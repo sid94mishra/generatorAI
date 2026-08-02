@@ -1,0 +1,11 @@
+{
+  "id": "code-review-v1",
+  "name": "Code Review",
+  "description": "Review code for best practices, bugs, and improvements",
+  "category": "code-review",
+  "version": "1.0.0",
+  "requiresCodebase": true,
+  "prompts": [],
+  "variables": [],
+  "hooks": []
+}

@@ -1,0 +1,134 @@
+// ────────────────────────────────────────────────────────────────
+// Chat — First-class top-level domain entity
+// 1 Chat → 1 Session → 1 Harness Conversation
+// ────────────────────────────────────────────────────────────────
+
+import type { HarnessConfig } from './Workflow.js';
+import type { BrowserConfig } from './BrowserSession.js';
+import type { AgentMode } from './AgentMode.js';
+
+/**
+ * Chat-scoped permission policy. Mirrors the harness permission modes so the
+ * value can be threaded straight through to the adapter.
+ */
+export type ChatPermissionMode = 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan';
+
+export const DEFAULT_CHAT_PERMISSION_MODE: ChatPermissionMode = 'bypassPermissions';
+
+/** Chat lifecycle status */
+export type ChatStatus = 'active' | 'archived';
+
+/** A local folder path linked to a chat at creation time */
+export interface ChatLocalFolder {
+  url: string;
+  alias: string;
+}
+
+/** Orchestrator background-task lifecycle status (a spawned worker chat). */
+export type BackgroundTaskStatus =
+  | 'spawned'
+  | 'running'
+  | 'needs_review'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+/**
+ * Metadata attached to a chat that was spawned as a background agent task by
+ * an orchestrator chat. Present only on worker chats (parentChatId set).
+ */
+export interface BackgroundTaskMeta {
+  /** The orchestrator chat that spawned this worker. */
+  orchestratorChatId: string;
+  /** Human-readable, short, unique-ish name given by the orchestrator. */
+  taskName: string;
+  /** Zero-based index within the spawning wave (for stable ordering). */
+  taskIndex?: number;
+  /** Current lifecycle status of this background task. */
+  status: BackgroundTaskStatus;
+}
+
+/** Chat domain entity */
+export interface Chat {
+  id: string;
+  name: string;
+  description?: string;
+  sessionId: string;
+  model?: string;
+  /** Agent harness configuration (provider-agnostic) */
+  harnessConfig?: Partial<HarnessConfig>;
+  /** Project ID — scopes this chat to a project (null = global) */
+  projectId?: string;
+  /** Linked codebase IDs from the project */
+  codebaseIds?: string[];
+  /** Whether a worktree was created for this chat */
+  createWorktree?: boolean;
+  /** Workspace ID — links to the execution workspace for this chat */
+  workspaceId?: string;
+  /** Local folder paths linked at creation (read-only after creation) */
+  gitRepositories?: ChatLocalFolder[];
+  tags: string[];
+  status: ChatStatus;
+  /** Integrated Browser configuration (per-chat opt-in). */
+  browserConfig?: BrowserConfig;
+  /**
+   * Orchestrator mode — when true, this chat runs the orchestrator system
+   * prompt and gets the background-agent tool set (spawn/check/send/list).
+   */
+  orchestratorMode?: boolean;
+  /** Set on WORKER chats: the orchestrator chat that spawned this one. */
+  parentChatId?: string;
+  /** Set on WORKER chats: background-task metadata. */
+  backgroundTask?: BackgroundTaskMeta;
+  /**
+   * Sticky per-chat default agent mode. The composer can override it per turn.
+   * Defaults to 'auto'.
+   */
+  defaultAgentMode?: AgentMode;
+  /**
+   * Chat-scoped permission policy. Defaults to 'bypassPermissions', which
+   * preserves the historical fully-autonomous behaviour (no prompts).
+   */
+  permissionMode?: ChatPermissionMode;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Parameters for creating a new Chat */
+export interface CreateChatParams {
+  name: string;
+  description?: string;
+  model?: string;
+  /** Agent harness configuration (provider-agnostic) */
+  harnessConfig?: Partial<HarnessConfig>;
+  /** Project ID — scopes this chat to a project */
+  projectId?: string;
+  /** Linked codebase IDs from the project */
+  codebaseIds?: string[];
+  /** Whether to create a worktree for code changes */
+  createWorktree?: boolean;
+  /** Whether to use a worktree (alias for createWorktree, used by workspace management) */
+  useWorktree?: boolean;
+  /** Local folder paths to link at creation (sets SDK workingDirectory) */
+  gitRepositories?: ChatLocalFolder[];
+  tags?: string[];
+  /** Integrated Browser configuration (per-chat opt-in). */
+  browserConfig?: BrowserConfig;
+  /** Enable orchestrator mode (inject orchestrator prompt + background-agent tools). */
+  orchestratorMode?: boolean;
+  /** Set when this chat is a spawned worker: the orchestrator chat id. */
+  parentChatId?: string;
+  /** Set when this chat is a spawned worker: background-task metadata. */
+  backgroundTask?: BackgroundTaskMeta;
+  /** Sticky per-chat default agent mode ('auto' when omitted). */
+  defaultAgentMode?: AgentMode;
+  /** Chat-scoped permission policy ('bypassPermissions' when omitted). */
+  permissionMode?: ChatPermissionMode;
+  /**
+   * Reuse an EXISTING execution workspace instead of creating a new one.
+   * Used by orchestrator workers so their file changes land in the shared
+   * (orchestrator's) workspace. When set, workspace + worktree creation is
+   * skipped and the working directory is that workspace's root.
+   */
+  workspaceId?: string;
+}

@@ -1,0 +1,1243 @@
+// ────────────────────────────────────────────────────────────────
+// Database Schema — Tables (Drizzle ORM + SQLite)
+// ────────────────────────────────────────────────────────────────
+
+import { sqliteTable, text, integer, blob, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import type {
+  ChatMessageMetadata,
+  DataSourceConfig,
+  ProjectSettings,
+  CodebaseSettings,
+  DataSchema,
+  IterationMode,
+  AutomationDataset,
+  AutomationRetryPolicy,
+} from '@generatorai/shared';
+
+// ── Sessions ──
+
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    status: text('status', {
+      enum: [
+        'created', 'starting', 'running', 'paused',
+        'cancelling', 'cancelled', 'completed', 'deleted',
+        'active', 'closing', 'closed', 'error',
+      ],
+    }).notNull().default('created'),
+    model: text('model'),
+    repoUrl: text('repo_url'),
+    repoBranch: text('repo_branch'),
+    requiresCodebase: integer('requires_codebase', { mode: 'boolean' }).notNull().default(false),
+    workspacePath: text('workspace_path'),
+    tags: text('tags', { mode: 'json' }).$type<string[]>().default([]),
+    triggeredBy: text('triggered_by', { mode: 'json' }).$type<{
+      source: string;
+      event: string;
+    } | null>(),
+    conversationId: text('conversation_id'),
+    ownerType: text('owner_type').$type<'chat' | 'stage_run' | 'workflow_run'>(),
+    ownerId: text('owner_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    closedAt: integer('closed_at', { mode: 'timestamp' }),
+  },
+  (table) => ({
+    statusIdx: index('idx_sessions_status').on(table.status),
+    createdAtIdx: index('idx_sessions_created_at').on(table.createdAt),
+  }),
+);
+
+// ── Workflows ──
+
+/** @deprecated v1 table — use workflowDefinitions + workflowRuns instead */
+export const workflows = sqliteTable(
+  'workflows',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    templateId: text('template_id').notNull(),
+    name: text('name').notNull(),
+    order: integer('order').notNull(),
+    status: text('status', {
+      enum: ['pending', 'queued', 'running', 'paused', 'completed', 'failed', 'cancelled'],
+    }).notNull().default('pending'),
+    conversationId: text('conversation_id'),
+    variables: text('variables', { mode: 'json' })
+      .$type<Record<string, unknown>>()
+      .default({}),
+    hookOverrides: text('hook_overrides', { mode: 'json' })
+      .$type<Record<string, unknown>>()
+      .default({}),
+    harnessConfigOverrides: text('harness_config_overrides', { mode: 'json' }),
+    currentStep: integer('current_step').default(0),
+    totalSteps: integer('total_steps').default(0),
+    error: text('error'),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    sessionIdx: index('idx_workflows_session_id').on(table.sessionId),
+    statusIdx: index('idx_workflows_status').on(table.status),
+    orderIdx: index('idx_workflows_order').on(table.sessionId, table.order),
+  }),
+);
+
+// ── Events ──
+
+export const events = sqliteTable(
+  'events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sessionId: text('session_id').notNull(),
+    sequenceId: integer('sequence_id').notNull(),
+    kind: text('kind').notNull(),
+    data: text('data', { mode: 'json' }).notNull(),
+    timestamp: integer('timestamp').notNull(),
+    workflowRunId: text('workflow_run_id'),
+    stageRunId: text('stage_run_id'),
+  },
+  (table) => ({
+    sessionSeqIdx: uniqueIndex('idx_events_session_seq').on(
+      table.sessionId,
+      table.sequenceId,
+    ),
+    sessionKindIdx: index('idx_events_session_kind').on(table.sessionId, table.kind),
+    timestampIdx: index('idx_events_timestamp').on(table.timestamp),
+  }),
+);
+
+// ── Event Sequences ──
+// Atomic per-session sequence allocator. Replaces the in-memory counter
+// inside EventRepository, which could collide across multiple server
+// processes writing to the same DB. Incremented via
+// `UPDATE ... SET next_sequence = next_sequence + 1 ... RETURNING`.
+export const eventSequences = sqliteTable('event_sequences', {
+  sessionId: text('session_id').primaryKey(),
+  nextSequence: integer('next_sequence').notNull().default(1),
+});
+
+// ── Stream Cursors (STR-02 / Phase 4 streaming rewrite) ─────────────
+// Persistent event log for the new `StreamBroker`. Unlike `events` (which
+// is keyed by sessionId only), this table supports four scopes:
+//   - session | run | chat | global
+// Consumers resume via Last-Event-ID by querying rows where
+// `(scope, scope_id, seq > lastEventId)`.
+//
+// Payloads are stored inline as JSON. We deliberately duplicate data
+// with the `events` table for now — the goal is a single source of truth
+// for the broker surface; existing per-session SSE infrastructure keeps
+// using `events` until STR-04 migrates the web client.
+export const streamCursors = sqliteTable(
+  'stream_cursors',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    scope: text('scope').notNull(), // 'session' | 'run' | 'chat' | 'global'
+    scopeId: text('scope_id').notNull(),
+    seq: integer('seq').notNull(), // monotonic per (scope, scope_id)
+    kind: text('kind').notNull(),
+    payload: text('payload', { mode: 'json' }).notNull(),
+    ts: integer('ts').notNull(),
+  },
+  (table) => ({
+    // Primary query pattern: replay `(scope, scope_id, seq > X)` ordered asc.
+    scopeIdSeqIdx: uniqueIndex('idx_stream_cursors_scope_id_seq').on(
+      table.scope,
+      table.scopeId,
+      table.seq,
+    ),
+    // Retention sweep uses timestamp.
+    tsIdx: index('idx_stream_cursors_ts').on(table.ts),
+  }),
+);
+
+// Atomic per-(scope, scope_id) sequence allocator, mirrors `event_sequences`.
+// Keyed by composite (scope, scope_id). Using SQLite's `INSERT ... ON
+// CONFLICT DO UPDATE ... RETURNING` inside a transaction makes allocation
+// race-free across concurrent writers.
+export const streamSequences = sqliteTable(
+  'stream_sequences',
+  {
+    scope: text('scope').notNull(),
+    scopeId: text('scope_id').notNull(),
+    lastSeq: integer('last_seq').notNull().default(0),
+  },
+  (table) => ({
+    pk: uniqueIndex('pk_stream_sequences').on(table.scope, table.scopeId),
+  }),
+);
+
+// ── Chat Messages ──
+
+export const chatMessages = sqliteTable(
+  'chat_messages',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['user', 'assistant', 'system', 'tool'] }).notNull(),
+    content: text('content').notNull(),
+    attachments: text('attachments', { mode: 'json' }).$type<
+      Array<{ name: string; path: string; mimeType: string }>
+    >(),
+    toolName: text('tool_name'),
+    toolArgs: text('tool_args', { mode: 'json' }),
+    toolResult: text('tool_result', { mode: 'json' }),
+    workflowId: text('workflow_id').references(() => workflows.id),
+    /** Rich metadata (thinking, tool calls, system msgs) for assistant messages */
+    metadata: text('metadata', { mode: 'json' }).$type<ChatMessageMetadata>(),
+    chatId: text('chat_id'),
+    timestamp: integer('timestamp', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    sessionIdx: index('idx_chat_session_id').on(table.sessionId),
+    sessionTimeIdx: index('idx_chat_session_time').on(table.sessionId, table.timestamp),
+    chatIdx: index('idx_chat_messages_chat_id').on(table.chatId),
+  }),
+);
+
+// ── Artifacts ──
+
+export const artifacts = sqliteTable(
+  'artifacts',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    workflowId: text('workflow_id').references(() => workflows.id),
+    name: text('name').notNull(),
+    path: text('path').notNull(),
+    mimeType: text('mime_type'),
+    size: integer('size').notNull(),
+    direction: text('direction', { enum: ['inbound', 'outbound'] }).notNull(),
+    content: blob('content', { mode: 'buffer' }),
+    workflowRunId: text('workflow_run_id'),
+    stageRunId: text('stage_run_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    sessionIdx: index('idx_artifacts_session_id').on(table.sessionId),
+  }),
+);
+
+// ── Webhook Registrations ──
+
+export const webhookRegistrations = sqliteTable('webhook_registrations', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  source: text('source').notNull(),
+  eventType: text('event_type').notNull(),
+  condition: text('condition'),
+  templateId: text('template_id').notNull(),
+  autoStart: integer('auto_start', { mode: 'boolean' }).notNull().default(true),
+  sessionConfig: text('session_config', { mode: 'json' }),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  lastTriggeredAt: integer('last_triggered_at', { mode: 'timestamp' }),
+});
+
+// ── Webhook Deliveries ──
+
+export const webhookDeliveries = sqliteTable(
+  'webhook_deliveries',
+  {
+    id: text('id').primaryKey(),
+    registrationId: text('registration_id').references(() => webhookRegistrations.id),
+    deliveryId: text('delivery_id'),
+    source: text('source').notNull(),
+    eventType: text('event_type').notNull(),
+    payload: text('payload', { mode: 'json' }),
+    status: text('status', {
+      enum: ['received', 'processed', 'failed', 'duplicate'],
+    }).notNull(),
+    error: text('error'),
+    sessionId: text('session_id').references(() => sessions.id),
+    receivedAt: integer('received_at', { mode: 'timestamp' }).notNull(),
+    processedAt: integer('processed_at', { mode: 'timestamp' }),
+  },
+  (table) => ({
+    deliveryIdIdx: uniqueIndex('idx_webhook_deliveries_delivery_id').on(table.deliveryId),
+    registrationIdx: index('idx_webhook_deliveries_registration').on(table.registrationId),
+    statusIdx: index('idx_webhook_deliveries_status').on(table.status),
+  }),
+);
+
+// ── Chats ──
+
+export const chats = sqliteTable(
+  'chats',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    model: text('model'),
+    harnessConfig: text('harness_config', { mode: 'json' }),
+    repoUrl: text('repo_url'),
+    repoBranch: text('repo_branch'),
+    workspacePath: text('workspace_path'),
+    codebaseIds: text('codebase_ids', { mode: 'json' }).$type<string[]>(),
+    gitRepositories: text('git_repositories', { mode: 'json' }),
+    tags: text('tags', { mode: 'json' }).$type<string[]>().default([]),
+    status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
+    projectId: text('project_id'),
+    workspaceId: text('workspace_id'),
+    useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
+    // ── Orchestrator mode (v17) ──
+    orchestratorMode: integer('orchestrator_mode', { mode: 'boolean' }).notNull().default(false),
+    parentChatId: text('parent_chat_id'),
+    backgroundTaskName: text('background_task_name'),
+    backgroundTaskIndex: integer('background_task_index'),
+    backgroundTaskStatus: text('background_task_status'),
+    // ── Agent mode (v21, renamed v22) ──
+    /** Sticky per-chat default agent mode; the composer can override per turn. */
+    defaultAgentMode: text('default_agent_mode', { enum: ['auto', 'plan'] })
+      .notNull()
+      .default('auto'),
+    /**
+     * Chat-scoped permission policy. Defaults to `bypassPermissions` so every
+     * pre-existing chat keeps its fully-autonomous behaviour (attaching a
+     * permission handler would otherwise force Claude into 'default' mode and
+     * turn every chat into a prompt storm — see HITL-06).
+     */
+    permissionMode: text('permission_mode', {
+      enum: ['bypassPermissions', 'default', 'acceptEdits', 'plan'],
+    })
+      .notNull()
+      .default('bypassPermissions'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    statusIdx: index('idx_chats_status').on(table.status),
+    sessionIdx: index('idx_chats_session_id').on(table.sessionId),
+    projectIdx: index('idx_chats_project_id').on(table.projectId),
+    createdAtIdx: index('idx_chats_created_at').on(table.createdAt),
+    parentChatIdx: index('idx_chats_parent_chat_id').on(table.parentChatId),
+  }),
+);
+
+// ── Workflow Definitions ──
+
+export const workflowDefinitions = sqliteTable(
+  'workflow_definitions',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    version: integer('version').notNull().default(1),
+    sessionMode: text('session_mode', { enum: ['single', 'per-stage', 'auto'] }).notNull().default('auto'),
+    harnessConfig: text('harness_config', { mode: 'json' }),
+    variables: text('variables', { mode: 'json' }).$type<unknown[]>().default([]),
+    tags: text('tags', { mode: 'json' }).$type<string[]>().default([]),
+    orchestratorConfig: text('orchestrator_config', { mode: 'json' }),
+    selectedArtifacts: text('selected_artifacts', { mode: 'json' }).$type<Record<string, string[]>>().default({}),
+    scope: text('scope').default('global'),
+    projectId: text('project_id'),
+    useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
+    hooks: text('hooks', { mode: 'json' }).$type<unknown[]>().default([]),
+    hooksFile: text('hooks_file', { mode: 'json' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    createdAtIdx: index('idx_workflow_defs_created_at').on(table.createdAt),
+    scopeIdx: index('idx_workflow_defs_scope').on(table.scope),
+    projectIdx: index('idx_workflow_defs_project').on(table.projectId),
+  }),
+);
+
+// ── Stage Definitions ──
+
+export const stageDefinitions = sqliteTable(
+  'stage_definitions',
+  {
+    id: text('id').primaryKey(),
+    workflowDefinitionId: text('workflow_definition_id')
+      .notNull()
+      .references(() => workflowDefinitions.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    templateId: text('template_id'),
+    order: integer('order').notNull().default(0),
+    prompts: text('prompts', { mode: 'json' }).$type<unknown[]>().default([]),
+    harnessConfigOverrides: text('harness_config_overrides', { mode: 'json' }),
+    variables: text('variables', { mode: 'json' }).$type<Record<string, unknown>>().default({}),
+    hooks: text('hooks', { mode: 'json' }).$type<unknown[]>().default([]),
+    retryPolicy: text('retry_policy', { mode: 'json' }),
+    timeoutMs: integer('timeout_ms'),
+    condition: text('condition', { mode: 'json' }),
+    contextFilter: text('context_filter').default('summary-only'),
+    contextSources: text('context_sources', { mode: 'json' }).$type<string[]>(),
+    outputFormat: text('output_format').default('text'),
+    agentName: text('agent_name'),
+    resultValidation: text('result_validation', { mode: 'json' }).$type<unknown[]>(),
+    expectedOutput: text('expected_output'),
+    outputSchema: text('output_schema', { mode: 'json' }).$type<Record<string, unknown>>(),
+    iterationConfig: text('iteration_config', { mode: 'json' }).$type<Record<string, unknown>>(),
+    approvalRequired: integer('approval_required', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * Per-stage agent mode (v22). Null means inherit the run default (`auto`).
+     * With `approvalRequired`, `plan` gates the plan for human approval.
+     */
+    agentMode: text('agent_mode', { enum: ['auto', 'plan'] }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    workflowIdx: index('idx_stage_defs_workflow').on(table.workflowDefinitionId),
+    orderIdx: index('idx_stage_defs_order').on(table.workflowDefinitionId, table.order),
+  }),
+);
+
+// ── Stage Edges ──
+
+export const stageEdges = sqliteTable(
+  'stage_edges',
+  {
+    id: text('id').primaryKey(),
+    workflowDefinitionId: text('workflow_definition_id')
+      .notNull()
+      .references(() => workflowDefinitions.id, { onDelete: 'cascade' }),
+    fromStageId: text('from_stage_id')
+      .notNull()
+      .references(() => stageDefinitions.id, { onDelete: 'cascade' }),
+    toStageId: text('to_stage_id')
+      .notNull()
+      .references(() => stageDefinitions.id, { onDelete: 'cascade' }),
+    edgeType: text('edge_type', { enum: ['on_success', 'on_failure', 'on_completion', 'always'] })
+      .notNull()
+      .default('on_success'),
+  },
+  (table) => ({
+    workflowIdx: index('idx_stage_edges_workflow').on(table.workflowDefinitionId),
+    fromIdx: index('idx_stage_edges_from').on(table.fromStageId),
+    toIdx: index('idx_stage_edges_to').on(table.toStageId),
+    uniqueEdge: uniqueIndex('idx_stage_edges_unique').on(table.fromStageId, table.toStageId),
+  }),
+);
+
+// ── Workflow Runs ──
+
+export const workflowRuns = sqliteTable(
+  'workflow_runs',
+  {
+    id: text('id').primaryKey(),
+    workflowDefinitionId: text('workflow_definition_id')
+      .notNull()
+      .references(() => workflowDefinitions.id),
+    name: text('name').notNull(),
+    status: text('status', {
+      enum: ['created', 'starting', 'running', 'paused', 'cancelling', 'completed', 'failed', 'cancelled'],
+    }).notNull().default('created'),
+    sessionMode: text('session_mode', { enum: ['single', 'per-stage', 'auto'] }).notNull().default('auto'),
+    masterSessionId: text('master_session_id'),
+    variables: text('variables', { mode: 'json' }).$type<Record<string, unknown>>().default({}),
+    error: text('error'),
+    /**
+     * HITL + TOL-04 — per-run permission mode. Default 'bypassPermissions'
+     * keeps the out-of-the-box experience fully autonomous; any other mode
+     * surfaces tool calls as `awaiting_input`. Nullable for backward-
+     * compatibility with runs created before this column landed; the
+     * domain evaluator treats NULL as `bypassPermissions`.
+     */
+    permissionMode: text('permission_mode', {
+      enum: ['bypassPermissions', 'default', 'acceptEdits', 'plan'],
+    }),
+    projectId: text('project_id'),
+    workspaceId: text('workspace_id'),
+    /** Links this run to a parent iteration stage (if it's a sub-workflow child) */
+    parentStageRunId: text('parent_stage_run_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (table) => ({
+    definitionIdx: index('idx_workflow_runs_definition').on(table.workflowDefinitionId),
+    projectIdx: index('idx_workflow_runs_project').on(table.projectId),
+    statusIdx: index('idx_workflow_runs_status').on(table.status),
+    createdAtIdx: index('idx_workflow_runs_created_at').on(table.createdAt),
+    statusCreatedIdx: index('idx_workflow_runs_status_created').on(table.status, table.createdAt),
+    parentStageIdx: index('idx_workflow_runs_parent_stage').on(table.parentStageRunId),
+  }),
+);
+
+// ── Stage Runs ──
+
+export const stageRuns = sqliteTable(
+  'stage_runs',
+  {
+    id: text('id').primaryKey(),
+    workflowRunId: text('workflow_run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    stageDefinitionId: text('stage_definition_id')
+      .notNull()
+      .references(() => stageDefinitions.id),
+    sessionId: text('session_id').references(() => sessions.id),
+    name: text('name').notNull(),
+    status: text('status', {
+      enum: ['pending', 'queued', 'running', 'paused', 'completed', 'failed', 'cancelled', 'skipped', 'sleeping', 'awaiting_input'],
+    }).notNull().default('pending'),
+    currentStep: integer('current_step').notNull().default(0),
+    totalSteps: integer('total_steps').notNull().default(0),
+    retryCount: integer('retry_count').notNull().default(0),
+    error: text('error'),
+    summary: text('summary'),
+    /** Full raw output of the stage's main prompt(s) — for contextFilter='full' handoff. */
+    outputText: text('output_text'),
+    /** Validated structured output JSON matching the stage's outputSchema */
+    outputData: text('output_data', { mode: 'json' }).$type<Record<string, unknown>>(),
+    /** JSON manifest of files created/modified by this stage */
+    artifactManifest: text('artifact_manifest', { mode: 'json' }).$type<unknown[]>(),
+    /** Current iteration index for iteration stages */
+    iterationIndex: integer('iteration_index').default(0),
+    /** Links child workflow runs back to parent iteration stage */
+    parentStageRunId: text('parent_stage_run_id'),
+    /**
+     * Optimistic-lock version counter. Incremented on every update via
+     * `retryCount`-style `SET version = version + 1 WHERE version = :expected`
+     * so two processes cannot both succeed at retrying the same stage.
+     */
+    version: integer('version').notNull().default(0),
+    /** DUR-05 — durable-sleep deadline (epoch-ms); non-null only while sleeping. */
+    wakeAt: integer('wake_at', { mode: 'timestamp' }),
+    /** DUR-05 — when the stage entered `sleeping`, for observability. */
+    sleptSince: integer('slept_since', { mode: 'timestamp' }),
+    /**
+     * HITL-02 — opaque JSON payload the stage asked an approver to
+     * review. Set when the row transitions to `awaiting_input`; cleared
+     * on resume. Persisted so late-connecting UIs see the same queue.
+     */
+    interruptData: text('interrupt_data', { mode: 'json' }).$type<unknown>(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (table) => ({
+    workflowRunIdx: index('idx_stage_runs_workflow_run').on(table.workflowRunId),
+    sessionIdx: index('idx_stage_runs_session').on(table.sessionId),
+    statusIdx: index('idx_stage_runs_status').on(table.status),
+    statusCreatedIdx: index('idx_stage_runs_status_created').on(table.status, table.createdAt),
+    /** DUR-05 — the sweeper queries this frequently. */
+    wakeAtIdx: index('idx_stage_runs_wake_at').on(table.wakeAt),
+  }),
+);
+
+// ── Session Allocations (1.6) ──
+// Persisted tracking of SessionAllocator state so runs can survive a restart
+// without orphaning Copilot SDK sessions. On boot, StartupRecoveryService
+// rehydrates these rows into the in-memory allocator map.
+
+export const sessionAllocations = sqliteTable(
+  'session_allocations',
+  {
+    id: text('id').primaryKey(),
+    workflowRunId: text('workflow_run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    mode: text('mode', { enum: ['single', 'per-stage', 'auto'] }).notNull(),
+    sharedSessionId: text('shared_session_id'),
+    sharedRefCount: integer('shared_ref_count').notNull().default(0),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    runIdx: uniqueIndex('idx_session_allocations_run').on(table.workflowRunId),
+  }),
+);
+
+export const stageSessionMaps = sqliteTable(
+  'stage_session_maps',
+  {
+    id: text('id').primaryKey(),
+    allocationId: text('allocation_id')
+      .notNull()
+      .references(() => sessionAllocations.id, { onDelete: 'cascade' }),
+    stageRunId: text('stage_run_id').notNull(),
+    sessionId: text('session_id').notNull(),
+  },
+  (table) => ({
+    allocationIdx: index('idx_stage_session_maps_allocation').on(table.allocationId),
+    stageRunIdx: uniqueIndex('idx_stage_session_maps_stage_run').on(table.stageRunId),
+  }),
+);
+
+// ── Automations ──
+
+export const automations = sqliteTable(
+  'automations',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    triggerType: text('trigger_type', { enum: ['manual', 'schedule', 'webhook'] }).notNull(),
+    cronExpression: text('cron_expression'),
+    webhookToken: text('webhook_token'),
+    workflowIds: text('workflow_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    inputMode: text('input_mode', { enum: ['single', 'loop', 'batch', 'script'] }).notNull().default('single'),
+    loopVariable: text('loop_variable'),
+    loopItems: text('loop_items', { mode: 'json' }).$type<unknown[]>().default([]),
+    batchDataFormat: text('batch_data_format', { enum: ['json', 'csv', 'jsonl'] }),
+    batchData: text('batch_data'),
+    batchColumns: text('batch_columns', { mode: 'json' }).$type<string[]>().default([]),
+    batchColumnMapping: text('batch_column_mapping', { mode: 'json' }).$type<Record<string, string>>().default({}),
+    dataSourceConfig: text('data_source_config', { mode: 'json' }).$type<DataSourceConfig>(),
+    variables: text('variables', { mode: 'json' }).$type<Record<string, unknown>>().default({}),
+    maxConcurrency: integer('max_concurrency').notNull().default(1),
+    onError: text('on_error', { enum: ['continue', 'stop'] }).notNull().default('continue'),
+    lastRunAt: integer('last_run_at', { mode: 'timestamp' }),
+    nextRunAt: integer('next_run_at', { mode: 'timestamp' }),
+    /**
+     * Row-level lease (1.23). Set when a cron-driven process picks this
+     * automation up; cleared when the run completes or the lease expires.
+     * Used together with `lockedByProcess` so one process can see it owns
+     * the lease and release it on shutdown / recover.
+     */
+    lockedUntil: integer('locked_until', { mode: 'timestamp' }),
+    lockedByProcess: text('locked_by_process'),
+    scope: text('scope').default('global'),
+    projectId: text('project_id'),
+    useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
+    // ── Track C — schema-driven pipeline ──
+    dataSchema: text('data_schema', { mode: 'json' }).$type<DataSchema>(),
+    iterationMode: text('iteration_mode', { mode: 'json' }).$type<IterationMode>(),
+    defaultDataset: text('default_dataset', { mode: 'json' }).$type<AutomationDataset>(),
+    retryPolicy: text('retry_policy', { mode: 'json' }).$type<AutomationRetryPolicy>(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    enabledIdx: index('idx_automations_enabled').on(table.enabled),
+    scopeIdx: index('idx_automations_scope').on(table.scope),
+    projectIdx: index('idx_automations_project').on(table.projectId),
+    triggerTypeIdx: index('idx_automations_trigger_type').on(table.triggerType),
+    createdAtIdx: index('idx_automations_created_at').on(table.createdAt),
+    lockIdx: index('idx_automations_lock').on(table.lockedUntil),
+  }),
+);
+
+// ── Automation Executions ──
+
+export const automationExecutions = sqliteTable(
+  'automation_executions',
+  {
+    id: text('id').primaryKey(),
+    automationId: text('automation_id')
+      .notNull()
+      .references(() => automations.id, { onDelete: 'cascade' }),
+    status: text('status', {
+      enum: ['pending', 'running', 'completed', 'failed', 'cancelled'],
+    }).notNull().default('pending'),
+    triggeredBy: text('triggered_by', { enum: ['manual', 'schedule', 'webhook'] }).notNull(),
+    webhookPayload: text('webhook_payload'),
+    totalIterations: integer('total_iterations').notNull().default(0),
+    completedIterations: integer('completed_iterations').notNull().default(0),
+    failedIterations: integer('failed_iterations').notNull().default(0),
+    error: text('error'),
+    workspaceId: text('workspace_id'),
+    /**
+     * Track C — audit snapshot of the dataset used for this run.
+     * Null for legacy automations (no dataSchema).
+     */
+    datasetSnapshot: text('dataset_snapshot', { mode: 'json' }).$type<AutomationDataset>(),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    automationIdx: index('idx_automation_executions_automation').on(table.automationId),
+    statusIdx: index('idx_automation_executions_status').on(table.status),
+    createdAtIdx: index('idx_automation_executions_created_at').on(table.createdAt),
+  }),
+);
+
+// ── Automation Execution Runs ──
+
+export const automationExecutionRuns = sqliteTable(
+  'automation_execution_runs',
+  {
+    id: text('id').primaryKey(),
+    executionId: text('execution_id')
+      .notNull()
+      .references(() => automationExecutions.id, { onDelete: 'cascade' }),
+    workflowRunId: text('workflow_run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'restrict' }),
+    workflowDefinitionId: text('workflow_definition_id')
+      .notNull()
+      .references(() => workflowDefinitions.id),
+    iterationIndex: integer('iteration_index').notNull().default(0),
+    iterationVariables: text('iteration_variables', { mode: 'json' }).$type<Record<string, unknown>>(),
+    iterationLabel: text('iteration_label'),
+    status: text('status', {
+      enum: ['pending', 'running', 'completed', 'failed', 'cancelled'],
+    }).notNull().default('pending'),
+    /** Track A — how many attempts this run consumed (1 = no retry). */
+    attemptCount: integer('attempt_count').notNull().default(1),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    executionIdx: index('idx_automation_exec_runs_execution').on(table.executionId),
+    workflowRunIdx: index('idx_automation_exec_runs_workflow_run').on(table.workflowRunId),
+    statusIdx: index('idx_automation_exec_runs_status').on(table.status),
+    iterationIdx: index('idx_automation_exec_runs_iteration').on(table.iterationIndex),
+  }),
+);
+
+// ── Idempotency Keys ──
+// Track A-3: dedup key store for `POST /:id/trigger` and webhook deliveries.
+// A previously-seen key returns the same executionId instead of spawning a
+// new run. Expired rows are removed by the background sweeper.
+export const idempotencyKeys = sqliteTable(
+  'idempotency_keys',
+  {
+    key: text('key').notNull(),
+    scope: text('scope').notNull(),
+    executionId: text('execution_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    pk: uniqueIndex('pk_idempotency_keys').on(table.key, table.scope),
+    // Sweep scans `WHERE expires_at < now`; leading column must be expires_at.
+    expiresIdx: index('idx_idempotency_keys_expires').on(table.expiresAt),
+  }),
+);
+
+// ── Projects ──
+
+export const projects = sqliteTable(
+  'projects',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    settings: text('settings', { mode: 'json' }).$type<ProjectSettings>().default({}),
+    rootPath: text('root_path').notNull(),
+    status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    statusIdx: index('idx_projects_status').on(table.status),
+    createdAtIdx: index('idx_projects_created_at').on(table.createdAt),
+    nameIdx: index('idx_projects_name').on(table.name),
+  }),
+);
+
+// ── Project Codebases ──
+
+export const projectCodebases = sqliteTable(
+  'project_codebases',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    alias: text('alias').notNull(),
+    type: text('type', { enum: ['git-remote', 'git-local', 'local-dir'] }).notNull(),
+    url: text('url'),
+    localPath: text('local_path'),
+    defaultBranch: text('default_branch'),
+    subdirectory: text('subdirectory'),
+    clonePath: text('clone_path'),
+    status: text('status', { enum: ['pending', 'cloning', 'ready', 'error', 'stale'] }).notNull().default('pending'),
+    lastFetchedAt: integer('last_fetched_at', { mode: 'timestamp' }),
+    lastError: text('last_error'),
+    settings: text('settings', { mode: 'json' }).$type<CodebaseSettings>().default({}),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    projectIdx: index('idx_project_codebases_project').on(table.projectId),
+    aliasIdx: uniqueIndex('idx_project_codebases_alias').on(table.projectId, table.alias),
+    statusIdx: index('idx_project_codebases_status').on(table.status),
+  }),
+);
+
+// ── Project Configs (agents/prompts/skills metadata) ──
+
+export const projectConfigs = sqliteTable(
+  'project_configs',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    type: text('type', { enum: ['agent', 'prompt', 'skill'] }).notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    filePath: text('file_path').notNull(),
+    metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().default({}),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    projectIdx: index('idx_project_configs_project').on(table.projectId),
+    typeIdx: index('idx_project_configs_type').on(table.projectId, table.type),
+    uniqueNameIdx: uniqueIndex('idx_project_configs_unique_name').on(table.projectId, table.type, table.name),
+  }),
+);
+
+// ── Worktrees ──
+
+export const worktrees = sqliteTable(
+  'worktrees',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    codebaseId: text('codebase_id')
+      .notNull()
+      .references(() => projectCodebases.id, { onDelete: 'cascade' }),
+    runId: text('run_id'),
+    runType: text('run_type', { enum: ['workflow', 'automation', 'manual'] }),
+    worktreePath: text('worktree_path').notNull(),
+    branchName: text('branch_name').notNull(),
+    status: text('status', { enum: ['active', 'completed', 'orphaned', 'cleanup-pending'] }).notNull().default('active'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    cleanedUpAt: integer('cleaned_up_at', { mode: 'timestamp' }),
+  },
+  (table) => ({
+    projectIdx: index('idx_worktrees_project').on(table.projectId),
+    codebaseIdx: index('idx_worktrees_codebase').on(table.codebaseId),
+    runIdx: index('idx_worktrees_run').on(table.runId),
+    statusIdx: index('idx_worktrees_status').on(table.status),
+  }),
+);
+
+// ── System Configs (system-level skills/prompts/agents) ──
+
+export const systemConfigs = sqliteTable(
+  'system_configs',
+  {
+    id: text('id').primaryKey(),
+    type: text('type', { enum: ['agent', 'prompt', 'skill'] }).notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    filePath: text('file_path').notNull(),
+    version: text('version').default('1.0.0'),
+    metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().default({}),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    typeIdx: index('idx_system_configs_type').on(table.type),
+    uniqueNameIdx: uniqueIndex('idx_system_configs_unique').on(table.type, table.name),
+  }),
+);
+
+// ── Execution Workspaces ──
+
+export const executionWorkspaces = sqliteTable(
+  'execution_workspaces',
+  {
+    id: text('id').primaryKey(),
+    ownerType: text('owner_type', {
+      enum: ['chat', 'workflow_run', 'automation_execution'],
+    }).notNull(),
+    ownerId: text('owner_id').notNull(),
+    projectId: text('project_id'),
+    rootPath: text('root_path').notNull(),
+    status: text('status', {
+      enum: ['creating', 'active', 'completed', 'archived', 'failed'],
+    }).notNull().default('creating'),
+    gitEnabled: integer('git_enabled', { mode: 'boolean' }).notNull().default(true),
+    useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
+    snapshotPath: text('snapshot_path'),
+    metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
+    // Integrated Browser (v13). All optional — browser is only initialised when
+    // a workspace opts in via `browserConfig.enabled` or when the linked chat/run
+    // includes the `playwright-cli` skill with browser enabled.
+    browserConfig: text('browser_config', { mode: 'json' }).$type<Record<string, unknown>>(),
+    browserStatus: text('browser_status', {
+      enum: ['off', 'starting', 'active', 'idle', 'terminated', 'error'],
+    }),
+    browserCurrentUrl: text('browser_current_url'),
+    /** CDP endpoint URL exposed by the shared Chromium (e.g. http://127.0.0.1:9333). */
+    browserCdpEndpoint: text('browser_cdp_endpoint'),
+    /** CDP `targetId` of the top-level page under agent+user control. */
+    browserTargetId: text('browser_target_id'),
+    browserStartedAt: integer('browser_started_at', { mode: 'timestamp' }),
+    browserLastActivityAt: integer('browser_last_activity_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    archivedAt: integer('archived_at', { mode: 'timestamp' }),
+  },
+  (table) => ({
+    ownerIdx: index('idx_execution_workspaces_owner').on(table.ownerType, table.ownerId),
+    ownerUnique: uniqueIndex('idx_execution_workspaces_owner_unique').on(table.ownerType, table.ownerId),
+    projectIdx: index('idx_execution_workspaces_project').on(table.projectId),
+    statusIdx: index('idx_execution_workspaces_status').on(table.status),
+    browserStatusIdx: index('idx_execution_workspaces_browser_status').on(table.browserStatus),
+  }),
+);
+
+// ── Workspace Worktrees ──
+
+export const workspaceWorktrees = sqliteTable(
+  'workspace_worktrees',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => executionWorkspaces.id, { onDelete: 'cascade' }),
+    codebaseId: text('codebase_id').notNull(),
+    alias: text('alias').notNull(),
+    branchName: text('branch_name').notNull(),
+    baseBranch: text('base_branch').notNull().default('main'),
+    relativePath: text('relative_path').notNull(),
+    status: text('status', {
+      enum: ['active', 'committed', 'pushed', 'deleted', 'error'],
+    }).notNull().default('active'),
+    commitHash: text('commit_hash'),
+    hasUncommittedChanges: integer('has_uncommitted_changes', { mode: 'boolean' }).default(false),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    workspaceIdx: index('idx_workspace_worktrees_workspace').on(table.workspaceId),
+    codebaseIdx: index('idx_workspace_worktrees_codebase').on(table.codebaseId),
+    aliasUnique: uniqueIndex('idx_workspace_worktrees_alias').on(table.workspaceId, table.alias),
+  }),
+);
+
+// ── Workspace Artifacts ──
+
+export const workspaceArtifacts = sqliteTable(
+  'workspace_artifacts',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => executionWorkspaces.id, { onDelete: 'cascade' }),
+    stageRunId: text('stage_run_id'),
+    artifactType: text('artifact_type', {
+      enum: [
+        'code_file',
+        'response_md',
+        'attachment',
+        'script_output',
+        'log',
+        'snapshot',
+        // Integrated Browser (v13) — outputs produced by the Playwright-CLI
+        // skill and BrowserService (screenshot, DOM snapshot, HAR, console log,
+        // recorded video, inspector selection).
+        'browser_screenshot',
+        'browser_dom',
+        'browser_har',
+        'browser_console_log',
+        'browser_video',
+        'browser_selection',
+      ],
+    }).notNull(),
+    relativePath: text('relative_path').notNull(),
+    fileSize: integer('file_size'),
+    mimeType: text('mime_type'),
+    metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    workspaceIdx: index('idx_workspace_artifacts_workspace').on(table.workspaceId),
+    stageRunIdx: index('idx_workspace_artifacts_stage').on(table.stageRunId),
+  }),
+);
+
+// ── Workspace Checkpoints (snapshots via private git refs) ──
+//
+// One row per captured snapshot. `ref_value` is a commit object reachable
+// only from `refs/generatorai/checkpoints/…`; `tree_sha` is the snapshot
+// content used for every diff. Deleting a row makes the objects GC-able.
+export const checkpoints = sqliteTable(
+  'checkpoints',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    /** Repo alias within the workspace (`.` = workspace root). */
+    repoAlias: text('repo_alias').notNull().default('.'),
+    /** Monotonic per (workspace_id, repo_alias). */
+    seq: integer('seq').notNull(),
+    kind: text('kind', {
+      enum: ['baseline', 'turn', 'stage', 'autorun', 'live', 'manual', 'pre_restore'],
+    }).notNull(),
+    label: text('label'),
+    refKind: text('ref_kind', { enum: ['git_tree'] }).notNull().default('git_tree'),
+    refValue: text('ref_value').notNull(),
+    treeSha: text('tree_sha').notNull(),
+    parentId: text('parent_id'),
+    // Provenance — at most one branch populated.
+    sessionId: text('session_id'),
+    chatId: text('chat_id'),
+    turnId: text('turn_id'),
+    workflowRunId: text('workflow_run_id'),
+    stageRunId: text('stage_run_id'),
+    automationExecutionRunId: text('automation_execution_run_id'),
+    /** `before` | `after` — which side of the turn/stage this snapshot is. */
+    phase: text('phase', { enum: ['before', 'after'] }),
+    promptExcerpt: text('prompt_excerpt'),
+    fileCount: integer('file_count').notNull().default(0),
+    additions: integer('additions').notNull().default(0),
+    deletions: integer('deletions').notNull().default(0),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    workspaceIdx: index('idx_checkpoints_workspace').on(table.workspaceId),
+    seqUnique: uniqueIndex('idx_checkpoints_ws_alias_seq').on(
+      table.workspaceId,
+      table.repoAlias,
+      table.seq,
+    ),
+    turnIdx: index('idx_checkpoints_turn').on(table.turnId),
+    stageRunIdx: index('idx_checkpoints_stage_run').on(table.stageRunId),
+    kindIdx: index('idx_checkpoints_kind').on(table.kind),
+  }),
+);
+
+// ── Review Threads (inline comments on diffs) ──
+//
+// A thread is anchored to a LINE RANGE in a file, against a specific
+// base→head checkpoint pair. `anchor_text` + `anchor_hash` are what let the
+// anchor survive later edits: line numbers are re-derived by content match
+// rather than trusted, so a comment never drifts onto unrelated code.
+export const reviewThreads = sqliteTable(
+  'review_threads',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    scope: text('scope', { enum: ['chat', 'run', 'automation'] }).notNull(),
+    scopeId: text('scope_id').notNull(),
+    repoAlias: text('repo_alias').notNull().default('.'),
+    path: text('path').notNull(),
+    baseCheckpointId: text('base_checkpoint_id').notNull(),
+    headCheckpointId: text('head_checkpoint_id').notNull(),
+    side: text('side', { enum: ['additions', 'deletions'] }).notNull(),
+    startLine: integer('start_line').notNull(),
+    endLine: integer('end_line').notNull(),
+    anchorText: text('anchor_text').notNull(),
+    anchorHash: text('anchor_hash').notNull(),
+    status: text('status', {
+      enum: ['draft', 'pending', 'submitted', 'addressed', 'resolved', 'outdated'],
+    })
+      .notNull()
+      .default('pending'),
+    resolvedByCheckpointId: text('resolved_by_checkpoint_id'),
+    submittedMessageId: text('submitted_message_id'),
+    reviewRound: integer('review_round').notNull().default(0),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    workspaceIdx: index('idx_review_threads_workspace').on(table.workspaceId),
+    scopeIdx: index('idx_review_threads_scope').on(table.scope, table.scopeId),
+    fileIdx: index('idx_review_threads_file').on(
+      table.workspaceId,
+      table.repoAlias,
+      table.path,
+    ),
+    statusIdx: index('idx_review_threads_status').on(table.status),
+  }),
+);
+
+// ── Review Comments ──
+
+export const reviewComments = sqliteTable(
+  'review_comments',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => reviewThreads.id, { onDelete: 'cascade' }),
+    author: text('author', { enum: ['user', 'agent'] }).notNull(),
+    body: text('body').notNull(),
+    intent: text('intent', { enum: ['fix', 'question', 'note', 'refactor', 'test'] }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    threadIdx: index('idx_review_comments_thread').on(table.threadId),
+  }),
+);
+
+// ── Plan mode (v21) ──
+//
+// The DB is authoritative for plans; the markdown file under
+// `.generatorai/plans/` is a git-ignored projection so draft plans never
+// pollute the Changes panel, checkpoints, or commits.
+
+export const planDocuments = sqliteTable(
+  'plan_documents',
+  {
+    id: text('id').primaryKey(),
+    chatId: text('chat_id').notNull(),
+    sessionId: text('session_id').notNull(),
+    /** The turn that produced the current revision. */
+    turnId: text('turn_id').notNull(),
+    title: text('title').notNull(),
+    /** Server-generated. Never provider-supplied (path-traversal defence). */
+    fileName: text('file_name').notNull(),
+    filePath: text('file_path'),
+    status: text('status', {
+      enum: [
+        'drafting',
+        'recorded',
+        'awaiting_review',
+        'changes_requested',
+        'approved',
+        'rejected',
+        'superseded',
+        'expired',
+      ],
+    })
+      .notNull()
+      .default('drafting'),
+    currentRevision: integer('current_revision').notNull().default(1),
+    harnessType: text('harness_type').notNull().default('copilot'),
+    availableActions: text('available_actions', { mode: 'json' }).$type<string[]>().default([]),
+    recommendedAction: text('recommended_action'),
+    decision: text('decision', { mode: 'json' }).$type<unknown>(),
+    /** Set when the plan came from a workflow stage rather than a chat turn (v22). */
+    stageRunId: text('stage_run_id'),
+    workflowRunId: text('workflow_run_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    chatIdx: index('idx_plan_documents_chat').on(table.chatId, table.createdAt),
+    statusIdx: index('idx_plan_documents_status').on(table.chatId, table.status),
+    stageIdx: index('idx_plan_documents_stage').on(table.stageRunId),
+  }),
+);
+
+export const planRevisions = sqliteTable(
+  'plan_revisions',
+  {
+    id: text('id').primaryKey(),
+    planId: text('plan_id')
+      .notNull()
+      .references(() => planDocuments.id, { onDelete: 'cascade' }),
+    revision: integer('revision').notNull(),
+    content: text('content').notNull(),
+    summary: text('summary').notNull().default(''),
+    authoredBy: text('authored_by', { enum: ['agent', 'user'] }).notNull().default('agent'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    uniqueRevision: uniqueIndex('idx_plan_revisions_unique').on(table.planId, table.revision),
+  }),
+);
+
+export const planComments = sqliteTable(
+  'plan_comments',
+  {
+    id: text('id').primaryKey(),
+    planId: text('plan_id')
+      .notNull()
+      .references(() => planDocuments.id, { onDelete: 'cascade' }),
+    revision: integer('revision').notNull(),
+    // Line numbers drift between revisions, so the anchor also stores the
+    // quoted text and a content hash (same approach as review_threads).
+    anchorStartLine: integer('anchor_start_line'),
+    anchorEndLine: integer('anchor_end_line'),
+    anchorText: text('anchor_text'),
+    anchorHash: text('anchor_hash'),
+    body: text('body').notNull(),
+    resolved: integer('resolved', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    planIdx: index('idx_plan_comments_plan').on(table.planId, table.revision),
+  }),
+);
+
+/**
+ * Durable human-interaction gates.
+ *
+ * Generalises HITL beyond stage runs: a chat can block an in-flight SDK
+ * callback on a human decision. Unlike a stage run, a chat gate CANNOT be
+ * resumed after a restart (the blocked vendor callback is gone) — hence the
+ * `expired` status.
+ */
+export const agentInteractions = sqliteTable(
+  'agent_interactions',
+  {
+    id: text('id').primaryKey(),
+    scopeKind: text('scope_kind', { enum: ['chat', 'stage_run'] }).notNull(),
+    scopeId: text('scope_id').notNull(),
+    chatId: text('chat_id'),
+    sessionId: text('session_id'),
+    turnId: text('turn_id'),
+    kind: text('kind', { enum: ['plan_review', 'question', 'tool_permission'] }).notNull(),
+    status: text('status', {
+      enum: [
+        'pending',
+        'approved',
+        'changes_requested',
+        'answered',
+        'rejected',
+        'cancelled',
+        'expired',
+        'failed',
+      ],
+    })
+      .notNull()
+      .default('pending'),
+    payload: text('payload', { mode: 'json' }).$type<unknown>(),
+    resolution: text('resolution', { mode: 'json' }).$type<unknown>(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }),
+  },
+  (table) => ({
+    chatIdx: index('idx_agent_interactions_chat').on(table.chatId, table.status),
+    scopeIdx: index('idx_agent_interactions_scope').on(table.scopeKind, table.scopeId, table.status),
+  }),
+);
+
+// ── Widget Instances (extension-rendered UI) ──
+//
+// A row per rendered widget instance. Instances outlive turns for
+// replay (chatMessageToBlocks stitches them back into the timeline) and
+// carry the current state so refreshing the page shows the same UI.
+export const widgetInstances = sqliteTable(
+  'widget_instances',
+  {
+    id: text('id').primaryKey(),
+    descriptorId: text('descriptor_id').notNull(),  // "<extensionId>/<component>"
+    sessionId: text('session_id').notNull(),
+    chatId: text('chat_id'),
+    workflowRunId: text('workflow_run_id'),
+    stageRunId: text('stage_run_id'),
+    messageId: text('message_id'),
+    surface: text('surface', { enum: ['inline', 'widget'] }).notNull(),
+    props: text('props', { mode: 'json' }).$type<unknown>(),
+    state: text('state', { mode: 'json' }).$type<unknown>(),
+    status: text('status', { enum: ['active', 'suspended', 'closed', 'error'] })
+      .notNull()
+      .default('active'),
+    error: text('error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    sessionIdx: index('idx_widget_instances_session').on(table.sessionId),
+    chatIdx: index('idx_widget_instances_chat').on(table.chatId),
+    runIdx: index('idx_widget_instances_run').on(table.workflowRunId),
+    stageIdx: index('idx_widget_instances_stage').on(table.stageRunId),
+  }),
+);

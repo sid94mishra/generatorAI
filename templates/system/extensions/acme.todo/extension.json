@@ -1,0 +1,11 @@
+{
+  "$schema": "https://generatorai.dev/schemas/extension.v2.json",
+  "id": "acme.todo",
+  "name": "Todo",
+  "version": "1.0.0",
+  "description": "A todo list widget contributed by an example third-party publisher. Demonstrates v2 loadExtension + a multi-file widget bundle.",
+  "author": { "name": "Acme" },
+  "license": "MIT",
+  "engines": { "generatorai": ">=1.0.0" },
+  "entry": "./index.js"
+}

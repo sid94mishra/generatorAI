@@ -1,0 +1,107 @@
+{
+  "name": "Eval — HN CLI end-to-end",
+  "description": "4-stage evaluation workflow: plan → code → test → review-with-approval. Builds a small Node CLI that fetches the Hacker News top stories API and renders them.",
+  "sessionMode": "per-stage",
+  "tags": ["eval", "harness-test"],
+  "variables": [
+    {
+      "name": "moduleName",
+      "type": "string",
+      "label": "Module name",
+      "description": "Kebab-case module name; used as file prefix.",
+      "required": true,
+      "defaultValue": "hn-top
+    },
+    {
+      "name": "storyCount",
+      "type": "number",
+      "label": "Number of stories to fetch",
+      "description": "How many top stories the CLI should render.",
+      "required": true,
+      "defaultValue": 5
+    },
+    {
+      "name": "apiUrl",
+      "type": "string",
+      "label": "HN Firebase API base URL",
+      "description": "Base URL for Hacker News API.",
+      "required": true,
+      "defaultValue": "https://hacker-news.firebaseio.com/v0"
+    }
+  ],
+  "stages": [
+    {
+      "name": "1-plan",
+      "description": "Produce a design plan for the CLI without writing code.",
+      "order": 0,
+      "prompts": [
+        {
+          "label": "plan",
+          "text": "You are a senior TypeScript engineer designing a small Node.js CLI named `{{moduleName}}`.\n\nGoal: The CLI fetches the top {{storyCount}} stories from the Hacker News Firebase API at `{{apiUrl}}` and prints them to the terminal in a readable, colored format.\n\nProduce a concise MARKDOWN design plan that includes:\n1. File layout — every file you will create with a one-line description each (source files, test files, package.json fields, config).\n2. Public API — function signatures for each module (`src/{{moduleName}}.ts`, `src/api.ts`, `src/render.ts`, `bin/{{moduleName}}.ts` or equivalent). Include TypeScript types.\n3. Runtime flow — a numbered sequence from CLI entry to final rendered output.\n4. Error handling — network failures, missing IDs, non-200 responses, empty story list, malformed JSON.\n5. External libraries — pick minimal, pure-ESM libraries (justify each). Use `undici` or built-in `fetch` for HTTP; `picocolors` for colors; `vitest` for tests. No frameworks.\n6. Test strategy — what will be unit-tested vs. integration-tested; how HTTP is mocked.\n7. Edge cases explicitly considered.\n\nDo NOT write code yet. Do NOT invoke any file-editing tools. Reply with markdown only. Keep the whole plan under 600 words.",
+          "waitForCompletion": true,
+          "source": "inline"
+        }
+      ],
+      "contextFilter": "none",
+      "outputFormat": "text",
+      "approvalRequired": false,
+      "variables": {}
+    },
+    {
+      "name": "2-code",
+      "description": "Implement the CLI following the plan; write real files.",
+      "order": 1,
+      "prompts": [
+        {
+          "label": "code",
+          "text": "Implement the plan from the previous stage. Create the following ACTUAL files in the working directory using your file-editing tools (Write/Create/Edit). Do NOT paste file contents in a markdown code block — you must actually write them to disk.\n\nRequired files (relative paths):\n- `package.json` — module type=ESM, `bin` field pointing to the CLI entry, minimal deps (undici OR node built-in fetch — pick built-in `fetch` since Node 18+), `picocolors` for coloring. Include a `scripts.test` running vitest.\n- `tsconfig.json` — strict, moduleResolution NodeNext, target ES2022, outDir dist.\n- `src/api.ts` — exports `fetchTopStoryIds(limit: number, baseUrl: string): Promise<number[]>` and `fetchStory(id: number, baseUrl: string): Promise<Story>`, with a `Story` type. Use `fetch`.\n- `src/render.ts` — exports `renderStory(story: Story, rank: number): string` and `renderStories(stories: Story[]): string`. Use picocolors.\n- `src/{{moduleName}}.ts` — exports `run(count: number, baseUrl: string): Promise<string>`; orchestrates api + render.\n- `bin/{{moduleName}}.ts` — CLI entry with shebang; parses argv for `--count` / `-n` (default {{storyCount}}) and `--url` (default `{{apiUrl}}`); calls `run` and prints result. Exit code 1 on error.\n- `README.md` — one-paragraph description + install/run/test example.\n\nHard requirements:\n- All source under `src/` and `bin/` — no code outside those directories.\n- Pure ESM (`\"type\": \"module\"` in package.json, `.js` extensions in relative imports from `.ts` sources per NodeNext).\n- Handle non-200 responses and network errors gracefully (throw a typed `HnApiError`).\n- Rank numbers 1..N, not 0..N-1.\n- No `any`. No `as` unless truly unavoidable.\n\nAfter writing the files, reply with a brief summary listing every file you created and one sentence on how the pieces connect. Keep the reply under 200 words.",
+          "waitForCompletion": true,
+          "source": "inline"
+        }
+      ],
+      "contextFilter": "full",
+      "outputFormat": "text",
+      "approvalRequired": false,
+      "variables": {}
+    },
+    {
+      "name": "3-tests",
+      "description": "Write unit tests + a mocked integration test for the CLI. Run them to confirm they pass.",
+      "order": 2,
+      "prompts": [
+        {
+          "label": "tests",
+          "text": "Add tests for the CLI created in the previous stage. Write real files with your file-editing tools.\n\nRequired test files (relative paths):\n- `tests/api.test.ts` — unit tests for `fetchTopStoryIds` and `fetchStory`. Mock `global.fetch` (vi.stubGlobal). Cover: happy path with N ids returned; slicing to `limit`; non-200 response throws `HnApiError`; malformed JSON throws.\n- `tests/render.test.ts` — unit tests for `renderStory` / `renderStories`. Verify rank prefix, title present, url present when defined, ansi stripping (use `strip-ansi` or a simple regex) to make assertions stable across environments.\n- `tests/cli.test.ts` — integration-ish test that imports `run()`, stubs `fetch`, and asserts the returned string contains {{storyCount}} numbered lines.\n- `vitest.config.ts` — minimal config with `test.environment='node'`.\n\nHard requirements:\n- Use vitest. No jest imports.\n- Strip ANSI in assertions so tests don't break when color is toggled.\n- Cover the error paths, not just happy paths.\n\nThen run `pnpm test` (or `npm test`) in the working directory via your Shell tool and paste the output in your reply. If tests fail, fix them and re-run until they pass. Reply with the final passing test output plus a one-paragraph explanation of what is covered.",
+          "waitForCompletion": true,
+          "source": "inline"
+        }
+      ],
+      "contextFilter": "full",
+      "outputFormat": "text",
+      "approvalRequired": false,
+      "variables": {}
+    },
+    {
+      "name": "4-review",
+      "description": "Human review gate. Reviewer must approve or send feedback.",
+      "order": 3,
+      "prompts": [
+        {
+          "label": "review",
+          "text": "You are the code-review agent. The previous stages produced a CLI plus tests. Read every file in the working directory (use your file-reading tools) and produce a REVIEW REPORT in markdown covering:\n\n1. Summary (2-3 sentences) — did the implementation match the plan?\n2. Correctness — for each source file, one bullet: bug / risk / OK.\n3. Test quality — coverage of edge cases, mock realism, false negatives.\n4. TypeScript hygiene — strictness, any-uses, unnecessary casts.\n5. UX — CLI ergonomics, error messages, exit codes.\n6. Suggested follow-ups (max 5, prioritized).\n\nBe honest and unbiased. Do NOT rewrite code in this stage — call out issues only.\n\nAfter your review, wait for approval. The human reviewer will either approve (advance) or send feedback (which you must then act on as a follow-up prompt).",
+          "waitForCompletion": true,
+          "source": "inline"
+        }
+      ],
+      "contextFilter": "full",
+      "outputFormat": "text",
+      "approvalRequired": true,
+      "variables": {}
+    }
+  ],
+  "edges": [
+    { "fromStageIndex": 0, "toStageIndex": 1, "edgeType": "on_success" },
+    { "fromStageIndex": 1, "toStageIndex": 2, "edgeType": "on_success" },
+    { "fromStageIndex": 2, "toStageIndex": 3, "edgeType": "on_success" }
+  ]
+}

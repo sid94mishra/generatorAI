@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Counter</title>
+    <!-- Uses external CSS file — validates 'style-src self' relaxation. -->
+    <link rel="stylesheet" href="./counter.css" />
+  </head>
+  <body>
+    <div class="card">
+      <h3>Counter</h3>
+      <div class="row">
+        <button id="dec">−</button>
+        <span id="value">0</span>
+        <button id="inc">+</button>
+        <button id="reset" class="secondary">Reset</button>
+      </div>
+      <p id="msg" class="muted">Click a button to change the counter.</p>
+    </div>
+    <!-- Uses external JS file — validates 'script-src self' relaxation. -->
+    <script src="./counter.js"></script>
+  </body>
+</html>

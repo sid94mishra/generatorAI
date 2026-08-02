@@ -1,0 +1,404 @@
+// ────────────────────────────────────────────────────────────────
+// WorkflowDefinition Zod validation schemas
+// ────────────────────────────────────────────────────────────────
+
+import { z } from 'zod';
+import { HookDefinitionSchema, WorkflowHookDefinitionSchema, HooksFileConfigSchema } from './WorkflowTemplate.js';
+import { BrowserConfigSchema } from './BrowserConfigSchema.js';
+import { AgentModeSchema } from './ChatSchemas.js';
+
+/** Zod schema for PromptDefinition */
+export const PromptDefinitionSchema = z.object({
+  label: z.string().min(1),
+  text: z.string().min(1),
+  /** Source type: inline text or file path reference */
+  source: z.enum(['inline', 'file']).default('inline'),
+  /** File path (only used when source is 'file') */
+  filePath: z.string().optional(),
+  attachments: z.array(z.string()).optional(),
+  waitForCompletion: z.boolean().default(true),
+});
+
+/** Zod schema for PromptType — only inline text or file reference */
+export const PromptTypeSchema = z.enum(['inline', 'file']).default('inline');
+
+/** Zod schema for Skill reference (independent of prompts) */
+export const SkillDefinitionSchema = z.object({
+  name: z.string().min(1),
+  directory: z.string().optional(),
+  description: z.string().optional(),
+});
+
+/** Zod schema for Agent reference (independent of prompts) */
+export const AgentDefinitionSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  instructions: z.string().optional(),
+  tools: z.array(z.string()).optional(),
+});
+
+/** Zod schema for RetryPolicy */
+export const RetryPolicySchema = z.object({
+  maxRetries: z.number().int().min(0).max(10).default(0),
+  backoffMs: z.number().int().min(100).default(1000),
+  backoffMultiplier: z.number().min(1).default(2),
+});
+
+/** Zod schema for StageCondition */
+export const StageConditionSchema = z.object({
+  type: z.enum(['always', 'on_success', 'on_failure', 'expression']),
+  expression: z.string().optional(),
+});
+
+/** Zod schema for VariableDefinition */
+export const VariableDefinitionSchema = z.object({
+  name: z.string().min(1).regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, 'Variable name must be a valid identifier'),
+  type: z.enum(['string', 'number', 'boolean', 'choice', 'text']),
+  label: z.string().min(1),
+  description: z.string().optional(),
+  required: z.boolean().default(false),
+  defaultValue: z.unknown().optional(),
+  options: z.array(z.string()).optional(),
+});
+
+/** Agent harness config schema — provider-agnostic (supports copilot, claude-agent, etc.) */
+const HarnessConfigSchema = z.object({
+  model: z.string().optional(),
+  /**
+   * Agent provider that should run this stage / workflow. Omit to route by
+   * `model` (the provider whose live catalog owns it), falling back to the
+   * server's primary provider. Lets stage 1 run on Claude and stage 2 on
+   * Copilot within the same run.
+   */
+  harnessType: z.enum(['copilot', 'claude-agent']).optional(),
+  systemMessage: z.object({
+    mode: z.enum(['append', 'replace']).default('append'),
+    content: z.string(),
+  }).optional(),
+  systemPromptAppend: z.string().optional(),
+  streaming: z.boolean().optional(),
+  mcpServers: z.record(z.object({
+    type: z.enum(['http', 'stdio']),
+    url: z.string().optional(),
+    command: z.string().optional(),
+    args: z.array(z.string()).optional(),
+  })).optional(),
+  availableTools: z.array(z.string()).optional(),
+  excludedTools: z.array(z.string()).optional(),
+  skillDirectories: z.array(z.string()).optional(),
+  disabledSkills: z.array(z.string()).optional(),
+  customAgents: z.array(z.object({
+    name: z.string(),
+    description: z.string(),
+    instructions: z.string(),
+    tools: z.array(z.string()).optional(),
+  })).optional(),
+  provider: z.object({
+    name: z.string(),
+    baseUrl: z.string().url(),
+    apiKey: z.string(),
+    model: z.string().optional(),
+  }).optional(),
+  configDir: z.string().optional(),
+  reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
+  maxTurns: z.number().int().min(1).optional(),
+}).partial();
+
+/** Zod schema for PreprocessingStep */
+const PreprocessingStepSchema = z.object({
+  type: z.enum(['run_script', 'validate_input', 'set_variable', 'conditional']),
+  name: z.string().min(1),
+  config: z.record(z.unknown()),
+  failOnError: z.boolean().default(true),
+  order: z.number().int().min(0).default(0),
+});
+
+/** Zod schema for a single ResultValidationRule */
+const ResultValidationRuleSchema = z.object({
+  type: z.enum(['contains', 'not_contains', 'min_length', 'max_length', 'regex', 'custom_script', 'json_schema', 'llm_validation']),
+  value: z.union([z.string(), z.number(), z.record(z.unknown())]).optional(),
+  message: z.string(),
+});
+
+/** Zod schema for StageResultValidation */
+const StageResultValidationSchema = z.object({
+  stageIndex: z.number().int().min(0),
+  rules: z.array(ResultValidationRuleSchema),
+});
+
+/** Zod schema for IterationConfig */
+const IterationConfigSchema = z.object({
+  subWorkflowDefinitionId: z.string().uuid(),
+  inputMapping: z.record(z.string()),
+  outputMapping: z.record(z.string()),
+  exitValue: z.string().optional(),
+  exitField: z.string().optional(),
+  maxIterations: z.number().int().min(1).max(100).default(10),
+});
+
+/** Zod schema for OrchestratorConfig — uses project/codebase model (no direct git repo cloning) */
+const OrchestratorConfigSchema = z.object({
+  category: z.enum(['system', 'custom', 'derived']).default('custom'),
+  parentTemplateId: z.string().optional(),
+  /** Codebase aliases from the linked project to use for this workflow */
+  codebaseAliases: z.array(z.string().min(1).max(50)).max(5).default([]),
+  /** Whether to auto-create worktrees for per-run isolation */
+  createWorktrees: z.boolean().default(true),
+  preprocessingSteps: z.array(PreprocessingStepSchema).default([]),
+  resultValidations: z.array(StageResultValidationSchema).default([]),
+  requiresCodebase: z.boolean().default(false),
+  autoCommit: z.boolean().optional(),
+  autoCreatePR: z.boolean().optional(),
+  postProcessingSteps: z.array(z.object({
+    type: z.string(),
+    name: z.string().optional(),
+    config: z.record(z.unknown()).optional(),
+    failOnError: z.boolean().optional(),
+    order: z.number().optional(),
+  })).default([]),
+});
+
+/** Zod schema for creating a WorkflowDefinition */
+export const CreateWorkflowDefinitionSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  sessionMode: z.enum(['single', 'per-stage', 'auto']).default('auto'),
+  harnessConfig: HarnessConfigSchema.optional(),
+  variables: z.array(VariableDefinitionSchema).max(50).default([]),
+  tags: z.array(z.string().max(50)).max(20).default([]),
+  orchestratorConfig: OrchestratorConfigSchema.optional(),
+  /** Project ID — scopes this workflow to a project and its codebases */
+  projectId: z.string().uuid().optional(),
+  /** Skills to use in this workflow (independent of stage prompts) */
+  skills: z.array(SkillDefinitionSchema).max(20).default([]),
+  /** Agents to use in this workflow (independent of stage prompts) */
+  agents: z.array(AgentDefinitionSchema).max(10).default([]),
+  /** Workflow-level lifecycle hooks */
+  hooks: z.array(WorkflowHookDefinitionSchema).max(50).optional(),
+  /** Imported hooks file config (.hooks.json) */
+  hooksFile: HooksFileConfigSchema.optional(),
+  /** Selected artifact IDs for skills/agents/prompts */
+  selectedArtifacts: z.object({
+    skillIds: z.array(z.string()).optional(),
+    agentIds: z.array(z.string()).optional(),
+    promptIds: z.array(z.string()).optional(),
+  }).optional(),
+  /** Whether to create worktrees for project codebases during execution */
+  useWorktree: z.boolean().optional(),
+  /** Integrated Browser configuration (workflow-level default). */
+  browserConfig: BrowserConfigSchema.optional(),
+});
+
+/** Zod schema for updating a WorkflowDefinition */
+export const UpdateWorkflowDefinitionSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(2000).optional(),
+  sessionMode: z.enum(['single', 'per-stage', 'auto']).optional(),
+  harnessConfig: HarnessConfigSchema.optional(),
+  variables: z.array(VariableDefinitionSchema).max(50).optional(),
+  tags: z.array(z.string().max(50)).max(20).optional(),
+  orchestratorConfig: OrchestratorConfigSchema.optional(),
+  projectId: z.string().uuid().optional().nullable(),
+  skills: z.array(SkillDefinitionSchema).max(20).optional(),
+  agents: z.array(AgentDefinitionSchema).max(10).optional(),
+  /** Workflow-level lifecycle hooks */
+  hooks: z.array(WorkflowHookDefinitionSchema).max(50).optional(),
+  /** Imported hooks file config (.hooks.json) */
+  hooksFile: HooksFileConfigSchema.optional(),
+  /** Selected artifact IDs for skills/agents/prompts */
+  selectedArtifacts: z.object({
+    skillIds: z.array(z.string()).optional(),
+    agentIds: z.array(z.string()).optional(),
+    promptIds: z.array(z.string()).optional(),
+  }).optional(),
+  /** Whether to create worktrees for project codebases during execution */
+  useWorktree: z.boolean().optional(),
+  /** Integrated Browser configuration (workflow-level default). */
+  browserConfig: BrowserConfigSchema.optional(),
+});
+
+/** Zod schema for creating a StageDefinition */
+export const CreateStageSchema = z.object({
+  workflowDefinitionId: z.string().uuid(),
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  templateId: z.string().optional(),
+  /** When omitted, the service auto-appends (`max existing order + 1`). */
+  order: z.number().int().min(0).optional(),
+  prompts: z.array(PromptDefinitionSchema).default([]),
+  promptType: PromptTypeSchema.optional(),
+  harnessConfigOverrides: HarnessConfigSchema.optional(),
+  variables: z.record(z.unknown()).default({}),
+  hooks: z.array(HookDefinitionSchema).default([]),
+  retryPolicy: RetryPolicySchema.optional(),
+  timeoutMs: z.number().int().min(1000).optional(),
+  condition: StageConditionSchema.optional(),
+  contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
+  /** Explicit list of stage names to pull context from (overrides DAG predecessors) */
+  contextSources: z.array(z.string().min(1).max(200)).max(50).optional(),
+  /** Output format: 'text' for summary, 'json' for schema-validated JSON */
+  outputFormat: z.enum(['text', 'json']).optional(),
+  /** Agent name to delegate this stage to */
+  agentName: z.string().optional(),
+  /** Skills specifically for this stage */
+  skills: z.array(SkillDefinitionSchema).max(10).optional(),
+  /** Per-stage result validation rules */
+  resultValidation: z.array(ResultValidationRuleSchema).max(20).optional(),
+  /** Expected output description appended to the stage prompt */
+  expectedOutput: z.string().max(5000).optional(),
+  /** JSON Schema describing the expected structured output */
+  outputSchema: z.record(z.unknown()).optional(),
+  /** Iteration config for sub-workflow loop stages */
+  iterationConfig: IterationConfigSchema.optional(),
+  /** When true, pause the stage in `awaiting_input` after completion for human review before advancing the DAG. Default false. */
+  approvalRequired: z.boolean().optional(),
+  /** Per-stage agent mode ('auto' | 'plan'). Accepts the legacy 'interactive' alias. */
+  agentMode: AgentModeSchema.optional(),
+  /** Integrated Browser overrides for this stage (deep-merged with workflow-level). */
+  browserConfig: BrowserConfigSchema.optional(),
+});
+
+/** Zod schema for creating a StageEdge */
+export const CreateEdgeSchema = z.object({
+  workflowDefinitionId: z.string().uuid(),
+  fromStageId: z.string().uuid(),
+  toStageId: z.string().uuid(),
+  edgeType: z.enum(['on_success', 'on_failure', 'on_completion', 'always']).default('on_success'),
+});
+
+/** Zod schema for creating a WorkflowRun */
+export const CreateWorkflowRunSchema = z.object({
+  workflowDefinitionId: z.string().uuid(),
+  variables: z.record(z.unknown()).default({}),
+  projectId: z.string().uuid().optional(),
+});
+
+/** Full WorkflowDefinition validation schema (for import/export) */
+export const WorkflowDefinitionSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  version: z.number().int().min(1),
+  sessionMode: z.enum(['single', 'per-stage', 'auto']),
+  harnessConfig: HarnessConfigSchema.optional(),
+  variables: z.array(VariableDefinitionSchema),
+  tags: z.array(z.string()),
+  skills: z.array(SkillDefinitionSchema).optional(),
+  agents: z.array(AgentDefinitionSchema).optional(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+
+/** Inline stage definition for JSON upload (no workflowDefinitionId needed) */
+const ImportStageSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  templateId: z.string().optional(),
+  order: z.number().int().min(0),
+  prompts: z.array(PromptDefinitionSchema).default([]),
+  promptType: PromptTypeSchema.optional(),
+  harnessConfigOverrides: HarnessConfigSchema.optional(),
+  variables: z.record(z.unknown()).default({}),
+  hooks: z.array(HookDefinitionSchema).default([]),
+  retryPolicy: RetryPolicySchema.optional(),
+  timeoutMs: z.number().int().min(1000).optional(),
+  condition: StageConditionSchema.optional(),
+  contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
+  /** Explicit list of stage names to pull context from (overrides DAG predecessors) */
+  contextSources: z.array(z.string().min(1).max(200)).max(50).optional(),
+  /** Output format: 'text' for summary, 'json' for schema-validated JSON */
+  outputFormat: z.enum(['text', 'json']).optional(),
+  agentName: z.string().optional(),
+  skills: z.array(SkillDefinitionSchema).max(10).optional(),
+  /** Per-stage result validation rules */
+  resultValidation: z.array(ResultValidationRuleSchema).max(20).optional(),
+  /** Expected output description appended to the stage prompt */
+  expectedOutput: z.string().max(5000).optional(),
+  /** JSON Schema describing the expected structured output */
+  outputSchema: z.record(z.unknown()).optional(),
+  /** Iteration config for sub-workflow loop stages */
+  iterationConfig: IterationConfigSchema.optional(),
+  /** When true, pause after completion for human review before advancing. */
+  approvalRequired: z.boolean().optional(),
+  /** Per-stage agent mode ('auto' | 'plan'). Accepts the legacy 'interactive' alias. */
+  agentMode: AgentModeSchema.optional(),
+  /** Integrated Browser overrides for this stage (deep-merged with workflow-level). */
+  browserConfig: BrowserConfigSchema.optional(),
+});
+
+/** Edge definition using stage array indices instead of UUIDs */
+const ImportEdgeSchema = z.object({
+  fromStageIndex: z.number().int().min(0),
+  toStageIndex: z.number().int().min(0),
+  edgeType: z.enum(['on_success', 'on_failure', 'on_completion', 'always']).default('on_success'),
+});
+
+/** Zod schema for importing a full workflow from a JSON file upload */
+export const ImportWorkflowJsonSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  sessionMode: z.enum(['single', 'per-stage', 'auto']).default('auto'),
+  harnessConfig: HarnessConfigSchema.optional(),
+  variables: z.array(VariableDefinitionSchema).max(50).default([]),
+  tags: z.array(z.string().max(50)).max(20).default([]),
+  stages: z.array(ImportStageSchema).min(1, 'At least one stage is required').max(100),
+  edges: z.array(ImportEdgeSchema).max(500).default([]),
+  /** Skills for the entire workflow */
+  skills: z.array(SkillDefinitionSchema).max(20).default([]),
+  /** Agents for the entire workflow */
+  agents: z.array(AgentDefinitionSchema).max(10).default([]),
+  /** Orchestrator configuration */
+  orchestratorConfig: OrchestratorConfigSchema.optional(),
+  /** Project ID to link to */
+  projectId: z.string().uuid().optional(),
+  /** Workflow-level lifecycle hooks (on_run_start, on_run_complete, etc.) */
+  hooks: z.array(WorkflowHookDefinitionSchema).max(50).optional(),
+  /** Imported hooks file config (.hooks.json) */
+  hooksFile: HooksFileConfigSchema.optional(),
+  /** Integrated Browser configuration */
+  browserConfig: BrowserConfigSchema.optional(),
+});
+
+export type ImportWorkflowJson = z.infer<typeof ImportWorkflowJsonSchema>;
+
+// ────────────────────────────────────────────────────────────────
+// RunProfile — Reusable run configuration (CLI + Web)
+// ────────────────────────────────────────────────────────────────
+
+/** Per-stage override schema */
+export const StageRunOverrideSchema = z.object({
+  stageName: z.string().optional(),
+  stageIndex: z.number().int().min(0).optional(),
+  agentName: z.string().optional(),
+  // SCHEMA-2: include 'structured' so runtime/profile overrides can set it,
+  // matching StageDefinition.contextFilter and the script-profile override enum.
+  contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
+  timeoutMs: z.number().int().min(1000).optional(),
+  variables: z.record(z.unknown()).optional(),
+  skip: z.boolean().optional(),
+}).refine(
+  (data) => data.stageName !== undefined || data.stageIndex !== undefined,
+  { message: 'Either stageName or stageIndex must be provided' },
+);
+
+/** RunProfile Zod schema for validation */
+export const RunProfileSchema = z.object({
+  version: z.literal(1),
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  workflowDefinitionId: z.string().uuid(),
+  runName: z.string().max(200).optional(),
+  variables: z.record(z.unknown()).default({}),
+  permissionMode: z.enum(['bypassPermissions', 'default', 'acceptEdits', 'plan']).optional(),
+  sessionMode: z.enum(['single', 'per-stage', 'auto']).optional(),
+  projectId: z.string().uuid().optional(),
+  selectedCodebases: z.array(z.string()).optional(),
+  stageOverrides: z.array(StageRunOverrideSchema).max(100).optional(),
+  promptFiles: z.array(z.string()).optional(),
+  skillFiles: z.array(z.string()).optional(),
+  agentFiles: z.array(z.string()).optional(),
+  /** Runtime override — deep-merged on top of workflow.browserConfig. */
+  browserConfig: BrowserConfigSchema.optional(),
+});
+
+export type RunProfileInput = z.infer<typeof RunProfileSchema>;

@@ -1,0 +1,59 @@
+node_modules/
+dist/
+.turbo/
+*.db
+*.db-journal
+*.db-wal
+coverage/
+.env
+.env.local
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+.playwright-cli/
+
+# ── Secrets ────────────────────────────────────────────────────────
+# Runtime key material, generated on first run. These MUST NOT be committed —
+# a key-encryption key stored next to the vault it decrypts provides no
+# protection at all.
+#
+# The directory rules are anchored to `data/` on purpose: a bare `secrets/`
+# would also swallow the `packages/secrets` SOURCE package, silently dropping
+# it from the repo.
+**/data/secrets/
+**/data/harnesses/
+bootstrap-pairing.json
+
+# Key material by extension, anywhere in the tree — the secrets directory is
+# relocatable via GENERATORAI_SECRETS_DIR, so path anchoring is not enough.
+*.pem
+*.p12
+*.pfx
+*.key
+*.enc
+*.salt
+*vault.json
+
+# Local env files. `.env.example` stays checked in as documentation.
+.env.*
+!.env.example
+
+# Ad-hoc dev logs — regenerable, and prone to capturing request detail.
+*.log
+
+# playwright-cli accessibility-tree snapshots from agentic browser testing.
+# Transient debugging artifacts (per-run a11y dumps), not fixtures — keep out of commits.
+agent-tests/snapshots/
+
+# ── Test output / E2E artifacts (regenerable, never source) ──
+# Playwright per-test failure artifacts (test-failed-*.png, video.webm,
+# trace.zip), HTML reports + bundled trace-viewer assets, the .last-run.json
+# record, and ad-hoc E2E scratch (id/run-id captures, *.json result dumps).
+# All produced on test runs (especially failures) — pure debugging output, not
+# fixtures. Scoped to test-output dirs on purpose so real source assets
+# (e.g. web app .png/.svg) are never ignored.
+test-results/
+**/test-results/
+playwright-report/
+**/playwright-report/
+**/.last-run.json

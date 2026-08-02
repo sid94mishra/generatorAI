@@ -1,0 +1,959 @@
+// ────────────────────────────────────────────────────────────────
+// ChatPage — Full v2 Chat page with SSE streaming
+//
+// This page handles a first-class Chat entity (/chats/:id).
+// It reuses existing chat components (ChatMessageList, StreamingMessage,
+// ChatInput) but connects to the v2 chat endpoints and SSE streams.
+// ────────────────────────────────────────────────────────────────
+
+import React, { useEffect, useCallback, useMemo, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useChat, useChatMessages, useSendChatPrompt, useUpdateChat, useCancelChat, useBackgroundTasks } from '@/hooks/queries.js';
+// PLN-01 — plan mode
+import { useDecidePlan, useAnswerQuestion, usePendingInteractions } from '@/hooks/queries.js';
+import { PlanDocumentPanel } from '@/components/chat/PlanDocumentPanel.js';
+import type { AgentMode } from '@generatorai/shared';
+import { DEFAULT_AGENT_MODE } from '@generatorai/shared';
+import { useStreamStore } from '@/stores/streamStore.js';
+import { useChatStore } from '@/stores/chatStore.js';
+import { useStickToBottom } from '@/hooks/useStickToBottom.js';
+import { usePlatform } from '@/providers/PlatformProvider.js';
+import { connectChatSession } from '@/stores/sseManager.js';
+import { hydrateWidgetsForChat } from '@/utils/hydrateWidgets.js';
+import { ChatMessageList } from '@/components/chat/ChatMessageList.js';
+import { StreamingMessage } from '@/components/chat/StreamingMessage.js';
+import { ChatInput } from '@/components/chat/ChatInput.js';
+import type { ComposerAttachment } from '@/components/chat/composer/types.js';
+import { useFileTabs } from '@/components/diff/useFileTabs.js';
+import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
+import { ChatMessageSkeleton } from '@/components/Skeleton.js';
+import { RightPane, useRightPaneOpen } from '@/components/layout/RightPane.js';
+import { clearBrowserTabUrl } from '@/lib/browserTabUrls.js';
+import { useRightPaneStore } from '@/stores/rightPaneStore.js';
+import { WidgetHost } from '@/components/widgets/WidgetHost.js';
+import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js';
+import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList } from 'lucide-react';
+import { openAuthenticatedEventSource } from '@/platform/authTransport.js';
+import { cn } from '@/lib/utils.js';
+
+// Right-pane-only surfaces, code-split out of the chat route chunk. They pull
+// in the two heaviest dependency trees in the app (xterm + its WebGL addon;
+// Shiki grammars via @pierre/diffs) and are never on the path to first paint —
+// keeping them static delayed the composer and transcript on every chat open.
+const TerminalPanel = React.lazy(() =>
+  import('@/components/terminal/TerminalPanel.js').then((m) => ({ default: m.TerminalPanel })),
+);
+const ChangesSurface = React.lazy(() =>
+  import('@/components/diff/ChangesSurface.js').then((m) => ({ default: m.ChangesSurface })),
+);
+
+function PanelFallback() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <Loader2 className="h-4 w-4 animate-spin text-[var(--color-muted-foreground)]" />
+    </div>
+  );
+}
+
+export function ChatPage() {
+  const { id: chatId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const platform = usePlatform();
+
+  const { data: chat, isLoading: chatLoading, error: chatError } = useChat(chatId);
+  const { data: messages, isLoading: messagesLoading } = useChatMessages(chatId);
+
+  // The stream store is keyed by sessionId (not chatId)
+  const sessionId = chat?.sessionId;
+  const stream = useStreamStore((state) =>
+    sessionId ? state.streams[sessionId] : undefined,
+  );
+  const sendChatMutation = useSendChatPrompt(chatId ?? '');
+  const updateChatMutation = useUpdateChat(chatId ?? '');
+  const cancelMutation = useCancelChat();
+
+
+  // Model selection, git repos (local paths), and codebase selection state.
+  // Starts empty rather than at a hardcoded id: the composer resolves an
+  // empty selection to the first model the account actually has, whereas a
+  // stale literal (the old `claude-sonnet-4`) matches nothing in the live
+  // catalog and hides every model-derived control.
+  const [selectedModel, setSelectedModel] = useState<string>(chat?.model ?? '');
+  const [reasoningEffort, setReasoningEffort] = useState<string | undefined>(chat?.harnessConfig?.reasoningEffort);
+  const [contextTier, setContextTier] = useState<string | undefined>(chat?.harnessConfig?.contextTier);
+  const [gitRepositories, setGitRepositories] = useState<Array<{ url: string; branch: string; alias: string }>>([]);
+  const [selectedCodebaseIds, setSelectedCodebaseIds] = useState<string[]>(chat?.codebaseIds ?? []);
+  // Unified right side pane — tabs (Changes / Browser / …) are managed
+  // inside RightPane; here we only track whether the pane is open.
+  const [rightPaneOpen, setRightPaneOpen, toggleRightPane] = useRightPaneOpen('generatorai:rightPane:chat', false);
+  // Bridge the pane toggle up to the global Header's side-pane icon.
+  const setRightPaneController = useRightPaneStore((s) => s.setController);
+  useEffect(() => {
+    setRightPaneController({ open: rightPaneOpen, toggle: toggleRightPane });
+    return () => setRightPaneController(null);
+  }, [rightPaneOpen, toggleRightPane, setRightPaneController]);
+  // Pending browser/terminal captures — previewed in the composer and attached
+  // to the next chat send.
+  const [pendingCaptures, setPendingCaptures] = useState<ComposerAttachment[]>([]);
+  /**
+   * Imperative "focus this tab" token — bumped when the server emits a
+   * `browser.session_created` event so the pane pops the Browser tab
+   * open automatically (Phase 2 of the built-in browser tools plan).
+   * Combined with `visibility === 'visible'` from BrowserConfig this
+   * gives users the "watch the agent live" UX with zero clicks.
+   */
+  const [browserTabFocusRequest, setBrowserTabFocusRequest] = useState<{ type: string; token: number; tabId?: string } | null>(null);
+  // Per-instance browser tab state (keyed by the RightPane tab id) so each
+  // "Browser" tab renders its own live title + favicon + spinner.
+  const [browserTabs, setBrowserTabs] = useState<Record<string, BrowserTabState>>({});
+  // Right-pane tabs are scoped to THIS chat, so opening three browser tabs in
+  // one conversation no longer leaks them into every other conversation.
+  const rightPaneStorageKey = `generatorai:rightPane:chat:${chatId ?? 'unknown'}`;
+  // Namespace for each browser tab's remembered URL (see `browserTabUrls`).
+  const browserUrlScopeKey = `chat:${chatId ?? 'unknown'}`;
+  // Files tab + per-file tabs. Opening a file expands the pane first, so the
+  // gesture works even when the user has it collapsed. Declared before the
+  // close handler because that handler has to forget this tab's selection.
+  const fileTabs = useFileTabs({
+    workspaceId: chat?.workspaceId,
+    requestFocus: setBrowserTabFocusRequest,
+    openPane: () => setRightPaneOpen(true),
+  });
+
+  // Closing a tab for good drops whatever that tab remembered.
+  const forgetFileTab = fileTabs.forgetTab;
+  const handleRightPaneTabClose = useCallback(
+    (tab: { id: string; type: string }) => {
+      if (tab.type === 'files') {
+        forgetFileTab(tab.id);
+        return;
+      }
+      if (tab.type !== 'browser') return;
+      clearBrowserTabUrl(browserUrlScopeKey, tab.id);
+      setBrowserTabs((prev) => {
+        if (!(tab.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[tab.id];
+        return next;
+      });
+    },
+    [browserUrlScopeKey, forgetFileTab],
+  );
+
+  // Orchestrator mode — poll for spawned background tasks. Enabled only for
+  // orchestrator chats. When the first task appears, pop the Background Tasks
+  // tab automatically so the user sees the delegation happen.
+  const isOrchestrator = !!chat?.orchestratorMode;
+  const { data: backgroundTasksData } = useBackgroundTasks(chatId, isOrchestrator);
+  const backgroundTaskCount = backgroundTasksData?.tasks?.length ?? 0;
+  const [bgTabAutoOpened, setBgTabAutoOpened] = useState(false);
+  useEffect(() => {
+    if (isOrchestrator && backgroundTaskCount > 0 && !bgTabAutoOpened) {
+      setBgTabAutoOpened(true);
+      setRightPaneOpen(true);
+      setBrowserTabFocusRequest({ type: 'background_tasks', token: Date.now() });
+    }
+  }, [isOrchestrator, backgroundTaskCount, bgTabAutoOpened, setRightPaneOpen]);
+
+  // ══════════════════════════════════════════════════════════════
+  // PLN-01 — plan mode
+  // ══════════════════════════════════════════════════════════════
+
+  // Sticky per-chat default, overridable per turn from the composer.
+  const [agentMode, setAgentMode] = useState<AgentMode>(DEFAULT_AGENT_MODE);
+  useEffect(() => {
+    if (chat?.defaultAgentMode) setAgentMode(chat.defaultAgentMode);
+  }, [chat?.defaultAgentMode]);
+
+  const [activePlanId, setActivePlanId] = useState<string | null>(null);
+  const [planTabAutoOpenedFor, setPlanTabAutoOpenedFor] = useState<string | null>(null);
+
+  const decidePlan = useDecidePlan(chatId ?? '');
+  const answerQuestion = useAnswerQuestion(chatId ?? '');
+  // The blocking promise lives server-side, so polling rehydrates the gate
+  // after a reload even when the SSE replay window has moved on.
+  const { data: pendingInteractions, dataUpdatedAt: pendingFetchedAt } = usePendingInteractions(
+    chatId,
+    chat?.status === 'active',
+  );
+  const pendingGate = pendingInteractions?.[0];
+
+  const openPlanTab = useCallback(
+    (planId: string) => {
+      setActivePlanId(planId);
+      setRightPaneOpen(true);
+      setBrowserTabFocusRequest({ type: 'plan', token: Date.now() });
+    },
+    [setRightPaneOpen],
+  );
+
+  // Auto-open the Plan tab the first time a plan asks for review — but only
+  // when the tab is actually visible, matching the browser-tab guard.
+  const awaitingPlanId = useMemo(() => {
+    const blocks = stream?.blocks ?? [];
+    for (let i = blocks.length - 1; i >= 0; i -= 1) {
+      const b = blocks[i];
+      if (b?.type === 'plan' && b.status === 'awaiting_review') return b.planId;
+    }
+    return null;
+  }, [stream?.blocks]);
+
+  useEffect(() => {
+    if (!awaitingPlanId || planTabAutoOpenedFor === awaitingPlanId) return;
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    setPlanTabAutoOpenedFor(awaitingPlanId);
+    openPlanTab(awaitingPlanId);
+  }, [awaitingPlanId, planTabAutoOpenedFor, openPlanTab]);
+
+  // Card decisions are applied to the store OPTIMISTICALLY.
+  //
+  // Two reasons: instant feedback, and it closes a race — the pending-gate
+  // poll can observe the resolved gate before the `chat.plan.decided` /
+  // `chat.question.answered` SSE event lands, and the reconciliation effect
+  // below would then wrongly mark the card expired.
+  const handleApprovePlan = useCallback(
+    (planId: string, action: 'implement_interactive' | 'implement_autopilot') => {
+      if (sessionId) {
+        useStreamStore.getState().setPlanStatus(sessionId, planId, 'approved');
+      }
+      decidePlan.mutate({ planId, approved: true, action });
+    },
+    [decidePlan, sessionId],
+  );
+
+  const handleRequestPlanChanges = useCallback(
+    (planId: string, feedback: string) => {
+      if (sessionId) {
+        useStreamStore.getState().setPlanStatus(sessionId, planId, 'changes_requested');
+      }
+      decidePlan.mutate({ planId, approved: false, feedback });
+    },
+    [decidePlan, sessionId],
+  );
+
+  const handleAnswerQuestion = useCallback(
+    (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) => {
+      if (sessionId) {
+        useStreamStore.getState().answerQuestion(sessionId, interactionId, answers, freeformResponse);
+      }
+      answerQuestion.mutate({
+        interactionId,
+        answers,
+        ...(freeformResponse ? { freeformResponse } : {}),
+      });
+    },
+    [answerQuestion, sessionId],
+  );
+
+  /** Human-readable reason the composer is blocked, if it is. */
+  const pendingInteractionLabel = useMemo(() => {
+    if (!pendingGate) return null;
+    return pendingGate.kind === 'plan_review'
+      ? 'Waiting on your plan review before the agent can continue.'
+      : 'The agent is waiting for your answer.';
+  }, [pendingGate]);
+
+  // Reconcile optimistic card state against the server's pending gates.
+  //
+  // A card is rendered "pending" from a live SSE event, but the gate can die
+  // server-side without the client hearing about it — a server restart expires
+  // every in-flight chat gate, and the event can also fall outside the replay
+  // window. Without this, the card would sit on "pending" forever and the
+  // user's answer would come back 409. The pending list is authoritative.
+  //
+  // It is only authoritative about gates that already existed when it was
+  // fetched, though: the list polls on an interval, so a card opened by SSE
+  // moments ago is legitimately absent from the last response. Comparing the
+  // card's `openedAt` with the poll's fetch time keeps a stale poll from
+  // instantly killing a live gate.
+  useEffect(() => {
+    if (!sessionId || pendingInteractions === undefined) return;
+    const live = new Set(pendingInteractions.map((i) => i.id));
+    const store = useStreamStore.getState();
+    const isStale = (openedAt: number | undefined) =>
+      openedAt !== undefined && openedAt > pendingFetchedAt;
+    for (const block of store.streams[sessionId]?.blocks ?? []) {
+      if (
+        block.type === 'question' &&
+        block.status === 'pending' &&
+        !live.has(block.interactionId) &&
+        !isStale(block.openedAt)
+      ) {
+        store.expireQuestion(sessionId, block.interactionId);
+      }
+      if (
+        block.type === 'plan' &&
+        block.status === 'awaiting_review' &&
+        block.interactionId &&
+        !live.has(block.interactionId) &&
+        !isStale(block.openedAt)
+      ) {
+        store.setPlanStatus(sessionId, block.planId, 'expired');
+      }
+    }
+  }, [sessionId, pendingInteractions, pendingFetchedAt, stream?.blocks]);
+
+  // ── Split-pane resize state for chat ↔ right pane ────────────
+  // The width itself is owned by `RightPane` via `useResizablePane`.
+
+  // Sync model and codebaseIds from loaded chat entity
+  useEffect(() => {
+    if (chat?.model) {
+      setSelectedModel(chat.model);
+    }
+    if (chat?.harnessConfig?.reasoningEffort) {
+      setReasoningEffort(chat.harnessConfig.reasoningEffort);
+    }
+    if (chat?.harnessConfig?.contextTier) {
+      setContextTier(chat.harnessConfig.contextTier);
+    }
+    if (chat?.codebaseIds !== undefined) {
+      setSelectedCodebaseIds(chat.codebaseIds);
+    }
+    if (chat?.gitRepositories?.length) {
+      setGitRepositories(chat.gitRepositories.map(r => ({ url: r.url, branch: '', alias: r.alias })));
+    }
+  }, [chat?.model, chat?.harnessConfig?.reasoningEffort, chat?.harnessConfig?.contextTier, chat?.codebaseIds, chat?.gitRepositories]);
+
+  // Persist model changes to server
+  const handleModelChange = useCallback((model: string) => {
+    setSelectedModel(model);
+    updateChatMutation.mutate({ model });
+  }, [updateChatMutation]);
+
+  // Persist reasoning-effort changes into harnessConfig (merged with existing)
+  const handleReasoningEffortChange = useCallback((effort: string) => {
+    setReasoningEffort(effort);
+    updateChatMutation.mutate({
+      harnessConfig: { ...(chat?.harnessConfig ?? {}), reasoningEffort: effort },
+    });
+  }, [updateChatMutation, chat?.harnessConfig]);
+
+  // Persist context-tier changes into harnessConfig (merged with existing)
+  const handleContextTierChange = useCallback((tier: string) => {
+    setContextTier(tier);
+    updateChatMutation.mutate({
+      harnessConfig: { ...(chat?.harnessConfig ?? {}), contextTier: tier },
+    });
+  }, [updateChatMutation, chat?.harnessConfig]);
+
+  // Connect SSE (depends on stable primitives only to avoid reconnection churn)
+  useEffect(() => {
+    if (!chatId || !sessionId) return;
+    const disconnect = connectChatSession(chatId, sessionId, platform);
+    return () => {
+      disconnect();
+    };
+  }, [chatId, sessionId, platform]);
+
+  // Reconstitute widgets from the DB on mount — independent of the SSE
+  // event-replay window, so widgets survive refresh even if their render
+  // event has scrolled out of the replay log.
+  useEffect(() => {
+    if (!chatId || !sessionId) return;
+    void hydrateWidgetsForChat(chatId, sessionId);
+  }, [chatId, sessionId]);
+
+  // Register chat entity in chatStore cache (can re-run on data updates)
+  useEffect(() => {
+    if (chat && sessionId) {
+      useChatStore.getState().registerChat(chat.id, sessionId, chat);
+    }
+  }, [chat, sessionId]);
+
+  // Set active chat in store
+  useEffect(() => {
+    if (chatId) {
+      useChatStore.getState().setActiveChatId(chatId);
+    }
+    return () => {
+      useChatStore.getState().setActiveChatId(null);
+    };
+  }, [chatId]);
+
+  // Phase 2 of built-in browser tools — auto-open the Browser tab in
+  // the right pane when the workspace signals `browser.session_created`
+  // AND the config says the user wants to watch (`visibility: 'visible'`
+  // OR the legacy `enabled: true` without visibility set which we treat
+  // as opt-in). We subscribe to the unified SSE stream scoped to
+  // `browser:<workspaceId>` — same channel `BrowserPanel` uses for its
+  // reactive updates, but here we react at the page level to change the
+  // right-pane state before the user opens it.
+  const chatWorkspaceId = chat?.workspaceId;
+  useEffect(() => {
+    if (!chatWorkspaceId) return;
+    let cancelled = false;
+    // 1) On-mount probe — chat creation may have already fired
+    //    `browser.session_created` before we subscribed, so query the
+    //    descriptor once. If visibility === 'visible' and the session is
+    //    active, pop the Browser tab.
+    void fetch(`/api/workspaces/${chatWorkspaceId}/browser/descriptor`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((desc: { ready?: boolean; config?: { visibility?: string } } | null) => {
+        if (cancelled || !desc?.ready) return;
+        if (desc.config?.visibility === 'visible') {
+          setRightPaneOpen(true);
+          setBrowserTabFocusRequest({ type: 'browser', token: Date.now() });
+        }
+      })
+      .catch(() => undefined);
+    // 2) Live SSE — for sessions that flip to active *after* the page
+    //    mounts (e.g. LLM calls open_browser_page lazily).
+    const es = openAuthenticatedEventSource(
+      `/api/stream?scope=session&id=${encodeURIComponent('browser:' + chatWorkspaceId)}&filter=browser.session_created`,
+      { scope: 'session', id: `browser:${chatWorkspaceId}` },
+      {
+        onMessage: (e) => {
+          if (cancelled) return;
+          try {
+            const payload = JSON.parse(e.data) as { kind?: string };
+            if (payload.kind !== 'browser.session_created') return;
+            // Fetch fresh descriptor to check visibility policy before opening.
+            void fetch(`/api/workspaces/${chatWorkspaceId}/browser/descriptor`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((desc: { config?: { visibility?: string } } | null) => {
+                if (cancelled || !desc) return;
+                // Open when visibility is 'visible' OR unset (backwards compat).
+                const v = desc.config?.visibility;
+                if (v === 'visible' || v === undefined) {
+                  setRightPaneOpen(true);
+                  setBrowserTabFocusRequest({ type: 'browser', token: Date.now() });
+                }
+              })
+              .catch(() => undefined);
+          } catch { /* ignore */ }
+        },
+      },
+    );
+    return () => {
+      cancelled = true;
+      try { es.close(); } catch { /* noop */ }
+    };
+  }, [chatWorkspaceId, setRightPaneOpen]);
+
+  // Auto-open the Widget tab whenever a new full-page widget arrives.
+  // Tracks the highest-seen instanceId seen for a widget so we only
+  // refocus once per new widget.
+  const seenCanvasWidgetsRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!stream) return;
+    for (const b of stream.blocks) {
+      if (b.type !== 'widget') continue;
+      if (b.surface !== 'widget') continue;
+      if (b.status === 'closed') continue;
+      if (seenCanvasWidgetsRef.current.has(b.instanceId)) continue;
+      seenCanvasWidgetsRef.current.add(b.instanceId);
+      setRightPaneOpen(true);
+      setBrowserTabFocusRequest({ type: 'widget', token: Date.now() });
+    }
+  }, [stream, setRightPaneOpen]);
+
+  // Stream state
+  const isStreaming = stream?.status === 'streaming' || stream?.status === 'thinking';
+  const isPending = stream?.status === 'pending';
+  const isCopilotWorking = isStreaming || isPending;
+  const isInputDisabled = isStreaming || isPending;
+  const turnUserMessage = stream?.turnUserMessage ?? null;
+  const pendingUserMessage = stream?.pendingUserMessage ?? null;
+  const isChatActive = chat?.status === 'active';
+
+  // Show stream blocks — treat inline/right-pane widget blocks as "active
+  // content" even when no chat turn is in flight (the LLM may have rendered
+  // a widget in a previous turn but the state stays live for interaction).
+  const hasActiveWidgetBlock = React.useMemo(() => {
+    if (!stream) return false;
+    return stream.blocks.some(
+      (b) => b.type === 'widget' && b.surface === 'inline' && b.status !== 'closed',
+    );
+  }, [stream]);
+
+  const showStreamingMessage =
+    stream != null &&
+    stream.blocks.length > 0 &&
+    (stream.status !== 'idle' || hasActiveWidgetBlock);
+
+  // Whether the current turn has produced its OWN content yet (text / tool
+  // steps / answer) — i.e. anything other than blocks carried across the
+  // turn barrier (widgets are preserved from previous turns by startPending).
+  // Used to gate the pending spinner: a follow-up prompt in a widget chat
+  // still has carried widget blocks, which must NOT suppress the "thinking"
+  // indicator, otherwise the user sees no feedback after sending.
+  const hasNewTurnContent = React.useMemo(
+    () => stream != null && stream.blocks.some((b) => b.type !== 'widget'),
+    [stream],
+  );
+
+  // Display messages dedup (same logic as ChatView)
+  const isInActiveTurn = stream != null && stream.status !== 'idle' && !!turnUserMessage;
+
+  const displayMessages = useMemo(() => {
+    if (!messages?.length) return messages ?? [];
+    if (!isInActiveTurn) return messages;
+
+    // Hide the persisted copy of the message this turn is streaming, so it
+    // isn't rendered twice (the optimistic bubble already shows it).
+    //
+    // Prefer the server-generated turnId (WEB-02): it identifies the current
+    // turn's messages exactly. Content matching cannot — if the user repeats a
+    // prompt they sent earlier, the scan lands on the OLDER copy and slicing
+    // there hides every message after it, so the conversation appears to
+    // vanish until the turn ends and this dedup switches off.
+    const serverTurnId = stream?.serverTurnId ?? null;
+    if (serverTurnId) {
+      const idx = messages.findIndex(
+        (m) => m.role === 'user'
+          && (m as { metadata?: { turnId?: string } }).metadata?.turnId === serverTurnId,
+      );
+      return idx >= 0 ? messages.slice(0, idx) : messages;
+    }
+
+    const targetContent = turnUserMessage?.trim();
+
+    if (targetContent) {
+      // No turnId yet. Only dedup when the match is the very LAST message —
+      // that can only be the copy just persisted for this turn. A match
+      // anywhere earlier is an identical older prompt and must be left alone.
+      const lastIdx = messages.length - 1;
+      const last = messages[lastIdx];
+      if (last?.role === 'user' && last.content?.trim() === targetContent) {
+        return messages.slice(0, lastIdx);
+      }
+      return messages;
+    }
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role === 'user') {
+        return messages.slice(0, i + 1);
+      }
+    }
+
+    return messages;
+  }, [messages, isInActiveTurn, turnUserMessage, stream?.serverTurnId]);
+
+  // Optimistic user message
+  const showOptimisticUserMessage = useMemo(
+    () => !!turnUserMessage && stream?.status !== 'idle',
+    [turnUserMessage, stream?.status],
+  );
+
+  // Stick-to-bottom: auto-follow while pinned near the bottom; surface a
+  // "jump to latest" pill when the user scrolls up to read mid-stream.
+  const scrollSignature = `${displayMessages.length}:${stream?.blocks?.length ?? 0}:${stream?.text?.length ?? 0}:${stream?.status ?? ''}`;
+  const { ref: scrollRef, showJumpToLatest, jumpToLatest } = useStickToBottom(scrollSignature);
+
+  // Auto-clear completed stream once chatMessages catches up
+  useEffect(() => {
+    if (!stream || stream.status !== 'complete' || !sessionId) return;
+    if (!messages?.length) return;
+
+    // Preserve stream state when it holds widget blocks — widgets live only
+    // in the event stream (not in chat history), so clearing here would
+    // drop the inline widget iframes the LLM rendered during the turn.
+    const hasWidgetBlocks = stream.blocks.some((b) => b.type === 'widget');
+    if (hasWidgetBlocks) return;
+
+    const turnMsg = stream.turnUserMessage?.trim();
+    if (!turnMsg) {
+      useStreamStore.getState().clearStream(sessionId);
+      return;
+    }
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role === 'user' && messages[i]?.content?.trim() === turnMsg) {
+        for (let j = i + 1; j < messages.length; j++) {
+          if (messages[j]?.role === 'assistant') {
+            useStreamStore.getState().clearStream(sessionId);
+            return;
+          }
+        }
+        return;
+      }
+    }
+  }, [stream?.status, stream?.blocks, messages, sessionId, stream?.turnUserMessage]);
+
+  // Loading
+  if (!chatId) {
+    navigate('/');
+    return null;
+  }
+
+  // Only the chat record gates the shell: the composer needs `chat.sessionId`,
+  // nothing else. Waiting on the message page too made the input box appear
+  // only after the slower of two round trips — the transcript now streams in
+  // under its own skeleton while the rest of the page is already interactive.
+  if (chatLoading) {
+    return <ChatMessageSkeleton />;
+  }
+
+  if (chatError || !chat) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <p className="text-sm text-[var(--color-destructive)]">Chat not found</p>
+        <button
+          onClick={() => navigate('/')}
+          className="text-sm text-[var(--color-primary)] underline"
+        >
+          Go back
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative flex h-full">
+      {/* Main chat column */}
+      <div className="flex flex-1 flex-col min-w-0">
+      {/* Streaming status banner */}
+      {isCopilotWorking && (
+        <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-primary)]/5 px-4 py-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--color-primary)]" />
+          <span className="text-xs font-medium text-[var(--color-primary)]">
+            {isStreaming ? 'Generating response...' : 'Processing...'}
+          </span>
+        </div>
+      )}
+
+      {/* Archived banner */}
+      {chat.status === 'archived' && (
+        <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-amber-500/5 px-4 py-2">
+          <Archive className="h-3.5 w-3.5 text-amber-500" />
+          <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+            This chat has been archived
+          </span>
+        </div>
+      )}
+
+      {/* Messages */}
+      <div className="relative flex flex-1 flex-col overflow-hidden">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-4 py-4"
+      >
+        <div className="mx-auto max-w-3xl">
+        {messagesLoading && <ChatMessageSkeleton />}
+        {displayMessages.length > 0 && (
+          <ChatMessageList messages={displayMessages} onOpenPlan={openPlanTab} />
+        )}
+        {/* Optimistic user message — right-aligned bubble (matches UserMessage
+            + workflow stage prompt for a consistent stream layout). */}
+        {showOptimisticUserMessage && (
+          <div className="mt-5 flex justify-end">
+            <div className="max-w-[85%] min-w-0">
+              <div className="rounded-2xl rounded-br-sm border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/[0.08] px-3.5 py-2.5">
+                <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-primary)]/80">
+                  <User className="h-2.5 w-2.5" />
+                  You
+                  <span className="ml-auto font-normal normal-case tracking-normal text-[var(--color-muted-foreground)]">just now</span>
+                </div>
+                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--color-foreground)]/90">{turnUserMessage}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Streaming message */}
+        {showStreamingMessage && (
+          <StreamingMessage
+            stream={stream}
+            sessionId={sessionId}
+            onOpenPlan={openPlanTab}
+            onApprovePlan={handleApprovePlan}
+            onRequestPlanChanges={handleRequestPlanChanges}
+            onAnswerQuestion={handleAnswerQuestion}
+            planBusy={decidePlan.isPending || answerQuestion.isPending}
+          />
+        )}
+
+        {/* Empty state */}
+        {!messagesLoading && displayMessages.length === 0 && !showStreamingMessage && !isPending && !pendingUserMessage && (
+          <div className="flex h-full flex-col items-center justify-center gap-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-accent)]">
+              <Bot className="h-8 w-8 text-[var(--color-primary)] opacity-60" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-[var(--color-foreground)] opacity-70">
+                Start the conversation
+              </p>
+              <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+                Type a message below to chat with Copilot
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Pending spinner — headerless (no avatar) to match the workflow
+            stage stream's loading state. Shown whenever the turn is pending
+            and hasn't produced its own content yet; carried-over widget
+            blocks (preserved across the turn barrier) must not suppress it. */}
+        {isPending && !hasNewTurnContent && (
+          <div className="animate-block-in mt-4">
+            <div className="space-y-3">
+              {/* Spinner + status text */}
+              <div className="flex items-center gap-2.5">
+                <div className="flex gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-[var(--color-primary)] dot-pulse-1" />
+                  <span className="h-2 w-2 rounded-full bg-[var(--color-primary)] dot-pulse-2" />
+                  <span className="h-2 w-2 rounded-full bg-[var(--color-primary)] dot-pulse-3" />
+                </div>
+                <span className="text-sm font-medium text-[var(--color-foreground)]">
+                  Copilot is thinking...
+                </span>
+              </div>
+              {/* Shimmer skeleton lines */}
+              <div className="space-y-2.5 max-w-md">
+                <div className="skeleton-shimmer h-3.5 w-[90%] rounded-md" />
+                <div className="skeleton-shimmer h-3.5 w-[75%] rounded-md" />
+                <div className="skeleton-shimmer h-3.5 w-[60%] rounded-md" />
+                <div className="skeleton-shimmer h-3.5 w-[45%] rounded-md" />
+              </div>
+            </div>
+          </div>
+        )}
+        </div>
+      </div>
+      {showJumpToLatest && (
+        <button
+          onClick={jumpToLatest}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] shadow-md transition-colors hover:bg-[var(--color-subtle)]"
+        >
+          <ArrowDown className="h-3.5 w-3.5" /> Jump to latest
+        </button>
+      )}
+      </div>
+
+      {/* Input — only for active chats (uses shared ChatInput with custom send) */}
+      {isChatActive && sessionId && (
+        <>
+          <ChatInput
+            sessionId={sessionId}
+            disabled={isInputDisabled}
+            placeholder={isInputDisabled ? 'Waiting for response...' : 'What feature are you dreaming up?'}
+            selectedModel={selectedModel}
+            onModelChange={handleModelChange}
+            reasoningEffort={reasoningEffort}
+            onReasoningEffortChange={handleReasoningEffortChange}
+            contextTier={contextTier}
+            onContextTierChange={handleContextTierChange}
+            gitRepositories={gitRepositories}
+            projectId={chat?.projectId}
+            codebaseIds={selectedCodebaseIds}
+            workspaceId={chat?.workspaceId}
+            showModelSelector={true}
+            showGitConnector={true}
+            onToggleFilesPanel={toggleRightPane}
+            filesPanelOpen={rightPaneOpen}
+            isStreaming={isCopilotWorking}
+            pendingCaptures={pendingCaptures}
+            onRemovePendingCapture={(id) => setPendingCaptures((prev) => prev.filter((c) => c.id !== id))}
+            onBuiltinCommand={async (commandId) => {
+              const wsId = chat?.workspaceId;
+              if (commandId === 'builtin:browser') {
+                // Start the integrated browser in VISIBLE mode so the panel
+                // opens and the user watches the agent drive it. The agent's
+                // subsequent lazy `open_browser_page` reuses this session, so
+                // it stays visible instead of running headless. Then focus the
+                // Browser tab.
+                if (wsId) {
+                  try {
+                    await fetch(`/api/workspaces/${wsId}/browser/start`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ config: { enabled: true, visibility: 'visible' } }),
+                    });
+                  } catch {
+                    /* non-fatal — the agent still lazy-starts (headless) */
+                  }
+                }
+                setRightPaneOpen(true);
+                setBrowserTabFocusRequest({ type: 'browser', token: Date.now() });
+              } else if (commandId === 'builtin:terminal') {
+                // Surface the integrated terminal so the user can watch the
+                // agent run commands live.
+                setRightPaneOpen(true);
+                setBrowserTabFocusRequest({ type: 'terminal', token: Date.now() });
+              }
+            }}
+            onStop={() => {
+              if (!chatId) return;
+              // Immediately reset the local stream to idle so the "generating"
+              // placeholder clears and the input re-enables; the server also
+              // aborts the turn and emits idle. clearStream mirrors the normal
+              // end-of-turn terminal state (status 'idle', blocks cleared —
+              // widgets preserved), so the UI never stays stuck.
+              if (sessionId) useStreamStore.getState().clearStream(sessionId);
+              cancelMutation.mutate(chatId);
+            }}
+            customSendFn={async ({ prompt, attachments, mode }) => {
+              const mergedAttachments = pendingCaptures.length
+                ? [...attachments, ...pendingCaptures.map((c) => c.file)]
+              : attachments;
+            await sendChatMutation.mutateAsync({
+              prompt,
+              attachments: mergedAttachments,
+              ...(mode ? { mode } : {}),
+            });
+            if (pendingCaptures.length) setPendingCaptures([]);
+          }}
+          agentMode={agentMode}
+          onAgentModeChange={(mode) => {
+            setAgentMode(mode);
+            // Persist as the chat's sticky default, matching how the model and
+            // reasoning-effort pickers behave.
+            if (chatId) updateChatMutation.mutate({ defaultAgentMode: mode });
+          }}
+          showAgentModePicker={!chat?.parentChatId}
+          pendingInteractionLabel={pendingInteractionLabel}
+          onCancelPendingInteraction={() => {
+            if (!chatId) return;
+            if (sessionId) useStreamStore.getState().clearStream(sessionId);
+            cancelMutation.mutate(chatId);
+          }}
+        />
+        </>
+      )}
+      </div>
+
+      {/* Unified right side pane — Changes (default), Browser (add-able). */}
+      <RightPane
+        open={rightPaneOpen}
+        onOpenChange={setRightPaneOpen}
+        storageKey={rightPaneStorageKey}
+        widthStorageKey="generatorai:rightPane:chat:width"
+        defaultTabType="changes"
+        addableTabTypes={isOrchestrator ? ['files', 'browser', 'terminal', 'canvas', 'plan', 'background_tasks'] : ['files', 'browser', 'terminal', 'canvas', 'plan']}
+        focusTabRequest={browserTabFocusRequest}
+        onTabClose={handleRightPaneTabClose}
+        tabs={{
+          changes: {
+            label: 'Changes',
+            description: 'Files & changes for this chat',
+            icon: <FolderGit2 className="h-3.5 w-3.5" />,
+            render: () => (
+              <React.Suspense fallback={<PanelFallback />}>
+                <ChangesSurface
+                  embedded
+                  workspaceId={chat?.workspaceId}
+                  enableReview
+                  // Threads are scoped to the chat; the send target is also the
+                  // chat, so "Send all" posts the batch as a new user turn.
+                  reviewScope={{ scope: 'chat', scopeId: chatId ?? '' }}
+                  {...(chatId ? { reviewTarget: { kind: 'chat', chatId } } : {})}
+                />
+              </React.Suspense>
+            ),
+          },
+          files: fileTabs.filesTab,
+          file: fileTabs.fileTab,
+          browser: {
+            label: 'Browser',
+            description: 'Integrated browser for this chat',
+            icon: <BrowserTabIcon state={null} />,
+            allowMultiple: true,
+            maxInstances: 5,
+            getTabLabel: ({ id, index }) => {
+              const t = (browserTabs[id]?.title ?? '').trim();
+              return t || (index <= 1 ? 'Browser' : `Browser ${index}`);
+            },
+            getTabIcon: ({ id }) => <BrowserTabIcon state={browserTabs[id] ?? null} />,
+            disabled: !chat?.workspaceId,
+            disabledReason: 'Send a message first to create a workspace',
+            render: (ctx) => (
+              chat?.workspaceId ? (
+                <div className="flex h-full min-h-0 flex-1 flex-col">
+                  {/* Pending-capture banner is hoisted above ChatInput for
+                      visibility across all right-pane tabs. */}
+                  <div className="flex-1 min-h-0">
+                    <BrowserPanel
+                      embedded
+                      workspaceId={chat.workspaceId}
+                      tabId={ctx.id}
+                      urlScopeKey={browserUrlScopeKey}
+                      open={true}
+                      onClose={() => setRightPaneOpen(false)}
+                      onCapture={(file) =>
+                        setPendingCaptures((prev) => [
+                          ...prev,
+                          { id: `browser:${Date.now()}:${file.name}`, file, source: 'browser', label: file.name },
+                        ])
+                      }
+                      onTabStateChange={(s) => setBrowserTabs((prev) => {
+                        const cur = prev[ctx.id];
+                        if (cur && cur.loading === s.loading && cur.title === s.title && cur.favicon === s.favicon && cur.url === s.url) return prev;
+                        return { ...prev, [ctx.id]: s };
+                      })}
+                      agentBusy={isCopilotWorking}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 text-xs text-[var(--color-muted-foreground)]">
+                  Browser is not available until this chat has a workspace.
+                </div>
+              )
+            ),
+          },
+          terminal: {
+            label: 'Terminal',
+            description: 'Integrated shell in this workspace',
+            icon: <TerminalSquare className="h-3.5 w-3.5" />,
+            allowMultiple: true,
+            disabled: !chat?.workspaceId,
+            disabledReason: 'Send a message first to create a workspace',
+            render: (ctx) => (
+              <React.Suspense fallback={<PanelFallback />}>
+                <TerminalPanel
+                  embedded
+                  workspaceId={chat?.workspaceId}
+                  tabId={ctx.id}
+                  onCapture={(file) =>
+                    setPendingCaptures((prev) => [
+                      ...prev,
+                      { id: `terminal:${Date.now()}:${file.name}`, file, source: 'terminal', label: file.name },
+                    ])
+                  }
+                  agentBusy={isCopilotWorking}
+                />
+              </React.Suspense>
+            ),
+          },
+          widget: {
+            label: 'Widget',
+            description: 'Agent-rendered interactive widgets in a full-page surface',
+            icon: <LayoutGrid className="h-3.5 w-3.5" />,
+            allowMultiple: false,
+            disabled: !sessionId,
+            disabledReason: 'Start the chat to enable widgets',
+            render: () => (
+              sessionId ? <WidgetHost sessionId={sessionId} /> : <div className="p-4 text-xs text-[var(--color-muted-foreground)]">No active session.</div>
+            ),
+          },
+          background_tasks: {
+            label: 'Background Tasks',
+            description: 'Background agent tasks spawned by this orchestrator chat',
+            icon: <Boxes className="h-3.5 w-3.5" />,
+            allowMultiple: false,
+            disabled: !isOrchestrator,
+            disabledReason: 'Enable Orchestrate mode on this chat to spawn background tasks',
+            render: () => <BackgroundTasksPanel chatId={chatId} />,
+          },
+          // PLN-01 — the plan document surface. Auto-opens when the agent asks
+          // for a review; also addable so a user can revisit an older plan.
+          plan: {
+            label: 'Plan',
+            description: 'Review, edit and approve the agent\u2019s implementation plan',
+            icon: <ClipboardList className="h-3.5 w-3.5" />,
+            allowMultiple: false,
+            render: () =>
+              chatId ? (
+                <PlanDocumentPanel chatId={chatId} planId={activePlanId} />
+              ) : (
+                <div className="p-4 text-xs text-[var(--color-muted-foreground)]">No chat.</div>
+              ),
+          },
+        }}
+      />
+    </div>
+  );
+}
+
+export { ChatPage as ChatPageComponent };

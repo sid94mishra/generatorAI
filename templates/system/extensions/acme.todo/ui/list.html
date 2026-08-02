@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Todo List</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 14px;
+        background: transparent;
+        color: inherit;
+      }
+      .card {
+        border: 1px solid #d0d7de;
+        border-radius: 10px;
+        background: #f6f8fa;
+        padding: 14px 16px;
+      }
+      h3 {
+        margin: 0 0 10px 0;
+        font-size: 14px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 0;
+      }
+      input[type='text'] {
+        flex: 1;
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        padding: 6px 8px;
+        font-size: 13px;
+        background: #fff;
+      }
+      button {
+        border: 1px solid #d0d7de;
+        background: #fff;
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      button.primary {
+        background: #1f6feb;
+        border-color: #1f6feb;
+        color: white;
+      }
+      button:hover {
+        opacity: 0.9;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+        margin: 8px 0 0 0;
+      }
+      li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 4px;
+      }
+      li.done .label {
+        text-decoration: line-through;
+        color: #6e7681;
+      }
+      .label {
+        flex: 1;
+        font-size: 13px;
+      }
+      .del {
+        border: none;
+        background: transparent;
+        color: #d1242f;
+        font-size: 16px;
+        cursor: pointer;
+        padding: 0 4px;
+      }
+      .empty {
+        color: #6e7681;
+        font-size: 12px;
+        font-style: italic;
+        padding: 6px 0;
+      }
+      @media (prefers-color-scheme: dark) {
+        .card {
+          background: #161b22;
+          border-color: #30363d;
+        }
+        input[type='text'],
+        button {
+          background: #0d1117;
+          border-color: #30363d;
+          color: #e6edf3;
+        }
+        button.primary {
+          background: #1f6feb;
+          border-color: #1f6feb;
+          color: white;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h3 id="title">Todo List</h3>
+      <div class="row">
+        <input type="text" id="new-task" placeholder="Add a task…" />
+        <button class="primary" id="add">Add</button>
+      </div>
+      <ul id="list"></ul>
+    </div>
+    <script>
+      let tasks = [];
+      const listEl = document.getElementById('list');
+      const inputEl = document.getElementById('new-task');
+      const addBtn = document.getElementById('add');
+      const titleEl = document.getElementById('title');
+
+      function uid() {
+        return Math.random().toString(36).slice(2, 10);
+      }
+
+      function render() {
+        listEl.innerHTML = '';
+        if (tasks.length === 0) {
+          const li = document.createElement('li');
+          li.className = 'empty';
+          li.textContent = 'No tasks yet.';
+          listEl.appendChild(li);
+          return;
+        }
+        for (const t of tasks) {
+          const li = document.createElement('li');
+          if (t.done) li.classList.add('done');
+
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = !!t.done;
+          cb.addEventListener('change', () => toggle(t.id));
+          li.appendChild(cb);
+
+          const label = document.createElement('span');
+          label.className = 'label';
+          label.textContent = t.text;
+          li.appendChild(label);
+
+          const del = document.createElement('button');
+          del.className = 'del';
+          del.textContent = '×';
+          del.title = 'Delete';
+          del.addEventListener('click', () => remove(t.id));
+          li.appendChild(del);
+
+          listEl.appendChild(li);
+        }
+      }
+
+      function pushState() {
+        window.parent.postMessage(
+          { type: 'widget:state', state: { tasks: [...tasks] } },
+          '*',
+        );
+      }
+
+      function add(text) {
+        const trimmed = text.trim();
+        if (!trimmed) return;
+        const t = { id: uid(), text: trimmed, done: false };
+        tasks.push(t);
+        render();
+        pushState();
+        window.parent.postMessage(
+          { type: 'widget:action', action: 'add', payload: { task: t } },
+          '*',
+        );
+      }
+
+      function toggle(id) {
+        const idx = tasks.findIndex((x) => x.id === id);
+        if (idx < 0) return;
+        tasks[idx] = { ...tasks[idx], done: !tasks[idx].done };
+        render();
+        pushState();
+        window.parent.postMessage(
+          {
+            type: 'widget:action',
+            action: tasks[idx].done ? 'complete' : 'reopen',
+            payload: { task: tasks[idx] },
+          },
+          '*',
+        );
+      }
+
+      function remove(id) {
+        const removed = tasks.find((x) => x.id === id);
+        tasks = tasks.filter((x) => x.id !== id);
+        render();
+        pushState();
+        if (removed) {
+          window.parent.postMessage(
+            { type: 'widget:action', action: 'remove', payload: { task: removed } },
+            '*',
+          );
+        }
+      }
+
+      addBtn.addEventListener('click', () => {
+        add(inputEl.value);
+        inputEl.value = '';
+      });
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          add(inputEl.value);
+          inputEl.value = '';
+        }
+      });
+
+      window.addEventListener('message', (ev) => {
+        const m = ev.data;
+        if (!m || typeof m !== 'object') return;
+        if (m.type === 'widget:init') {
+          const props = m.props ?? {};
+          const state = m.state ?? {};
+          if (typeof props.title === 'string') titleEl.textContent = props.title;
+          if (Array.isArray(state.tasks)) tasks = [...state.tasks];
+          else if (Array.isArray(props.initialTasks)) {
+            tasks = props.initialTasks.map((text) => ({ id: uid(), text, done: false }));
+          }
+          render();
+          if (Array.isArray(props.initialTasks) && !Array.isArray(state.tasks)) pushState();
+        } else if (m.type === 'widget:state') {
+          const state = m.state ?? {};
+          if (Array.isArray(state.tasks)) {
+            tasks = [...state.tasks];
+            render();
+          }
+        }
+      });
+
+      window.parent.postMessage({ type: 'widget:hello' }, '*');
+      requestAnimationFrame(() =>
+        window.parent.postMessage({ type: 'widget:ready' }, '*'),
+      );
+      render();
+    </script>
+  </body>
+</html>

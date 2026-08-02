@@ -1,0 +1,246 @@
+// ────────────────────────────────────────────────────────────────
+// VariablesTab — Compact variable editor with table-like layout
+// ────────────────────────────────────────────────────────────────
+
+import React, { useCallback, useState } from 'react';
+import { Plus, Trash2, ChevronDown, ChevronRight, Info } from 'lucide-react';
+import type { VariableDefinition } from '@generatorai/shared';
+import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
+import { Input, Select } from '@/components/ui/index.js';
+import { cn } from '@/lib/utils.js';
+
+const TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  string: { label: 'String', color: 'bg-info-muted text-info' },
+  number: { label: 'Number', color: 'bg-success-muted text-success' },
+  boolean: { label: 'Boolean', color: 'bg-done/15 text-done' },
+  choice: { label: 'Choice', color: 'bg-warning-muted text-warning' },
+  text: { label: 'Text', color: 'bg-info-muted text-info' },
+};
+
+export function VariablesTab() {
+  const variables = useWorkflowBuilderStore((s) => s.variables);
+  const setVariables = useWorkflowBuilderStore((s) => s.setVariables);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+  const addVariable = useCallback(() => {
+    const baseName = 'variable';
+    let counter = variables.length + 1;
+    const existingNames = new Set(variables.map(v => v.name));
+    while (existingNames.has(`${baseName}${counter}`)) counter++;
+    const newVar: VariableDefinition = {
+      name: `${baseName}${counter}`,
+      type: 'string',
+      label: `Variable ${counter}`,
+      required: false,
+    };
+    setVariables([...variables, newVar]);
+    setExpandedIndex(variables.length);
+  }, [variables, setVariables]);
+
+  const updateVariable = useCallback(
+    (index: number, updates: Partial<VariableDefinition>) => {
+      const updated = variables.map((v, i) => (i === index ? { ...v, ...updates } : v));
+      setVariables(updated);
+    },
+    [variables, setVariables],
+  );
+
+  const removeVariable = useCallback(
+    (index: number) => {
+      setVariables(variables.filter((_, i) => i !== index));
+      if (expandedIndex === index) setExpandedIndex(null);
+      else if (expandedIndex !== null && expandedIndex > index) setExpandedIndex(expandedIndex - 1);
+    },
+    [variables, setVariables, expandedIndex],
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Info banner */}
+      <div className="flex items-center gap-1.5 rounded-md bg-info-muted px-3 py-2 text-xs text-info">
+        <Info className="h-3.5 w-3.5 shrink-0" />
+        <span>Variables are requested from users before starting a run. Use {'{{name}}'} in prompts to interpolate.</span>
+      </div>
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium text-foreground">
+          Variables ({variables.length})
+        </label>
+        <button
+          onClick={addVariable}
+          className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-subtle"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add Variable
+        </button>
+      </div>
+
+      {/* Variable list */}
+      {variables.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-6 text-center">
+          <p className="text-sm text-muted-foreground">
+            No variables defined. Runs will start without asking for input.
+          </p>
+          <button
+            onClick={addVariable}
+            className="mt-2 text-xs font-medium text-primary hover:underline"
+          >
+            + Add your first variable
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {variables.map((variable, index) => {
+            const isExpanded = expandedIndex === index;
+            const typeInfo = TYPE_LABELS[variable.type] ?? TYPE_LABELS['string']!;
+            return (
+              <div
+                key={variable.name}
+                className={cn(
+                  'group rounded-lg border transition-all',
+                  isExpanded
+                    ? 'border-primary/30 bg-primary/[0.02]'
+                    : 'border-border hover:border-emphasis',
+                )}
+              >
+                {/* Compact row */}
+                <div
+                  className="flex items-center gap-2 px-3 py-2.5 cursor-pointer"
+                  onClick={() => setExpandedIndex(isExpanded ? null : index)}
+                >
+                  {isExpanded ? (
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <code className="text-xs font-mono text-foreground min-w-[80px]">
+                    {variable.name}
+                  </code>
+                  <span className="text-xs text-muted-foreground flex-1 truncate">
+                    {variable.label}
+                  </span>
+                  <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-medium', typeInfo.color)}>
+                    {typeInfo.label}
+                  </span>
+                  {variable.required && (
+                    <span className="rounded-full bg-danger-muted px-1.5 py-0.5 text-[10px] font-medium text-danger">
+                      Required
+                    </span>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeVariable(index);
+                    }}
+                    aria-label={`Delete variable ${variable.name}`}
+                    className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-danger-muted hover:text-danger transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {/* Expanded edit form */}
+                {isExpanded && (
+                  <div className="border-t border-border px-3 py-3 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium text-muted-foreground mb-1">Name</label>
+                        <Input
+                          type="text"
+                          value={variable.name}
+                          onChange={(e) => updateVariable(index, { name: e.target.value })}
+                          className="h-auto px-2.5 py-1.5 text-xs font-mono"
+                          placeholder="variableName"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-muted-foreground mb-1">Label</label>
+                        <Input
+                          type="text"
+                          value={variable.label}
+                          onChange={(e) => updateVariable(index, { label: e.target.value })}
+                          className="h-auto px-2.5 py-1.5 text-xs"
+                          placeholder="Display label"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium text-muted-foreground mb-1">Type</label>
+                        <Select
+                          value={variable.type}
+                          onChange={(v) =>
+                            updateVariable(index, { type: v as VariableDefinition['type'] })
+                          }
+                          options={[
+                            { value: 'string', label: 'String' },
+                            { value: 'number', label: 'Number' },
+                            { value: 'boolean', label: 'Boolean' },
+                            { value: 'choice', label: 'Choice' },
+                            { value: 'text', label: 'Text (multiline)' },
+                          ]}
+                        />
+                      </div>
+                      <div className="flex items-end pb-1">
+                        <label className="flex items-center gap-1.5 text-xs text-foreground">
+                          <input
+                            type="checkbox"
+                            checked={variable.required}
+                            onChange={(e) => updateVariable(index, { required: e.target.checked })}
+                            className="h-3.5 w-3.5 rounded border-border"
+                          />
+                          Required
+                        </label>
+                      </div>
+                    </div>
+                    {variable.type === 'choice' && (
+                      <div>
+                        <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                          Options (comma-separated)
+                        </label>
+                        <Input
+                          type="text"
+                          value={variable.options?.join(', ') ?? ''}
+                          onChange={(e) =>
+                            updateVariable(index, {
+                              options: e.target.value
+                                .split(',')
+                                .map((s) => s.trim())
+                                .filter(Boolean),
+                            })
+                          }
+                          className="h-auto px-2.5 py-1.5 text-xs"
+                          placeholder="option1, option2, option3"
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-[11px] font-medium text-muted-foreground mb-1">Default Value</label>
+                      <Input
+                        type="text"
+                        value={String(variable.defaultValue ?? '')}
+                        onChange={(e) => updateVariable(index, { defaultValue: e.target.value || undefined })}
+                        className="h-auto px-2.5 py-1.5 text-xs"
+                        placeholder="Optional default"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => removeVariable(index)}
+                        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-danger hover:bg-danger-muted transition-colors"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,128 @@
+{
+  "id": "system-test-generation",
+  "name": "Test Generation Workflow",
+  "description": "Analyze an existing codebase and generate comprehensive test suites. Supports unit tests, integration tests, and end-to-end tests.",
+  "category": "system",
+  "version": "1.0.0",
+  "requiresCodebase": true,
+  "supportsMultipleCodebases": false,
+  "tags": ["testing", "test-generation", "quality"],
+  "preprocessingSteps": [
+    {
+      "type": "clone_repo",
+      "name": "Clone repository",
+      "config": { "type": "clone_repo", "repoAlias": "target" },
+      "failOnError": true,
+      "order": 0
+    }
+  ],
+  "stages": [
+    {
+      "name": "Codebase Analysis",
+      "description": "Analyze the codebase to understand testable units",
+      "order": 0,
+      "prompts": [
+        {
+          "label": "Analyze for Testing",
+          "text": "Analyze the codebase at {{repo_path_target}} to identify testable units. Focus on {{test_focus}}.\n\nIdentify:\n1. Functions/methods to test\n2. Classes with business logic\n3. API endpoints\n4. Data transformations\n5. Edge cases and error scenarios\n6. Current test coverage gaps",
+          "waitForCompletion": true
+        }
+      ],
+      "isLocked": true
+    },
+    {
+      "name": "Unit Test Generation",
+      "description": "Generate unit tests for individual functions and methods",
+      "order": 1,
+      "prompts": [
+        {
+          "label": "Generate Unit Tests",
+          "text": "Generate comprehensive unit tests using {{test_framework}}. For each testable unit identified:\n1. Happy path tests\n2. Error/edge case tests\n3. Boundary value tests\n4. Mock external dependencies\n\nFollow {{language}} testing best practices. Use descriptive test names.",
+          "waitForCompletion": true
+        }
+      ],
+      "isLocked": true
+    },
+    {
+      "name": "Integration Test Generation",
+      "description": "Generate integration tests for module interactions",
+      "order": 2,
+      "prompts": [
+        {
+          "label": "Generate Integration Tests",
+          "text": "Generate integration tests for the key interaction points between modules. Test:\n1. API endpoint flows\n2. Database operations\n3. Service layer interactions\n4. Event/message flows\n\nUse {{test_framework}} with appropriate setup/teardown.",
+          "waitForCompletion": true
+        }
+      ],
+      "isLocked": true
+    },
+    {
+      "name": "Test Report",
+      "description": "Generate a test coverage report and recommendations",
+      "order": 3,
+      "prompts": [
+        {
+          "label": "Generate Test Report",
+          "text": "Generate a comprehensive test report including:\n1. Test inventory (all tests generated)\n2. Coverage analysis\n3. Critical paths covered\n4. Remaining gaps\n5. Recommendations for additional testing\n6. Setup instructions for running the tests",
+          "waitForCompletion": true
+        }
+      ],
+      "isLocked": true
+    }
+  ],
+  "edges": [
+    { "fromStageIndex": 0, "toStageIndex": 1, "edgeType": "on_success" },
+    { "fromStageIndex": 0, "toStageIndex": 2, "edgeType": "on_success" },
+    { "fromStageIndex": 1, "toStageIndex": 3, "edgeType": "on_success" },
+    { "fromStageIndex": 2, "toStageIndex": 3, "edgeType": "on_success" }
+  ],
+  "variables": [
+    {
+      "name": "git_url",
+      "type": "git_url",
+      "label": "Repository URL",
+      "description": "Git repository to generate tests for",
+      "required": true
+    },
+    {
+      "name": "branch",
+      "type": "string",
+      "label": "Branch",
+      "required": false,
+      "defaultValue": ""
+    },
+    {
+      "name": "test_focus",
+      "type": "text",
+      "label": "Testing Focus",
+      "description": "Specific modules, files, or features to focus testing on",
+      "required": false,
+      "defaultValue": "All business logic and API endpoints"
+    },
+    {
+      "name": "language",
+      "type": "choice",
+      "label": "Language",
+      "required": true,
+      "defaultValue": "TypeScript",
+      "options": ["TypeScript", "JavaScript", "Python", "Java", "Go", "Rust", "C#"]
+    },
+    {
+      "name": "test_framework",
+      "type": "string",
+      "label": "Test Framework",
+      "description": "Testing framework (e.g., Jest, Vitest, Pytest, JUnit)",
+      "required": true,
+      "defaultValue": "Vitest"
+    }
+  ],
+  "resultValidations": [
+    {
+      "stageIndex": 1,
+      "rules": [
+        { "type": "min_length", "value": 300, "message": "Unit tests should be substantive" },
+        { "type": "contains", "value": "test", "message": "Output should contain test definitions" }
+      ]
+    }
+  ]
+}

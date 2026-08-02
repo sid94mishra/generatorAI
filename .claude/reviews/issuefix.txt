@@ -1,0 +1,87 @@
+Security & Auth
+Bearer token middleware — new apps/server/src/middleware/auth.ts with timingSafeEqual, ?apiKey= fallback, exempts /health + /webhooks/*. 14 tests added.
+Logger redaction — *.apiKey, *.token, *.secret, *.password redacted in Pino config.
+Webhook HMAC/Bearer verification — idempotency-key support added to webhook calls.
+Webhook token rotation — POST /automations/:id/rotate-webhook-token, ValidationError → 400 on non-webhook.
+WorkflowPreprocessor env-var injection — POSIX-identifier filtering, 32KB value cap, no shell interpolation.
+Safe path resolution — resolveWithinBase, isSymlink checks for workspace writes.
+State Machines
+SessionStateMachine — split isChatEnabled (completed/cancelled) from canChatWhilePaused (paused only).
+WorkflowRunStateMachine — added user:retry (failed → created).
+WorkflowRunService.retryRun — resets failed stages, re-schedules, emits workflow_run.retried.
+POST /workflow-runs/:id/retry — new retry route.
+Orchestration Core
+DAGScheduler — hash-based cache invalidation (SHA-1 of stages+edges), invalidates on update.
+DAGScheduler withLock — FIFO queue with per-op promise resolve/reject (removed silent .catch).
+ConditionEvaluator — complete rewrite: tokenizer → shunting-yard → postfix eval (AND/OR/NOT/parens/dotted vars).
+DAGValidator — cycle detection, unreachable-stage detection.
+StageExecutionService — createEnrichedAgentEvent() helper replacing as unknown as cast.
+SessionAllocator persistence — ISessionAllocationRepository, rehydrate() method, destroy-at-refCount-0 fix.
+WorkflowOrchestrator workflow uploads — hardlink → symlink → copy fallback (no cross-run duplication).
+Event System
+EventBus sequence allocator — SQL-allocated monotonic sequences, per-session promise queue preserved.
+EventBus retry + dead-letter — failed inserts persist to dead-letter table.
+EventBus listener stats — configurable maxListeners, getListenerStats().
+EVENT_REGISTRY — deferred (L effort).
+Streaming
+DurableStreamManager consolidation — in-memory ring buffer per session with Last-Event-ID replay.
+Per-run SSE buffers — 30s auto-clear after terminal; REST replay endpoints fill the gap.
+StreamSubscriptions — container-scoped fan-out replacing module-level runAllSubscribed booleans.
+writeSSEFrame — drain-aware write with backpressure handling.
+Hooks
+HookExecutor MAX_BACKOFF_MS — exponential backoff capped at 60s.
+HookInterceptor denied-tool tracking — deniedTools Set suppresses subsequent copilot.tool_complete.
+Database
+withTransaction helper — 10s default deadline.
+Versioned migrations — _schema_versions table replaces unversioned CREATE IF NOT EXISTS.
+safeAddColumn ordering — ALTERs run before numbered migrations that reference new columns.
+New tables — session_allocations, stage_session_maps, event_sequences.
+New columns/indexes — stage_runs.version, automations.locked_until, automations.locked_by_process; webhooks.delivery_id UNIQUE; composite status+created_at.
+StageRun optimistic locking — version column, bumped on update.
+safeJsonColumn — Zod-validated JSON column reader utility.
+Sandbox & Lifecycle
+SandboxLifecycleManager creation queue — replaces event-loop sleep.
+Orphan container registry — cleanupOrphans() reaps stale genai-run-* containers.
+StartupRecoveryService — optional sandboxCleaner + SessionAllocator rehydrate injection.
+Automation
+AbortController per execution — executionAborts map, .abort() on cancel, cleanup in finally.
+Cron lease pattern — locked_until + locked_by_process for multi-process safety.
+Data Sources & Batch
+Data-source schema validation — requiredFields + maxItems enforced in DataSourceResolver.
+Reserved names + max-items guards — RESERVED_NAMES, MAX_DATA_SOURCE_ITEMS.
+Batch parser limits — GEN_BATCH_MAX_ROWS / GEN_BATCH_MAX_COLUMNS env overrides.
+Shared Utilities
+deepMerge cycle detection — WeakSet prevents self-referential stack overflow.
+Variable interpolation dotted paths — {{user.name}} traversal with MAX_PATH_DEPTH=16.
+Single-pass interpolation — no recursion on interpolated values.
+Composition
+createCoreServices factory — shared DI replacing 180 lines of duplicated wiring.
+composition-root destructure fix — configResolver included.
+Copilot Bridge
+defaultModel — wired as fallback for createConversation.
+cliPath — passed through to SDK CopilotClient.
+defaultTimeoutMs — internal guard in sendPromptAndWait.
+mcpServers cast — narrowed from as unknown as to SDK type.
+resumeConversation — semantics documented (in-memory no-op vs rehydration).
+abortSession → abortConversation — fixed call.
+event-mapper + tool-factory tests — 24 new tests.
+Web
+sseManager dedup — < not <=, window widened 200→300.
+Global SSE URL — withApiKeyQuery() wrapper.
+QueryProvider defaults — staleTime: 0 + gcTime: 5min.
+ThemeProvider storeTheme — try/catch around localStorage (SSR + private mode).
+PageErrorBoundary — per-route with retry + home buttons.
+router.tsx withBoundary — wraps all 14 lazy routes.
+downloadBlobAsFile — try/finally + delayed revoke helper.
+EventSource paths documented — HttpPlatformClient vs sseManager multiplex.
+getOverlappingStages — O(n²) → O(n log n) sweep-line.
+ChatView turnId — follow-up documented (backend emission needed).
+CLI
+automation execution-watch — new polling command with exit-code-reflects-status.
+loadConfig — uses shared deepMerge (no hardcoded key list).
+DAGProgress listFiles — async with node_modules/.git/dist/.turbo/etc. exclusions.
+DirectPlatformClient.subscribeToRunEvents — signature parity with HTTP client.
+Deferred
+2.17 EVENT_REGISTRY — large refactor, dedicated session.
+2.28 turnId-based chat dedup — needs backend turnId emission.
+2.12 sandboxed custom_script execution — needs workspace context plumbing.

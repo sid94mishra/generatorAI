@@ -1,0 +1,62 @@
+# gitleaks configuration
+#
+# Extends the upstream default ruleset (AWS keys, GitHub tokens, private keys,
+# and so on) and adds rules for the credential shapes specific to this repo.
+#
+# A real incident motivated the custom rules: the AES-GCM secret vault and its
+# key-encryption key were committed together, which makes the encryption
+# worthless. `kek.key` is raw binary with no recognisable prefix, so no generic
+# rule would ever have caught it — only the path rules below do.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generatorai-secret-vault"
+description = "GeneratorAI encrypted secret vault (ciphertext for system keys)"
+path = '''(^|/)secrets\.vault\.json$'''
+regex = '''kekVersion'''
+tags = ["generatorai", "vault"]
+
+[[rules]]
+id = "generatorai-kek"
+description = "GeneratorAI key-encryption key or wrapped KEK"
+# Matched by path: the file is 32 raw random bytes, so content matching cannot
+# distinguish it from any other binary blob.
+path = '''(^|/)(kek\.key|kek\.enc|kdf\.salt)$'''
+regex = '''.'''
+tags = ["generatorai", "kek"]
+
+[[rules]]
+id = "generatorai-bootstrap-pairing"
+description = "GeneratorAI bootstrap pairing grant (single-use, but live while unclaimed)"
+path = '''(^|/)bootstrap-pairing\.json$'''
+regex = '''.'''
+tags = ["generatorai", "pairing"]
+
+[[rules]]
+id = "generatorai-secret-env"
+description = "GeneratorAI vault key or passphrase committed in an env file"
+regex = '''(?i)GENERATORAI_SECRET_(KEY|PASSPHRASE)\s*=\s*[^\s#'"]{8,}'''
+tags = ["generatorai", "env"]
+
+[allowlist]
+description = "Paths that legitimately contain secret-shaped strings"
+
+paths = [
+  # Fixtures and unit tests deliberately construct fake keys and tokens.
+  '''(^|/)__tests__/''',
+  '''\.test\.(ts|tsx|js|mjs)$''',
+  '''(^|/)agent-tests/''',
+  # Documents the variable NAMES with placeholder values, by design.
+  '''(^|/)\.env\.example$''',
+  # Third-party vendored bundles — minified, and not ours to fix.
+  '''(^|/)vendor/''',
+  '''(^|/)pnpm-lock\.yaml$''',
+]
+
+regexes = [
+  # Placeholder values used across docs and examples.
+  '''(?i)(your[-_]?|example|placeholder|changeme|dummy|redacted|xxx+)''',
+  '''security@example\.com''',
+]

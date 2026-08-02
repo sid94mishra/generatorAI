@@ -1,0 +1,56 @@
+{
+  "name": "My Workflow",
+  "description": "Describe what this workflow does",
+  "sessionMode": "auto",
+  "tags": ["custom"],
+  "variables": [
+    {
+      "name": "example_variable",
+      "type": "string",
+      "label": "Example Variable",
+      "description": "An example variable that can be referenced in prompts as {{example_variable}}",
+      "required": false,
+      "defaultValue": ""
+    }
+  ],
+  "copilotConfig": {},
+  "stages": [
+    {
+      "name": "Stage 1 - Analyze",
+      "description": "First stage of the workflow",
+      "order": 0,
+      "prompts": [
+        {
+          "label": "Analyze Requirements",
+          "text": "Analyze the following requirements and provide a breakdown: {{example_variable}}",
+          "waitForCompletion": true,
+          "attachments": []
+        }
+      ],
+      "variables": {},
+      "hooks": []
+    },
+    {
+      "name": "Stage 2 - Generate",
+      "description": "Second stage that depends on Stage 1",
+      "order": 1,
+      "prompts": [
+        {
+          "label": "Generate Output",
+          "text": "Based on the analysis, generate the output.",
+          "waitForCompletion": true,
+          "attachments": []
+        }
+      ],
+      "variables": {},
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "fromStageIndex": 0,
+      "toStageIndex": 1,
+      "edgeType": "on_success"
+    }
+  ]
+}

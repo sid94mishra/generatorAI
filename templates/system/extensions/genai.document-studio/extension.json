@@ -1,0 +1,10 @@
+{
+  "id": "genai.document-studio",
+  "name": "Document Studio",
+  "version": "1.0.0",
+  "description": "Create and edit real PDF, Word, PowerPoint, and Excel files with the agent — draft content together, preview it, and export the actual file.",
+  "author": { "name": "GeneratorAI" },
+  "license": "MIT",
+  "engines": { "generatorai": ">=1.0.0" },
+  "entry": "./index.js"
+}

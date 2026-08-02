@@ -1,0 +1,90 @@
+[
+  {
+    "id": "system-mcp-github",
+    "name": "GitHub",
+    "description": "Access GitHub repositories, issues, pull requests and more",
+    "serverType": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "source": "system",
+    "enabled": true,
+    "category": "version-control"
+  },
+  {
+    "id": "system-mcp-filesystem",
+    "name": "Filesystem",
+    "description": "Read and write local files with configurable allowed directories",
+    "serverType": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+    "source": "system",
+    "enabled": true,
+    "category": "storage"
+  },
+  {
+    "id": "system-mcp-postgres",
+    "name": "PostgreSQL",
+    "description": "Query and explore PostgreSQL databases",
+    "serverType": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
+    "source": "system",
+    "enabled": true,
+    "category": "database"
+  },
+  {
+    "id": "system-mcp-sqlite",
+    "name": "SQLite",
+    "description": "Query and manage SQLite databases",
+    "serverType": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/tmp/mydb.sqlite"],
+    "source": "system",
+    "enabled": true,
+    "category": "database"
+  },
+  {
+    "id": "system-mcp-slack",
+    "name": "Slack",
+    "description": "Send messages, list channels and interact with Slack workspaces",
+    "serverType": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-slack"],
+    "source": "system",
+    "enabled": true,
+    "category": "communication"
+  },
+  {
+    "id": "system-mcp-web-search",
+    "name": "Web Search (Brave)",
+    "description": "Search the web using the Brave Search API",
+    "serverType": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+    "source": "system",
+    "enabled": true,
+    "category": "search"
+  },
+  {
+    "id": "system-mcp-puppeteer",
+    "name": "Puppeteer (Browser Automation)",
+    "description": "Control a headless browser for web automation and scraping",
+    "serverType": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+    "source": "system",
+    "enabled": true,
+    "category": "automation"
+  },
+  {
+    "id": "system-mcp-aws-kb",
+    "name": "AWS Knowledge Base",
+    "description": "Retrieve information from AWS Bedrock Knowledge Bases",
+    "serverType": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-aws-kb-retrieval"],
+    "source": "system",
+    "enabled": true,
+    "category": "cloud"
+  }
+]

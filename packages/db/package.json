@@ -1,0 +1,46 @@
+{
+  "name": "@generatorai/db",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": { "import": "./src/index.ts", "types": "./src/index.ts" }
+  },
+  "files": ["dist"],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/",
+    "db:generate": "drizzle-kit generate --config ./drizzle.config.ts",
+    "db:check": "drizzle-kit check --config ./drizzle.config.ts",
+    "db:push": "drizzle-kit push --config ./drizzle.config.ts",
+    "db:reset": "tsx scripts/prepare-db.ts reset",
+    "db:prepare-dist": "tsx scripts/prepare-db.ts prepare-dist",
+    "prepublishOnly": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@generatorai/auth": "workspace:*",
+    "@generatorai/core": "workspace:*",
+    "@generatorai/checkpoints": "workspace:*",
+    "@generatorai/review": "workspace:*",
+    "@generatorai/shared": "workspace:*",
+    "@opentelemetry/api": "^1.9.0",
+    "drizzle-orm": "^0.45.2",
+    "better-sqlite3": "^12.11.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.19.0"
+  }
+}

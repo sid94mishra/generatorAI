@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../shared" },
+    { "path": "../git" },
+    { "path": "../changes" },
+    { "path": "../checkpoints" },
+    { "path": "../review" },
+    { "path": "../source-control" }
+  ]
+}

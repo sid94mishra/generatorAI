@@ -1,0 +1,10 @@
+{
+  "id": "genai.web-designer",
+  "name": "Web App Designer",
+  "version": "1.0.0",
+  "description": "Describe a web app or page, watch the agent design it, and refine it together with a live preview and version history.",
+  "author": { "name": "GeneratorAI" },
+  "license": "MIT",
+  "engines": { "generatorai": ">=1.0.0" },
+  "entry": "./index.js"
+}

@@ -1,0 +1,78 @@
+You are an expert in developing AI coding agents for autonomous task. 
+
+Overview of the application:
+- Build an AI autonomous Agent which can be leveraged to use Copilot SDK and Copilot CLI and perform autonomous tasks. User can generate workflows 
+and autonomous operation can be achieved using the Agent. 
+The Agent need to be highly flexible to support different kind of workflows and tasks leveraging full capabilities of copilot SDK.
+
+CRITICAL Pre requisite and analysis:
+Mandatory to go through the resources to understand how the Copilot SDK and Copilot CLI works to develop the Autonomous agent on top of Copilot SDK using all its capabilities.
+Copilot SDK Resource: 
+https://github.com/github/awesome-copilot/blob/main/instructions/copilot-sdk-nodejs.instructions.md
+https://github.com/github/awesome-copilot/blob/main/skills/copilot-sdk/SKILL.md
+Copilot CLI Resource:
+https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli
+
+Go through the resources to understand and gather all the knowledge required for the understanding and implementation plan and architecture design. 
+
+High level Functional Requirements: 
+- Develop an autonomous agent to create sessions and perform autonomous workflows. 
+- User can create a session and configure one or more workflows for the session.
+- CRITICAL: User can start multiple sessions at once and should have the ability to interact with each session independently. 
+- User can create / pause /play / cancel / delete a session entirely. 
+- We will have some predefined workflows. User can attach one or multiple workflows to a session during creation. 
+- Every session once created should not start automatically. User has to start the session. ON starting a session if there is an workflows associated with it , then it will be started in sequence. 
+- Workflows inside a session will have start / stop / pause buttons. Once workflow paused session paused. This should have a typical parent child relationship between Session and its workflows. 
+- For every session user should see all its workflows in sequence and what is started and what is pending.
+- Every session will have a chat View where user can send follow up prompts to the Agent. This only be available after the workflows complete for the session. User can cancel the workflows and send prompts. 
+- User can send attachments as well as part of prompt context to Agent and then this will be sent to Copilot sdk as attachments for more context. 
+- CRITICAL: Session should be persisted. Every user can create multiple sessions and once the application is closed all the session details and workflow details for this need to be saved and next time user should see the progress and all the details for the sessions. 
+Every session should store workflow progress and the chat context sent from copilot SDK for persistence and next time user can see and start from that point. 
+- CRITICAL: Agent should support a Client / Desktop App for GUI operations. Should have a CLI support for an headless mode. Also Webhook support to trigger any workflows based on external events automatically.
+
+These are the High level functional requirements need to be analyzed before proceeding with architecture planning and implementation planning. 
+
+CRITICAL Technical Requirements :
+- The Agent application need to support a desktop app / Browser client/ robust CLI app for an headless execution / Webhook support to trigger any workflows based on external events automatically.
+- Language of choice : NodeJS , Typescript and all the modern frameworks present in these. 
+- for the web client try to use react and tanstack query for state management.
+- We need to analyse durable streams architecture and SSE for message streaming from copilot SDK to UI.
+- For the desktop choice of frameworks is electronJs.
+- The folder structure should be modular and thorough. Core packages need to be segregated and leveraged to provide future scaling and addition of multiple more functional and technical features. The design of the application need to be modules considering the support for all the different interfaces in need to support. The architecture should be extensible and design patterns need to be thoroughly analyzed and leveraged to design he application. 
+- SQLite db integration need to be done for data persistence. 
+
+- User can create a session add workflows and start the session with workflows. On every action of the workflow Copilot SDK should send the event messages to the user and it need to be displayed in the chat interface. 
+-  The responses should be sent realtime as an when Copilot SDK receives the messages from internal Copilot CLI. 
+- Hooks support need to be added to the overall architecture , to run any hooks for a workflow that is required. 
+- Preconfigured workflows need to be loaded upfront. Workflows should have their Prompts, Skills, Tools they can use to send to Copilot along with other details. 
+- The configuration objects need to be robust and extensible enough to support all new feature addition related to current feature. 
+- end to end typescript support need to be done. 
+- Sessions can have their temporary storage folder created for any artifact storage and eventually need to be loaded to DB. 
+- CRITICAL: Any workflow need to connect to a codebase the repo URL need to be provided from the UI and base root folder of the repo. 
+Session can be configured with codebase support required or not flag. Any Session need codebase scaffolding, the repo need to be cloned and setup need to be done as prerequisite step. 
+- Git and GitHub CLI support addition required for programmatically cloning repo and raising PR after code changes. 
+- external script execution support required for programmatic script execution at any step. 
+- All the Copilot SDK messages , the output of git execution, GitHub CLI execution and all other script execution need to be sent real time to the UI for the user to see in the chat view. 
+- UI design should be very modern and sophisticated and all good design principles need to be considered during UI design and implementation. 
+
+MANDATORY: 
+Always use the Copilot SDK and Copilot CLI. These we have already installed and ready to use. Donot assume or provide dummy implementation or todo logic. 
+Integrate directly with the SDK and use its exposed methods and properties for agent run.
+
+
+MANDATORY STEPS: 
+- Thoroughly analyze the overall goal , support of devices and headless mode, and go through the functional and technical requirements. 
+- Identify the best tech stack for this application development. 
+- Consider all the modern design architectures, CRITICAL: explore the web and gather all the design and modern architecture principles and best practices. 
+- Identify the optimal application codebase structure, common / core packages , and build system and DB system.
+- Go through all the points consider each every aspect of the application that we need to develop. 
+
+
+Generate a clear technical architecture and implementation plan for the entire application. This should contain 
+- all the models , architecture layers, folder structure. 
+- Framework considerations for Client /desktop / cli /websocket / server. 
+- Provide extra anlaysis and finalize the architecture for sending the response from Copilot SDK and script execution to display on UI realtime. This should also be considered to send attachments to UI for download after Copilot response. 
+- Generate a clear and detailed plan and tehnical architecture document. Review and critically analyse the generated document to double check the technical considerations. 
+- After this document generated again do a review of the overall architecture and all the technical implementation details and provide a detailed sections for why the approach considered for anything is the most optimal. 
+
+Think ultra hard and complete all the requirements before completing your turn.

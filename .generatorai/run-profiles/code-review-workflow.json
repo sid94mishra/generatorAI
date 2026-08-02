@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "name": "Code Review Workflow - Run Profile",
+  "description": "Run profile for Code Review Workflow",
+  "workflowDefinitionId": "74ccf66f-f2c4-4f0e-af03-a7ba6bbeeb84",
+  "projectId": "83f5ba59-ddaa-4bcd-899c-75ead0ac6287",
+  "variables": {
+    "repo_path_target": "C:\\Users\\sidmishra\\.generatorai\\artifacts\\projects\\83f5ba59-ddaa-4bcd-899c-75ead0ac6287\\repos\\express",
+    "review_focus": "routing, middleware architecture, error handling",
+    "language": "JavaScript",
+    "coding_style": "Node.js best practices"
+  },
+  "permissionMode": "bypassPermissions",
+  "stageOverrides": [
+    {
+      "stageName": "Architecture Analysis",
+      "stageIndex": 0,
+      "skip": false
+    },
+    {
+      "stageName": "Code Quality Review",
+      "stageIndex": 1,
+      "skip": false
+    },
+    {
+      "stageName": "Security Review",
+      "stageIndex": 2,
+      "skip": false
+    },
+    {
+      "stageName": "Review Report",
+      "stageIndex": 3,
+      "skip": false
+    }
+  ]
+}

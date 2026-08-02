@@ -1,0 +1,754 @@
+@import "tailwindcss";
+
+/* Use .dark class for dark mode */
+@custom-variant dark (&:is(.dark *));
+/* @generated-tokens:start — regenerate with `pnpm tokens:write`; do not edit by hand */
+
+/* ══════════════════════════════════════════════════════════════
+   Layer 1 — raw semantic values.
+   Components never read these directly; they use the Tailwind
+   utilities produced by Layer 2.
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  color-scheme: dark;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Surfaces */
+  --background: #0d1117;
+  --foreground: #e6edf3;
+  --card: #161b22;
+  --card-foreground: #e6edf3;
+  --popover: #1c2129;
+  --popover-foreground: #e6edf3;
+  --raised: #161b22;
+  --overlay: #1c2129;
+  --subtle: #21262d;
+  --emphasis: #30363d;
+
+  /* Interactive — accent axis, default 'blue' */
+  --primary: #4493f8;
+  --primary-emphasis: #1f6feb;
+  --primary-foreground: #ffffff;
+  --secondary: #21262d;
+  --secondary-foreground: #e6edf3;
+  --muted: #21262d;
+  --muted-foreground: #8b949e;
+  --accent: #1f6feb33;
+  --accent-foreground: #e6edf3;
+  --destructive: #f85149;
+  --destructive-foreground: #ffffff;
+
+  /* Borders */
+  --border: #30363d;
+  --border-muted: #21262d;
+  --input: #30363d;
+  --ring: #4493f8;
+
+  /* Status — semantic, never accent-controlled */
+  --success: #3fb950;
+  --success-muted: #23863626;
+  --warning: #d29922;
+  --warning-muted: #9e6a0326;
+  --info: #4493f8;
+  --info-muted: #4493f826;
+  --danger: #f85149;
+  --danger-muted: #da363326;
+  --done: #a371f7;
+
+  /* Sidebar */
+  --sidebar: #161b22;
+  --sidebar-foreground: #8b949e;
+  --sidebar-border: #30363d;
+  --sidebar-accent: #1f6feb21;
+  --sidebar-accent-foreground: #4493f8;
+
+  /* Canvas (React Flow) */
+  --canvas-bg: #0d1117;
+  --canvas-dot: rgba(48, 54, 61, 0.6);
+
+  /* File-type icon palette (mirrors @pierre/trees) */
+  --file-icon-gray: #adadb1;
+  --file-icon-red: #ff6762;
+  --file-icon-vermilion: #d5512f;
+  --file-icon-orange: #ffa359;
+  --file-icon-yellow: #ffd452;
+  --file-icon-green: #5ecc71;
+  --file-icon-teal: #64d1db;
+  --file-icon-cyan: #68cdf2;
+  --file-icon-blue: #69b1ff;
+  --file-icon-indigo: #9d6afb;
+  --file-icon-purple: #d568ea;
+  --file-icon-pink: #ff678d;
+  --file-icon-mauve: #79697b;
+
+  /* Radius — compact */
+  --radius: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.625rem;
+}
+
+.light {
+  color-scheme: light;
+
+  /* Surfaces */
+  --background: #ffffff;
+  --foreground: #1f2328;
+  --card: #f6f8fa;
+  --card-foreground: #1f2328;
+  --popover: #ffffff;
+  --popover-foreground: #1f2328;
+  --raised: #f6f8fa;
+  --overlay: #ffffff;
+  --subtle: #f0f3f6;
+  --emphasis: #dfe2e5;
+
+  /* Interactive — accent axis, default 'blue' */
+  --primary: #0969da;
+  --primary-emphasis: #0969da;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f3f6;
+  --secondary-foreground: #1f2328;
+  --muted: #f0f3f6;
+  --muted-foreground: #656d76;
+  --accent: #0969da1a;
+  --accent-foreground: #1f2328;
+  --destructive: #d1242f;
+  --destructive-foreground: #ffffff;
+
+  /* Borders */
+  --border: #d0d7de;
+  --border-muted: #d8dee4;
+  --input: #d0d7de;
+  --ring: #0969da;
+
+  /* Status — semantic, never accent-controlled */
+  --success: #1a7f37;
+  --success-muted: #1a7f3720;
+  --warning: #9a6700;
+  --warning-muted: #9a670020;
+  --info: #0969da;
+  --info-muted: #0969da20;
+  --danger: #d1242f;
+  --danger-muted: #d1242f20;
+  --done: #8250df;
+
+  /* Sidebar */
+  --sidebar: #f6f8fa;
+  --sidebar-foreground: #656d76;
+  --sidebar-border: #d0d7de;
+  --sidebar-accent: #0969da14;
+  --sidebar-accent-foreground: #0969da;
+
+  /* Canvas (React Flow) */
+  --canvas-bg: #ffffff;
+  --canvas-dot: rgba(208, 215, 222, 0.6);
+
+  /* File-type icon palette (mirrors @pierre/trees) */
+  --file-icon-gray: #84848a;
+  --file-icon-red: #d52c36;
+  --file-icon-vermilion: #ff8c5b;
+  --file-icon-orange: #d47628;
+  --file-icon-yellow: #d5a910;
+  --file-icon-green: #199f43;
+  --file-icon-teal: #17a5af;
+  --file-icon-cyan: #1ca1c7;
+  --file-icon-blue: #1a85d4;
+  --file-icon-indigo: #693acf;
+  --file-icon-purple: #a631be;
+  --file-icon-pink: #d32a61;
+  --file-icon-mauve: #594c5b;
+}
+
+/* ── Accent axis (orthogonal to appearance) ──
+   Each accent overrides ONLY interactive tokens. Surfaces, text and
+   status colours are untouched: "danger" must look like danger no
+   matter what the user's accent preference is. */
+
+[data-accent="violet"] {
+  --primary: #a371f7;
+  --primary-emphasis: #8957e5;
+  --ring: #a371f7;
+  --accent: #8957e533;
+  --sidebar-accent: #8957e521;
+  --sidebar-accent-foreground: #a371f7;
+}
+
+.light[data-accent="violet"] {
+  --primary: #8250df;
+  --primary-emphasis: #8250df;
+  --ring: #8250df;
+  --accent: #8250df1a;
+  --sidebar-accent: #8250df14;
+  --sidebar-accent-foreground: #8250df;
+}
+
+[data-accent="green"] {
+  --primary: #3fb950;
+  --primary-emphasis: #238636;
+  --ring: #3fb950;
+  --accent: #23863633;
+  --sidebar-accent: #23863621;
+  --sidebar-accent-foreground: #3fb950;
+}
+
+.light[data-accent="green"] {
+  --primary: #1a7f37;
+  --primary-emphasis: #1f883d;
+  --ring: #1a7f37;
+  --accent: #1a7f371a;
+  --sidebar-accent: #1a7f3714;
+  --sidebar-accent-foreground: #1a7f37;
+}
+
+[data-accent="orange"] {
+  --primary: #db6d28;
+  --primary-emphasis: #bc4c00;
+  --ring: #db6d28;
+  --accent: #bc4c0033;
+  --sidebar-accent: #bc4c0021;
+  --sidebar-accent-foreground: #db6d28;
+}
+
+.light[data-accent="orange"] {
+  --primary: #bc4c00;
+  --primary-emphasis: #bc4c00;
+  --ring: #bc4c00;
+  --accent: #bc4c001a;
+  --sidebar-accent: #bc4c0014;
+  --sidebar-accent-foreground: #bc4c00;
+}
+
+[data-accent="rose"] {
+  --primary: #f778ba;
+  --primary-emphasis: #bf4b8a;
+  --ring: #f778ba;
+  --accent: #bf4b8a33;
+  --sidebar-accent: #bf4b8a21;
+  --sidebar-accent-foreground: #f778ba;
+}
+
+.light[data-accent="rose"] {
+  --primary: #bf3989;
+  --primary-emphasis: #bf3989;
+  --ring: #bf3989;
+  --accent: #bf39891a;
+  --sidebar-accent: #bf398914;
+  --sidebar-accent-foreground: #bf3989;
+}
+
+[data-accent="teal"] {
+  --primary: #39c5cf;
+  --primary-emphasis: #1b7c83;
+  --ring: #39c5cf;
+  --accent: #1b7c8333;
+  --sidebar-accent: #1b7c8321;
+  --sidebar-accent-foreground: #39c5cf;
+}
+
+.light[data-accent="teal"] {
+  --primary: #1b7c83;
+  --primary-emphasis: #1b7c83;
+  --ring: #1b7c83;
+  --accent: #1b7c831a;
+  --sidebar-accent: #1b7c8314;
+  --sidebar-accent-foreground: #1b7c83;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Layer 2 — Tailwind utility bridge. Makes `bg-background`,
+   `text-muted-foreground`, `bg-success-muted`, `ring-ring`… real
+   utilities that follow the active theme + accent.
+   ══════════════════════════════════════════════════════════════ */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-raised: var(--raised);
+  --color-overlay: var(--overlay);
+  --color-subtle: var(--subtle);
+  --color-emphasis: var(--emphasis);
+  --color-primary: var(--primary);
+  --color-primary-emphasis: var(--primary-emphasis);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-border-muted: var(--border-muted);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-muted);
+  --color-info: var(--info);
+  --color-info-muted: var(--info-muted);
+  --color-danger: var(--danger);
+  --color-danger-muted: var(--danger-muted);
+  --color-done: var(--done);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-canvas-bg: var(--canvas-bg);
+  --color-canvas-dot: var(--canvas-dot);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Layer 3 — compat aliases. Keeps every pre-existing
+   `var(--color-*)` arbitrary value resolving, dynamically, so
+   theme/accent switches still apply. New code should use Layer 2.
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-raised: var(--raised);
+  --color-overlay: var(--overlay);
+  --color-subtle: var(--subtle);
+  --color-emphasis: var(--emphasis);
+  --color-primary: var(--primary);
+  --color-primary-emphasis: var(--primary-emphasis);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-border-muted: var(--border-muted);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-muted);
+  --color-info: var(--info);
+  --color-info-muted: var(--info-muted);
+  --color-danger: var(--danger);
+  --color-danger-muted: var(--danger-muted);
+  --color-done: var(--done);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-canvas-bg: var(--canvas-bg);
+  --color-canvas-dot: var(--canvas-dot);
+}
+
+/* @generated-tokens:end */
+
+/* == Base Styles == */
+html { scroll-behavior: smooth; }
+
+/* ==========================================================================
+   Desktop shell chrome
+   ==========================================================================
+   The Electron main process hides the OS title bar, and the SPA draws its own
+   full-width strip (`.app-titlebar`) in its place, above both the sidebar and
+   the content. `applyChromeToDocument()` (apps/web/src/lib/desktop.ts) sets
+   these variables and classes on <html> before first paint.
+
+   Defaults keep every rule inert in a plain browser tab.
+   -------------------------------------------------------------------------- */
+:root {
+  --titlebar-height: 0px;
+  --titlebar-inset-left: 0px;
+  --titlebar-inset-right: 0px;
+}
+
+/* Electron treats a draggable region as a window handle: pointer events do
+   not reach the DOM inside it, so every interactive child must opt back out.
+   `app-region: drag` is the standardised name; the -webkit- prefix is what
+   current Chromium actually honours, so both are emitted. */
+.app-drag-region {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.app-no-drag,
+.app-drag-region button,
+.app-drag-region a,
+.app-drag-region input,
+.app-drag-region select,
+.app-drag-region textarea,
+.app-drag-region [role='button'],
+.app-drag-region [role='tab'],
+.app-drag-region [role='menuitem'],
+.app-drag-region [contenteditable='true'] {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* The window-control strip. Padding — not margin — so the row's background
+   still runs edge to edge underneath the OS-drawn buttons.
+
+   This is the ONLY element that reserves inset space. The app header below it
+   keeps its full width, which is what stops the theme toggle and the OS close
+   button from fighting over the same pixels in a narrow window. */
+.custom-titlebar .app-titlebar {
+  height: var(--titlebar-height);
+  padding-left: calc(var(--titlebar-inset-left) + 0.75rem);
+  padding-right: calc(var(--titlebar-inset-right) + 0.75rem);
+}
+
+/* The SPA never draws minimise/maximise/close: on Windows and Linux the OS
+   paints them into our header via Window Controls Overlay (which is what
+   provides the Windows 11 Snap Layouts flyout), and macOS keeps its real
+   traffic lights. We only reserve the space they occupy — tracked live from
+   `navigator.windowControlsOverlay`, which also collapses it in fullscreen. */
+
+/* An unfocused window should read as inactive, matching native apps. */
+.window-blurred .app-titlebar { opacity: 0.75; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-titlebar { transition: none; }
+}
+
+* {
+  border-color: var(--color-border);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent) transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 25%, transparent);
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-background);
+  color: var(--color-foreground);
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* == Focus Visible (WCAG 2.1 AA) == */
+/* cmdk command inputs — and any other search field that sits inside a
+   bordered dialog/popover (`data-inline-search`) — provide their own
+   affordance, so they opt out of the offset ring. */
+button:focus-visible,
+a:focus-visible,
+input:not([cmdk-input]):not([data-inline-search]):focus-visible,
+/* textarea:focus-visible, */
+select:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: calc(var(--radius) + 2px);
+}
+
+/* == Scrollbar == */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-emphasis); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-muted-foreground); }
+
+/* Scrollable strips that expose their own overflow affordance (e.g. the
+   right-pane tab bar's "more tabs" menu) and must not show a scrollbar. */
+.gai-no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.gai-no-scrollbar::-webkit-scrollbar { width: 0; height: 0; }
+
+/* == Code Blocks == */
+pre code {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+pre { border-radius: var(--radius); overflow-x: auto; }
+
+.hljs-pre code.hljs { background: transparent; padding: 0; }
+.dark .hljs-pre code.hljs { background: transparent; padding: 0; }
+pre.hljs-pre { background: var(--color-subtle); }
+
+/* == Markdown == */
+.markdown-content {
+  line-height: 1.7;
+  color: var(--color-foreground);
+  font-size: 0.875rem;
+}
+
+.markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4 {
+  font-weight: 600;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  color: var(--color-foreground);
+}
+
+.markdown-content h1 { font-size: 1.375rem; padding-bottom: 0.3em; border-bottom: 1px solid var(--color-border); }
+.markdown-content h2 { font-size: 1.125rem; padding-bottom: 0.25em; border-bottom: 1px solid var(--color-border); }
+.markdown-content h3 { font-size: 1rem; }
+.markdown-content h4 { font-size: 0.875rem; }
+
+.markdown-content p { margin-bottom: 0.75em; }
+.markdown-content ul, .markdown-content ol { padding-left: 1.5em; margin-bottom: 0.75em; }
+.markdown-content ul { list-style-type: disc; }
+.markdown-content ol { list-style-type: decimal; }
+.markdown-content li { margin-bottom: 0.25em; }
+.markdown-content li::marker { color: var(--color-primary); }
+
+.markdown-content code:not(pre code) {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--color-subtle);
+  color: var(--color-primary);
+  padding: 0.15em 0.4em;
+  border-radius: 0.25rem;
+  font-weight: 500;
+}
+
+.markdown-content pre {
+  margin-bottom: 1em;
+  background: var(--color-subtle);
+  padding: 0.875rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.markdown-content blockquote {
+  border-left: 3px solid var(--color-primary);
+  padding: 0.5rem 1rem;
+  margin-bottom: 0.75em;
+  margin-left: 0;
+  background: var(--color-accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--color-muted-foreground);
+}
+
+.markdown-content a { color: var(--color-primary); text-decoration: underline; text-underline-offset: 2px; }
+.markdown-content a:hover { opacity: 0.8; }
+
+.markdown-content table { width: 100%; border-collapse: collapse; margin-bottom: 1em; font-size: 0.8125rem; }
+.markdown-content th, .markdown-content td { border: 1px solid var(--color-border); padding: 0.375rem 0.625rem; text-align: left; }
+.markdown-content th { background: var(--color-subtle); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-muted-foreground); }
+.markdown-content tr:nth-child(even) td { background: color-mix(in srgb, var(--color-subtle) 50%, transparent); }
+.markdown-content strong { font-weight: 600; }
+.markdown-content em { font-style: italic; color: var(--color-muted-foreground); }
+.markdown-content hr { border: none; height: 1px; background: var(--color-border); margin: 1.5em 0; }
+.markdown-content img { max-width: 100%; border-radius: var(--radius); }
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.message-assistant .markdown-content { line-height: 1.7; }
+
+/* == Animations == */
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.streaming-cursor { animation: blink 0.8s step-end infinite; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slide-in-right { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes slide-in-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes stage-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-primary) 40%, transparent); } 50% { box-shadow: 0 0 0 4px transparent; } }
+@keyframes edge-flow { 0% { stroke-dashoffset: 24; } 100% { stroke-dashoffset: 0; } }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+
+/* Streaming caret — subtle pulsing bar at the text tail (calmer than a spinner) */
+@keyframes caret-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+.streaming-caret::after {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  margin-left: 2px;
+  border-radius: 1px;
+  background: var(--color-primary);
+  animation: caret-pulse 1s ease-in-out infinite;
+  vertical-align: text-bottom;
+}
+
+/* Streaming activity indicator — polished bouncing gradient dots shown at the
+   tail of the stream while the agent is generating. Replaces the mid-stream
+   caret so the "generating" cue always sits at the end of the content. */
+@keyframes stream-dot-bounce {
+  0%, 80%, 100% { transform: translateY(0) scale(0.65); opacity: 0.35; }
+  40%           { transform: translateY(-4px) scale(1); opacity: 1; }
+}
+.streaming-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+}
+.streaming-indicator .stream-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg,
+    var(--color-primary),
+    color-mix(in srgb, var(--color-primary) 55%, #a855f7)
+  );
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-primary) 45%, transparent);
+  animation: stream-dot-bounce 1.3s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.streaming-indicator .stream-dot:nth-child(2) { animation-delay: 0.16s; }
+.streaming-indicator .stream-dot:nth-child(3) { animation-delay: 0.32s; }
+@media (prefers-reduced-motion: reduce) {
+  .streaming-indicator .stream-dot { animation-duration: 2.2s; }
+}
+
+/* Streaming text — smooth fade-in entrance for new content */
+@keyframes stream-fade-in {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+.stream-container .markdown-content {
+  animation: stream-fade-in 0.3s ease-out;
+}
+
+/* Block entrance — smooth slide-up + fade for newly appearing blocks */
+@keyframes block-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-block-in { animation: block-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Sophisticated bouncing dots — staggered pulse with scale */
+@keyframes dot-pulse {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+.dot-pulse-1 { animation: dot-pulse 1.4s ease-in-out infinite; }
+.dot-pulse-2 { animation: dot-pulse 1.4s ease-in-out 0.2s infinite; }
+.dot-pulse-3 { animation: dot-pulse 1.4s ease-in-out 0.4s infinite; }
+
+/* Skeleton shimmer — gradient sweep for loading placeholders */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton-shimmer {
+  background: linear-gradient(90deg,
+    var(--color-subtle) 25%,
+    color-mix(in srgb, var(--color-emphasis) 60%, transparent) 50%,
+    var(--color-subtle) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  border-radius: var(--radius);
+}
+
+/* Active stage border — subtle animated border for running stages */
+.stage-active-border {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+}
+
+/* Tool call spinner — smooth rotation */
+@keyframes tool-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-tool-spin { animation: tool-spin 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+
+/* Thinking indicator — breathing glow */
+@keyframes thinking-glow {
+  0%, 100% { opacity: 0.5; box-shadow: 0 0 4px color-mix(in srgb, #a855f7 30%, transparent); }
+  50% { opacity: 1; box-shadow: 0 0 12px color-mix(in srgb, #a855f7 50%, transparent); }
+}
+.animate-thinking-glow { animation: thinking-glow 2s ease-in-out infinite; }
+
+/* Expand/collapse content transition */
+.stage-content-enter {
+  animation: block-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Status dot indicator — subtle breathing */
+@keyframes status-breathe {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+.animate-status-breathe { animation: status-breathe 2s ease-in-out infinite; }
+
+.animate-dialog-in { animation: fade-in 150ms ease-out; }
+.animate-fade-in { animation: fade-in 150ms ease-out; }
+.animate-slide-in-right { animation: slide-in-right 200ms ease-out; }
+.animate-slide-in-up { animation: slide-in-up 150ms ease-out; }
+.animate-shimmer { background: linear-gradient(90deg, var(--color-subtle) 0%, var(--color-emphasis) 50%, var(--color-subtle) 100%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+.animate-stage-pulse { animation: stage-pulse 2s ease-in-out infinite; }
+.animate-edge-flow { stroke-dasharray: 6; stroke-dashoffset: 24; animation: edge-flow 1s linear infinite; }
+
+/* Prompt section — subtle blue tint border-left */
+.prompt-section {
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 4%, var(--color-background));
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.light .prompt-section {
+  background: color-mix(in srgb, var(--color-info) 3%, white);
+}
+
+/* Response section — subtle green tint border-left */
+.response-section {
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 3%, var(--color-background));
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.light .response-section {
+  background: color-mix(in srgb, var(--color-success) 2%, white);
+}
+
+/* Streaming container — GPU-composited, no layout thrashing */
+.stream-container {
+  contain: content;
+  will-change: auto;
+}
+
+/* == React Flow canvas == */
+/* Override React Flow's default background (RF CSS loads after globals, so we need :root-level vars) */
+:root {
+  --xy-background-color-default: var(--color-canvas-bg);
+  --xy-background-color: var(--color-canvas-bg);
+  --xy-node-background-color-default: var(--color-card);
+  --xy-handle-background-color-default: var(--color-primary);
+  --xy-minimap-background-color-default: var(--color-card);
+  --xy-edge-stroke-default: var(--color-border);
+  --xy-controls-button-background-color-default: var(--color-card);
+  --xy-controls-button-background-color-hover-default: var(--color-subtle);
+  --xy-controls-button-border-color-default: var(--color-border);
+  --xy-controls-button-color-default: var(--color-foreground);
+}
+.react-flow__minimap { background-color: var(--color-card) !important; }
+.react-flow__controls button { background-color: var(--color-card) !important; border-color: var(--color-border) !important; fill: var(--color-foreground) !important; }
+.react-flow__controls button:hover { background-color: var(--color-subtle) !important; }
+
+/* == Smooth transitions == */
+button, a, input, select, textarea, [role="button"] {
+  transition-property: color, background-color, border-color, outline-color, fill, stroke, opacity, box-shadow;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* == Cursor pointer == */
+button, a, [role="button"], [role="tab"], [role="option"], select, .cursor-pointer { cursor: pointer; }
+
+/* == Reduced motion == */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

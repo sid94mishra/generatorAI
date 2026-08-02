@@ -1,0 +1,11 @@
+{
+  "id": "code-generation-v1",
+  "name": "Code Generation",
+  "description": "Generate code from a natural language description",
+  "category": "code-generation",
+  "version": "1.0.0",
+  "requiresCodebase": true,
+  "prompts": [],
+  "variables": [],
+  "hooks": []
+}

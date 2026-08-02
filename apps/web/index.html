@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en" class="">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GeneratorAI</title>
+
+  </head>
+  <body class="min-h-screen bg-background text-foreground antialiased">
+    <!-- Prevent theme flash: apply stored theme class + accent BEFORE React renders.
+         Keep in sync with providers/ThemeProvider.tsx. -->
+    <script>
+      (function() {
+        var theme, accent;
+        try {
+          theme = localStorage.getItem('generatorai-theme') || 'dark';
+          accent = localStorage.getItem('generatorai-accent') || 'blue';
+        } catch (e) {
+          theme = 'dark';
+          accent = 'blue';
+        }
+        var resolved = theme === 'system'
+          ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : theme;
+        var root = document.documentElement;
+        root.classList.add(resolved);
+        root.setAttribute('data-theme', theme);
+        root.setAttribute('data-accent', accent);
+      })();
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

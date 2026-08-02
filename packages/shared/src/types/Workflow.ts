@@ -1,0 +1,51 @@
+// ────────────────────────────────────────────────────────────────
+// Workflow — Domain entity
+// ────────────────────────────────────────────────────────────────
+
+import type { WorkflowStatus } from './WorkflowStateMachine.js';
+import type { HookDefinition } from './HookDefinition.js';
+
+export interface HarnessConfig {
+  model: string;
+  systemMessage?: { mode: 'append' | 'replace'; content: string };
+  systemPromptAppend?: string;
+  streaming: boolean;
+  mcpServers: Record<string, { type: 'http' | 'stdio'; url?: string; command?: string; args?: string[] }>;
+  availableTools: string[];
+  excludedTools: string[];
+  skillDirectories: string[];
+  disabledSkills: string[];
+  customAgents: Array<{ name: string; description: string; instructions: string; tools?: string[] }>;
+  provider?: { name: string; baseUrl: string; apiKey: string; model?: string };
+  configDir?: string;
+  /** Reasoning effort for models that support it (SDK 0.3.0) */
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Context window tier — 'long_context' pins the long-context tier for models that support it. */
+  contextTier?: 'default' | 'long_context';
+  /**
+   * Agent provider that should run this stage / workflow / chat. Omit to route
+   * by `model`, falling back to the server's primary provider.
+   */
+  harnessType?: 'copilot' | 'claude-agent';
+  /** Maximum tool-call turns before forcing completion */
+  maxTurns?: number;
+}
+
+export interface Workflow {
+  id: string;
+  sessionId: string;
+  templateId: string;
+  name: string;
+  order: number;
+  status: WorkflowStatus;
+  conversationId?: string;
+  variables: Record<string, unknown>;
+  hookOverrides: Record<string, Partial<HookDefinition>>;
+  harnessConfigOverrides?: Partial<HarnessConfig>;
+  currentStep: number;
+  totalSteps: number;
+  error?: string;
+  startedAt?: Date;
+  completedAt?: Date;
+  createdAt: Date;
+}

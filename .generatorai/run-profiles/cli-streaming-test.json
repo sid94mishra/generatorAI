@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "name": "CLI Streaming Test - Run Profile",
+  "description": "Run profile for CLI Streaming Test",
+  "workflowDefinitionId": "814b78c8-9066-4a52-8777-2fadf2b41af4",
+  "variables": {
+    "requirements": "Create a simple fizzbuzz function that takes a number and returns 'Fizz' for multiples of 3, 'Buzz' for multiples of 5, 'FizzBuzz' for multiples of both, or the number as a string",
+    "language": "TypeScript",
+    "framework": "none",
+    "coding_style": "functional",
+    "test_framework": "Vitest"
+  },
+  "permissionMode": "bypassPermissions",
+  "stageOverrides": [
+    {
+      "stageName": "Requirements Analysis",
+      "stageIndex": 0,
+      "skip": false
+    },
+    {
+      "stageName": "Code Generation",
+      "stageIndex": 1,
+      "skip": false
+    },
+    {
+      "stageName": "Test Generation",
+      "stageIndex": 2,
+      "skip": false
+    },
+    {
+      "stageName": "Documentation",
+      "stageIndex": 3,
+      "skip": false
+    }
+  ]
+}

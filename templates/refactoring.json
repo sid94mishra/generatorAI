@@ -1,0 +1,11 @@
+{
+  "id": "refactoring-v1",
+  "name": "Refactoring",
+  "description": "Refactor code with specified goals",
+  "category": "refactoring",
+  "version": "1.0.0",
+  "requiresCodebase": true,
+  "prompts": [],
+  "variables": [],
+  "hooks": []
+}

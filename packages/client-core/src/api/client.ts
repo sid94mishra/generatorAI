@@ -1,0 +1,1042 @@
+// ────────────────────────────────────────────────────────────────
+// Typed API client.
+//
+// Wraps a caller-supplied `fetch` (already authenticated and routed) so
+// every client speaks to the same endpoints with the same shapes. No auth,
+// no transport, no retries live here — those belong to the layers below.
+// ────────────────────────────────────────────────────────────────
+
+export interface ApiFetch {
+  (path: string, init?: RequestInit): Promise<Response>;
+}
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly path: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+
+  /** The credential is gone or was revoked — the caller must re-authenticate. */
+  get isAuthFailure(): boolean {
+    return this.status === 401;
+  }
+
+  /** Authenticated, but this device lacks the scope. */
+  get isForbidden(): boolean {
+    return this.status === 403;
+  }
+}
+
+async function request<T>(fetchImpl: ApiFetch, path: string, init?: RequestInit): Promise<T> {
+  const res = await fetchImpl(path, init);
+  if (!res.ok) {
+    // Prefer the server's message: it distinguishes "missing scope" from
+    // "not found", which the status code alone does not.
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string; message?: string };
+      detail = body.error ?? body.message ?? detail;
+    } catch {
+      // Non-JSON error body; the status line is all we have.
+    }
+    throw new ApiError(res.status, path, detail);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+const json = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+
+// ── Wire shapes ─────────────────────────────────────────────────
+
+/**
+ * A timestamp as the server actually serialises it.
+ *
+ * The server sends ISO-8601 STRINGS ("2026-07-31T11:30:43Z") for every
+ * `createdAt` / `updatedAt` / `startedAt` on every entity — verified against
+ * live `/api/chats`, `/api/workflow-runs`, `/api/projects` and
+ * `/api/automations`. These were previously declared `number`, which compiled
+ * fine and then failed silently at runtime in the worst possible way:
+ *
+ *   • `b.updatedAt - a.updatedAt` is NaN, so every sort became a no-op and
+ *     lists rendered in whatever order the server happened to return;
+ *   • `Date.now() - updatedAt < DAY_MS` is `false`, so the mobile "Today"
+ *     filter excluded EVERYTHING and the screen read "nothing today" while
+ *     137 items sat waiting.
+ *
+ * Declaring the union forces every consumer through `toEpochMs`.
+ */
+export type Timestamp = number | string;
+
+/**
+ * Normalises a wire timestamp to epoch milliseconds.
+ *
+ * Returns null rather than NaN for anything unparseable, so callers must
+ * decide what to render instead of silently producing "Invalid Date".
+ */
+export function toEpochMs(value: Timestamp | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/** Convenience for sort comparators: unparseable values sort last. */
+export function epochOr(value: Timestamp | null | undefined, fallback = 0): number {
+  return toEpochMs(value) ?? fallback;
+}
+
+/**
+ * A chat as the server actually serialises it.
+ *
+ * Verified against a live `GET /api/chats/:id`. The field is `name`, NOT
+ * `title` — the previous declaration used `title`, so every consumer read
+ * `undefined` and the mobile list rendered every row as "Untitled chat".
+ *
+ * There is likewise no `archived` boolean: archival is `status === 'archived'`.
+ */
+export interface ChatSummary {
+  id: string;
+  name: string;
+  sessionId: string | null;
+  status: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  tags?: string[];
+  projectId?: string | null;
+  workspaceId?: string | null;
+  model?: string | null;
+  defaultAgentMode?: AgentMode | null;
+  permissionMode?: string | null;
+  orchestratorMode?: boolean;
+}
+
+/** True when a chat has been archived. */
+export function isArchived(chat: Pick<ChatSummary, 'status'>): boolean {
+  return chat.status === 'archived';
+}
+
+/**
+ * A persisted tool call.
+ *
+ * These do NOT arrive as `role: 'tool'` messages — they hang off the
+ * ASSISTANT message that made them, in `metadata.toolCalls`. A client that
+ * only renders message content therefore shows an agent narrating work it
+ * appears never to have done.
+ */
+export interface PersistedToolCall {
+  id: string;
+  tool: string;
+  args: unknown;
+  result?: unknown;
+  status: 'running' | 'complete' | 'error';
+}
+
+/**
+ * A chat message as the server actually serialises it.
+ *
+ * The timestamp field is `timestamp` (ISO string), NOT `createdAt` — verified
+ * against a live `GET /api/chats/:id/messages`. `createdAt` is kept optional
+ * because nothing validates the wire and an older server may still send it.
+ */
+export interface ChatMessage {
+  id: string;
+  chatId: string;
+  sessionId?: string;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  timestamp?: Timestamp;
+  createdAt?: Timestamp;
+  metadata?: {
+    turnId?: string;
+    agentMode?: string;
+    toolCalls?: PersistedToolCall[];
+    [key: string]: unknown;
+  };
+}
+
+/** The message's time, whichever field the server used. */
+export function messageTime(message: ChatMessage): Timestamp | null {
+  return message.timestamp ?? message.createdAt ?? null;
+}
+
+/** Tool calls attached to a message, or an empty array. */
+export function messageToolCalls(message: ChatMessage): PersistedToolCall[] {
+  const calls = message.metadata?.toolCalls;
+  return Array.isArray(calls) ? calls : [];
+}
+
+export interface PlanSummary {
+  planId: string;
+  revision: number;
+  title: string;
+  summary: string;
+  status: string;
+  actions: string[];
+  fileName?: string;
+  interactionId?: string;
+}
+
+export interface InteractionSummary {
+  interactionId: string;
+  kind: string;
+  status: string;
+  payload?: Record<string, unknown>;
+}
+
+/** A worker spawned by an orchestrator chat. */
+export interface BackgroundTaskSummary {
+  taskId: string;
+  taskName: string;
+  status: string;
+  model?: string;
+  reviewRounds: number;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  provider?: string;
+  description?: string;
+  category?: string;
+  contextWindow?: number;
+  /** The context-gauge denominator. Prefer this over `contextWindow`. */
+  promptTokenLimit?: number;
+  totalContextWindow?: number;
+  maxOutputTokens?: number;
+  supportsReasoning?: boolean;
+  /**
+   * The effort levels this model accepts.
+   *
+   * An ARRAY (`["low","medium","high","xhigh","max"]`) — verified against a
+   * live `/api/harness/models`. This was declared as a space-separated
+   * string, so calling `.trim()` on it threw and took the entire app down
+   * the moment a reasoning-capable model was selected. The union keeps the
+   * older shape parseable rather than trading one hard assumption for
+   * another.
+   */
+  reasoningEfforts?: string[] | string;
+  defaultReasoningEffort?: string;
+  /** Present when the model offers a long-context tier. */
+  supportsLongContext?: boolean;
+  standardContextWindow?: number;
+  longContext?: { promptTokenLimit?: number; totalContextWindow?: number };
+}
+
+/** Per-turn agent mode. Mirrors `AGENT_MODES` in @generatorai/shared. */
+export type AgentMode = 'auto' | 'plan';
+
+export interface SendMessageInput {
+  message: string;
+  /** Per-turn agent mode; omit to inherit the chat's default. */
+  mode?: AgentMode;
+}
+
+// ── Runs ────────────────────────────────────────────────────────
+
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  description?: string;
+  projectId?: string | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  tags?: string[];
+}
+
+export type RunStatus =
+  | 'created'
+  | 'pending'
+  | 'starting'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface WorkflowRunSummary {
+  id: string;
+  workflowDefinitionId: string;
+  name?: string;
+  status: RunStatus;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  startedAt?: Timestamp | null;
+  completedAt?: Timestamp | null;
+  error?: string | null;
+  workspaceId?: string | null;
+}
+
+export type StageRunStatus =
+  | 'pending'
+  | 'queued'
+  | 'running'
+  | 'paused'
+  | 'sleeping'
+  | 'awaiting_input'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'skipped';
+
+export interface StageRunSummary {
+  id: string;
+  workflowRunId: string;
+  stageDefinitionId: string;
+  name?: string;
+  status: StageRunStatus;
+  sessionId?: string | null;
+  startedAt?: Timestamp | null;
+  completedAt?: Timestamp | null;
+  error?: string | null;
+  retryCount?: number;
+}
+
+export interface PendingInterrupt {
+  id: string;
+  stageId: string;
+  prompt?: string;
+  interruptData?: Record<string, unknown>;
+}
+
+/** Outcomes the HITL approve endpoint accepts. */
+export type ApprovalOutcome = 'approved' | 'changes_requested' | 'rejected';
+
+// ── Automations ─────────────────────────────────────────────────
+
+export interface AutomationSummary {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  triggerType: 'manual' | 'schedule' | 'webhook';
+  workflowDefinitionId: string;
+  lastRunAt?: Timestamp | null;
+  createdAt: Timestamp;
+}
+
+export interface AutomationExecutionSummary {
+  id: string;
+  automationId: string;
+  status: string;
+  totalRuns?: number;
+  completedRuns?: number;
+  failedRuns?: number;
+  startedAt?: Timestamp | null;
+  completedAt?: Timestamp | null;
+}
+
+// ── Changes / review ────────────────────────────────────────────
+
+export interface ChangeFileEntry {
+  path: string;
+  oldPath?: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed';
+  additions: number;
+  deletions: number;
+  isBinary: boolean;
+  isTooLarge: boolean;
+  oldBlob?: string;
+  newBlob?: string;
+  lang?: string;
+}
+
+export interface ChangeRepoEntry {
+  alias: string;
+  kind: string;
+  hasBaseline: boolean;
+  stats: { files: number; additions: number; deletions: number };
+  files: ChangeFileEntry[];
+}
+
+export interface ChangeSummary {
+  workspaceId: string;
+  hasGit: boolean;
+  repos: ChangeRepoEntry[];
+  stats: { files: number; additions: number; deletions: number };
+}
+
+export interface ChangeFilePatch {
+  path: string;
+  alias: string;
+  patch: string;
+  truncated: boolean;
+  cacheKey: string;
+}
+
+export interface ReviewComment {
+  id: string;
+  threadId: string;
+  author: 'user' | 'agent';
+  body: string;
+  intent?: string;
+  createdAt: string | number;
+}
+
+export interface ReviewThread {
+  id: string;
+  workspaceId: string;
+  repoAlias: string;
+  path: string;
+  side: 'additions' | 'deletions';
+  startLine: number;
+  endLine: number;
+  anchorText: string;
+  status: string;
+  reviewRound: number;
+  comments: ReviewComment[];
+  baseCheckpointId: string;
+  headCheckpointId: string;
+}
+
+// ── Projects ────────────────────────────────────────────────────
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  description?: string;
+  status?: string;
+  createdAt: Timestamp;
+}
+
+export interface CodebaseSummary {
+  id: string;
+  projectId: string;
+  alias: string;
+  type: 'git-remote' | 'git-local' | 'local-dir';
+  url?: string;
+  localPath?: string;
+  defaultBranch?: string;
+  status?: string;
+  lastFetchedAt?: Timestamp | null;
+}
+
+export interface WorkspaceSummary {
+  id: string;
+  name?: string;
+  status: string;
+  projectId?: string | null;
+  rootPath?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// ── Workspace tree ──────────────────────────────────────────────
+
+/**
+ * The file tree is served SEPARATELY from the change summary on purpose: the
+ * path set only moves when files are created or deleted, whereas the change
+ * summary moves on every write. Keeping them apart lets the Files view stay
+ * mounted without refetching on every token.
+ */
+export interface WorkspaceTreeRepo {
+  alias: string;
+  kind: string;
+  /** Repo-relative paths, sorted. NOT alias-prefixed. */
+  paths: string[];
+  truncated: boolean;
+}
+
+export interface WorkspaceTree {
+  workspaceId: string;
+  hasGit: boolean;
+  repos: WorkspaceTreeRepo[];
+  totalPaths: number;
+}
+
+/** Mirrors `WorkspaceTreeFile` — the field is `contents`, not `content`. */
+export interface WorkspaceFile {
+  alias: string;
+  path: string;
+  /** null when the file is binary or over the inline budget. */
+  contents: string | null;
+  size: number;
+  isBinary: boolean;
+  isTooLarge: boolean;
+  lang: string;
+  cacheKey: string;
+}
+
+// ── Providers / health ──────────────────────────────────────────
+
+export interface ProviderStatus {
+  type: string;
+  label: string;
+  installed: boolean;
+  connected: boolean;
+  authenticated: boolean;
+  ready: boolean;
+  error?: string | null;
+  checkedAt?: number;
+  modelCount: number;
+  models?: ModelInfo[];
+}
+
+export interface ProvidersResponse {
+  primary: string;
+  providers: ProviderStatus[];
+}
+
+/** The full `/api/health` body, not just `{ status }`. */
+export interface HealthSnapshot {
+  status: string;
+  copilot: boolean;
+  harness: { type: string; healthy: boolean };
+  db: boolean;
+  uptime: number;
+  timestamp: string;
+  activeChats: number;
+  activeWorkflowRuns: number;
+  runningChatIds: string[];
+  otel?: { enabled: boolean; endpoint?: string; serviceName?: string };
+}
+
+// ── System catalogues ───────────────────────────────────────────
+
+/** A skill, prompt or agent shipped with the install. */
+export interface SystemArtifact {
+  id: string;
+  name: string;
+  type: 'agent' | 'prompt' | 'skill';
+  description?: string;
+  path?: string;
+  tags?: string[];
+}
+
+export interface McpServerEntry {
+  id?: string;
+  name: string;
+  description?: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  transport?: string;
+}
+
+/** Credentials are never returned; only whether one is configured. */
+export interface SourceControlConfig {
+  activeProvider: 'github' | 'none';
+  github?: { host?: string; hasToken?: boolean; username?: string };
+}
+
+export interface SourceControlStatus {
+  activeProvider: string;
+  enabled: boolean;
+}
+
+
+/** Query keys, shared so web and mobile invalidate the same entries. */
+export const queryKeys = {
+  chats: () => ['chats'] as const,
+  chat: (id: string) => ['chats', id] as const,
+  chatMessages: (id: string) => ['chats', id, 'messages'] as const,
+  chatPlans: (id: string) => ['chats', id, 'plans'] as const,
+  chatInteractions: (id: string) => ['chats', id, 'interactions'] as const,
+  chatTasks: (id: string) => ['chats', id, 'background-tasks'] as const,
+  models: () => ['models'] as const,
+  providers: () => ['harness', 'providers'] as const,
+  health: () => ['health'] as const,
+  devices: () => ['auth', 'devices'] as const,
+  posture: () => ['security', 'posture'] as const,
+  workflows: () => ['workflows'] as const,
+  runs: (workflowId?: string) => (workflowId ? (['runs', workflowId] as const) : (['runs'] as const)),
+  run: (runId: string) => ['runs', runId] as const,
+  runStages: (runId: string) => ['runs', runId, 'stages'] as const,
+  runInterrupts: (runId: string) => ['runs', runId, 'interrupts'] as const,
+  automations: () => ['automations'] as const,
+  automation: (id: string) => ['automations', id] as const,
+  automationExecutions: (id: string) => ['automations', id, 'executions'] as const,
+  projects: () => ['projects'] as const,
+  project: (id: string) => ['projects', id] as const,
+  codebases: (projectId: string) => ['projects', projectId, 'codebases'] as const,
+  workspaces: () => ['workspaces'] as const,
+  workspaceTree: (workspaceId: string) => ['workspaces', workspaceId, 'tree'] as const,
+  /** Keyed on the server's cache key so an edited file re-reads. */
+  workspaceFile: (workspaceId: string, path: string, alias?: string) =>
+    ['workspaces', workspaceId, 'tree', 'file', alias ?? '.', path] as const,
+  changes: (workspaceId: string) => ['workspaces', workspaceId, 'changes'] as const,
+  /**
+   * A diff must be keyed by CONTENT identity, not just by path.
+   *
+   * With a path-only key and any staleTime at all, editing a file leaves the
+   * previous diff on screen — the query looks fresh because the key did not
+   * change. The blob pair is the content identity.
+   */
+  changeFile: (workspaceId: string, path: string, oldBlob?: string, newBlob?: string) =>
+    ['workspaces', workspaceId, 'changes', path, oldBlob ?? '-', newBlob ?? '-'] as const,
+  reviewThreads: (workspaceId: string) => ['workspaces', workspaceId, 'review'] as const,
+} as const;
+
+export function createApiClient(fetchImpl: ApiFetch) {
+  return {
+    health: () => request<HealthSnapshot>(fetchImpl, '/api/health'),
+
+    harness: {
+      /**
+       * Provider readiness and per-provider model counts.
+       *
+       * `refresh` forces a re-probe, which spawns each provider's CLI and can
+       * take seconds — so it is only ever passed on an explicit user action.
+       */
+      providers: (refresh = false) =>
+        request<ProvidersResponse>(
+          fetchImpl,
+          `/api/harness/providers${refresh ? '?refresh=1' : ''}`,
+        ),
+
+      /** Change the DEFAULT provider. Existing chats keep their own. */
+      setDefault: (type: string) =>
+        request<{ message: string; type: string; switched: boolean }>(
+          fetchImpl,
+          '/api/harness/switch',
+          json({ type }),
+        ),
+    },
+
+    chats: {
+      // NOTE ON LIST SHAPES
+      //
+      // Every list endpoint on this server responds with a BARE ARRAY, not a
+      // `{ chats: [...] }` envelope. These signatures previously declared an
+      // envelope, which type-checked fine (nothing validates the wire at
+      // runtime) and then silently produced `undefined` at every call site —
+      // the mobile Chats tab rendered "No chats yet" against a server holding
+      // 128 chats. Verified against the live API; keep these in step with
+      // `apps/server/src/routes/chats.ts`, which does `res.json(chats)`.
+      list: (params?: { archived?: boolean; limit?: number }) => {
+        const q = new URLSearchParams();
+        if (params?.archived !== undefined) q.set('archived', String(params.archived));
+        if (params?.limit !== undefined) q.set('limit', String(params.limit));
+        const suffix = q.toString() ? `?${q}` : '';
+        return request<ChatSummary[]>(fetchImpl, `/api/chats${suffix}`);
+      },
+
+      get: (id: string) => request<ChatSummary>(fetchImpl, `/api/chats/${id}`),
+
+      /**
+       * Create a chat.
+       *
+       * The server field is `name`, NOT `title` — `CreateChatSchema` requires
+       * it (min length 1). Sending `{}` returned 400 and made the mobile
+       * "New chat" button a dead end.
+       *
+       * The optional fields mirror `CreateChatSchema` exactly. They are the
+       * ones a phone can meaningfully supply: anything that needs a host
+       * filesystem path (`gitRepositories`) is deliberately absent.
+       */
+      create: (input: {
+        name: string;
+        description?: string;
+        model?: string;
+        projectId?: string;
+        codebaseIds?: string[];
+        tags?: string[];
+        defaultAgentMode?: AgentMode;
+        permissionMode?: string;
+        orchestratorMode?: boolean;
+        useWorktree?: boolean;
+      }) => request<ChatSummary>(fetchImpl, '/api/chats', json(input)),
+
+      messages: (id: string, params?: { limit?: number; before?: string }) => {
+        const q = new URLSearchParams();
+        if (params?.limit !== undefined) q.set('limit', String(params.limit));
+        if (params?.before) q.set('before', params.before);
+        const suffix = q.toString() ? `?${q}` : '';
+        return request<ChatMessage[]>(
+          fetchImpl,
+          `/api/chats/${id}/messages${suffix}`,
+        );
+      },
+
+      /**
+       * Send a prompt.
+       *
+       * The route is `/prompt`, NOT `/messages` — `/messages` is GET-only, so
+       * the previous POST to it 404'd and mobile could never send anything.
+       * The server accepts multipart (for attachments) or JSON; JSON is enough
+       * until mobile supports attachments.
+       */
+      send: (id: string, input: SendMessageInput) =>
+        request<{ sessionId: string }>(
+          fetchImpl,
+          `/api/chats/${id}/prompt`,
+          json({
+            prompt: input.message,
+            ...(input.mode ? { mode: input.mode } : {}),
+          }),
+        ),
+
+      cancel: (id: string) => request<void>(fetchImpl, `/api/chats/${id}/cancel`, json({})),
+
+      /**
+       * Update chat metadata.
+       *
+       * Field names mirror the server exactly: `name` (not `title`) and
+       * `status: 'archived'` (not `archived: true`). The previous signature
+       * used the client-side names, so every field it sent was silently
+       * dropped by the route's destructure.
+       *
+       * `model` and `defaultAgentMode` live here rather than on the prompt
+       * because the server has no per-turn model override — the composer
+       * changes the chat's model, which then applies to subsequent turns.
+       */
+      update: (
+        id: string,
+        patch: {
+          name?: string;
+          description?: string;
+          model?: string;
+          defaultAgentMode?: AgentMode;
+          permissionMode?: string;
+          projectId?: string;
+          tags?: string[];
+          status?: string;
+        },
+      ) =>
+        request<ChatSummary>(fetchImpl, `/api/chats/${id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(patch),
+        }),
+
+      archive: (id: string) =>
+        request<ChatSummary>(fetchImpl, `/api/chats/${id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'archived' }),
+        }),
+
+      remove: (id: string) => request<void>(fetchImpl, `/api/chats/${id}`, { method: 'DELETE' }),
+
+      plans: (id: string) => request<PlanSummary[]>(fetchImpl, `/api/chats/${id}/plans`),
+
+      planContent: (id: string, planId: string) =>
+        request<{ content: string }>(fetchImpl, `/api/chats/${id}/plans/${planId}/content`),
+
+      decidePlan: (
+        id: string,
+        planId: string,
+        decision: { action: string; comment?: string; interactionId?: string },
+      ) =>
+        request<void>(fetchImpl, `/api/chats/${id}/plans/${planId}/decision`, json(decision)),
+
+      interactions: (id: string) =>
+        request<InteractionSummary[]>(fetchImpl, `/api/chats/${id}/interactions`),
+
+      /**
+       * Workers spawned by an orchestrator chat.
+       *
+       * Note the envelope: this route answers `{ tasks: [...] }`, unlike the
+       * bare arrays the other chat list routes return.
+       */
+      backgroundTasks: (id: string) =>
+        request<{ tasks: BackgroundTaskSummary[] }>(
+          fetchImpl,
+          `/api/chats/${id}/background-tasks`,
+        ),
+
+      respond: (
+        id: string,
+        interactionId: string,
+        response: { answers?: Record<string, string[]>; freeformResponse?: string; action?: string },
+      ) =>
+        request<void>(
+          fetchImpl,
+          `/api/chats/${id}/interactions/${interactionId}/respond`,
+          json(response),
+        ),
+
+      setPermissionMode: (id: string, mode: string) =>
+        request<void>(fetchImpl, `/api/chats/${id}/permission-mode`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ permissionMode: mode }),
+        }),
+    },
+
+    models: () => request<ModelInfo[]>(fetchImpl, '/api/harness/models'),
+
+    workflows: {
+      list: (projectId?: string) =>
+        request<WorkflowSummary[]>(
+          fetchImpl,
+          `/api/workflow-definitions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+        ),
+
+      get: (id: string) =>
+        request<WorkflowSummary & { stages: unknown[]; edges: unknown[] }>(
+          fetchImpl,
+          `/api/workflow-definitions/${id}`,
+        ),
+    },
+
+    runs: {
+      list: (params?: { definitionId?: string; status?: string }) => {
+        const q = new URLSearchParams();
+        if (params?.definitionId) q.set('definitionId', params.definitionId);
+        if (params?.status) q.set('status', params.status);
+        const suffix = q.toString() ? `?${q}` : '';
+        return request<WorkflowRunSummary[]>(fetchImpl, `/api/workflow-runs${suffix}`);
+      },
+
+      get: (id: string) =>
+        request<WorkflowRunSummary & { stageRuns: StageRunSummary[] }>(
+          fetchImpl,
+          `/api/workflow-runs/${id}`,
+        ),
+
+      stages: (id: string) =>
+        request<StageRunSummary[]>(fetchImpl, `/api/workflow-runs/${id}/stages`),
+
+      pendingInterrupts: (id: string) =>
+        request<PendingInterrupt[]>(fetchImpl, `/api/workflow-runs/${id}/pending-interrupts`),
+
+      /**
+       * Answer a stage's HITL gate.
+       *
+       * This is the ONE mutating run operation a mobile device can perform:
+       * the route policy classifies it as `exec:agent` (answering the agent)
+       * rather than `write:workflows` (editing the workflow). Everything else
+       * below is intentionally absent from the mobile surface.
+       */
+      approve: (
+        runId: string,
+        stageId: string,
+        body: {
+          outcome?: ApprovalOutcome;
+          approved?: boolean;
+          reason?: string;
+          followUpPrompt?: string;
+          value?: unknown;
+        },
+      ) =>
+        request<{ message: string; outcome: string; approved: boolean }>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/stages/${stageId}/approve`,
+          json(body),
+        ),
+
+      /** Supply data to a stage waiting on input. Also `exec:agent`. */
+      interrupt: (runId: string, stageId: string, body: { data?: unknown; prompt?: string }) =>
+        request<{ message: string }>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/stages/${stageId}/interrupt`,
+          json(body),
+        ),
+    },
+
+    automations: {
+      list: (projectId?: string) =>
+        request<AutomationSummary[]>(
+          fetchImpl,
+          `/api/automations${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+        ),
+
+      get: (id: string) =>
+        request<AutomationSummary & { executions: AutomationExecutionSummary[] }>(
+          fetchImpl,
+          `/api/automations/${id}`,
+        ),
+
+      executions: (id: string) =>
+        request<AutomationExecutionSummary[]>(fetchImpl, `/api/automations/${id}/executions`),
+    },
+
+    workspaces: {
+      list: (params?: { projectId?: string; limit?: number }) => {
+        const q = new URLSearchParams();
+        if (params?.projectId) q.set('projectId', params.projectId);
+        if (params?.limit !== undefined) q.set('limit', String(params.limit));
+        const suffix = q.toString() ? `?${q}` : '';
+        return request<WorkspaceSummary[]>(fetchImpl, `/api/workspaces${suffix}`);
+      },
+
+      get: (id: string) => request<WorkspaceSummary>(fetchImpl, `/api/workspaces/${id}`),
+
+      changes: (id: string, params?: { base?: string; head?: string; alias?: string }) => {
+        const q = new URLSearchParams({ v: '2' });
+        if (params?.base) q.set('base', params.base);
+        if (params?.head) q.set('head', params.head);
+        if (params?.alias) q.set('alias', params.alias);
+        return request<ChangeSummary>(fetchImpl, `/api/workspaces/${id}/changes?${q}`);
+      },
+
+      /**
+       * One file's unified diff.
+       *
+       * The blob SHAs are passed through so the server can answer 304 and the
+       * client can key its cache on content identity.
+       */
+      filePatch: (
+        id: string,
+        params: { path: string; alias?: string; oldBlob?: string; newBlob?: string; base?: string; head?: string },
+      ) => {
+        const q = new URLSearchParams({ path: params.path, form: 'patch' });
+        if (params.alias) q.set('alias', params.alias);
+        if (params.oldBlob) q.set('oldBlob', params.oldBlob);
+        if (params.newBlob) q.set('newBlob', params.newBlob);
+        if (params.base) q.set('base', params.base);
+        if (params.head) q.set('head', params.head);
+        return request<ChangeFilePatch>(fetchImpl, `/api/workspaces/${id}/changes/file?${q}`);
+      },
+
+      /** Every tracked path, grouped by repo. Browsable independent of diffs. */
+      tree: (id: string, alias?: string) =>
+        request<WorkspaceTree>(
+          fetchImpl,
+          `/api/workspaces/${id}/tree${alias ? `?alias=${encodeURIComponent(alias)}` : ''}`,
+        ),
+
+      /**
+       * One file's CURRENT content.
+       *
+       * Distinct from `filePatch`: that only serves paths appearing in a diff,
+       * which is why browsing an untouched file needs this route instead.
+       */
+      treeFile: (id: string, params: { path: string; alias?: string }) => {
+        const q = new URLSearchParams({ path: params.path });
+        if (params.alias) q.set('alias', params.alias);
+        return request<WorkspaceFile>(fetchImpl, `/api/workspaces/${id}/tree/file?${q}`);
+      },
+    },
+
+    review: {
+      threads: (workspaceId: string, params?: { path?: string; status?: string }) => {
+        const q = new URLSearchParams();
+        if (params?.path) q.set('path', params.path);
+        if (params?.status) q.set('status', params.status);
+        const suffix = q.toString() ? `?${q}` : '';
+        return request<{ workspaceId: string; threads: ReviewThread[] }>(
+          fetchImpl,
+          `/api/workspaces/${workspaceId}/review/threads${suffix}`,
+        );
+      },
+
+      createThread: (
+        workspaceId: string,
+        body: {
+          path: string;
+          body: string;
+          anchorText: string;
+          scopeId: string;
+          baseCheckpointId: string;
+          headCheckpointId: string;
+          side: 'additions' | 'deletions';
+          startLine: number;
+          endLine: number;
+          alias?: string;
+          intent?: string;
+          scope?: string;
+        },
+      ) =>
+        request<ReviewThread>(
+          fetchImpl,
+          `/api/workspaces/${workspaceId}/review/threads`,
+          json(body),
+        ),
+
+      addComment: (
+        workspaceId: string,
+        threadId: string,
+        body: { body: string; intent?: string },
+      ) =>
+        request<ReviewComment>(
+          fetchImpl,
+          `/api/workspaces/${workspaceId}/review/threads/${threadId}/comments`,
+          json(body),
+        ),
+
+      setThreadStatus: (workspaceId: string, threadId: string, status: string) =>
+        request<ReviewThread>(
+          fetchImpl,
+          `/api/workspaces/${workspaceId}/review/threads/${threadId}`,
+          {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ status }),
+          },
+        ),
+
+      submit: (workspaceId: string, body: { threadIds: string[]; note?: string; preview?: boolean }) =>
+        request<{ prompt: string; threadIds: string[]; reviewRound: number; delivered: boolean }>(
+          fetchImpl,
+          `/api/workspaces/${workspaceId}/review/submit`,
+          json(body),
+        ),
+    },
+
+    projects: {
+      list: () => request<ProjectSummary[]>(fetchImpl, '/api/projects'),
+
+      get: (id: string) =>
+        request<ProjectSummary & { codebases: CodebaseSummary[] }>(
+          fetchImpl,
+          `/api/projects/${id}`,
+        ),
+
+      codebases: (id: string) =>
+        request<CodebaseSummary[]>(fetchImpl, `/api/projects/${id}/codebases`),
+    },
+
+    /**
+     * Events since `afterSeq`, for cold start and gap-fill after a drop.
+     *
+     * The envelope is `{ rows, nextAfterSeq }` — NOT `{ events }`, which is
+     * what this previously declared. Nothing validates the wire, so the
+     * mismatch type-checked and then produced `undefined` at every call site:
+     * a client that dropped its stream would silently replay nothing and sit
+     * on a stale transcript with no error.
+     */
+    replay: (scope: string, id: string, afterSeq = 0) =>
+      request<{
+        rows: Array<{
+          id: number;
+          scope: string;
+          scopeId: string;
+          seq: number;
+          kind: string;
+          payload?: Record<string, unknown>;
+          ts: number;
+        }>;
+        nextAfterSeq: number;
+      }>(
+        fetchImpl,
+        `/api/stream/replay?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}&afterSeq=${afterSeq}`,
+      ),
+
+    /**
+     * Read-only catalogues.
+     *
+     * Enabling or disabling a skill / MCP server is a machine-wide change,
+     * so it stays on the desktop. Mobile shows what is installed and what it
+     * does, which is the part worth checking away from a desk.
+     */
+    system: {
+      artifacts: (type?: 'agent' | 'prompt' | 'skill') =>
+        request<SystemArtifact[]>(
+          fetchImpl,
+          `/api/system/artifacts${type ? `?type=${type}` : ''}`,
+        ),
+
+      artifactContent: (id: string) =>
+        request<{ content: string }>(fetchImpl, `/api/system/artifacts/${id}`),
+
+      mcpServers: () => request<McpServerEntry[]>(fetchImpl, '/api/system/mcp-servers'),
+    },
+
+    sourceControl: {
+      config: () => request<SourceControlConfig>(fetchImpl, '/api/source-control/config'),
+      status: () => request<SourceControlStatus>(fetchImpl, '/api/source-control/status'),
+    },
+  };
+}
+
+export type ApiClient = ReturnType<typeof createApiClient>;

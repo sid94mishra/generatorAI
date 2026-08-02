@@ -1,0 +1,60 @@
+{
+  "name": "@generatorai/agent-harness-providers",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    },
+    "./copilot": {
+      "import": "./src/providers/copilot/index.ts",
+      "types": "./src/providers/copilot/index.ts"
+    },
+    "./claude-agent": {
+      "import": "./src/providers/claude-agent/index.ts",
+      "types": "./src/providers/claude-agent/index.ts"
+    }
+  },
+  "files": ["dist"],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./copilot": {
+        "types": "./dist/providers/copilot/index.d.ts",
+        "import": "./dist/providers/copilot/index.js"
+      },
+      "./claude-agent": {
+        "types": "./dist/providers/claude-agent/index.d.ts",
+        "import": "./dist/providers/claude-agent/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/",
+    "prepublishOnly": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@generatorai/core": "workspace:*",
+    "@generatorai/shared": "workspace:*",
+    "@opentelemetry/api": "^1.9.0"
+  },
+  "optionalDependencies": {
+    "@github/copilot-sdk": "^1.0.8",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.220"
+  },
+  "devDependencies": {
+    "zod": "^3.24.0"
+  }
+}

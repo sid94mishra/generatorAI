@@ -1,0 +1,15 @@
+# Generated/template databases live here.
+# Distribution template DB (created by `pnpm db:prepare-dist`) is git-ignored.
+*.db
+*.db-wal
+*.db-shm
+
+# Runtime state written by the server on first launch. None of it is source:
+#   secrets/    AES-GCM vault + its key-encryption key
+#   harnesses/  per-agent home dirs (configs, caches, logs)
+# The vault and KEK were committed once by accident; keep them out.
+secrets/
+harnesses/
+bootstrap-pairing.json
+
+!.gitignore

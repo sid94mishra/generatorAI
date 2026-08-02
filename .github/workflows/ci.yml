@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+# A new push to the same branch makes an in-flight run obsolete. Cancelling it
+# keeps the queue short without affecting correctness.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Secret scanning ──────────────────────────────────────────────────────
+  # Runs independently of the build: a leaked credential is worth knowing
+  # about even when compilation is broken. A vault key was committed here
+  # once, so this is a real regression guard rather than box-ticking.
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks scans the pushed commit range, which a shallow clone
+          # cannot see.
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Build, lint, typecheck, test ─────────────────────────────────────────
+  # The matrix exists because the desktop app ships on all three platforms
+  # and the codebase does real path, PTY and native-module work. Linux-only
+  # CI cannot catch Windows path handling.
+  build-and-test:
+    name: Build & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm turbo build
+
+      - run: pnpm turbo lint
+
+      - run: pnpm turbo typecheck
+
+      - run: pnpm turbo test
+
+      # WEB-03: enforce 800 KB gzipped budget on the web bundle.
+      # `pnpm turbo build` above already produced dist/ — this just checks it.
+      # Bundle size does not vary by platform, so once is enough.
+      - name: Check web bundle size
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm --filter @generatorai/web check:bundle

@@ -1,0 +1,16 @@
+{
+  "name": "@generatorai/agent-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:e2e": "playwright test --config=playwright.config.ts",
+    "test:ui": "playwright test --config=playwright.config.ts --ui",
+    "report": "playwright show-report test-results/html-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@playwright/cli": "^0.1.1"
+  }
+}

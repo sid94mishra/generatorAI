@@ -1,0 +1,315 @@
+// Shared types barrel
+export type {
+  AgentEvent,
+  AgentEventKind,
+  PersistedEvent,
+} from './AgentEvent.js';
+export {
+  isAgentEvent,
+  isHarnessEvent,
+  isWorkflowRunEvent,
+  isStageRunEvent,
+  isChatEvent,
+  isSessionEvent,
+  isGitEvent,
+  isHookEvent,
+  isBrowserEvent,
+  createAgentEvent,
+  isEventOfKind,
+  narrowEvent,
+} from './AgentEvent.js';
+
+export type {
+  HookPhase,
+  HookType,
+  HookFailurePolicy,
+  HookDefinition,
+  HookConfig,
+  ScriptHookConfig,
+  HttpHookConfig,
+  FunctionHookConfig,
+  WorkflowHookPhase,
+  WorkflowHookDefinition,
+  HooksFileConfig,
+  HookResult,
+  HookPhaseResult,
+} from './HookDefinition.js';
+
+export type { Session, SessionWithWorkflows, SessionOwnerType, SessionStatus } from './Session.js';
+export type { SessionTransition } from './SessionStateMachine.js';
+
+export type { Workflow, HarnessConfig } from './Workflow.js';
+export type { WorkflowStatus, WorkflowTransition } from './WorkflowStateMachine.js';
+export type { WorkflowRunTransition } from './WorkflowRunStateMachine.js';
+export type { StageRunTransition } from './StageRunStateMachine.js';
+
+export type { ChatMessage, ChatMessageMetadata } from './ChatMessage.js';
+export type { Artifact } from './Artifact.js';
+export type { WebhookRegistration, WebhookDelivery } from './Webhook.js';
+export type { CreateSessionParams, McpServerConfig } from './CreateSessionParams.js';
+export type { ILogger } from './ILogger.js';
+
+// ── v2 New Types ──
+export type { Chat, ChatStatus, ChatLocalFolder, CreateChatParams, BackgroundTaskStatus, BackgroundTaskMeta, ChatPermissionMode } from './Chat.js';
+export { DEFAULT_CHAT_PERMISSION_MODE } from './Chat.js';
+
+// ── Agent modes (mode registry, plan documents, interactive questions) ──
+export type {
+  AgentMode,
+  AgentModeDescriptor,
+  AgentPermissionMode,
+  PlanGateBehaviour,
+  PlanAction,
+  PlanStatus,
+  PlanRevision,
+  PlanCommentAnchor,
+  PlanComment,
+  PlanDecision,
+  PlanScope,
+  PlanDocument,
+  PlanCardSummary,
+  AgentQuestionOption,
+  AgentQuestion,
+  AgentQuestionResponse,
+  QuestionCardSummary,
+  AgentInteractionKind,
+  AgentInteractionStatus,
+  AgentInteraction,
+  PlanReviewResolution,
+  StageReviewOutcome,
+} from './AgentMode.js';
+export {
+  AGENT_MODE_REGISTRY,
+  agentModeDescriptor,
+  DEFAULT_AGENT_MODE,
+  AGENT_MODES,
+  isAgentMode,
+  coerceAgentMode,
+  PLAN_ACTIONS,
+  isPlanAction,
+  TERMINAL_INTERACTION_STATUSES,
+  STAGE_REVIEW_OUTCOMES,
+  isStageReviewOutcome,
+} from './AgentMode.js';
+export type {
+  WorkflowDefinition,
+  WorkflowDefinitionWithStages,
+  WorkflowSessionMode,
+  VariableDefinition,
+  SkillReference,
+  AgentReference,
+  CreateWorkflowDefinitionParams,
+  UpdateWorkflowDefinitionParams,
+} from './WorkflowDefinition.js';
+export type {
+  StageDefinition,
+  StageEdge,
+  StageEdgeType,
+  PromptDefinition,
+  PromptType,
+  RetryPolicy,
+  StageCondition,
+  CreateStageParams,
+  CreateEdgeParams,
+  ContextFilter,
+  StageSkillReference,
+  IterationConfig,
+  ArtifactManifestEntry,
+} from './StageDefinition.js';
+export type {
+  WorkflowRun,
+  WorkflowRunStatus,
+  StageRun,
+  StageRunStatus,
+  WorkflowRunWithStages,
+  CreateWorkflowRunParams,
+  WorkflowRunPermissionMode,
+  RunScratchpad,
+  RunScratchpadEntry,
+} from './WorkflowRun.js';
+export { DEFAULT_WORKFLOW_RUN_PERMISSION_MODE } from './WorkflowRun.js';
+export type { RunProfile, StageRunOverride } from './RunProfile.js';
+
+export type {
+  IPlatformClient,
+  PlatformType,
+  PaginatedResult,
+  EventSubscriptionOptions,
+  WorkflowTemplateSummary,
+} from './IPlatformClient.js';
+
+// ── Automation Types ──
+export type {
+  Automation,
+  AutomationExecution,
+  AutomationExecutionRun,
+  AutomationExecutionWithRuns,
+  AutomationWithExecutions,
+  AutomationTriggerType,
+  AutomationInputMode,
+  AutomationErrorPolicy,
+  AutomationExecutionStatus,
+  AutomationRunItemStatus,
+  AutomationRetryPolicy,
+  BatchDataFormat,
+  ParsedBatchData,
+  CreateAutomationParams,
+  UpdateAutomationParams,
+  TriggerAutomationBody,
+  // E1 — Dynamic Data Source types
+  DataSourceType,
+  DataSourceOutputFormat,
+  DataSourceConfig,
+  StaticDataSourceConfig,
+  ScriptDataSourceConfig,
+  HttpDataSourceConfig,
+  FileDataSourceConfig,
+  WorkflowScriptDataSourceConfig,
+  DataSourceSchema,
+  DataSourceTestResult,
+  // Track C — Schema-driven pipeline
+  DataFieldType,
+  DataFieldDef,
+  DataSchema,
+  IterationMode,
+  AutomationDataset,
+  PlannedIterations,
+  IterationPreview,
+} from './Automation.js';
+
+// ── Project & Codebase Types ──
+export type {
+  Project,
+  ProjectStatus,
+  ProjectSettings,
+  WorktreeRetentionPolicy,
+  CreateProjectParams,
+  UpdateProjectParams,
+  CodebaseType,
+  CodebaseStatus,
+  ProjectCodebase,
+  CodebaseSettings,
+  CreateCodebaseParams,
+  UpdateCodebaseParams,
+  ConfigType,
+  ProjectConfig,
+  CreateProjectConfigParams,
+  WorktreeRunType,
+  WorktreeStatus,
+  WorktreeInfo,
+  EntityScope,
+  ProjectWithCodebases,
+  SystemConfig,
+  ArtifactSource,
+  ArtifactType,
+  ArtifactWithSource,
+  McpServerEntry,
+  FileEntry,
+} from './Project.js';
+
+// ── Orchestrator Types ──
+export type {
+  GitRepositoryConfig,
+  PreprocessingStep,
+  PreprocessingStepType,
+  PreprocessingStepConfig,
+  CloneRepoStepConfig,
+  RunScriptStepConfig,
+  ValidateInputStepConfig,
+  SetVariableStepConfig,
+  ConditionalStepConfig,
+  ValidationRule,
+  StageResultValidation,
+  ResultValidationRule,
+  WorkflowCategory,
+  PostProcessingStep,
+  PostProcessingStepType,
+  PostProcessingStepConfig,
+  CommitAndPushStepConfig,
+  CreatePRStepConfig,
+  PostRunScriptStepConfig,
+  OrchestratorConfig,
+  OrchestratedRunParams,
+  OrchestratorContext,
+  PreprocessingResult,
+  StageValidationResult,
+  SystemWorkflowTemplate,
+  SystemStageTemplate,
+  ConfigurableVariable,
+  RunWorkspaceInfo,
+  RunUploadResult,
+} from './WorkflowOrchestrator.js';
+
+// ── Workspace Management Types ──
+export type {
+  WorkspaceOwnerType,
+  WorkspaceStatus,
+  WorkspaceWorktreeStatus,
+  WorkspaceArtifactType,
+  BrowserSessionStatus,
+  WorktreeDetail,
+  ExecutionWorkspace,
+  WorkspaceWorktreeRecord,
+  WorkspaceArtifactRecord,
+  WorkspaceInfo,
+  CreateWorkspaceParams,
+  WorkspaceFilters,
+  TrackArtifactParams,
+  WorkspaceRetentionPolicy,
+  WorkspaceManifest,
+} from './Workspace.js';
+
+// ── Checkpoint Types (workspace snapshots / rewind) ──
+export type {
+  CheckpointKind,
+  CheckpointRefKind,
+  CheckpointProvenance,
+  CheckpointStats,
+  CheckpointRecord,
+  CreateCheckpointParams,
+  CheckpointFilters,
+  CheckpointDiffFile,
+  RestoreCheckpointResult,
+  CheckpointRetentionPolicy,
+} from './Checkpoint.js';
+export { DEFAULT_CHECKPOINT_RETENTION } from './Checkpoint.js';
+
+// ── Integrated Browser Types ──
+export type {
+  BrowserMode,
+  BrowserConfig,
+  BrowserSessionDescriptor,
+  BrowserActionKind,
+  BrowserAction,
+  BrowserInspectorSelection,
+  ImportedCookie,
+} from './BrowserSession.js';
+
+// ── Integrated Terminal Types ──
+export type {
+  TerminalSessionDescriptor,
+  TerminalHostKind,
+  CreateTerminalRequest,
+  TerminalInputFrame,
+  TerminalOutputFrame,
+} from './Terminal.js';
+
+// ── Widgets + Extensions (agent-rendered UI) ──
+export type {
+  WidgetSurface,
+  WidgetPermission,
+  WidgetActionDef,
+  WidgetDescriptor,
+  WidgetInstance,
+  WidgetInstanceStatus,
+} from './Widget.js';
+export { normalizeWidgetSurface, DEFAULT_WIDGET_SURFACE } from './Widget.js';
+
+export type {
+  ExtensionScope,
+  ExtensionAuthor,
+  ExtensionEngines,
+  ExtensionManifest,
+  InstalledExtension,
+  InstallExtensionParams,
+} from './Extension.js';

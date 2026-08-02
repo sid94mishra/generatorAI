@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<title>Document Studio</title>
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6M9 9h1"/></svg>
+        Document Studio
+      </div>
+
+      <div class="type-tabs" id="typeTabs"></div>
+
+      <input class="title-input" id="titleInput" spellcheck="false" />
+
+      <div class="header-actions">
+        <div class="view-toggle" id="viewToggle">
+          <button data-view="edit">Edit</button>
+          <button data-view="preview">Preview</button>
+        </div>
+        <button class="btn primary" id="exportBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          Export
+        </button>
+      </div>
+    </header>
+
+    <div class="body">
+      <aside class="outline-pane">
+        <div class="pane-header"><span id="outlineLabel">Outline</span></div>
+        <div class="pane-scroll" id="outlineList"></div>
+        <div class="add-menu-wrap">
+          <button class="btn small" id="addBtn" style="width:100%; justify-content:center;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            <span id="addBtnLabel">Add block</span>
+          </button>
+          <div class="add-menu" id="addMenu"></div>
+        </div>
+      </aside>
+
+      <main class="canvas-wrap" id="canvasWrap">
+        <div id="canvas"></div>
+      </main>
+
+      <aside class="activity-pane">
+        <div class="pane-header">Activity</div>
+        <div class="pane-scroll">
+          <div class="activity-list" id="activityList"></div>
+        </div>
+        <div class="feedback-box">
+          <textarea id="feedbackText" placeholder="Tell the agent what to change…"></textarea>
+          <div class="feedback-actions">
+            <button class="btn ghost small" id="noteBtn" title="Leave a silent note for next turn">Just note it</button>
+            <button class="btn primary small" id="askBtn">Ask agent</button>
+          </div>
+          <div class="hint">"Ask agent" sends this now. "Just note it" saves it for their next reply.</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="./vendor/pdf-lib.min.js"></script>
+  <script src="./vendor/docx.iife.js"></script>
+  <script src="./vendor/pptxgen.bundle.js"></script>
+  <script src="./vendor/xlsx.full.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

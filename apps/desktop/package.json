@@ -1,0 +1,177 @@
+{
+  "name": "@generatorai/desktop",
+  "version": "0.0.1-alpha.1",
+  "private": true,
+  "description": "GeneratorAI Desktop — native Electron shell with full parity to the web UI and CLI",
+  "author": "GeneratorAI",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build:bundle": "tsup",
+    "build:resources": "node scripts/build-resources.mjs",
+    "build": "pnpm run build:bundle && pnpm run build:resources",
+    "dev": "node scripts/dev.mjs",
+    "start": "pnpm run build && electron .",
+    "preview": "pnpm run build && cross-env GENERATORAI_DESKTOP_MODE=standalone electron .",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "rebuild": "electron-rebuild -f -w better-sqlite3 -w node-pty",
+    "package": "pnpm run build && electron-builder",
+    "package:dir": "pnpm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "node-pty": "^1.1.0",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.18.1",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "playwright-core": "^1.58.2",
+    "tsup": "^8.3.5"
+  },
+  "build": {
+    "appId": "ai.generatorai.desktop",
+    "productName": "GeneratorAI",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "dist/**/*",
+      "resources/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../../apps/server/dist",
+        "to": "server/dist"
+      },
+      {
+        "from": "../../apps/web/dist",
+        "to": "web/dist"
+      },
+      {
+        "from": "../../templates",
+        "to": "templates"
+      }
+    ],
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**",
+      "**/node_modules/node-pty/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.png",
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GeneratorAI",
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "resources/icon.png",
+      "category": "public.app-category.developer-tools",
+      "darkModeSupport": true,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "GeneratorAI needs microphone access for voice input in chats.",
+        "NSCameraUsageDescription": "GeneratorAI needs camera access when an agent captures video in the integrated browser.",
+        "NSAppleEventsUsageDescription": "GeneratorAI needs automation access to drive local developer tooling on your behalf.",
+        "LSMinimumSystemVersion": "11.0"
+      }
+    },
+    "dmg": {
+      "contents": [
+        { "x": 140, "y": 180, "type": "file" },
+        { "x": 400, "y": 180, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "icon": "resources/icon.png",
+      "category": "Development",
+      "synopsis": "Agentic developer workspace",
+      "description": "GeneratorAI Desktop — native shell with full parity to the web UI and CLI.",
+      "desktop": {
+        "entry": {
+          "Name": "GeneratorAI",
+          "StartupWMClass": "GeneratorAI",
+          "MimeType": "x-scheme-handler/generatorai;",
+          "Keywords": "ai;agent;developer;automation;"
+        }
+      }
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libsecret-1-0"
+      ]
+    },
+    "rpm": {
+      "fpm": [
+        "--rpm-rpmbuild-define=_build_id_links none"
+      ]
+    },
+    "protocols": [
+      {
+        "name": "GeneratorAI",
+        "schemes": [
+          "generatorai"
+        ]
+      }
+    ]
+  }
+}

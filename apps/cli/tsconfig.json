@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "jsx": "react-jsx",
+    "composite": true,
+    // `@generatorai/client-runtime` is isomorphic and typed against WebCrypto
+    // and IndexedDB. Node 20 provides the runtime half (globalThis.crypto);
+    // the DOM lib supplies the *types*. The CLI must not actually use browser
+    // APIs — only the shared auth runtime's declarations need them.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/__tests__/**"]
+}

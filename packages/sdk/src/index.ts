@@ -1,0 +1,124 @@
+// ────────────────────────────────────────────────────────────────
+// @generatorai/sdk — Main Entry Point
+//
+// The simplest way to use GeneratorAI:
+//
+//   import { createGeneratorAI } from '@generatorai/sdk';
+//   const ai = await createGeneratorAI({ provider: 'copilot' });
+//   const run = await ai.workflows.run(defId, { variables: { code: '...' } });
+//
+// ────────────────────────────────────────────────────────────────
+
+// ── Main Entry ──
+export { GeneratorAI, createGeneratorAI } from './GeneratorAI.js';
+export type { GeneratorAIConfig, ResolvedConfig, LoggerConfig, SandboxConfig } from './config.js';
+// Database driver seam (DB-01) — config-level, part of the stable surface.
+export type { DatabaseConfig, DatabaseDriver } from '@generatorai/db';
+
+// ── Facades ──
+export {
+  WorkflowFacade,
+  ChatFacade,
+  AutomationFacade,
+  EventFacade,
+  ScriptFacade,
+  ToolFacade,
+  ProjectFacade,
+  HookFacade,
+  HitlFacade,
+  WorkspaceFacade,
+  tool,
+} from './facades/index.js';
+
+export type {
+  CreateWorkflowInput,
+  RunOptions,
+  OrchestrateOptions,
+  StreamOptions,
+  CreateChatOptions,
+  RunScriptOptions,
+  ToolConfig,
+  ToolDefinition,
+  CreateProjectInput,
+  UpdateProjectInput,
+  LinkCodebaseInput,
+  CreateWorktreeOptions,
+  UploadConfigInput,
+  HookContext,
+  HookResult,
+  HookHandler,
+  InterruptOptions,
+  InterruptResolution,
+  CreateWorkspaceInput,
+  WorkspaceFilters,
+} from './facades/index.js';
+
+// ── Builders (re-export from shared) ──
+export { WorkflowBuilder, StageBuilder } from '@generatorai/shared';
+
+// ── Types (selective re-export from shared) ──
+export type {
+  AgentEvent,
+  AgentEventKind,
+  PersistedEvent,
+  WorkflowDefinition,
+  WorkflowDefinitionWithStages,
+  StageDefinition,
+  StageEdge,
+  WorkflowRun,
+  StageRun,
+  Chat,
+  ChatMessage,
+  ChatStatus,
+  Automation,
+  AutomationExecution,
+  CreateAutomationParams,
+  UpdateAutomationParams,
+  Session,
+  Artifact,
+  HookDefinition,
+  HookConfig,
+  WorkspaceOwnerType,
+  WorkspaceStatus,
+} from '@generatorai/shared';
+
+// ── Errors (re-export from shared) ──
+export {
+  GeneratorAIError,
+  ValidationError,
+  HarnessConnectionError,
+} from '@generatorai/shared';
+
+// ── State Machines (stable, pure — re-export from core) ──
+export {
+  WorkflowRunStateMachine,
+  StageRunStateMachine,
+  SessionStateMachine,
+} from '@generatorai/core';
+
+// ── Harness extension point (bring-your-own-harness) ──
+// `IAgentHarness` is part of the STABLE surface: an integrator can implement it
+// and pass the instance as `config.provider` to run on any harness they like.
+// See ./internal for the repository ports / service classes used for deeper,
+// non-stable composition.
+export type { IAgentHarness } from '@generatorai/core';
+
+// ── Harness provider types ──
+export type {
+  HarnessType,
+  HarnessProviderConfig,
+} from '@generatorai/agent-harness-providers';
+
+// ────────────────────────────────────────────────────────────────
+// ADVANCED / UNSTABLE surface
+//
+// The raw core service graph (CoreServices, service classes, repository
+// ports, DAG utilities) is intentionally NOT exported from the main entry.
+// It changes across minor versions and is not covered by the SDK's semver
+// contract (see API-STABILITY.md). Power users who accept that can import it
+// explicitly:
+//
+//   import { WorkflowOrchestrator } from '@generatorai/sdk/internal';
+//
+// Prefer the facades (`ai.workflows`, `ai.chat`, …) — they are the stable API.
+// ────────────────────────────────────────────────────────────────

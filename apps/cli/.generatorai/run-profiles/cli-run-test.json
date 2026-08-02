@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "name": "CLI Run Test - Run Profile",
+  "description": "Run profile for CLI Run Test",
+  "workflowDefinitionId": "1d4e8a80-19eb-4ad2-811b-64eb0c24cc1f",
+  "variables": {
+    "word": "OK"
+  },
+  "permissionMode": "bypassPermissions",
+  "stageOverrides": [
+    {
+      "stageName": "S1",
+      "stageIndex": 0,
+      "skip": false
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<title>Web App Designer</title>
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3H4z"/><path d="M4 8h16v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M8 12h8M8 15h5"/></svg>
+        Web App Designer
+      </div>
+
+      <div class="header-actions" id="headerActions" style="display:none;">
+        <div class="seg" id="viewSeg">
+          <button data-view="preview">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            Preview
+          </button>
+          <button data-view="code">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18-6-6 6-6M15 6l6 6-6 6"/></svg>
+            Code
+          </button>
+        </div>
+        <div class="seg" id="deviceSeg">
+          <button data-device="desktop" title="Desktop">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="1.5"/><path d="M8 21h8M12 17v4"/></svg>
+          </button>
+          <button data-device="tablet" title="Tablet">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/></svg>
+          </button>
+          <button data-device="mobile" title="Mobile">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+          </button>
+        </div>
+        <button class="btn ghost small" id="newBtn">New</button>
+        <button class="btn primary" id="exportBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          Export
+        </button>
+      </div>
+    </header>
+
+    <div class="body" id="bodyGrid">
+      <aside class="history-pane" id="historyPane" style="display:none;">
+        <div class="pane-header">Versions</div>
+        <div class="pane-scroll" id="historyList"></div>
+      </aside>
+
+      <main class="canvas-col" id="canvasCol">
+        <!-- populated by app.js: either the empty-state hero, or the toolbar + canvas -->
+      </main>
+
+      <aside class="chat-pane" id="chatPane" style="display:none;">
+        <div class="pane-header">Activity</div>
+        <div class="pane-scroll">
+          <div id="activityList"></div>
+        </div>
+        <div class="feedback-box">
+          <textarea id="feedbackText" placeholder="What should change?"></textarea>
+          <button class="btn primary small" id="askBtn" style="justify-content:center;">Ask agent</button>
+          <div class="hint">Sends this to the agent now, alongside a live preview of what you're looking at.</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "name": "E2E Test Gen Pipeline - Run Profile",
+  "description": "Run profile for E2E Test Gen Pipeline",
+  "workflowDefinitionId": "97768686-e6ed-4a06-9401-03186785eb16",
+  "variables": {
+    "repo_path_target": "C:\\Users\\sidmishra\\Desktop\\New folder (2)\\GeneratorAI\\packages\\shared\\src",
+    "test_focus": "error handling, validation, and configuration parsing",
+    "test_framework": "Vitest",
+    "language": "TypeScript"
+  },
+  "permissionMode": "bypassPermissions",
+  "stageOverrides": [
+    {
+      "stageName": "Codebase Analysis",
+      "stageIndex": 0,
+      "skip": false
+    },
+    {
+      "stageName": "Unit Test Generation",
+      "stageIndex": 1,
+      "skip": false
+    },
+    {
+      "stageName": "Integration Test Generation",
+      "stageIndex": 2,
+      "skip": false
+    },
+    {
+      "stageName": "Test Report",
+      "stageIndex": 3,
+      "skip": false
+    }
+  ]
+}

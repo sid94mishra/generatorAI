@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Feedback Form</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 14px;
+        background: transparent;
+        color: inherit;
+      }
+      .card {
+        border: 1px solid #d0d7de;
+        border-radius: 10px;
+        background: #f6f8fa;
+        padding: 14px 16px;
+      }
+      h3 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+      }
+      p.muted {
+        color: #6e7681;
+        font-size: 12px;
+        margin: 0 0 10px 0;
+      }
+      textarea {
+        width: 100%;
+        min-height: 60px;
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        padding: 6px 8px;
+        font-size: 13px;
+        background: #fff;
+        box-sizing: border-box;
+        font-family: inherit;
+        resize: vertical;
+      }
+      button {
+        margin-top: 8px;
+        border: 1px solid #1f6feb;
+        background: #1f6feb;
+        color: white;
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-size: 13px;
+        cursor: pointer;
+        font-weight: 500;
+      }
+      button:hover {
+        opacity: 0.9;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      @media (prefers-color-scheme: dark) {
+        .card {
+          background: #161b22;
+          border-color: #30363d;
+        }
+        textarea {
+          background: #0d1117;
+          border-color: #30363d;
+          color: #e6edf3;
+        }
+        p.muted {
+          color: #7d8590;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h3 id="title">Feedback</h3>
+      <p class="muted" id="prompt">Type your feedback and click Send.</p>
+      <textarea id="input" placeholder="Your feedback..."></textarea>
+      <button id="send" disabled>Send</button>
+    </div>
+    <script>
+      const inputEl = document.getElementById('input');
+      const sendBtn = document.getElementById('send');
+      const titleEl = document.getElementById('title');
+      const promptEl = document.getElementById('prompt');
+
+      inputEl.addEventListener('input', () => {
+        sendBtn.disabled = !inputEl.value.trim();
+      });
+
+      sendBtn.addEventListener('click', () => {
+        const text = inputEl.value.trim();
+        if (!text) return;
+        window.parent.postMessage(
+          {
+            type: 'widget:action',
+            action: 'submit',
+            payload: { text, submittedAt: Date.now() },
+          },
+          '*',
+        );
+        window.parent.postMessage(
+          { type: 'widget:state', state: { submitted: text } },
+          '*',
+        );
+        inputEl.value = '';
+        sendBtn.disabled = true;
+        promptEl.textContent = 'Sent to the agent.';
+      });
+
+      window.addEventListener('message', (ev) => {
+        const m = ev.data;
+        if (!m || typeof m !== 'object') return;
+        if (m.type === 'widget:init') {
+          const props = m.props ?? {};
+          if (typeof props.title === 'string') titleEl.textContent = props.title;
+          if (typeof props.prompt === 'string') promptEl.textContent = props.prompt;
+          if (typeof props.placeholder === 'string') inputEl.placeholder = props.placeholder;
+        }
+      });
+
+      window.parent.postMessage({ type: 'widget:hello' }, '*');
+      requestAnimationFrame(() =>
+        window.parent.postMessage({ type: 'widget:ready' }, '*'),
+      );
+    </script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://generatorai.dev/schemas/extension.v2.json",
+  "id": "genai.hello-world",
+  "name": "Hello World",
+  "version": "2.0.0",
+  "description": "Reference v2 extension — showcases a counter widget, a feedback form, and a notes canvas app using the new loadExtension(ai) API.",
+  "author": { "name": "GeneratorAI" },
+  "license": "MIT",
+  "engines": { "generatorai": ">=1.0.0" },
+  "entry": "./index.js",
+  "permissions": ["canvas:open"]
+}
