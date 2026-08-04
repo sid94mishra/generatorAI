@@ -2,7 +2,7 @@
 // @generatorai/db — Migration runner (extracted from index.ts)
 // ────────────────────────────────────────────────────────────────
 
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import type { AppDatabase } from '../index.js';
 
 /** Run migrations — creates tables if they don't exist */

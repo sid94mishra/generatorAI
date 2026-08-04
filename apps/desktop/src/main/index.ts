@@ -13,7 +13,7 @@ import { log } from './logger';
 import { loadSettings } from './config';
 import { getServerManager } from './server-manager';
 import { getWindowManager } from './window-manager';
-import { getNativeBrowserHost } from './browser-host';
+import { getNativeBrowserHost, nativeBrowserEnabled } from './browser-host';
 import { setIpcToken } from './cdp/ipc-token';
 import { registerIpc } from './ipc';
 import { buildMenu, syncMenuThemeFromSettings } from './menu';
@@ -47,8 +47,7 @@ let ipcToken: string | null = null;
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  const nativeBrowserFlag = process.env['GENERATORAI_DESKTOP_NATIVE_BROWSER'] === '1';
-  if (nativeBrowserFlag) {
+  if (nativeBrowserEnabled()) {
     ipcToken = randomUUID();
     setIpcToken(ipcToken);
   }

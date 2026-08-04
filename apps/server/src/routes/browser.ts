@@ -23,6 +23,8 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import type { Container } from '../composition-root.js';
 import type { BrowserInspectorSelection } from '@generatorai/shared';
+import type { BrowserConfig } from '@generatorai/shared';
+import type { BrowserInputEvent } from '@generatorai/core';
 import { BrowserConfigSchema } from '@generatorai/shared';
 
 type WorkspaceIdParams = { id: string };
@@ -90,7 +92,7 @@ export function createBrowserRoutes(container: Container): Router {
         ...(workspace.browserConfig ?? {}),
         ...(parsed.data.config ?? {}),
         enabled: true,
-      } as import('@generatorai/shared').BrowserConfig;
+      } as BrowserConfig;
       workspace.browserConfig = merged as Record<string, unknown>;
 
       const descriptor = await browserService.ensureStarted(workspace);
@@ -422,7 +424,7 @@ export function createBrowserRoutes(container: Container): Router {
   router.post('/input', async (req, res, next) => {
     try {
       const workspaceId = idOf(req as BrowserRequest);
-      const event = req.body as import('@generatorai/core').BrowserInputEvent;
+      const event = req.body as BrowserInputEvent;
       if (!event || typeof event !== 'object' || typeof (event as { type?: unknown }).type !== 'string') {
         res.status(400).json({ error: { code: 'VALIDATION', message: 'Missing event.type' } });
         return;

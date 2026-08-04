@@ -1,18 +1,18 @@
 {
   "name": "@generatorai/cli",
-  "version": "0.1.0",
+  "version": "0.0.1-alpha.1",
   "private": true,
   "type": "module",
   "bin": {
-    "generatorai": "./dist/index.js"
+    "generatorai": "./dist-bundle/generatorai.mjs"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "bundle": "node esbuild.config.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src/",
-    "dev": "tsx --import ./src/instrumentation.ts src/index.tsx",
-    "cli": "tsx --import ./src/instrumentation.ts src/index.tsx"
+    "dev": "tsx --import ./src/instrumentation.ts src/index.tsx"
   },
   "dependencies": {
     "@generatorai/agent-harness-providers": "workspace:*",
@@ -42,6 +42,7 @@
   "devDependencies": {
     "@types/eventsource": "^3.0.0",
     "@types/react": "^18.3.28",
+    "esbuild": "^0.25.0",
     "ink-testing-library": "^4.0.0",
     "tsx": "^4.19.0"
   }

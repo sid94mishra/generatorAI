@@ -261,7 +261,7 @@ Native Electron shell with **full parity** to the web UI and (via the shared ser
 
 Main process modules: `server-manager` (spawn / health‑gate / crash‑restart / graceful `SIGTERM`), `window-manager` (splash + main window + state persistence + History‑API navigation), `menu` (every route + actions), `tray`, `ipc` (native dialogs, theme, server status, settings), `downloads` (native Save‑As), `deep-link` (`generatorai://`), `updater` (electron‑updater scaffold). The `preload` exposes `window.generatoraiDesktop` and shims `showDirectoryPicker` to a native dialog. Built with `tsup` (CJS main/preload); packaged with `electron-builder`.
 
-Runtime data is isolated under the OS user‑data dir (`<userData>/data/{generatorai.db,workspaces,artifacts}`). Run standalone with `pnpm --filter @generatorai/desktop start` (after `pnpm --filter @generatorai/web build`), or in dev with `pnpm --filter @generatorai/desktop dev` against the Vite dev server. E2E smoke: `node agent-tests/desktop-smoke.mjs`.
+Runtime data is isolated under the OS user‐data dir (`<userData>/data/{generatorai.db,workspaces,artifacts}`). Run standalone with `pnpm preview:desktop` (after `pnpm --filter @generatorai/web build`), or in dev with `pnpm dev:desktop` against the Vite dev server. E2E smoke: `node agent-tests/desktop-smoke.mjs`.
 
 **Integrated Browser + Terminal parity**: because the desktop main process spawns the same server binary the web build talks to, both features work identically inside Electron — no re-implementation. Two desktop-specific niceties:
 

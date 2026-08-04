@@ -33,10 +33,12 @@ import { randomUUID } from 'node:crypto';
 import type {
   Browser,
   BrowserContext,
+  Locator,
   Page,
 } from 'playwright';
 import { chromium } from 'playwright';
 import type { ILogger } from '@generatorai/shared';
+import type { ImportedCookie } from '@generatorai/shared';
 import { matchesAnyHostPattern } from '@generatorai/shared';
 import type {
   BrowserHandle,
@@ -325,7 +327,7 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
     }
   }
 
-  async addCookies(handle: BrowserHandle, cookies: import('@generatorai/shared').ImportedCookie[]): Promise<void> {
+  async addCookies(handle: BrowserHandle, cookies: ImportedCookie[]): Promise<void> {
     const entry = await this.entryFor(handle);
     if (cookies.length === 0) return;
     await entry.context.addCookies(cookies);
@@ -526,7 +528,7 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
     return { url, title, snapshot };
   }
 
-  private locatorForRef(entry: HostEntry, ref: string): import('playwright').Locator | null {
+  private locatorForRef(entry: HostEntry, ref: string): Locator | null {
     const selector = entry.refMap.get(ref);
     if (!selector) return null;
     return this.locatorFromSelector(entry.page, selector);
@@ -545,7 +547,7 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
     return { ok: false, error: `Unknown ${label} '${ref}'. Call readPage to refresh.` };
   }
 
-  private locatorFromSelector(page: Page, selector: string): import('playwright').Locator {
+  private locatorFromSelector(page: Page, selector: string): Locator {
     let base = selector;
     let nth: number | null = null;
     const nthMatch = /\|nth=(\d+)$/.exec(selector);
@@ -553,7 +555,7 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
       nth = Number(nthMatch[1]);
       base = selector.slice(0, nthMatch.index);
     }
-    let locator: import('playwright').Locator;
+    let locator: Locator;
     const roleMatch = /^role=([a-zA-Z]+)(?:\[name=(.*)\])?$/.exec(base);
     if (roleMatch) {
       const role = roleMatch[1]!;

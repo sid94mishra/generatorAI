@@ -1,0 +1,217 @@
+name: Release
+
+# Tag-driven. The tag decides both the version and the update channel:
+#
+#   v0.0.1-alpha.3  → alpha.yml   (GitHub pre-release)
+#   v0.1.0-beta.1   → beta.yml    (GitHub pre-release)
+#   v1.0.0          → latest.yml  (full release)
+#
+# The channel split is what stops someone on the stable channel being offered
+# an alpha build: electron-updater only reads the manifest for its own channel.
+# `alpha` and `beta` are deliberate choices — electron-updater's GitHub
+# provider hardcodes those two names when deciding whether a pre-release is a
+# valid upgrade, so a custom channel ("nightly", say) would leave testers
+# stranded with no path back to stable.
+#
+# Builds never publish. Each platform emits artifacts and a single release job
+# assembles them: three matrix legs racing to create the same GitHub release is
+# a documented way to end up with duplicates or a half-populated release.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Update channel to publish to'
+        required: true
+        default: 'alpha'
+        type: choice
+        options: [alpha, beta, latest]
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Resolve the release identity once ────────────────────────────────────
+  # Every downstream job reads these instead of re-deriving them, so a build
+  # and the release it lands in can never disagree about the channel.
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.meta.outputs.channel }}
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      ref: ${{ github.sha }}
+    steps:
+      - id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            channel="${{ github.event.inputs.channel }}"
+          else
+            case "$tag" in
+              *-alpha*) channel=alpha  ;;
+              *-beta*)  channel=beta   ;;
+              *)        channel=latest ;;
+            esac
+          fi
+
+          # Reject a malformed tag before three platform builds and a public
+          # release get spent on it.
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$tag' is not a valid release tag (expected vMAJOR.MINOR.PATCH[-prerelease])."
+            exit 1
+          fi
+
+          if [ "$channel" = latest ]; then prerelease=false; else prerelease=true; fi
+
+          {
+            echo "channel=$channel"
+            echo "tag=$tag"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Releasing $tag on the '$channel' channel (prerelease=$prerelease)."
+
+  # ── Gate the release on the same checks a PR gets ────────────────────────
+  # CI runs these on the branch, but a tag can point at any commit and nothing
+  # guarantees the tagged one was ever green. Publishing is irreversible for
+  # anyone whose client has already seen the manifest, so the cost of finding
+  # out here instead is one job.
+  preflight:
+    name: Preflight
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm turbo build
+      - run: pnpm turbo lint
+      - run: pnpm turbo typecheck
+      - run: pnpm turbo test
+      - run: pnpm run check:security
+
+  # ── Build installers ─────────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.os }})
+    needs: [prepare, preflight]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not discard the artifacts of the others —
+      # the release job decides whether a partial set is worth shipping.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Pinned to the commit preflight validated, so a push landing
+          # mid-release cannot change what gets built.
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # Builds the web SPA, bundles the server to a single file, and installs
+      # the server's runtime dependencies beside it. Everything
+      # electron-builder packages.
+      - name: Build distributables
+        run: pnpm --filter @generatorai/desktop prepack:dist
+
+      # `--publish never`: electron-builder still writes the channel manifest
+      # (alpha.yml and friends) that electron-updater reads, it just uploads
+      # nothing. The release job below does that, once.
+      #
+      # Signing credentials are passed whole. The build refuses to start if a
+      # group is half-set, rather than quietly producing an unsigned artifact.
+      - name: Package
+        working-directory: apps/desktop
+        env:
+          GENERATORAI_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: pnpm run electron-builder --publish never
+
+      # electron-updater trusts the manifest completely, and a target that
+      # overwrites another's output invalidates it without failing the build.
+      - name: Verify update manifest
+        working-directory: apps/desktop
+        run: pnpm run verify:release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.rpm
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/*.yml
+            !apps/desktop/release/builder-debug.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── Publish one release from all three platforms' output ─────────────────
+  release:
+    name: Publish release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: List assets
+        run: ls -lh release-assets
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: GeneratorAI ${{ needs.prepare.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ needs.prepare.outputs.prerelease }}
+          make_latest: ${{ needs.prepare.outputs.channel == 'latest' }}
+          files: release-assets/*
+          # An empty release is worse than a failed one: electron-updater would
+          # serve a manifest with nothing behind it.
+          fail_on_unmatched_files: true
+

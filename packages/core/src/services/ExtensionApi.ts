@@ -9,7 +9,7 @@
 // v2 authoring surface. See docs/EXTENSIONS_V2_PLAN.md §4.
 // ────────────────────────────────────────────────────────────────
 
-import { EventEmitter } from 'node:events';
+import type { EventEmitter } from 'node:events';
 import type {
   WidgetActionDef,
   WidgetPermission,

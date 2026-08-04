@@ -28,6 +28,7 @@ import type {
 } from '@generatorai/shared';
 import type { ILogger } from '@generatorai/shared';
 import type { HookExecutor } from './HookExecutor.js';
+import type { FunctionHookHandler } from './HookExecutor.js';
 
 // ── Error Classes ──
 
@@ -212,7 +213,7 @@ export class WorkflowScriptLoader {
         try {
           const unregister = this.hookExecutor.registerFunctionHandler(
             key,
-            handler as unknown as import('./HookExecutor.js').FunctionHookHandler,
+              handler as unknown as FunctionHookHandler,
           );
           this.hookUnregisters.set(key, unregister);
           this.logger.debug(`[ScriptLoader] Registered inline hook: ${key}`);

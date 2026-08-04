@@ -113,7 +113,7 @@ export function GeneralSection() {
             with real-time streaming.
           </p>
           <div className="mt-3 flex gap-3 text-xs text-muted-foreground">
-            <span>Version 0.1.0</span>
+            <span>Version {__APP_VERSION__}</span>
             <span>•</span>
             <span>Node.js runtime</span>
           </div>

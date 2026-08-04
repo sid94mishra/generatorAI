@@ -22,6 +22,7 @@ import * as fsSync from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
+  AgentEvent,
   BrowserAction,
   BrowserConfig,
   BrowserInspectorSelection,
@@ -540,7 +541,7 @@ export class BrowserService {
    */
   async interact(workspaceId: string, event: BrowserInputEvent): Promise<void> {
     const record = this.mustRecord(workspaceId);
-    record.fsm.status === 'idle' && record.fsm.transition('sys:active');
+    if (record.fsm.status === 'idle') record.fsm.transition('sys:active');
     record.lastActivityAt = Date.now();
     await record.bridge.interact(record.handle, event);
     await this.updateWorkspaceRow(workspaceId, {
@@ -1197,7 +1198,7 @@ export class BrowserService {
    */
   private async emitBrowserEvent(
     workspaceId: string,
-    event: import('@generatorai/shared').AgentEvent,
+    event: AgentEvent,
   ): Promise<void> {
     const record = this.sessions.get(workspaceId);
     const chain = record?.emitQueue ?? Promise.resolve();

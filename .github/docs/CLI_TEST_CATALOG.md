@@ -14,7 +14,7 @@ The CLI client factory `createClient()` ([apps/cli/src/platform/createClient.ts]
 
 ## Invocation surface used during testing
 
-- `pnpm --filter @generatorai/cli cli -- …` (≡ `tsx --import instrumentation.ts src/index.tsx`) — the documented dev/runtime path. **Compiled `dist/index.js` cannot be run standalone** today because `@generatorai/shared` `main` points at `./src/index.ts` and the Node ESM resolver in dist mode can't load `.ts` re-exports → `ERR_MODULE_NOT_FOUND`. Use `pnpm cli` (tsx).
+- `pnpm dev:cli -- …` (≡ `tsx --import instrumentation.ts src/index.tsx`) — the documented dev/runtime path. **Compiled `dist/index.js` cannot be run standalone** today because `@generatorai/shared` `main` points at `./src/index.ts` and the Node ESM resolver in dist mode can't load `.ts` re-exports → `ERR_MODULE_NOT_FOUND`. Use `pnpm dev:cli` (tsx), or the bundled `dist-bundle/generatorai.mjs`.
 - `--json`, `--server`, `--api-key`, `--config-profile`, `--verbose`, `--no-color` global flags.
 
 ## Legend
@@ -311,7 +311,7 @@ The CLI client factory `createClient()` ([apps/cli/src/platform/createClient.ts]
 ## 📝 Observations / known limitations (no fix this session)
 
 - **Direct mode** is a stub — `mode:'direct'` always throws `"Direct mode is not yet implemented."` (per [createClient.ts](../../apps/cli/src/platform/createClient.ts) line 33). All testing is therefore against HTTP mode. The catalog notes this prominently.
-- **Compiled `dist/index.js` cannot be run via plain `node`** because `@generatorai/shared` `main` points at `./src/index.ts` (good for tsx dev) and Node 26 ESM can't resolve `./types/index.js` re-exports from inside the TS file. Use `pnpm --filter @generatorai/cli cli -- <args>` (tsx) or run from a packaged release. Same issue affects `apps/server/dist`.
+- **Compiled `dist/index.js` cannot be run via plain `node`** because `@generatorai/shared` `main` points at `./src/index.ts` (good for tsx dev) and Node 26 ESM can't resolve `./types/index.js` re-exports from inside the TS file. Use `pnpm dev:cli -- <args>` (tsx), or the bundled `dist-bundle/generatorai.mjs` produced by `pnpm --filter @generatorai/cli bundle`. Same issue affects `apps/server/dist`.
 - **libuv assertion on error exit (Windows)** — see O8. Cosmetic; affects every command that prints an error and exits non-zero. Possible fix: drop or delay-shutdown the OTel SDK in `instrumentation.ts` before `process.exit`.
 - **`--json` on error path** still prints human text — UX inconsistency.
 - **`orchestrator`, `automation`, `workspace` commands lack ID-prefix resolution** that the `workflow`, `run`, `chat`, `project` commands already have (via `resolveDefId`, `resolveRunId`, etc.). Mildly inconsistent — opportunity for a shared `resolvePrefix(scope, id)` helper.

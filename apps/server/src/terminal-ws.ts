@@ -30,6 +30,7 @@
 
 import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer } from 'ws';
+import type { WebSocket } from 'ws';
 import type { Container } from './composition-root.js';
 import { authorizeWebSocketUpgrade } from './middleware/wsAuth.js';
 import type { TerminalInputFrame, TerminalOutputFrame } from '@generatorai/shared';
@@ -109,7 +110,7 @@ export function attachTerminalWebSocket(server: HttpServer, container: Container
   });
 
   function handleConnection(
-    ws: import('ws').WebSocket,
+    ws: WebSocket,
     workspaceId: string,
     sessionId: string,
   ): void {
@@ -230,7 +231,7 @@ export function attachTerminalWebSocket(server: HttpServer, container: Container
     });
   }
 
-  function sendJson(ws: import('ws').WebSocket, frame: TerminalOutputFrame): void {
+  function sendJson(ws: WebSocket, frame: TerminalOutputFrame): void {
     try {
       ws.send(JSON.stringify(frame));
     } catch {

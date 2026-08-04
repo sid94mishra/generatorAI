@@ -3,6 +3,13 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { visualizer } from 'rollup-plugin-visualizer';
 import { resolve } from 'path';
+import { readFileSync } from 'fs';
+
+// Read once at config time so the About panel can show the shipped version
+// instead of a hardcoded literal that silently goes stale.
+const { version: APP_VERSION } = JSON.parse(
+  readFileSync(resolve(__dirname, '..', '..', 'package.json'), 'utf8'),
+) as { version: string };
 
 // WEB-03: rollup-plugin-visualizer emits `dist/stats.html` on every
 // production build. CI reads the companion `dist/stats.json` to enforce
@@ -10,6 +17,9 @@ import { resolve } from 'path';
 // The visualizer is cheap (writes after bundle finalization) so it's
 // always on rather than gated by an env flag.
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [
     react(),
     tailwindcss(),

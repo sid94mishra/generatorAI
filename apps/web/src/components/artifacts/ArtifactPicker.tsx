@@ -27,10 +27,13 @@ export function ArtifactPicker({
   multiple = true,
   className = '',
 }: ArtifactPickerProps) {
-  // Use merged artifacts when projectId is provided, otherwise system-only
-  const { data: availableArtifacts, isLoading } = projectId
-    ? useAvailableArtifacts(projectId, type)
-    : useSystemArtifacts(type);
+  // Both hooks run every render — calling them conditionally changes React's
+  // hook order the moment `projectId` appears or disappears, which corrupts
+  // hook state. `useAvailableArtifacts` is already internally gated on
+  // `projectId`, so the idle one simply never fetches.
+  const merged = useAvailableArtifacts(projectId, type);
+  const systemOnly = useSystemArtifacts(type);
+  const { data: availableArtifacts, isLoading } = projectId ? merged : systemOnly;
 
   // Skills the user disabled in Settings → Skills are hidden here so they
   // can't be attached to a chat/stage/workflow (kept if already selected so

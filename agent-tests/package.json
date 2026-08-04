@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test",
     "test:e2e": "playwright test --config=playwright.config.ts",
     "test:ui": "playwright test --config=playwright.config.ts --ui",
     "report": "playwright show-report test-results/html-report"

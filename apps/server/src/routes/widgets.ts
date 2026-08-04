@@ -15,6 +15,7 @@
 
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
+import type { WidgetInstance } from '@generatorai/shared';
 import {
   CreateWidgetInstanceSchema,
   DispatchWidgetActionSchema,
@@ -31,7 +32,7 @@ export function createWidgetRoutes(container: Container): Router {
     const workflowRunId =
       typeof req.query['workflowRunId'] === 'string' ? req.query['workflowRunId'] : undefined;
     const sessionId = typeof req.query['sessionId'] === 'string' ? req.query['sessionId'] : undefined;
-    let items: import('@generatorai/shared').WidgetInstance[] = [];
+    let items: WidgetInstance[] = [];
     if (chatId) items = await widgetService.listByChat(chatId);
     else if (workflowRunId) items = await widgetService.listByRun(workflowRunId);
     else if (sessionId) items = await widgetService.listBySession(sessionId);

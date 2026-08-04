@@ -60,7 +60,7 @@ The binary is available at `apps/cli/dist/index.js`. During development use the 
 pnpm dev -- <command> [options]
 
 # Or via the monorepo root
-pnpm --filter @generatorai/cli cli -- <command> [options]
+pnpm --filter @generatorai/cli dev -- <command> [options]
 ```
 
 To install globally (optional):

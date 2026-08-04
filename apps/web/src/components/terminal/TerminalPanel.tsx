@@ -798,7 +798,8 @@ function TerminalSearchBar({
           if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
           if (e.key === 'Enter') {
             e.preventDefault();
-            e.shiftKey ? onPrev() : onNext();
+            if (e.shiftKey) onPrev();
+            else onNext();
           }
         }}
         placeholder="Find…"

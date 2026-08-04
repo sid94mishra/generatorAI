@@ -1,7 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
 // Dedicated config for the deterministic Web UI E2E suite under e2e/.
-// Run:  cd agent-tests && pnpm test        (requires web :5173 + server :3100)
+// Run:  cd agent-tests && pnpm test:e2e    (requires web :5173 + server :3100)
+// Deliberately absent from the `test` task turbo runs in CI: these drive a
+// live full stack, so they are opt-in rather than a per-PR gate.
 // The legacy *.spec.ts at the agent-tests root are excluded; they predate the
 // shared helpers/ foundation and are kept only for reference.
 export default defineConfig({

@@ -256,8 +256,16 @@ export class ServerManager extends EventEmitter {
 
       child.once('exit', done);
       try {
-        // The server entry installs SIGTERM/SIGINT graceful-shutdown handlers.
-        child.kill('SIGTERM');
+        // Node maps kill('SIGTERM') to TerminateProcess on Windows, so the
+        // server's graceful handler never runs there and, worse, the agent
+        // subprocesses it spawned are left orphaned holding the inherited
+        // stdio pipes — which keeps our own exit from ever completing.
+        // taskkill /t reaps the whole tree; POSIX keeps the graceful path.
+        if (process.platform === 'win32' && child.pid) {
+          spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
+        } else {
+          child.kill('SIGTERM');
+        }
       } catch {
         done();
       }
@@ -461,7 +469,15 @@ export function getServerManager(): ServerManager {
   return instance;
 }
 
-// Defensive: ensure the child is signalled if the app is force-exiting.
-app.on('will-quit', () => {
-  if (instance) void instance.stop().catch(() => undefined);
+// `will-quit` cannot hold the app open for async work, so the child was being
+// orphaned mid-drain. Defer the quit until the server is actually down.
+let quitCleanupStarted = false;
+app.on('before-quit', (event) => {
+  if (quitCleanupStarted || !instance) return;
+  quitCleanupStarted = true;
+  event.preventDefault();
+  void instance
+    .stop()
+    .catch(() => undefined)
+    .finally(() => app.quit());
 });

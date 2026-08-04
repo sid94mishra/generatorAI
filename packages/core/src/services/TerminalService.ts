@@ -22,6 +22,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { ILogger, TerminalHostKind, TerminalSessionDescriptor } from '@generatorai/shared';
+import type { AgentEvent } from '@generatorai/shared';
 import type { EventBus } from '../events/EventBus.js';
 import type { ITerminalHost, ITerminalHandle, TerminalSpawnOptions } from '../domain/ports/ITerminalHost.js';
 
@@ -429,7 +430,7 @@ export class TerminalService {
     }
   }
 
-  private async emit(workspaceId: string, event: import('@generatorai/shared').AgentEvent): Promise<void> {
+  private async emit(workspaceId: string, event: AgentEvent): Promise<void> {
     try {
       const scopeSession = `${this.cfg.eventBusScopePrefix}:${workspaceId}`;
       await this.eventBus.emit(scopeSession, event);

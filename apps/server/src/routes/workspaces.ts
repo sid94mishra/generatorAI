@@ -3,6 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Router } from 'express';
+import type { Response } from 'express';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Container } from '../composition-root.js';
@@ -87,7 +88,7 @@ export function createWorkspaceRoutes(container: Container): Router {
   }
 
   /** Resolve a workspace + its worktree refs, or send a 404. */
-  async function loadWorkspace(id: string, res: import('express').Response) {
+  async function loadWorkspace(id: string, res: Response) {
     const info = await workspaceManager.getWorkspaceInfo(id);
     if (!info) {
       res

@@ -18,6 +18,7 @@
 
 import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer } from 'ws';
+import type { WebSocket } from 'ws';
 import type { Container } from './composition-root.js';
 import { authorizeWebSocketUpgrade } from './middleware/wsAuth.js';
 import type { BrowserInputEvent } from '@generatorai/core';
@@ -72,7 +73,7 @@ export function attachBrowserWebSocket(server: HttpServer, container: Container)
     });
   });
 
-  function handleConnection(ws: import('ws').WebSocket, workspaceId: string): void {
+  function handleConnection(ws: WebSocket, workspaceId: string): void {
     let stopped = false;
     logger.info?.(`[browser-ws v3-framepoll] client connected workspace=${workspaceId}`);
 
@@ -145,7 +146,7 @@ export function attachBrowserWebSocket(server: HttpServer, container: Container)
  * polling in that case.
  */
 async function streamViaScreencast(
-  ws: import('ws').WebSocket,
+  ws: WebSocket,
   isStopped: () => boolean,
   sendFrame: (jpeg: Buffer) => void,
   startScreencast: () => AsyncIterable<{ jpeg: Buffer; ts: number }>,
@@ -184,7 +185,7 @@ async function streamViaScreencast(
  * mode) and as a general safety net.
  */
 async function streamViaPolling(
-  ws: import('ws').WebSocket,
+  ws: WebSocket,
   isStopped: () => boolean,
   sendFrame: (jpeg: Buffer) => void,
   targetFps: number,

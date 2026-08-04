@@ -19,8 +19,10 @@
 // `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK=1`.
 // ────────────────────────────────────────────────────────────────
 
-import { DpopError, DpopVerifier } from './dpop.js';
-import { TokenError, TokenService, principalFromClaims } from './TokenService.js';
+import { DpopError } from './dpop.js';
+import type { DpopVerifier } from './dpop.js';
+import { TokenError, principalFromClaims } from './TokenService.js';
+import type { TokenService } from './TokenService.js';
 import { AuditAction, type SecurityAuditService } from './SecurityAuditService.js';
 import { ALL_SCOPES, normalizeScopes, type Scope } from './scopes.js';
 import { sha256Base64Url, timingSafeEqualString } from './jose.js';

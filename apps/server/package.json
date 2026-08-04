@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "bundle": "node esbuild.config.mjs",
     "dev": "tsx watch --env-file-if-exists=.env --import ./src/instrumentation.ts src/index.ts",
-    "dev:clean": "node -e \"const fs=require('fs');const p=require('path');const d=p.join(require('os').tmpdir(),'tsx-'+require('os').userInfo().username);try{fs.rmSync(d,{recursive:true,force:true})}catch{};\" && tsx watch --env-file-if-exists=.env --import ./src/instrumentation.ts src/index.ts",
     "start": "node --import ./dist/instrumentation.js dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -48,6 +48,7 @@
     "@types/multer": "^1.4.12",
     "@types/supertest": "^6.0.3",
     "@types/ws": "^8.18.1",
+    "esbuild": "^0.25.0",
     "supertest": "^7.1.0",
     "tsx": "^4.19.0"
   }

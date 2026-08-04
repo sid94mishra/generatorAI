@@ -36,7 +36,7 @@ Prerequisites: from the repo root run `pnpm install` once. (If Electron's binary
 ```powershell
 # Build the web SPA the server will serve, then launch the desktop app.
 pnpm --filter @generatorai/web build
-pnpm --filter @generatorai/desktop start
+pnpm --filter @generatorai/desktop preview
 ```
 
 `start` builds the main/preload bundle and launches Electron. With no dev‑server env set, the app spawns its **own** embedded server (production mode) on a free port, using an **isolated** data directory under the OS user‑data folder, and opens onto it.

@@ -8,10 +8,11 @@
 // (agent CDP attach, popup gating, cert overrides, per-workspace session
 // partitioning) are deferred to Phase 3.
 //
-// Feature flag: only active when `GENERATORAI_DESKTOP_NATIVE_BROWSER=1`.
-// When inactive, `isEnabled()` returns false and none of the IPC handlers
-// do anything — the SPA continues to use the server-Playwright screencast
-// path, preserving parity with the web build.
+// Feature flag: see `nativeBrowserEnabled()` below. ON by default in the
+// desktop app; set `GENERATORAI_DESKTOP_NATIVE_BROWSER=0` to opt out. When
+// disabled, `isEnabled()` returns false and none of the IPC handlers do
+// anything — the SPA falls back to the server-Playwright screencast path,
+// preserving parity with the web build.
 // ────────────────────────────────────────────────────────────────
 
 import { WebContentsView, session as electronSession } from 'electron';
@@ -29,6 +30,25 @@ import type {
   NativeBrowserDescriptor,
   NativeBrowserEvent,
 } from '../shared/browser-ipc';
+
+/**
+ * Whether the agent drives a native Electron `WebContentsView` (through a
+ * per-tab `ScopedCdpProxy`) instead of a separately launched Chromium.
+ *
+ * **On by default in the desktop app.** The alternative — the server's
+ * `ServerPlaywrightHost` — calls `chromium.launchPersistentContext()`, which
+ * needs browser binaries that `npx playwright install` downloads into a
+ * user-level cache. A packaged install has no such cache, so defaulting the
+ * other way would ship a browser feature that fails the first time it is
+ * used. Attaching over CDP to the Chromium already inside Electron needs no
+ * download, and the agent and the user end up driving the same tab.
+ *
+ * Other clients (web, mobile, CLI, standalone server) keep the Playwright
+ * path, where installing browsers is a reasonable ask.
+ */
+export function nativeBrowserEnabled(): boolean {
+  return process.env['GENERATORAI_DESKTOP_NATIVE_BROWSER'] !== '0';
+}
 
 // The embedded server can still be starting (or restarting after a crash)
 // when a browser tab activates, so the endpoint push gets a few tries
@@ -186,7 +206,7 @@ export class NativeBrowserHost extends EventEmitter {
   private cdpProxies = new Map<string, ScopedCdpProxy>();
 
   isEnabled(): boolean {
-    return process.env['GENERATORAI_DESKTOP_NATIVE_BROWSER'] === '1';
+    return nativeBrowserEnabled();
   }
 
   attachOwnerWindow(win: BrowserWindow): void {

@@ -182,7 +182,7 @@ pnpm dev:server
 pnpm dev:web
 
 # 3. CLI
-pnpm start:cli -- workflow list
+pnpm dev:cli -- workflow list
 # or after `pnpm --filter @generatorai/cli build`
 node apps/cli/dist/index.js workflow list
 

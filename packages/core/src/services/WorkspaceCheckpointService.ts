@@ -32,7 +32,7 @@ export interface CaptureWorkspaceCheckpointParams extends CheckpointProvenance {
   skipIfUnchanged?: boolean;
 }
 
-export interface WorkspaceRepoRef extends DiscoveredRepo {}
+export type WorkspaceRepoRef = DiscoveredRepo;
 
 /**
  * Provenance carried on emitted events so the SSE bridge can republish to the

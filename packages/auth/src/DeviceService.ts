@@ -20,8 +20,8 @@ import {
   ACCESS_TOKEN_TTL_MS,
   PAIRING_GRANT_TTL_MS,
   RESUME_CREDENTIAL_TTL_MS,
-  TokenService,
 } from './TokenService.js';
+import type { TokenService } from './TokenService.js';
 import { AuditAction, type SecurityAuditService } from './SecurityAuditService.js';
 import {
   DEFAULT_CLI_SCOPES,

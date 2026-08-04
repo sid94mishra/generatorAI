@@ -14,7 +14,7 @@ pnpm --filter @generatorai/cli build
 node apps/cli/dist/index.js <command>
 
 # Or while developing
-pnpm start:cli -- <command>
+pnpm dev:cli -- <command>
 
 # After a global install (future):
 generatorai <command>

@@ -1,6 +1,7 @@
 // @ts-check
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
+import reactHooks from 'eslint-plugin-react-hooks';
 import prettierConfig from 'eslint-config-prettier';
 
 /** @type {import('eslint').Linter.Config[]} */
@@ -26,6 +27,24 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
       'no-console': 'warn',
+    },
+  },
+  {
+    // React hooks rules for the web app. Registered mainly so the
+    // `eslint-disable-next-line react-hooks/exhaustive-deps` suppressions
+    // scattered through the components refer to a rule that actually exists —
+    // without the plugin every one of them is itself a lint error.
+    //
+    // `exhaustive-deps` stays a warning: the existing suppressions are
+    // deliberate, and promoting it to an error would block the build on
+    // judgement calls rather than defects.
+    files: ['apps/web/src/**/*.{ts,tsx}'],
+    plugins: {
+      'react-hooks': reactHooks,
+    },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
     },
   },
   {

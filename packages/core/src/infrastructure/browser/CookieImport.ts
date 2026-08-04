@@ -27,6 +27,10 @@
 // ────────────────────────────────────────────────────────────────
 
 import * as os from 'node:os';
+// Type-only: erased at build time, so this does NOT create a hard runtime
+// dependency on node:sqlite (which only exists on Node >= 22). The actual
+// module is still loaded through a guarded dynamic import below.
+import type { DatabaseSync } from 'node:sqlite';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
@@ -162,7 +166,7 @@ async function copyStableSnapshot(srcPath: string, destPath: string, attempts = 
 }
 
 async function readCookieRows(dbPath: string): Promise<RawCookieRow[]> {
-  let DatabaseSyncCtor: typeof import('node:sqlite').DatabaseSync;
+  let DatabaseSyncCtor: typeof DatabaseSync;
   try {
     ({ DatabaseSync: DatabaseSyncCtor } = await import('node:sqlite'));
   } catch {

@@ -21,15 +21,16 @@ harness that works with GitHub Copilot or the Claude Agent SDK.
 ```bash
 pnpm install
 pnpm build
-pnpm start:web      # server + web UI
+pnpm dev            # server + web UI
 ```
 
 Other entry points:
 
 ```bash
-pnpm dev            # everything, watch mode
-pnpm start:cli      # CLI
-pnpm --filter @generatorai/desktop preview   # desktop shell
+pnpm dev:cli        # CLI
+pnpm dev:desktop    # desktop shell against the Vite dev server
+pnpm preview:desktop  # desktop shell with the embedded production server
+pnpm package:desktop  # build installers for this platform
 ```
 
 ## Layout

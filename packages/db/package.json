@@ -1,6 +1,7 @@
 {
   "name": "@generatorai/db",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -23,10 +24,8 @@
     "lint": "eslint src/",
     "db:generate": "drizzle-kit generate --config ./drizzle.config.ts",
     "db:check": "drizzle-kit check --config ./drizzle.config.ts",
-    "db:push": "drizzle-kit push --config ./drizzle.config.ts",
     "db:reset": "tsx scripts/prepare-db.ts reset",
-    "db:prepare-dist": "tsx scripts/prepare-db.ts prepare-dist",
-    "prepublishOnly": "tsc -p tsconfig.json"
+    "db:prepare-dist": "tsx scripts/prepare-db.ts prepare-dist"
   },
   "dependencies": {
     "@generatorai/auth": "workspace:*",

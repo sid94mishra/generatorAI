@@ -42,6 +42,32 @@ import { attachBrowserWebSocket } from './browser-ws.js';
 import { attachTerminalWebSocket } from './terminal-ws.js';
 import { attachSttWebSocket } from './stt-ws.js';
 
+// Killing the process on a failed write to an already-exited child is the
+// wrong trade. The agent CLIs are optional: when one is absent its harness is
+// marked unavailable and the server degrades correctly, but the vendored
+// JSON-RPC writers issue their final writes from background tasks we cannot
+// attach a handler to, so the resulting rejection reaches the process. Node
+// defaults to `--unhandled-rejections=throw`, so that alone was enough to take
+// down a server that had otherwise started cleanly.
+//
+// Registered at module scope on purpose: container initialization is where
+// these fire, and a handler installed after `await container.initialize()`
+// is installed too late to ever see them.
+const DEAD_PIPE_CODES = new Set(['EPIPE', 'ERR_STREAM_DESTROYED', 'ERR_STREAM_WRITE_AFTER_END']);
+
+function isDeadPipeError(value: unknown): boolean {
+  const code = (value as NodeJS.ErrnoException | null | undefined)?.code;
+  return typeof code === 'string' && DEAD_PIPE_CODES.has(code);
+}
+
+process.on('unhandledRejection', (reason) => {
+  if (isDeadPipeError(reason)) {
+    console.warn('[Server] ignored write to a closed child process stream');
+    return;
+  }
+  throw reason;
+});
+
 /** Expand leading ~ to the user's home directory and resolve to absolute path. */
 function expandPath(p: string): string {
   if (p.startsWith('~')) {

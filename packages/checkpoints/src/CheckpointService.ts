@@ -16,7 +16,8 @@ import type {
 } from '@generatorai/shared';
 import { DEFAULT_CHECKPOINT_RETENTION } from '@generatorai/shared';
 import type { IGitClient } from '@generatorai/git';
-import { GitShadowRefStore, checkpointRefName } from './GitShadowRefStore.js';
+import type { GitShadowRefStore } from './GitShadowRefStore.js';
+import { checkpointRefName } from './GitShadowRefStore.js';
 import type { ICheckpointRepository } from './ports/ICheckpointRepository.js';
 
 export interface CheckpointServiceOptions {

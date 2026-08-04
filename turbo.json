@@ -5,6 +5,10 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "bundle": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist-bundle/**"]
+    },
     "dev": {
       "cache": false,
       "persistent": true
@@ -18,9 +22,6 @@
     },
     "typecheck": {
       "dependsOn": ["^build"]
-    },
-    "clean": {
-      "cache": false
     }
   }
 }

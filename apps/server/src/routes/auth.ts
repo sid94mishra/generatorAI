@@ -10,6 +10,8 @@
 import { Router, type Request, type Response } from 'express';
 import * as os from 'node:os';
 import { z } from 'zod';
+import type {
+  DpopVerifier} from '@generatorai/auth';
 import {
   ALL_SCOPES,
   AuditAction,
@@ -17,7 +19,6 @@ import {
   DEFAULT_DEVICE_SCOPES,
   DEFAULT_MOBILE_SCOPES,
   DpopError,
-  DpopVerifier,
   HIGH_RISK_SCOPES,
   PairingError,
   SCOPES,

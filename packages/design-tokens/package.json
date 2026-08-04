@@ -1,6 +1,7 @@
 {
   "name": "@generatorai/design-tokens",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -36,8 +37,7 @@
     "test": "vitest run",
     "lint": "eslint src/ bin/",
     "tokens:check": "tsx bin/generate.ts --check",
-    "tokens:write": "tsx bin/generate.ts --write",
-    "prepublishOnly": "tsc -p tsconfig.json"
+    "tokens:write": "tsx bin/generate.ts --write"
   },
   "devDependencies": {
     "tsx": "^4.19.0"

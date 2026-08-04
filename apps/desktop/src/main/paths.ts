@@ -18,7 +18,11 @@ export function repoRoot(): string {
 export interface ResolvedPaths {
   packaged: boolean;
   repoRoot: string;
-  /** Compiled server entry (packaged installs). */
+  /**
+   * Server entry to spawn. Packaged: the single-file esbuild bundle
+   * (`server.mjs`). Unpackaged: the `tsc` output, which can still resolve
+   * its imports from the monorepo's `node_modules`.
+   */
   serverEntry: string;
   /** TypeScript server entry run via tsx when unpackaged. */
   serverSrcEntry: string;
@@ -37,9 +41,12 @@ export function resolvePaths(): ResolvedPaths {
   const root = repoRoot();
   const base = packaged ? process.resourcesPath : root;
 
-  const serverDist = packaged
-    ? path.join(base, 'server', 'dist')
-    : path.join(root, 'apps', 'server', 'dist');
+  // Packaged builds run the single-file esbuild bundle. The `tsc` output is
+  // not usable here: it keeps its imports unresolved, and the installer ships
+  // no `node_modules` for them to resolve against.
+  const serverEntry = packaged
+    ? path.join(base, 'server', 'server.mjs')
+    : path.join(root, 'apps', 'server', 'dist', 'index.js');
 
   const webDist = packaged ? path.join(base, 'web', 'dist') : path.join(root, 'apps', 'web', 'dist');
 
@@ -55,7 +62,7 @@ export function resolvePaths(): ResolvedPaths {
   return {
     packaged,
     repoRoot: root,
-    serverEntry: path.join(serverDist, 'index.js'),
+    serverEntry,
     serverSrcEntry: path.join(root, 'apps', 'server', 'src', 'index.ts'),
     webDist,
     templatesDir,

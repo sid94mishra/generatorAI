@@ -12,7 +12,18 @@ let initialized = false;
 async function getUpdater(): Promise<AppUpdater | null> {
   try {
     const mod = await import('electron-updater');
-    return mod.autoUpdater;
+    // `autoUpdater` is a lazy getter on module.exports, and cjs-module-lexer
+    // cannot see those — so it is absent from the ESM namespace and only
+    // reachable through `default`. Reading the namespace alone yields
+    // undefined, which silently disabled auto-update in every packaged build.
+    const resolved =
+      mod.autoUpdater ??
+      (mod as unknown as { default?: { autoUpdater?: AppUpdater } }).default?.autoUpdater ??
+      null;
+    if (!resolved) {
+      log.error('electron-updater loaded but exposes no autoUpdater', Object.keys(mod).join(', '));
+    }
+    return resolved;
   } catch (e) {
     log.warn('electron-updater not available', e);
     return null;

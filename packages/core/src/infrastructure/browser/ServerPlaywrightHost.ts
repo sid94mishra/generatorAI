@@ -18,10 +18,12 @@ import type {
   BrowserContext,
   CDPSession,
   Frame,
+  Locator,
   Page,
 } from 'playwright';
 import { chromium } from 'playwright';
 import type { ILogger } from '@generatorai/shared';
+import type { ImportedCookie } from '@generatorai/shared';
 import { matchesAnyHostPattern, isLoopbackHost } from '@generatorai/shared';
 import type {
   BrowserHandle,
@@ -677,7 +679,7 @@ export class ServerPlaywrightHost implements IBrowserBridge {
     }
   }
 
-  async addCookies(handle: BrowserHandle, cookies: import('@generatorai/shared').ImportedCookie[]): Promise<void> {
+  async addCookies(handle: BrowserHandle, cookies: ImportedCookie[]): Promise<void> {
     const entry = this.mustEntry(handle);
     if (cookies.length === 0) return;
     await entry.context.addCookies(cookies);
@@ -1046,7 +1048,7 @@ export class ServerPlaywrightHost implements IBrowserBridge {
    * `null` if the ref is unknown so callers can produce a friendly error
    * (e.g. "ref eN unknown — call readPage first").
    */
-  private locatorForRef(entry: HostEntry, ref: string): import('playwright').Locator | null {
+  private locatorForRef(entry: HostEntry, ref: string): Locator | null {
     const selector = entry.refMap.get(ref);
     if (!selector) return null;
     const owningFrame = entry.refFrames.get(ref);
@@ -1084,7 +1086,7 @@ export class ServerPlaywrightHost implements IBrowserBridge {
    * inside an iframe (see `snapshotFrame`) — both expose the same
    * `getByRole`/`locator` surface this method needs.
    */
-  private locatorFromSelector(target: Page | Frame, selector: string): import('playwright').Locator {
+  private locatorFromSelector(target: Page | Frame, selector: string): Locator {
     // Split off `|nth=N` if present.
     let base = selector;
     let nth: number | null = null;
@@ -1093,7 +1095,7 @@ export class ServerPlaywrightHost implements IBrowserBridge {
       nth = Number(nthMatch[1]);
       base = selector.slice(0, nthMatch.index);
     }
-    let locator: import('playwright').Locator;
+    let locator: Locator;
     const roleMatch = /^role=([a-zA-Z]+)(?:\[name=(.*)\])?$/.exec(base);
     if (roleMatch) {
       const role = roleMatch[1]!;

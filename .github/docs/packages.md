@@ -404,6 +404,6 @@ Each package has the same scripts:
 | `pnpm --filter <pkg> test` | `vitest run` |
 | `pnpm --filter <pkg> lint` | `eslint src/` |
 | `pnpm --filter @generatorai/db db:generate` | Drizzle Kit migration generation |
-| `pnpm --filter @generatorai/db db:check` | Validate schema vs migrations |
+| `pnpm db:check` | Validate schema vs migrations |
 
 Turborepo (`turbo.json`) orchestrates parallel builds. Cache hits are essential for monorepo build times.
