@@ -18,7 +18,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, ScrollView, Text, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import {
   ArrowUp,
@@ -36,6 +36,7 @@ import type { AgentMode, ModelInfo } from '@generatorai/client-core';
 import { Chip } from '../ui/Chip';
 import { IconButton } from '../ui/Button';
 import { ProgressRing } from '../ui/ProgressRing';
+import { Spinner } from '../ui/States';
 import { Touchable } from '../ui/Touchable';
 import { haptics } from '../ui/haptics';
 import { ModelSheet } from './ModelSheet';
@@ -85,8 +86,14 @@ export interface ComposerProps {
 
   voiceAvailable: boolean;
   onVoice?: (() => void) | undefined;
+  /** Recording right now — the button becomes a stop control. */
+  voiceActive?: boolean | undefined;
+  /** Transcribing — disabled with a spinner. */
+  voiceBusy?: boolean | undefined;
   attachAvailable: boolean;
   onAttach?: (() => void) | undefined;
+  /** Shown when the attach button is unavailable, instead of a dead control. */
+  attachDisabledReason?: string | undefined;
 
   attachments: Array<{ id: string; name: string }>;
   onRemoveAttachment: (id: string) => void;
@@ -243,11 +250,27 @@ export function Composer(props: ComposerProps): React.ReactElement {
             // field scrolls internally past this height.
             className="max-h-40 min-h-9 flex-1 py-1 text-md leading-relaxed text-foreground"
           />
-          {props.voiceAvailable && draft.length === 0 ? (
+          {props.voiceAvailable && props.onVoice && (draft.length === 0 || props.voiceActive) ? (
             <IconButton
-              accessibilityLabel="Voice input"
-              icon={<Mic size={18} color={colors['muted-foreground']} />}
-              onPress={props.onVoice ?? (() => {})}
+              accessibilityLabel={props.voiceActive ? 'Stop recording' : 'Dictate a message'}
+              accessibilityHint={
+                props.voiceActive
+                  ? 'Transcribes what you said and adds it to the message'
+                  : 'Records audio and transcribes it on your own server'
+              }
+              selected={Boolean(props.voiceActive)}
+              disabled={Boolean(props.voiceBusy)}
+              variant={props.voiceActive ? 'danger' : 'ghost'}
+              icon={
+                props.voiceBusy ? (
+                  <Spinner />
+                ) : props.voiceActive ? (
+                  <Square size={16} color={colors['destructive-foreground']} />
+                ) : (
+                  <Mic size={18} color={colors['muted-foreground']} />
+                )
+              }
+              onPress={props.onVoice}
             />
           ) : null}
         </View>
@@ -255,9 +278,21 @@ export function Composer(props: ComposerProps): React.ReactElement {
         <View className="flex-row items-center gap-1.5 px-2 pb-2 pt-1">
           <IconButton
             accessibilityLabel="Add attachment"
-            disabled={!props.attachAvailable}
+            // A disabled control that says nothing when tapped is the same as
+            // a broken one. When the scope is withheld the button explains
+            // itself rather than ignoring the tap.
+            accessibilityHint={props.attachDisabledReason}
             icon={<Plus size={18} color={colors['muted-foreground']} />}
-            onPress={props.onAttach ?? (() => {})}
+            onPress={
+              props.attachAvailable
+                ? (props.onAttach ?? (() => {}))
+                : () =>
+                    Alert.alert(
+                      'Attachments are off for this device',
+                      props.attachDisabledReason ??
+                        'This device was not granted permission to upload files.',
+                    )
+            }
           />
 
           <ScrollView
@@ -265,7 +300,12 @@ export function Composer(props: ComposerProps): React.ReactElement {
             keyboardShouldPersistTaps="always"
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ gap: 8, alignItems: 'center' }}
-            className="flex-1"
+            // Written out rather than `flex-1` because the chips must be
+            // allowed to shrink BELOW their content width and scroll inside
+            // their own box. With flex-basis left at `auto` the strip claims
+            // its full content width and the chips render straight through
+            // the context ring and the send button.
+            style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0 }}
           >
             <Chip
               accessibilityLabel="Choose model"
@@ -274,21 +314,22 @@ export function Composer(props: ComposerProps): React.ReactElement {
               onPress={() => setSheet('model')}
               showChevron
               // Long names ("Claude Opus 4.8", "GPT-5.6 Sol") otherwise push
-              // the mode and options chips entirely out of view.
-              maxWidth={140}
+              // the options chip out of the strip on a 393pt screen.
+              maxWidth={120}
             />
-            <Chip
-              accessibilityLabel="Agent mode"
-              label={props.mode === 'plan' ? 'Plan first' : 'Auto'}
-              icon={
-                <Wand2
-                  size={13}
-                  color={props.mode === 'plan' ? colors.primary : colors['muted-foreground']}
-                />
-              }
-              active={props.mode === 'plan'}
-              onPress={() => props.onModeChange(props.mode === 'plan' ? 'auto' : 'plan')}
-            />
+            {/* Agent mode also lives in the options sheet, so the chip earns
+                its space only while the mode differs from the default —
+                otherwise it pushes "Options" off-screen to say "Auto", and a
+                control nobody can see is a control nobody uses. */}
+            {props.mode === 'plan' ? (
+              <Chip
+                accessibilityLabel="Agent mode"
+                label="Plan first"
+                icon={<Wand2 size={13} color={colors.primary} />}
+                active
+                onPress={() => props.onModeChange('auto')}
+              />
+            ) : null}
             <Chip
               accessibilityLabel="Turn options"
               label="Options"
@@ -297,29 +338,28 @@ export function Composer(props: ComposerProps): React.ReactElement {
             />
           </ScrollView>
 
-          {limit ? (
-            <Touchable
-              accessibilityLabel={`Context usage ${Math.round(ratio * 100)} percent`}
-              haptic="tap"
-              onPress={() => setSheet('options')}
-              className="px-1"
-            >
-              <ProgressRing ratio={ratio} />
-            </Touchable>
-          ) : null}
+          <View className="shrink-0 flex-row items-center gap-1.5">
+            {limit ? (
+              <Touchable
+                accessibilityLabel={`Context usage ${Math.round(ratio * 100)} percent`}
+                haptic="tap"
+                onPress={() => setSheet('options')}
+                className="px-1"
+              >
+                <ProgressRing ratio={ratio} />
+              </Touchable>
+            ) : null}
 
-          <SendButton streaming={isStreaming} enabled={canSend} onSend={onSend} onStop={onStop} />
+            <SendButton streaming={isStreaming} enabled={canSend} onSend={onSend} onStop={onStop} />
+          </View>
         </View>
       </Animated.View>
 
       <ModelSheet
         visible={sheet === 'model'}
         onClose={() => setSheet('none')}
-        models={models}
-        loading={props.modelsLoading}
         selectedId={selectedModelId}
         onSelect={props.onSelectModel}
-        {...(props.onRefreshModels ? { onRefresh: props.onRefreshModels } : {})}
       />
 
       <TurnOptionsSheet

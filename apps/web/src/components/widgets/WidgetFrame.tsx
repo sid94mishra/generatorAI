@@ -59,6 +59,10 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
   // fresh navigation if `load` doesn't fire within a short window.
   const [reloadNonce, setReloadNonce] = useState<number>(0);
   const [loaded, setLoaded] = useState<boolean>(false);
+  // A missing entry file still fires `load` (the asset origin's 404 page is a
+  // document), so "loaded but never shook hands" is the only signal we get
+  // that the widget is broken rather than slow.
+  const [stalled, setStalled] = useState<boolean>(false);
 
   const widgetUrl = useMemo(
     () => buildWidgetUrl(block.assetsBase, block.extensionId, block.entry),
@@ -82,7 +86,14 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
   useEffect(() => {
     setLoaded(false);
     setReloadNonce(0);
+    setStalled(false);
   }, [widgetUrl]);
+
+  useEffect(() => {
+    if (!loaded || ready) { setStalled(false); return; }
+    const t = setTimeout(() => setStalled(true), 6000);
+    return () => clearTimeout(t);
+  }, [loaded, ready]);
 
   // Register bridge for this instance.
   useEffect(() => {
@@ -192,6 +203,49 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
           background: 'transparent',
         }}
       />
+      {stalled && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            padding: 16,
+            textAlign: 'center',
+            background: 'var(--color-surface, #ffffff)',
+            fontSize: 12,
+            color: 'var(--color-muted-foreground, #57606a)',
+          }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-foreground, #1f2328)' }}>
+            This widget didn&apos;t start
+          </span>
+          <span>
+            <code style={{ fontFamily: 'ui-monospace, monospace' }}>{block.extensionId}</code> may be
+            missing <code style={{ fontFamily: 'ui-monospace, monospace' }}>{block.entry}</code>, or
+            the page failed to boot.
+          </span>
+          <button
+            type="button"
+            onClick={() => { setLoaded(false); setStalled(false); setReloadNonce((n) => n + 1); }}
+            style={{
+              marginTop: 4,
+              padding: '4px 10px',
+              borderRadius: 6,
+              border: '1px solid var(--color-border, #d0d7de)',
+              background: 'transparent',
+              cursor: 'pointer',
+              fontSize: 12,
+              color: 'var(--color-foreground, #1f2328)',
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
     </div>
   );
 }

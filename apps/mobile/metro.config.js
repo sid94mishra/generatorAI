@@ -61,7 +61,30 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     }
   }
 
-  return resolve(context, moduleName, platform);
+  try {
+    return resolve(context, moduleName, platform);
+  } catch (error) {
+    // `disableHierarchicalLookup` above pins resolution to two directories,
+    // which is what stops a second copy of React being bundled. The cost is
+    // that any transitive dependency pnpm did NOT hoist to the root becomes
+    // invisible, even though the symlink inside the virtual store is valid —
+    // expo-router's own `standard-navigation` is one such package, and it
+    // fails the whole bundle rather than degrading.
+    //
+    // So fall back to Node's resolution FROM THE IMPORTING FILE, which does
+    // follow the store symlinks. Order matters: the pinned paths are still
+    // tried first, so React and friends keep resolving to the single hoisted
+    // copy and this only ever rescues genuinely unhoisted packages.
+    if (moduleName.startsWith('.') || moduleName.startsWith('/')) throw error;
+    try {
+      return {
+        type: 'sourceFile',
+        filePath: require.resolve(moduleName, { paths: [context.originModulePath] }),
+      };
+    } catch {
+      throw error;
+    }
+  }
 };
 
 module.exports = withNativeWind(config, { input: './src/theme/global.css' });

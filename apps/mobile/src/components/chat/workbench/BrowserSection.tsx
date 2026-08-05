@@ -1,44 +1,50 @@
 // ────────────────────────────────────────────────────────────────
 // Workbench › Browser.
 //
-// VIEW-ONLY, deliberately.
+// Web renders a live CDP screencast and forwards every click, drag and
+// keystroke back to the page. Mobile deliberately does NOT forward pointer
+// input: the remote page is laid out for a desktop viewport, so a tap at
+// phone coordinates lands somewhere the user did not aim, and the resulting
+// mis-clicks are indistinguishable from the agent misbehaving.
 //
-// The remote page is laid out for a desktop viewport. Forwarding phone
-// touches to it means every tap lands somewhere the user did not aim, and
-// the resulting mis-clicks are indistinguishable from the agent misbehaving.
-// So this shows what the agent's browser is looking at — live frame, URL,
-// status — and stops there. Driving it is a desktop job.
+// What IS here is everything that does not depend on pixel-accurate aim —
+// start/stop, the address bar, back/forward/reload — because those are the
+// controls you actually reach for when the agent has parked on the wrong
+// page and you want to put it back on the right one.
 //
-// Frames are polled rather than streamed: the MJPEG endpoint is a long-lived
-// multipart response, and RN's `Image` cannot consume one. A poll also stops
-// the moment the sheet closes, which a stream would not.
+// Frames are polled rather than streamed: RN's `Image` cannot consume the
+// multipart MJPEG response, and a poll stops the moment the sheet closes,
+// which a socket would not.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Text, View } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
-import { Globe, RefreshCw } from 'lucide-react-native';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, ArrowRight, Globe, Play, RotateCw, Square } from 'lucide-react-native';
 
-import { Badge, type Tone } from '../../ui/primitives';
 import { IconButton } from '../../ui/Button';
-import { EmptyState, LoadingState } from '../../ui/States';
+import { EmptyState, LoadingState, Spinner } from '../../ui/States';
+import { Field } from '../../ui/Form';
+import { useToast } from '../../ui/Toast';
 import { useAuth } from '../../../auth/AuthProvider';
 import { useTheme } from '../../../theme/ThemeProvider';
+
+/** Mirrors the server's `ActionBodySchema` union so a bad shape cannot compile. */
+type BrowserAction =
+  | { kind: 'navigate'; url: string }
+  | { kind: 'reload' }
+  | { kind: 'back' }
+  | { kind: 'forward' };
 
 interface Descriptor {
   status: string;
   mode?: string;
   currentUrl?: string | null;
   ready?: boolean;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
   viewport?: { width: number; height: number };
 }
-
-const STATUS_TONE: Record<string, Tone> = {
-  running: 'success',
-  starting: 'warning',
-  stopped: 'neutral',
-  error: 'danger',
-};
 
 /** How often a frame is refreshed while the section is on screen. */
 const FRAME_INTERVAL_MS = 2_000;
@@ -46,12 +52,17 @@ const FRAME_INTERVAL_MS = 2_000;
 export function BrowserSection({ workspaceId }: { workspaceId: string }): React.ReactElement {
   const { fetch: authFetch } = useAuth();
   const { colors } = useTheme();
+  const queryClient = useQueryClient();
+  const toast = useToast();
   const [frame, setFrame] = useState<string | null>(null);
-  const [frameError, setFrameError] = useState(false);
+  const [address, setAddress] = useState('');
+  const [dirty, setDirty] = useState(false);
   const inFlight = useRef(false);
 
+  const key = ['workspaces', workspaceId, 'browser', 'descriptor'] as const;
+
   const descriptor = useQuery<Descriptor>({
-    queryKey: ['workspaces', workspaceId, 'browser', 'descriptor'],
+    queryKey: key,
     queryFn: async () => {
       const response = await authFetch(`/api/workspaces/${workspaceId}/browser/descriptor`);
       if (!response.ok) throw new Error(String(response.status));
@@ -60,7 +71,66 @@ export function BrowserSection({ workspaceId }: { workspaceId: string }): React.
     refetchInterval: 5_000,
   });
 
-  const live = descriptor.data?.status === 'running';
+  // `ready` rather than `status`: the session row exists (`status:'active'`)
+  // long before Chromium is actually up, and only `ready` means there is a
+  // page worth screencasting.
+  const live = descriptor.data?.ready === true;
+  const url = descriptor.data?.currentUrl ?? '';
+
+  // The field follows the page until the user starts typing, then stops —
+  // otherwise a navigation mid-edit silently rewrites what they were typing.
+  useEffect(() => {
+    if (!dirty) setAddress(url);
+  }, [url, dirty]);
+
+  const post = useCallback(
+    async (path: string, body?: unknown) => {
+      const response = await authFetch(`/api/workspaces/${workspaceId}/browser/${path}`, {
+        method: 'POST',
+        ...(body ? { headers: { 'content-type': 'application/json' } } : {}),
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return response;
+    },
+    [authFetch, workspaceId],
+  );
+
+  const invalidate = (): void => void queryClient.invalidateQueries({ queryKey: key });
+
+  /** The address bar's text as a navigable URL, or '' when it is empty. */
+  const targetUrl = useCallback((): string => {
+    const raw = address.trim();
+    if (!raw) return '';
+    return /^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`;
+  }, [address]);
+
+  const startStop = useMutation({
+    // `/start` takes the first URL too, so typing an address and pressing run
+    // is ONE call — otherwise the session comes up on about:blank and the
+    // address the user typed is silently dropped.
+    mutationFn: (next: 'start' | 'stop') =>
+      next === 'start' ? post('start', targetUrl() ? { url: targetUrl() } : undefined) : post('stop'),
+    onSuccess: () => {
+      setDirty(false);
+      invalidate();
+    },
+    onError: (err) =>
+      toast({ message: err instanceof Error ? err.message : 'Browser failed', tone: 'error' }),
+  });
+
+  // The body is a Zod discriminated union on `kind` (see routes/browser.ts).
+  // Sending `action` instead made every navigation fail 400 VALIDATION.
+  const act = useMutation({
+    mutationFn: (action: BrowserAction) => post('actions', action),
+    onSuccess: () => {
+      setDirty(false);
+      invalidate();
+      void pullFrame();
+    },
+    onError: (err) =>
+      toast({ message: err instanceof Error ? err.message : 'Navigation failed', tone: 'error' }),
+  });
 
   /**
    * Pull one JPEG and turn it into a data URI.
@@ -72,19 +142,14 @@ export function BrowserSection({ workspaceId }: { workspaceId: string }): React.
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      const response = await authFetch(`/api/workspaces/${workspaceId}/browser/screencast.jpg`);
-      if (!response.ok) {
-        setFrameError(true);
-        return;
-      }
+      const response = await authFetch(
+        `/api/workspaces/${workspaceId}/browser/screencast.jpg?quality=45&k=${Date.now()}`,
+      );
+      if (!response.ok) return;
       const buffer = await response.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (const byte of bytes) binary += String.fromCharCode(byte);
-      setFrame(`data:image/jpeg;base64,${globalThis.btoa(binary)}`);
-      setFrameError(false);
+      setFrame(`data:image/jpeg;base64,${bytesToBase64(new Uint8Array(buffer))}`);
     } catch {
-      setFrameError(true);
+      /* a dropped frame is not worth surfacing; the next poll retries */
     } finally {
       inFlight.current = false;
     }
@@ -99,54 +164,142 @@ export function BrowserSection({ workspaceId }: { workspaceId: string }): React.
 
   if (descriptor.isLoading) return <LoadingState label="Checking the browser…" />;
 
-  if (!live) {
-    return (
-      <EmptyState
-        title="Browser is not running"
-        message="It starts when the agent needs a page. Whatever it is looking at appears here."
-        icon={<Globe size={22} color={colors['muted-foreground']} />}
-      />
-    );
-  }
+  // Chromium takes seconds to come up, and the session row exists well before
+  // it does. Without a distinct "starting" phase the panel said "not running"
+  // the whole time and Start looked ignored.
+  const starting =
+    !live &&
+    (startStop.isPending ||
+      descriptor.data?.status === 'active' ||
+      descriptor.data?.status === 'starting');
+
+  // Submitting an address while the browser is down should START it there,
+  // not post a navigate the server has nothing to run.
+  const navigate = (): void => {
+    if (!targetUrl()) return;
+    if (!live) {
+      startStop.mutate('start');
+      return;
+    }
+    act.mutate({ kind: 'navigate', url: targetUrl() });
+  };
 
   return (
     <View className="flex-1">
-      <View className="gap-2 border-b border-border-muted px-4 pb-2.5">
-        <View className="flex-row items-center gap-2">
-          <Badge
-            label={descriptor.data?.status ?? 'unknown'}
-            tone={STATUS_TONE[descriptor.data?.status ?? ''] ?? 'neutral'}
-          />
-          <Text numberOfLines={1} className="flex-1 text-xs text-muted-foreground">
-            {descriptor.data?.currentUrl ?? 'about:blank'}
-          </Text>
-          <IconButton
-            accessibilityLabel="Refresh frame"
-            icon={<RefreshCw size={16} color={colors['muted-foreground']} />}
-            onPress={() => void pullFrame()}
+      {/* One row, the way every mobile browser arranges it: navigation left,
+          the address filling the middle, run/stop right. Compact icons —
+          three 44pt buttons left barely a third of a phone for the URL. */}
+      <View className="flex-row items-center gap-0.5 border-b border-border-muted px-1.5 py-1.5">
+        {/* Named for the page, not the app: the screen header already has a
+            "Back", and two controls with the same accessible name on one
+            screen is ambiguous to anyone navigating by voice or reader. */}
+        <IconButton
+          compact
+          accessibilityLabel="Browser back"
+          icon={<ArrowLeft size={16} color={colors['muted-foreground']} />}
+          disabled={!live}
+          onPress={() => act.mutate({ kind: 'back' })}
+        />
+        <IconButton
+          compact
+          accessibilityLabel="Browser forward"
+          icon={<ArrowRight size={16} color={colors['muted-foreground']} />}
+          disabled={!live}
+          onPress={() => act.mutate({ kind: 'forward' })}
+        />
+        <IconButton
+          compact
+          accessibilityLabel="Reload page"
+          icon={<RotateCw size={16} color={colors['muted-foreground']} />}
+          disabled={!live}
+          onPress={() => act.mutate({ kind: 'reload' })}
+        />
+        <View className="mx-1 flex-1">
+          <Field
+            placeholder="Search or enter address"
+            value={address}
+            onChangeText={(next) => {
+              setAddress(next);
+              setDirty(true);
+            }}
+            onSubmitEditing={navigate}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            returnKeyType="go"
+            // Typing an address is how you START a session, so the field must
+            // stay editable while the browser is down.
+            accessibilityLabel="Address"
           />
         </View>
-        <Text className="text-xs text-muted-foreground">
-          View only — the page is laid out for a desktop window, so taps are not forwarded.
-        </Text>
+        {/* Bare glyph, not a filled pill: a solid accent block next to the
+            address bar reads as the primary action of the whole panel. */}
+        <IconButton
+          compact
+          accessibilityLabel={live ? 'Stop the browser' : 'Start the browser'}
+          disabled={startStop.isPending}
+          icon={
+            startStop.isPending ? (
+              <Spinner />
+            ) : live ? (
+              <Square size={17} color={colors.danger} />
+            ) : (
+              <Play size={17} color={colors.primary} />
+            )
+          }
+          onPress={() => startStop.mutate(live ? 'stop' : 'start')}
+        />
       </View>
 
-      <View className="flex-1 items-center justify-center bg-canvas-bg p-3">
-        {frame ? (
-          <Image
-            accessibilityLabel="Browser preview"
-            source={{ uri: frame }}
-            resizeMode="contain"
-            style={{ width: '100%', height: '100%', borderRadius: 12 }}
-          />
-        ) : frameError ? (
-          <Text className="text-sm text-muted-foreground">
-            No frame available yet. The page may still be loading.
+      {live ? (
+        <View className="flex-1 items-center justify-center bg-canvas-bg p-3">
+          {frame ? (
+            <Image
+              accessibilityLabel={`Browser showing ${url || 'a page'}`}
+              source={{ uri: frame }}
+              resizeMode="contain"
+              style={{ width: '100%', height: '100%' }}
+            />
+          ) : (
+            <LoadingState label="Loading live view…" />
+          )}
+        </View>
+      ) : starting ? (
+        // Chromium takes several seconds to come up. Without this the panel
+        // still said "not running" the whole time, so Start looked ignored.
+        <LoadingState label="Starting the browser…" />
+      ) : (
+        <EmptyState
+          title="Browser is not running"
+          message="Type a URL and press Start, or leave it — the agent starts it when it needs a page."
+          icon={<Globe size={22} color={colors['muted-foreground']} />}
+        />
+      )}
+
+      {live ? (
+        <View className="border-t border-border-muted px-3 py-2">
+          <Text className="text-xs text-muted-foreground">
+            View only — the page is sized for a desktop window, so taps are not forwarded.
           </Text>
-        ) : (
-          <LoadingState />
-        )}
-      </View>
+        </View>
+      ) : null}
     </View>
   );
+}
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** Hermes has no `btoa`, and `Buffer` is not guaranteed on React Native. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i]!;
+    const b = i + 1 < bytes.length ? bytes[i + 1]! : 0;
+    const c = i + 2 < bytes.length ? bytes[i + 2]! : 0;
+    out += B64[a >> 2];
+    out += B64[((a & 3) << 4) | (b >> 4)];
+    out += i + 1 < bytes.length ? B64[((b & 15) << 2) | (c >> 6)] : '=';
+    out += i + 2 < bytes.length ? B64[c & 63] : '=';
+  }
+  return out;
 }

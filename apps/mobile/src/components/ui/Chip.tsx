@@ -11,6 +11,7 @@ import { Text, View } from 'react-native';
 import { ChevronDown } from 'lucide-react-native';
 
 import { Touchable } from './Touchable';
+import { MAX_SCALE } from './accessibility';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function Chip({
@@ -21,6 +22,7 @@ export function Chip({
   disabled = false,
   showChevron = false,
   accessibilityLabel,
+  accessibilityHint,
   maxWidth,
 }: {
   label: string;
@@ -31,6 +33,7 @@ export function Chip({
   disabled?: boolean;
   showChevron?: boolean;
   accessibilityLabel?: string;
+  accessibilityHint?: string;
   maxWidth?: number;
 }): React.ReactElement {
   const { colors } = useTheme();
@@ -38,10 +41,14 @@ export function Chip({
   return (
     <Touchable
       accessibilityLabel={accessibilityLabel ?? label}
+      {...(accessibilityHint ? { accessibilityHint } : {})}
+      // A chip is a value, not a command: `active` has to be announced or the
+      // only signal that the model picker is set is a border colour.
+      accessibilityState={{ selected: active }}
       disabled={disabled}
       haptic="select"
       onPress={onPress}
-      className={`h-8 flex-row items-center gap-1.5 rounded-full border px-2.5 ${
+      className={`min-h-8 flex-row items-center gap-1.5 rounded-full border px-2.5 py-1 ${
         active ? 'border-primary bg-accent' : 'border-border bg-raised'
       }`}
       style={maxWidth ? { maxWidth } : undefined}
@@ -49,6 +56,7 @@ export function Chip({
       {icon}
       <Text
         numberOfLines={1}
+        maxFontSizeMultiplier={MAX_SCALE.chrome}
         className={`text-sm font-medium ${active ? 'text-primary' : 'text-muted-foreground'}`}
       >
         {label}
@@ -71,10 +79,11 @@ export function StaticChip({
   mono?: boolean;
 }): React.ReactElement {
   return (
-    <View className="h-7 flex-row items-center gap-1.5 self-start rounded-full bg-subtle px-2.5">
+    <View className="min-h-7 flex-row items-center gap-1.5 self-start rounded-full bg-subtle px-2.5 py-0.5">
       {icon}
       <Text
         numberOfLines={1}
+        maxFontSizeMultiplier={MAX_SCALE.chrome}
         className={`text-xs text-muted-foreground ${mono ? 'font-mono' : ''}`}
       >
         {label}

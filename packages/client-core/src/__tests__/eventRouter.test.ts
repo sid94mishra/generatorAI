@@ -221,9 +221,79 @@ describe('StreamEventRouter — plan and question gates', () => {
   it.each([
     ['chat.plan.review_requested', 'plans'],
     ['chat.plan.decided', 'plans'],
+    ['chat.question.asked', 'interactions'],
+    ['chat.question.expired', 'interactions'],
+    // The underscore spellings are not on the wire but were once assumed to
+    // be; both are accepted so the gate cannot go silent again.
     ['chat.question_asked', 'interactions'],
     ['chat.question_expired', 'interactions'],
   ])('%s triggers a %s refetch', (kind, resource) => {
     expect(run([{ kind, data: {} }])).toContainEqual({ op: 'invalidate', resource });
+  });
+
+  it('builds a question card so the gate can render before the refetch lands', () => {
+    const effects = run([
+      {
+        kind: 'chat.question.asked',
+        data: { interactionId: 'i1', questions: [{ id: 'q1', header: 'Scope' }] },
+      },
+    ]);
+    expect(effects).toContainEqual({
+      op: 'upsertQuestion',
+      key: SID,
+      question: {
+        interactionId: 'i1',
+        questions: [{ id: 'q1', header: 'Scope' }],
+        status: 'pending',
+      },
+    });
+  });
+
+  it('builds a plan card on review_requested', () => {
+    const effects = run([
+      {
+        kind: 'chat.plan.review_requested',
+        data: {
+          planId: 'p1',
+          interactionId: 'i2',
+          revision: 2,
+          title: 'Refactor',
+          summary: 'Do the thing',
+          actions: ['approve', 'request_changes'],
+        },
+      },
+    ]);
+    expect(effects).toContainEqual({
+      op: 'upsertPlan',
+      key: SID,
+      plan: {
+        planId: 'p1',
+        revision: 2,
+        title: 'Refactor',
+        summary: 'Do the thing',
+        status: 'awaiting_review',
+        actions: ['approve', 'request_changes'],
+        interactionId: 'i2',
+      },
+    });
+  });
+});
+
+describe('StreamEventRouter — non-streaming providers', () => {
+  it('emits the whole answer from message_complete', () => {
+    expect(
+      run([{ kind: 'harness.message_complete', data: { content: 'All done.' } }]),
+    ).toContainEqual({ op: 'appendTokenIfNoText', key: SID, text: 'All done.' });
+  });
+
+  it('does not do so for tool-call XML, which is restructured instead', () => {
+    const effects = run([
+      {
+        kind: 'harness.message_complete',
+        data: { content: '<function_calls>…</function_calls>' },
+      },
+    ]);
+    expect(effects.some((e) => e.op === 'appendTokenIfNoText')).toBe(false);
+    expect(effects.some((e) => e.op === 'processInlineToolCalls')).toBe(true);
   });
 });

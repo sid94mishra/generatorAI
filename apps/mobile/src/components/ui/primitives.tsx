@@ -10,6 +10,8 @@
 import React from 'react';
 import { Text, View, type ViewProps } from 'react-native';
 
+import { MAX_SCALE } from './accessibility';
+
 export type Tone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
 
 // Opacity modifiers (`bg-primary/15`) are avoided throughout: the palette is
@@ -80,7 +82,11 @@ export function SectionHeader({
 }): React.ReactElement {
   return (
     <View className={`flex-row items-center justify-between px-1 pb-2 pt-4 ${className}`}>
-      <Text className="text-sm font-semibold text-muted-foreground">{title}</Text>
+      {/* The header role is what lets a screen-reader user jump between
+          sections instead of swiping through every row of the one above. */}
+      <Text accessibilityRole="header" className="text-sm font-semibold text-muted-foreground">
+        {title}
+      </Text>
       {action}
     </View>
   );
@@ -104,27 +110,40 @@ export function Badge({
       className={`flex-row items-center gap-1 self-start rounded-full border px-2 py-0.5 ${TONE_BADGE[tone]}`}
     >
       {icon}
-      <Text className={`text-xs font-medium ${TONE_TEXT[tone]}`}>{label}</Text>
+      <Text
+        maxFontSizeMultiplier={MAX_SCALE.chrome}
+        className={`text-xs font-medium ${TONE_TEXT[tone]}`}
+      >
+        {label}
+      </Text>
     </View>
   );
 }
 
 /**
- * A 8pt status dot.
+ * An 8pt status dot.
  *
- * `pulse` is deliberately a static ring rather than an animation: a list of
- * twenty running items with twenty looping animations is a measurable battery
- * cost for no added information.
+ * `label` is not optional in practice: a dot is pure colour, so without one
+ * the only carrier of "this run failed" is a hue, which fails both a
+ * colour-blind user and a screen reader. Callers that genuinely have the
+ * status in adjacent text pass `label={null}` to say so explicitly.
  */
 export function StatusDot({
   tone,
   ring = false,
+  label,
 }: {
   tone: Tone;
   ring?: boolean;
+  label: string | null;
 }): React.ReactElement {
   return (
-    <View className={ring ? `rounded-full p-0.5 ${TONE_BADGE[tone]}` : undefined}>
+    <View
+      className={ring ? `rounded-full p-0.5 ${TONE_BADGE[tone]}` : undefined}
+      {...(label
+        ? { accessible: true, accessibilityLabel: label }
+        : { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' as const })}
+    >
       <View className={`h-2 w-2 rounded-full ${TONE_DOT[tone]}`} />
     </View>
   );

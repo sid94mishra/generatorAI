@@ -153,6 +153,22 @@ function invalidatePendingInteractions(chatId: unknown): void {
   queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'interactions'] });
 }
 
+/**
+ * PLN-01 — refetch the full plan document behind the Plan tab.
+ *
+ * The inline card carries its own summary from the event, but the tab renders
+ * the REST document. Without this, a revision the agent publishes mid-turn
+ * leaves the tab showing the previous revision's markdown — which is the text
+ * the user would then approve.
+ */
+function invalidatePlanDocument(chatId: unknown, planId: unknown): void {
+  if (typeof chatId !== 'string' || !chatId) return;
+  queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'plans'] });
+  if (typeof planId === 'string' && planId) {
+    queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'plan', planId] });
+  }
+}
+
 function flushBuffers(sessionId: string, conn: ConnectionState): void {
   const store = useStreamStore.getState();
   for (const [sk, buf] of conn.stageBuffers) {
@@ -444,6 +460,7 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
         status: 'drafting',
         actions: [],
       });
+      invalidatePlanDocument(data['chatId'], data['planId']);
       break;
     }
     case 'chat.plan.updated': {
@@ -451,6 +468,7 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
       useStreamStore.getState().setPlanStatus(sk, String(data['planId'] ?? ''), 'drafting', {
         revision: Number(data['revision'] ?? 1),
       });
+      invalidatePlanDocument(data['chatId'], data['planId']);
       break;
     }
     case 'chat.plan.review_requested': {
@@ -477,6 +495,7 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
         interactionId: String(data['interactionId'] ?? ''),
       });
       invalidatePendingInteractions(data['chatId']);
+      invalidatePlanDocument(data['chatId'], data['planId']);
       break;
     }
     case 'chat.plan.decided': {
@@ -489,12 +508,14 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
         approved ? (action === 'exit_only' ? 'rejected' : 'approved') : 'changes_requested',
       );
       invalidatePendingInteractions(data['chatId']);
+      invalidatePlanDocument(data['chatId'], data['planId']);
       break;
     }
     case 'chat.plan.expired': {
       flushNow(sessionId, conn);
       useStreamStore.getState().setPlanStatus(sk, String(data['planId'] ?? ''), 'expired');
       invalidatePendingInteractions(data['chatId']);
+      invalidatePlanDocument(data['chatId'], data['planId']);
       break;
     }
     case 'chat.plan.extraction_failed': {

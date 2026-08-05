@@ -172,7 +172,7 @@ export default function WorkflowScreen(): React.ReactElement {
               onPress={() => router.push(`/runs/${run.id}`)}
             >
               <Card className="flex-row items-center gap-3 p-3.5">
-                <StatusDot tone={runTone(run.status)} />
+                <StatusDot tone={runTone(run.status)} label={null} />
                 <View className="flex-1">
                   <Text numberOfLines={1} className="text-sm text-foreground">
                     {run.name ?? 'Workflow run'}

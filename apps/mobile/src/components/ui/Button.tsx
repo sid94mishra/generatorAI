@@ -3,16 +3,20 @@
 //
 // Three components rather than one with a dozen props, because the shapes
 // genuinely differ: `Button` is a labelled bar, `IconButton` is a circular
-// 44pt target, `Fab` floats above content with a shadow.
+// platform-minimum target, `Fab` floats above content with a shadow.
 //
-// All heights are >= 44pt (HIG minimum). The `sm` variant is 36pt tall but
-// keeps a 44pt target via `Touchable`'s hitSlop.
+// Heights are MINIMUMS, not fixed values. A fixed `h-11` clips its own label
+// the moment the user raises their reading size, which is the most common
+// accessibility setting on both platforms; `min-h-11` plus vertical padding
+// grows instead.
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Touchable, type HapticIntent } from './Touchable';
+import { MAX_SCALE, MIN_TARGET, useFontScale } from './accessibility';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -33,9 +37,9 @@ const VARIANT_LABEL: Record<ButtonVariant, string> = {
 };
 
 const SIZE_CONTAINER: Record<ButtonSize, string> = {
-  sm: 'h-9 px-3 rounded-2xl',
-  md: 'h-11 px-4 rounded-2xl',
-  lg: 'h-12 px-5 rounded-3xl',
+  sm: 'min-h-9 px-3 py-1.5 rounded-2xl',
+  md: 'min-h-11 px-4 py-2.5 rounded-2xl',
+  lg: 'min-h-12 px-5 py-3 rounded-3xl',
 };
 
 const SIZE_LABEL: Record<ButtonSize, string> = {
@@ -55,6 +59,7 @@ export function Button({
   full = false,
   haptic = 'commit',
   accessibilityLabel,
+  accessibilityHint,
 }: {
   label: string;
   onPress?: () => void;
@@ -66,6 +71,7 @@ export function Button({
   full?: boolean;
   haptic?: HapticIntent;
   accessibilityLabel?: string;
+  accessibilityHint?: string;
 }): React.ReactElement {
   const { colors } = useTheme();
   const spinnerColor =
@@ -78,13 +84,22 @@ export function Button({
   return (
     <Touchable
       accessibilityLabel={accessibilityLabel ?? label}
+      {...(accessibilityHint ? { accessibilityHint } : {})}
+      // `busy` is what tells a screen reader that the pending action was
+      // registered — otherwise a loading button is just an unresponsive one.
+      accessibilityState={{ busy: loading }}
       disabled={disabled || loading}
       haptic={haptic}
       onPress={onPress}
       className={`flex-row items-center justify-center gap-2 ${SIZE_CONTAINER[size]} ${VARIANT_CONTAINER[variant]} ${full ? 'w-full' : 'self-start'}`}
     >
       {loading ? <ActivityIndicator size="small" color={spinnerColor} /> : icon}
-      <Text className={`font-semibold ${SIZE_LABEL[size]} ${VARIANT_LABEL[variant]}`}>{label}</Text>
+      <Text
+        maxFontSizeMultiplier={MAX_SCALE.control}
+        className={`font-semibold ${SIZE_LABEL[size]} ${VARIANT_LABEL[variant]}`}
+      >
+        {label}
+      </Text>
     </Touchable>
   );
 }
@@ -93,27 +108,45 @@ export function IconButton({
   icon,
   onPress,
   accessibilityLabel,
+  accessibilityHint,
   variant = 'ghost',
+  compact = false,
   disabled = false,
   badge = false,
+  selected,
   haptic = 'tap',
 }: {
   icon: React.ReactNode;
   onPress?: () => void;
   accessibilityLabel: string;
+  accessibilityHint?: string;
   variant?: ButtonVariant;
+  /**
+   * Shrinks the drawn box for dense toolbars. The TAP target stays at the
+   * 44pt minimum via hitSlop — only the ink gets smaller.
+   */
+  compact?: boolean;
   disabled?: boolean;
   /** Draws an accent dot in the corner — unread / active state. */
   badge?: boolean;
+  /** Toggle buttons pass this so the state is announced, not just drawn. */
+  selected?: boolean;
   haptic?: HapticIntent;
 }): React.ReactElement {
+  const box = compact ? 32 : MIN_TARGET;
+  const slop = Math.max(0, Math.round((MIN_TARGET - box) / 2));
+
   return (
     <Touchable
       accessibilityLabel={accessibilityLabel}
+      {...(accessibilityHint ? { accessibilityHint } : {})}
+      {...(selected === undefined ? {} : { accessibilityState: { selected } })}
       disabled={disabled}
       haptic={haptic}
       onPress={onPress}
-      className={`h-11 w-11 items-center justify-center rounded-full ${VARIANT_CONTAINER[variant]}`}
+      {...(slop > 0 ? { hitSlop: { top: slop, bottom: slop, left: slop, right: slop } } : {})}
+      style={{ width: box, height: box }}
+      className={`items-center justify-center rounded-full ${VARIANT_CONTAINER[variant]}`}
     >
       {icon}
       {badge ? (
@@ -126,32 +159,44 @@ export function IconButton({
 /**
  * Floating action button.
  *
- * Sits above the tab bar and clear of the home indicator; callers pass the
- * bottom offset because only the screen knows whether a tab bar is present.
+ * Positions itself above the home indicator without being told: the caller
+ * only knows whether a tab bar is present, not how tall the inset is, and
+ * the previous fixed `bottom={24}` put it inside the HIG clearance on every
+ * gesture-navigation device.
  */
 export function Fab({
   icon,
   label,
   onPress,
   accessibilityLabel,
-  bottom = 24,
+  /** Clearance above the safe area — pass the tab bar height when inside one. */
+  offset = 16,
 }: {
   icon: React.ReactNode;
   label?: string;
   onPress: () => void;
   accessibilityLabel: string;
-  bottom?: number;
+  offset?: number;
 }): React.ReactElement {
+  const insets = useSafeAreaInsets();
+  const fontScale = useFontScale();
+
   return (
-    <View className="absolute right-4" style={{ bottom }} pointerEvents="box-none">
+    <View
+      className="absolute right-4"
+      style={{ bottom: insets.bottom + offset }}
+      pointerEvents="box-none"
+    >
       <Touchable
         accessibilityLabel={accessibilityLabel}
         haptic="commit"
         onPress={onPress}
         scale="default"
-        className={`h-14 flex-row items-center justify-center gap-2 rounded-full bg-primary ${label ? 'px-5' : 'w-14'}`}
+        className={`flex-row items-center justify-center gap-2 rounded-full bg-primary ${label ? 'px-5' : ''}`}
         style={{
-          shadowColor: '#000',
+          minHeight: 56,
+          ...(label ? {} : { width: 56 }),
+          shadowColor: 'rgba(0,0,0,0.9)',
           shadowOpacity: 0.28,
           shadowRadius: 16,
           shadowOffset: { width: 0, height: 6 },
@@ -159,8 +204,15 @@ export function Fab({
         }}
       >
         {icon}
-        {label ? (
-          <Text className="text-md font-semibold text-primary-foreground">{label}</Text>
+        {/* The label is dropped rather than truncated at large reading sizes:
+            a FAB that grows to half the screen width is worse than an icon. */}
+        {label && fontScale <= 1.35 ? (
+          <Text
+            maxFontSizeMultiplier={MAX_SCALE.chrome}
+            className="text-md font-semibold text-primary-foreground"
+          >
+            {label}
+          </Text>
         ) : null}
       </Touchable>
     </View>

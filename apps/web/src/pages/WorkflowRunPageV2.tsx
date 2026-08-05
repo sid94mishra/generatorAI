@@ -535,7 +535,7 @@ export function WorkflowRunPageV2() {
           storageKey={rightPaneStorageKey}
           widthStorageKey="generatorai:rightPane:workflow-run:width"
           defaultTabType="changes"
-            addableTabTypes={['files', 'inspector', 'browser', 'terminal', 'canvas']}
+            addableTabTypes={['files', 'inspector', 'browser', 'terminal', 'widget']}
           focusTabRequest={browserTabFocusRequest}
           onTabClose={handleRightPaneTabClose}
           tabs={{

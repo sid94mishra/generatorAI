@@ -16,6 +16,8 @@
 import type { ILogger, WidgetInstance, WidgetSurface, WidgetActionDef } from '@generatorai/shared';
 import { normalizeWidgetSurface, DEFAULT_WIDGET_SURFACE } from '@generatorai/shared';
 import { randomUUID } from 'node:crypto';
+import { access } from 'node:fs/promises';
+import path from 'node:path';
 import type { EventBus } from '../events/EventBus.js';
 import type { IWidgetRegistry } from '../domain/ports/IWidgetRegistry.js';
 import type { IExtensionRegistry } from '../domain/ports/IExtensionRegistry.js';
@@ -127,6 +129,7 @@ export class WidgetService {
         `Extension ${descriptor.extensionId} is not active — cannot render widget ${descriptor.id}`,
       );
     }
+    await this.assertEntryExists(ext.rootPath, descriptor.entry, descriptor.id);
     const surface: WidgetSurface = normalizeWidgetSurface(
       params.surface ?? descriptor.preferredSurface ?? DEFAULT_WIDGET_SURFACE,
     );
@@ -175,6 +178,35 @@ export class WidgetService {
       },
     });
     return instance;
+  }
+
+  /**
+   * The iframe loads `entry` from the widget-asset origin, and a missing file
+   * there renders as the browser's own 404 page inside the panel — a blank
+   * widget with nothing to act on. Checking here turns that into a tool error
+   * the agent can actually fix (usually: it declared the widget but never
+   * wrote the HTML).
+   */
+  private async assertEntryExists(
+    rootPath: string,
+    entry: string,
+    descriptorId: string,
+  ): Promise<void> {
+    if (!rootPath) return;
+    const target = path.resolve(rootPath, entry);
+    const root = path.resolve(rootPath);
+    const withinRoot = target === root || target.startsWith(root + path.sep);
+    if (!withinRoot) {
+      throw new Error(`Widget ${descriptorId} declares an entry outside its extension: ${entry}`);
+    }
+    try {
+      await access(target);
+    } catch {
+      throw new Error(
+        `Widget ${descriptorId} declares entry "${entry}" but that file does not exist in the ` +
+          `extension. Write it (e.g. via write_extension) before rendering the widget.`,
+      );
+    }
   }
 
   /** Fetch an instance by id. */

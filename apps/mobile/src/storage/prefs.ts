@@ -35,4 +35,8 @@ export const PREF_KEYS = {
   biometricLock: 'generatorai.biometric-lock',
   localOnly: 'generatorai.local-only',
   lastRoute: 'generatorai.last-route',
+  motion: 'generatorai.motion',
+  haptics: 'generatorai.haptics',
+  /** Locally disabled skills — mirrors the web's `catalogPrefsStore`. */
+  disabledSkills: 'generatorai.disabled-skills',
 } as const;

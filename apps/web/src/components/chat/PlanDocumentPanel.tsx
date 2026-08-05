@@ -54,7 +54,9 @@ async function hashText(text: string): Promise<string> {
 
 export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
   const { data: plans } = usePlans(chatId);
-  const effectivePlanId = planId ?? plans?.[0]?.id ?? null;
+  // Prefer a plan that is actually waiting on the user; otherwise the newest.
+  const effectivePlanId =
+    planId ?? plans?.find((p) => p.status === 'awaiting_review')?.planId ?? plans?.[0]?.planId ?? null;
   const { data: plan, isLoading } = usePlan(chatId, effectivePlanId ?? undefined);
 
   const [viewRevision, setViewRevision] = useState<number | null>(null);

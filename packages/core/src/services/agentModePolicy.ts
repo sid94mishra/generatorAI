@@ -32,6 +32,15 @@ export interface TurnContext {
   planIds: string[];
   /** Question gates opened during this turn, for transcript persistence. */
   interactionIds: string[];
+  /**
+   * Monotonic ordinal handed out to every ordered item of the turn — each
+   * tool call, and each plan/question card. Persisting it is what lets the
+   * transcript be rebuilt in true chronological order after a reload; without
+   * it the cards can only be appended after the final answer.
+   */
+  nextSequence: number;
+  /** planId | interactionId → the ordinal that card was issued. */
+  cardSequence: Map<string, number>;
 }
 
 /** The behavioural contract for a mode. Re-exported so callers need one import. */

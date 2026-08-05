@@ -8,18 +8,31 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, File, Folder, Home } from 'lucide-react-native';
+import {
+  ChevronRight,
+  Code2,
+  Eye,
+  File,
+  Folder,
+  FolderTree,
+  Home,
+  RefreshCw,
+  WrapText,
+} from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 
 import { Touchable } from '../../ui/Touchable';
-import { Field } from '../../ui/Form';
+import { IconButton } from '../../ui/Button';
+import { SearchField } from '../../ui/Form';
 import { EmptyState, ErrorState, LoadingState } from '../../ui/States';
 import { SkeletonList } from '../../ui/Skeleton';
+import { Markdown } from '../../markdown/Markdown';
 import { useApi } from '../../../api/useApi';
 import { crumbsFor, levelEntries, type TreeEntry } from './fileTree';
+import { Toolbar } from './ChangesSection';
 import { useTheme } from '../../../theme/ThemeProvider';
 
 export function FilesSection({
@@ -35,6 +48,7 @@ export function FilesSection({
   const { colors } = useTheme();
   const [prefix, setPrefix] = useState('');
   const [query, setQuery] = useState('');
+  const [aliasFilter, setAliasFilter] = useState<string | null>(null);
 
   const tree = useQuery({
     queryKey: queryKeys.workspaceTree(workspaceId),
@@ -44,7 +58,8 @@ export function FilesSection({
     staleTime: 60_000,
   });
 
-  const repo = tree.data?.repos[0];
+  const repos = tree.data?.repos ?? [];
+  const repo = repos.find((r) => r.alias === aliasFilter) ?? repos[0];
   const paths = repo?.paths ?? [];
 
   const entries = useMemo<TreeEntry[]>(() => {
@@ -77,14 +92,74 @@ export function FilesSection({
 
   return (
     <View className="flex-1">
-      <View className="gap-2 border-b border-border-muted px-4 pb-2.5">
-        <Field
+      <Toolbar>
+        <FolderTree size={14} color={colors['muted-foreground']} />
+        <Text className="text-sm font-medium text-foreground">
+          {paths.length} file{paths.length === 1 ? '' : 's'}
+        </Text>
+        {repo?.truncated ? (
+          <Text className="text-xs text-warning">truncated</Text>
+        ) : null}
+        <View className="flex-1" />
+        <IconButton
+          accessibilityLabel="Refresh files"
+          icon={
+            <RefreshCw
+              size={16}
+              color={tree.isFetching ? colors.primary : colors['muted-foreground']}
+            />
+          }
+          onPress={() => void tree.refetch()}
+          disabled={tree.isFetching}
+        />
+      </Toolbar>
+
+      {repos.length > 1 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0, flexShrink: 0 }}
+          contentContainerStyle={{
+            gap: 6,
+            paddingHorizontal: 12,
+            paddingTop: 8,
+            alignItems: 'center',
+          }}
+        >
+          {repos.map((r) => {
+            const selected = r.alias === repo?.alias;
+            return (
+              <Touchable
+                key={r.alias}
+                accessibilityLabel={r.alias === '.' ? 'Workspace root' : r.alias}
+                accessibilityState={{ selected }}
+                haptic="select"
+                onPress={() => {
+                  setAliasFilter(r.alias);
+                  setPrefix('');
+                }}
+                className={`min-h-8 justify-center rounded-full border px-2.5 ${
+                  selected ? 'border-primary bg-accent' : 'border-border bg-raised'
+                }`}
+              >
+                <Text
+                  className={`text-xs font-medium ${
+                    selected ? 'text-primary' : 'text-muted-foreground'
+                  }`}
+                >
+                  {r.alias === '.' ? 'workspace root' : r.alias}
+                </Text>
+              </Touchable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+
+      <View className="gap-2 border-b border-border-muted px-4 py-2.5">
+        <SearchField
           placeholder={`Search ${paths.length} files`}
           value={query}
           onChangeText={setQuery}
-          autoCapitalize="none"
-          autoCorrect={false}
-          accessibilityLabel="Search files"
         />
         {!query ? (
           <View className="flex-row flex-wrap items-center gap-1">
@@ -168,11 +243,16 @@ function FileView({
   alias?: string;
 }): React.ReactElement {
   const api = useApi();
+  const { colors } = useTheme();
+  const [wrap, setWrap] = useState(false);
+  const [rendered, setRendered] = useState(true);
 
   const file = useQuery({
     queryKey: queryKeys.workspaceFile(workspaceId, path, alias),
     queryFn: () => api.workspaces.treeFile(workspaceId, { path, ...(alias ? { alias } : {}) }),
   });
+
+  const isMarkdown = /\.(md|mdx|markdown)$/i.test(path);
 
   const lines = useMemo(
     () =>
@@ -182,39 +262,107 @@ function FileView({
     [file.data],
   );
 
-  if (file.isLoading) return <LoadingState label="Loading file…" />;
-  if (file.isError) {
-    return <ErrorState message="Could not read this file." onRetry={() => void file.refetch()} />;
-  }
-  if (file.data?.isBinary) {
-    return <EmptyState title="Binary file" message="There is nothing to display for this type." />;
-  }
-  if (file.data?.isTooLarge) {
-    return (
-      <EmptyState
-        title="File is too large"
-        message="Open it on desktop — sending it to a phone would not be readable anyway."
+  const body = ((): React.ReactElement => {
+    if (file.isLoading) return <LoadingState label="Loading…" />;
+    if (file.isError) {
+      return <ErrorState message="Could not read this file." onRetry={() => void file.refetch()} />;
+    }
+    if (file.data?.isBinary) {
+      return (
+        <EmptyState
+          title="Binary file"
+          message={`${formatBytes(file.data.size)} — there is nothing to display for this type.`}
+        />
+      );
+    }
+    if (file.data?.isTooLarge) {
+      return (
+        <EmptyState
+          title="File is too large to preview"
+          message={`${formatBytes(file.data.size)}. Open it on desktop — it would not be readable at this width anyway.`}
+        />
+      );
+    }
+    if (isMarkdown && rendered) {
+      return (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+          <Markdown content={file.data?.contents ?? ''} />
+        </ScrollView>
+      );
+    }
+
+    const list = (
+      <LegendList
+        data={lines}
+        keyExtractor={(line) => line.key}
+        estimatedItemSize={18}
+        contentContainerStyle={{ paddingVertical: 8, paddingBottom: 32 }}
+        renderItem={({ item }) => (
+          <View className="flex-row">
+            <Text className="w-10 px-1 text-right font-mono text-xs leading-code text-muted-foreground">
+              {item.number}
+            </Text>
+            <Text
+              {...(wrap ? {} : { numberOfLines: 1 })}
+              className="flex-1 pr-3 font-mono text-xs leading-code text-foreground"
+            >
+              {item.text || ' '}
+            </Text>
+          </View>
+        )}
       />
     );
-  }
+
+    // Unwrapped, the whole list scrolls sideways as one surface so the gutter
+    // cannot drift out of alignment with its code.
+    return wrap ? (
+      list
+    ) : (
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={{ width: 760 }} className="flex-1">
+          {list}
+        </View>
+      </ScrollView>
+    );
+  })();
 
   return (
-    <LegendList
-      data={lines}
-      keyExtractor={(line) => line.key}
-      estimatedItemSize={18}
-      recycleItems
-      contentContainerStyle={{ paddingVertical: 8, paddingBottom: 32 }}
-      renderItem={({ item }) => (
-        <View className="flex-row">
-          <Text className="w-10 px-1 text-right font-mono text-xs leading-code text-muted-foreground">
-            {item.number}
-          </Text>
-          <Text className="flex-1 pr-3 font-mono text-xs leading-code text-foreground">
-            {item.text || ' '}
-          </Text>
-        </View>
-      )}
-    />
+    <View className="flex-1">
+      <Toolbar>
+        <File size={14} color={colors['muted-foreground']} />
+        <Text numberOfLines={1} className="flex-1 font-mono text-xs text-muted-foreground">
+          {path}
+        </Text>
+        {isMarkdown ? (
+          <IconButton
+            accessibilityLabel={rendered ? 'Show source' : 'Show rendered preview'}
+            selected={rendered}
+            icon={
+              rendered ? (
+                <Code2 size={16} color={colors['muted-foreground']} />
+              ) : (
+                <Eye size={16} color={colors['muted-foreground']} />
+              )
+            }
+            onPress={() => setRendered((v) => !v)}
+          />
+        ) : null}
+        {!isMarkdown || !rendered ? (
+          <IconButton
+            accessibilityLabel={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
+            selected={wrap}
+            icon={<WrapText size={16} color={wrap ? colors.primary : colors['muted-foreground']} />}
+            onPress={() => setWrap((w) => !w)}
+          />
+        ) : null}
+      </Toolbar>
+      {body}
+    </View>
   );
+}
+
+function formatBytes(size: number): string {
+  if (size >= 1_048_576) return `${(size / 1_048_576).toFixed(1)} MB`;
+  if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${size} B`;
 }

@@ -303,6 +303,21 @@ export class AuthenticatedClientRuntime {
     return session;
   }
 
+  /**
+   * Re-mints the access token now, without waiting for it to expire.
+   *
+   * Scopes are carried IN the token, so a capability granted from another
+   * device is invisible here until the next refresh. Without this the user
+   * grants "Terminal" on their laptop, returns to the phone, and the tab is
+   * still locked with no way to ask again.
+   */
+  async refreshSession(): Promise<AuthState> {
+    await this.initialize();
+    if (!this.session) return this.state;
+    await this.refreshAccessToken();
+    return this.state;
+  }
+
   /** Deletes all local credentials. Used for logout and after revocation. */
   async forget(): Promise<void> {
     this.accessToken = null;

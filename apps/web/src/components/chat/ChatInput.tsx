@@ -290,8 +290,8 @@ export function ChatInput({
     return () => ro.disconnect();
   }, []);
 
-  // Close dropdowns on outside click. The model picker manages its own
-  // dismissal (it lives in the shared `ModelPicker`).
+  // Close dropdowns on outside click or Escape. The model picker manages its
+  // own dismissal (it lives in the shared `ModelPicker`).
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const t = e.target as Node;
@@ -305,9 +305,20 @@ export function ChatInput({
         setShowModeDropdown(false);
       }
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setShowReasoningDropdown(false);
+      setShowToolsMenu(false);
+      setShowModeDropdown(false);
+    };
     if (showReasoningDropdown || showToolsMenu || showModeDropdown) {
       document.addEventListener('mousedown', handler);
-      return () => document.removeEventListener('mousedown', handler);
+      document.addEventListener('keydown', onKeyDown, true);
+      return () => {
+        document.removeEventListener('mousedown', handler);
+        document.removeEventListener('keydown', onKeyDown, true);
+      };
     }
   }, [showReasoningDropdown, showToolsMenu, showModeDropdown]);
 

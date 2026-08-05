@@ -14,6 +14,8 @@ export interface ChatMessageMetadata {
     args: unknown;
     result?: unknown;
     status: 'running' | 'complete';
+    /** See {@link PlanCardSummary.sequence}. */
+    sequence?: number;
   }>;
   /** System messages emitted during this response */
   systemMessages?: string[];

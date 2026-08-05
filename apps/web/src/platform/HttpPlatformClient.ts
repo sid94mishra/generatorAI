@@ -15,7 +15,6 @@ import type { ChatMessage } from '@generatorai/shared';
 // PLN-01 — plan mode
 import type {
   AgentMode,
-  AgentInteraction,
   PlanAction,
   PlanComment,
   PlanDocument,
@@ -137,6 +136,35 @@ export interface SystemHealth {
   /** IDs of chats currently streaming a response (in-flight turn). */
   runningChatIds: string[];
   otel: { enabled: boolean; endpoint?: string; serviceName?: string };
+}
+
+/**
+ * A human gate still awaiting a response, as serialised by
+ * `GET /api/chats/:id/interactions`.
+ *
+ * Deliberately NOT `AgentInteraction`: the route projects the entity and
+ * renames `id` to `interactionId`. Typing this as the entity made every
+ * consumer read `i.id` as `undefined`, which silently expired live gates.
+ */
+export interface PendingInteraction {
+  interactionId: string;
+  kind: 'plan_review' | 'question' | string;
+  status: string;
+  payload?: Record<string, unknown>;
+}
+
+/**
+ * Row shape of `GET /api/chats/:id/plans`. Like {@link PendingInteraction},
+ * the route projects the entity and renames `id` to `planId`.
+ */
+export interface PlanSummary {
+  planId: string;
+  revision: number;
+  title: string;
+  summary: string;
+  status: string;
+  actions: string[];
+  fileName?: string;
 }
 
 export class HttpPlatformClient implements IPlatformClient {
@@ -572,8 +600,8 @@ export class HttpPlatformClient implements IPlatformClient {
 
   // ── PLN-01: Plan mode ──
 
-  async getChatPlans(chatId: string): Promise<PlanDocument[]> {
-    return apiFetch<PlanDocument[]>(`${this.baseUrl}/api/chats/${chatId}/plans`);
+  async getChatPlans(chatId: string): Promise<PlanSummary[]> {
+    return apiFetch<PlanSummary[]>(`${this.baseUrl}/api/chats/${chatId}/plans`);
   }
 
   async getChatPlan(chatId: string, planId: string): Promise<PlanDocument> {
@@ -641,8 +669,8 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  async getChatInteractions(chatId: string): Promise<AgentInteraction[]> {
-    return apiFetch<AgentInteraction[]>(`${this.baseUrl}/api/chats/${chatId}/interactions`);
+  async getChatInteractions(chatId: string): Promise<PendingInteraction[]> {
+    return apiFetch<PendingInteraction[]>(`${this.baseUrl}/api/chats/${chatId}/interactions`);
   }
 
   async respondToChatInteraction(

@@ -47,7 +47,7 @@ export function useChatStream({
   // not re-run when a callback identity changes mid-stream.
   const routerRef = useRef(new StreamEventRouter());
   const pendingRef = useRef<StreamEffect[]>([]);
-  const invalidateRef = useRef(new Set<string>());
+  const invalidateRef = useRef(new Map<string, string | undefined>());
 
   useEffect(() => {
     if (!enabled || state.status !== 'authenticated') return;
@@ -70,7 +70,7 @@ export function useChatStream({
 
       const resources = invalidateRef.current;
       if (resources.size > 0) {
-        for (const resource of resources) {
+        for (const [resource, id] of resources) {
           switch (resource) {
             case 'messages':
               void queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
@@ -83,6 +83,17 @@ export function useChatStream({
               break;
             case 'chat':
               void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
+              break;
+            case 'tasks':
+              void queryClient.invalidateQueries({ queryKey: queryKeys.chatTasks(chatId) });
+              break;
+            case 'workspace':
+              // Every workspace-scoped surface — changes, tree, file bodies
+              // — keys off the workspace id, so one prefix match covers the
+              // Workbench without the sheet having to poll.
+              if (id) {
+                void queryClient.invalidateQueries({ queryKey: ['workspaces', id] });
+              }
               break;
             default:
               break;
@@ -102,7 +113,7 @@ export function useChatStream({
       onEvent: (event: StreamEvent) => {
         for (const effect of router.handle(event.sessionId ?? chatId, event)) {
           if (effect.op === 'invalidate') {
-            invalidateRef.current.add(effect.resource);
+            invalidateRef.current.set(effect.resource, effect.id);
           } else {
             pendingRef.current.push(effect);
           }

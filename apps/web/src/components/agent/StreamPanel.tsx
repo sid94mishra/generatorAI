@@ -107,6 +107,15 @@ export function StreamPanel({
     })();
     const hasAnswerSeg = lastAnswerIdx !== -1;
 
+    // A turn parked on a plan/question gate is waiting on the USER. Showing
+    // "generating" cues there reads as "more output is coming, hold on" and
+    // stops people from acting on the card that is already in front of them.
+    const awaitingUser = segments.some(
+      (s) =>
+        (s.type === 'plan' && s.plan.status === 'awaiting_review') ||
+        (s.type === 'question' && s.question.status === 'pending'),
+    );
+
     return (
       <div className={cn('space-y-2.5', className)}>
         {segments.map((seg, i) => {
@@ -115,15 +124,16 @@ export function StreamPanel({
           }
           if (seg.type === 'answer') {
             const isLastAnswer = i === lastAnswerIdx;
+            const streamingHere = isActive && !awaitingUser && isLastAnswer;
             return (
               <div
                 key={seg.id}
                 className={cn(
                   'min-w-0 overflow-hidden text-[13.5px] leading-relaxed message-assistant',
-                  isActive && isLastAnswer && 'stream-container',
+                  streamingHere && 'stream-container',
                 )}
                 aria-live="polite"
-                aria-busy={isActive && isLastAnswer}
+                aria-busy={streamingHere}
               >
                 <MarkdownRenderer content={seg.text} />
               </div>
@@ -166,7 +176,7 @@ export function StreamPanel({
 
         {/* Trailing loading placeholder — only when we expect answer tokens
             but none have arrived yet (no answer segment present). */}
-        {loading && !hasAnswerSeg && (
+        {loading && !hasAnswerSeg && !awaitingUser && (
           <div className="min-w-0 space-y-2 pt-1">
             <div className="skeleton-shimmer h-3.5 w-[92%] rounded" />
             <div className="skeleton-shimmer h-3.5 w-[78%] rounded" />
@@ -178,7 +188,7 @@ export function StreamPanel({
             content while the turn is active, so the "generating" cue never
             appears mid-stream (e.g. stranded on an earlier answer segment
             once tool calls follow it). */}
-        {isActive && <StreamingIndicator />}
+        {isActive && !awaitingUser && <StreamingIndicator />}
 
         {/* Error box */}
         {error && (

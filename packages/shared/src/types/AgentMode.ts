@@ -267,6 +267,14 @@ export interface PlanCardSummary {
   fileName: string;
   summary: string;
   status: PlanStatus;
+  /**
+   * Position of this card among the turn's ordered items (tool calls and
+   * cards share one counter). Replay sorts on it so a rebuilt transcript
+   * reads in the order the user lived through, instead of appending every
+   * card after the final answer. Absent on messages persisted before the
+   * ordinal existed.
+   */
+  sequence?: number;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -313,6 +321,8 @@ export interface QuestionCardSummary {
   questions: AgentQuestion[];
   response?: AgentQuestionResponse;
   status: 'pending' | 'answered' | 'expired';
+  /** See {@link PlanCardSummary.sequence}. */
+  sequence?: number;
 }
 
 // ────────────────────────────────────────────────────────────────

@@ -46,6 +46,13 @@ const config: ExpoConfig = {
   android: {
     package: 'dev.generatorai.app',
     adaptiveIcon: { backgroundColor: '#0d1117' },
+    // Android 14+ predictive back. Without it the OS falls back to the
+    // legacy blocking behaviour and the back preview never animates.
+    predictiveBackGestureEnabled: true,
+    // The composer and every sheet depend on the window resizing when the
+    // IME opens; `pan` (the other option) slides the whole window and hides
+    // the transcript instead.
+    softwareKeyboardLayoutMode: 'resize',
     permissions: [
       'android.permission.CAMERA',
       'android.permission.RECORD_AUDIO',
@@ -76,6 +83,12 @@ const config: ExpoConfig = {
     'expo-local-authentication',
     'expo-notifications',
     'expo-web-browser',
+    [
+      // Voice dictation records to a local file and posts the PCM to the
+      // server's own Whisper endpoint; nothing leaves the machine pair.
+      'expo-audio',
+      { microphonePermission: 'Dictate prompts to your agent, transcribed on your own server.' },
+    ],
   ],
 
   experiments: {

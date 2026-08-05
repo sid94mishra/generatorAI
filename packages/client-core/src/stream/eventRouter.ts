@@ -21,7 +21,7 @@
 // rather than a comment.
 // ────────────────────────────────────────────────────────────────
 
-import type { SystemCategory } from './types.js';
+import type { PlanBlock, QuestionBlock, SystemCategory, WidgetBlock } from './types.js';
 
 /** A mutation to apply to the stream store. */
 export type StreamEffect =
@@ -29,6 +29,12 @@ export type StreamEffect =
   | { op: 'appendThinking'; key: string; text: string }
   | { op: 'completeThinking'; key: string }
   | { op: 'startPending'; key: string; userMessage?: string }
+  /**
+   * Text that arrived only on `message_complete`, with no token stream
+   * behind it. Applied ONLY when the turn produced no text block, so a
+   * provider that streams normally never gets its answer duplicated.
+   */
+  | { op: 'appendTokenIfNoText'; key: string; text: string }
   | { op: 'addToolCall'; key: string; tool: string; args: unknown; callId?: string }
   | { op: 'completeToolCall'; key: string; toolOrCallId: string; result: unknown }
   | { op: 'addSystemMessage'; key: string; message: string; category: SystemCategory }
@@ -38,8 +44,43 @@ export type StreamEffect =
   | { op: 'setServerTurnId'; key: string; turnId: string }
   | { op: 'setUsage'; key: string; usage: Record<string, unknown> }
   | { op: 'setContextUsage'; key: string; snapshot: Record<string, unknown> }
+  | { op: 'upsertPlan'; key: string; plan: Omit<PlanBlock, 'type' | 'blockId'> }
+  | {
+      op: 'setPlanStatus';
+      key: string;
+      planId: string;
+      status: PlanBlock['status'];
+      extra?: { interactionId?: string; revision?: number };
+    }
+  | { op: 'upsertQuestion'; key: string; question: Omit<QuestionBlock, 'type' | 'blockId'> }
+  | {
+      op: 'answerQuestion';
+      key: string;
+      interactionId: string;
+      answers: Record<string, string[]>;
+      freeformResponse?: string;
+    }
+  | { op: 'expireQuestion'; key: string; interactionId: string }
+  | {
+      op: 'addWidget';
+      key: string;
+      widget: Omit<WidgetBlock, 'type' | 'blockId' | 'surface'> & { surface: string };
+    }
+  | { op: 'updateWidgetState'; key: string; instanceId: string; state: unknown }
+  | {
+      op: 'setWidgetStatus';
+      key: string;
+      instanceId: string;
+      status: WidgetBlock['status'];
+      error?: string;
+    }
   /** Refetch a REST resource. The host decides how (TanStack, manual, …). */
-  | { op: 'invalidate'; resource: 'messages' | 'chat' | 'run' | 'plans' | 'interactions' };
+  | {
+      op: 'invalidate';
+      resource: 'messages' | 'chat' | 'run' | 'plans' | 'interactions' | 'workspace' | 'tasks';
+      /** Workspace the change belongs to, when the resource is workspace-scoped. */
+      id?: string;
+    };
 
 export interface PersistedEventLike {
   kind: string;
@@ -190,6 +231,12 @@ export class StreamEventRouter {
           // The model emitted tool-call XML in the token stream instead of
           // using the SDK protocol; restructure it into real blocks.
           out.push({ op: 'processInlineToolCalls', key, content });
+        } else if (content) {
+          // Some providers never emit token deltas and deliver the whole
+          // answer here. Without this the transcript stays empty until the
+          // history refetch lands — the single most visible way mobile fell
+          // out of step with web.
+          out.push({ op: 'appendTokenIfNoText', key, text: content });
         }
         out.push({ op: 'invalidate', resource: 'messages' });
         break;
@@ -268,19 +315,286 @@ export class StreamEventRouter {
         break;
 
       case 'chat.plan.created':
-      case 'chat.plan.updated':
-      case 'chat.plan.review_requested':
-      case 'chat.plan.decided':
-      case 'chat.plan.expired':
         this.flushKey(key, out);
+        out.push({
+          op: 'upsertPlan',
+          key,
+          plan: {
+            planId: String(data['planId'] ?? ''),
+            revision: Number(data['revision'] ?? 1),
+            title: String(data['title'] ?? 'Plan'),
+            fileName: String(data['fileName'] ?? 'plan.md'),
+            summary: String(data['summary'] ?? ''),
+            status: 'drafting',
+            actions: [],
+          },
+        });
         out.push({ op: 'invalidate', resource: 'plans' });
         break;
 
+      case 'chat.plan.updated':
+        this.flushKey(key, out);
+        out.push({
+          op: 'setPlanStatus',
+          key,
+          planId: String(data['planId'] ?? ''),
+          status: 'drafting',
+          extra: { revision: Number(data['revision'] ?? 1) },
+        });
+        out.push({ op: 'invalidate', resource: 'plans' });
+        break;
+
+      case 'chat.plan.review_requested': {
+        this.flushKey(key, out);
+        // `upsertPlan` merges onto the card from `chat.plan.created`, so
+        // absent fields must be omitted rather than blanked.
+        const title =
+          typeof data['title'] === 'string' && data['title']
+            ? data['title']
+            : String(data['summary'] ?? 'Plan');
+        out.push({
+          op: 'upsertPlan',
+          key,
+          plan: {
+            planId: String(data['planId'] ?? ''),
+            revision: Number(data['revision'] ?? 1),
+            title,
+            ...(typeof data['fileName'] === 'string' && data['fileName']
+              ? { fileName: data['fileName'] }
+              : {}),
+            summary: String(data['summary'] ?? ''),
+            status: 'awaiting_review',
+            actions: Array.isArray(data['actions']) ? (data['actions'] as string[]) : [],
+            ...(typeof data['recommendedAction'] === 'string'
+              ? { recommendedAction: data['recommendedAction'] }
+              : {}),
+            interactionId: String(data['interactionId'] ?? ''),
+          },
+        });
+        out.push({ op: 'invalidate', resource: 'plans' });
+        out.push({ op: 'invalidate', resource: 'interactions' });
+        break;
+      }
+
+      case 'chat.plan.decided': {
+        this.flushKey(key, out);
+        const approved = data['approved'] === true;
+        const action = typeof data['action'] === 'string' ? data['action'] : undefined;
+        out.push({
+          op: 'setPlanStatus',
+          key,
+          planId: String(data['planId'] ?? ''),
+          status: approved
+            ? action === 'exit_only'
+              ? 'rejected'
+              : 'approved'
+            : 'changes_requested',
+        });
+        out.push({ op: 'invalidate', resource: 'plans' });
+        out.push({ op: 'invalidate', resource: 'interactions' });
+        break;
+      }
+
+      case 'chat.plan.expired':
+        this.flushKey(key, out);
+        out.push({
+          op: 'setPlanStatus',
+          key,
+          planId: String(data['planId'] ?? ''),
+          status: 'expired',
+        });
+        out.push({ op: 'invalidate', resource: 'plans' });
+        out.push({ op: 'invalidate', resource: 'interactions' });
+        break;
+
+      case 'chat.plan.extraction_failed':
+        this.flushKey(key, out);
+        out.push({
+          op: 'addSystemMessage',
+          key,
+          message: `Plan mode: ${String(data['reason'] ?? 'the plan could not be captured')}`,
+          category: 'error',
+        });
+        break;
+
+      // The wire kinds are dot-separated (`chat.question.asked`). The
+      // underscore spellings were a transcription slip that meant a phone
+      // NEVER saw a clarifying question; both are accepted now so a rename
+      // in either direction cannot silently break the gate again.
+      case 'chat.question.asked':
       case 'chat.question_asked':
+        this.flushKey(key, out);
+        out.push({
+          op: 'upsertQuestion',
+          key,
+          question: {
+            interactionId: String(data['interactionId'] ?? ''),
+            questions: Array.isArray(data['questions'])
+              ? (data['questions'] as QuestionBlock['questions'])
+              : [],
+            status: 'pending',
+          },
+        });
+        out.push({ op: 'invalidate', resource: 'interactions' });
+        break;
+
+      case 'chat.question.answered':
       case 'chat.question_answered':
+        this.flushKey(key, out);
+        out.push({
+          op: 'answerQuestion',
+          key,
+          interactionId: String(data['interactionId'] ?? ''),
+          answers: (data['answers'] as Record<string, string[]>) ?? {},
+          ...(typeof data['freeformResponse'] === 'string'
+            ? { freeformResponse: data['freeformResponse'] }
+            : {}),
+        });
+        out.push({ op: 'invalidate', resource: 'interactions' });
+        break;
+
+      case 'chat.question.expired':
       case 'chat.question_expired':
         this.flushKey(key, out);
+        out.push({
+          op: 'expireQuestion',
+          key,
+          interactionId: String(data['interactionId'] ?? ''),
+        });
         out.push({ op: 'invalidate', resource: 'interactions' });
+        break;
+
+      // ── Widgets ──
+      case 'harness.widget.render':
+        this.flushKey(key, out);
+        out.push({
+          op: 'addWidget',
+          key,
+          widget: {
+            instanceId: String(data['instanceId'] ?? ''),
+            descriptorId: String(data['descriptorId'] ?? ''),
+            extensionId: String(data['extensionId'] ?? ''),
+            component: String(data['component'] ?? ''),
+            ...(typeof data['title'] === 'string' ? { title: data['title'] } : {}),
+            surface: typeof data['surface'] === 'string' ? data['surface'] : 'widget',
+            assetsBase: typeof data['assetsBase'] === 'string' ? data['assetsBase'] : '',
+            entry: String(data['entry'] ?? ''),
+            props: data['props'],
+            state: data['state'],
+            status: 'active',
+          },
+        });
+        break;
+
+      case 'harness.widget.state':
+        this.flushKey(key, out);
+        out.push({
+          op: 'updateWidgetState',
+          key,
+          instanceId: String(data['instanceId'] ?? ''),
+          state: data['state'],
+        });
+        break;
+
+      case 'harness.widget.closed':
+        this.flushKey(key, out);
+        out.push({
+          op: 'setWidgetStatus',
+          key,
+          instanceId: String(data['instanceId'] ?? ''),
+          status: 'closed',
+        });
+        break;
+
+      case 'harness.widget.error':
+        this.flushKey(key, out);
+        out.push({
+          op: 'setWidgetStatus',
+          key,
+          instanceId: String(data['instanceId'] ?? ''),
+          status: 'error',
+          ...(typeof data['error'] === 'string' ? { error: data['error'] } : {}),
+        });
+        break;
+
+      // ── Git / workspace narration ──
+      case 'git.clone_start':
+        this.flushKey(key, out);
+        out.push({
+          op: 'addSystemMessage',
+          key,
+          message: `Cloning repository: ${String(data['repoUrl'] ?? '')}`,
+          category: 'system',
+        });
+        break;
+
+      case 'git.clone_complete':
+        this.flushKey(key, out);
+        out.push({
+          op: 'addSystemMessage',
+          key,
+          message: `Repository cloned to: ${String(data['localPath'] ?? '')}`,
+          category: 'system',
+        });
+        break;
+
+      case 'git.commit':
+        this.flushKey(key, out);
+        out.push({
+          op: 'addSystemMessage',
+          key,
+          message: `Git commit: ${String(data['message'] ?? '')} (${String(data['sha'] ?? '')})`,
+          category: 'system',
+        });
+        break;
+
+      case 'git.push':
+        this.flushKey(key, out);
+        out.push({
+          op: 'addSystemMessage',
+          key,
+          message: `Pushed to branch: ${String(data['branch'] ?? '')}`,
+          category: 'system',
+        });
+        break;
+
+      case 'git.pr_created':
+        this.flushKey(key, out);
+        out.push({
+          op: 'addSystemMessage',
+          key,
+          message: `PR created: ${String(data['url'] ?? '')}`,
+          category: 'system',
+        });
+        break;
+
+      case 'hook.failed':
+        this.flushKey(key, out);
+        out.push({
+          op: 'addSystemMessage',
+          key,
+          message: `Hook "${String(data['hookName'] ?? '')}" failed: ${String(data['error'] ?? '')}`,
+          category: 'error',
+        });
+        break;
+
+      // The Changes and Files surfaces used to poll. These are what keep a
+      // sheet that is already open in step with the agent's edits.
+      case 'workspace.changed':
+      case 'checkpoint.created':
+      case 'checkpoint.restored':
+        out.push({
+          op: 'invalidate',
+          resource: 'workspace',
+          ...(typeof data['workspaceId'] === 'string' ? { id: data['workspaceId'] } : {}),
+        });
+        break;
+
+      case 'chat.background_task.spawned':
+      case 'chat.background_task.status':
+      case 'chat.background_task.completed':
+      case 'chat.background_task.failed':
+        out.push({ op: 'invalidate', resource: 'tasks' });
         break;
 
       default:

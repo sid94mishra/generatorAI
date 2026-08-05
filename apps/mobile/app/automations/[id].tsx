@@ -129,7 +129,7 @@ export default function AutomationDetailScreen(): React.ReactElement {
           {(executions.data ?? []).map((execution) => (
             <Card key={execution.id} className="gap-1.5 p-3.5">
               <View className="flex-row items-center gap-2">
-                <StatusDot tone={toneOf(execution.status)} />
+                <StatusDot tone={toneOf(execution.status)} label={null} />
                 <Text className="flex-1 text-sm text-foreground">
                   {relativeTime(execution.startedAt ?? null)}
                 </Text>

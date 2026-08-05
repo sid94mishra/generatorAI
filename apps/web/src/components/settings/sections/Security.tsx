@@ -155,6 +155,48 @@ const SCOPE_PRESETS: Record<string, { label: string; hint: string; scopes: strin
   },
 };
 
+/**
+ * Capabilities a paired device can be granted after the fact.
+ *
+ * Terminal and browser control are withheld from every default grant, so
+ * without this the only way to give a phone a terminal was to revoke it and
+ * pair it again on the "Full workstation" preset — which is why those tabs
+ * looked broken rather than locked. `PUT /devices/:id/scopes` has always
+ * existed; nothing surfaced it.
+ */
+const GRANTABLE_CAPABILITIES: Array<{ scope: string; label: string; hint: string }> = [
+  {
+    scope: 'exec:terminal',
+    label: 'Terminal',
+    hint: 'Run shell commands in a workspace. This is remote code execution — grant it only to a device you physically hold.',
+  },
+  {
+    scope: 'exec:browser',
+    label: 'Browser',
+    hint: "View and drive the agent's browser session.",
+  },
+  {
+    scope: 'write:files',
+    label: 'Write files',
+    hint: 'Upload attachments and edit workspace files.',
+  },
+  {
+    scope: 'write:workflows',
+    label: 'Control runs',
+    hint: 'Start, pause and cancel workflow runs, and edit definitions.',
+  },
+  {
+    scope: 'write:projects',
+    label: 'Edit projects',
+    hint: 'Create projects and link codebases.',
+  },
+  {
+    scope: 'admin:devices',
+    label: 'Manage devices',
+    hint: 'Pair and revoke other devices from this one.',
+  },
+];
+
 function relativeTime(ts: number | null): string {
   if (!ts) return 'never';
   const delta = Date.now() - ts;
@@ -266,6 +308,45 @@ export function SecuritySection() {
         void refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [refresh],
+  );
+
+  /**
+   * Grant or withdraw one capability on an already-paired device.
+   *
+   * Sends the FULL scope list because the endpoint replaces rather than
+   * merges. Granting `exec:terminal` is confirmed explicitly — it is remote
+   * code execution, and the server records it as a critical audit event.
+   */
+  const [scopeBusy, setScopeBusy] = useState<string | null>(null);
+  const toggleCapability = useCallback(
+    async (device: DeviceSummary, scope: string, grant: boolean) => {
+      if (grant && (scope === 'exec:terminal' || scope === 'admin:devices')) {
+        const what =
+          scope === 'exec:terminal'
+            ? 'run shell commands on this machine'
+            : 'pair and revoke other devices';
+        if (!window.confirm(`Allow "${device.name}" to ${what}?\n\nThis takes effect the next time that device refreshes its session.`)) {
+          return;
+        }
+      }
+      const next = grant
+        ? [...new Set([...device.scopes, scope])]
+        : device.scopes.filter((s) => s !== scope);
+      setScopeBusy(`${device.deviceId}:${scope}`);
+      setError(null);
+      try {
+        await apiFetch(`/api/auth/devices/${device.deviceId}/scopes`, {
+          method: 'PUT',
+          body: JSON.stringify({ scopes: next }),
+        });
+        void refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setScopeBusy(null);
       }
     },
     [refresh],
@@ -584,6 +665,42 @@ export function SecuritySection() {
                             {s}
                           </span>
                         ))}
+                      </div>
+
+                      {/* Capabilities — the only place a withheld scope can
+                          be granted without re-pairing the device. */}
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          Capabilities
+                        </span>
+                        {GRANTABLE_CAPABILITIES.map((cap) => {
+                          const held = d.scopes.includes(cap.scope);
+                          const busy = scopeBusy === `${d.deviceId}:${cap.scope}`;
+                          return (
+                            <button
+                              key={cap.scope}
+                              type="button"
+                              role="switch"
+                              aria-checked={held}
+                              disabled={busy}
+                              title={`${cap.hint}${held ? '' : '\n\nNot granted.'}`}
+                              onClick={() => void toggleCapability(d, cap.scope, !held)}
+                              className={cn(
+                                'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+                                held
+                                  ? 'border-primary/40 bg-primary/10 text-primary'
+                                  : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
+                              )}
+                            >
+                              {busy ? (
+                                <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+                              ) : held ? (
+                                <Check className="h-2.5 w-2.5" />
+                              ) : null}
+                              {cap.label}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

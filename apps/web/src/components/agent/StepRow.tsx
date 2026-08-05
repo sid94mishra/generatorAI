@@ -9,7 +9,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   BookOpen, Search, FileEdit, Play, Wrench, Brain, Bot,
-  Database, StickyNote, AlertCircle, CheckCircle2, Loader2, ChevronRight, Circle,
+  Database, StickyNote, AlertCircle, CheckCircle2, Loader2, ChevronRight, Circle, PauseCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import type { StepKind, StepStatus, TimelineStep } from '@/components/chat/redesign/types.js';
@@ -30,6 +30,9 @@ const KIND_ICON: Record<StepKind, React.ComponentType<{ className?: string }>> =
 function StatusDot({ status }: { status: StepStatus }) {
   if (status === 'running') {
     return <Loader2 className="h-3 w-3 animate-spin text-[var(--color-primary)]" />;
+  }
+  if (status === 'waiting') {
+    return <PauseCircle className="h-3 w-3 text-[var(--color-primary)]" />;
   }
   if (status === 'done') {
     return <CheckCircle2 className="h-3 w-3 text-[var(--color-success)]" />;
@@ -57,6 +60,7 @@ export const StepRow = React.memo(function StepRow({ step, nested }: StepRowProp
   const [expanded, setExpanded] = useState(false);
   const Icon = KIND_ICON[step.kind];
   const isRunning = step.status === 'running';
+  const isWaiting = step.status === 'waiting';
   const isPending = step.status === 'pending';
   const hasExpandable =
     (step.children && step.children.length > 0) ||
@@ -113,6 +117,7 @@ export const StepRow = React.memo(function StepRow({ step, nested }: StepRowProp
 
         {/* right meta */}
         <span className="flex shrink-0 items-center gap-2 text-[11px] text-[var(--color-muted-foreground)]/70">
+          {isWaiting && <span className="text-[var(--color-primary)]">Waiting for you</span>}
           {step.meta && <span>{step.meta}</span>}
           {step.durationMs != null && <span>{formatDuration(step.durationMs)}</span>}
           {hasExpandable && (

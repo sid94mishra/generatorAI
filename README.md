@@ -59,6 +59,27 @@ pnpm test
 `check:tokens` (design tokens match their generated output). Both are enforced
 in CI.
 
+## Packaging
+
+Build desktop installers for your current platform:
+
+```bash
+pnpm package:desktop     # → apps/desktop/release/
+```
+
+Windows gets an `nsis` installer and a portable exe, macOS a `dmg` and `zip`,
+Linux an `AppImage`, `deb` and `rpm`. Each carries the whole stack — Electron
+shell, web SPA, and the server bundled with its native dependencies compiled
+against Electron's ABI.
+
+Two constraints are worth knowing before you start: you must build on the
+platform you are targeting, and the installer architecture must match the
+staged server runtime.
+
+Step-by-step commands, cross-architecture builds, signing, update channels and
+release publishing are in
+**[.github/docs/packaging.md](.github/docs/packaging.md)**.
+
 ## Configuration
 
 Configuration is environment-driven; see [apps/server/.env.example](apps/server/.env.example).

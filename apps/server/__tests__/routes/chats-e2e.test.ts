@@ -3,7 +3,7 @@
 // Tests the complete chat lifecycle via API endpoints
 // ────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { createTestApp } from '../helpers/testApp.js';
 import type { Express } from 'express';
@@ -94,6 +94,95 @@ describe('E2E: Chat API Flow', () => {
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
+    });
+  });
+
+  describe('POST /api/chats/:id/plans/:planId/decision — Plan decision', () => {
+    it('should delegate to chatManagementService.decidePlan, feedback included', async () => {
+      const res = await request(app)
+        .post('/api/chats/chat-1/plans/plan-1/decision')
+        .send({ approved: false, feedback: 'Add a --json flag', expectedRevision: 1 });
+
+      expect(res.status).toBe(202);
+      // The route must NOT settle the gate itself: only the service releases
+      // it as `changes_requested`, which is what tells the agent to revise
+      // rather than to stop. Resolving it here once dropped the feedback and
+      // rejected the plan instead.
+      expect(container.chatManagementService.decidePlan).toHaveBeenCalledWith(
+        'chat-1',
+        'plan-1',
+        expect.objectContaining({ approved: false, feedback: 'Add a --json flag' }),
+      );
+    });
+
+    it('should map a stale expectedRevision to 409 REVISION_CONFLICT', async () => {
+      (container.chatManagementService.decidePlan as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: false,
+        reason: 'Plan has been revised; reload before deciding',
+      });
+
+      const res = await request(app)
+        .post('/api/chats/chat-1/plans/plan-1/decision')
+        .send({ approved: true, expectedRevision: 1 });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('REVISION_CONFLICT');
+    });
+
+    it('should map an already-settled gate to 409 DECISION_CONFLICT', async () => {
+      (container.chatManagementService.decidePlan as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: false,
+        reason: 'No plan review is awaiting a decision',
+      });
+
+      const res = await request(app)
+        .post('/api/chats/chat-1/plans/plan-1/decision')
+        .send({ approved: true });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('DECISION_CONFLICT');
+    });
+  });
+
+  describe('POST /api/chats/:id/interactions/:interactionId/respond', () => {
+    it('should delegate to chatManagementService.answerQuestion', async () => {
+      const res = await request(app)
+        .post('/api/chats/chat-1/interactions/int-1/respond')
+        .send({ answers: { q0: ['Python'] } });
+
+      expect(res.status).toBe(202);
+      // Resolving the gate inline left no `chat.question.answered` event, so a
+      // reload replayed the card as pending and it was then marked expired.
+      expect(container.chatManagementService.answerQuestion).toHaveBeenCalledWith(
+        'chat-1',
+        'int-1',
+        expect.objectContaining({ answers: { q0: ['Python'] } }),
+      );
+    });
+
+    it('should carry the freeform "skip" response through', async () => {
+      await request(app)
+        .post('/api/chats/chat-1/interactions/int-1/respond')
+        .send({ freeformResponse: 'Skip the questions and use your best judgement.' });
+
+      expect(container.chatManagementService.answerQuestion).toHaveBeenCalledWith(
+        'chat-1',
+        'int-1',
+        expect.objectContaining({
+          freeformResponse: 'Skip the questions and use your best judgement.',
+        }),
+      );
+    });
+
+    it('should map an interaction from another chat to 404', async () => {
+      (container.chatManagementService.answerQuestion as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: false, reason: 'Interaction not found' });
+
+      const res = await request(app)
+        .post('/api/chats/chat-1/interactions/int-1/respond')
+        .send({ answers: {} });
+
+      expect(res.status).toBe(404);
     });
   });
 

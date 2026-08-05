@@ -22,6 +22,7 @@ import { connectChatSession } from '@/stores/sseManager.js';
 import { hydrateWidgetsForChat } from '@/utils/hydrateWidgets.js';
 import { ChatMessageList } from '@/components/chat/ChatMessageList.js';
 import { StreamingMessage } from '@/components/chat/StreamingMessage.js';
+import { awaitsUserDecision } from '@/components/agent/deriveTimeline.js';
 import { ChatInput } from '@/components/chat/ChatInput.js';
 import type { ComposerAttachment } from '@/components/chat/composer/types.js';
 import { useFileTabs } from '@/components/diff/useFileTabs.js';
@@ -31,8 +32,9 @@ import { RightPane, useRightPaneOpen } from '@/components/layout/RightPane.js';
 import { clearBrowserTabUrl } from '@/lib/browserTabUrls.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { WidgetHost } from '@/components/widgets/WidgetHost.js';
+import { widgetTabId, parseWidgetTabId } from '@/components/widgets/widgetTabId.js';
 import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js';
-import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList } from 'lucide-react';
+import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList, PauseCircle } from 'lucide-react';
 import { openAuthenticatedEventSource } from '@/platform/authTransport.js';
 import { cn } from '@/lib/utils.js';
 
@@ -103,6 +105,13 @@ export function ChatPage() {
    * gives users the "watch the agent live" UX with zero clicks.
    */
   const [browserTabFocusRequest, setBrowserTabFocusRequest] = useState<{ type: string; token: number; tabId?: string } | null>(null);
+  // React Router reuses this component across /chats/:id, so a focus request
+  // minted for the previous conversation would otherwise open that tab in the
+  // next one (e.g. Background Tasks following you into a worker chat).
+  useEffect(() => {
+    setBrowserTabFocusRequest(null);
+    setBgTabAutoOpened(false);
+  }, [chatId]);
   // Per-instance browser tab state (keyed by the RightPane tab id) so each
   // "Browser" tab renders its own live title + favicon + spinner.
   const [browserTabs, setBrowserTabs] = useState<Record<string, BrowserTabState>>({});
@@ -268,7 +277,7 @@ export function ChatPage() {
   // instantly killing a live gate.
   useEffect(() => {
     if (!sessionId || pendingInteractions === undefined) return;
-    const live = new Set(pendingInteractions.map((i) => i.id));
+    const live = new Set(pendingInteractions.map((i) => i.interactionId));
     const store = useStreamStore.getState();
     const isStale = (openedAt: number | undefined) =>
       openedAt !== undefined && openedAt > pendingFetchedAt;
@@ -315,11 +324,19 @@ export function ChatPage() {
     }
   }, [chat?.model, chat?.harnessConfig?.reasoningEffort, chat?.harnessConfig?.contextTier, chat?.codebaseIds, chat?.gitRepositories]);
 
+  // The chat entity is authoritative until the user picks something else.
+  // `selectedModel` is only synced in an effect, and React runs the composer's
+  // effects before this page's, so reading it directly would hand ChatInput an
+  // empty selection for one commit — long enough for its catalog fallback to
+  // fire and persist the wrong model over the one the chat was created with.
+  const effectiveModel = selectedModel || chat?.model || '';
+
   // Persist model changes to server
   const handleModelChange = useCallback((model: string) => {
+    if (!chat) return;
     setSelectedModel(model);
     updateChatMutation.mutate({ model });
-  }, [updateChatMutation]);
+  }, [chat, updateChatMutation]);
 
   // Persist reasoning-effort changes into harnessConfig (merged with existing)
   const handleReasoningEffortChange = useCallback((effort: string) => {
@@ -431,9 +448,9 @@ export function ChatPage() {
     };
   }, [chatWorkspaceId, setRightPaneOpen]);
 
-  // Auto-open the Widget tab whenever a new full-page widget arrives.
-  // Tracks the highest-seen instanceId seen for a widget so we only
-  // refocus once per new widget.
+  // Auto-open a tab per full-page widget. The tab id encodes the instance, so
+  // a second widget gets its OWN tab instead of re-focusing the first one's,
+  // and re-rendering the same widget focuses the tab already showing it.
   const seenCanvasWidgetsRef = React.useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!stream) return;
@@ -444,9 +461,21 @@ export function ChatPage() {
       if (seenCanvasWidgetsRef.current.has(b.instanceId)) continue;
       seenCanvasWidgetsRef.current.add(b.instanceId);
       setRightPaneOpen(true);
-      setBrowserTabFocusRequest({ type: 'widget', token: Date.now() });
+      setBrowserTabFocusRequest({
+        type: 'widget',
+        token: Date.now(),
+        tabId: widgetTabId(b.instanceId),
+      });
     }
   }, [stream, setRightPaneOpen]);
+
+  const openWidgetTab = useCallback(
+    (instanceId: string) => {
+      setRightPaneOpen(true);
+      setBrowserTabFocusRequest({ type: 'widget', token: Date.now(), tabId: widgetTabId(instanceId) });
+    },
+    [setRightPaneOpen],
+  );
 
   // Stream state
   const isStreaming = stream?.status === 'streaming' || stream?.status === 'thinking';
@@ -456,6 +485,13 @@ export function ChatPage() {
   const turnUserMessage = stream?.turnUserMessage ?? null;
   const pendingUserMessage = stream?.pendingUserMessage ?? null;
   const isChatActive = chat?.status === 'active';
+
+  // The turn is parked on a gate: the agent is idle and the ball is with the
+  // user, so every "generating" affordance must stand down.
+  const awaitingUserDecision = useMemo(
+    () => awaitsUserDecision(stream?.blocks),
+    [stream?.blocks],
+  );
 
   // Show stream blocks — treat inline/right-pane widget blocks as "active
   // content" even when no chat turn is in flight (the LLM may have rendered
@@ -606,9 +642,15 @@ export function ChatPage() {
       {/* Streaming status banner */}
       {isCopilotWorking && (
         <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-primary)]/5 px-4 py-2">
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--color-primary)]" />
+          {awaitingUserDecision ? (
+            <PauseCircle className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+          ) : (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--color-primary)]" />
+          )}
           <span className="text-xs font-medium text-[var(--color-primary)]">
-            {isStreaming ? 'Generating response...' : 'Processing...'}
+            {awaitingUserDecision
+              ? 'Paused — waiting for your input'
+              : isStreaming ? 'Generating response...' : 'Processing...'}
           </span>
         </div>
       )}
@@ -728,7 +770,7 @@ export function ChatPage() {
             sessionId={sessionId}
             disabled={isInputDisabled}
             placeholder={isInputDisabled ? 'Waiting for response...' : 'What feature are you dreaming up?'}
-            selectedModel={selectedModel}
+            selectedModel={effectiveModel}
             onModelChange={handleModelChange}
             reasoningEffort={reasoningEffort}
             onReasoningEffortChange={handleReasoningEffortChange}
@@ -775,12 +817,20 @@ export function ChatPage() {
             }}
             onStop={() => {
               if (!chatId) return;
-              // Immediately reset the local stream to idle so the "generating"
-              // placeholder clears and the input re-enables; the server also
-              // aborts the turn and emits idle. clearStream mirrors the normal
-              // end-of-turn terminal state (status 'idle', blocks cleared —
-              // widgets preserved), so the UI never stays stuck.
-              if (sessionId) useStreamStore.getState().clearStream(sessionId);
+              // Settle the turn locally so the "generating" affordances clear
+              // and the composer re-enables, but KEEP the blocks: the user is
+              // stopping to read what already streamed. The server persists
+              // the same partial turn, and the auto-clear effect swaps these
+              // blocks for the persisted message once it lands.
+              //
+              // Nothing has streamed yet while 'pending' (and completeStream
+              // deliberately ignores that state), so there the old full reset
+              // is still what keeps the UI from getting stuck.
+              if (sessionId) {
+                const store = useStreamStore.getState();
+                if (store.streams[sessionId]?.status === 'pending') store.clearStream(sessionId);
+                else store.completeStream(sessionId);
+              }
               cancelMutation.mutate(chatId);
             }}
             customSendFn={async ({ prompt, attachments, mode }) => {
@@ -820,7 +870,7 @@ export function ChatPage() {
         storageKey={rightPaneStorageKey}
         widthStorageKey="generatorai:rightPane:chat:width"
         defaultTabType="changes"
-        addableTabTypes={isOrchestrator ? ['files', 'browser', 'terminal', 'canvas', 'plan', 'background_tasks'] : ['files', 'browser', 'terminal', 'canvas', 'plan']}
+        addableTabTypes={isOrchestrator ? ['files', 'browser', 'terminal', 'widget', 'plan', 'background_tasks'] : ['files', 'browser', 'terminal', 'widget', 'plan']}
         focusTabRequest={browserTabFocusRequest}
         onTabClose={handleRightPaneTabClose}
         tabs={{
@@ -920,12 +970,34 @@ export function ChatPage() {
             label: 'Widget',
             description: 'Agent-rendered interactive widgets in a full-page surface',
             icon: <LayoutGrid className="h-3.5 w-3.5" />,
-            allowMultiple: false,
+            // One tab per widget instance — several widgets in one chat must
+            // not compete for a single surface.
+            allowMultiple: true,
+            maxInstances: 6,
             disabled: !sessionId,
             disabledReason: 'Start the chat to enable widgets',
-            render: () => (
-              sessionId ? <WidgetHost sessionId={sessionId} /> : <div className="p-4 text-xs text-[var(--color-muted-foreground)]">No active session.</div>
-            ),
+            getTabLabel: ({ id }) => {
+              const instanceId = parseWidgetTabId(id);
+              if (!instanceId) return 'Widgets';
+              const block = stream?.blocks.find(
+                (b) => b.type === 'widget' && b.instanceId === instanceId,
+              );
+              return (block && block.type === 'widget' && (block.title ?? block.component)) || 'Widget';
+            },
+            render: (ctx) => {
+              if (!sessionId) {
+                return <div className="p-4 text-xs text-[var(--color-muted-foreground)]">No active session.</div>;
+              }
+              const instanceId = parseWidgetTabId(ctx.id);
+              return instanceId ? (
+                <WidgetHost sessionId={sessionId} instanceId={instanceId} />
+              ) : (
+                // Unbound tab (added from "+", or stored before widgets got
+                // their own tabs) — a picker, so it never mounts a second live
+                // copy of a widget that already has a tab.
+                <WidgetHost sessionId={sessionId} onOpenWidget={openWidgetTab} />
+              );
+            },
           },
           background_tasks: {
             label: 'Background Tasks',

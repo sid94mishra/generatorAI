@@ -67,6 +67,11 @@ export interface AuthContextValue {
   completePairing(consent: PairingConsent, deviceName: string): Promise<void>;
   unpair(): Promise<void>;
   reconnect(): Promise<void>;
+  /**
+   * Re-mint the access token so scopes granted elsewhere take effect.
+   * Scopes live inside the token, so nothing else picks them up.
+   */
+  refreshPermissions(): Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -239,6 +244,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     await supervisorRef.current?.connect(3);
   }, []);
 
+  const refreshPermissions = useCallback(async () => {
+    const next = await runtimeRef.current?.refreshSession();
+    if (next) setState(next);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       state,
@@ -263,8 +273,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       completePairing,
       unpair,
       reconnect,
+      refreshPermissions,
     }),
-    [state, initializing, transport, keyBacking, completePairing, unpair, reconnect],
+    [
+      state,
+      initializing,
+      transport,
+      keyBacking,
+      completePairing,
+      unpair,
+      reconnect,
+      refreshPermissions,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

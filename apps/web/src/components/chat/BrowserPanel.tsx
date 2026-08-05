@@ -120,8 +120,21 @@ export function getWebBrowserInteractivity(): boolean {
  * open tabs pick up the change and re-render. */
 export function setWebBrowserInteractivity(v: boolean): void {
   try {
-    window.localStorage.setItem(INTERACTIVITY_STORAGE_KEY, String(v));
-    window.dispatchEvent(new StorageEvent('storage', { key: INTERACTIVITY_STORAGE_KEY }));
+    const oldValue = window.localStorage.getItem(INTERACTIVITY_STORAGE_KEY);
+    const newValue = String(v);
+    window.localStorage.setItem(INTERACTIVITY_STORAGE_KEY, newValue);
+    // `newValue`/`storageArea` are not optional in practice: third-party
+    // storage-sync listeners read a null `newValue` as "key deleted" and
+    // helpfully remove the entry we just wrote.
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: INTERACTIVITY_STORAGE_KEY,
+        oldValue,
+        newValue,
+        storageArea: window.localStorage,
+        url: window.location.href,
+      }),
+    );
   } catch {
     /* ignore */
   }

@@ -17,17 +17,22 @@ import '../src/theme/global.css';
 import { installCrypto } from '../src/crypto/installCrypto';
 
 import React, { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
-import { Redirect, Stack, SplashScreen, usePathname } from 'expo-router';
+import { Platform, View } from 'react-native';
+import { Redirect, Stack, SplashScreen, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ChevronLeft } from 'lucide-react-native';
+
+import { IconButton } from '../src/components/ui/Button';
+import { goBack } from '../src/components/ui/Screen';
 
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
+import { PreferencesProvider } from '../src/prefs/preferences';
 import { AuthProvider, useAuth } from '../src/auth/AuthProvider';
-import { Spinner } from '../src/components/common/States';
+import { Spinner, ToastProvider, Button, ErrorState } from '../src/components/ui';
 import { usePushNotifications } from '../src/notifications/usePushNotifications';
 
 installCrypto();
@@ -114,15 +119,38 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
   // A connection failure must not masquerade as an empty account. Public
   // routes still render so the user can re-pair against a different host.
   if (state.status === 'error' && !isPublic) {
-    return (
-      <View className="flex-1 items-center justify-center gap-2 px-6">
-        <Text className="text-center text-lg font-semibold text-danger">Could not connect</Text>
-        <Text className="text-center text-sm text-muted-foreground">{state.message}</Text>
-      </View>
-    );
+    return <ConnectionError message={state.message} />;
   }
 
   return <>{children}</>;
+}
+
+/**
+ * A connection failure is a screen the user has to be able to LEAVE.
+ *
+ * The previous version was two `Text` nodes: no retry, no way back to
+ * pairing, and no explanation of which host was unreachable — a dead end
+ * reached by simply walking out of Wi-Fi range.
+ */
+function ConnectionError({ message }: { message: string }): React.ReactElement {
+  const { reconnect } = useAuth();
+  return (
+    <View className="flex-1 items-center justify-center gap-4 px-8">
+      <ErrorState
+        title="Can’t reach your server"
+        message={message}
+        onRetry={() => {
+          void reconnect();
+        }}
+      />
+      <Button
+        label="Pair with a different host"
+        variant="ghost"
+        size="sm"
+        onPress={() => router.replace('/pair')}
+      />
+    </View>
+  );
 }
 
 /**
@@ -139,6 +167,23 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
 function RootStack(): React.ReactElement {
   const { colors } = useTheme();
 
+  /**
+   * An explicit back button for every pushed screen.
+   *
+   * The navigator only draws one when there is history to pop, so arriving by
+   * deep link, push notification or a direct URL left detail screens with no
+   * way out. `goBack` falls back to the natural parent instead.
+   */
+  const headerBack =
+    (fallback: Parameters<typeof goBack>[0]) =>
+    () => (
+      <IconButton
+        accessibilityLabel="Back"
+        icon={<ChevronLeft size={24} color={colors.foreground} />}
+        onPress={() => goBack(fallback)}
+      />
+    );
+
   return (
     <Stack
       screenOptions={{
@@ -147,23 +192,54 @@ function RootStack(): React.ReactElement {
         headerShadowVisible: false,
         headerTitleStyle: { color: colors.foreground },
         contentStyle: { backgroundColor: colors.background },
+        // The platform push transition, explicitly: `slide_from_right` on
+        // Android matches predictive back's own preview, and the iOS default
+        // keeps the interactive edge-swipe pop alive.
+        animation: Platform.OS === 'android' ? 'slide_from_right' : 'default',
+        gestureEnabled: true,
+        // Off-screen tab stacks stop re-rendering during a chat stream.
+        freezeOnBlur: true,
       }}
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       {/* Pairing and the revoked wall are full-bleed terminal states: a back
           button would imply somewhere to go back TO, and there is not. */}
-      <Stack.Screen name="pair" options={{ headerShown: false }} />
-      <Stack.Screen name="revoked" options={{ headerShown: false }} />
+      <Stack.Screen name="pair" options={{ headerShown: false, gestureEnabled: false }} />
+      <Stack.Screen name="revoked" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="index" options={{ headerShown: false }} />
 
-      <Stack.Screen name="chats/[id]" options={{ title: 'Chat' }} />
-      <Stack.Screen name="runs/[id]" options={{ title: 'Run' }} />
-      <Stack.Screen name="workflows/[id]" options={{ title: 'Workflow' }} />
-      <Stack.Screen name="projects/[id]" options={{ title: 'Project' }} />
-      <Stack.Screen name="automations/[id]" options={{ title: 'Automation' }} />
-      <Stack.Screen name="changes/[workspaceId]/index" options={{ title: 'Changes' }} />
-      <Stack.Screen name="changes/[workspaceId]/file" options={{ title: 'Diff' }} />
-      <Stack.Screen name="terminal/[workspaceId]" options={{ title: 'Terminal' }} />
+      <Stack.Screen
+        name="chats/[id]"
+        options={{ title: 'Chat', headerLeft: headerBack('/(tabs)/chats') }}
+      />
+      <Stack.Screen
+        name="runs/[id]"
+        options={{ title: 'Run', headerLeft: headerBack('/(tabs)/runs') }}
+      />
+      <Stack.Screen
+        name="workflows/[id]"
+        options={{ title: 'Workflow', headerLeft: headerBack('/(tabs)/runs') }}
+      />
+      <Stack.Screen
+        name="projects/[id]"
+        options={{ title: 'Project', headerLeft: headerBack('/(tabs)/projects') }}
+      />
+      <Stack.Screen
+        name="automations/[id]"
+        options={{ title: 'Automation', headerLeft: headerBack('/(tabs)/runs') }}
+      />
+      <Stack.Screen
+        name="changes/[workspaceId]/index"
+        options={{ title: 'Changes', headerLeft: headerBack('/(tabs)') }}
+      />
+      <Stack.Screen
+        name="changes/[workspaceId]/file"
+        options={{ title: 'Diff', headerLeft: headerBack('/(tabs)') }}
+      />
+      <Stack.Screen
+        name="terminal/[workspaceId]"
+        options={{ title: 'Terminal', headerLeft: headerBack('/(tabs)') }}
+      />
       {/* Settings screens draw their own collapsing large title and back
           button through <Screen>. Leaving the navigator header on would stack
           an empty title bar above every one of them. */}
@@ -176,7 +252,7 @@ function RootStack(): React.ReactElement {
       <Stack.Screen name="settings/tools" options={{ headerShown: false }} />
       <Stack.Screen name="settings/diagnostics" options={{ headerShown: false }} />
       <Stack.Screen name="settings/about" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/security" options={{ title: 'Security' }} />
+      <Stack.Screen name="settings/security" options={{ headerShown: false }} />
     </Stack>
   );
 }
@@ -186,17 +262,21 @@ export default function RootLayout(): React.ReactElement {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <ThemedShell>
-            <QueryClientProvider client={queryClient}>
-              <AuthProvider>
-                <BottomSheetModalProvider>
-                  <AuthGate>
-                    <RootStack />
-                  </AuthGate>
-                </BottomSheetModalProvider>
-              </AuthProvider>
-            </QueryClientProvider>
-          </ThemedShell>
+          <PreferencesProvider>
+            <ThemedShell>
+              <QueryClientProvider client={queryClient}>
+                <AuthProvider>
+                  <ToastProvider>
+                    <BottomSheetModalProvider>
+                      <AuthGate>
+                        <RootStack />
+                      </AuthGate>
+                    </BottomSheetModalProvider>
+                  </ToastProvider>
+                </AuthProvider>
+              </QueryClientProvider>
+            </ThemedShell>
+          </PreferencesProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

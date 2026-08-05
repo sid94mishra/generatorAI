@@ -465,6 +465,46 @@ export interface WorkspaceFile {
   cacheKey: string;
 }
 
+// ── Checkpoints ─────────────────────────────────────────────────
+
+export interface WorkspaceCheckpoint {
+  id: string;
+  workspaceId: string;
+  repoAlias: string;
+  /** baseline | turn | stage | autorun | live | manual | pre_restore */
+  kind: string;
+  label?: string | null;
+  createdAt: number;
+  fileCount?: number;
+}
+
+export interface CheckpointList {
+  workspaceId: string;
+  checkpoints: WorkspaceCheckpoint[];
+}
+
+export interface RestoreResult {
+  restored: number;
+  removed: number;
+  /** Paths refused for safety — symlinks pointing outside the workspace. */
+  skipped?: Array<{ path: string; reason: string }>;
+}
+
+// ── Terminals ───────────────────────────────────────────────────
+
+export interface TerminalDescriptor {
+  id: string;
+  cwd: string;
+  shell: string;
+  pid?: number;
+  /** pty | sandbox | fallback — `fallback` cannot run full-screen apps. */
+  host: string;
+  /** null while the process is alive. */
+  exitCode: number | null;
+  cols?: number;
+  rows?: number;
+}
+
 // ── Providers / health ──────────────────────────────────────────
 
 export interface ProviderStatus {
@@ -572,6 +612,7 @@ export const queryKeys = {
    */
   changeFile: (workspaceId: string, path: string, oldBlob?: string, newBlob?: string) =>
     ['workspaces', workspaceId, 'changes', path, oldBlob ?? '-', newBlob ?? '-'] as const,
+  checkpoints: (workspaceId: string) => ['workspaces', workspaceId, 'checkpoints'] as const,
   reviewThreads: (workspaceId: string) => ['workspaces', workspaceId, 'review'] as const,
 } as const;
 
@@ -721,10 +762,24 @@ export function createApiClient(fetchImpl: ApiFetch) {
       planContent: (id: string, planId: string) =>
         request<{ content: string }>(fetchImpl, `/api/chats/${id}/plans/${planId}/content`),
 
+      /**
+       * Record a decision on a plan.
+       *
+       * The shape is `PlanDecisionSchema` on the server and nothing else
+       * validates: `approved` is REQUIRED, and the discriminator between
+       * "implement it" and "stop here" is `action`, not `approved`. Sending
+       * `{action, comment}` — which reads plausibly — is rejected with a 400.
+       */
       decidePlan: (
         id: string,
         planId: string,
-        decision: { action: string; comment?: string; interactionId?: string },
+        decision: {
+          approved: boolean;
+          action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot';
+          feedback?: string;
+          useEditedContent?: boolean;
+          expectedRevision?: number;
+        },
       ) =>
         request<void>(fetchImpl, `/api/chats/${id}/plans/${planId}/decision`, json(decision)),
 
@@ -906,6 +961,51 @@ export function createApiClient(fetchImpl: ApiFetch) {
         if (params.alias) q.set('alias', params.alias);
         return request<WorkspaceFile>(fetchImpl, `/api/workspaces/${id}/tree/file?${q}`);
       },
+
+      /** Snapshots taken before each turn — the "compare against" list. */
+      checkpoints: (id: string) =>
+        request<CheckpointList>(fetchImpl, `/api/workspaces/${id}/checkpoints`),
+
+      /**
+       * Rewinds the workspace, or just the given paths.
+       *
+       * The server writes a `pre_restore` checkpoint first, so this is itself
+       * undoable — which is the only reason it is safe to offer as a
+       * one-tap "discard" on a phone.
+       */
+      restoreCheckpoint: (id: string, checkpointId: string, body?: { paths?: string[] }) =>
+        request<RestoreResult>(
+          fetchImpl,
+          `/api/workspaces/${id}/checkpoints/${checkpointId}/restore`,
+          json(body ?? {}),
+        ),
+    },
+
+    /**
+     * Terminal sessions.
+     *
+     * A session is created over authenticated HTTP and only then attached to
+     * over a WebSocket — the upgrade cannot carry an Authorization header, so
+     * the session id is the thing the socket URL is built from.
+     */
+    terminals: {
+      create: (workspaceId: string, body: { cols: number; rows: number }) =>
+        request<TerminalDescriptor>(
+          fetchImpl,
+          `/api/workspaces/${workspaceId}/terminals`,
+          json(body),
+        ),
+
+      get: (workspaceId: string, sid: string) =>
+        request<TerminalDescriptor>(
+          fetchImpl,
+          `/api/workspaces/${workspaceId}/terminals/${sid}`,
+        ),
+
+      kill: (workspaceId: string, sid: string) =>
+        request<void>(fetchImpl, `/api/workspaces/${workspaceId}/terminals/${sid}`, {
+          method: 'DELETE',
+        }),
     },
 
     review: {

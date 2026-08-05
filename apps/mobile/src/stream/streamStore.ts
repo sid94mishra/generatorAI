@@ -34,12 +34,17 @@ function applyEffect(streams: StreamsRecord, effect: StreamEffect): StreamsRecor
   switch (effect.op) {
     case 'appendToken':
       return r.appendToken(streams, effect.key, effect.text);
+    case 'appendTokenIfNoText':
+      return r.appendTokenIfNoText(streams, effect.key, effect.text);
     case 'appendThinking':
       return r.appendThinking(streams, effect.key, effect.text);
     case 'completeThinking':
       return r.completeThinking(streams, effect.key);
     case 'startPending':
-      return r.startPending(streams, effect.key, effect.userMessage);
+      // `startTurn`, not `startPending`: a gap-fill after a dropped
+      // connection replays the user message, and the raw reset would wipe
+      // the blocks of the turn that is still streaming.
+      return r.startTurn(streams, effect.key, effect.userMessage);
     case 'addToolCall':
       return r.addToolCall(streams, effect.key, effect.tool, effect.args, effect.callId);
     case 'completeToolCall':
@@ -58,6 +63,34 @@ function applyEffect(streams: StreamsRecord, effect: StreamEffect): StreamsRecor
       return r.setUsage(streams, effect.key, effect.usage as never);
     case 'setContextUsage':
       return r.setContextUsage(streams, effect.key, effect.snapshot as never);
+    case 'upsertPlan':
+      return r.upsertPlan(streams, effect.key, effect.plan);
+    case 'setPlanStatus':
+      return r.setPlanStatus(streams, effect.key, effect.planId, effect.status, effect.extra);
+    case 'upsertQuestion':
+      return r.upsertQuestion(streams, effect.key, effect.question);
+    case 'answerQuestion':
+      return r.answerQuestion(
+        streams,
+        effect.key,
+        effect.interactionId,
+        effect.answers,
+        effect.freeformResponse,
+      );
+    case 'expireQuestion':
+      return r.expireQuestion(streams, effect.key, effect.interactionId);
+    case 'addWidget':
+      return r.addWidget(streams, effect.key, effect.widget);
+    case 'updateWidgetState':
+      return r.updateWidgetState(streams, effect.key, effect.instanceId, effect.state);
+    case 'setWidgetStatus':
+      return r.setWidgetStatus(
+        streams,
+        effect.key,
+        effect.instanceId,
+        effect.status,
+        effect.error,
+      );
     case 'invalidate':
       // Handled by the query layer, not the stream store.
       return streams;

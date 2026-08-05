@@ -11,10 +11,19 @@
 import { Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
-const enabled = Platform.OS === 'ios' || Platform.OS === 'android';
+const supported = Platform.OS === 'ios' || Platform.OS === 'android';
+
+// A module-level flag rather than a hook so every call site stays
+// `haptics.tap()`. `PreferencesProvider` owns the value and pushes it here on
+// mount and on every change.
+let userEnabled = true;
+
+export function setHapticsEnabled(enabled: boolean): void {
+  userEnabled = enabled;
+}
 
 function safe(run: () => Promise<unknown>): void {
-  if (!enabled) return;
+  if (!supported || !userEnabled) return;
   // Fire and forget: a failed haptic must never reject into a render path.
   void run().catch(() => {});
 }
@@ -26,8 +35,12 @@ export const haptics = {
   tap: () => safe(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)),
   /** Committing — send, approve, submit. */
   commit: () => safe(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)),
+  /** Crossing a gesture threshold — swipe action armed, sheet detent caught. */
+  threshold: () => safe(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid)),
   /** A terminal good outcome. */
   success: () => safe(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)),
+  /** A caution — a destructive confirmation opening. */
+  warn: () => safe(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)),
   /** A refusal or a failure. */
   error: () => safe(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)),
 } as const;

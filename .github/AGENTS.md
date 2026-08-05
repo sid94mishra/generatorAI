@@ -84,6 +84,7 @@ GeneratorAI/
 | **CLI usage** (every command + TUI)                                                                                                                                                                                                                         | [docs/usage-cli.md](./docs/usage-cli.md)                                     |
 | **Web UI usage** (every page + dialog + setting)                                                                                                                                                                                                            | [docs/usage-web.md](./docs/usage-web.md)                                     |
 | **Build / deploy / env vars / troubleshooting**                                                                                                                                                                                                             | [docs/operations.md](./docs/operations.md)                                   |
+| **Packaging & release** (desktop installers, staged native runtime, signing, update channels, tag-driven release)                                                                                                                                            | [docs/packaging.md](./docs/packaging.md)                                     |
 
 ---
 
@@ -196,7 +197,16 @@ pnpm --filter agent-tests test                  # Playwright E2E
 pnpm lint
 pnpm typecheck
 pnpm format
+
+# 6. Desktop installers for this platform
+pnpm package:desktop
 ```
+
+Packaging has constraints that are enforced rather than documented — you must
+build on the platform you are targeting, and the installer architecture must
+match the staged server runtime. See
+[docs/packaging.md](./docs/packaging.md) before changing anything under
+`apps/desktop/scripts/`.
 
 Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 

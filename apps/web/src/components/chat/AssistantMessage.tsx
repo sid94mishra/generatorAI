@@ -8,7 +8,7 @@
 
 import React, { useMemo } from 'react';
 import type { ChatMessage } from '@generatorai/shared';
-import { Bot, Download } from 'lucide-react';
+import { Bot, Download, CircleSlash } from 'lucide-react';
 import { StreamPanel } from '@/components/agent/StreamPanel.js';
 import { chatMessageToBlocks } from '@/components/agent/chatMessageToBlocks.js';
 import { deriveStreamView } from '@/components/agent/deriveTimeline.js';
@@ -63,6 +63,15 @@ export function AssistantMessage({ message, showHeader = false, onOpenPlan }: As
           streamKey={message.sessionId}
           {...(onOpenPlan ? { onOpenPlan } : {})}
         />
+
+        {/* A stopped turn keeps everything it streamed, so say that it is not
+            the whole answer rather than letting it read as one. */}
+        {message.metadata?.partial && (
+          <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[var(--color-muted-foreground)]">
+            <CircleSlash className="h-3 w-3" />
+            Stopped before the response finished.
+          </p>
+        )}
 
         {/* Attachments (generated artifacts) */}
         {message.attachments && message.attachments.length > 0 && (

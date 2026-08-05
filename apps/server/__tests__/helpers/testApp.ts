@@ -228,6 +228,12 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     archiveChat: vi.fn().mockResolvedValue(undefined),
     deleteChat: vi.fn().mockResolvedValue(undefined),
     sendPrompt: vi.fn().mockResolvedValue(undefined),
+    // PLN-01 — the plan-decision route must delegate here rather than
+    // resolving the gate itself (see chats-e2e "Plan decision" suite).
+    decidePlan: vi.fn().mockResolvedValue({ ok: true }),
+    // Same for the question gate: only the service emits
+    // `chat.question.answered`, which is what survives a reload.
+    answerQuestion: vi.fn().mockResolvedValue({ ok: true }),
     getChatHistory: vi.fn().mockResolvedValue([
       { id: 'msg-1', sessionId: 'sess-1', role: 'user', content: 'Hello', timestamp: new Date() },
       { id: 'msg-2', sessionId: 'sess-1', role: 'assistant', content: 'Hi there!', timestamp: new Date() },
@@ -445,6 +451,19 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     configResolver,
     // v2
     chatManagementService,
+    planService: {
+      findById: vi.fn().mockResolvedValue({
+        id: 'plan-1',
+        chatId: 'chat-1',
+        title: 'Test Plan',
+        status: 'awaiting_review',
+        currentRevision: 1,
+        revisions: [{ revision: 1, content: '# Plan', authoredBy: 'agent' }],
+      }),
+      listByChat: vi.fn().mockResolvedValue([]),
+      recordDecision: vi.fn().mockResolvedValue(undefined),
+      listComments: vi.fn().mockResolvedValue([]),
+    },
     workflowDefinitionService,
     workflowRunService,
     dagScheduler,

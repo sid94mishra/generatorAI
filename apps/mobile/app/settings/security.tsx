@@ -6,7 +6,7 @@
 // how to revoke any of them from wherever you happen to be standing.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -14,8 +14,20 @@ import { ShieldAlert, ShieldCheck, Smartphone } from 'lucide-react-native';
 
 import { useAuth } from '../../src/auth/AuthProvider';
 import { describeScope, isSensitiveScope } from '../../src/auth/scopeLabels';
-import { checkFeature } from '../../src/auth/featureGate';
+import { checkFeature, grantableFeatures, type MobileFeature } from '../../src/auth/featureGate';
 import { useTheme } from '../../src/theme/ThemeProvider';
+
+/** Short names for the capabilities a user can be granted after pairing. */
+const FEATURE_LABELS: Record<MobileFeature, string> = {
+  terminal: 'Run terminal commands',
+  browser: "Control the agent's browser",
+  voice: 'Dictate messages',
+  fileUpload: 'Attach and write files',
+  runControl: 'Start, pause and cancel runs',
+  workflowEdit: 'Edit workflows',
+  projectEdit: 'Link codebases',
+  deviceAdmin: 'Manage other devices',
+};
 
 interface DeviceRecord {
   deviceId: string;
@@ -50,12 +62,24 @@ const KEY_BACKING_LABEL: Record<string, string> = {
 };
 
 export default function SecurityScreen(): React.ReactElement {
-  const { state, transport, keyBacking, fetch: authFetch, unpair } = useAuth();
+  const { state, transport, keyBacking, fetch: authFetch, unpair, refreshPermissions } = useAuth();
   const { colors } = useTheme();
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
 
   const scopes = state.status === 'authenticated' ? state.scopes : [];
+
+  // Naming what is MISSING, not just what is held. "Terminal is not enabled"
+  // in the workbench was previously the only hint, and it appeared in a
+  // different part of the app from the screen that explains permissions.
+  const missingCapabilities = useMemo(
+    () =>
+      grantableFeatures(scopes).map((feature) => ({
+        scope: feature,
+        label: FEATURE_LABELS[feature],
+      })),
+    [scopes],
+  );
 
   // Listing and revoking other devices needs `admin:devices`, which a paired
   // phone is deliberately NOT granted by default. Asking anyway produced a
@@ -114,6 +138,22 @@ export default function SecurityScreen(): React.ReactElement {
     },
     [authFetch, queryClient],
   );
+
+  /**
+   * Re-mint the access token so a capability granted from a trusted device
+   * is picked up. Scopes are inside the token; nothing else refreshes them.
+   */
+  const reloadPermissions = useCallback(async () => {
+    setBusy('permissions');
+    try {
+      await refreshPermissions();
+      await queryClient.invalidateQueries({ queryKey: ['security', 'posture'] });
+    } catch (err) {
+      Alert.alert('Could not refresh', err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [refreshPermissions, queryClient]);
 
   const confirmUnpair = useCallback(() => {
     Alert.alert(
@@ -187,10 +227,41 @@ export default function SecurityScreen(): React.ReactElement {
             </View>
           ))
         )}
-        <Text className="mt-1 text-xs text-muted-foreground">
-          Terminal and browser control are withheld by default. Grant them from a trusted device
-          only when you need them.
+
+        {missingCapabilities.length > 0 ? (
+          <>
+            <Divider />
+            <Text className="text-xs uppercase tracking-wide text-muted-foreground">
+              Not granted
+            </Text>
+            {missingCapabilities.map((capability) => (
+              <View key={capability.scope} className="flex-row gap-2">
+                <Text className="text-muted-foreground">•</Text>
+                <Text className="flex-1 text-sm text-muted-foreground">{capability.label}</Text>
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        <Text className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Terminal and browser control are withheld from a phone by default. Turn them on where
+          GeneratorAI is running — Settings › Security › Paired devices › this device › Capabilities
+          — then tap below.
         </Text>
+
+        {/* Scopes travel inside the access token, so a grant made elsewhere
+            is invisible here until the token is re-minted. Without this the
+            capability appears to have been ignored. */}
+        <Pressable
+          accessibilityRole="button"
+          disabled={busy === 'permissions'}
+          onPress={() => void reloadPermissions()}
+          className="mt-1 items-center rounded-lg border border-border px-4 py-3"
+        >
+          <Text className="text-sm font-medium text-foreground">
+            {busy === 'permissions' ? 'Checking…' : 'Check for new permissions'}
+          </Text>
+        </Pressable>
       </Section>
 
       {/* ── Server posture ── */}

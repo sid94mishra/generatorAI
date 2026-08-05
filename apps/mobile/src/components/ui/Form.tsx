@@ -1,13 +1,26 @@
 // ────────────────────────────────────────────────────────────────
-// Form controls — themed switch and text field.
+// Form controls — themed switch, text field and search field.
 //
 // RN's `Switch` takes explicit colour props rather than styles, so it cannot
 // pick up NativeWind classes and has to be fed from the theme directly.
+//
+// `Field` links its label to its input with `nativeID` + `accessibilityLabelledBy`.
+// Without that the label is a separate, unrelated text node and the input
+// announces as "text field" with no idea what it is for — the mobile
+// equivalent of an unlabelled `<input>`.
 // ────────────────────────────────────────────────────────────────
 
-import React from 'react';
-import { Switch as RNSwitch, Text, TextInput, View, type TextInputProps } from 'react-native';
+import React, { useId } from 'react';
+import {
+  Switch as RNSwitch,
+  Text,
+  TextInput,
+  View,
+  type TextInputProps,
+} from 'react-native';
+import { Search, X } from 'lucide-react-native';
 
+import { Touchable } from './Touchable';
 import { haptics } from './haptics';
 import { useTheme } from '../../theme/ThemeProvider';
 
@@ -50,10 +63,18 @@ export function Field({
   error?: string | null;
 }): React.ReactElement {
   const { colors } = useTheme();
+  const labelId = useId();
+
   return (
     <View className="gap-1.5">
-      {label ? <Text className="text-sm font-medium text-foreground">{label}</Text> : null}
+      {label ? (
+        <Text nativeID={labelId} className="text-sm font-medium text-foreground">
+          {label}
+        </Text>
+      ) : null}
       <TextInput
+        {...(label ? { accessibilityLabelledBy: labelId } : {})}
+        accessibilityState={{ disabled: rest.editable === false }}
         placeholderTextColor={colors['muted-foreground']}
         className={`min-h-11 rounded-2xl border bg-raised px-3 py-2.5 text-md text-foreground ${
           error ? 'border-danger' : 'border-border'
@@ -61,9 +82,67 @@ export function Field({
         {...rest}
       />
       {error ? (
-        <Text className="text-xs text-danger">{error}</Text>
+        // Assertive: a validation failure that appears while the user is
+        // still typing is worth interrupting for.
+        <Text accessibilityLiveRegion="assertive" className="text-xs text-danger">
+          {error}
+        </Text>
       ) : hint ? (
         <Text className="text-xs text-muted-foreground">{hint}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * The list search field.
+ *
+ * A dedicated component rather than a `Field` with an icon, because search
+ * carries platform behaviour a generic field must not: the search return key,
+ * a clear button, no autocorrect, and cancellation without submitting.
+ */
+export function SearchField({
+  value,
+  onChangeText,
+  placeholder = 'Search',
+  autoFocus = false,
+  onSubmit,
+}: {
+  value: string;
+  onChangeText: (next: string) => void;
+  placeholder?: string;
+  autoFocus?: boolean;
+  onSubmit?: () => void;
+}): React.ReactElement {
+  const { colors } = useTheme();
+
+  return (
+    <View className="min-h-11 flex-row items-center gap-2 rounded-2xl border border-border bg-raised px-3">
+      <Search size={16} color={colors['muted-foreground']} />
+      <TextInput
+        accessibilityLabel={placeholder}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors['muted-foreground']}
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoFocus={autoFocus}
+        returnKeyType="search"
+        clearButtonMode="never"
+        onSubmitEditing={onSubmit}
+        className="flex-1 py-2.5 text-md text-foreground"
+      />
+      {value.length > 0 ? (
+        <Touchable
+          accessibilityLabel="Clear search"
+          haptic="select"
+          scale="none"
+          ripple={false}
+          onPress={() => onChangeText('')}
+        >
+          <X size={16} color={colors['muted-foreground']} />
+        </Touchable>
       ) : null}
     </View>
   );

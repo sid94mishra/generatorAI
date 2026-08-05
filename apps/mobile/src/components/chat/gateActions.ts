@@ -33,3 +33,33 @@ function humanize(id: string): string {
   const spaced = id.replace(/[_-]+/g, ' ').trim();
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
+
+/** The decision body `POST /plans/:id/decision` accepts. */
+export interface PlanDecision {
+  approved: boolean;
+  action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot';
+  feedback?: string;
+}
+
+/**
+ * Turn a server-supplied plan action id into the decision body.
+ *
+ * The server validates `{ approved, action?, feedback? }` and rejects
+ * anything else with a 400, so the action id alone is NOT a valid payload —
+ * posting it directly is why plan approval silently failed.
+ */
+export function toPlanDecision(actionId: string, feedback?: string): PlanDecision {
+  const id = actionId.toLowerCase();
+  const withFeedback = feedback?.trim() ? { feedback } : {};
+
+  if (/exit|discard|abandon/.test(id)) {
+    return { approved: true, action: 'exit_only', ...withFeedback };
+  }
+  if (/autopilot|auto_run|autorun/.test(id)) {
+    return { approved: true, action: 'implement_autopilot', ...withFeedback };
+  }
+  if (NEGATIVE.test(id) || /changes/.test(id)) {
+    return { approved: false, ...withFeedback };
+  }
+  return { approved: true, action: 'implement_interactive', ...withFeedback };
+}

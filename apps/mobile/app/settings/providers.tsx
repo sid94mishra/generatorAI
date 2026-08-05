@@ -11,10 +11,11 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Cpu, RefreshCw } from 'lucide-react-native';
+import { Check, RefreshCw } from 'lucide-react-native';
 import { queryKeys, type ProviderStatus } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
+import { ProviderBrandIcon } from '../../src/components/brand/VendorIcons';
 import { Badge, Card, type Tone } from '../../src/components/ui/primitives';
 import { Button, IconButton } from '../../src/components/ui/Button';
 import { ErrorState } from '../../src/components/ui/States';
@@ -82,8 +83,12 @@ export default function ProvidersScreen(): React.ReactElement {
             return (
               <Card key={provider.type} className="gap-3 p-4">
                 <View className="flex-row items-center gap-3">
-                  <View className="h-10 w-10 items-center justify-center rounded-2xl bg-subtle">
-                    <Cpu size={18} color={provider.ready ? colors.success : colors['muted-foreground']} />
+                  <View className="h-10 w-10 items-center justify-center rounded-2xl border border-border bg-subtle">
+                    <ProviderBrandIcon
+                      provider={provider.type}
+                      size={20}
+                      {...(provider.type === 'copilot' ? { color: colors.foreground } : {})}
+                    />
                   </View>
                   <View className="flex-1 gap-0.5">
                     <Text className="text-md font-semibold text-foreground">{provider.label}</Text>

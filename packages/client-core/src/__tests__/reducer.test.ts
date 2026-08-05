@@ -282,6 +282,57 @@ describe('stream reducer — plan and question cards', () => {
   });
 });
 
+describe('stream reducer — providers that never stream tokens', () => {
+  it('commits a message_complete answer when the turn produced no text', () => {
+    const s = r.appendTokenIfNoText({}, SID, 'All done.');
+    expect(r.getStream(s, SID).text).toBe('All done.');
+    expect(kinds(s)).toEqual(['text']);
+  });
+
+  it('is a no-op once any text block exists, so a streamed answer is never doubled', () => {
+    const streamed = r.appendToken({}, SID, 'All done.');
+    const s = r.appendTokenIfNoText(streamed, SID, 'All done.');
+    expect(s).toBe(streamed);
+  });
+
+  it('still commits when the turn produced only tool calls and thinking', () => {
+    const s = run(
+      (x) => r.appendThinking(x, SID, 'hmm'),
+      (x) => r.addToolCall(x, SID, 'read', {}, 'c1'),
+      (x) => r.appendTokenIfNoText(x, SID, 'Here is the summary.'),
+    );
+    expect(kinds(s)).toEqual(['thinking', 'tool_call', 'text']);
+  });
+});
+
+describe('stream reducer — replayed turn boundaries', () => {
+  it('ignores a replayed user_message for the turn already in flight', () => {
+    // A gap-fill after a dropped connection re-delivers the user message.
+    // Resetting here would erase a turn's tool calls mid-stream.
+    const live = run(
+      (x) => r.startTurn(x, SID, 'do the thing'),
+      (x) => r.addToolCall(x, SID, 'read', {}, 'c1'),
+      (x) => r.appendToken(x, SID, 'working'),
+    );
+    expect(r.startTurn(live, SID, 'do the thing')).toBe(live);
+  });
+
+  it('still starts a new turn when the prompt differs', () => {
+    const live = run(
+      (x) => r.startTurn(x, SID, 'first'),
+      (x) => r.appendToken(x, SID, 'working'),
+    );
+    const next = r.startTurn(live, SID, 'second');
+    expect(r.getStream(next, SID).turnUserMessage).toBe('second');
+    expect(blocks(next)).toEqual([]);
+  });
+
+  it('starts a turn normally when nothing is in flight', () => {
+    const s = r.startTurn({}, SID, 'hello');
+    expect(r.getStream(s, SID).status).toBe('pending');
+  });
+});
+
 describe('stream reducer — referential stability', () => {
   // The Zustand adapter skips the update when the record is returned
   // unchanged, so identity is load-bearing for render performance.

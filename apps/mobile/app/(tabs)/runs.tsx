@@ -10,8 +10,10 @@
 // on this screen that costs anything to ignore.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
+import { LegendList } from '@legendapp/list/react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Bot, Clock, Play, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
@@ -27,15 +29,28 @@ import { useApi } from '../../src/api/useApi';
 import { relativeTime, runElapsed, formatDuration } from '../../src/components/runs/formatTime';
 import { isActive, needsAttention, statusLabel } from '../../src/components/runs/statusStyle';
 import { Badge, Card, StatusDot, type Tone } from '../../src/components/ui/primitives';
-import { SegmentedControl } from '../../src/components/ui/SegmentedControl';
+import { SegmentedControl, useSegmentSwipe } from '../../src/components/ui/SegmentedControl';
 import { Touchable } from '../../src/components/ui/Touchable';
+import { SearchField } from '../../src/components/ui/Form';
 import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { Screen } from '../../src/components/ui/Screen';
 import { SettingsButton } from '../../src/components/ui/SettingsButton';
+import { useScrollToTop, scrollerToTop } from '../../src/navigation/scrollToTop';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 type Tab = 'runs' | 'workflows' | 'automations';
+
+type Row =
+  | { kind: 'run'; item: WorkflowRunSummary }
+  | { kind: 'workflow'; item: WorkflowSummary }
+  | { kind: 'automation'; item: AutomationSummary };
+
+const TABS = [
+  { value: 'runs' as const, label: 'Runs' },
+  { value: 'workflows' as const, label: 'Workflows' },
+  { value: 'automations' as const, label: 'Automations' },
+];
 
 function runTone(status: string): Tone {
   if (needsAttention(status)) return status === 'failed' ? 'danger' : 'warning';
@@ -48,6 +63,10 @@ export default function WorkScreen(): React.ReactElement {
   const api = useApi();
   const { colors } = useTheme();
   const [tab, setTab] = useState<Tab>('runs');
+  const [query, setQuery] = useState('');
+  const listRef = useRef<never>(null);
+
+  useScrollToTop('runs', scrollerToTop(listRef));
 
   const runs = useQuery({
     queryKey: queryKeys.runs(),
@@ -84,72 +103,123 @@ export default function WorkScreen(): React.ReactElement {
 
   const active = tab === 'runs' ? runs : tab === 'workflows' ? workflows : automations;
 
-  return (
-    <Screen
-      title="Work"
-      trailing={<SettingsButton />}
-      onRefresh={() => {
-        void runs.refetch();
-        void workflows.refetch();
-        void automations.refetch();
-      }}
-      refreshing={runs.isFetching || workflows.isFetching || automations.isFetching}
-    >
-      <SegmentedControl
-        segments={[
-          { value: 'runs', label: 'Runs', count: orderedRuns.length },
-          { value: 'workflows', label: 'Workflows', count: workflows.data?.length ?? 0 },
-          { value: 'automations', label: 'Automations', count: automations.data?.length ?? 0 },
-        ]}
-        value={tab}
-        onChange={setTab}
-      />
+  const segments = useMemo(
+    () => [
+      { ...TABS[0]!, count: orderedRuns.length },
+      { ...TABS[1]!, count: workflows.data?.length ?? 0 },
+      { ...TABS[2]!, count: automations.data?.length ?? 0 },
+    ],
+    [orderedRuns.length, workflows.data?.length, automations.data?.length],
+  );
 
-      {active.isLoading ? (
-        <SkeletonList rows={5} />
-      ) : active.isError ? (
-        <ErrorState message="Could not load this list." onRetry={() => void active.refetch()} />
-      ) : tab === 'runs' ? (
-        orderedRuns.length === 0 ? (
-          <EmptyState
-            title="No runs yet"
-            message="Runs appear when a workflow or automation executes."
-            icon={<Play size={22} color={colors['muted-foreground']} />}
+  const swipeTab = useSegmentSwipe(segments, tab, setTab);
+  const swipe = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-24, 24])
+        .failOffsetY([-16, 16])
+        .onEnd((event) => {
+          if (Math.abs(event.translationX) < 48) return;
+          swipeTab(event.translationX);
+        })
+        .runOnJS(true),
+    [swipeTab],
+  );
+
+  const rows = useMemo<Row[]>(() => {
+    const q = query.trim().toLowerCase();
+    const matches = (name: string | null | undefined) =>
+      !q || (name ?? '').toLowerCase().includes(q);
+
+    if (tab === 'runs') {
+      return orderedRuns.filter((r) => matches(r.name)).map((item) => ({ kind: 'run', item }));
+    }
+    if (tab === 'workflows') {
+      return (workflows.data ?? [])
+        .filter((w) => matches(w.name))
+        .map((item) => ({ kind: 'workflow', item }));
+    }
+    return (automations.data ?? [])
+      .filter((a) => matches(a.name))
+      .map((item) => ({ kind: 'automation', item }));
+  }, [tab, query, orderedRuns, workflows.data, automations.data]);
+
+  const refreshAll = () => {
+    void runs.refetch();
+    void workflows.refetch();
+    void automations.refetch();
+  };
+
+  const header = (
+    <View className="gap-3 pb-3">
+      <SegmentedControl segments={segments} value={tab} onChange={setTab} />
+      <SearchField
+        value={query}
+        onChangeText={setQuery}
+        placeholder={
+          tab === 'runs'
+            ? 'Search runs'
+            : tab === 'workflows'
+              ? 'Search workflows'
+              : 'Search automations'
+        }
+      />
+    </View>
+  );
+
+  const empty = active.isLoading ? (
+    <SkeletonList rows={5} />
+  ) : active.isError ? (
+    <ErrorState message="Could not load this list." onRetry={() => void active.refetch()} />
+  ) : query ? (
+    <EmptyState title="No matches" message="Nothing here matches that search." />
+  ) : tab === 'runs' ? (
+    <EmptyState
+      title="No runs yet"
+      message="Runs appear when a workflow or automation executes."
+      icon={<Play size={22} color={colors['muted-foreground']} />}
+    />
+  ) : tab === 'workflows' ? (
+    <EmptyState
+      title="No workflows"
+      message="Workflows are authored on the desktop or web app — a node graph needs more room than a phone has."
+      icon={<WorkflowIcon size={22} color={colors['muted-foreground']} />}
+    />
+  ) : (
+    <EmptyState
+      title="No automations"
+      message="Automations are created on the desktop or web app. Their runs and history show up here."
+      icon={<Bot size={22} color={colors['muted-foreground']} />}
+    />
+  );
+
+  return (
+    <Screen title="Work" trailing={<SettingsButton />} scroll={false}>
+      <GestureDetector gesture={swipe}>
+        <View className="flex-1">
+          <LegendList
+            ref={listRef as never}
+            data={rows}
+            keyExtractor={(row: Row) => `${row.kind}:${row.item.id}`}
+            estimatedItemSize={108}
+            recycleItems
+            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120, gap: 10 }}
+            ListHeaderComponent={header}
+            ListEmptyComponent={empty}
+            refreshing={runs.isFetching || workflows.isFetching || automations.isFetching}
+            onRefresh={refreshAll}
+            renderItem={({ item: row }: { item: Row }) =>
+              row.kind === 'run' ? (
+                <RunCard run={row.item} />
+              ) : row.kind === 'workflow' ? (
+                <WorkflowCard workflow={row.item} runs={runs.data ?? []} />
+              ) : (
+                <AutomationCard automation={row.item} />
+              )
+            }
           />
-        ) : (
-          <View className="gap-2.5">
-            {orderedRuns.map((run) => (
-              <RunCard key={run.id} run={run} />
-            ))}
-          </View>
-        )
-      ) : tab === 'workflows' ? (
-        (workflows.data ?? []).length === 0 ? (
-          <EmptyState
-            title="No workflows"
-            message="Workflows are authored on the desktop or web app — a node graph needs more room than a phone has."
-            icon={<WorkflowIcon size={22} color={colors['muted-foreground']} />}
-          />
-        ) : (
-          <View className="gap-2.5">
-            {(workflows.data ?? []).map((workflow) => (
-              <WorkflowCard key={workflow.id} workflow={workflow} runs={runs.data ?? []} />
-            ))}
-          </View>
-        )
-      ) : (automations.data ?? []).length === 0 ? (
-        <EmptyState
-          title="No automations"
-          message="Automations are created on the desktop or web app. Their runs and history show up here."
-          icon={<Bot size={22} color={colors['muted-foreground']} />}
-        />
-      ) : (
-        <View className="gap-2.5">
-          {(automations.data ?? []).map((automation) => (
-            <AutomationCard key={automation.id} automation={automation} />
-          ))}
         </View>
-      )}
+      </GestureDetector>
     </Screen>
   );
 }
@@ -167,7 +237,7 @@ function RunCard({ run }: { run: WorkflowRunSummary }): React.ReactElement {
     >
       <Card className={`gap-2 p-3.5 ${needsAttention(run.status) ? 'border-warning' : ''}`}>
         <View className="flex-row items-center gap-2">
-          <StatusDot tone={tone} />
+          <StatusDot tone={tone} label={null} />
           <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
             {run.name ?? 'Workflow run'}
           </Text>
@@ -218,7 +288,9 @@ function WorkflowCard({
             {latest ? ` · last ${relativeTime(latest.updatedAt)}` : ''}
           </Text>
         </View>
-        {latest ? <StatusDot tone={runTone(latest.status)} /> : null}
+        {latest ? (
+          <StatusDot tone={runTone(latest.status)} label={`Last run ${statusLabel(latest.status)}`} />
+        ) : null}
       </Card>
     </Touchable>
   );

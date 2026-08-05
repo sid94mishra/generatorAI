@@ -17,6 +17,7 @@ import {
   SetChatPermissionModeSchema,
   coerceAgentMode,
 } from '@generatorai/shared';
+import type { PlanDocument } from '@generatorai/shared';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -35,7 +36,28 @@ export function createChatApiRoutes(container: Container): Router {
     artifactService,
     eventBus,
     logger,
+    planService,
+    agentInteractionService,
   } = container;
+
+  /**
+   * Plan mode is optional wiring, so every plan route has to answer honestly
+   * when it is absent rather than throwing an unhandled TypeError — which is
+   * exactly what these routes did while they pointed at methods that had
+   * never been implemented.
+   */
+  const plans = planService;
+
+  /** Wire shape the clients expect from the plan list/summary routes. */
+  const toPlanSummary = (plan: PlanDocument): Record<string, unknown> => ({
+    planId: plan.id,
+    revision: plan.currentRevision,
+    title: plan.title,
+    summary: plan.revisions.find((r) => r.revision === plan.currentRevision)?.summary ?? '',
+    status: plan.status,
+    actions: plan.status === 'awaiting_review' ? plan.availableActions : [],
+    fileName: plan.fileName,
+  });
 
   // POST /chats — Create a new chat
   router.post('/', validate(CreateChatSchema), async (req, res, next) => {
@@ -204,7 +226,9 @@ export function createChatApiRoutes(container: Container): Router {
         // PLN-01 — refuse while a human gate is open. Sending a second prompt
         // during a plan review would leave the first SDK turn blocked and
         // mis-attribute its late events to the new turn.
-        const pendingGates = await chatManagementService.listPendingInteractions(chatId);
+        const pendingGates = agentInteractionService
+          ? await agentInteractionService.listPendingByChat(chatId)
+          : [];
         const openGate = pendingGates[0];
         if (openGate) {
           res.status(409).json({
@@ -345,7 +369,8 @@ export function createChatApiRoutes(container: Container): Router {
   router.get('/:id/plans', async (req, res, next) => {
     try {
       const chatId = String(req.params['id']);
-      res.json(await chatManagementService.listPlans(chatId));
+      const documents = await plans!.listByChat(chatId);
+      res.json(documents.map(toPlanSummary));
     } catch (err) {
       next(err);
     }
@@ -354,10 +379,7 @@ export function createChatApiRoutes(container: Container): Router {
   // GET /chats/:id/plans/:planId — one plan with all revisions + comments.
   router.get('/:id/plans/:planId', async (req, res, next) => {
     try {
-      const plan = await chatManagementService.getPlan(
-        String(req.params['id']),
-        String(req.params['planId']),
-      );
+      const plan = await plans!.findById(String(req.params['planId']));
       if (!plan) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
@@ -371,10 +393,7 @@ export function createChatApiRoutes(container: Container): Router {
   // GET /chats/:id/plans/:planId/content?revision=n — raw markdown.
   router.get('/:id/plans/:planId/content', async (req, res, next) => {
     try {
-      const plan = await chatManagementService.getPlan(
-        String(req.params['id']),
-        String(req.params['planId']),
-      );
+      const plan = await plans!.findById(String(req.params['planId']));
       if (!plan) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
@@ -401,13 +420,13 @@ export function createChatApiRoutes(container: Container): Router {
     try {
       const chatId = String(req.params['id']);
       const planId = String(req.params['planId']);
-      const plan = await chatManagementService.getPlan(chatId, planId);
+      const plan = await plans!.findById(planId);
       if (!plan) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
       }
       const body = req.body as { content: string; summary?: string; expectedRevision: number };
-      const revision = await container.planService?.addRevision({
+      const revision = await plans!.addRevision({
         planId,
         content: body.content,
         summary: body.summary ?? plan.title,
@@ -437,7 +456,7 @@ export function createChatApiRoutes(container: Container): Router {
     try {
       const chatId = String(req.params['id']);
       const planId = String(req.params['planId']);
-      const plan = await chatManagementService.getPlan(chatId, planId);
+      const plan = await plans!.findById(planId);
       if (!plan) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
@@ -447,7 +466,7 @@ export function createChatApiRoutes(container: Container): Router {
         revision: number;
         anchor?: { startLine: number; endLine: number; quotedText: string; contentHash: string };
       };
-      const comment = await container.planService?.addComment({
+      const comment = await plans!.addComment({
         planId,
         revision: body.revision,
         body: body.body,
@@ -464,19 +483,39 @@ export function createChatApiRoutes(container: Container): Router {
     try {
       const chatId = String(req.params['id']);
       const planId = String(req.params['planId']);
-      const result = await chatManagementService.decidePlan(
-        chatId,
-        planId,
-        req.body as Parameters<typeof chatManagementService.decidePlan>[2],
-      );
-      if (!result.ok) {
-        // Already-settled decisions are a conflict, not a server error: a
-        // retry of the SAME decision is idempotent, a conflicting one is 409.
+      const body = req.body as {
+        approved: boolean;
+        action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot';
+        feedback?: string;
+        useEditedContent?: boolean;
+        expectedRevision?: number;
+      };
+
+      const plan = await plans!.findById(planId);
+      if (!plan) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
+        return;
+      }
+      if (plan.status !== 'awaiting_review') {
+        // Already-settled decisions are a conflict, not a server error.
         res.status(409).json({
-          error: { code: 'DECISION_CONFLICT', message: result.reason ?? 'Decision rejected' },
+          error: { code: 'DECISION_CONFLICT', message: `Plan is already ${plan.status}` },
         });
         return;
       }
+
+      // The service owns the decision: it composes unresolved inline comments
+      // into the feedback message, honours `useEditedContent`, and — critically
+      // — releases the gate as `changes_requested` rather than `rejected`, so
+      // the agent is told to revise instead of to stop.
+      const outcome = await chatManagementService.decidePlan(chatId, planId, body);
+      if (!outcome.ok) {
+        const reason = outcome.reason ?? 'Decision not recorded';
+        const code = /revised/i.test(reason) ? 'REVISION_CONFLICT' : 'DECISION_CONFLICT';
+        res.status(409).json({ error: { code, message: reason } });
+        return;
+      }
+
       logger.info(`[ChatRoutes] Plan decision recorded for ${planId}`, { requestId: req.requestId });
       res.status(202).json({ ok: true });
     } catch (err) {
@@ -489,7 +528,7 @@ export function createChatApiRoutes(container: Container): Router {
     try {
       const chatId = String(req.params['id']);
       const planId = String(req.params['planId']);
-      const plan = await chatManagementService.getPlan(chatId, planId);
+      const plan = await plans!.findById(planId);
       if (!plan) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
@@ -501,7 +540,7 @@ export function createChatApiRoutes(container: Container): Router {
         });
         return;
       }
-      const savedPath = await container.planService?.saveToWorkspace(planId, roots.workspaceRoot);
+      const savedPath = await plans!.saveToWorkspace(planId, roots.workspaceRoot);
       res.json({ ok: !!savedPath, path: savedPath ?? null });
     } catch (err) {
       next(err);
@@ -512,7 +551,17 @@ export function createChatApiRoutes(container: Container): Router {
   router.get('/:id/interactions', async (req, res, next) => {
     try {
       const chatId = String(req.params['id']);
-      res.json(await chatManagementService.listPendingInteractions(chatId));
+      const pending = agentInteractionService
+        ? await agentInteractionService.listPendingByChat(chatId)
+        : [];
+      res.json(
+        pending.map((i) => ({
+          interactionId: i.id,
+          kind: i.kind,
+          status: i.status,
+          ...(i.payload ? { payload: i.payload } : {}),
+        })),
+      );
     } catch (err) {
       next(err);
     }
@@ -524,14 +573,24 @@ export function createChatApiRoutes(container: Container): Router {
     validate(AnswerQuestionSchema),
     async (req, res, next) => {
       try {
+        // Delegate: the service checks the interaction belongs to THIS chat and
+        // emits `chat.question.answered`. Resolving the gate here instead left
+        // no event behind, so a reload replayed the card as still-pending and
+        // the reconciliation pass then marked it expired.
         const result = await chatManagementService.answerQuestion(
           String(req.params['id']),
           String(req.params['interactionId']),
           req.body as { answers: Record<string, string[]>; freeformResponse?: string },
         );
         if (!result.ok) {
-          res.status(409).json({
-            error: { code: 'INTERACTION_CONFLICT', message: result.reason ?? 'Already resolved' },
+          const reason = result.reason ?? 'Already resolved';
+          if (/not enabled/i.test(reason)) {
+            res.status(503).json({ error: { code: 'UNAVAILABLE', message: reason } });
+            return;
+          }
+          const status = /not found/i.test(reason) ? 404 : 409;
+          res.status(status).json({
+            error: { code: status === 404 ? 'NOT_FOUND' : 'INTERACTION_CONFLICT', message: reason },
           });
           return;
         }

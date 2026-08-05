@@ -148,6 +148,16 @@ export class ChatManagementService {
   private turnContexts = new Map<string, TurnContext>();
 
   /**
+   * Commits the in-flight turn's transcript row. Held per chat so `cancelTurn`
+   * can flush what streamed before it tears the subscription down.
+   */
+  private turnFinalizers = new Map<string, (opts?: { partial?: boolean }) => Promise<void>>();
+
+  /** Chats whose current turn the user stopped, so the abort rejection that
+   *  follows is not reported as an error. */
+  private cancelledTurns = new Set<string>();
+
+  /**
    * Enrich an AgentEvent's data with `chatId` so that `bridgeEvent` in
    * composition-root routes it to BOTH `session:{sessionId}` AND
    * `chat:{chatId}` scopes. Without this, copilot streaming events never
@@ -264,6 +274,7 @@ export class ChatManagementService {
         title = plan.title;
         fileName = plan.fileName;
         ctx.planIds.push(planId);
+        this.stampCardSequence(ctx, planId);
         await this.eventBus.emit(ctx.sessionId, {
           kind: 'chat.plan.created',
           data: {
@@ -362,6 +373,7 @@ export class ChatManagementService {
           );
           if (pending) {
             ctx.interactionIds.push(pending.id);
+            this.stampCardSequence(ctx, pending.id);
             await this.announceQuestionGate(
               chatId,
               ctx.sessionId,
@@ -527,6 +539,7 @@ export class ChatManagementService {
         ...(workspaceRoot ? { workspaceRoot } : {}),
       });
       ctx.planIds.push(plan.id);
+      this.stampCardSequence(ctx, plan.id);
 
       await this.eventBus.emit(ctx.sessionId, {
         kind: 'chat.plan.created',
@@ -552,6 +565,27 @@ export class ChatManagementService {
     }
   }
 
+  /**
+   * Hands out the next ordinal for the turn in flight.
+   *
+   * Tool calls and cards draw from ONE counter so their relative order is
+   * recoverable from the persisted message alone.
+   */
+  private takeTurnSequence(chatId: string): number | undefined {
+    const ctx = this.turnContexts.get(chatId);
+    if (!ctx) return undefined;
+    const seq = ctx.nextSequence;
+    ctx.nextSequence += 1;
+    return seq;
+  }
+
+  /** Records where a plan/question card falls in the turn's ordered items. */
+  private stampCardSequence(ctx: TurnContext, cardId: string): void {
+    if (ctx.cardSequence.has(cardId)) return;
+    ctx.cardSequence.set(cardId, ctx.nextSequence);
+    ctx.nextSequence += 1;
+  }
+
   /** Snapshot of the plan/question cards surfaced during the current turn. */
   private async collectTurnCards(
     chatId: string,
@@ -568,6 +602,7 @@ export class ChatManagementService {
         const plan = await planService.findById(planId).catch(() => null);
         if (!plan) continue;
         const current = plan.revisions.find((r) => r.revision === plan.currentRevision);
+        const sequence = ctx.cardSequence.get(plan.id);
         planCards.push({
           planId: plan.id,
           revision: plan.currentRevision,
@@ -575,6 +610,7 @@ export class ChatManagementService {
           fileName: plan.fileName,
           summary: current?.summary ?? plan.title,
           status: plan.status,
+          ...(sequence === undefined ? {} : { sequence }),
         });
       }
     }
@@ -584,6 +620,7 @@ export class ChatManagementService {
         const record = await interactions.findById(interactionId).catch(() => null);
         if (!record || record.kind !== 'question') continue;
         const payload = (record.payload ?? {}) as { questions?: AgentQuestion[] };
+        const sequence = ctx.cardSequence.get(record.id);
         questionCards.push({
           interactionId: record.id,
           questions: payload.questions ?? [],
@@ -596,6 +633,7 @@ export class ChatManagementService {
               : record.status === 'pending'
                 ? 'pending'
                 : 'expired',
+          ...(sequence === undefined ? {} : { sequence }),
         });
       }
     }
@@ -1597,6 +1635,8 @@ export class ChatManagementService {
       agentMode,
       planIds: [],
       interactionIds: [],
+      nextSequence: 0,
+      cardSequence: new Map(),
     });
 
     if (agentMode === 'plan') {
@@ -1662,6 +1702,71 @@ export class ChatManagementService {
     // Idempotency guard: prevent double-persistence per turn.
     let assistantPersisted = false;
 
+    /**
+     * Write whatever this turn produced into the transcript.
+     *
+     * Lives here rather than inline in the idle handler because a cancel has
+     * to run it too: stopping mid-turn used to tear down this subscription,
+     * which took the only reference to the accumulated content with it, so the
+     * partial answer was streamed to the screen and then lost forever.
+     */
+    const finalizeTurn = async (opts: { partial?: boolean } = {}): Promise<void> => {
+      if (assistantPersisted) return;
+      const hasText = turnContent.trim().length > 0;
+      const hasActivity =
+        !!turnMetadata.thinkingText?.trim() || (turnMetadata.toolCalls?.length ?? 0) > 0;
+      // A cancel before the model said anything at all leaves nothing worth a
+      // transcript row; a completed turn still requires text, as before.
+      if (opts.partial ? !hasText && !hasActivity : !hasText) return;
+      assistantPersisted = true;
+
+      const metadata: ChatMessageMetadata = {};
+      if (turnMetadata.thinkingText) metadata.thinkingText = turnMetadata.thinkingText;
+      if (turnMetadata.toolCalls!.length > 0) metadata.toolCalls = turnMetadata.toolCalls;
+      if (turnMetadata.systemMessages!.length > 0) metadata.systemMessages = turnMetadata.systemMessages;
+
+      // WEB-02: tag assistant with the same turnId as the user msg.
+      metadata.turnId = turnId;
+      metadata.agentMode = agentMode;
+      if (opts.partial) metadata.partial = true;
+
+      // PLN-01 — persist plan/question cards into the transcript.
+      // Event replay is SKIPPED for completed chats (replayEvents fast
+      // path), so the message metadata is the only thing that can rebuild
+      // these cards in historical conversations.
+      const cards = await this.collectTurnCards(chatId);
+      if (cards.planCards.length > 0) metadata.planCards = cards.planCards;
+      if (cards.questionCards.length > 0) metadata.questionCards = cards.questionCards;
+
+      await this.messageRepo.create({
+        id: generateId(),
+        sessionId: chat.sessionId,
+        chatId,
+        role: 'assistant',
+        content: turnContent,
+        metadata,
+        timestamp: new Date(),
+      });
+
+      // Save long responses as markdown artifacts in the workspace
+      // so they show up in the Files & Changes sidebar.
+      if (chat.workspaceId && this.extensions.workspaceManager && turnContent.length >= 500) {
+        try {
+          const wsInfo = await this.extensions.workspaceManager.getWorkspaceInfo(chat.workspaceId);
+          if (wsInfo) {
+            const artifactsDir = path.join(wsInfo.rootPath, 'artifacts', 'responses');
+            await fs.mkdir(artifactsDir, { recursive: true });
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const fileName = `response-${timestamp}.md`;
+            await fs.writeFile(path.join(artifactsDir, fileName), turnContent, 'utf-8');
+          }
+        } catch {
+          // Non-fatal — artifact saving should not break the chat flow
+        }
+      }
+    };
+    this.turnFinalizers.set(chatId, finalizeTurn);
+
     // Subscribe to conversation events
     const unsub = this.harness.onConversationEvent(
       session.conversationId,
@@ -1692,14 +1797,17 @@ export class ChatManagementService {
           case 'harness.reasoning_delta':
             turnMetadata.thinkingText = (turnMetadata.thinkingText ?? '') + ((data?.['text'] as string) ?? '');
             break;
-          case 'harness.tool_start':
+          case 'harness.tool_start': {
+            const sequence = this.takeTurnSequence(chatId);
             turnMetadata.toolCalls!.push({
               id: (data?.['callId'] as string) ?? `tc_${turnMetadata.toolCalls!.length}`,
               tool: (data?.['tool'] as string) ?? 'unknown',
               args: data?.['args'],
               status: 'running',
+              ...(sequence === undefined ? {} : { sequence }),
             });
             break;
+          }
           case 'harness.tool_complete': {
             const matchKey = (data?.['callId'] as string) ?? (data?.['tool'] as string);
             const tc = turnMetadata.toolCalls!.find(
@@ -1727,52 +1835,7 @@ export class ChatManagementService {
 
         // Persist on idle — all tool calls have completed by now
         if (event.kind === 'harness.idle') {
-          if (!assistantPersisted && turnContent.trim().length > 0) {
-            assistantPersisted = true;
-            const metadata: ChatMessageMetadata = {};
-            if (turnMetadata.thinkingText) metadata.thinkingText = turnMetadata.thinkingText;
-            if (turnMetadata.toolCalls!.length > 0) metadata.toolCalls = turnMetadata.toolCalls;
-            if (turnMetadata.systemMessages!.length > 0) metadata.systemMessages = turnMetadata.systemMessages;
-
-            // WEB-02: tag assistant with the same turnId as the user msg.
-            metadata.turnId = turnId;
-            metadata.agentMode = agentMode;
-
-            // PLN-01 — persist plan/question cards into the transcript.
-            // Event replay is SKIPPED for completed chats (replayEvents fast
-            // path), so the message metadata is the only thing that can rebuild
-            // these cards in historical conversations.
-            const cards = await this.collectTurnCards(chatId);
-            if (cards.planCards.length > 0) metadata.planCards = cards.planCards;
-            if (cards.questionCards.length > 0) metadata.questionCards = cards.questionCards;
-
-            await this.messageRepo.create({
-              id: generateId(),
-              sessionId: chat.sessionId,
-              chatId,
-              role: 'assistant',
-              content: turnContent,
-              metadata,
-              timestamp: new Date(),
-            });
-
-            // Save long responses as markdown artifacts in the workspace
-            // so they show up in the Files & Changes sidebar.
-            if (chat.workspaceId && this.extensions.workspaceManager && turnContent.length >= 500) {
-              try {
-                const wsInfo = await this.extensions.workspaceManager.getWorkspaceInfo(chat.workspaceId);
-                if (wsInfo) {
-                  const artifactsDir = path.join(wsInfo.rootPath, 'artifacts', 'responses');
-                  await fs.mkdir(artifactsDir, { recursive: true });
-                  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-                  const fileName = `response-${timestamp}.md`;
-                  await fs.writeFile(path.join(artifactsDir, fileName), turnContent, 'utf-8');
-                }
-              } catch {
-                // Non-fatal — artifact saving should not break the chat flow
-              }
-            }
-          }
+          await finalizeTurn();
 
           // Checkpoint the workspace AFTER the agent has finished. The
           // pre-turn snapshot alone is not enough: without an "after" the
@@ -1794,6 +1857,7 @@ export class ChatManagementService {
             });
           }
 
+          this.turnFinalizers.delete(chatId);
           this.activeSubscriptions.delete(chatId);
           unsub();
         }
@@ -1843,14 +1907,20 @@ export class ChatManagementService {
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      await this.eventBus.emit(chat.sessionId, {
-        kind: 'harness.error',
-        data: { message: `Failed to send prompt: ${errMsg}` },
-      });
+      // A user-initiated stop aborts the in-flight prompt, which surfaces here
+      // as a rejection. That is the requested outcome, not a failure to report.
+      if (!this.cancelledTurns.delete(chatId)) {
+        await this.eventBus.emit(chat.sessionId, {
+          kind: 'harness.error',
+          data: { message: `Failed to send prompt: ${errMsg}` },
+        });
+      }
+      await finalizeTurn({ partial: true });
       await this.eventBus.emit(chat.sessionId, {
         kind: 'harness.idle',
         data: {},
       });
+      this.turnFinalizers.delete(chatId);
       this.activeSubscriptions.delete(chatId);
       unsub();
       throw err;
@@ -1859,13 +1929,17 @@ export class ChatManagementService {
 
   /**
    * Cancel the in-flight turn for a chat — aborts the SDK conversation,
-   * tears down the active event subscription and emits `harness.idle` so the
-   * UI transitions out of the "generating" state. The chat stays active and
-   * can accept new prompts (unlike archive, which closes the session).
+   * persists whatever the turn produced, tears down the active event
+   * subscription and emits `harness.idle` so the UI transitions out of the
+   * "generating" state. The chat stays active and can accept new prompts
+   * (unlike archive, which closes the session).
    */
   async cancelTurn(chatId: string): Promise<void> {
     const chat = await this.chatRepo.getById(chatId);
     const session = await this.sessionRepo.getById(chat.sessionId);
+
+    // Tells `sendPrompt`'s catch that the imminent abort rejection is expected.
+    this.cancelledTurns.add(chatId);
 
     // PLN-01 — settle pending gates FIRST.
     //
@@ -1885,7 +1959,6 @@ export class ChatManagementService {
         } as AgentEvent);
       }
     }
-    this.turnContexts.delete(chatId);
 
     if (session.conversationId) {
       try {
@@ -1894,6 +1967,20 @@ export class ChatManagementService {
         // Conversation may not be actively streaming — non-fatal.
       }
     }
+
+    // Commit the partial turn BEFORE tearing the listener down — `unsub()`
+    // drops the closure holding everything streamed so far, so persisting
+    // after it would have nothing left to write.
+    try {
+      await this.turnFinalizers.get(chatId)?.({ partial: true });
+    } catch (err) {
+      console.warn(
+        `[ChatManagement] failed to persist cancelled turn for ${chatId}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+    this.turnFinalizers.delete(chatId);
+    this.turnContexts.delete(chatId);
 
     // Tear down the turn's event listener so no late events leak through.
     const unsub = this.activeSubscriptions.get(chatId);

@@ -2,23 +2,47 @@
 // Skeleton — the loading state.
 //
 // A spinner tells the user to wait; a skeleton tells them what is coming and
-// stops the layout jumping when it does. Every list in the app replaces its
-// spinner with a skeleton shaped like its own rows.
+// stops the layout jumping when it does.
 //
-// One shared looping opacity animation per skeleton element, on the UI
-// thread. The loop is cheap, but screens still cap themselves at ~6 rows —
-// beyond that the shimmer is noise, not information.
+// ONE clock drives every skeleton in the app. The previous version started an
+// independent `withRepeat` per element, so a six-row list ran eighteen
+// unsynchronised loops that visibly beat against each other — the effect read
+// as flickering rather than as breathing. A single module-level shared value
+// also means Reduce Motion is honoured in one place.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useEffect } from 'react';
 import { View } from 'react-native';
 import Animated, {
   Easing,
+  cancelAnimation,
+  makeMutable,
   useAnimatedStyle,
-  useSharedValue,
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
+
+import { useReduceMotion } from './accessibility';
+
+const pulse = makeMutable(0.45);
+let subscribers = 0;
+
+function retain(): void {
+  subscribers += 1;
+  if (subscribers > 1) return;
+  pulse.value = withRepeat(
+    withTiming(1, { duration: 900, easing: Easing.inOut(Easing.quad) }),
+    -1,
+    true,
+  );
+}
+
+function release(): void {
+  subscribers = Math.max(0, subscribers - 1);
+  if (subscribers > 0) return;
+  cancelAnimation(pulse);
+  pulse.value = 0.45;
+}
 
 export function Skeleton({
   width,
@@ -31,15 +55,13 @@ export function Skeleton({
   radius?: number;
   className?: string;
 }): React.ReactElement {
-  const pulse = useSharedValue(0.45);
+  const reduceMotion = useReduceMotion();
 
   useEffect(() => {
-    pulse.value = withRepeat(
-      withTiming(1, { duration: 900, easing: Easing.inOut(Easing.quad) }),
-      -1,
-      true,
-    );
-  }, [pulse]);
+    if (reduceMotion) return;
+    retain();
+    return release;
+  }, [reduceMotion]);
 
   const style = useAnimatedStyle(() => ({ opacity: pulse.value }));
 
@@ -48,7 +70,10 @@ export function Skeleton({
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       className={`bg-emphasis ${className}`}
-      style={[style, { width: width ?? '100%', height, borderRadius: radius }]}
+      style={[
+        reduceMotion ? { opacity: 0.6 } : style,
+        { width: width ?? '100%', height, borderRadius: radius },
+      ]}
     />
   );
 }
@@ -68,7 +93,12 @@ export function SkeletonRow(): React.ReactElement {
 
 export function SkeletonList({ rows = 5 }: { rows?: number }): React.ReactElement {
   return (
-    <View className="overflow-hidden rounded-3xl border border-border bg-card">
+    <View
+      accessible
+      accessibilityLabel="Loading"
+      accessibilityRole="progressbar"
+      className="overflow-hidden rounded-3xl border border-border bg-card"
+    >
       {Array.from({ length: rows }, (_, i) => (
         <View key={i}>
           {i > 0 ? <View className="ml-4 h-px bg-border-muted" /> : null}

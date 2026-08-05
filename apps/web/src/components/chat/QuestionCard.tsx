@@ -10,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useMemo, useState } from 'react';
-import { HelpCircle, Check, Loader2, AlertTriangle, Send } from 'lucide-react';
+import { HelpCircle, Check, Loader2, AlertTriangle, Send, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import type { QuestionBlock } from '@/stores/streamStore.js';
@@ -36,6 +36,9 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
   // questionId → selected labels (or [OTHER] when the user is typing their own)
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [customText, setCustomText] = useState<Record<string, string>>({});
+  // The agent may ask several questions at once; page through them one at a
+  // time so a 4-question card doesn't become a wall of radio buttons.
+  const [index, setIndex] = useState(0);
 
   const isPending = question.status === 'pending';
   const isExpired = question.status === 'expired';
@@ -47,6 +50,10 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
     if (question.status !== 'answered') return null;
     return question.answers ?? {};
   }, [question.status, question.answers]);
+
+  const total = question.questions.length;
+  const current = Math.min(index, Math.max(total - 1, 0));
+  const visible = total > 1 ? question.questions.slice(current, current + 1) : question.questions;
 
   const toggle = (qid: string, label: string, multiSelect: boolean) => {
     setSelections((prev) => {
@@ -79,15 +86,23 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
     return out;
   };
 
+  const isQuestionAnswered = (qid: string): boolean => {
+    const picked = selections[qid] ?? [];
+    if (picked.length === 0) return false;
+    if (picked.includes(OTHER) && (customText[qid] ?? '').trim().length === 0) return false;
+    return true;
+  };
+
   const canSubmit =
-    isAnswerable &&
-    !busy &&
-    question.questions.every((q) => {
-      const picked = selections[q.id] ?? [];
-      if (picked.length === 0) return false;
-      if (picked.includes(OTHER) && (customText[q.id] ?? '').trim().length === 0) return false;
-      return true;
-    });
+    isAnswerable && !busy && question.questions.every((q) => isQuestionAnswered(q.id));
+
+  /** First question still missing an answer, when it isn't the one on screen. */
+  const nextUnanswered = useMemo(() => {
+    if (!isAnswerable || total <= 1) return -1;
+    const idx = question.questions.findIndex((q) => !isQuestionAnswered(q.id));
+    return idx >= 0 && idx !== current ? idx : -1;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAnswerable, total, current, question.questions, selections, customText]);
 
   return (
     <div
@@ -112,10 +127,37 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
         {isExpired && (
           <AlertTriangle className="h-3 w-3 text-[var(--color-muted-foreground)]" aria-hidden />
         )}
+
+        {/* Pager — only when the agent asked more than one question. */}
+        {total > 1 && (
+          <span className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="Previous question"
+              disabled={current === 0}
+              onClick={() => setIndex(current - 1)}
+              className="rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <span className="tabular-nums text-[11px] text-[var(--color-muted-foreground)]">
+              {current + 1} / {total}
+            </span>
+            <button
+              type="button"
+              aria-label="Next question"
+              disabled={current >= total - 1}
+              onClick={() => setIndex(current + 1)}
+              className="rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        )}
       </div>
 
       <div className="space-y-3 p-3">
-        {question.questions.map((q) => {
+        {visible.map((q) => {
           const picked = selections[q.id] ?? [];
           const previouslyAnswered = answered?.[q.id];
           return (
@@ -132,6 +174,12 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
               {previouslyAnswered ? (
                 <p className="rounded-lg bg-[var(--color-muted)]/30 px-2.5 py-1.5 text-xs text-[var(--color-foreground)]">
                   {previouslyAnswered.join(', ')}
+                </p>
+              ) : answered ? (
+                // Answered card, but this question carries no selection —
+                // the user took the "let the agent decide" route.
+                <p className="rounded-lg bg-[var(--color-muted)]/30 px-2.5 py-1.5 text-xs italic text-[var(--color-muted-foreground)]">
+                  {question.freeformResponse ?? 'Left to the agent to decide.'}
                 </p>
               ) : (
                 <div className="space-y-1">
@@ -237,23 +285,44 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
             >
               Skip &amp; let the agent decide
             </button>
-            <button
-              type="button"
-              disabled={!canSubmit}
-              onClick={() => onSubmit?.(question.interactionId, buildAnswers())}
-              className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
-            >
-              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-              Submit answers
-            </button>
+            {/* With several questions the Submit stays disabled until they are
+                all answered, so send the user to the next gap rather than
+                leaving a dead button and no explanation. */}
+            {nextUnanswered >= 0 ? (
+              <button
+                type="button"
+                onClick={() => setIndex(nextUnanswered)}
+                className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+              >
+                Next question
+                <ChevronRight className="h-3 w-3" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={!canSubmit}
+                onClick={() => onSubmit?.(question.interactionId, buildAnswers())}
+                className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                Submit answers
+              </button>
+            )}
           </div>
         )}
 
         {question.status === 'answered' && (
-          <p className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
-            <Check className="h-3 w-3" />
-            Answers sent to the agent
-          </p>
+          <>
+            {question.freeformResponse && Object.keys(answered ?? {}).length > 0 && (
+              <p className="rounded-lg bg-[var(--color-muted)]/30 px-2.5 py-1.5 text-xs italic text-[var(--color-muted-foreground)]">
+                {question.freeformResponse}
+              </p>
+            )}
+            <p className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+              <Check className="h-3 w-3" />
+              Answers sent to the agent
+            </p>
+          </>
         )}
         {isExpired && (
           <p className="text-[11px] text-[var(--color-muted-foreground)]">

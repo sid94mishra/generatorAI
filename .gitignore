@@ -64,3 +64,5 @@ playwright-report/
 **/.last-run.json
 # Written per build by apps/desktop/scripts/electron-builder.mjs.
 .electron-builder.generated.json
+**/impeccable/
+*impeccable*

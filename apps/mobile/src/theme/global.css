@@ -1,3 +1,22 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * react-native-web renders TextInput as a real <input>/<textarea>, so it
+ * inherits the browser's focus ring — a heavy amber outline that belongs to
+ * no part of this design system. Every field already signals focus with its
+ * own border colour, so the ring is removed rather than restyled.
+ *
+ * Scoped to text entry only: buttons and links keep their focus ring, which
+ * is the one keyboard users actually navigate by.
+ */
+@layer base {
+  input:focus,
+  input:focus-visible,
+  textarea:focus,
+  textarea:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+}

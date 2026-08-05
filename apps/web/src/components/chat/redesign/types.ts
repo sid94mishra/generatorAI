@@ -5,7 +5,8 @@
 // eyeball it at /__redesign/chat.
 // ────────────────────────────────────────────────────────────────
 
-export type StepStatus = 'pending' | 'running' | 'done' | 'failed';
+/** `waiting` = the call is still open but blocked on the human, not the model. */
+export type StepStatus = 'pending' | 'running' | 'waiting' | 'done' | 'failed';
 
 export type StepKind =
   | 'read'

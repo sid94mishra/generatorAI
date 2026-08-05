@@ -182,11 +182,20 @@ export function Workbench({
       }
     >
       {detail ? null : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ gap: 8, paddingHorizontal: 16, paddingVertical: 10 }}
-        >
+        // Tight, and divided from the body: the section's own toolbar supplies
+        // the next band of spacing, so any padding here is doubled.
+        <View className="border-b border-border-muted">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ flexGrow: 0, flexShrink: 0 }}
+            contentContainerStyle={{
+              gap: 6,
+              paddingHorizontal: 12,
+              paddingBottom: 8,
+              alignItems: 'center',
+            }}
+          >
           {SECTIONS.map(({ id, label, Icon }) => {
             const selected = id === section;
             const count =
@@ -219,7 +228,8 @@ export function Workbench({
               </Touchable>
             );
           })}
-        </ScrollView>
+          </ScrollView>
+        </View>
       )}
 
       <View className="flex-1">{body}</View>

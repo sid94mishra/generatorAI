@@ -111,6 +111,25 @@ export function appendToken(
   });
 }
 
+/**
+ * Commit an answer that only ever arrived on `message_complete`.
+ *
+ * Some providers deliver the whole response in one event with no token
+ * deltas behind it. Appending unconditionally would duplicate the answer for
+ * every provider that DOES stream, so this is a no-op once any text block
+ * exists for the turn.
+ */
+export function appendTokenIfNoText(
+  streams: StreamsRecord,
+  sessionId: string,
+  text: string,
+): StreamsRecord {
+  if (!text) return streams;
+  const existing = streams[sessionId];
+  if (existing && existing.blocks.some((block) => block.type === 'text')) return streams;
+  return appendToken(streams, sessionId, text);
+}
+
 export function appendThinking(
   streams: StreamsRecord,
   sessionId: string,
@@ -304,6 +323,36 @@ export function startPending(
     turnId: (existing?.turnId ?? 0) + 1,
     blocks: priorWidgets,
   });
+}
+
+/**
+ * Begin a turn in response to a `harness.user_message` event.
+ *
+ * `startPending` resets the block list, which is correct for a genuinely new
+ * turn and destructive for a replayed one — and every gap-fill after a
+ * dropped connection replays the user message. So the reset is skipped while
+ * a turn with the SAME prompt is already in flight; a different prompt still
+ * starts a new turn, because that is a real second turn arriving from
+ * another client.
+ */
+export function startTurn(
+  streams: StreamsRecord,
+  sessionId: string,
+  userMessage?: string,
+): StreamsRecord {
+  const existing = streams[sessionId];
+  const inTurn =
+    existing !== undefined &&
+    (existing.status === 'pending' ||
+      ((existing.status === 'streaming' || existing.status === 'thinking') &&
+        existing.blocks.length > 0));
+
+  if (inTurn) {
+    const incoming = (userMessage ?? '').trim();
+    const current = (existing.turnUserMessage ?? '').trim();
+    if (!incoming || !current || incoming === current) return streams;
+  }
+  return startPending(streams, sessionId, userMessage);
 }
 
 export function setServerTurnId(

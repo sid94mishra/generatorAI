@@ -142,7 +142,7 @@ export default function RunDetailScreen(): React.ReactElement {
     >
       <Card className="gap-2.5 p-4">
         <View className="flex-row items-center gap-2">
-          <StatusDot tone={toneOf(run.data.status)} />
+          <StatusDot tone={toneOf(run.data.status)} label={null} />
           <Text className="flex-1 text-lg font-semibold text-foreground">
             {run.data.name ?? `Run ${runId.slice(0, 8)}`}
           </Text>
@@ -239,7 +239,7 @@ function StageRow({
   return (
     <View className="flex-row gap-3">
       <View className="items-center pt-4">
-        <StatusDot tone={tone} ring />
+        <StatusDot tone={tone} ring label={statusLabel(stage.status)} />
         {!last ? <View className="mt-1 w-px flex-1 bg-border-muted" /> : null}
       </View>
 

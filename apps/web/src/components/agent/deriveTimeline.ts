@@ -113,6 +113,28 @@ function subagentTarget(messages: string[]): string {
 export interface DeriveTimelineOptions {
   /** true while the stream is not yet complete — affects subagent status. */
   active: boolean;
+  /**
+   * true while a plan/question gate is blocking the turn. Computed from the
+   * blocks when omitted.
+   */
+  awaitingDecision?: boolean;
+}
+
+/**
+ * Is the turn parked on the human rather than the model?
+ *
+ * The gate tool call (`exit_plan_mode` / `ask_user`) stays `running` for as
+ * long as the card is unanswered, because it genuinely is — but presenting
+ * that as a spinner tells the user to keep waiting when the turn is in fact
+ * waiting on THEM.
+ */
+export function awaitsUserDecision(blocks: StreamBlock[] | undefined): boolean {
+  if (!blocks) return false;
+  return blocks.some(
+    (b) =>
+      (b.type === 'plan' && b.status === 'awaiting_review') ||
+      (b.type === 'question' && b.status === 'pending'),
+  );
 }
 
 export function deriveTimeline(
@@ -120,6 +142,8 @@ export function deriveTimeline(
   opts: DeriveTimelineOptions = { active: false },
 ): TimelineStep[] {
   if (!blocks || blocks.length === 0) return [];
+
+  const awaitingDecision = opts.awaitingDecision ?? awaitsUserDecision(blocks);
 
   // Consolidate ALL subagent messages first (they may be non-consecutive).
   const subagentMessages: string[] = [];
@@ -164,7 +188,9 @@ export function deriveTimeline(
         // unresolved call degrades to a neutral terminal state instead.
         const status: StepStatus = b.status === 'complete'
           ? 'done'
-          : opts.active ? 'running' : 'pending';
+          : awaitingDecision
+            ? 'waiting'
+            : opts.active ? 'running' : 'pending';
         // Detail is built lazily: `args`/`result` routinely hold whole file
         // trees or multi-MB tool output, and eagerly pretty-printing them for
         // every tool call of every message costs hundreds of ms on chat open
@@ -316,11 +342,18 @@ export function deriveSegments(
   let textBuf = '';
   let textStartId: number | null = null;
 
+  // The gate block lives outside any single step run, so resolve it once over
+  // the whole array and hand it to every `deriveTimeline` slice below.
+  const stepOpts: DeriveTimelineOptions = {
+    ...opts,
+    awaitingDecision: opts.awaitingDecision ?? awaitsUserDecision(blocks),
+  };
+
   const flushSteps = () => {
     if (stepBuf.length === 0) return;
     // Reuse deriveTimeline on the consecutive run so subagent/error
     // consolidation, arg summarisation and icons stay identical.
-    const steps = deriveTimeline(stepBuf, opts);
+    const steps = deriveTimeline(stepBuf, stepOpts);
     if (steps.length > 0) {
       segments.push({ type: 'steps', id: `steps-${stepBuf[0]!.blockId}`, steps });
     }
