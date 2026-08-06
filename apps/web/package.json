@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@dagrejs/dagre": "^2.0.4",
-    "@generatorai/client-runtime": "workspace:*",
     "@generatorai/client-core": "workspace:*",
+    "@generatorai/client-runtime": "workspace:*",
     "@generatorai/design-tokens": "workspace:*",
     "@generatorai/shared": "workspace:*",
     "@pierre/diffs": "^1.2.12",
@@ -66,6 +66,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-react": "^4.7.0",
     "happy-dom": "^15.11.7",
     "jsdom": "^25.0.1",

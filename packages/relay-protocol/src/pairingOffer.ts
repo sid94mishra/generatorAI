@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { decodeCanonicalBase64Url, fromBase64Url, toBase64Url, utf8 } from './bytes.js';
 import { hostIdFromPublicKey } from './e2ee.js';
 
-export const PAIRING_OFFER_VERSION = 1;
+export const PAIRING_OFFER_VERSION = 2;
 export const PAIRING_CODE_MAX_CHARACTERS = 8 * 1024;
 export const PAIRING_ENDPOINT_MAX_CHARACTERS = 2048;
 export const MAX_PAIRING_TTL_MS = 10 * 60 * 1000;
@@ -26,6 +26,15 @@ const BASE64URL_43 = /^[A-Za-z0-9_-]{43}$/;
 const BASE64URL_32BYTE = /^[A-Za-z0-9_-]{43}$/;
 
 const ScopeString = z.string().min(1).max(64).regex(/^[a-z]+:[a-z_]+$/);
+
+export const PairingEndpointSchema = z
+  .object({
+    origin: z.string().min(1).max(PAIRING_ENDPOINT_MAX_CHARACTERS).refine(isAllowedEndpoint, 'Unsupported endpoint'),
+    reachability: z.enum(['loopback', 'lan', 'private-network', 'public']),
+    priority: z.number().int().min(0).max(10_000),
+  })
+  .strict();
+export type PairingEndpoint = z.infer<typeof PairingEndpointSchema>;
 
 function isCanonicalKey(value: string): boolean {
   return decodeCanonicalBase64Url(value, 32) !== null;
@@ -87,9 +96,11 @@ export function createPairingOfferSchema(now: () => number = () => Date.now()) {
 
   return z
     .object({
-      v: z.literal(PAIRING_OFFER_VERSION),
+      v: z.union([z.literal(1), z.literal(PAIRING_OFFER_VERSION)]),
       /** Absolute base URL of the GeneratorAI API for LAN/loopback transport. */
       endpoint: z.string().min(1).max(PAIRING_ENDPOINT_MAX_CHARACTERS).refine(isAllowedEndpoint, 'Unsupported endpoint'),
+      /** Ordered direct routes. Version 1 offers normalize to the primary endpoint. */
+      endpoints: z.array(PairingEndpointSchema).min(1).max(16).optional(),
       /** Canonical host identity, derived from `serverPublicKey`. */
       serverId: z.string().regex(BASE64URL_43),
       /** Host's long-term X25519 public key (base64url, 32 bytes). */
@@ -97,7 +108,11 @@ export function createPairingOfferSchema(now: () => number = () => Date.now()) {
       /** Fingerprint of a self-signed TLS certificate, when one is in use. */
       certificateFingerprint: z.string().max(128).optional(),
       /** Single-use pairing grant. */
-      pairingGrant: z.string().min(16).max(256),
+      // Lower bound is 12 to admit the human-typeable pairing code
+      // (`@generatorai/shared` -> PAIRING_CODE_LENGTH). The upper bound still
+      // accommodates the legacy 43-char opaque grants embedded in offers
+      // minted by older servers.
+      pairingGrant: z.string().min(12).max(256),
       pairingExpiresAt: z
         .number()
         .int()
@@ -112,6 +127,27 @@ export function createPairingOfferSchema(now: () => number = () => Date.now()) {
     })
     .strict()
     .superRefine((offer, ctx) => {
+      if (offer.v === PAIRING_OFFER_VERSION) {
+        if (!offer.endpoints) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['endpoints'],
+            message: 'Version 2 pairing offers require endpoints',
+          });
+        } else if (offer.endpoints[0]?.origin !== offer.endpoint) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['endpoints', 0, 'origin'],
+            message: 'Primary endpoint must be the first endpoint candidate',
+          });
+        }
+      } else if (offer.endpoints !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['endpoints'],
+          message: 'Version 1 pairing offers cannot contain endpoints',
+        });
+      }
       const key = fromBase64Url(offer.serverPublicKey);
       if (!key || hostIdFromPublicKey(key) !== offer.serverId) {
         ctx.addIssue({
@@ -141,6 +177,18 @@ export function createPairingOfferSchema(now: () => number = () => Date.now()) {
 
 export const PairingOfferSchema = createPairingOfferSchema();
 export type PairingOffer = z.infer<typeof PairingOfferSchema>;
+
+export function pairingEndpoints(offer: PairingOffer): PairingEndpoint[] {
+  return offer.endpoints
+    ? [...offer.endpoints].sort((left, right) => left.priority - right.priority)
+    : [
+        {
+          origin: offer.endpoint,
+          reachability: offer.transportCapabilities.includes('loopback') ? 'loopback' : 'lan',
+          priority: 0,
+        },
+      ];
+}
 
 /** Encodes an offer as the compact base64url payload embedded in the QR code. */
 export function encodePairingOffer(offer: PairingOffer): string {

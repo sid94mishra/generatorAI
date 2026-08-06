@@ -38,6 +38,22 @@ describe('route policy — resolution', () => {
     expect(resolveRoutePolicy('/workspaces/w1').read).toEqual(['read:workspaces']);
   });
 
+  it('exposes pairing preview publicly without opening the pairing admin API', () => {
+    // The joining device holds only a pairing code, so it must be able to ask
+    // what that code grants before redeeming it.
+    expect(resolveRoutePolicy('/auth/pair/preview').public).toBe(true);
+
+    // ...but the surrounding pairing API stays admin-only. If longest-prefix
+    // matching ever regressed, `/auth/pair` would inherit the public policy
+    // and let an unauthenticated caller mint grants.
+    expect(resolveRoutePolicy('/auth/pair').public).toBeFalsy();
+    expect(resolveRoutePolicy('/auth/pair').write).toContain('admin:devices');
+    expect(resolveRoutePolicy('/auth/pair/pending').public).toBeFalsy();
+    expect(allowed([], '/auth/pair', 'POST')).toBe(false);
+    expect(allowed([], '/auth/pair/pending', 'GET')).toBe(false);
+    expect(allowed([], '/auth/pair/preview', 'POST')).toBe(true);
+  });
+
   it('matches `:param` segments positionally', () => {
     expect(resolveRoutePolicy('/workspaces/any-id-at-all/browser').read).toEqual(['exec:browser']);
   });

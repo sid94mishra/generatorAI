@@ -119,6 +119,8 @@ interface StreamStore {
 
   /** Mark the stream complete. */
   completeStream: (sessionId: string) => void;
+  /** User pressed Stop: settle the turn and ignore late live-status events. */
+  requestCancel: (sessionId: string) => void;
 
   /** Mark the stream errored. */
   errorStream: (sessionId: string) => void;
@@ -174,6 +176,7 @@ export const useStreamStore = create<StreamStore>((set, get) => {
     setUsage: apply(r.setUsage),
     setContextUsage: apply(r.setContextUsage),
     completeStream: apply(r.completeStream),
+    requestCancel: apply(r.requestCancel),
     errorStream: apply(r.errorStream),
     clearStreamText: apply(r.clearStreamText),
     clearStream: apply(r.clearStream),

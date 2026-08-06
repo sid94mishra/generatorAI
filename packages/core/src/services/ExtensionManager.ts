@@ -189,16 +189,24 @@ export class ExtensionManager implements IExtensionRegistry {
     }
     const manifest = result.data as ExtensionManifest;
 
-    // Precedence check — workspace beats user beats system.
+    // Precedence check — workspace beats user beats system. Within one scope
+    // the higher version wins: installs go to `<id>@<version>` directories, so
+    // ranking by scope alone let a reload resurrect whichever directory name
+    // sorted first — usually the oldest, superseded copy.
     const prior = this.installed.get(manifest.id);
-    if (prior && rank(prior.scope) >= rank(scope)) {
-      this.logger?.info?.(
-        `[ExtensionManager] skipped ${manifest.id}@${manifest.version} (${scope}) — higher-precedence ${prior.scope} already loaded`,
-      );
-      return null;
-    }
-    if (prior && rank(prior.scope) < rank(scope)) {
-      // We're replacing a lower-precedence copy — tear it down first.
+    if (prior) {
+      const priorRank = rank(prior.scope);
+      const thisRank = rank(scope);
+      const keepPrior =
+        priorRank > thisRank ||
+        (priorRank === thisRank &&
+          compareVersions(prior.manifest.version, manifest.version) >= 0);
+      if (keepPrior) {
+        this.logger?.info?.(
+          `[ExtensionManager] skipped ${manifest.id}@${manifest.version} (${scope}) — ${prior.manifest.id}@${prior.manifest.version} (${prior.scope}) already loaded`,
+        );
+        return null;
+      }
       await this.deactivate(prior);
       this.installed.delete(prior.manifest.id);
     }
@@ -536,6 +544,28 @@ export class ExtensionManager implements IExtensionRegistry {
 /** Higher rank = higher precedence. */
 function rank(scope: ExtensionScope): number {
   return scope === 'workspace' ? 2 : scope === 'user' ? 1 : 0;
+}
+
+/** Numeric-segment version compare; non-numeric suffixes fall back to a
+ *  string compare so `1.0.0-beta` still orders below `1.0.0`. */
+function compareVersions(a: string, b: string): number {
+  const partsA = a.split(/[.\-+]/);
+  const partsB = b.split(/[.\-+]/);
+  const len = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < len; i += 1) {
+    const rawA = partsA[i];
+    const rawB = partsB[i];
+    if (rawA === undefined) return rawB === undefined ? 0 : 1;
+    if (rawB === undefined) return -1;
+    const numA = Number(rawA);
+    const numB = Number(rawB);
+    if (Number.isFinite(numA) && Number.isFinite(numB)) {
+      if (numA !== numB) return numA > numB ? 1 : -1;
+      continue;
+    }
+    if (rawA !== rawB) return rawA > rawB ? 1 : -1;
+  }
+  return 0;
 }
 
 /** Resolve `relative` inside `root`. Returns undefined if it escapes. */

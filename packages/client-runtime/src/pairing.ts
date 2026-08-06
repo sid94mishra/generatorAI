@@ -7,11 +7,17 @@
 // `completePairing`.
 // ────────────────────────────────────────────────────────────────
 
-import { decodePairingOffer, type PairingOffer } from '@generatorai/relay-protocol';
+import {
+  decodePairingOffer,
+  pairingEndpoints,
+  type PairingEndpoint,
+  type PairingOffer,
+} from '@generatorai/relay-protocol';
 
 export interface PairingConsent {
   serverName: string;
   endpoint: string;
+  endpoints: PairingEndpoint[];
   /** Pin this: it is how the client detects a substituted host later. */
   serverId: string;
   /** Short, human-comparable form of `serverId` for the consent screen. */
@@ -20,7 +26,14 @@ export interface PairingConsent {
   transportCapabilities: string[];
   relayOffered: boolean;
   expiresAt: number;
-  offer: PairingOffer;
+  /**
+   * The single-use grant to redeem. Held directly rather than read off
+   * `offer`, because a consent can also originate from a short code typed by
+   * hand, where no offer blob exists.
+   */
+  pairingGrant: string;
+  /** Present only when the consent came from a decoded QR/offer payload. */
+  offer?: PairingOffer;
 }
 
 export class PairingCodeError extends Error {
@@ -42,18 +55,21 @@ export function parsePairingCode(input: string): PairingConsent {
     throw new PairingCodeError(result.error ?? 'This pairing code is not valid.', 'INVALID_OFFER');
   }
   const offer = result.offer;
+  const endpoints = pairingEndpoints(offer);
   if (offer.pairingExpiresAt <= Date.now()) {
     throw new PairingCodeError('This pairing code has expired. Generate a new one.', 'EXPIRED');
   }
   return {
     serverName: offer.serverName,
-    endpoint: offer.endpoint,
+    endpoint: endpoints[0]!.origin,
+    endpoints,
     serverId: offer.serverId,
     fingerprint: formatFingerprint(offer.serverId),
     requestedScopes: [...offer.requestedScopes],
     transportCapabilities: [...offer.transportCapabilities],
     relayOffered: Boolean(offer.relay),
     expiresAt: offer.pairingExpiresAt,
+    pairingGrant: offer.pairingGrant,
     offer,
   };
 }

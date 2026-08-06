@@ -21,6 +21,7 @@ import {
   type Scope,
 } from '@generatorai/auth';
 import type { Container } from '../composition-root.js';
+import { reachableOrigins } from '../network/reachableOrigins.js';
 
 export interface UpgradeAuthResult {
   ok: boolean;
@@ -142,6 +143,11 @@ export function isOriginAllowed(req: IncomingMessage, container: Container): boo
   }
   const allowed = container.config.security.corsOrigins;
   if (allowed.includes(origin)) return true;
+
+  // Must match the CORS allowlist exactly. An origin accepted for REST but
+  // refused here yields a session that loads and then cannot open a terminal
+  // or a live stream, with no error that points at the origin.
+  if (reachableOrigins(container).includes(origin)) return true;
 
   const widgetOrigin =
     process.env['WIDGET_ORIGIN'] ?? `http://127.0.0.1:${process.env['WIDGET_PORT'] ?? '3101'}`;

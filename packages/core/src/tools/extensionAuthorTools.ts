@@ -260,6 +260,23 @@ export function buildWriteExtensionTool(ctx: ExtensionAuthorContext): ToolDefini
         );
       }
 
+      // A widget whose entry HTML was never written installs cleanly and only
+      // fails much later as a blank panel, so report it while the agent still
+      // has the file contents in hand.
+      const missingEntries = (ctx.widgetRegistry?.list() ?? [])
+        .filter((w) => w.extensionId === installed.manifest.id && Boolean(w.entry))
+        .filter((w) => !existsSync(resolve(installed.rootPath, w.entry)))
+        .map((w) => `${w.id} → ${w.entry}`);
+      if (missingEntries.length > 0) {
+        return {
+          ok: false,
+          error:
+            `Extension "${installed.manifest.id}" installed, but these widgets declare entry ` +
+            `files that were never written: ${missingEntries.join(', ')}. Call write_extension ` +
+            `again with those files included — rendering will fail until they exist.`,
+        };
+      }
+
       return {
         ok: true,
         extensionId: installed.manifest.id,

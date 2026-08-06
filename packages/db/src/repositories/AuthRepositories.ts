@@ -586,6 +586,17 @@ export class SqliteServiceAccountRepository implements IServiceAccountRepository
       );
   }
 
+  async rotateSecret(accountId: string, secretHash: string): Promise<boolean> {
+    const result = this.sqlite
+      .prepare(
+        `UPDATE auth_service_accounts
+            SET secret_hash = ?, revoked_at = NULL
+          WHERE account_id = ?`,
+      )
+      .run(secretHash, accountId);
+    return result.changes > 0;
+  }
+
   async findByHash(secretHash: string): Promise<ServiceAccountRecord | null> {
     const row = this.sqlite
       .prepare(`SELECT * FROM auth_service_accounts WHERE secret_hash = ?`)

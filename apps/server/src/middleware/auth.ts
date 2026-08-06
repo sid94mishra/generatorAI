@@ -47,14 +47,37 @@ function firstValue(v: string | string[] | undefined): string | undefined {
 }
 
 /**
- * True only when BOTH ends of the socket are loopback. Checking the remote
- * address alone would let a proxy on the same host launder remote traffic
- * into "trusted local" requests.
+ * True only for a request that genuinely originated on this machine.
+ *
+ * Both ends of the socket must be loopback AND the request must carry no
+ * evidence of having been forwarded. The socket check alone is not enough: a
+ * reverse proxy running on the same host (the Vite dev server proxying `/api`
+ * is exactly this) connects loopback-to-loopback, so traffic arriving from
+ * anywhere on the network would otherwise be indistinguishable from a local
+ * request — and in unauthenticated-loopback mode that means full authority.
+ *
+ * Any `x-forwarded-for` / `forwarded` header therefore disqualifies the
+ * request. This server is only ever loopback-bound when unauthenticated mode
+ * is permitted at all, so there is no legitimate trusted proxy in front of it
+ * whose headers we would want to honour instead.
  */
 export function isLoopbackRequest(req: {
   socket: { remoteAddress?: string | undefined; localAddress?: string | undefined };
+  headers?: Record<string, string | string[] | undefined>;
 }): boolean {
-  return isLoopbackAddress(req.socket.remoteAddress) && isLoopbackAddress(req.socket.localAddress);
+  if (!isLoopbackAddress(req.socket.remoteAddress)) return false;
+  if (!isLoopbackAddress(req.socket.localAddress)) return false;
+
+  const headers = req.headers ?? {};
+  const forwardedFor = firstValue(headers['x-forwarded-for'] as string | string[] | undefined);
+  if (forwardedFor) {
+    // Only the left-most entry is the real client; the rest are proxies.
+    const client = forwardedFor.split(',')[0]?.trim();
+    if (!isLoopbackAddress(client)) return false;
+  }
+  if (headers['forwarded'] !== undefined) return false;
+
+  return true;
 }
 
 export function createAuthMiddleware(options: ApiAuthOptions): RequestHandler {

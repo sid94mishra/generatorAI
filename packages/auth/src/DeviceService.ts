@@ -15,6 +15,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import * as crypto from 'node:crypto';
+import { generatePairingCode, isPairingCode, normalizePairingCode } from '@generatorai/shared';
 import { importPublicJwk, jwkThumbprint, sha256Base64Url } from './jose.js';
 import {
   ACCESS_TOKEN_TTL_MS,
@@ -55,7 +56,8 @@ export class PairingError extends Error {
       | 'THROTTLED'
       | 'INVALID_KEY'
       | 'DUPLICATE_KEY'
-      | 'SCOPE_ESCALATION',
+      | 'SCOPE_ESCALATION'
+      | 'CREDENTIAL_SUPERSEDED',
   ) {
     super(message);
     this.name = 'PairingError';
@@ -80,6 +82,23 @@ export interface PairingGrantResult {
   requestedScopes: Scope[];
   deviceNameHint: string;
   platform: DevicePlatform;
+}
+
+export interface PreviewPairingParams {
+  pairingToken: string;
+  sourceAddress?: string | null;
+  requestId?: string | null;
+}
+
+/**
+ * What a pairing code is asking for. Safe to return to the holder of the code:
+ * it carries no grant id and no credential material.
+ */
+export interface PairingGrantPreview {
+  deviceNameHint: string;
+  platform: DevicePlatform;
+  requestedScopes: Scope[];
+  expiresAt: number;
 }
 
 export interface CompletePairingParams {
@@ -205,7 +224,14 @@ export class DeviceService {
 
     await this.deps.pairing.revokePendingFor(params.deviceNameHint, now);
 
-    const { secret, hash } = this.deps.tokens.createOpaqueCredential(32);
+    // A pairing grant is the one credential in the system a HUMAN transcribes,
+    // so it is a short typeable code rather than a 43-char opaque secret. The
+    // reduced entropy (60 bits) is safe here specifically because a grant is
+    // single-use, expires in 10 minutes, allows 5 attempts, and sits behind the
+    // per-source and global pairing throttles. Machine-held credentials
+    // (resume, tickets) keep using `createOpaqueCredential` below.
+    const secret = generatePairingCode();
+    const hash = this.deps.tokens.hashOpaque(secret);
     const grant: PairingGrantRecord = {
       grantId: crypto.randomUUID(),
       tokenHash: hash,
@@ -265,6 +291,64 @@ export class DeviceService {
   }
 
   /**
+   * Resolves what a pairing code is asking for, WITHOUT consuming it.
+   *
+   * This exists so the short typed-code flow can show the same informed
+   * consent screen as the QR flow. A QR offer carries the requested scopes in
+   * its payload; a 12-character code cannot, so the joining device has to ask
+   * the server what it is about to accept before it accepts it.
+   *
+   * Deliberately does not increment `attempts`: a preview is not a redemption,
+   * and burning the 5-attempt budget on the consent screen would mean a user
+   * who typed a code, read the screen and hit back a few times would lock
+   * themselves out of a code they hold legitimately. Guessing is still bounded
+   * by the per-source and global throttles applied here, which over a grant's
+   * 10-minute life allow ~100 attempts against a 60-bit space.
+   *
+   * Returns only what the holder of the code is already entitled to see. It
+   * does NOT return the grant id or any device credential.
+   */
+  async previewPairingGrant(params: PreviewPairingParams): Promise<PairingGrantPreview> {
+    const now = Date.now();
+    const source = params.sourceAddress ?? 'unknown';
+    if (!this.globalThrottle.hit('global', now) || !this.perSourceThrottle.hit(source, now)) {
+      this.deps.audit.record({
+        action: AuditAction.rateLimited,
+        result: 'denied',
+        reasonCode: 'pairing_preview_throttled',
+        sourceAddress: params.sourceAddress ?? null,
+        requestId: params.requestId ?? null,
+        severity: 'warn',
+      });
+      throw new PairingError('Too many pairing attempts — try again shortly', 'THROTTLED');
+    }
+
+    const canonicalToken = isPairingCode(params.pairingToken)
+      ? normalizePairingCode(params.pairingToken)
+      : params.pairingToken;
+    const grant = await this.deps.pairing.findByHash(sha256Base64Url(canonicalToken));
+
+    // Every failure mode collapses to one message and one code. Distinguishing
+    // "no such code" from "revoked" here would turn the preview into an oracle
+    // that confirms which codes ever existed.
+    if (
+      !grant ||
+      grant.revokedAt != null ||
+      grant.consumedAt != null ||
+      grant.expiresAt <= now
+    ) {
+      throw new PairingError('Pairing code is not valid', 'INVALID_GRANT');
+    }
+
+    return {
+      deviceNameHint: grant.deviceNameHint,
+      platform: grant.platform,
+      requestedScopes: [...grant.requestedScopes],
+      expiresAt: grant.expiresAt,
+    };
+  }
+
+  /**
    * Exchanges a pairing grant for a durable, key-bound device credential.
    *
    * The pairing token is consumed atomically; a race between two clients can
@@ -285,7 +369,15 @@ export class DeviceService {
       throw new PairingError('Too many pairing attempts — try again shortly', 'THROTTLED');
     }
 
-    const tokenHash = sha256Base64Url(params.pairingToken);
+    // Normalise before hashing so the dashes we render for readability, a
+    // lowercase paste, or a stray space from a phone keyboard all resolve to
+    // the canonical code that was hashed at mint time. Falls back to the raw
+    // value when normalisation does not yield a well-formed code, so the
+    // long-form opaque grants issued by older clients still redeem.
+    const canonicalToken = isPairingCode(params.pairingToken)
+      ? normalizePairingCode(params.pairingToken)
+      : params.pairingToken;
+    const tokenHash = sha256Base64Url(canonicalToken);
     const grant = await this.deps.pairing.findByHash(tokenHash);
     if (!grant) {
       this.auditPairingFailure('unknown_grant', params);
@@ -424,8 +516,22 @@ export class DeviceService {
       throw new PairingError('Refresh proof key does not match the device', 'INVALID_KEY');
     }
 
+    const isCurrentCredential = credential.version === device.credentialVersion;
+    const isPreviousCredential =
+      credential.version === device.credentialVersion - 1 &&
+      device.previousCredentialGraceUntil != null &&
+      device.previousCredentialGraceUntil > now;
+    if (!isCurrentCredential && !isPreviousCredential) {
+      throw new PairingError('Resume credential has been superseded', 'CREDENTIAL_SUPERSEDED');
+    }
+
     await this.deps.devices.markCredentialUsed(credential.credentialId, now);
-    const session = await this.issueSession(device, params.keyThumbprint, now, credential.credentialId);
+    const session = await this.issueSession(
+      device,
+      params.keyThumbprint,
+      now,
+      isCurrentCredential ? credential.credentialId : undefined,
+    );
     await this.deps.devices.touch(device.deviceId, now, params.transport ?? 'unknown');
 
     this.deps.audit.record({
@@ -527,8 +633,9 @@ export class DeviceService {
       throw new PairingError('Cannot grant scopes beyond your own', 'SCOPE_ESCALATION');
     }
     await this.deps.devices.update(deviceId, { scopes: next });
-    // Force re-authentication so tokens carrying the old scope set die.
-    await this.rotateCredentials(deviceId, principal, 'scopes_changed');
+    // AuthService reads scopes from the live device record on every request,
+    // so reductions and grants take effect immediately without invalidating
+    // the device's DPoP-bound resume credential.
     this.deps.audit.record({
       action: AuditAction.deviceScopesChanged,
       result: 'success',

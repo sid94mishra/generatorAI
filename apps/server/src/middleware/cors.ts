@@ -64,10 +64,13 @@ export function createCorsMiddleware(config?: CorsConfig): RequestHandler {
     'http://localhost:8082',
     'http://127.0.0.1:8082',
     // Dedicated widget-asset origin — widget iframes served here may fetch
-    // the API cross-origin. Kept in the dev default so widgets work out of
-    // the box; production must list it explicitly in security.corsOrigins.
+    // the API cross-origin. Both loopback spellings are listed because the
+    // iframe adopts whichever hostname the host page uses (Chrome aborts a
+    // `localhost` page framing a `127.0.0.1` document).
     process.env['WIDGET_ORIGIN'] ??
       `http://127.0.0.1:${process.env['WIDGET_PORT'] ?? '3101'}`,
+    `http://localhost:${process.env['WIDGET_PORT'] ?? '3101'}`,
+    `http://127.0.0.1:${process.env['WIDGET_PORT'] ?? '3101'}`,
   ];
 
   // SEC-02 — hard-fail on the `credentials:true` + `*` combination.

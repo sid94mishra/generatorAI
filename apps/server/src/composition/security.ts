@@ -411,6 +411,9 @@ export async function createSecurityContext(
   };
 }
 
+/** Fixed primary key for the single account backing GENERATORAI_API_KEY. */
+const LEGACY_SERVICE_ACCOUNT_ID = 'legacy-api-key';
+
 async function ensureLegacyServiceAccount(
   repo: IServiceAccountRepository,
   tokens: TokenService,
@@ -420,8 +423,21 @@ async function ensureLegacyServiceAccount(
   const hash = tokens.hashOpaque(apiKey);
   const existing = await repo.findByHash(hash);
   if (existing) return;
+
+  // The account id is fixed, so a CHANGED key finds nothing by hash and then
+  // collides on the primary key — which used to abort startup entirely and
+  // leave the server unbootable until the old key was restored. Rotating in
+  // place is also the correct behaviour: it is the same account, re-keyed.
+  if (await repo.rotateSecret(LEGACY_SERVICE_ACCOUNT_ID, hash)) {
+    logger.warn(
+      '[Auth] GENERATORAI_API_KEY changed; the legacy service account was re-keyed. ' +
+        'The previous key no longer works.',
+    );
+    return;
+  }
+
   await repo.create({
-    accountId: 'legacy-api-key',
+    accountId: LEGACY_SERVICE_ACCOUNT_ID,
     name: 'Deprecated GENERATORAI_API_KEY',
     secretHash: hash,
     scopes: [...ALL_SCOPES],

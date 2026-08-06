@@ -1698,6 +1698,10 @@ export class ChatManagementService {
     };
     // Accumulate assistant content across message_complete events in agentic loop
     let turnContent = '';
+    // Live token buffer. `message_complete` only fires when a message ENDS, so
+    // without this a turn stopped mid-sentence has no server-side record of
+    // anything the user already watched stream in.
+    let streamedText = '';
 
     // Idempotency guard: prevent double-persistence per turn.
     let assistantPersisted = false;
@@ -1712,7 +1716,13 @@ export class ChatManagementService {
      */
     const finalizeTurn = async (opts: { partial?: boolean } = {}): Promise<void> => {
       if (assistantPersisted) return;
-      const hasText = turnContent.trim().length > 0;
+      // A cancel keeps whichever record is richer: the last completed message,
+      // or the tokens streamed since it.
+      const content =
+        opts.partial && streamedText.trim().length > turnContent.trim().length
+          ? streamedText
+          : turnContent;
+      const hasText = content.trim().length > 0;
       const hasActivity =
         !!turnMetadata.thinkingText?.trim() || (turnMetadata.toolCalls?.length ?? 0) > 0;
       // A cancel before the model said anything at all leaves nothing worth a
@@ -1743,14 +1753,14 @@ export class ChatManagementService {
         sessionId: chat.sessionId,
         chatId,
         role: 'assistant',
-        content: turnContent,
+        content,
         metadata,
         timestamp: new Date(),
       });
 
       // Save long responses as markdown artifacts in the workspace
       // so they show up in the Files & Changes sidebar.
-      if (chat.workspaceId && this.extensions.workspaceManager && turnContent.length >= 500) {
+      if (chat.workspaceId && this.extensions.workspaceManager && content.length >= 500) {
         try {
           const wsInfo = await this.extensions.workspaceManager.getWorkspaceInfo(chat.workspaceId);
           if (wsInfo) {
@@ -1758,7 +1768,7 @@ export class ChatManagementService {
             await fs.mkdir(artifactsDir, { recursive: true });
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
             const fileName = `response-${timestamp}.md`;
-            await fs.writeFile(path.join(artifactsDir, fileName), turnContent, 'utf-8');
+            await fs.writeFile(path.join(artifactsDir, fileName), content, 'utf-8');
           }
         } catch {
           // Non-fatal — artifact saving should not break the chat flow
@@ -1794,9 +1804,20 @@ export class ChatManagementService {
         // Collect metadata from events for rich persistence
         const data = event.data as Record<string, unknown> | undefined;
         switch (event.kind) {
+          case 'harness.token':
+            streamedText += (data?.['text'] as string) ?? '';
+            break;
           case 'harness.reasoning_delta':
             turnMetadata.thinkingText = (turnMetadata.thinkingText ?? '') + ((data?.['text'] as string) ?? '');
             break;
+          case 'harness.reasoning_complete': {
+            // Providers that emit only the finished block never send deltas.
+            const full = (data?.['content'] as string) ?? '';
+            if (full.length > (turnMetadata.thinkingText ?? '').length) {
+              turnMetadata.thinkingText = full;
+            }
+            break;
+          }
           case 'harness.tool_start': {
             const sequence = this.takeTurnSequence(chatId);
             turnMetadata.toolCalls!.push({
@@ -1831,6 +1852,8 @@ export class ChatManagementService {
           if (content.length > turnContent.length) {
             turnContent = content;
           }
+          // The completed message supersedes the tokens that built it.
+          streamedText = '';
         }
 
         // Persist on idle — all tool calls have completed by now

@@ -282,8 +282,48 @@ describe('stream reducer — plan and question cards', () => {
   });
 });
 
-describe('stream reducer — providers that never stream tokens', () => {
-  it('commits a message_complete answer when the turn produced no text', () => {
+describe('stream reducer — stopping a turn', () => {
+  it('keeps what already streamed', () => {
+    const s = run(
+      (x) => r.appendToken(x, SID, 'partial answer'),
+      (x) => r.requestCancel(x, SID),
+    );
+    expect(r.getStream(s, SID).status).toBe('complete');
+    expect(kinds(s)).toEqual(['text']);
+    expect(r.getStream(s, SID).text).toBe('partial answer');
+  });
+
+  it('does not let events still draining from the provider revive the turn', () => {
+    // Aborting is a round trip. Without the latch these late events set
+    // `streaming` again, the Stop button reappears, and the user's click
+    // reads as ignored — so they click again, and again.
+    const s = run(
+      (x) => r.appendToken(x, SID, 'partial'),
+      (x) => r.requestCancel(x, SID),
+      (x) => r.appendToken(x, SID, ' more'),
+      (x) => r.appendThinking(x, SID, 'still thinking'),
+      (x) => r.addToolCall(x, SID, 'read_file', { path: 'a.ts' }, 'c9'),
+      (x) => r.completeThinking(x, SID),
+    );
+    expect(r.getStream(s, SID).status).toBe('complete');
+    // The content itself is still accepted — only the status is pinned.
+    expect(r.getStream(s, SID).text).toBe('partial more');
+    expect(kinds(s)).toContain('tool_call');
+  });
+
+  it('releases the latch when the next turn starts', () => {
+    const s = run(
+      (x) => r.appendToken(x, SID, 'partial'),
+      (x) => r.requestCancel(x, SID),
+      (x) => r.startPending(x, SID, 'next question'),
+      (x) => r.appendToken(x, SID, 'fresh'),
+    );
+    expect(r.getStream(s, SID).cancelRequested).toBe(false);
+    expect(r.getStream(s, SID).status).toBe('streaming');
+  });
+});
+
+describe('stream reducer — providers that never stream tokens', () => {  it('commits a message_complete answer when the turn produced no text', () => {
     const s = r.appendTokenIfNoText({}, SID, 'All done.');
     expect(r.getStream(s, SID).text).toBe('All done.');
     expect(kinds(s)).toEqual(['text']);

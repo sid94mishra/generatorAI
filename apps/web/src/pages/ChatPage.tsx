@@ -823,14 +823,11 @@ export function ChatPage() {
               // the same partial turn, and the auto-clear effect swaps these
               // blocks for the persisted message once it lands.
               //
-              // Nothing has streamed yet while 'pending' (and completeStream
-              // deliberately ignores that state), so there the old full reset
-              // is still what keeps the UI from getting stuck.
-              if (sessionId) {
-                const store = useStreamStore.getState();
-                if (store.streams[sessionId]?.status === 'pending') store.clearStream(sessionId);
-                else store.completeStream(sessionId);
-              }
+              // The latch matters as much as the status: aborting is a round
+              // trip, so without it the events still draining out of the
+              // provider set `streaming` again, the Stop button reappears, and
+              // the click looks like it did nothing.
+              if (sessionId) useStreamStore.getState().requestCancel(sessionId);
               cancelMutation.mutate(chatId);
             }}
             customSendFn={async ({ prompt, attachments, mode }) => {
@@ -855,7 +852,11 @@ export function ChatPage() {
           pendingInteractionLabel={pendingInteractionLabel}
           onCancelPendingInteraction={() => {
             if (!chatId) return;
-            if (sessionId) useStreamStore.getState().clearStream(sessionId);
+            if (sessionId) {
+              const store = useStreamStore.getState();
+              store.clearStream(sessionId);
+              store.requestCancel(sessionId);
+            }
             cancelMutation.mutate(chatId);
           }}
         />

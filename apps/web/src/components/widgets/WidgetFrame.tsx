@@ -37,11 +37,31 @@ interface WidgetFrameProps {
 
 const DEFAULT_MIN_HEIGHT = 160;
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/** Chrome's local-network protections block an iframe when the embedding page
+ *  and the frame spell loopback differently (`localhost` page → `127.0.0.1`
+ *  frame aborts with no error). The server advertises `127.0.0.1`, so realign
+ *  the spelling with the page. Isolation comes from the PORT, which is kept. */
+function alignLoopbackHost(assetsBase: string): string {
+  if (typeof window === 'undefined') return assetsBase;
+  try {
+    const url = new URL(assetsBase);
+    const pageHost = window.location.hostname;
+    if (!LOOPBACK_HOSTS.has(url.hostname) || !LOOPBACK_HOSTS.has(pageHost)) return assetsBase;
+    if (url.hostname === pageHost) return assetsBase;
+    url.hostname = pageHost;
+    return url.origin;
+  } catch {
+    return assetsBase;
+  }
+}
+
 /** Build the absolute URL to the widget's entry HTML on the dedicated
  *  widget-asset origin. Relative asset paths (`./bundle.js`) resolve
  *  against this URL naturally since the iframe now has a real origin. */
 function buildWidgetUrl(assetsBase: string, extensionId: string, entry: string): string {
-  const base = assetsBase && assetsBase.length > 0 ? assetsBase : '';
+  const base = assetsBase && assetsBase.length > 0 ? alignLoopbackHost(assetsBase) : '';
   const cleaned = entry.replace(/^\/+/, '');
   return `${base}/api/widget-assets/${encodeURIComponent(extensionId)}/${cleaned
     .split('/')

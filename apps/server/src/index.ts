@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { Server } from 'node:http';
-import { homedir, hostname } from 'node:os';
+import { homedir, hostname, networkInterfaces } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +41,8 @@ import { createWidgetAssetRoutes } from './routes/extensions.js';
 import { attachBrowserWebSocket } from './browser-ws.js';
 import { attachTerminalWebSocket } from './terminal-ws.js';
 import { attachSttWebSocket } from './stt-ws.js';
+import { resolveAdvertisedEndpoints } from './network/advertisedEndpoints.js';
+import { readExposureMode, resolveBindHost } from './network/exposure.js';
 
 // Killing the process on a failed write to an already-exited child is the
 // wrong trade. The agent CLIs are optional: when one is absent its harness is
@@ -156,9 +158,13 @@ async function startServer(): Promise<void> {
       corsOrigins: process.env['CORS_ORIGINS']
         ? process.env['CORS_ORIGINS'].split(',').map((s) => s.trim())
         : undefined,
-      // Loopback by default — exposing the API on a routable interface must be
-      // a deliberate act (`GENERATORAI_BIND_HOST=0.0.0.0`).
-      bindHost: process.env['GENERATORAI_BIND_HOST'] ?? '127.0.0.1',
+      // Loopback unless the user has explicitly opted this server into being
+      // reachable from the network (Settings → Security, persisted next to the
+      // database). `GENERATORAI_BIND_HOST` still overrides both.
+      bindHost: resolveBindHost({
+        envBindHost: process.env['GENERATORAI_BIND_HOST'],
+        mode: readExposureMode(dirname(resolve(dbPath))),
+      }),
       allowUnauthenticatedLoopback:
         process.env['GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK'] === '1',
       requireSecureSecretStore: process.env['GENERATORAI_REQUIRE_SECURE_SECRETS'] === '1',
@@ -310,15 +316,27 @@ async function startServer(): Promise<void> {
   //     unclaimed (no device, no service account), so a normal restart is a
   //     no-op. Deliberately AFTER `listen` because the pairing offer has to
   //     advertise a reachable endpoint.
-  const advertisedEndpoint =
-    process.env['GENERATORAI_ADVERTISED_URL']?.replace(/\/$/, '') ??
-    `http://${bindHost === '0.0.0.0' || bindHost === '::' ? '127.0.0.1' : bindHost}:${config.port}`;
+  const bootstrapEndpoints = resolveAdvertisedEndpoints({
+    port: config.port,
+    bindHost,
+    configuredOrigins: [
+      ...(process.env['GENERATORAI_ADVERTISED_URLS']?.split(',') ?? []),
+      ...(process.env['GENERATORAI_ADVERTISED_URL'] ? [process.env['GENERATORAI_ADVERTISED_URL']] : []),
+    ],
+    networkInterfaces: networkInterfaces(),
+  });
+  const advertisedEndpoint = bootstrapEndpoints[0]?.origin ?? `http://127.0.0.1:${config.port}`;
   try {
     await ensureBootstrapPairing({
       security: container.security,
       logger: container.logger,
       dataDir: dirname(resolve(config.dbPath)),
       endpoint: advertisedEndpoint,
+      endpoints: bootstrapEndpoints.map((endpoint, priority) => ({
+        origin: endpoint.origin,
+        reachability: endpoint.reachability,
+        priority,
+      })),
       serverName: process.env['GENERATORAI_SERVER_NAME'] ?? `GeneratorAI (${hostname()})`,
     });
   } catch (err) {

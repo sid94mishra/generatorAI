@@ -25,6 +25,8 @@ import {
 export interface StoredSession {
   serverId: string;
   endpoint: string;
+  /** Ordered direct origins. Absent on legacy sessions. */
+  endpoints?: string[];
   deviceId: string;
   deviceName: string;
   scopes: string[];
@@ -70,6 +72,8 @@ export interface ClientRuntimeOptions {
    * fail with `NotPairedError` even though the server would have accepted it.
    */
   allowUnauthenticated?: boolean;
+  /** Maximum time to wait for one endpoint to prove its pinned identity. */
+  identityProbeTimeoutMs?: number;
   clock?: () => number;
 }
 
@@ -119,6 +123,7 @@ export class AuthenticatedClientRuntime {
   private accessToken: string | null = null;
   private accessTokenExpiresAt = 0;
   private nonce: string | null = null;
+  private activeEndpoint: string | null = null;
   private state: AuthState = { status: 'unpaired' };
   /** Single-flight: concurrent 401s must trigger ONE refresh, not N. */
   private refreshInFlight: Promise<void> | null = null;
@@ -176,7 +181,7 @@ export class AuthenticatedClientRuntime {
   }
 
   get endpoint(): string {
-    return this.session?.endpoint ?? this.options.endpoint;
+    return this.activeEndpoint ?? this.session?.endpoint ?? this.options.endpoint;
   }
 
   get isLegacyKeyMode(): boolean {
@@ -227,6 +232,7 @@ export class AuthenticatedClientRuntime {
    */
   async completePairing(params: {
     endpoint: string;
+    endpoints?: string[];
     serverId: string;
     pairingToken: string;
     deviceName: string;
@@ -235,13 +241,16 @@ export class AuthenticatedClientRuntime {
   }): Promise<StoredSession> {
     this.setState({ status: 'pairing' });
 
+    const endpoints = normalizeEndpointList(params.endpoint, params.endpoints);
+    const selectedEndpoint = await this.resolvePinnedEndpoint(params.serverId, endpoints);
+
     // A fresh key per pairing: re-pairing after a revoke must not resurrect
     // the old identity, and the server's unique-thumbprint index would reject
     // it anyway.
     const key = await this.options.keyStore.create();
     this.key = key;
 
-    const url = `${params.endpoint.replace(/\/$/, '')}/api/auth/pair/complete`;
+    const url = `${selectedEndpoint}/api/auth/pair/complete`;
     const response = await this.fetchWithProof(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -273,7 +282,8 @@ export class AuthenticatedClientRuntime {
 
     const session: StoredSession = {
       serverId: params.serverId,
-      endpoint: params.endpoint.replace(/\/$/, ''),
+      endpoint: selectedEndpoint,
+      endpoints,
       deviceId: body.deviceId,
       deviceName: body.deviceName,
       scopes: body.scopes,
@@ -322,6 +332,7 @@ export class AuthenticatedClientRuntime {
   async forget(): Promise<void> {
     this.accessToken = null;
     this.accessTokenExpiresAt = 0;
+    this.activeEndpoint = null;
     this.session = null;
     this.key = null;
     // Reset the memo so a later call re-reads the (now empty) vault instead of
@@ -339,9 +350,8 @@ export class AuthenticatedClientRuntime {
    * Retries exactly once on `401 use_dpop_nonce` or an expired token.
    */
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
-    const url = path.startsWith('http') ? path : `${this.endpoint}${path}`;
-
     if (this.options.legacyApiKey) {
+      const url = path.startsWith('http') ? path : `${this.endpoint}${path}`;
       return this.doFetch(url, {
         ...init,
         headers: {
@@ -361,10 +371,12 @@ export class AuthenticatedClientRuntime {
     // running with authentication explicitly disabled. Send the request as-is
     // rather than failing locally on a request the server would have accepted.
     if (!this.session && (await this.serverAllowsUnauthenticated())) {
+      const url = path.startsWith('http') ? path : `${this.endpoint}${path}`;
       return this.doFetch(url, init);
     }
 
     await this.ensureAccessToken();
+    const url = path.startsWith('http') ? path : `${this.endpoint}${path}`;
     let response = await this.signedRequest(url, init);
 
     if (response.status === 401) {
@@ -456,34 +468,57 @@ export class AuthenticatedClientRuntime {
    * out-of-band pairing is that the client can detect a substituted server
    * even when TLS is absent, self-signed, or terminated by a relay.
    *
-   * A network failure is NOT treated as a mismatch — that would lock a user
-   * out of their own server whenever the network hiccups. Only a positively
-   * different identity is fatal.
+  * Network failures move to the next saved endpoint. If none can prove the
+  * pinned identity, the credential stays local and the request fails closed.
    */
   private verifyPinnedIdentity(session: StoredSession): Promise<void> {
     if (!session.serverId) return Promise.resolve();
     this.identityCheck ??= (async () => {
-      let advertised: string | undefined;
-      try {
-        const response = await this.doFetch(`${session.endpoint}/api/auth/server-info`, {});
-        if (!response.ok) return;
-        const body = (await response.json()) as { serverId?: string };
-        advertised = body.serverId;
-      } catch {
-        // Offline or unreachable — say nothing rather than falsely accusing.
-        return;
-      }
-      if (advertised && advertised !== session.serverId) {
-        // Reset so a later, legitimate re-pair is not permanently poisoned.
-        this.identityCheck = null;
-        this.setState({
-          status: 'error',
-          message: 'The server identity at this address changed.',
-        });
-        throw new HostIdentityChangedError(session.serverId, advertised);
-      }
+      await this.resolvePinnedEndpoint(
+        session.serverId,
+        normalizeEndpointList(session.endpoint, session.endpoints),
+      );
     })();
     return this.identityCheck;
+  }
+
+  private async resolvePinnedEndpoint(serverId: string, endpoints: readonly string[]): Promise<string> {
+    if (this.activeEndpoint) return this.activeEndpoint;
+    const failures: string[] = [];
+    for (const endpoint of endpoints) {
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(),
+        this.options.identityProbeTimeoutMs ?? 4_000,
+      );
+      try {
+        const response = await this.doFetch(`${endpoint}/api/auth/server-info`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          failures.push(`${endpoint} returned ${response.status}`);
+          continue;
+        }
+        const body = (await response.json()) as { serverId?: string };
+        if (!body.serverId) {
+          failures.push(`${endpoint} did not identify itself`);
+          continue;
+        }
+        if (body.serverId !== serverId) {
+          this.identityCheck = null;
+          this.setState({ status: 'error', message: 'The server identity at this address changed.' });
+          throw new HostIdentityChangedError(serverId, body.serverId);
+        }
+        this.activeEndpoint = endpoint;
+        return endpoint;
+      } catch (error) {
+        if (error instanceof HostIdentityChangedError) throw error;
+        failures.push(`${endpoint} is unreachable`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    throw new Error(`Could not verify the paired server identity. ${failures.join('; ')}`);
   }
 
   /**
@@ -525,9 +560,17 @@ export class AuthenticatedClientRuntime {
     // Single-flight — a burst of parallel requests must not rotate the resume
     // credential N times, which would invalidate all but one of them.
     if (this.refreshInFlight) return this.refreshInFlight;
-    this.refreshInFlight = this.doRefresh().finally(() => {
-      this.refreshInFlight = null;
-    });
+    this.refreshInFlight = this.doRefresh()
+      .catch(async (error) => {
+        if (error instanceof DeviceRevokedError) {
+          await this.forget();
+          this.setState({ status: 'revoked', reason: error.message });
+        }
+        throw error;
+      })
+      .finally(() => {
+        this.refreshInFlight = null;
+      });
     return this.refreshInFlight;
   }
 
@@ -547,7 +590,7 @@ export class AuthenticatedClientRuntime {
 
     if (!this.key) throw new NotPairedError();
 
-    const url = `${session.endpoint}/api/auth/token/refresh`;
+    const url = `${this.endpoint}/api/auth/token/refresh`;
     const response = await this.fetchWithProof(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -685,6 +728,24 @@ async function safeErrorMessage(response: Response): Promise<string> {
     // Non-JSON body.
   }
   return `HTTP ${response.status}`;
+}
+
+function normalizeEndpointList(primary: string, endpoints?: readonly string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of [primary, ...(endpoints ?? [])]) {
+    try {
+      const origin = new URL(value).origin;
+      if (!seen.has(origin)) {
+        seen.add(origin);
+        result.push(origin);
+      }
+    } catch {
+      // Pairing-offer validation rejects malformed endpoints; legacy stores may not.
+    }
+  }
+  if (result.length === 0) throw new Error('No valid server endpoint is available.');
+  return result;
 }
 
 export type { DeviceKey, DeviceKeyStore, PublicJwk };

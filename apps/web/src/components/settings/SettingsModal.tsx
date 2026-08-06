@@ -89,7 +89,7 @@ export function SettingsModal() {
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && closeSettings()}>
-      <DialogContent hideClose className="h-[min(94vh,54rem)] w-[min(98vw,78rem)] p-0">
+      <DialogContent hideClose className="h-[min(96dvh,54rem)] w-[calc(100vw-1rem)] p-0 sm:h-[min(94vh,54rem)] sm:w-[min(98vw,78rem)]">
         <DialogTitle className="sr-only">Settings</DialogTitle>
 
         {/* Fixed top header spanning the full modal width */}
@@ -110,9 +110,27 @@ export function SettingsModal() {
           </button>
         </header>
 
+        <div className="shrink-0 border-b border-border bg-subtle/40 px-4 py-2.5 sm:hidden">
+          <label htmlFor="settings-section" className="sr-only">Settings section</label>
+          <select
+            id="settings-section"
+            value={section}
+            onChange={(event) => setSection(event.target.value as SettingsSectionId)}
+            className="h-10 w-full rounded-md border border-border bg-card px-3 text-base text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {NAV.map((group) => (
+              <optgroup key={group.heading} label={group.heading}>
+                {group.items.map(({ id, label }) => (
+                  <option key={id} value={id}>{label}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+
         <div className="flex min-h-0 flex-1">
           {/* Left nav */}
-          <nav className="flex w-60 shrink-0 flex-col gap-5 overflow-y-auto border-r border-border bg-subtle/40 px-3 py-4">
+          <nav className="hidden w-60 shrink-0 flex-col gap-5 overflow-y-auto border-r border-border bg-subtle/40 px-3 py-4 sm:flex">
             {NAV.map((group) => (
               <div key={group.heading} className="space-y-1">
                 <div className="px-2 pb-1.5">
@@ -148,7 +166,7 @@ export function SettingsModal() {
           {/* Content — full-width scroller so the scrollbar sits at the modal
               edge; an inner column keeps the reading measure comfortable. */}
           <div className="min-w-0 flex-1 overflow-y-auto">
-            <div className="mx-auto w-full max-w-3xl px-8 py-6">
+            <div className="mx-auto w-full max-w-3xl px-4 py-4 sm:px-8 sm:py-6">
               {SECTIONS[section]}
             </div>
           </div>

@@ -11,17 +11,25 @@
 // device shape: a `?pair=` deep link, a paste, or a camera QR scan.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ShieldCheck, ShieldAlert, Loader2, ArrowRight } from 'lucide-react';
+import { isPairingCode } from '@generatorai/shared';
 import {
   initAuth,
   subscribeToAuthState,
-  previewPairingCode,
+  resolvePairingInput,
   acceptPairing,
   getStoredApiKey,
   type AuthState,
   type PairingConsent,
 } from '@/platform/authRuntime.js';
+
+/**
+ * Below this length an input cannot be a full offer blob, so it is still
+ * mid-paste rather than something worth decoding. Short codes are recognised
+ * separately by `isPairingCode`.
+ */
+const MIN_OFFER_LENGTH = 64;
 
 /** Best-effort friendly name so the device list is readable without editing. */
 function defaultDeviceName(): string {
@@ -96,7 +104,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       try {
         const code = await desktop.requestPairingCode?.(`Desktop on ${defaultDeviceName()}`);
         if (cancelled || !code) return;
-        const consent = previewPairingCode(code.pairingUrl);
+        const consent = await resolvePairingInput(code.pairingUrl);
         await acceptPairing(consent, 'GeneratorAI Desktop', 'desktop');
         window.location.reload();
       } catch {
@@ -128,6 +136,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 function PairingScreen({ state }: { state: AuthState }) {
   const [code, setCode] = useState('');
   const [consent, setConsent] = useState<PairingConsent | null>(null);
+  /** True while a typed short code is being resolved against the host. */
+  const [resolving, setResolving] = useState(false);
   const [deviceName, setDeviceName] = useState(defaultDeviceName);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -149,18 +159,43 @@ function PairingScreen({ state }: { state: AuthState }) {
     );
   }, []);
 
+  // Monotonic token that invalidates in-flight previews. Short codes resolve
+  // over the network, so a user still typing can easily have two requests in
+  // flight; without this the slower one can overwrite the newer result and
+  // show consent for a code that is no longer in the box.
+  const previewToken = useRef(0);
+
   const preview = useCallback((raw: string) => {
+    const token = ++previewToken.current;
     setError(null);
-    if (!raw.trim()) {
+    const trimmed = raw.trim();
+    if (!trimmed) {
       setConsent(null);
+      setResolving(false);
       return;
     }
-    try {
-      setConsent(previewPairingCode(raw.trim()));
-    } catch (err) {
+    // Wait for a complete code before asking the host about it, so every
+    // keystroke of a 12-character code does not spend a throttle slot.
+    if (!isPairingCode(trimmed) && trimmed.length < MIN_OFFER_LENGTH) {
       setConsent(null);
-      setError(err instanceof Error ? err.message : 'That pairing code is not valid.');
+      setResolving(false);
+      return;
     }
+
+    setResolving(true);
+    void resolvePairingInput(trimmed).then(
+      (next) => {
+        if (token !== previewToken.current) return;
+        setConsent(next);
+        setResolving(false);
+      },
+      (err: unknown) => {
+        if (token !== previewToken.current) return;
+        setConsent(null);
+        setResolving(false);
+        setError(err instanceof Error ? err.message : 'That pairing code is not valid.');
+      },
+    );
   }, []);
 
   useEffect(() => {
@@ -205,15 +240,30 @@ function PairingScreen({ state }: { state: AuthState }) {
 
         <div className="space-y-3 rounded-lg border border-border bg-card p-5">
           <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-foreground">Pairing code or link</span>
-            <textarea
+            <span className="text-xs font-medium text-foreground">Pairing code</span>
+            <input
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              rows={3}
-              placeholder="generatorai://pair?code=…"
-              className="w-full resize-none rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              autoCapitalize="characters"
+              autoComplete="one-time-code"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="text"
+              placeholder="4H7K-2M9P-XQ3T"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-center font-mono text-lg tracking-[0.2em] uppercase outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:tracking-[0.2em] placeholder:text-muted-foreground/50"
             />
+            <span className="block text-[11px] text-muted-foreground">
+              Type the code shown on the host device. Scanning a QR code or opening a pairing
+              link fills this in for you.
+            </span>
           </label>
+
+          {resolving && (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Checking this code…
+            </p>
+          )}
 
           {consent && (
             <div className="space-y-3 rounded-md border border-border bg-subtle/40 p-3.5">
@@ -239,7 +289,7 @@ function PairingScreen({ state }: { state: AuthState }) {
               <div>
                 <p className="mb-1 text-xs text-muted-foreground">This device will be granted:</p>
                 <div className="flex flex-wrap gap-1">
-                  {consent.offer.requestedScopes.map((s) => (
+                  {consent.requestedScopes.map((s) => (
                     <span
                       key={s}
                       className="rounded bg-card px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"

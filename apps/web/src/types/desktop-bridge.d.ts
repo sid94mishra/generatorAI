@@ -175,6 +175,13 @@ interface GeneratorAIDesktopBridge {
   isDesktop: true;
   browser?: GeneratorAIDesktopBrowserApi;
 
+  /**
+   * Restarts the embedded server process. Needed after changing the network
+   * exposure mode, because the bind address and the startup security gates
+   * are resolved once at boot.
+   */
+  restartServer?: () => Promise<void>;
+
   // ── Window chrome / native menu integration ──
   getWindowChrome?: () => Promise<GeneratorAIDesktopWindowChrome>;
   window?: GeneratorAIDesktopWindowApi;

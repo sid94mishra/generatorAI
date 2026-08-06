@@ -54,6 +54,18 @@ function existingOrDefault(streams: StreamsRecord, sessionId: string): StreamSta
 }
 
 /**
+ * The status a live event wants to set, unless the user already pressed Stop.
+ *
+ * Aborting is a round trip: the provider keeps emitting for a moment after
+ * `cancel`. Letting those events set `streaming` again flips the composer back
+ * to a Stop button, which reads as "my click did nothing" and makes people
+ * click repeatedly. Content still lands — only the status is pinned.
+ */
+function liveStatus(existing: StreamState, next: StreamState['status']): StreamState['status'] {
+  return existing.cancelRequested ? existing.status : next;
+}
+
+/**
  * Replace a single block matched by predicate. Returns the ORIGINAL record
  * when nothing matches, so callers naturally skip a re-render.
  */
@@ -102,7 +114,7 @@ export function appendToken(
   return put(streams, sessionId, {
     ...existing,
     text: existing.text + token,
-    status: 'streaming',
+    status: liveStatus(existing, 'streaming'),
     blocks,
     _nextBlockId: nextId,
     // pendingUserMessage is deliberately NOT cleared here. Consumers hide it
@@ -152,7 +164,7 @@ export function appendThinking(
   return put(streams, sessionId, {
     ...existing,
     thinkingText: existing.thinkingText + text,
-    status: 'thinking',
+    status: liveStatus(existing, 'thinking'),
     blocks,
     _nextBlockId: nextId,
   });
@@ -163,7 +175,7 @@ export function completeThinking(streams: StreamsRecord, sessionId: string): Str
   const blocks = existing.blocks.map((block) =>
     block.type === 'thinking' && !block.isComplete ? { ...block, isComplete: true } : block,
   );
-  return put(streams, sessionId, { ...existing, status: 'streaming', blocks });
+  return put(streams, sessionId, { ...existing, status: liveStatus(existing, 'streaming'), blocks });
 }
 
 // ── Tool calls ──────────────────────────────────────────────────
@@ -223,7 +235,7 @@ export function addToolCall(
   return put(streams, sessionId, {
     ...existing,
     toolCalls: [...existing.toolCalls, { id, tool, args, status: 'running' }],
-    status: 'streaming',
+    status: liveStatus(existing, 'streaming'),
     blocks: [...existing.blocks, newBlock],
     _nextBlockId: existing._nextBlockId + 1,
     _toolCallCounter: existing._toolCallCounter + 1,
@@ -370,6 +382,24 @@ export function completeStream(streams: StreamsRecord, sessionId: string): Strea
   // Do not overwrite 'pending' — a new turn has already started.
   if (existing.status === 'pending') return streams;
   return put(streams, sessionId, { ...existing, status: 'complete' });
+}
+
+/**
+ * The user pressed Stop.
+ *
+ * Settles the turn immediately so the composer re-enables, and latches the
+ * stream so the events still draining out of the provider cannot drag it back
+ * to `streaming`. Blocks are kept — stopping is how you say "that is enough,
+ * let me read it".
+ */
+export function requestCancel(streams: StreamsRecord, sessionId: string): StreamsRecord {
+  const existing = existingOrDefault(streams, sessionId);
+  return put(streams, sessionId, {
+    ...existing,
+    cancelRequested: true,
+    status: 'complete',
+    pendingUserMessage: null,
+  });
 }
 
 export function errorStream(streams: StreamsRecord, sessionId: string): StreamsRecord {

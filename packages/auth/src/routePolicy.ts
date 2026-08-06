@@ -41,6 +41,11 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // Auth bootstrap. Pairing completion is deliberately public: the caller has
   // no credential yet, and the single-use pairing grant IS the credential.
   { prefix: '/auth/pair/complete', read: [], write: [], public: true },
+  // Public for the same reason as /pair/complete: the joining device holds
+  // only the pairing code, and it must be able to see what that code grants
+  // before redeeming it. Returns no credential and does not consume the grant.
+  // Longest-prefix matching keeps this ahead of the admin-scoped '/auth/pair'.
+  { prefix: '/auth/pair/preview', read: [], write: [], public: true },
   { prefix: '/auth/token/refresh', read: [], write: [], public: true },
   { prefix: '/auth/nonce', read: [], write: [], public: true },
   { prefix: '/auth/server-info', read: [], write: [], public: true },

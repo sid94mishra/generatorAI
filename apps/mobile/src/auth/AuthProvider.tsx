@@ -121,11 +121,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
    * the pinned endpoint we only learn from the stored session.
    */
   const buildSupervisor = useCallback(
-    (pairedEndpoint: string, pinnedServerId: string): EndpointSupervisor => {
+    (
+      pairedEndpoint: string,
+      pinnedServerId: string,
+      endpoints?: readonly string[],
+    ): EndpointSupervisor => {
       const supervisor = new EndpointSupervisor({
         pinnedServerId,
         candidates: buildEndpointCandidates({
           pairedEndpoint,
+          discoveredEndpoints: endpoints?.filter((endpoint) => endpoint !== pairedEndpoint),
           localOnly: prefs.getBoolean(PREF_KEYS.localOnly),
         }),
         verifyHost: verifyHostIdentity,
@@ -150,7 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           return;
         }
 
-        const supervisor = buildSupervisor(session.endpoint, session.serverId);
+        const supervisor = buildSupervisor(session.endpoint, session.serverId, session.endpoints);
 
         const runtime = new AuthenticatedClientRuntime({
           endpoint: session.endpoint,
@@ -160,7 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           // lazily here means a cold start does not block on the network
           // until something actually needs data.
           fetchImpl: async (input, init) => {
-            const adapter = await supervisor.connect(3);
+            const adapter = await supervisor.connect(3, init?.signal ?? undefined);
             return adapter.fetch(String(input), init as RequestInit);
           },
           onStateChange: (next) => {
@@ -201,13 +206,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     async (consent: PairingConsent, deviceName: string) => {
       setState({ status: 'pairing' });
 
-      const supervisor = buildSupervisor(consent.endpoint, consent.serverId);
+      const endpoints = consent.endpoints.map((endpoint) => endpoint.origin);
+      const supervisor = buildSupervisor(consent.endpoint, consent.serverId, endpoints);
       const runtime = new AuthenticatedClientRuntime({
         endpoint: consent.endpoint,
         keyStore,
         sessionStore,
         fetchImpl: async (input, init) => {
-          const adapter = await supervisor.connect(3);
+          const adapter = await supervisor.connect(3, init?.signal ?? undefined);
           return adapter.fetch(String(input), init as RequestInit);
         },
         onStateChange: setState,
@@ -215,11 +221,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       runtimeRef.current = runtime;
 
       await runtime.completePairing({
-        pairingToken: consent.offer.pairingGrant,
+        pairingToken: consent.pairingGrant,
         deviceName,
         platform: 'mobile',
         serverId: consent.serverId,
         endpoint: consent.endpoint,
+        endpoints,
       });
 
       setKeyBacking(keyStore.backing);

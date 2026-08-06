@@ -30,10 +30,16 @@ import {
   type Scope,
 } from '@generatorai/auth';
 import { PairingOfferSchema, encodePairingOffer, pairingOfferUrl } from '@generatorai/relay-protocol';
+import { formatPairingCode } from '@generatorai/shared';
 import { dirname, resolve } from 'node:path';
 import type { Container } from '../composition-root.js';
 import { removeBootstrapFile } from '../composition/bootstrapPairing.js';
 import { isLoopbackRequest } from '../middleware/auth.js';
+import {
+  resolveAdvertisedEndpoints,
+  selectPairingEndpoint,
+  type AdvertisedEndpointCandidate,
+} from '../network/advertisedEndpoints.js';
 
 const PLATFORMS = ['web', 'desktop', 'cli', 'mobile', 'other'] as const;
 
@@ -46,8 +52,16 @@ const createPairingSchema = z.object({
   includeRelay: z.boolean().default(false),
 });
 
+// Lower bound is 12 so the human-typeable pairing code is accepted; the
+// generous upper bound still admits the legacy 43-char opaque grants.
+const pairingTokenSchema = z.string().min(12).max(512);
+
+const previewPairingSchema = z.object({
+  pairingToken: pairingTokenSchema,
+});
+
 const completePairingSchema = z.object({
-  pairingToken: z.string().min(16).max(512),
+  pairingToken: pairingTokenSchema,
   publicJwk: z.object({
     kty: z.string(),
     crv: z.string().optional(),
@@ -103,6 +117,7 @@ export function createAuthRoutes(container: Container): Router {
    * pairing QR pins so a client can detect a substituted host.
    */
   router.get('/server-info', (_req: Request, res: Response) => {
+    const endpoints = advertisedEndpoints(container);
     res.json({
       issuer: 'generatorai',
       audience: posture.tokenAudience,
@@ -112,16 +127,19 @@ export function createAuthRoutes(container: Container): Router {
       serverId: identity.hostId,
       serverPublicKey: identity.publicKeyBase64Url,
       serverName: serverDisplayName(),
-      protocolVersion: 1,
+      protocolVersion: 2,
       authentication: {
         required: posture.authenticationRequired,
         dpopRequired: true,
         legacyApiKeyAccepted: posture.legacyApiKeyActive,
       },
       transports: {
-        lan: !posture.loopbackOnly,
-        relay: posture.relayEnabled,
+        loopback: endpoints.some((endpoint) => endpoint.reachability === 'loopback'),
+        lan: endpoints.some((endpoint) => endpoint.reachability === 'lan'),
+        privateNetwork: endpoints.some((endpoint) => endpoint.reachability === 'private-network'),
+        relay: false,
       },
+      endpoints,
       scopes: SCOPES,
     });
   });
@@ -210,6 +228,46 @@ export function createAuthRoutes(container: Container): Router {
   });
 
   /**
+   * Resolves what a pairing code grants, without consuming it.
+   *
+   * The QR flow carries the requested scopes inside the offer payload, so the
+   * joining device can render a consent screen offline. A 12-character typed
+   * code cannot carry them, so it asks here instead. Without this, typing a
+   * code would mean consenting to permissions the user was never shown.
+   *
+   * Public by necessity (the caller has no credential yet) and safe: the
+   * response contains no credential and no grant id, the grant is not
+   * consumed, and every rejection returns one indistinguishable error so the
+   * route cannot be used to probe which codes exist.
+   */
+  router.post('/pair/preview', (req: Request, res: Response) => {
+    void (async () => {
+      const parsed = previewPairingSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+        return;
+      }
+
+      try {
+        const preview = await devices.previewPairingGrant({
+          pairingToken: parsed.data.pairingToken,
+          sourceAddress: req.socket.remoteAddress ?? null,
+          requestId: req.requestId,
+        });
+        res.json({
+          serverId: identity.hostId,
+          serverPublicKey: identity.publicKeyBase64Url,
+          serverName: serverDisplayName(),
+          endpoints: advertisedEndpoints(container),
+          ...preview,
+        });
+      } catch (err) {
+        handlePairingError(err, res, logger);
+      }
+    })();
+  });
+
+  /**
    * Exchanges a resume credential for a fresh access token. Rotates the
    * resume credential on every use, and requires a DPoP proof from the same
    * device key — a leaked resume secret alone is unusable.
@@ -273,23 +331,33 @@ export function createAuthRoutes(container: Container): Router {
         : defaultScopesFor(platform);
 
       try {
-        let relayOffer: unknown;
-        let relayInvite: string | null = null;
         if (parsed.data.includeRelay) {
-          const broker = container.relayHostBroker;
-          if (!broker || !broker.isEnabled()) {
-            res.status(409).json({
-              error: {
-                code: 'RELAY_DISABLED',
-                message: 'Relay connectivity is not enabled on this server.',
-              },
-            });
-            return;
-          }
-          const invite = await broker.createInvite();
-          relayInvite = invite.inviteToken;
-          relayOffer = invite.offer;
+          res.status(409).json({
+            error: {
+              code: 'RELAY_CLIENT_UNAVAILABLE',
+              message: 'Relay pairing is unavailable until the client relay transport is enabled.',
+            },
+          });
+          return;
         }
+
+        const endpoints = advertisedEndpoints(container);
+        const selectedEndpoint = selectPairingEndpoint(endpoints, platform);
+        if (!selectedEndpoint) {
+          res.status(409).json({
+            error: {
+              code: 'NO_REACHABLE_ENDPOINT',
+              message:
+                'No endpoint is reachable from that device. Enable network access or configure ' +
+                'GENERATORAI_ADVERTISED_URLS before generating a mobile pairing code.',
+            },
+          });
+          return;
+        }
+        const orderedEndpoints = [
+          selectedEndpoint,
+          ...endpoints.filter((endpoint) => endpoint.origin !== selectedEndpoint.origin),
+        ];
 
         const grant = await devices.createPairingGrant({
           deviceNameHint: parsed.data.deviceName,
@@ -297,23 +365,27 @@ export function createAuthRoutes(container: Container): Router {
           requestedScopes,
           createdBy: principal,
           ...(parsed.data.ttlMs ? { ttlMs: parsed.data.ttlMs } : {}),
-          relayInvite,
+          relayInvite: null,
         });
 
         // Validate through the SAME schema clients use to decode. If the host
         // cannot produce a valid offer, that is a server bug — never ship a
         // half-valid offer that a client will reject after scanning.
         const offerResult = PairingOfferSchema.safeParse({
-          v: 1,
-          endpoint: resolveAdvertisedEndpoint(req, container),
+          v: 2,
+          endpoint: selectedEndpoint.origin,
+          endpoints: orderedEndpoints.map((endpoint, priority) => ({
+            origin: endpoint.origin,
+            reachability: endpoint.reachability,
+            priority,
+          })),
           serverId: identity.hostId,
           serverPublicKey: identity.publicKeyBase64Url,
           pairingGrant: grant.pairingToken,
           pairingExpiresAt: grant.expiresAt,
           requestedScopes: grant.requestedScopes,
-          transportCapabilities: buildTransportCapabilities(container),
+          transportCapabilities: buildTransportCapabilities(orderedEndpoints),
           serverName: serverDisplayName(),
-          ...(relayOffer ? { relay: relayOffer } : {}),
         });
         if (!offerResult.success) {
           logger.warn('[Auth] Generated pairing offer failed validation', {
@@ -338,6 +410,19 @@ export function createAuthRoutes(container: Container): Router {
           platform: grant.platform,
           requestedScopes: grant.requestedScopes,
           serverId: identity.hostId,
+          /**
+           * The code a human reads out or types on the joining device, in
+           * grouped display form. This is the same secret as the one inside
+           * `pairingCode`, not a second credential — redeeming either consumes
+           * the one grant.
+           */
+          shortCode: formatPairingCode(grant.pairingToken),
+          /**
+           * Where to type it. The joining device only needs this origin and
+           * the short code; the offer blob below exists for QR scanning and
+           * for clients that cannot reach this server same-origin.
+           */
+          joinUrl: selectedEndpoint.origin,
           /** Encoded offer — render as a QR code. */
           pairingCode: encodePairingOffer(offerResult.data),
           pairingUrl: pairingOfferUrl(offerResult.data),
@@ -633,24 +718,26 @@ function pathParam(req: Request, name: string): string {
 }
 
 /**
- * The endpoint a paired device should dial. Prefers an explicitly configured
- * advertised URL (correct behind a proxy or when binding 0.0.0.0), then the
- * Host header, and only then loopback.
+ * Explicit origins are authoritative. Interface origins are derived only when
+ * the server is deliberately bound beyond loopback.
  */
-function resolveAdvertisedEndpoint(req: Request, container: Container): string {
-  const configured = process.env['GENERATORAI_ADVERTISED_URL'];
-  if (configured) return configured.replace(/\/$/, '');
-  const host = firstValue(req.headers['host']);
-  const proto = firstValue(req.headers['x-forwarded-proto']) ?? (req.secure ? 'https' : 'http');
-  if (host) return `${proto}://${host}`;
-  return `http://127.0.0.1:${container.config.port}`;
+function advertisedEndpoints(container: Container): AdvertisedEndpointCandidate[] {
+  const configured = [
+    ...(process.env['GENERATORAI_ADVERTISED_URLS']?.split(',') ?? []),
+    ...(process.env['GENERATORAI_ADVERTISED_URL'] ? [process.env['GENERATORAI_ADVERTISED_URL']] : []),
+  ];
+  return resolveAdvertisedEndpoints({
+    port: container.config.port,
+    bindHost: container.security.posture.bindHost,
+    configuredOrigins: configured,
+    networkInterfaces: os.networkInterfaces(),
+  });
 }
 
-function buildTransportCapabilities(container: Container): string[] {
-  const caps = ['loopback'];
-  if (!container.security.posture.loopbackOnly) caps.push('lan');
-  caps.push('ssh');
-  if (container.security.posture.relayEnabled) caps.push('relay');
+function buildTransportCapabilities(endpoints: readonly AdvertisedEndpointCandidate[]): string[] {
+  const caps: string[] = [];
+  if (endpoints.some((endpoint) => endpoint.reachability === 'loopback')) caps.push('loopback');
+  if (endpoints.some((endpoint) => endpoint.reachability !== 'loopback')) caps.push('lan');
   return caps;
 }
 

@@ -35,7 +35,7 @@ function StatusPill({
     neutral: 'bg-subtle text-muted-foreground',
   } as const;
   return (
-    <span className={cn('rounded px-1.5 py-0.5 font-mono text-[10px] uppercase', TONE[tone])}>
+    <span className={cn('inline-block max-w-full break-all rounded px-1.5 py-0.5 text-right font-mono text-[10px] uppercase leading-tight', TONE[tone])}>
       {label}
     </span>
   );
@@ -83,6 +83,22 @@ interface PairingResponse {
   serverId: string;
   pairingCode: string;
   pairingUrl: string;
+  /** Human-typeable code, already grouped for display. */
+  shortCode: string;
+  /** Origin the joining device should open in its browser. */
+  joinUrl: string;
+}
+
+/** Mirrors `GET /api/security/network-access` exactly. */
+interface NetworkAccess {
+  mode: 'local-only' | 'network-accessible';
+  /** What the listener is doing now, which lags `mode` until a restart. */
+  active: boolean;
+  pendingRestart: boolean;
+  bindHost: string;
+  envOverride: string | null;
+  blockers: { code: string; message: string }[];
+  endpoints: { origin: string; reachability: string; priority: number }[];
 }
 
 /** Mirrors `GET /api/security/posture` exactly. */
@@ -107,7 +123,7 @@ interface SecurityPosture {
     supportsRotation: boolean;
   };
   devices: { active: number; revoked: number; relayBound: number };
-  relay: { enabled: boolean; state: string; hostId: string | null };
+  relay: { enabled: boolean; clientAvailable: boolean; state: string; hostId: string | null };
   warnings: { code: string; severity: 'warn' | 'critical'; message: string }[];
 }
 
@@ -212,6 +228,33 @@ function shortFingerprint(value: string): string {
   return `${value.slice(0, 8)}…${value.slice(-8)}`;
 }
 
+/**
+ * The address to read out to the joining device.
+ *
+ * Not simply the server's own origin: in development the SPA is served by Vite
+ * on a different port than the API, so the server's origin would send the user
+ * to a port that serves no app. What the second device actually needs is the
+ * place THIS page was served from, with a loopback hostname swapped for a
+ * routable one. In production and the desktop shell the two are the same
+ * origin, so this collapses to the server address anyway.
+ */
+function joinAddress(
+  serverJoinUrl: string,
+  endpoints: NetworkAccess['endpoints'] | undefined,
+): string {
+  if (typeof window === 'undefined') return serverJoinUrl;
+
+  const here = new URL(window.location.origin);
+  const isLoopback = /^(localhost|127\.|\[?::1)/i.test(here.hostname);
+  if (!isLoopback) return here.origin;
+
+  const routable = endpoints?.find((endpoint) => endpoint.reachability !== 'loopback');
+  if (!routable) return serverJoinUrl;
+
+  here.hostname = new URL(routable.origin).hostname;
+  return here.origin;
+}
+
 export function SecuritySection() {
   const [posture, setPosture] = useState<SecurityPosture | null>(null);
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
@@ -221,22 +264,27 @@ export function SecuritySection() {
   const [pairing, setPairing] = useState<PairingResponse | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
   const [deviceName, setDeviceName] = useState('');
   const [platform, setPlatform] = useState<'mobile' | 'web' | 'cli' | 'desktop'>('mobile');
   const [preset, setPreset] = useState<keyof typeof SCOPE_PRESETS>('default');
   const [includeRelay, setIncludeRelay] = useState(false);
+  const [network, setNetwork] = useState<NetworkAccess | null>(null);
+  const [networkBusy, setNetworkBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      const [p, d, q] = await Promise.all([
+      const [p, d, q, n] = await Promise.all([
         apiFetch<SecurityPosture>('/api/security/posture'),
         apiFetch<{ devices: DeviceSummary[] }>('/api/auth/devices?includeRevoked=true'),
         apiFetch<{ pending: PendingPairing[] }>('/api/auth/pair/pending'),
+        apiFetch<NetworkAccess>('/api/security/network-access'),
       ]);
       setPosture(p);
       setDevices(d.devices);
       setPending(q.pending);
+      setNetwork(n);
     } catch (err) {
       // A device without `admin:devices` legitimately cannot list devices —
       // say so plainly instead of rendering an empty table that looks broken.
@@ -251,6 +299,38 @@ export function SecuritySection() {
       setLoading(false);
     }
   }, []);
+
+  const setNetworkAccess = useCallback(
+    async (mode: NetworkAccess['mode']) => {
+      setNetworkBusy(true);
+      setError(null);
+      try {
+        await apiFetch('/api/security/network-access', {
+          method: 'POST',
+          body: JSON.stringify({ mode }),
+        });
+
+        // In the desktop shell the server is a child process we own, so the
+        // restart the change requires can just happen — the user should not
+        // have to go and restart anything by hand. In a browser against a
+        // standalone server we cannot do that, so the card shows a
+        // "restart required" notice instead.
+        const desktop = window.generatoraiDesktop;
+        if (desktop?.isDesktop && typeof desktop.restartServer === 'function') {
+          await desktop.restartServer();
+        }
+
+        await refresh();
+      } catch (err) {
+        // The server refuses to expose an unsafe posture (409). Surfacing its
+        // message verbatim is the point: it names the exact thing to fix.
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setNetworkBusy(false);
+      }
+    },
+    [refresh],
+  );
 
   useEffect(() => {
     void refresh();
@@ -280,7 +360,7 @@ export function SecuritySection() {
         platform,
         ...(deviceName.trim() ? { deviceName: deviceName.trim() } : {}),
         ...(scopes ? { scopes } : {}),
-        ...(includeRelay ? { includeRelay: true } : {}),
+        ...(includeRelay && posture?.relay.clientAvailable ? { includeRelay: true } : {}),
       };
       const result = await apiFetch<PairingResponse>('/api/auth/pair', {
         method: 'POST',
@@ -294,7 +374,7 @@ export function SecuritySection() {
     } finally {
       setCreating(false);
     }
-  }, [platform, deviceName, preset, includeRelay, refresh]);
+  }, [platform, deviceName, preset, includeRelay, posture?.relay.clientAvailable, refresh]);
 
   const revokeDevice = useCallback(
     async (deviceId: string, name: string) => {
@@ -367,10 +447,17 @@ export function SecuritySection() {
 
   const copyCode = useCallback(async () => {
     if (!pairing) return;
-    await navigator.clipboard.writeText(pairing.pairingUrl);
+    await navigator.clipboard.writeText(pairing.shortCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [pairing]);
+
+  const copyJoinUrl = useCallback(async () => {
+    if (!pairing) return;
+    await navigator.clipboard.writeText(joinAddress(pairing.joinUrl, network?.endpoints));
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 1500);
+  }, [pairing, network]);
 
   const activeDevices = useMemo(() => devices.filter((d) => !d.revokedAt), [devices]);
   const revokedDevices = useMemo(() => devices.filter((d) => d.revokedAt), [devices]);
@@ -456,27 +543,35 @@ export function SecuritySection() {
               value={
                 <StatusPill
                   tone={
-                    posture.relay.enabled
+                    posture.relay.clientAvailable && posture.relay.enabled
                       ? posture.relay.state === 'attached'
                         ? 'success'
                         : 'warning'
                       : 'neutral'
                   }
-                  label={posture.relay.enabled ? posture.relay.state : 'disabled'}
+                  label={
+                    posture.relay.clientAvailable
+                      ? posture.relay.enabled
+                        ? posture.relay.state
+                        : 'disabled'
+                      : posture.relay.enabled
+                        ? 'client unavailable'
+                        : 'disabled'
+                  }
                 />
               }
             />
             {posture.warnings.length > 0 && (
               <ul className="mt-3 space-y-1.5 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
                 {posture.warnings.map((w) => (
-                  <li key={w.code} className="flex items-start gap-2 text-xs text-foreground">
+                  <li key={w.code} className="flex min-w-0 items-start gap-2 break-words text-xs text-foreground">
                     <ShieldAlert
                       className={cn(
                         'mt-0.5 h-3.5 w-3.5 shrink-0',
                         w.severity === 'critical' ? 'text-destructive' : 'text-warning',
                       )}
                     />
-                    {w.message}
+                    <span className="min-w-0 [overflow-wrap:anywhere]">{w.message}</span>
                   </li>
                 ))}
               </ul>
@@ -489,6 +584,101 @@ export function SecuritySection() {
         )}
       </SettingsCard>
 
+      {/* ── Network access ────────────────────────────────────── */}
+      <SettingsCard
+        title="Network access"
+        description="Let other devices on this network reach this server, so you can open the app on a phone or a second computer."
+      >
+        {network ? (
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-subtle/40 p-4">
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-medium text-foreground">
+                  {network.active ? 'Reachable on this network' : 'This computer only'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {network.active
+                    ? 'Other devices on the same network can reach this server and pair with it.'
+                    : 'The server is bound to loopback, so nothing outside this computer can connect.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={network.mode === 'network-accessible'}
+                aria-label="Allow devices on this network"
+                disabled={networkBusy || network.envOverride != null}
+                onClick={() =>
+                  void setNetworkAccess(
+                    network.mode === 'network-accessible' ? 'local-only' : 'network-accessible',
+                  )
+                }
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-40 ${
+                  network.mode === 'network-accessible' ? 'bg-primary' : 'bg-border'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                    network.mode === 'network-accessible' ? 'translate-x-[22px]' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {network.envOverride != null && (
+              <p className="rounded-md border border-border bg-subtle/40 px-3 py-2 text-xs text-muted-foreground">
+                GENERATORAI_BIND_HOST is set to{' '}
+                <code className="font-mono">{network.envOverride}</code> in this server's
+                environment, so it decides the bind address and this toggle cannot change it.
+              </p>
+            )}
+
+            {network.blockers.length > 0 && (
+              <div className="space-y-1.5 rounded-md border border-warning/40 bg-warning/5 px-3 py-2">
+                <p className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                  <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+                  Fix this before enabling network access
+                </p>
+                {network.blockers.map((blocker) => (
+                  <p key={blocker.code} className="text-xs text-muted-foreground">
+                    {blocker.message}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {network.pendingRestart && (
+              <p className="rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-foreground">
+                Saved. Restart the server to apply this change — the bind address is fixed when
+                the server starts.
+              </p>
+            )}
+
+            {network.active && network.endpoints.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-foreground">
+                  Addresses other devices can use
+                </p>
+                {network.endpoints
+                  .filter((endpoint) => endpoint.reachability !== 'loopback')
+                  .map((endpoint) => (
+                    <code
+                      key={endpoint.origin}
+                      className="block truncate rounded-md bg-subtle/60 px-2.5 py-1.5 font-mono text-xs text-muted-foreground select-all"
+                    >
+                      {endpoint.origin}
+                    </code>
+                  ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {loading ? 'Loading…' : 'Network access settings are unavailable.'}
+          </p>
+        )}
+      </SettingsCard>
+
       {/* ── Pair a new device ─────────────────────────────────── */}
       <SettingsCard
         title="Pair a new device"
@@ -496,20 +686,79 @@ export function SecuritySection() {
       >
         {pairing ? (
           <div className="space-y-3">
-            <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-subtle/40 p-5">
-              <PairingQr text={pairing.pairingUrl} />
-              <code className="max-w-full break-all rounded-md bg-card px-3 py-2 text-center font-mono text-[11px] text-muted-foreground">
-                {pairing.pairingUrl}
-              </code>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void copyCode()}
-                  className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs transition-colors hover:bg-subtle"
-                >
-                  {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? 'Copied' : 'Copy link'}
-                </button>
+            <div className="space-y-4 rounded-lg border border-border bg-subtle/40 p-5">
+              {/* The two things the other device actually needs, in the order
+                  they are needed: where to go, then what to type. Everything
+                  else on this card is a shortcut for that same pair. */}
+              <ol className="space-y-3">
+                <li className="space-y-1.5">
+                  <p className="text-xs text-muted-foreground">
+                    <span className="mr-1.5 font-semibold text-foreground">1.</span>
+                    On the other device, open a browser and go to
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 truncate rounded-md bg-card px-3 py-2 font-mono text-sm text-foreground">
+                      {joinAddress(pairing.joinUrl, network?.endpoints)}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => void copyJoinUrl()}
+                      title="Copy address"
+                      className="rounded-md border border-border p-2 transition-colors hover:bg-subtle"
+                    >
+                      {copiedUrl ? (
+                        <Check className="h-3.5 w-3.5 text-success" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </div>
+                </li>
+                <li className="space-y-1.5">
+                  <p className="text-xs text-muted-foreground">
+                    <span className="mr-1.5 font-semibold text-foreground">2.</span>
+                    Enter this code
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 rounded-md bg-card px-3 py-3 text-center font-mono text-2xl font-semibold tracking-[0.15em] text-foreground select-all">
+                      {pairing.shortCode}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => void copyCode()}
+                      title="Copy code"
+                      className="rounded-md border border-border p-2 transition-colors hover:bg-subtle"
+                    >
+                      {copied ? (
+                        <Check className="h-3.5 w-3.5 text-success" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </div>
+                </li>
+              </ol>
+
+              <p className="text-center text-xs text-muted-foreground">
+                Expires in {Math.max(0, Math.ceil((pairing.expiresAt - now) / 1000))}s ·{' '}
+                {pairing.requestedScopes.length} scope
+                {pairing.requestedScopes.length === 1 ? '' : 's'}
+              </p>
+
+              <details className="group">
+                <summary className="cursor-pointer list-none text-center text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                  Or scan a QR code
+                </summary>
+                <div className="mt-3 flex flex-col items-center gap-2">
+                  <PairingQr text={pairing.pairingUrl} />
+                  <p className="max-w-xs text-center text-[11px] text-muted-foreground">
+                    Scanning also works for a device that cannot reach this server at the
+                    address above — the QR carries the full endpoint list.
+                  </p>
+                </div>
+              </details>
+
+              <div className="flex justify-center">
                 <button
                   type="button"
                   onClick={() => void cancelPairing(pairing.grantId)}
@@ -518,11 +767,6 @@ export function SecuritySection() {
                   Cancel
                 </button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Expires in {Math.max(0, Math.ceil((pairing.expiresAt - now) / 1000))}s ·{' '}
-                {pairing.requestedScopes.length} scope
-                {pairing.requestedScopes.length === 1 ? '' : 's'}
-              </p>
             </div>
             <p className="text-xs text-muted-foreground">
               Anyone who sees this code can pair a device with the listed scopes until it is used
@@ -568,7 +812,7 @@ export function SecuritySection() {
               </select>
               <span className="text-xs text-muted-foreground">{SCOPE_PRESETS[preset]?.hint}</span>
             </label>
-            {posture?.relay.enabled && (
+            {posture?.relay.enabled && posture.relay.clientAvailable && (
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"

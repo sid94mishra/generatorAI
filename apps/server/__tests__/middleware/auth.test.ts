@@ -22,7 +22,73 @@ import express from 'express';
 import request from 'supertest';
 import type { ILogger } from '@generatorai/shared';
 import { AuthError, type Principal, type Scope } from '@generatorai/auth';
-import { createAuthMiddleware } from '../../src/middleware/auth.js';
+import { createAuthMiddleware, isLoopbackRequest } from '../../src/middleware/auth.js';
+
+describe('isLoopbackRequest', () => {
+  const localSocket = { remoteAddress: '127.0.0.1', localAddress: '127.0.0.1' };
+
+  it('accepts a genuine local request', () => {
+    expect(isLoopbackRequest({ socket: localSocket, headers: {} })).toBe(true);
+    expect(isLoopbackRequest({ socket: { remoteAddress: '::1', localAddress: '::1' } })).toBe(true);
+  });
+
+  it('rejects a request from off-machine', () => {
+    expect(
+      isLoopbackRequest({
+        socket: { remoteAddress: '192.168.1.50', localAddress: '192.168.1.10' },
+        headers: {},
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects traffic laundered through a same-host proxy', () => {
+    // The Vite dev server proxies /api from loopback to loopback, so the
+    // socket looks local even when the real client is a phone on the LAN.
+    // Honouring that would hand full authority to the whole network whenever
+    // the server runs in unauthenticated-loopback mode.
+    expect(
+      isLoopbackRequest({
+        socket: localSocket,
+        headers: { 'x-forwarded-for': '192.168.1.50' },
+      }),
+    ).toBe(false);
+  });
+
+  it('inspects only the originating client in a proxy chain', () => {
+    expect(
+      isLoopbackRequest({
+        socket: localSocket,
+        headers: { 'x-forwarded-for': '192.168.1.50, 127.0.0.1' },
+      }),
+    ).toBe(false);
+    // A genuinely local client that passed through a local proxy stays local.
+    expect(
+      isLoopbackRequest({
+        socket: localSocket,
+        headers: { 'x-forwarded-for': '127.0.0.1' },
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects a request carrying an RFC 7239 Forwarded header', () => {
+    expect(
+      isLoopbackRequest({
+        socket: localSocket,
+        headers: { forwarded: 'for=192.168.1.50' },
+      }),
+    ).toBe(false);
+  });
+
+  it('handles a repeated x-forwarded-for header', () => {
+    expect(
+      isLoopbackRequest({
+        socket: localSocket,
+        headers: { 'x-forwarded-for': ['192.168.1.50', '127.0.0.1'] },
+      }),
+    ).toBe(false);
+  });
+});
+
 
 function testLogger(): ILogger {
   return {

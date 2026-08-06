@@ -18,10 +18,13 @@ import {
   AuthenticatedClientRuntime,
   IndexedDbDeviceKeyStore,
   LocalStorageSessionStore,
+  PairingCodeError,
+  formatFingerprint,
   parsePairingCode,
   type AuthState,
   type PairingConsent,
 } from '@generatorai/client-runtime';
+import { isPairingCode, normalizePairingCode } from '@generatorai/shared';
 
 /** localStorage key that holds the legacy shared server API key. */
 export const API_KEY_STORAGE_KEY = 'generatorai-api-key';
@@ -128,6 +131,96 @@ export function previewPairingCode(code: string): PairingConsent {
   return parsePairingCode(code);
 }
 
+/**
+ * Resolves typed or pasted pairing input into a consent screen.
+ *
+ * Two shapes are accepted, and which one you get depends on how the user got
+ * here rather than on anything they have to understand:
+ *
+ *   - A short typed code (`4H7K-2M9P-XQ3T`). The endpoint is NOT in the code,
+ *     because it does not need to be: the user is typing this into an app they
+ *     already loaded from the host, so `window.location.origin` IS the server.
+ *     Asking the host what the code grants gives the same informed-consent
+ *     screen the QR flow renders offline.
+ *   - A full offer blob or `generatorai://pair?code=…` link, which carries its
+ *     own endpoint list and is decoded without a network round-trip. This is
+ *     still required for QR scans and for pairing a device that cannot reach
+ *     this server on the origin it is currently loaded from.
+ */
+export async function resolvePairingInput(input: string): Promise<PairingConsent> {
+  const trimmed = input.trim();
+  if (!isPairingCode(trimmed)) {
+    return parsePairingCode(trimmed);
+  }
+
+  const pairingGrant = normalizePairingCode(trimmed);
+  const origin = resolveEndpoint();
+  let response: Response;
+  try {
+    response = await fetch(`${origin}/api/auth/pair/preview`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pairingToken: pairingGrant }),
+      // Bypass the auth fetch interceptor. This endpoint is deliberately
+      // pre-auth: the device asking has no session yet, which is the entire
+      // reason it is asking. Routing it through the runtime would fail with
+      // "not paired" on the one request whose job is to start pairing.
+      // Symbol.for keeps this in sync with authTransport without importing it
+      // (which would be circular).
+      [Symbol.for('generatorai.signedRequest')]: true,
+    } as RequestInit);
+  } catch {
+    throw new PairingCodeError(
+      `Could not reach ${origin}. Check that you opened this page from the host device's address.`,
+      'UNREACHABLE',
+    );
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error =
+      body && typeof body === 'object' && 'error' in body
+        ? (body as { error?: { code?: string; message?: string } }).error
+        : undefined;
+    throw new PairingCodeError(
+      error?.message ?? 'This pairing code is not valid.',
+      error?.code ?? 'INVALID_GRANT',
+    );
+  }
+
+  const preview = body as {
+    serverId: string;
+    serverName: string;
+    requestedScopes: string[];
+    expiresAt: number;
+    endpoints?: Array<{ origin: string; reachability: string; priority: number }>;
+  };
+
+  // The origin the user is already talking to is the endpoint to pin. The
+  // host's advertised list is kept as fallbacks, but never ahead of the one
+  // that is demonstrably reachable from this device.
+  const advertised = (preview.endpoints ?? []).filter((e) => e.origin !== origin);
+  return {
+    serverName: preview.serverName,
+    endpoint: origin,
+    endpoints: [
+      { origin, reachability: 'lan', priority: 0 },
+      ...advertised.map((e, index) => ({
+        origin: e.origin,
+        reachability: e.reachability as PairingConsent['endpoints'][number]['reachability'],
+        priority: index + 1,
+      })),
+    ],
+    serverId: preview.serverId,
+    fingerprint: formatFingerprint(preview.serverId),
+    requestedScopes: preview.requestedScopes,
+    transportCapabilities: ['lan'],
+    relayOffered: false,
+    expiresAt: preview.expiresAt,
+    pairingGrant,
+  };
+}
+
 export async function acceptPairing(
   consent: PairingConsent,
   deviceName: string,
@@ -142,8 +235,9 @@ export async function acceptPairing(
   const rt = getAuthRuntime();
   await rt.completePairing({
     endpoint: consent.endpoint,
+    endpoints: consent.endpoints.map((endpoint) => endpoint.origin),
     serverId: consent.serverId,
-    pairingToken: consent.offer.pairingGrant,
+    pairingToken: consent.pairingGrant,
     deviceName,
     platform,
     connectionMode: 'auto',

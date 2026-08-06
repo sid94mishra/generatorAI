@@ -153,7 +153,7 @@ export function openAuthenticatedEventSource(
     try {
       const ticket = await getAuthRuntime().createStreamTicket(ticketScope.scope, ticketScope.id);
       if (closed) return;
-      const target = new URL(url, window.location.origin);
+      const target = new URL(url, `${getAuthRuntime().endpoint}/`);
       // Empty means the server is running unauthenticated — a bogus ticket
       // would be rejected before the server ever reached that branch.
       if (ticket) target.searchParams.set('ticket', ticket);
@@ -233,9 +233,5 @@ export async function buildAuthenticatedSocketUrl(
   path: string,
   ticketScope: StreamTicketScope,
 ): Promise<string> {
-  const ticket = await getAuthRuntime().createStreamTicket(ticketScope.scope, ticketScope.id);
-  const url = new URL(path, window.location.origin);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  if (ticket) url.searchParams.set('ticket', ticket);
-  return url.toString();
+  return getAuthRuntime().buildSocketUrl(path, ticketScope.scope, ticketScope.id);
 }

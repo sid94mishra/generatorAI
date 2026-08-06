@@ -199,6 +199,13 @@ export interface StreamState {
    * over derived ones; see `contextUsage.ts`.
    */
   contextUsage: ContextUsageSnapshot | null;
+  /**
+   * The user pressed Stop. Aborting is a round trip — the provider keeps
+   * emitting for a moment — so this latches the turn out of its live statuses
+   * while still accepting the content that is already on the wire. Cleared by
+   * the next `startPending`.
+   */
+  cancelRequested: boolean;
 }
 
 /** All sessions, keyed by session id. */
@@ -219,4 +226,5 @@ export const DEFAULT_STREAM: Readonly<StreamState> = Object.freeze({
   serverTurnId: null,
   usage: null,
   contextUsage: null,
+  cancelRequested: false,
 });

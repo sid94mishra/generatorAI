@@ -1,5 +1,7 @@
 // Shared utilities
 
+export * from './pairingCode.js';
+
 /**
  * Generate a unique ID using the Web Crypto `randomUUID`, available on
  * `globalThis.crypto` in Node.js 19+ and all modern browsers. This package

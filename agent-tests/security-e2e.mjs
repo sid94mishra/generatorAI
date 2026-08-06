@@ -122,6 +122,7 @@ function startServer(dataDir, extraEnv = {}) {
         // Deterministic KEK so the vault is "secure" without an OS keychain.
         GENERATORAI_SECRET_KEY: Buffer.alloc(32, 7).toString('base64'),
         GENERATORAI_BIND_HOST: '127.0.0.1',
+        GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK: '0',
         LOG_LEVEL: 'warn',
         ...extraEnv,
       },

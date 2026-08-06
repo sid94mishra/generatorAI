@@ -10,8 +10,21 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Router, type Request, type Response } from 'express';
+import { z } from 'zod';
+import { dirname, resolve } from 'node:path';
+import { networkInterfaces } from 'node:os';
 import { SCOPES } from '@generatorai/auth';
 import type { Container } from '../composition-root.js';
+import { resolveAdvertisedEndpoints } from '../network/advertisedEndpoints.js';
+import {
+  describeExposurePreconditions,
+  readExposureMode,
+  writeExposureMode,
+} from '../network/exposure.js';
+
+const networkAccessSchema = z.object({
+  mode: z.enum(['local-only', 'network-accessible']),
+});
 
 export function createSecurityRoutes(container: Container): Router {
   const router = Router();
@@ -50,6 +63,7 @@ export function createSecurityRoutes(container: Container): Router {
         },
         relay: {
           enabled: posture.relayEnabled,
+          clientAvailable: false,
           state: container.relayHostBroker.connectionState,
           hostId: posture.relayEnabled ? container.relayHostBroker.relayHostId : null,
         },
@@ -59,6 +73,99 @@ export function createSecurityRoutes(container: Container): Router {
          * have to read logs to discover an unsafe configuration.
          */
         warnings: buildWarnings(container, backend),
+      });
+    })();
+  });
+
+  /**
+   * Current network exposure, plus everything the UI needs to explain it:
+   * which addresses other devices would use, and what (if anything) is
+   * blocking the server from being exposed.
+   */
+  router.get('/network-access', (_req: Request, res: Response) => {
+    void (async () => {
+      const backend = await secretStore.backendInfo();
+      const dataDir = dirname(resolve(container.config.dbPath));
+      const mode = readExposureMode(dataDir);
+      res.json({
+        mode,
+        /** What the server is doing right now, which may lag `mode` until a restart. */
+        active: !posture.loopbackOnly,
+        pendingRestart: (mode === 'network-accessible') !== !posture.loopbackOnly,
+        bindHost: posture.bindHost,
+        /** Set in the environment, in which case the toggle cannot take effect. */
+        envOverride: process.env['GENERATORAI_BIND_HOST'] ?? null,
+        blockers: describeExposurePreconditions({
+          unauthenticatedLoopback: posture.unauthenticatedLoopback,
+          secretStoreSecure: backend.secure,
+        }),
+        endpoints: resolveAdvertisedEndpoints({
+          port: container.config.port,
+          bindHost: posture.bindHost,
+          networkInterfaces: networkInterfaces(),
+        }),
+      });
+    })();
+  });
+
+  /**
+   * Changes network exposure. Requires `admin:settings` via ROUTE_POLICIES.
+   *
+   * Persists only — it deliberately does not try to rebind the running
+   * listener. The bind address is an input to the startup security gates
+   * (unauthenticated-mode refusal, secret-store strength), and those are
+   * resolved once when the security context is built. Re-deriving them live
+   * would mean rebuilding auth mid-flight, where a partial failure could leave
+   * the process listening on a routable interface with the loopback posture
+   * still in effect. A restart re-runs every gate from scratch.
+   */
+  router.post('/network-access', (req: Request, res: Response) => {
+    void (async () => {
+      const parsed = networkAccessSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+        return;
+      }
+
+      const { mode } = parsed.data;
+
+      if (mode === 'network-accessible') {
+        const backend = await secretStore.backendInfo();
+        const blockers = describeExposurePreconditions({
+          unauthenticatedLoopback: posture.unauthenticatedLoopback,
+          secretStoreSecure: backend.secure,
+        });
+        // Refuse up front rather than persisting a mode that would make the
+        // next start throw StartupSecurityError — that failure would surface
+        // as a server that simply will not come back.
+        if (blockers.length > 0) {
+          res.status(409).json({
+            error: {
+              code: 'EXPOSURE_PRECONDITION_FAILED',
+              message: blockers.map((blocker) => blocker.message).join(' '),
+              blockers,
+            },
+          });
+          return;
+        }
+      }
+
+      try {
+        writeExposureMode(dirname(resolve(container.config.dbPath)), mode);
+      } catch (err) {
+        res.status(500).json({
+          error: {
+            code: 'EXPOSURE_WRITE_FAILED',
+            message: err instanceof Error ? err.message : String(err),
+          },
+        });
+        return;
+      }
+
+      res.json({
+        mode,
+        pendingRestart: (mode === 'network-accessible') !== !posture.loopbackOnly,
+        envOverride: process.env['GENERATORAI_BIND_HOST'] ?? null,
       });
     })();
   });
@@ -108,6 +215,15 @@ function buildWarnings(
       message:
         `This server is reachable on ${posture.bindHost}. Ensure TLS terminates in front of it ` +
         'or that clients connect over SSH/relay.',
+    });
+  }
+  if (posture.relayEnabled) {
+    warnings.push({
+      code: 'RELAY_CLIENT_UNAVAILABLE',
+      severity: 'warn',
+      message:
+        'The relay host is configured, but client relay transport is not available yet. ' +
+        'Pairing codes currently include direct endpoints only.',
     });
   }
   return warnings;

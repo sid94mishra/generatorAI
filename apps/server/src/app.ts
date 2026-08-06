@@ -6,6 +6,7 @@ import express from 'express';
 import type { Express, Request } from 'express';
 import type { IncomingMessage } from 'http';
 import type { Container } from './composition-root.js';
+import { reachableOrigins } from './network/reachableOrigins.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { requestMetricsMiddleware } from './middleware/requestMetrics.js';
 import { createCorsMiddleware } from './middleware/cors.js';
@@ -48,9 +49,13 @@ export function createApp(container: Container): Express {
   // already lists it in CORS_ORIGINS doesn't get it twice.
   const widgetOrigin =
     process.env['WIDGET_ORIGIN'] ?? `http://127.0.0.1:${process.env['WIDGET_PORT'] ?? '3101'}`;
-  const corsOrigins = container.config.security.corsOrigins.includes(widgetOrigin)
-    ? container.config.security.corsOrigins
-    : [...container.config.security.corsOrigins, widgetOrigin];
+  const corsOrigins = [
+    ...new Set([
+      ...container.config.security.corsOrigins,
+      widgetOrigin,
+      ...reachableOrigins(container),
+    ]),
+  ];
   app.use(createCorsMiddleware({ origins: corsOrigins }));
 
   // 3+4. Body parsers.

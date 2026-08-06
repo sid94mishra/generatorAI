@@ -113,8 +113,8 @@ export function InfoRow({
   };
   return (
     <div className="flex items-center justify-between gap-4 py-2 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={cn('font-medium tabular-nums', tone ? TONE[tone] : 'text-foreground')}>{value}</span>
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className={cn('min-w-0 text-right font-medium tabular-nums', tone ? TONE[tone] : 'text-foreground')}>{value}</span>
     </div>
   );
 }

@@ -27,16 +27,36 @@ interface ChatMessageListProps {
  *  measurement/ResizeObserver overhead isn't amortized yet. */
 const VIRTUAL_THRESHOLD = 80;
 
+/**
+ * Does this assistant turn have anything to show?
+ *
+ * Text is the usual answer, but a turn can carry all of its value in
+ * metadata: a tool-only turn, or one the user stopped part-way, has thinking
+ * and tool calls with no prose. Keying off `content` alone hid those rows
+ * entirely, so a stopped turn replayed as just the user's message.
+ */
+function hasRenderableContent(message: ChatMessage): boolean {
+  if (message.content?.trim()) return true;
+  const meta = message.metadata;
+  if (!meta) return false;
+  return Boolean(
+    meta.thinkingText?.trim() ||
+      meta.toolCalls?.length ||
+      meta.planCards?.length ||
+      meta.questionCards?.length ||
+      meta.widgetInstanceIds?.length ||
+      meta.systemMessages?.length,
+  );
+}
+
 function renderMessage(
   message: ChatMessage,
   onOpenPlan?: (planId: string) => void,
 ): React.ReactNode {
-  // Skip messages with empty content — these arise when the SDK fires
-  // message_complete with no content (e.g., tool-only turns) and an
-  // empty string was persisted before the guard was added.
-  // System and tool messages are exempt: system messages are always
-  // meaningful, and tool messages display toolName/toolArgs, not content.
-  if (!message.content?.trim() && message.role !== 'system' && message.role !== 'tool') {
+  // System messages are always meaningful and tool messages display
+  // toolName/toolArgs rather than content, so only user/assistant rows are
+  // subject to the emptiness check.
+  if (message.role !== 'system' && message.role !== 'tool' && !hasRenderableContent(message)) {
     return null;
   }
 

@@ -186,6 +186,11 @@ async function handleWidgetMessage(
         { type: 'widget:init', props: reg.props, state: reg.state },
         reg.origin,
       );
+      // `hello` is proof the document booted and its script ran, which is all
+      // the host needs. Waiting for `ready` alone left widgets that announce it
+      // from requestAnimationFrame stuck behind the "didn't start" overlay
+      // whenever the browser throttled rAF (background tab, hidden panel).
+      reg.onReady?.();
       break;
     }
     case 'widget:ready': {

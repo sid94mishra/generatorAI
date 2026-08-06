@@ -119,7 +119,7 @@ export function registerDeviceCommands(program: Command): void {
         process.stderr.write(`    endpoint  ${consent.endpoint}\n`);
         process.stderr.write(`    identity  ${consent.serverId}\n`);
         process.stderr.write(
-          `    scopes    ${consent.offer.requestedScopes.join(', ')}\n\n`,
+          `    scopes    ${consent.requestedScopes.join(', ')}\n\n`,
         );
       }
 
@@ -127,8 +127,9 @@ export function registerDeviceCommands(program: Command): void {
       try {
         const session = await runtime.completePairing({
           endpoint: consent.endpoint,
+          endpoints: consent.endpoints.map((endpoint) => endpoint.origin),
           serverId: consent.serverId,
-          pairingToken: consent.offer.pairingGrant,
+          pairingToken: consent.pairingGrant,
           deviceName: opts.name ?? defaultCliDeviceName(),
           platform: 'cli',
           connectionMode: 'auto',

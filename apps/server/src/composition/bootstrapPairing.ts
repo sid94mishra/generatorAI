@@ -26,7 +26,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ALL_SCOPES } from '@generatorai/auth';
-import { encodePairingOffer, pairingOfferUrl, PairingOfferSchema } from '@generatorai/relay-protocol';
+import {
+  encodePairingOffer,
+  pairingOfferUrl,
+  PairingOfferSchema,
+  type PairingEndpoint,
+} from '@generatorai/relay-protocol';
 import type { ILogger } from '@generatorai/shared';
 import type { SecurityContext } from './security.js';
 
@@ -38,8 +43,7 @@ import type { SecurityContext } from './security.js';
  */
 const BOOTSTRAP_SCOPES = ALL_SCOPES;
 
-/** Longer than a normal pairing code: the user may be watching a splash screen. */
-const BOOTSTRAP_TTL_MS = 15 * 60_000;
+const BOOTSTRAP_TTL_MS = 10 * 60_000;
 
 export interface BootstrapPairingResult {
   /** Absolute path of the `0600` file the code was written to. */
@@ -56,6 +60,7 @@ export interface BootstrapPairingOptions {
   dataDir: string;
   /** Origin clients should connect back to, e.g. `http://127.0.0.1:3100`. */
   endpoint: string;
+  endpoints: PairingEndpoint[];
   serverName: string;
 }
 
@@ -126,8 +131,9 @@ export async function ensureBootstrapPairing(
   });
 
   const offer = PairingOfferSchema.parse({
-    v: 1,
+    v: 2,
     endpoint,
+    endpoints: options.endpoints,
     serverId: security.identity.hostId,
     serverPublicKey: security.identity.publicKeyBase64Url,
     pairingGrant: grant.pairingToken,
@@ -147,7 +153,7 @@ export async function ensureBootstrapPairing(
   writeBootstrapFile(result, logger);
 
   logger.warn(
-    '[Auth] This server has no paired device yet. Pair one within 15 minutes:\n' +
+    '[Auth] This server has no paired device yet. Pair one within 10 minutes:\n' +
       `  ${result.pairingUrl}\n` +
       `  (also written to ${result.file}, readable only by this user)`,
   );

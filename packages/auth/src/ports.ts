@@ -211,6 +211,8 @@ export interface ServiceAccountRecord {
 export interface IServiceAccountRepository {
   create(account: ServiceAccountRecord): Promise<void>;
   findByHash(secretHash: string): Promise<ServiceAccountRecord | null>;
+  /** Replaces the credential on an existing account, un-revoking it. */
+  rotateSecret(accountId: string, secretHash: string): Promise<boolean>;
   list(): Promise<ServiceAccountRecord[]>;
   revoke(accountId: string, at: number): Promise<void>;
   markUsed(accountId: string, at: number): Promise<void>;
