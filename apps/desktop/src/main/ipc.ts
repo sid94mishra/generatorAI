@@ -19,6 +19,7 @@ import { BROWSER_IPC, BROWSER_IPC_EVENT, type BrowserBounds, type NativeBrowserE
 import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
 import { getNativeBrowserHost } from './browser-host';
+import { connectionState } from './backend-switcher';
 import { resolvePaths } from './paths';
 import { loadSettings, saveSettings } from './config';
 import { windowChrome } from './platform';
@@ -213,7 +214,16 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   // handler. When off, `available` still resolves so the renderer can
   // detect the absence.
   const host = getNativeBrowserHost();
-  ipcMain.handle(BROWSER_IPC.available, () => host.isEnabled());
+  // The native browser is a WebContentsView on THIS machine, driven over a
+  // loopback CDP endpoint pushed into the embedded server. A remote server
+  // cannot reach that endpoint, so while the shell is pointed elsewhere the
+  // renderer must be told native is unavailable and fall back to the
+  // server-hosted browser — which is the right place for it anyway, since
+  // that is where the workspace lives.
+  ipcMain.handle(
+    BROWSER_IPC.available,
+    () => host.isEnabled() && connectionState().serverMode === 'embedded',
+  );
   if (host.isEnabled()) {
     log.info('[ipc] Native desktop browser enabled (GENERATORAI_DESKTOP_NATIVE_BROWSER=1)');
     const mainWin = wm.getMainWindow();

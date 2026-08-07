@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { log } from './logger';
 import { loadSettings } from './config';
 import { getServerManager } from './server-manager';
+import { resolveTarget } from './serverConnections';
 import { getWindowManager } from './window-manager';
 import { getNativeBrowserHost, nativeBrowserEnabled } from './browser-host';
 import { setIpcToken } from './cdp/ipc-token';
@@ -143,7 +144,26 @@ async function onReady(): Promise<void> {
 
   wm.showSplash();
 
-  if (mode === 'standalone') {
+  // Three ways to decide what the window loads:
+  //   dev       — an external Vite server, chosen by env
+  //   remote    — a server on another machine; nothing is spawned here
+  //   embedded  — this shell's own child server (the default)
+  const target = resolveTarget(settings.servers, null);
+
+  if (mode === 'dev') {
+    appUrl = DEV_SERVER_URL;
+    log.info('Dev mode — attaching to external dev server', { appUrl });
+  } else if (target?.mode === 'remote') {
+    appUrl = target.url;
+    log.info('Remote mode — attaching to a server on another machine', { appUrl });
+    // The embedded server still starts, so switching back is instant and any
+    // work already running locally keeps going. A failure here is not fatal:
+    // the window is pointed somewhere else entirely.
+    sm.on('status', () => refreshTrayMenu());
+    void sm.start().catch((err: unknown) => {
+      log.warn('Embedded server did not start while in remote mode', err);
+    });
+  } else {
     sm.on('status', () => refreshTrayMenu());
     try {
       await sm.start();
@@ -155,9 +175,6 @@ async function onReady(): Promise<void> {
       );
       return;
     }
-  } else {
-    appUrl = DEV_SERVER_URL;
-    log.info('Dev mode — attaching to external dev server', { appUrl });
   }
 
   if (!appUrl) {

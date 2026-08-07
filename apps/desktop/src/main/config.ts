@@ -10,6 +10,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ThemePreference } from '../shared/ipc';
 import { log } from './logger';
+import {
+  DEFAULT_CONNECTION_STATE,
+  sanitizeConnectionState,
+  type ServerConnectionState,
+} from './serverConnections';
 
 export interface WindowState {
   width: number;
@@ -30,6 +35,8 @@ export interface DesktopSettings {
   minimizeToTray: boolean;
   /** Open the most recent route on launch. */
   lastRoute?: string;
+  /** Which backend the shell talks to. See `serverConnections.ts`. */
+  servers: ServerConnectionState;
 }
 
 const DEFAULTS: DesktopSettings = {
@@ -38,6 +45,7 @@ const DEFAULTS: DesktopSettings = {
   serverPort: 0,
   harnessType: 'copilot',
   minimizeToTray: false,
+  servers: DEFAULT_CONNECTION_STATE,
 };
 
 let cache: DesktopSettings | null = null;
@@ -55,9 +63,12 @@ export function loadSettings(): DesktopSettings {
       ...DEFAULTS,
       ...parsed,
       window: { ...DEFAULTS.window, ...(parsed.window ?? {}) },
+      // Repaired on every read: a half-written file must not be able to point
+      // the window at a server with no way back.
+      servers: sanitizeConnectionState(parsed.servers),
     };
   } catch {
-    cache = { ...DEFAULTS, window: { ...DEFAULTS.window } };
+    cache = { ...DEFAULTS, window: { ...DEFAULTS.window }, servers: { ...DEFAULT_CONNECTION_STATE } };
   }
   return cache;
 }

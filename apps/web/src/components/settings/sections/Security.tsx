@@ -17,6 +17,7 @@ import {
   Globe, Trash2, RefreshCw, Copy, Check, QrCode, KeyRound, AlertTriangle,
 } from 'lucide-react';
 import { SectionHeader, SettingsCard, InfoRow } from '../shared.js';
+import { ToggleSwitch } from '@/components/ui/index.js';
 import { apiFetch, ApiError } from '@/platform/apiFetch.js';
 import {
   forgetConnection,
@@ -706,38 +707,26 @@ export function SecuritySection() {
       >
         {network ? (
           <div className="space-y-3">
-            <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-subtle/40 p-4">
-              <div className="min-w-0 space-y-1">
-                <p className="text-sm font-medium text-foreground">
-                  {network.active ? 'Reachable on this network' : 'This computer only'}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {network.active
-                    ? 'Other devices on the same network can reach this server and pair with it.'
-                    : 'The server is bound to loopback, so nothing outside this computer can connect.'}
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={network.mode === 'network-accessible'}
-                aria-label="Allow devices on this network"
+            <div className="rounded-lg border border-border bg-subtle/40 p-4">
+              <ToggleSwitch
+                checked={network.mode === 'network-accessible'}
                 disabled={networkBusy || network.envOverride != null}
-                onClick={() =>
-                  void setNetworkAccess(
-                    network.mode === 'network-accessible' ? 'local-only' : 'network-accessible',
-                  )
+                onChange={(next) =>
+                  void setNetworkAccess(next ? 'network-accessible' : 'local-only')
                 }
-                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-40 ${
-                  network.mode === 'network-accessible' ? 'bg-primary' : 'bg-border'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                    network.mode === 'network-accessible' ? 'translate-x-[22px]' : 'translate-x-0.5'
-                  }`}
-                />
-              </button>
+                label={network.active ? 'Reachable on this network' : 'This computer only'}
+                description={
+                  network.active
+                    ? 'Other devices on the same network can reach this server and pair with it.'
+                    : 'The server is bound to loopback, so nothing outside this computer can connect.'
+                }
+              />
+              {networkBusy && (
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  Applying…
+                </p>
+              )}
             </div>
 
             {network.envOverride != null && (

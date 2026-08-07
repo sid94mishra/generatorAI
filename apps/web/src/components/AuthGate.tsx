@@ -53,6 +53,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [openServer, setOpenServer] = useState(false);
   /** Desktop shells enrol silently; suppress the manual screen while trying. */
   const [autoPairing, setAutoPairing] = useState(false);
+  const autoPairAttempted = useRef(false);
 
   useEffect(() => {
     const unsubscribe = subscribeToAuthState(setState);
@@ -97,6 +98,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       };
     }).generatoraiDesktop;
     if (!desktop?.isDesktop || typeof desktop.requestPairingCode !== 'function') return;
+
+    // Once per page load, no matter how the auth state moves underneath us.
+    //
+    // Pairing itself emits auth-state changes, and `state.status` is a
+    // dependency of this effect — so without this guard a completed pairing
+    // re-triggers the effect, which mints another grant and pairs again. That
+    // loop is silent (the catch below swallows it) and only shows up as the
+    // server rate-limiting a blank window.
+    if (autoPairAttempted.current) return;
+    autoPairAttempted.current = true;
 
     let cancelled = false;
     setAutoPairing(true);

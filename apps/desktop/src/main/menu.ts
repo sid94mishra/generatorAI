@@ -25,6 +25,13 @@ import { resolvePaths } from './paths';
 import { loadSettings, saveSettings } from './config';
 import { isMac, mnemonic, sectionAccelerator } from './platform';
 import { log } from './logger';
+import {
+  connectionState,
+  forgetRemoteConnection,
+  promptForRemoteServer,
+  switchToEmbedded,
+  switchToRemote,
+} from './backend-switcher';
 import type { MenuState, ThemePreference } from '../shared/ipc';
 
 export interface MenuActions {
@@ -112,6 +119,46 @@ export function buildMenu(actions: MenuActions): void {
           click: () => nav(r.route),
         }))
       : [{ label: 'No Recent Items', enabled: false }];
+
+  // ── Server ───────────────────────────────────────────────────────
+  // Native chrome rather than in-app UI on purpose: the page belongs to one
+  // backend, so a switcher rendered inside it dies with that backend — and if
+  // the remote one is unreachable the page never renders to begin with.
+  const servers = connectionState();
+  const isRemote = servers.serverMode === 'remote';
+  const serverMenu: MenuItemConstructorOptions = {
+    label: mnemonic('Server', 'S'),
+    submenu: [
+      {
+        label: 'This Computer',
+        type: 'radio',
+        checked: !isRemote,
+        click: () => void switchToEmbedded(),
+      },
+      ...(servers.connections.length > 0
+        ? ([{ type: 'separator' }] as MenuItemConstructorOptions[])
+        : []),
+      ...servers.connections.map<MenuItemConstructorOptions>((connection) => ({
+        label: `${connection.label} — ${connection.url}`,
+        type: 'radio',
+        checked: isRemote && servers.activeConnectionId === connection.id,
+        click: () => void switchToRemote(connection.id),
+      })),
+      { type: 'separator' },
+      { label: 'Add Server…', click: () => void promptForRemoteServer() },
+      ...(servers.connections.length > 0
+        ? ([
+            {
+              label: 'Forget Server',
+              submenu: servers.connections.map<MenuItemConstructorOptions>((connection) => ({
+                label: connection.label,
+                click: () => forgetRemoteConnection(connection.id),
+              })),
+            },
+          ] as MenuItemConstructorOptions[])
+        : []),
+    ],
+  };
 
   const fileMenu: MenuItemConstructorOptions = {
     label: mnemonic('File', 'F'),
@@ -304,7 +351,7 @@ export function buildMenu(actions: MenuActions): void {
   };
 
   Menu.setApplicationMenu(
-    Menu.buildFromTemplate([...appMenu, fileMenu, editMenu, viewMenu, windowMenu, helpMenu]),
+    Menu.buildFromTemplate([...appMenu, fileMenu, editMenu, viewMenu, serverMenu, windowMenu, helpMenu]),
   );
 }
 
