@@ -8,5 +8,6 @@
 export * from './deviceKey.js';
 export * from './AuthenticatedClientRuntime.js';
 export * from './pairing.js';
+export * from './connections.js';
 export * from './browserStores.js';
 export * from './nodeStores.js';

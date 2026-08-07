@@ -27,6 +27,16 @@ export interface KeyProvider {
   getKey(): Promise<Buffer>;
   /** Discards the current key and produces a fresh one (for rotation). */
   rotateKey?(): Promise<Buffer>;
+  /**
+   * Keys that used to protect the vault and should still be accepted once, so
+   * an operator changing the KEK migrates instead of losing every secret.
+   *
+   * Only providers where the OPERATOR owns the key need this. The OS- and
+   * file-backed providers rotate in place via `rotateKey`, so they never see a
+   * key they cannot reproduce; an env-supplied key can change between two
+   * process starts with nothing on disk connecting the two.
+   */
+  previousKeys?(): Promise<Buffer[]>;
   info(): KeyProviderInfo;
 }
 
@@ -35,9 +45,13 @@ const KEY_BYTES = 32;
 /**
  * KEK supplied out-of-band by the operator.
  *
- * `GENERATORAI_SECRET_KEY`        — base64 or hex encoded 32-byte key.
- * `GENERATORAI_SECRET_PASSPHRASE` — passphrase, stretched with scrypt using a
- *                                   salt persisted next to the vault.
+ * `GENERATORAI_SECRET_KEY`          — base64 or hex encoded 32-byte key.
+ * `GENERATORAI_SECRET_PASSPHRASE`   — passphrase, stretched with scrypt using a
+ *                                     salt persisted next to the vault.
+ * `GENERATORAI_SECRET_KEY_PREVIOUS` — comma-separated older keys, accepted only
+ *                                     to re-encrypt the vault under the current
+ *                                     one. Remove it after the server logs that
+ *                                     the migration completed.
  */
 export class EnvKeyProvider implements KeyProvider {
   private cached: Buffer | null = null;
@@ -86,6 +100,29 @@ export class EnvKeyProvider implements KeyProvider {
       kind: process.env['GENERATORAI_SECRET_KEY'] ? 'env-key' : 'env-passphrase',
       secure: true,
     };
+  }
+
+  /**
+   * Superseded keys from `GENERATORAI_SECRET_KEY_PREVIOUS`.
+   *
+   * Malformed entries are skipped rather than thrown: this list exists to
+   * RECOVER a vault, so one bad value must not block a good one beside it.
+   */
+  async previousKeys(): Promise<Buffer[]> {
+    const raw = process.env['GENERATORAI_SECRET_KEY_PREVIOUS'];
+    if (!raw) return [];
+    const keys: Buffer[] = [];
+    for (const part of raw.split(',')) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      try {
+        const decoded = decodeKeyMaterial(trimmed);
+        if (decoded.length === KEY_BYTES) keys.push(decoded);
+      } catch {
+        // Not usable key material; the next candidate may still be.
+      }
+    }
+    return keys;
   }
 }
 

@@ -173,6 +173,67 @@ export class EncryptedFileSecretStore implements SecretStore {
     });
   }
 
+  /**
+   * Re-encrypts the vault under the current KEK when it is still sealed with a
+   * superseded one.
+   *
+   * Without this, changing `GENERATORAI_SECRET_KEY` is unrecoverable: every
+   * entry fails its GCM authentication, the server refuses to start, and the
+   * only way out is deleting the vault — which destroys the host identity (so
+   * every paired device must re-enrol) along with any integration credentials
+   * stored beside it. A KEK an operator holds must be changeable without that.
+   *
+   * Returns `'migrated'` when a re-key happened, so the caller can tell the
+   * operator to drop the old key from the environment.
+   */
+  async migrateKeyIfNeeded(): Promise<'not-needed' | 'migrated'> {
+    const vault = this.load();
+    const entries = Object.entries(vault.entries);
+    if (entries.length === 0) return 'not-needed';
+
+    const currentKek = await this.keyProvider.getKey();
+    const [probeKey, probeEntry] = entries[0]!;
+    const probe = splitKey(probeKey);
+    try {
+      open(probeEntry, currentKek, probe.ns, probe.name);
+      return 'not-needed';
+    } catch {
+      // Sealed under something else — fall through and look for it.
+    }
+
+    const previous = (await this.keyProvider.previousKeys?.()) ?? [];
+    for (const oldKek of previous) {
+      let plaintext: Map<string, { ns: string; name: string; value: Uint8Array }>;
+      try {
+        // Decrypt EVERY entry before writing anything: a vault that is only
+        // partly readable under this key is the wrong key, and a partial
+        // re-key would strand the remainder permanently.
+        plaintext = new Map();
+        for (const [entryKey, entry] of entries) {
+          const { ns, name } = splitKey(entryKey);
+          plaintext.set(entryKey, { ns, name, value: open(entry, oldKek, ns, name) });
+        }
+      } catch {
+        continue;
+      }
+
+      await this.enqueue(async () => {
+        const next: VaultFile = {
+          v: VAULT_VERSION,
+          kekVersion: vault.kekVersion + 1,
+          entries: {},
+        };
+        for (const [entryKey, { ns, name, value }] of plaintext) {
+          next.entries[entryKey] = seal(value, currentKek, next.kekVersion, ns, name);
+        }
+        this.persist(next);
+      });
+      return 'migrated';
+    }
+
+    return 'not-needed';
+  }
+
   // ── internals ────────────────────────────────────────────────
 
   private load(): VaultFile {
@@ -305,7 +366,12 @@ function open(entry: SealedEntry, kek: Buffer, namespace: string, name: string):
     // Never include ciphertext or key material in the message.
     throw new SecretStoreError(
       `Secret ${namespace}/${name} failed integrity verification. The vault may have been ` +
-        'tampered with, or the key-encryption key changed.',
+        'tampered with, or the key-encryption key changed.\n' +
+        'If you changed GENERATORAI_SECRET_KEY, put the PREVIOUS value in ' +
+        'GENERATORAI_SECRET_KEY_PREVIOUS and start again — the vault will be re-encrypted ' +
+        'under the new key automatically. Deleting the vault also clears this error, but it ' +
+        'destroys the host identity (every paired device must re-enrol) and every stored ' +
+        'credential.',
       'INTEGRITY',
       { cause: err },
     );

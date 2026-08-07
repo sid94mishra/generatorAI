@@ -17,6 +17,9 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import {
   defaultCliDeviceName,
   describeCliSecretBackend,
@@ -46,6 +49,50 @@ async function serverUrl(globalOpts: { server?: string }): Promise<string> {
 
 function fmtTime(ts: number | null): string {
   return ts ? new Date(ts).toISOString().replace('T', ' ').slice(0, 19) : '—';
+}
+
+/**
+ * Reads the server's per-launch local admin token.
+ *
+ * The file is a deliberate cross-process contract (written by
+ * `apps/server/src/composition/localAdminToken.ts`) rather than a shared
+ * import: the CLI must not depend on the server package, and `@generatorai/shared`
+ * is isomorphic so it cannot pull in `node:fs`.
+ */
+function readLocalAdminToken(dataDir: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(join(dataDir, 'local-admin.json'), 'utf8'),
+    );
+    const token = (parsed as { token?: unknown } | null)?.token;
+    return typeof token === 'string' && token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Best-effort guess at where the server keeps its data, in the same order the
+ * server itself resolves it. Only a guess — `--data-dir` is the escape hatch,
+ * and the failure message prints whatever was tried.
+ */
+function defaultServerDataDir(): string {
+  const candidates: string[] = [];
+  if (process.env['DB_PATH']) candidates.push(dirname(resolve(process.env['DB_PATH'])));
+  if (process.env['GENERATORAI_SECRETS_DIR']) candidates.push(process.env['GENERATORAI_SECRETS_DIR']);
+
+  // Walk up from the working directory: a developer runs this from wherever
+  // they happen to be in the monorepo, not necessarily its root.
+  let dir = process.cwd();
+  for (;;) {
+    candidates.push(join(dir, 'packages', 'db', 'data'));
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  candidates.push(join(homedir(), '.generatorai'));
+
+  return candidates.find((c) => existsSync(join(c, 'local-admin.json'))) ?? candidates[0]!;
 }
 
 /**
@@ -151,6 +198,74 @@ export function registerDeviceCommands(program: Command): void {
         );
         process.exitCode = 1;
       }
+    });
+
+  // ── recover ──────────────────────────────────────────────────────
+  device
+    .command('recover')
+    .description('Mint a pairing code for a server on this machine when every admin device is lost')
+    .option('--data-dir <path>', "Server data directory (defaults to this installation's)")
+    .option('--name <name>', 'Name shown in the device list', 'Recovered device')
+    .option('--json', 'Output JSON')
+    .action(async (opts: { dataDir?: string; name?: string; json?: boolean }) => {
+      const endpoint = await serverUrl(program.opts());
+      const dataDir = opts.dataDir ?? defaultServerDataDir();
+      const token = readLocalAdminToken(dataDir);
+
+      if (!token) {
+        process.stderr.write(
+          chalk.red('No local admin token found.\n') +
+            `Looked in: ${dataDir}\n\n` +
+            'This command only works on the machine running the server, as the user that runs it.\n' +
+            'If the server lives elsewhere, run this there — or pass --data-dir if it stores data\n' +
+            'somewhere other than the default.\n',
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      // Deliberately a bare fetch: the whole point is that this path works
+      // when no device credential exists, so it must not go through the
+      // authenticated runtime.
+      let response: Response;
+      try {
+        response = await fetch(`${endpoint}/internal/desktop/pairing`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify({ deviceName: opts.name }),
+        });
+      } catch (err) {
+        process.stderr.write(
+          chalk.red(`Could not reach ${endpoint}: ${err instanceof Error ? err.message : String(err)}\n`),
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        process.stderr.write(
+          chalk.red(`Recovery failed (HTTP ${response.status}).\n`) +
+            (response.status === 401
+              ? 'The token on disk does not match the running server. Restart the server and try again —\n' +
+                'the token is regenerated on every start.\n'
+              : `${detail}\n`),
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      const body = (await response.json()) as { shortCode: string; expiresAt: number };
+      if (opts.json) {
+        outputJson(body);
+        return;
+      }
+      process.stdout.write(
+        `\n  ${chalk.bold('Pairing code')}  ${chalk.cyan(body.shortCode)}\n` +
+          `  Expires        ${fmtTime(body.expiresAt)}\n\n` +
+          `  Open ${endpoint} and enter the code, or run:\n` +
+          `    generatorai device pair ${body.shortCode}\n\n`,
+      );
     });
 
   // ── status ───────────────────────────────────────────────────────

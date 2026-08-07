@@ -66,3 +66,4 @@ playwright-report/
 .electron-builder.generated.json
 **/impeccable/
 *impeccable*
+**/packages/db/data/*

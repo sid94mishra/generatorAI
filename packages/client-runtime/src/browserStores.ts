@@ -45,12 +45,20 @@ function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
 }
 
 export class IndexedDbDeviceKeyStore implements DeviceKeyStore {
+  /**
+   * One keypair per server. Sharing a single key across servers would mean a
+   * device proving possession of the same key to every host it ever paired
+   * with, so revoking it anywhere would break it everywhere — and switching
+   * back to a server would silently present the wrong device's credential.
+   */
+  constructor(private readonly keyId = KEY_ID) {}
+
   async load(): Promise<DeviceKey | null> {
     try {
       const db = await openDb();
       const tx = db.transaction(STORE_NAME, 'readonly');
       const pair = await idbRequest<CryptoKeyPair | undefined>(
-        tx.objectStore(STORE_NAME).get(KEY_ID) as IDBRequest<CryptoKeyPair | undefined>,
+        tx.objectStore(STORE_NAME).get(this.keyId) as IDBRequest<CryptoKeyPair | undefined>,
       );
       db.close();
       if (!pair?.privateKey || !pair.publicKey) return null;
@@ -64,7 +72,7 @@ export class IndexedDbDeviceKeyStore implements DeviceKeyStore {
     const pair = await generateDeviceKeyPair(false);
     const db = await openDb();
     const tx = db.transaction(STORE_NAME, 'readwrite');
-    await idbRequest(tx.objectStore(STORE_NAME).put(pair, KEY_ID) as IDBRequest<IDBValidKey>);
+    await idbRequest(tx.objectStore(STORE_NAME).put(pair, this.keyId) as IDBRequest<IDBValidKey>);
     db.close();
     return deviceKeyFromCryptoKeyPair(pair);
   }
@@ -73,7 +81,7 @@ export class IndexedDbDeviceKeyStore implements DeviceKeyStore {
     try {
       const db = await openDb();
       const tx = db.transaction(STORE_NAME, 'readwrite');
-      await idbRequest(tx.objectStore(STORE_NAME).delete(KEY_ID) as IDBRequest<undefined>);
+      await idbRequest(tx.objectStore(STORE_NAME).delete(this.keyId) as IDBRequest<undefined>);
       db.close();
     } catch {
       // Nothing to clear.

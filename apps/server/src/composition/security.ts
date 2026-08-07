@@ -185,6 +185,22 @@ export async function createSecurityContext(
   });
   const backendInfo = await secretStore.backendInfo();
 
+  // Runs before anything reads a secret. If the operator changed
+  // GENERATORAI_SECRET_KEY and supplied the old one as
+  // GENERATORAI_SECRET_KEY_PREVIOUS, the vault is re-encrypted here rather
+  // than failing every read with an integrity error the only cure for which
+  // was deleting it.
+  if (secretStore.migrateKeyIfNeeded) {
+    const outcome = await secretStore.migrateKeyIfNeeded();
+    if (outcome === 'migrated') {
+      logger.warn(
+        '[Secrets] The vault was re-encrypted under the current GENERATORAI_SECRET_KEY. ' +
+          'Remove GENERATORAI_SECRET_KEY_PREVIOUS from this environment now — it is no ' +
+          'longer needed and keeping it around widens the window for a leaked old key.',
+      );
+    }
+  }
+
   // ── Repositories ────────────────────────────────────────────────
   const deviceRepo = new SqliteDeviceRepository(db);
   const pairingRepo = new SqlitePairingGrantRepository(db);

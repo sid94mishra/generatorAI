@@ -19,10 +19,20 @@ import {
   IndexedDbDeviceKeyStore,
   LocalStorageSessionStore,
   PairingCodeError,
+  activeConnection,
+  clearConnectionCredentials,
+  deviceKeyId,
   formatFingerprint,
+  hostLabel,
+  loadCatalog,
   parsePairingCode,
+  removeConnection,
+  saveCatalog,
+  sessionStorageKey,
+  upsertConnection,
   type AuthState,
   type PairingConsent,
+  type ServerConnection,
 } from '@generatorai/client-runtime';
 import { isPairingCode, normalizePairingCode } from '@generatorai/shared';
 
@@ -39,6 +49,12 @@ export function getStoredApiKey(): string | null {
 }
 
 function resolveEndpoint(): string {
+  // A saved connection wins: it is the server the user chose, and it may be
+  // reachable at an address unrelated to wherever this page happens to be
+  // served from.
+  const active = activeConnection(loadCatalog(window.localStorage));
+  if (active) return active.endpoint.replace(/\/$/, '');
+
   // Same-origin in production and behind the Vite dev proxy; an explicit
   // override lets a browser talk to a remote/paired server directly.
   const override =
@@ -48,24 +64,63 @@ function resolveEndpoint(): string {
   return window.location.origin;
 }
 
+/**
+ * Credentials are per-server, so the stores have to be scoped before the
+ * runtime is built. An unpaired client has no server id yet and uses the
+ * unsuffixed keys, which is also what the legacy single-session layout used —
+ * so a first pairing lands exactly where the migration expects it.
+ */
+function credentialStores(serverId: string | null) {
+  return serverId
+    ? {
+        keyStore: new IndexedDbDeviceKeyStore(deviceKeyId(serverId)),
+        sessionStore: new LocalStorageSessionStore(sessionStorageKey(serverId)),
+      }
+    : {
+        keyStore: new IndexedDbDeviceKeyStore(),
+        sessionStore: new LocalStorageSessionStore(),
+      };
+}
+
 let runtime: AuthenticatedClientRuntime | null = null;
 let initPromise: Promise<AuthState> | undefined;
 const listeners = new Set<(state: AuthState) => void>();
 let currentState: AuthState = { status: 'unpaired' };
 
+/**
+ * The interceptor's un-intercepted fetch, kept here so it can be re-applied
+ * whenever the runtime is rebuilt for a different server. A rebuilt runtime
+ * without it would fall back to the patched `window.fetch` and recurse into
+ * itself forever on the first request.
+ */
+let bypassFetch: Parameters<AuthenticatedClientRuntime['setFetchImpl']>[0] | null = null;
+
+export function setRuntimeFetchImpl(
+  impl: Parameters<AuthenticatedClientRuntime['setFetchImpl']>[0],
+): void {
+  bypassFetch = impl;
+  runtime?.setFetchImpl(impl);
+}
+
+function buildRuntime(serverId: string | null, endpoint: string): AuthenticatedClientRuntime {
+  const legacyKey = getStoredApiKey();
+  const next = new AuthenticatedClientRuntime({
+    endpoint,
+    ...credentialStores(serverId),
+    ...(legacyKey ? { legacyApiKey: legacyKey } : {}),
+    onStateChange: (state: AuthState) => {
+      currentState = state;
+      for (const listener of listeners) listener(state);
+    },
+  });
+  if (bypassFetch) next.setFetchImpl(bypassFetch);
+  return next;
+}
+
 export function getAuthRuntime(): AuthenticatedClientRuntime {
   if (!runtime) {
-    const legacyKey = getStoredApiKey();
-    runtime = new AuthenticatedClientRuntime({
-      endpoint: resolveEndpoint(),
-      keyStore: new IndexedDbDeviceKeyStore(),
-      sessionStore: new LocalStorageSessionStore(),
-      ...(legacyKey ? { legacyApiKey: legacyKey } : {}),
-      onStateChange: (state: AuthState) => {
-        currentState = state;
-        for (const listener of listeners) listener(state);
-      },
-    });
+    const active = activeConnection(loadCatalog(window.localStorage));
+    runtime = buildRuntime(active?.serverId ?? null, resolveEndpoint());
   }
   return runtime;
 }
@@ -232,8 +287,12 @@ export async function acceptPairing(
    */
   platform: 'web' | 'desktop' = 'web',
 ): Promise<void> {
-  const rt = getAuthRuntime();
-  await rt.completePairing({
+  // Rebuild against THIS server before pairing, so the device key and session
+  // are created under its own storage keys. Doing it afterwards would leave
+  // both under the unscoped keys and the next load — which reads the scoped
+  // ones — would find no session and show the pairing screen again.
+  runtime = buildRuntime(consent.serverId, consent.endpoint);
+  await runtime.completePairing({
     endpoint: consent.endpoint,
     endpoints: consent.endpoints.map((endpoint) => endpoint.origin),
     serverId: consent.serverId,
@@ -242,7 +301,23 @@ export async function acceptPairing(
     platform,
     connectionMode: 'auto',
   });
-  // Remember the endpoint so a reload reconnects to the same server.
+
+  saveCatalog(
+    window.localStorage,
+    upsertConnection(loadCatalog(window.localStorage), {
+      serverId: consent.serverId,
+      label: consent.serverName || hostLabel(consent.endpoint),
+      endpoint: consent.endpoint,
+      endpoints: consent.endpoints.map((endpoint) => endpoint.origin),
+      // Only the host shell can claim a server is local; a loopback URL is not
+      // proof, because a tunnelled remote server looks identical.
+      kind: 'remote',
+      managed: false,
+      lastConnectedAt: Date.now(),
+    }),
+  );
+
+  // Kept for the pre-catalog code path that still reads it directly.
   try {
     window.localStorage.setItem('generatorai-endpoint', consent.endpoint);
   } catch {
@@ -250,11 +325,59 @@ export async function acceptPairing(
   }
 }
 
+/** Every server this client holds a credential for. */
+export function listConnections(): ServerConnection[] {
+  return loadCatalog(window.localStorage).connections;
+}
+
+export function getActiveConnection(): ServerConnection | null {
+  return activeConnection(loadCatalog(window.localStorage));
+}
+
+/**
+ * Switches to another known server.
+ *
+ * Reloads rather than swapping in place. Every store, the TanStack cache and
+ * the SSE manager are global singletons holding data from the previous server;
+ * rebuilding the auth runtime alone would leave the UI showing one server's
+ * chats while talking to another. A reload is the only way to guarantee the
+ * whole page reflects one server, and it also tears down every open stream.
+ */
+export function switchConnection(serverId: string): void {
+  const catalog = loadCatalog(window.localStorage);
+  const target = catalog.connections.find((c) => c.serverId === serverId);
+  if (!target || catalog.activeServerId === serverId) return;
+
+  saveCatalog(window.localStorage, { ...catalog, activeServerId: serverId });
+  try {
+    window.localStorage.setItem('generatorai-endpoint', target.endpoint);
+  } catch {
+    // Ignore.
+  }
+  window.location.replace('/');
+}
+
+/** Forgets a server and its credentials. Does not revoke on the server. */
+export function forgetConnection(serverId: string): void {
+  const catalog = loadCatalog(window.localStorage);
+  const wasActive = catalog.activeServerId === serverId;
+  clearConnectionCredentials(window.localStorage, serverId);
+  saveCatalog(window.localStorage, removeConnection(catalog, serverId));
+  if (wasActive) window.location.replace('/');
+}
+
 export async function signOut(): Promise<void> {
+  const active = getActiveConnection();
   await getAuthRuntime().forget();
   try {
     window.localStorage.removeItem(API_KEY_STORAGE_KEY);
     window.localStorage.removeItem('generatorai-endpoint');
+    // Only this server is being signed out of; credentials for other saved
+    // servers stay put so switching back does not require pairing again.
+    if (active) {
+      clearConnectionCredentials(window.localStorage, active.serverId);
+      saveCatalog(window.localStorage, removeConnection(loadCatalog(window.localStorage), active.serverId));
+    }
   } catch {
     // Ignore.
   }

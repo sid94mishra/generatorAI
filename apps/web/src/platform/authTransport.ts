@@ -22,7 +22,7 @@
 // recurse into the interceptor forever.
 // ────────────────────────────────────────────────────────────────
 
-import { getAuthRuntime } from './authRuntime.js';
+import { getAuthRuntime, setRuntimeFetchImpl } from './authRuntime.js';
 
 /**
  * Marks an init object as "already signed, do not re-enter the interceptor".
@@ -72,8 +72,9 @@ export function installAuthFetchInterceptor(): void {
   const nativeFetch = window.fetch.bind(window);
 
   // The runtime must NOT be routed back through the interceptor, otherwise
-  // signing a request would trigger signing a request, forever.
-  getAuthRuntime().setFetchImpl((url: RequestInfo | URL, init?: RequestInit) =>
+  // signing a request would trigger signing a request, forever. Registered via
+  // the auth module so a runtime rebuilt for another server inherits it.
+  setRuntimeFetchImpl((url: RequestInfo | URL, init?: RequestInit) =>
     nativeFetch(url, { ...init, [BYPASS]: true } as MarkedInit),
   );
 

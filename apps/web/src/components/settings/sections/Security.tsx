@@ -18,6 +18,12 @@ import {
 } from 'lucide-react';
 import { SectionHeader, SettingsCard, InfoRow } from '../shared.js';
 import { apiFetch, ApiError } from '@/platform/apiFetch.js';
+import {
+  forgetConnection,
+  getActiveConnection,
+  listConnections,
+  switchConnection,
+} from '@/platform/authRuntime.js';
 import { cn } from '@/lib/utils.js';
 
 /** Compact coloured label used throughout this section. */
@@ -98,7 +104,13 @@ interface NetworkAccess {
   bindHost: string;
   envOverride: string | null;
   blockers: { code: string; message: string }[];
-  endpoints: { origin: string; reachability: string; priority: number }[];
+  endpoints: {
+    origin: string;
+    reachability: string;
+    priority?: number;
+    /** Host-only adapter (WSL/Hyper-V/Docker) that nothing off-box can reach. */
+    virtual?: boolean;
+  }[];
 }
 
 /** Mirrors `GET /api/security/posture` exactly. */
@@ -255,6 +267,38 @@ function joinAddress(
   return here.origin;
 }
 
+/**
+ * Rewrites a server endpoint into the address a second device should open.
+ *
+ * In development the SPA and the API sit on different ports, so the server's
+ * own origin points at a port that serves no app. The host is what varies
+ * between endpoints; the scheme and port always come from wherever this page
+ * was served, which is by definition reachable — and identical to the server's
+ * own origin in production, where the two are the same.
+ */
+function browserAddressFor(endpointOrigin: string): string {
+  if (typeof window === 'undefined') return endpointOrigin;
+  try {
+    const here = new URL(window.location.origin);
+    here.hostname = new URL(endpointOrigin).hostname;
+    return here.origin;
+  } catch {
+    return endpointOrigin;
+  }
+}
+
+/**
+ * One-word verdict on what a device can do, so the list is scannable without
+ * reading 22 raw scope strings per row.
+ */
+function accessLevel(scopes: string[]): { label: string; tone: 'danger' | 'warning' | 'neutral' } {
+  if (scopes.some((s) => s.startsWith('admin:'))) return { label: 'full access', tone: 'danger' };
+  if (scopes.some((s) => s.startsWith('exec:') || s.startsWith('write:'))) {
+    return { label: 'can make changes', tone: 'warning' };
+  }
+  return { label: 'read only', tone: 'neutral' };
+}
+
 export function SecuritySection() {
   const [posture, setPosture] = useState<SecurityPosture | null>(null);
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
@@ -271,6 +315,9 @@ export function SecuritySection() {
   const [includeRelay, setIncludeRelay] = useState(false);
   const [network, setNetwork] = useState<NetworkAccess | null>(null);
   const [networkBusy, setNetworkBusy] = useState(false);
+  // Read once per mount: the catalog only changes via actions that reload.
+  const [connections] = useState(() => listConnections());
+  const [active] = useState(() => getActiveConnection());
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -462,6 +509,18 @@ export function SecuritySection() {
   const activeDevices = useMemo(() => devices.filter((d) => !d.revokedAt), [devices]);
   const revokedDevices = useMemo(() => devices.filter((d) => d.revokedAt), [devices]);
 
+  // NON_LOOPBACK_BIND fires whenever the server is off loopback — which is the
+  // state the Network access toggle exists to produce. Showing it there turns
+  // a deliberate, already-explained choice into a standing alarm, and an alarm
+  // that is always on for normal usage is one people learn to ignore.
+  const visibleWarnings = useMemo(
+    () =>
+      (posture?.warnings ?? []).filter(
+        (w) => !(w.code === 'NON_LOOPBACK_BIND' && network?.mode === 'network-accessible'),
+      ),
+    [posture, network],
+  );
+
   return (
     <div className="space-y-4">
       <SectionHeader
@@ -476,10 +535,75 @@ export function SecuritySection() {
         </div>
       )}
 
-      {/* ── Posture ───────────────────────────────────────────── */}
+      {/* ── Servers ───────────────────────────────────────────── */}
+      {connections.length > 0 && (
+        <SettingsCard
+          title="Servers"
+          description="Each server keeps its own credential, so switching back never needs pairing again."
+        >
+          <div className="space-y-2">
+            {connections.map((connection) => {
+              const isActive = connection.serverId === active?.serverId;
+              return (
+                <div
+                  key={connection.serverId}
+                  className={cn(
+                    'flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5',
+                    isActive ? 'border-primary/40 bg-primary/5' : 'border-border',
+                  )}
+                >
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      {connection.label}
+                      {isActive && <StatusPill tone="success" label="connected" />}
+                    </p>
+                    <p className="truncate font-mono text-[11px] text-muted-foreground">
+                      {connection.endpoint}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {!isActive && (
+                      <button
+                        type="button"
+                        onClick={() => switchConnection(connection.serverId)}
+                        className="rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors hover:bg-subtle"
+                      >
+                        Switch
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title="Forget this server"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Forget ${connection.label}? This device's credential for it is deleted, ` +
+                              'and you will need a new pairing code to connect again.',
+                          )
+                        ) {
+                          forgetConnection(connection.serverId);
+                        }
+                      }}
+                      className="rounded-md border border-border p-1.5 text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            <p className="text-xs text-muted-foreground">
+              To add another server, open its address in this browser and pair there — it will
+              appear in this list.
+            </p>
+          </div>
+        </SettingsCard>
+      )}
+
+      {/* ── This server ───────────────────────────────────────── */}
       <SettingsCard
-        title="Server security posture"
-        description="What is actually protecting this server right now."
+        title="This server"
+        description="What is protecting it right now."
         action={
           <button
             type="button"
@@ -499,7 +623,7 @@ export function SecuritySection() {
                 <span className="flex items-center gap-2">
                   <StatusPill
                     tone={posture.authentication.required ? 'success' : 'danger'}
-                    label={posture.authentication.required ? 'device credentials' : 'DISABLED'}
+                    label={posture.authentication.required ? 'pairing required' : 'DISABLED'}
                   />
                   {posture.authentication.legacyApiKeyActive && (
                     <StatusPill tone="warning" label="legacy key active" />
@@ -513,20 +637,11 @@ export function SecuritySection() {
                 <span className="flex items-center gap-2">
                   <StatusPill
                     tone={posture.secretStore.secure ? 'success' : 'danger'}
-                    label={posture.secretStore.kind}
+                    label={posture.secretStore.secure ? 'protected' : 'weak'}
                   />
-                </span>
-              }
-            />
-            <InfoRow
-              label="Listening on"
-              value={
-                <span className="flex items-center gap-2 font-mono text-xs">
-                  {posture.server.bindHost}
-                  <StatusPill
-                    tone={posture.server.loopbackOnly ? 'success' : 'warning'}
-                    label={posture.server.loopbackOnly ? 'loopback only' : 'network exposed'}
-                  />
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {posture.secretStore.kind}
+                  </span>
                 </span>
               }
             />
@@ -561,9 +676,9 @@ export function SecuritySection() {
                 />
               }
             />
-            {posture.warnings.length > 0 && (
+            {visibleWarnings.length > 0 && (
               <ul className="mt-3 space-y-1.5 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
-                {posture.warnings.map((w) => (
+                {visibleWarnings.map((w) => (
                   <li key={w.code} className="flex min-w-0 items-start gap-2 break-words text-xs text-foreground">
                     <ShieldAlert
                       className={cn(
@@ -659,16 +774,30 @@ export function SecuritySection() {
                 <p className="text-xs font-medium text-foreground">
                   Addresses other devices can use
                 </p>
-                {network.endpoints
-                  .filter((endpoint) => endpoint.reachability !== 'loopback')
-                  .map((endpoint) => (
+                {(() => {
+                  // Virtual adapters (WSL, Hyper-V, Docker) are RFC1918 and so
+                  // look like a LAN address, but nothing off this machine can
+                  // route to them — listing them sends people to an address
+                  // that silently times out.
+                  const usable = network.endpoints.filter(
+                    (endpoint) => endpoint.reachability !== 'loopback' && !endpoint.virtual,
+                  );
+                  if (usable.length === 0) {
+                    return (
+                      <p className="text-xs text-muted-foreground">
+                        No routable network address was detected. Connect to Wi-Fi or Ethernet.
+                      </p>
+                    );
+                  }
+                  return usable.map((endpoint) => (
                     <code
                       key={endpoint.origin}
                       className="block truncate rounded-md bg-subtle/60 px-2.5 py-1.5 font-mono text-xs text-muted-foreground select-all"
                     >
-                      {endpoint.origin}
+                      {browserAddressFor(endpoint.origin)}
                     </code>
-                  ))}
+                  ));
+                })()}
               </div>
             )}
           </div>
@@ -893,23 +1022,39 @@ export function SecuritySection() {
                         {d.credentialVersion}
                         {d.relayBound ? ' · relay enabled' : ''}
                       </p>
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        {d.scopes.map((s) => (
-                          <span
-                            key={s}
-                            className={cn(
-                              'rounded px-1.5 py-0.5 font-mono text-[10px]',
-                              s.startsWith('admin:')
-                                ? 'bg-destructive/10 text-destructive'
-                                : s.startsWith('exec:')
-                                  ? 'bg-warning/10 text-warning'
-                                  : 'bg-subtle text-muted-foreground',
-                            )}
-                          >
-                            {s}
+                      {/* A one-line summary instead of one chip per scope.
+                          A full-access device carries 22 scopes; rendering
+                          them all turned a list of 16 devices into ~350 chips
+                          that nobody reads. The exact grant is still one click
+                          away for anyone auditing. */}
+                      <details className="mt-1.5 group">
+                        <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground">
+                          <StatusPill
+                            tone={accessLevel(d.scopes).tone}
+                            label={accessLevel(d.scopes).label}
+                          />
+                          <span className="underline-offset-2 group-hover:underline">
+                            {d.scopes.length} permission{d.scopes.length === 1 ? '' : 's'}
                           </span>
-                        ))}
-                      </div>
+                        </summary>
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {d.scopes.map((s) => (
+                            <span
+                              key={s}
+                              className={cn(
+                                'rounded px-1.5 py-0.5 font-mono text-[10px]',
+                                s.startsWith('admin:')
+                                  ? 'bg-destructive/10 text-destructive'
+                                  : s.startsWith('exec:')
+                                    ? 'bg-warning/10 text-warning'
+                                    : 'bg-subtle text-muted-foreground',
+                              )}
+                            >
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </details>
 
                       {/* Capabilities — the only place a withheld scope can
                           be granted without re-pairing the device. */}

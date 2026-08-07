@@ -26,6 +26,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { hostname } from 'node:os';
 import { ALL_SCOPES } from '@generatorai/auth';
 import { PairingOfferSchema, encodePairingOffer, pairingOfferUrl } from '@generatorai/relay-protocol';
+import { formatPairingCode } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 import { isLoopbackRequest } from '../middleware/auth.js';
 
@@ -44,10 +45,18 @@ export function createInternalDesktopRoutes(container: Container): Router {
       res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Loopback only' } });
       return;
     }
-    const expected = process.env['GENERATORAI_DESKTOP_ADMIN_TOKEN'];
     const authHeader = req.headers.authorization ?? '';
     const provided = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
-    if (!expected || !provided || !safeEqual(provided, expected)) {
+    // Two credentials, one authority: the Electron shell's in-memory handshake
+    // token, and the mode-0600 file that proves the caller is the OS user who
+    // owns this server. The second exists so losing every admin device is
+    // recoverable from the machine itself rather than being terminal.
+    const accepted = [
+      process.env['GENERATORAI_DESKTOP_ADMIN_TOKEN'],
+      container.localAdminToken,
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+    if (!provided || !accepted.some((expected) => safeEqual(provided, expected))) {
       // Deliberately terse: a probing attacker learns nothing about whether
       // the feature is enabled or the token was merely wrong.
       res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or missing token' } });
@@ -99,6 +108,9 @@ export function createInternalDesktopRoutes(container: Container): Router {
         res.status(201).json({
           pairingCode: encodePairingOffer(offer),
           pairingUrl: pairingOfferUrl(offer),
+          // The recovery path is a human reading this off a terminal, so the
+          // typeable form has to be here too, not only inside the offer blob.
+          shortCode: formatPairingCode(grant.pairingToken),
           expiresAt: grant.expiresAt,
         });
       } catch (err) {

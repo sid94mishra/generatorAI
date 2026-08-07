@@ -74,4 +74,43 @@ describe('resolveAdvertisedEndpoints', () => {
     expect(selectPairingEndpoint(endpoints, 'mobile')).toBeNull();
     expect(selectPairingEndpoint(endpoints, 'desktop')?.origin).toBe('http://127.0.0.1:3100');
   });
+
+  it('flags hypervisor adapters and ranks real network cards ahead of them', () => {
+    // WSL/Hyper-V/Docker switches hand out RFC1918 addresses that look exactly
+    // like a LAN address but route nowhere off this machine. Advertising one
+    // to a phone produces a silent connection timeout.
+    const endpoints = resolveAdvertisedEndpoints({
+      port: 3100,
+      bindHost: '0.0.0.0',
+      networkInterfaces: interfaces({
+        'vEthernet (WSL (Hyper-V firewall))': [{ address: '172.19.144.1' }],
+        'vEthernet (Default Switch)': [{ address: '172.18.144.1' }],
+        'Wi-Fi': [{ address: '192.168.0.107' }],
+      }),
+    });
+
+    // Real adapter first even though the OS enumerated it last.
+    expect(endpoints[0]?.origin).toBe('http://192.168.0.107:3100');
+    expect(endpoints[0]?.virtual).toBe(false);
+
+    const virtualOrigins = endpoints.filter((e) => e.virtual).map((e) => e.origin);
+    expect(virtualOrigins).toEqual([
+      'http://172.19.144.1:3100',
+      'http://172.18.144.1:3100',
+    ]);
+  });
+
+  it('never hands a phone a host-only virtual address', () => {
+    const endpoints = resolveAdvertisedEndpoints({
+      port: 3100,
+      bindHost: '0.0.0.0',
+      networkInterfaces: interfaces({
+        'vEthernet (WSL)': [{ address: '172.19.144.1' }],
+      }),
+    });
+
+    // Only a virtual adapter and loopback exist, so there is genuinely nothing
+    // a phone can reach — better to refuse than to advertise a dead address.
+    expect(selectPairingEndpoint(endpoints, 'mobile')).toBeNull();
+  });
 });

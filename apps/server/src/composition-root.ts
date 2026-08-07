@@ -5,10 +5,11 @@
 import type { AppConfig, ILogger } from '@generatorai/shared';
 import { createLogger } from '@generatorai/shared';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import * as path from 'node:path';
 import { HarnessRegistry, MultiHarness, type HarnessType } from '@generatorai/agent-harness-providers';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
+import { mintLocalAdminToken } from './composition/localAdminToken.js';
 import { RelayHostBroker } from './relay/RelayHostBroker.js';
 import {
   ExpoPushProvider,
@@ -170,6 +171,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // when the process is configured in a way that would expose an
   // unauthenticated API, and we want that to happen before anything binds.
   const security = await createSecurityContext({ config, db, logger });
+
+  // Recovery channel for a lost admin device. Only meaningful once pairing is
+  // actually enforced; in unauthenticated loopback mode it would be a live
+  // credential on disk that grants nothing not already freely available.
+  // Minted here, published to disk only once the listener binds (see index.ts).
+  const localAdminToken = security.posture.authenticationRequired
+    ? mintLocalAdminToken()
+    : null;
 
   // Outbound relay connector. Demand-driven: it stays closed until a relay
   // device is paired or a relay pairing is requested.
@@ -1219,6 +1228,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
     eventBus,
     security,
+    localAdminToken,
     relayHostBroker,
     pushTokens,
 
@@ -1491,6 +1501,11 @@ export interface Container {
   eventBus: EventBus;
   /** Secret store, device/pairing services, DPoP verification, audit log. */
   security: SecurityContext;
+  /**
+   * Per-launch token proving a caller is the OS user who owns this server.
+   * Null when authentication is disabled, where it would grant nothing.
+   */
+  localAdminToken: string | null;
   /** Outbound-only relay connector. Disabled unless `security.relayEnabled`. */
   relayHostBroker: RelayHostBroker;
   /**

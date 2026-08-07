@@ -102,6 +102,12 @@ export interface SecretStore {
   backendInfo(): Promise<SecretBackendInfo>;
   /** Re-encrypts everything under a fresh key-encryption key, when supported. */
   rotate?(): Promise<void>;
+  /**
+   * Re-encrypts the vault under the current key when it is still sealed with a
+   * superseded one, so an operator-held key can be changed without losing
+   * every secret. No-op for backends that own their own key.
+   */
+  migrateKeyIfNeeded?(): Promise<'not-needed' | 'migrated'>;
   /** Flush + release handles. */
   close?(): Promise<void>;
 }

@@ -10,6 +10,19 @@ export interface AdvertisedEndpointCandidate {
   reachability: 'loopback' | 'lan' | 'private-network' | 'public';
   secure: boolean;
   source: 'configured' | 'interface' | 'bind';
+  /**
+   * True when this address belongs to a hypervisor/container adapter (WSL,
+   * Hyper-V, Docker, VirtualBox, VMware).
+   *
+   * These are RFC1918 and indistinguishable from a real LAN address by IP
+   * alone, but nothing outside this machine can route to them. Advertising
+   * one to a phone produces a connection that times out with no explanation,
+   * so callers should rank or filter on this rather than show every private
+   * address as equally usable.
+   */
+  virtual: boolean;
+  /** Adapter this address came from, when it came from an interface scan. */
+  interfaceName?: string;
 }
 
 export interface ResolveAdvertisedEndpointsInput {
@@ -57,9 +70,23 @@ function reachabilityOf(origin: string): AdvertisedEndpointCandidate['reachabili
   return 'public';
 }
 
+/**
+ * Adapter names created by virtualisation stacks. Matched case-insensitively
+ * against the OS interface name, which is the only signal that separates a
+ * routable LAN address from a host-only virtual switch — the IP ranges
+ * overlap completely.
+ */
+const VIRTUAL_ADAPTER_PATTERN =
+  /(vethernet|hyper-?v|wsl|docker|virtualbox|vmware|vboxnet|utun|tailscale|zerotier|default switch|loopback pseudo)/i;
+
+function isVirtualAdapter(name: string): boolean {
+  return VIRTUAL_ADAPTER_PATTERN.test(name);
+}
+
 function candidate(
   origin: string,
   source: AdvertisedEndpointCandidate['source'],
+  interfaceName?: string,
 ): AdvertisedEndpointCandidate {
   const reachability = reachabilityOf(origin);
   return {
@@ -68,6 +95,8 @@ function candidate(
     reachability,
     secure: origin.startsWith('https://'),
     source,
+    virtual: interfaceName ? isVirtualAdapter(interfaceName) : false,
+    ...(interfaceName ? { interfaceName } : {}),
   };
 }
 
@@ -76,22 +105,33 @@ export function resolveAdvertisedEndpoints(
 ): AdvertisedEndpointCandidate[] {
   const result: AdvertisedEndpointCandidate[] = [];
   const seen = new Set<string>();
-  const add = (origin: string, source: AdvertisedEndpointCandidate['source']): void => {
+  const add = (
+    origin: string,
+    source: AdvertisedEndpointCandidate['source'],
+    interfaceName?: string,
+  ): void => {
     const normalized = canonicalOrigin(origin);
     if (!normalized || seen.has(normalized)) return;
     seen.add(normalized);
-    result.push(candidate(normalized, source));
+    result.push(candidate(normalized, source, interfaceName));
   };
 
   for (const configured of input.configuredOrigins ?? []) add(configured, 'configured');
 
   if (WILDCARD_HOSTS.has(input.bindHost)) {
-    for (const addresses of Object.values(input.networkInterfaces)) {
+    // Interface NAME is retained (rather than iterating values alone) purely so
+    // virtual adapters can be told apart from a real LAN card.
+    const scanned: { origin: string; name: string }[] = [];
+    for (const [name, addresses] of Object.entries(input.networkInterfaces)) {
       for (const address of addresses ?? []) {
         if (address.internal || address.family !== 'IPv4' || !isPrivateIpv4(address.address)) continue;
-        add(`http://${address.address}:${input.port}`, 'interface');
+        scanned.push({ origin: `http://${address.address}:${input.port}`, name });
       }
     }
+    // Real adapters first, so `selectPairingEndpoint` cannot hand a phone a
+    // host-only virtual address just because the OS enumerated it first.
+    scanned.sort((a, b) => Number(isVirtualAdapter(a.name)) - Number(isVirtualAdapter(b.name)));
+    for (const entry of scanned) add(entry.origin, 'interface', entry.name);
   } else if (!LOOPBACK_HOSTS.has(input.bindHost)) {
     const host = input.bindHost.includes(':') ? `[${input.bindHost}]` : input.bindHost;
     add(`http://${host}:${input.port}`, 'bind');
@@ -105,8 +145,10 @@ export function selectPairingEndpoint(
   endpoints: readonly AdvertisedEndpointCandidate[],
   platform: 'web' | 'desktop' | 'cli' | 'mobile' | 'other',
 ): AdvertisedEndpointCandidate | null {
+  // A phone can reach neither loopback (that would be the phone itself) nor a
+  // host-only virtual switch, so both are excluded rather than merely ranked.
   const usable = platform === 'mobile'
-    ? endpoints.filter((endpoint) => endpoint.reachability !== 'loopback')
+    ? endpoints.filter((endpoint) => endpoint.reachability !== 'loopback' && !endpoint.virtual)
     : endpoints;
   return usable[0] ?? null;
 }

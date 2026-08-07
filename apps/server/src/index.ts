@@ -43,6 +43,7 @@ import { attachTerminalWebSocket } from './terminal-ws.js';
 import { attachSttWebSocket } from './stt-ws.js';
 import { resolveAdvertisedEndpoints } from './network/advertisedEndpoints.js';
 import { readExposureMode, resolveBindHost } from './network/exposure.js';
+import { publishLocalAdminToken, removeLocalAdminToken } from './composition/localAdminToken.js';
 
 // Killing the process on a failed write to an already-exited child is the
 // wrong trade. The agent CLIs are optional: when one is absent its harness is
@@ -248,6 +249,12 @@ async function startServer(): Promise<void> {
   // API here, so by the time we listen the posture is known-good.
   const bindHost = config.security.bindHost;
   const server: Server = app.listen(config.port, bindHost, () => {
+    // Only now is this process the one a local CLI should be able to talk to.
+    if (container.localAdminToken) {
+      publishLocalAdminToken(dirname(resolve(config.dbPath)), container.localAdminToken);
+    } else {
+      removeLocalAdminToken(dirname(resolve(config.dbPath)));
+    }
     container.logger.info(
       `[Server] GeneratorAI server listening on ${bindHost}:${config.port}`,
       {
