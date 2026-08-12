@@ -109,11 +109,60 @@ export interface SystemMessageConfig {
   content: string;
 }
 
+/**
+ * A named agent the harness can address. Superset of what both SDKs accept;
+ * each provider maps the subset it supports and reports the rest as a
+ * {@link ConversationWarning}.
+ */
 export interface CustomAgentConfig {
   name: string;
+  displayName?: string;
   description: string;
   instructions: string;
+  /** Allow-list of tool names. Omit for "inherit everything". */
   tools?: string[];
+  /** Deny-list. Claude native; Copilot folds it into the session exclusions. */
+  disallowedTools?: string[];
+  /** Per-agent model override. Falls back to the parent session model. */
+  model?: string;
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Skill names to eagerly inject into this agent's context. */
+  skills?: string[];
+  /** Per-agent MCP servers, keyed by server name. */
+  mcpServers?: Record<string, McpServerConfig>;
+  permissionMode?: HarnessPermissionMode;
+  maxTurns?: number;
+  /** Run as a non-blocking background task when invoked (Claude native). */
+  background?: boolean;
+  /** Whether the model may pick this agent itself. Copilot native; default true. */
+  infer?: boolean;
+}
+
+/**
+ * Machine-readable notice raised while translating domain params to a
+ * provider's native shape. Codes, never user-facing English — the
+ * presentation layer maps them to copy.
+ */
+export interface ConversationWarning {
+  code:
+    | 'FIELD_UNSUPPORTED_BY_PROVIDER'
+    | 'FIELD_COERCED'
+    | 'AGENT_NOT_REGISTERED';
+  params: Record<string, string | number>;
+}
+
+/** What a provider reports back about a created/resumed conversation. */
+export interface ConversationResult {
+  conversationId: string;
+  warnings: ConversationWarning[];
+}
+
+/** A named agent the provider actually registered. */
+export interface HarnessAgentInfo {
+  name: string;
+  description?: string;
+  model?: string;
+  source?: string;
 }
 
 export interface BYOKProviderConfig {
@@ -296,9 +345,32 @@ export interface CreateConversationParams {
   excludedTools?: string[];
 
   // ── Skills & Agents ──
+  /**
+   * Agents addressable by name inside this conversation. On Copilot these
+   * become `SessionConfig.customAgents`; on Claude, `Options.agents`.
+   */
   customAgents?: CustomAgentConfig[];
+  /**
+   * Name of the agent to activate as the conversation's MAIN agent.
+   * Both SDKs replace their base system prompt when this is set, so callers
+   * that rely on injected capability instructions should compose the agent
+   * instructions into `systemMessage` instead and leave this unset.
+   */
+  defaultAgent?: string;
+  /** How the caller composed the agent instructions. Informational for the adapter. */
+  agentProjection?: 'append' | 'replace' | 'native';
   skillDirectories?: string[];
   disabledSkills?: string[];
+  /**
+   * Explicit skill allow-list by name. Claude's `Options.skills` is the only
+   * way to turn skills on there; Copilot derives `disabledSkills` from it.
+   */
+  skills?: string[];
+  /**
+   * Tool names hidden from the DEFAULT agent while staying available to
+   * sub-agents that name them. Copilot `defaultAgent.excludedTools`.
+   */
+  excludedBuiltinTools?: string[];
 
   // ── MCP Servers ──
   mcpServers?: Record<string, McpServerConfig>;
@@ -404,6 +476,19 @@ export interface IHarnessConversationLifecycle {
   getLastConversationId(): Promise<string | null>;
   deleteConversation(conversationId: string): Promise<void>;
   destroyConversation(conversationId: string): Promise<void>;
+  /**
+   * Warnings raised the last time this conversation was created or resumed.
+   * Empty when the provider honoured every field. Read by services to surface
+   * silently-dropped configuration instead of losing it.
+   */
+  getConversationWarnings(conversationId: string): ConversationWarning[];
+  /**
+   * Switch the conversation's active agent in place, when the provider
+   * supports it. Providers that cannot do this record a warning and no-op.
+   */
+  selectAgent(conversationId: string, agentName: string): Promise<void>;
+  /** Agents the provider actually registered for this conversation. */
+  listAgents(conversationId: string): Promise<HarnessAgentInfo[]>;
 }
 
 /** Send prompts and read/abort the in-flight turn. */

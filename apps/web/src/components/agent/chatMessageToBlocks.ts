@@ -11,14 +11,15 @@
 //
 // Sources, in render order (matches the old AssistantMessage):
 //  1. metadata.thinkingText   → one completed ThinkingBlock
-//  2. tool calls + plan/question cards, interleaved by the turn ordinal
-//     the server stamped on each (`sequence`)
+//  2. text segments, tool calls and plan/question cards, interleaved by the
+//     turn ordinal the server stamped on each (`sequence`)
 //  3. message.content         → TextBlock, or interleaved text/tool_call
 //     blocks when the model embedded <tool_calls>/<function_calls> XML
 //     (parsed by the same utils/parseInlineToolCalls streamStore uses).
 //
-// `content` is the turn's FINAL assistant text, so it always closes the
-// message.
+// `content` is the turn's FINAL assistant text. When `metadata.textSegments`
+// is present it already ends with that text, so step 3 is skipped to avoid
+// printing the closing paragraph twice.
 // ────────────────────────────────────────────────────────────────
 
 import type { ChatMessage } from '@generatorai/shared';
@@ -49,6 +50,17 @@ export function chatMessageToBlocks(message: ChatMessage): StreamBlock[] {
 
   // 2. Everything the agent DID, in the order it happened.
   const ordered: OrderedBlock[] = [];
+
+  // Assistant narration between tool waves. Present only on turns that said
+  // more than their closing paragraph.
+  const textSegments = metadata?.textSegments ?? [];
+  for (const seg of textSegments) {
+    if (!seg.content?.trim()) continue;
+    ordered.push({
+      sequence: seg.sequence,
+      make: (blockId) => ({ type: 'text', blockId, content: seg.content }),
+    });
+  }
 
   // Tool calls. Status is coerced to 'complete': a persisted message can carry
   // status 'running' when a turn was paused/aborted mid-call, but rendering
@@ -124,6 +136,10 @@ export function chatMessageToBlocks(message: ChatMessage): StreamBlock[] {
 
   // 3. Content — either plain markdown or text interleaved with inline
   //    <tool_calls>/<function_calls> XML.
+  //    Skipped when ordered segments already carried the narration, which
+  //    ends with this same closing text.
+  if (textSegments.length > 0) return blocks;
+
   const content = message.content ?? '';
   const segments = parseInlineToolCalls(content);
   if (segments) {

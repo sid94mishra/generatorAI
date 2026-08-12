@@ -19,6 +19,16 @@ export interface ChatMessageMetadata {
   }>;
   /** System messages emitted during this response */
   systemMessages?: string[];
+  /**
+   * Every assistant text segment of the turn, in order.
+   *
+   * An agentic turn emits many `message_complete` events interleaved with tool
+   * calls ("planning…" → 3 tools → "wave 1 running…" → tool → …). `content`
+   * holds only the final one, so without this the transcript replays as a wall
+   * of tool calls followed by the closing summary — nothing like what streamed.
+   * Shares the turn ordinal with `toolCalls[].sequence` and the card summaries.
+   */
+  textSegments?: Array<{ content: string; sequence?: number }>;
   /** Stage run that produced this message (for per-stage isolation in single-session mode) */
   stageRunId?: string;
   /** Whether this user message is the summary prompt sent at end of a stage */

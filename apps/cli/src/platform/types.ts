@@ -38,6 +38,11 @@ import type {
   StageRun,
   DataSourceTestResult,
   WebhookRegistration,
+  Agent,
+  AgentOverrides,
+  CreateAgentParams,
+  UpdateAgentParams,
+  ResolvedAgentProjection,
 } from '@generatorai/shared';
 
 // ── API Error ────────────────────────────────────────────────────
@@ -71,6 +76,13 @@ export interface ReplayResult {
   hasMore: boolean;
 }
 
+/** Response of `GET /api/agents/:id/usage` — the bound entities, not counts. */
+export interface AgentUsageResponse {
+  chats: Array<{ id: string; name: string }>;
+  stages: Array<{ id: string; name: string; workflowDefinitionId: string }>;
+  workflows: Array<{ id: string; name: string }>;
+}
+
 // ── Extended Client Interface ────────────────────────────────────
 
 export interface CLIPlatformClient extends IPlatformClient {
@@ -98,6 +110,34 @@ export interface CLIPlatformClient extends IPlatformClient {
   getCopilotState(): Promise<Record<string, unknown>>;
   getSystemArtifacts(type?: string): Promise<ArtifactWithSource[]>;
   getSystemMcpServers(): Promise<McpServerEntry[]>;
+
+  // ── Agents ──
+  listAgents(filter?: {
+    scope?: string;
+    role?: string;
+    projectId?: string;
+    q?: string;
+    enabledOnly?: boolean;
+  }): Promise<Agent[]>;
+  getAgent(id: string): Promise<Agent>;
+  createAgent(params: CreateAgentParams): Promise<Agent>;
+  updateAgent(id: string, params: UpdateAgentParams): Promise<Agent>;
+  deleteAgent(id: string, force?: boolean): Promise<{ deleted: boolean; soft: boolean }>;
+  getAgentUsage(id: string): Promise<AgentUsageResponse>;
+  exportAgent(id: string): Promise<string>;
+  importAgent(params: {
+    markdown: string;
+    scope?: string;
+    projectId?: string;
+    overwrite?: boolean;
+  }): Promise<Agent>;
+  resolveAgentPreview(body: {
+    agentRef?: string;
+    overrides?: AgentOverrides;
+    projectId?: string;
+    harnessType?: 'copilot' | 'claude-agent';
+    scope: 'chat' | 'stage' | 'worker';
+  }): Promise<ResolvedAgentProjection>;
 
   // ── Copilot ──
   listCopilotConversations(): Promise<Array<Record<string, unknown>>>;

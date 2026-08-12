@@ -5,7 +5,7 @@
 ---
 
 ## 0. Navigation (Sidebar)
-`apps/web/src/components/layout/Sidebar.tsx` — Dashboard · Chats · Workflows · Automations · Projects · Templates · Settings. Sidebar collapses/expands.
+`apps/web/src/components/layout/Sidebar.tsx` — Dashboard · Projects · Chats · **Agents** · Workflows · Scripts · Automations · Settings. Sidebar collapses/expands.
 
 ---
 
@@ -102,7 +102,16 @@ System templates: code-generation-v1, code-review-v1, test-generation-v1, refact
 ---
 
 ## 10. Chats (`ChatPage.tsx`, `ChatsListPage.tsx`, `CreateChatDialog.tsx`)
-Create: name(req), description, model, tags(≤20), project+codebases(≤3), local folder path. Input: textarea (Ctrl+Enter), model selector, reasoning effort, attachments, Stop/Send. SSE streaming keyed by sessionId. List: search, status filter all/active/archived, bulk select+delete, archive.
+Create: name(req), description, model, **agent (`agentRef`) + "Customize capabilities" → `agentOverrides`**, orchestrate mode, tags(≤20), project+codebases(≤3), local folder path. Input: textarea (Ctrl+Enter), model selector, **agent chip when bound**, reasoning effort, attachments, Stop/Send. SSE streaming keyed by sessionId. List: search, status filter all/active/archived, bulk select+delete, archive.
+
+---
+
+## 10a. Agents (`AgentsListPage.tsx`, `AgentEditorPage.tsx`, `components/agents/*`)
+**Catalog**: card grid, search (name/slug/description/tag), scope filter (Built-in/Global/Project), role filter (Agent/Orchestrator), Import (`.agent.md`, ≤256 KB), per-card Export + Delete. Built-in agents are read-only (synced from `templates/system/artifacts/agents/`).
+
+**Editor** (`/agents/new`, `/agents/:id`): Identity (name, slug — immutable after create, description ≥10 chars, scope, project, tags, enabled) · Instructions (instructions with byte counter, 8 KB warn / 32 KB reject; projection append∣replace) · Role (agent∣orchestrator) · Skills · MCP servers · Capabilities (tri-state on/inherit/off × 8 groups; `orchestration` locked on for orchestrators) · Team (orchestrator only) · Runtime (provider, model, effort, context tier, permission mode, max turns) · sticky **Effective capabilities** panel driven by `POST /api/agents/resolve-preview` with an unsaved `draft`.
+
+**Binding surfaces**: New Chat dialog picker + capability chips; Stage Properties → Prompts & Context → **Agent** tab (`AgentBindingSection`); Settings → Agents (read-only overview).
 
 ---
 
@@ -112,7 +121,7 @@ Create: name(req), description, defaultModel, sessionMode (single/per-stage/auto
 ---
 
 ## 12. Settings (`Settings.tsx`)
-Tabs: **General** (theme light/dark/system, about), **Provider** (copilot / anthropic / claude-agent switch), **Copilot** (connection state, models), **Advanced** (health, sandbox config).
+Tabs: **General** (theme light/dark/system, about), **Provider** (copilot / anthropic / claude-agent switch), **Agents** (read-only catalog + "Manage agents"), **Skills**, **MCP Servers**, **Templates**, **Copilot** (connection state, models), **Advanced** (health, sandbox config).
 
 ---
 
@@ -122,6 +131,8 @@ Tabs: **General** (theme light/dark/system, about), **Provider** (copilot / anth
 ---
 
 ## E2E Test Scenario Matrix (priority for live run)
+0. **Agent union algebra** — create an agent with N skills, bind it to a chat/stage and add M more; the effective projection must show **N + M** (the removals list wins over an add). Verify in the UI preview AND in `chats.agent_snapshot`.
+0a. **Agent lifecycle** — boot syncs 7 built-ins from disk; export → edit slug → import round-trips; delete is refused (409) while bound and `--force` soft-disables; tri-state capability editor and the effective panel agree for every group.
 1. **Build complex multi-stage DAG** — ≥4 stages, mixed edge types (success/failure/completion/always), conditional expression edge, retry policy, validation rule, per-stage hook.
 2. **Run + streaming** — start run, watch thinking/text/tool_call blocks render live, status transitions, per-stage progress, timeline.
 3. **Handoff** — verify predecessor context passes; stage transitions on correct edge type.

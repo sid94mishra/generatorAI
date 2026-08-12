@@ -6,6 +6,7 @@
 import type { HarnessConfig } from './Workflow.js';
 import type { BrowserConfig } from './BrowserSession.js';
 import type { AgentMode } from './AgentMode.js';
+import type { AgentOverrides, ResolvedAgentProjection } from './Agent.js';
 
 /**
  * Chat-scoped permission policy. Mirrors the harness permission modes so the
@@ -90,6 +91,16 @@ export interface Chat {
    * preserves the historical fully-autonomous behaviour (no prompts).
    */
   permissionMode?: ChatPermissionMode;
+  /** Portable `scope:slug` ref of the agent driving this chat. */
+  agentRef?: string;
+  /** Resolution cache for `agentRef`. May be stale/orphaned. */
+  agentId?: string;
+  /** Agent version at bind time. Part of the conversation binding key. */
+  agentVersion?: number;
+  /** Additive capability delta layered on top of the bound agent. */
+  agentOverrides?: AgentOverrides;
+  /** Frozen, redacted projection captured at session creation (audit + replay). */
+  agentSnapshot?: ResolvedAgentProjection;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -131,4 +142,8 @@ export interface CreateChatParams {
    * skipped and the working directory is that workspace's root.
    */
   workspaceId?: string;
+  /** Portable `scope:slug` ref of the agent that should drive this chat. */
+  agentRef?: string;
+  /** Additive capability delta layered on top of the bound agent. */
+  agentOverrides?: AgentOverrides;
 }

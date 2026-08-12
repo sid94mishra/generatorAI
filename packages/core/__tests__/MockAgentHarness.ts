@@ -12,6 +12,8 @@ import type {
   ConversationMessage,
   CreateConversationParams,
   AttachmentRef,
+  ConversationWarning,
+  HarnessAgentInfo,
 } from '../src/domain/ports/IAgentHarness.js';
 
 export class MockAgentHarness implements IAgentHarness {
@@ -116,6 +118,21 @@ export class MockAgentHarness implements IAgentHarness {
   async destroyConversation(conversationId: string): Promise<void> {
     this.calls.push({ method: 'destroyConversation', args: [conversationId] });
     this.conversations.delete(conversationId);
+  }
+
+  getConversationWarnings(_conversationId: string): ConversationWarning[] {
+    return [];
+  }
+
+  async selectAgent(conversationId: string, agentName: string): Promise<void> {
+    this.calls.push({ method: 'selectAgent', args: [conversationId, agentName] });
+  }
+
+  async listAgents(conversationId: string): Promise<HarnessAgentInfo[]> {
+    const params = this.calls.find(
+      (c) => c.method === 'createConversation' && (c.args[0] as CreateConversationParams).conversationId === conversationId,
+    )?.args[0] as CreateConversationParams | undefined;
+    return (params?.customAgents ?? []).map((a) => ({ name: a.name, description: a.description }));
   }
 
   // ── Messaging ──

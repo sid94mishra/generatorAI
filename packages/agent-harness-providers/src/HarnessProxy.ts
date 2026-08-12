@@ -14,6 +14,8 @@ import type {
   CreateConversationParams,
   AttachmentRef,
   SendPromptOptions,
+  ConversationWarning,
+  HarnessAgentInfo,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
 import type { HarnessType } from './types.js';
@@ -104,6 +106,15 @@ export class HarnessProxy implements IAgentHarness {
   }
   destroyConversation(conversationId: string): Promise<void> {
     return this._adapter.destroyConversation(conversationId);
+  }
+  getConversationWarnings(conversationId: string): ConversationWarning[] {
+    return this._adapter.getConversationWarnings(conversationId);
+  }
+  selectAgent(conversationId: string, agentName: string): Promise<void> {
+    return this._adapter.selectAgent(conversationId, agentName);
+  }
+  listAgents(conversationId: string): Promise<HarnessAgentInfo[]> {
+    return this._adapter.listAgents(conversationId);
   }
   sendPrompt(
     conversationId: string,

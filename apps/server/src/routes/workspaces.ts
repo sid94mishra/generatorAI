@@ -179,7 +179,7 @@ export function createWorkspaceRoutes(container: Container): Router {
 
       if (String(req.query['v'] ?? '2') === '1') {
         const changeSet = await changeSetService.getChangeSet({
-          rootPath: info.rootPath,
+          rootPath: info.workingDirectory,
           worktrees,
           autoInit,
         });
@@ -199,7 +199,7 @@ export function createWorkspaceRoutes(container: Container): Router {
       const head = await parseRevision(req.query['head'], 'working', id);
       const summary = await changeSummaryService.getSummary({
         workspaceId: id,
-        rootPath: info.rootPath,
+        rootPath: info.workingDirectory,
         worktrees,
         base,
         head,
@@ -245,7 +245,7 @@ export function createWorkspaceRoutes(container: Container): Router {
 
       const common = {
         workspaceId: id,
-        rootPath: info.rootPath,
+        rootPath: info.workingDirectory,
         worktrees,
         base,
         head,
@@ -411,7 +411,7 @@ export function createWorkspaceRoutes(container: Container): Router {
 
       const tree = await workspaceTreeService.listTree({
         workspaceId: id,
-        rootPath: info.rootPath,
+        rootPath: info.workingDirectory,
         worktrees,
         ...(typeof req.query['alias'] === 'string' && req.query['alias']
           ? { repoAlias: String(req.query['alias']) }
@@ -452,7 +452,7 @@ export function createWorkspaceRoutes(container: Container): Router {
       const { info, worktrees } = loaded;
 
       const file = await workspaceTreeService.readFile({
-        rootPath: info.rootPath,
+        rootPath: info.workingDirectory,
         worktrees,
         alias: String(req.query['alias'] ?? '.'),
         filePath,
@@ -497,7 +497,7 @@ export function createWorkspaceRoutes(container: Container): Router {
         return;
       }
       // Resolve repo directory for the alias.
-      let repoDir = info.rootPath;
+      let repoDir = info.workingDirectory;
       let fileRel = relPath;
       if (alias && alias !== '.') {
         const wt = (info.worktrees ?? []).find((w) => w.alias === alias);
@@ -527,7 +527,7 @@ export function createWorkspaceRoutes(container: Container): Router {
         return;
       }
       const alias = String(req.body?.alias ?? req.query['alias'] ?? '.');
-      let repoDir = info.rootPath;
+      let repoDir = info.workingDirectory;
       if (alias && alias !== '.') {
         const wt = (info.worktrees ?? []).find((w) => w.alias === alias);
         repoDir = wt ? path.join(info.rootPath, wt.worktreePath) : path.join(info.rootPath, alias);
@@ -556,7 +556,7 @@ export function createWorkspaceRoutes(container: Container): Router {
         return;
       }
       const alias = String(req.query['alias'] ?? '.');
-      let repoDir = info.rootPath;
+      let repoDir = info.workingDirectory;
       if (alias && alias !== '.') {
         const wt = (info.worktrees ?? []).find((w) => w.alias === alias);
         repoDir = wt ? path.join(info.rootPath, wt.worktreePath) : path.join(info.rootPath, alias);
@@ -623,7 +623,10 @@ export function createWorkspaceRoutes(container: Container): Router {
         return;
       }
 
-      // Helper: list only files (not directories), excluding .git internals
+      // Helper: list only files (not directories), excluding .git internals.
+      // Paths are returned POSIX-style: the web client derives a display label
+      // with `path.split('/')`, so native separators made every Windows entry
+      // render as its full path instead of a filename.
       async function listFiles(dir: string): Promise<string[]> {
         try {
           const entries = await fs.readdir(dir, { recursive: true }) as unknown as string[];
@@ -632,7 +635,7 @@ export function createWorkspaceRoutes(container: Container): Router {
             if (entry === '.git' || entry.startsWith('.git/') || entry.startsWith('.git\\')) continue;
             const fullPath = path.join(dir, entry);
             const stat = await fs.stat(fullPath);
-            if (stat.isFile()) files.push(entry);
+            if (stat.isFile()) files.push(entry.split(path.sep).join('/'));
           }
           return files;
         } catch {
@@ -640,13 +643,10 @@ export function createWorkspaceRoutes(container: Container): Router {
         }
       }
 
-      // The agent's working directory is the workspace *root* (see
-      // WorkspaceManager.getWorkingDirectory), so files it creates land
-      // directly under rootPath — NOT under an `output/` subdir. List the
-      // top-level workspace files, pruning the structural subdirectories
-      // (source / artifacts / config / scripts / output) and internal
-      // manifest so they don't show up as user output or get double-listed
-      // with artifactFiles / sourceFiles / worktrees below.
+      // The agent's working directory is `info.workingDirectory` — the managed
+      // root normally, or the user's folder when the chat is bound to one — so
+      // files it creates land directly there, NOT under an `output/` subdir.
+      // Artifacts and worktrees stay on the managed `rootPath`.
       const RESERVED_WS_ENTRIES = new Set([
         '.git', 'source', 'output', 'artifacts', 'scripts', 'config',
         'node_modules', 'dist', 'build', '.cache', '.next', '.turbo', 'coverage',
@@ -660,7 +660,7 @@ export function createWorkspaceRoutes(container: Container): Router {
             if (e.isDirectory()) {
               if (RESERVED_WS_ENTRIES.has(e.name)) continue;
               const sub = await listFiles(path.join(root, e.name));
-              for (const f of sub) files.push(path.join(e.name, f));
+              for (const f of sub) files.push(path.posix.join(e.name, f));
             } else if (e.isFile()) {
               files.push(e.name);
             }
@@ -684,7 +684,7 @@ export function createWorkspaceRoutes(container: Container): Router {
       }
 
       const [rootFiles, legacyOutputFiles, artifactFiles, sourceFiles] = await Promise.all([
-        listRootWorkspaceFiles(info.rootPath),
+        listRootWorkspaceFiles(info.workingDirectory),
         listFiles(outputDir),
         listFiles(artifactsDir),
         listFiles(sourceDir),
@@ -700,6 +700,7 @@ export function createWorkspaceRoutes(container: Container): Router {
       res.json({
         workspaceId: id,
         rootPath: info.rootPath,
+        codeRoot: info.workingDirectory,
         workspaceFiles,
         artifactFiles,
         sourceFiles,
@@ -742,10 +743,9 @@ export function createWorkspaceRoutes(container: Container): Router {
       } else if (source === 'source') {
         baseDir = path.join(info.rootPath, 'source');
       } else {
-        // 'workspace' source — the agent's working directory is the
-        // workspace root (see WorkspaceManager.getWorkingDirectory), so
-        // top-level output files resolve from rootPath, not rootPath/output.
-        baseDir = info.rootPath;
+        // 'workspace' source — resolve against the agent's working directory,
+        // which is the user's folder when the chat is bound to one.
+        baseDir = info.workingDirectory;
       }
 
       // Prevent path traversal

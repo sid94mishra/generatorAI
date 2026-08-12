@@ -419,6 +419,28 @@ export interface CodebaseSummary {
   lastFetchedAt?: Timestamp | null;
 }
 
+// ── Agents (AGT-01) ─────────────────────────────────────────────
+
+/**
+ * The subset of an `Agent` a thin client needs to render a picker.
+ * Deliberately NOT the full row: instructions and the tool policy are large
+ * and are only meaningful on an authoring surface.
+ */
+export interface AgentSummary {
+  id: string;
+  /** Portable `scope:slug` binding identifier. */
+  ref: string;
+  scope: 'system' | 'global' | 'project';
+  slug: string;
+  name: string;
+  description: string;
+  role: 'agent' | 'orchestrator';
+  enabled: boolean;
+  skillIds: string[];
+  mcpServerIds: string[];
+  version: number;
+}
+
 export interface WorkspaceSummary {
   id: string;
   name?: string;
@@ -684,6 +706,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
         permissionMode?: string;
         orchestratorMode?: boolean;
         useWorktree?: boolean;
+        /** AGT-01 — portable `scope:slug` ref of the driving agent. */
+        agentRef?: string;
       }) => request<ChatSummary>(fetchImpl, '/api/chats', json(input)),
 
       messages: (id: string, params?: { limit?: number; before?: string }) => {
@@ -1084,6 +1108,22 @@ export function createApiClient(fetchImpl: ApiFetch) {
 
       codebases: (id: string) =>
         request<CodebaseSummary[]>(fetchImpl, `/api/projects/${id}/codebases`),
+    },
+
+    /**
+     * AGT-01 — reusable agents. Read-only on mobile: authoring an agent grants
+     * capability and is deliberately kept on the desktop/web surface where the
+     * full capability policy is visible.
+     */
+    agents: {
+      /** Picker list — project agents shadow global, global shadows system. */
+      selectable: (projectId?: string) =>
+        request<AgentSummary[]>(
+          fetchImpl,
+          `/api/agents?selectable=1${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`,
+        ),
+
+      list: () => request<AgentSummary[]>(fetchImpl, '/api/agents'),
     },
 
     /**

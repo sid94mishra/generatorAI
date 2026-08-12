@@ -208,6 +208,7 @@ export function WorkflowBuilderPage() {
               order: stage.order,
               prompts: stage.prompts,
               harnessConfigOverrides: stage.harnessConfigOverrides,
+              agentRef: stage.agentRef ?? null,
               variables: stage.variables,
               hooks: stage.hooks,
               retryPolicy: stage.retryPolicy,
@@ -278,6 +279,9 @@ export function WorkflowBuilderPage() {
               order: stage.order,
               prompts: stage.prompts,
               harnessConfigOverrides: stage.harnessConfigOverrides,
+              // Nullable, not optional: clearing the picker must actually
+              // unbind the agent rather than leave the previous ref in place.
+              agentRef: stage.agentRef ?? null,
               variables: stage.variables,
               hooks: stage.hooks,
               retryPolicy: stage.retryPolicy,

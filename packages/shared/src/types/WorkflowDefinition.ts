@@ -71,6 +71,8 @@ export interface WorkflowDefinition {
   hooksFile?: HooksFileConfig;
   /** Integrated Browser configuration (workflow-level default). */
   browserConfig?: BrowserConfig;
+  /** Portable `scope:slug` ref of the default agent for stages that do not bind their own. */
+  defaultAgentRef?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -102,6 +104,8 @@ export interface CreateWorkflowDefinitionParams {
   hooksFile?: HooksFileConfig;
   /** Integrated Browser configuration (workflow-level default). */
   browserConfig?: BrowserConfig;
+  /** Portable `scope:slug` ref of the default agent for stages that do not bind their own. */
+  defaultAgentRef?: string;
 }
 
 /** Parameters for updating a WorkflowDefinition */
@@ -121,4 +125,6 @@ export interface UpdateWorkflowDefinitionParams {
   hooksFile?: HooksFileConfig;
   /** Integrated Browser configuration (workflow-level default). */
   browserConfig?: BrowserConfig;
+  /** Portable `scope:slug` ref of the default agent. `null` clears the binding. */
+  defaultAgentRef?: string | null;
 }

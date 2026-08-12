@@ -2,6 +2,14 @@
 
 > A **StageDefinition** is a single node in the workflow DAG. This is the most config-heavy entity in the system. Every option exposed in the web `Stage Properties` panel is documented here.
 
+> **Agent binding (AGT-01).** `stage.agentRef` binds a first-class Agent by its
+> portable `scope:slug` ref; `harnessConfigOverrides.agentOverrides` is the
+> additive delta. Skills and MCP servers selected on the stage **UNION** with
+> the agent's own — an agent with 5 skills plus 2 selected here gives the stage
+> 7. MCP exclusions go in `harnessConfigOverrides.excludedMcpServerIds` (they
+> used to be written into `excludedTools`, which excluded nothing). See
+> [feature-agents.md](./feature-agents.md).
+
 ---
 
 ## 1. Entity & DB shape

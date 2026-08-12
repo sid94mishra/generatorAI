@@ -1683,9 +1683,19 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
                 {(status === 'off' || status === 'terminated') && (
                   <div>
                     <div className="mb-1">Browser is not running.</div>
-                    {showNavControls && (
+                    {showNavControls ? (
                       <div className="text-xs opacity-80">
                         Type a URL and press <kbd className="rounded bg-[var(--color-subtle)] px-1 text-[var(--color-foreground)]">Start</kbd>.
+                      </div>
+                    ) : (
+                      // Without full interactivity there is no URL bar, so the
+                      // bare "not running" line was a dead end.
+                      <div className="mx-auto max-w-xs text-xs opacity-80">
+                        Ask the agent to browse a page, or enable{' '}
+                        <span className="text-[var(--color-foreground)]">
+                          Settings → Browser &amp; Terminal → interactive browser
+                        </span>{' '}
+                        to drive it yourself.
                       </div>
                     )}
                   </div>

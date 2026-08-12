@@ -20,7 +20,7 @@ import { PromptEditor } from './PromptEditor.js';
 import { PromptFilePicker } from './PromptFilePicker.js';
 import { McpServerSelector } from './McpServerSelector.js';
 import { SkillSelector } from './SkillSelector.js';
-import { AgentSelector } from './AgentSelector.js';
+import { AgentBindingSection } from './AgentBindingSection.js';
 import { StyledSelect } from './StyledSelect.js';
 import { ToggleSwitch } from './ToggleSwitch.js';
 import { NumberStepper } from './NumberStepper.js';
@@ -295,7 +295,7 @@ function PropertiesTab({
           />
         )}
         {promptSubTab === 'agent' && (
-          <AgentSelector stage={stage} onUpdate={onUpdate} />
+          <AgentBindingSection stage={stage} onUpdate={onUpdate} />
         )}
       </CollapsibleSection>
 

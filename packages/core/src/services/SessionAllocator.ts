@@ -379,22 +379,15 @@ export class SessionAllocator implements ISessionAllocator {
     // Create the harness conversation. `harnessType` picks the agent provider
     // for this stage; when unset the router falls back to the provider that
     // owns `model`, so a workflow can mix providers across stages.
+    //
+    // Spread the caller's config wholesale rather than re-enumerating fields:
+    // the old allow-list silently dropped reasoningEffort, hooks, plan gates
+    // and the agent binding. `conversationId` is overridden last because it is
+    // already persisted on the session row above and must win.
     await this.harness.createConversation({
+      ...(config ?? {}),
       conversationId,
-      model: config?.model,
-      harnessType: config?.harnessType,
-      systemMessage: config?.systemMessage,
-      tools: config?.tools,
-      availableTools: config?.availableTools,
-      excludedTools: config?.excludedTools,
-      customAgents: config?.customAgents,
-      mcpServers: config?.mcpServers,
-      skillDirectories: config?.skillDirectories,
-      disabledSkills: config?.disabledSkills,
-      provider: config?.provider,
       streaming: config?.streaming ?? true,
-      workingDirectory: config?.workingDirectory,
-      configDir: config?.configDir,
       // Auto-approve all permission requests for workflow stage execution
       // so the Copilot agent can create files, directories, and run commands
       onPermissionRequest: config?.onPermissionRequest ?? (async () => ({ granted: true })),

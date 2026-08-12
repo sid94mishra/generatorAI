@@ -33,6 +33,9 @@ export type {
   PlanReviewRequestHandler,
   QuestionRequest,
   QuestionRequestHandler,
+  ConversationWarning,
+  ConversationResult,
+  HarnessAgentInfo,
 } from './IAgentHarness.js';
 
 export type {
@@ -45,6 +48,7 @@ export type {
 } from './IRepositories.js';
 
 export type { IChatRepository } from './IChatRepository.js';
+export type { IAgentRepository, AgentListFilter, AgentUsage } from './IAgentRepository.js';
 export type {
   IPlanRepository,
   IAgentInteractionRepository,

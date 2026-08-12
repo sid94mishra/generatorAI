@@ -60,6 +60,14 @@ export interface ExecutionWorkspace {
   ownerId: string;
   projectId?: string;
   rootPath: string;
+  /**
+   * Where the AGENT works and where diff / checkpoints / discard look.
+   *
+   * Defaults to `rootPath`. A chat bound to a local folder points this at that
+   * folder while `rootPath` stays managed, so plans, artifacts, orchestrator
+   * state and task scratch never land in the user's repository.
+   */
+  codeRoot?: string;
   status: WorkspaceStatus;
   gitEnabled: boolean;
   useWorktree: boolean;
@@ -150,6 +158,13 @@ export interface CreateWorkspaceParams {
    * from the run/chat's declared config on first tool invocation.
    */
   browserConfig?: Record<string, unknown>;
+  /**
+   * Point the agent's working tree at an existing directory while platform
+   * artifacts stay in the managed root. Used when a chat is bound to a local
+   * folder: diff, checkpoints and the file list follow the code, but plans,
+   * artifacts and orchestrator state do not pollute the user's repository.
+   */
+  codeRootOverride?: string;
 }
 
 // ── Workspace Filters ──

@@ -53,6 +53,11 @@ import type {
   FileEntry,
   DataSourceTestResult,
   WebhookRegistration,
+  Agent,
+  AgentOverrides,
+  CreateAgentParams,
+  UpdateAgentParams,
+  ResolvedAgentProjection,
 } from '@generatorai/shared';
 
 import {
@@ -61,6 +66,7 @@ import {
   type SSEScope,
   type SSESubscriptionOptions,
   type ReplayResult,
+  type AgentUsageResponse,
 } from './types.js';
 import { withRetry } from '../utils/retry.js';
 import { getCliAuthRuntime } from './authRuntime.js';
@@ -672,6 +678,94 @@ export class HttpPlatformClient implements CLIPlatformClient {
 
   async getSystemMcpServers(): Promise<McpServerEntry[]> {
     return api<McpServerEntry[]>(this.url('/api/system/mcp-servers'));
+  }
+
+  // ── Agents ──
+
+  async listAgents(filter?: {
+    scope?: string;
+    role?: string;
+    projectId?: string;
+    q?: string;
+    enabledOnly?: boolean;
+  }): Promise<Agent[]> {
+    return api<Agent[]>(
+      this.url(
+        `/api/agents${qs({
+          scope: filter?.scope,
+          role: filter?.role,
+          projectId: filter?.projectId,
+          q: filter?.q,
+          enabledOnly: filter?.enabledOnly ? '1' : undefined,
+        })}`,
+      ),
+    );
+  }
+
+  async getAgent(id: string): Promise<Agent> {
+    return api<Agent>(this.url(`/api/agents/${encodeURIComponent(id)}`));
+  }
+
+  async createAgent(params: CreateAgentParams): Promise<Agent> {
+    return api<Agent>(this.url('/api/agents'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+  }
+
+  async updateAgent(id: string, params: UpdateAgentParams): Promise<Agent> {
+    return api<Agent>(this.url(`/api/agents/${encodeURIComponent(id)}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+  }
+
+  async deleteAgent(id: string, force?: boolean): Promise<{ deleted: boolean; soft: boolean }> {
+    return api<{ deleted: boolean; soft: boolean }>(
+      this.url(`/api/agents/${encodeURIComponent(id)}${force ? '?force=1' : ''}`),
+      { method: 'DELETE' },
+    );
+  }
+
+  async getAgentUsage(id: string): Promise<AgentUsageResponse> {
+    return api(this.url(`/api/agents/${encodeURIComponent(id)}/usage`));
+  }
+
+  async exportAgent(id: string): Promise<string> {
+    const result = await api<{ markdown: string }>(
+      this.url(`/api/agents/${encodeURIComponent(id)}/export`),
+      { method: 'POST' },
+    );
+    return result.markdown;
+  }
+
+  async importAgent(params: {
+    markdown: string;
+    scope?: string;
+    projectId?: string;
+    overwrite?: boolean;
+  }): Promise<Agent> {
+    return api<Agent>(this.url('/api/agents/import'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+  }
+
+  async resolveAgentPreview(body: {
+    agentRef?: string;
+    overrides?: AgentOverrides;
+    projectId?: string;
+    harnessType?: 'copilot' | 'claude-agent';
+    scope: 'chat' | 'stage' | 'worker';
+  }): Promise<ResolvedAgentProjection> {
+    return api<ResolvedAgentProjection>(this.url('/api/agents/resolve-preview'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
   }
 
   // ── Copilot ──

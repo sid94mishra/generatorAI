@@ -68,6 +68,22 @@ describe('route policy — resolution', () => {
       }
     }
   });
+
+  it('splits agent READING from agent AUTHORING', () => {
+    // AGT-01: an agent bundles skills, MCP servers and a tool policy, so
+    // authoring one is a capability grant and must sit behind `admin:settings`.
+    // READING the catalog is not — a paired device has to be able to list
+    // agents in order to pick one when starting a chat.
+    expect(resolveRoutePolicy('/agents').read).toEqual(['read:workflows']);
+    expect(resolveRoutePolicy('/agents').write).toContain('admin:settings');
+    expect(resolveRoutePolicy('/agents/some-id/export').write).toContain('admin:settings');
+
+    // A device with only run-time scopes may browse but not author.
+    const runtimeOnly = ['read:workflows', 'exec:agent'];
+    expect(allowed(runtimeOnly, '/agents', 'GET')).toBe(true);
+    expect(allowed(runtimeOnly, '/agents', 'POST')).toBe(false);
+    expect(allowed(runtimeOnly, '/agents/import', 'POST')).toBe(false);
+  });
 });
 
 describe('route policy — mobile device authority', () => {

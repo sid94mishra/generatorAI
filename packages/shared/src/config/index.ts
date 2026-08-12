@@ -39,6 +39,24 @@ export type { ImportWorkflowJson, RunProfileInput } from './WorkflowDefinitionSc
 export { RunProfileSchema, StageRunOverrideSchema } from './WorkflowDefinitionSchemas.js';
 
 export {
+  McpServerConfigSchema,
+  AgentToolPolicySchema,
+  AgentRuntimePolicySchema,
+  AgentOrchestrationPolicySchema,
+  AgentOverridesSchema,
+  CreateAgentSchema,
+  UpdateAgentSchema,
+  ImportAgentSchema,
+  ResolvePreviewSchema,
+} from './AgentSchemas.js';
+export type {
+  CreateAgentInput,
+  UpdateAgentInput,
+  ImportAgentInput,
+  ResolvePreviewInput,
+} from './AgentSchemas.js';
+
+export {
   AgentModeSchema,
   CreateChatSchema,
   SendChatPromptSchema,

@@ -9,7 +9,7 @@
 import React from 'react';
 import {
   Settings2, Cpu, Sparkles, Server, LayoutTemplate,
-  GitPullRequest, SquareTerminal, Blocks, HeartPulse, ShieldCheck, X,
+  GitPullRequest, SquareTerminal, Blocks, HeartPulse, ShieldCheck, X, Bot,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
@@ -18,6 +18,7 @@ import { useSettingsUiStore, type SettingsSectionId } from '@/stores/settingsUiS
 import { GeneralSection } from './sections/GeneralAppearance.js';
 import { ProvidersSection } from './sections/Providers.js';
 import { SkillsSection, McpSection, TemplatesSection } from './sections/Catalogs.js';
+import { AgentsSection } from './sections/Agents.js';
 import { SourceControlSection } from './sections/SourceControl.js';
 import { BrowserTerminalSection } from './sections/BrowserTerminal.js';
 import { ExtensionsSection } from './sections/Extensions.js';
@@ -46,6 +47,7 @@ const NAV: NavGroup[] = [
     heading: 'Agents',
     items: [
       { id: 'providers', label: 'Model Providers', icon: Cpu },
+      { id: 'agents', label: 'Agents', icon: Bot },
       { id: 'skills', label: 'Skills', icon: Sparkles },
       { id: 'mcp', label: 'MCP Servers', icon: Server },
       { id: 'templates', label: 'Templates', icon: LayoutTemplate },
@@ -71,6 +73,7 @@ const NAV: NavGroup[] = [
 const SECTIONS: Record<SettingsSectionId, React.ReactNode> = {
   general: <GeneralSection />,
   providers: <ProvidersSection />,
+  agents: <AgentsSection />,
   skills: <SkillsSection />,
   mcp: <McpSection />,
   templates: <TemplatesSection />,

@@ -31,7 +31,10 @@ import type {
   ConversationMessage,
   AttachmentRef,
   SendPromptOptions,
+  ConversationWarning,
+  HarnessAgentInfo,
 } from '@generatorai/core';
+import type { HookBridge } from '@generatorai/core';
 import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
 import { HarnessSessionError, withSpan, getMeter, createAgentEvent } from '@generatorai/shared';
 import { mapClaudeAgentMessageToAgentEvents } from './event-mapper.js';
@@ -254,6 +257,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
   // Accumulated messages per conversation for getMessages()
   private conversationMessages = new Map<string, ConversationMessage[]>();
+  /** Warnings raised while translating the last create/resume for a conversation. */
+  private conversationWarnings = new Map<string, ConversationWarning[]>();
+  /** Agents registered on each conversation. */
+  private conversationAgents = new Map<string, HarnessAgentInfo[]>();
 
   constructor(private options: ClaudeAgentProviderOptions) {
     this.verbose = options.verbose ?? (process.env['GENERATORAI_LOG_LEVEL'] === 'debug');
@@ -483,6 +490,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
       span.setAttribute('claude_agent.conversation_id', params.conversationId);
       span.setAttribute('claude_agent.model', params.model ?? this.options.defaultModel ?? 'claude-sonnet-4-6');
 
+      const warnings: ConversationWarning[] = [];
+      const registeredAgents: HarnessAgentInfo[] = [];
+
       // Build MCP server for domain tools
       let mcpConfig: Record<string, unknown> = {};
       let domainToolNames: string[] = [];
@@ -510,14 +520,18 @@ export class ClaudeAgentProvider implements IAgentHarness {
         ...(params.mcpServers ?? {}),
       };
 
-      // Map allowed tools. An absent OR empty whitelist means "no restriction"
-      // (all built-in tools available) — an empty array must NOT collapse the
-      // agent down to zero tools, or it can't write files. Only a non-empty,
-      // wildcard-free list is treated as a real restriction.
+      // Map allowed tools.
+      //
+      // `Options.tools` is the BUILT-IN base set; `Options.allowedTools` is the
+      // auto-approve list. Custom/MCP tool names belong only in the latter —
+      // putting them in `tools` names built-ins that do not exist.
       const hasNoToolRestriction =
         !params.availableTools ||
         params.availableTools.length === 0 ||
         params.availableTools.includes('*');
+      const builtinAllowList = hasNoToolRestriction
+        ? undefined
+        : params.availableTools!.filter((t) => !t.startsWith('mcp__') && !t.includes('__'));
       const resolvedAllowedTools: string[] = [];
       if (!hasNoToolRestriction && params.availableTools) {
         resolvedAllowedTools.push(...params.availableTools);
@@ -525,16 +539,61 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // Add domain MCP tool names to allowed list
       resolvedAllowedTools.push(...domainToolNames);
 
-      // Map custom agents
+      // Map custom agents onto the SDK's AgentDefinition shape.
       const agents: Record<string, unknown> = {};
       if (params.customAgents) {
         for (const agent of params.customAgents) {
           agents[agent.name] = {
             description: agent.description,
             prompt: agent.instructions,
-            tools: agent.tools,
+            ...(agent.tools ? { tools: agent.tools } : {}),
+            ...(agent.disallowedTools ? { disallowedTools: agent.disallowedTools } : {}),
+            ...(agent.model ? { model: agent.model } : {}),
+            ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}),
+            ...(agent.skills ? { skills: agent.skills } : {}),
+            ...(agent.mcpServers ? { mcpServers: [agent.mcpServers] } : {}),
+            ...(agent.permissionMode ? { permissionMode: agent.permissionMode } : {}),
+            ...(agent.maxTurns !== undefined ? { maxTurns: agent.maxTurns } : {}),
+            ...(agent.background !== undefined ? { background: agent.background } : {}),
           };
+          registeredAgents.push({
+            name: agent.name,
+            ...(agent.description ? { description: agent.description } : {}),
+            ...(agent.model ? { model: agent.model } : {}),
+            source: 'programmatic',
+          });
         }
+      }
+      // Delegation runs through the built-in `Agent` tool; without it in the
+      // allow-list every delegation falls through to canUseTool and is denied.
+      if (Object.keys(agents).length > 0 && !resolvedAllowedTools.includes('Agent')) {
+        resolvedAllowedTools.push('Agent');
+      }
+      // `Options.skills` auto-adds `Skill` to allowedTools, but an explicit
+      // `tools` array must carry it too or the model cannot invoke skills.
+      if (params.skills?.length) {
+        if (!resolvedAllowedTools.includes('Skill')) resolvedAllowedTools.push('Skill');
+        if (builtinAllowList && !builtinAllowList.includes('Skill')) builtinAllowList.push('Skill');
+      }
+      for (const field of ['contextTier', 'configDir', 'streaming'] as const) {
+        if (params[field] !== undefined) {
+          warnings.push({
+            code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+            params: { field, provider: 'claude-agent' },
+          });
+        }
+      }
+      if (params.provider) {
+        warnings.push({
+          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+          params: { field: 'provider', provider: 'claude-agent' },
+        });
+      }
+      if (params.excludedBuiltinTools?.length) {
+        warnings.push({
+          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+          params: { field: 'excludedBuiltinTools', provider: 'claude-agent' },
+        });
       }
 
       // Store configuration for later use.
@@ -562,11 +621,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
         maxTurns: params.maxTurns ?? this.options.defaultMaxTurns,
         maxBudgetUsd: this.options.defaultMaxBudgetUsd,
         permissionMode: params.permissionMode ?? this.options.defaultPermissionMode ?? 'bypassPermissions',
-        tools: hasNoToolRestriction ? undefined : params.availableTools,
+        tools: builtinAllowList,
         allowedTools: resolvedAllowedTools.length > 0 ? resolvedAllowedTools : undefined,
         disallowedTools: params.excludedTools,
         mcpServers: Object.keys(mergedMcpServers).length > 0 ? mergedMcpServers : undefined,
         agents: Object.keys(agents).length > 0 ? agents : undefined,
+        ...(params.skills?.length ? { skills: params.skills } : {}),
+        ...(params.defaultAgent && params.agentProjection === 'native' && agents[params.defaultAgent]
+          ? { agent: params.defaultAgent }
+          : {}),
+        ...(params.hooks ? { hooks: params.hooks } : {}),
         env: this.options.env,
         // HITL-06 (Claude parity) — persist the domain permission callback
         // so `buildQueryOptions` can wire it into the SDK's `canUseTool`.
@@ -579,6 +643,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
       };
 
       this.conversations.set(params.conversationId, config);
+      this.conversationWarnings.set(params.conversationId, warnings);
+      this.conversationAgents.set(params.conversationId, registeredAgents);
       // Preserve the transcript across a rebind; only seed an empty one for a
       // genuinely new conversation.
       if (!this.conversationMessages.has(params.conversationId)) {
@@ -647,6 +713,28 @@ export class ClaudeAgentProvider implements IAgentHarness {
   /** Whether the conversation is live in memory (tool handlers registered). */
   hasLiveConversation(conversationId: string): boolean {
     return this.conversations.has(conversationId);
+  }
+
+  getConversationWarnings(conversationId: string): ConversationWarning[] {
+    return this.conversationWarnings.get(conversationId) ?? [];
+  }
+
+  async selectAgent(conversationId: string, agentName: string): Promise<void> {
+    const config = this.conversations.get(conversationId);
+    if (!config) throw new HarnessSessionError(`Conversation ${conversationId} not found`);
+    if (!config.agents || !(agentName in config.agents)) {
+      const existing = this.conversationWarnings.get(conversationId) ?? [];
+      existing.push({ code: 'AGENT_NOT_REGISTERED', params: { agent: agentName } });
+      this.conversationWarnings.set(conversationId, existing);
+      return;
+    }
+    // The main-thread agent is resolved once at query start, so this takes
+    // effect on the NEXT turn rather than mid-turn.
+    config.agent = agentName;
+  }
+
+  async listAgents(conversationId: string): Promise<HarnessAgentInfo[]> {
+    return this.conversationAgents.get(conversationId) ?? [];
   }
 
   async listConversations(): Promise<string[]> {
@@ -996,6 +1084,133 @@ export class ClaudeAgentProvider implements IAgentHarness {
   }
 
   /**
+   * HKS-01 — bridge the domain hook surface onto the Claude SDK's
+   * `Options.hooks`. Only the six phases the domain models are wired; the SDK
+   * exposes 31 events and the rest stay unused.
+   */
+  private buildClaudeHooks(bridge: HookBridge): ClaudeOptions['hooks'] {
+    const hooks: Record<string, unknown[]> = {};
+    const wrap = (fn: (input: Record<string, unknown>) => Promise<Record<string, unknown> | void>) => [
+      { hooks: [async (input: unknown) => (await fn(input as Record<string, unknown>)) ?? {}] },
+    ];
+
+    if (bridge.onPreToolUse) {
+      hooks['PreToolUse'] = wrap(async (input) => {
+        const out = await bridge.onPreToolUse!(
+          {
+            timestamp: Date.now(),
+            cwd: String(input['cwd'] ?? ''),
+            toolName: String(input['tool_name'] ?? ''),
+            toolArgs: input['tool_input'],
+          },
+          { sessionId: String(input['session_id'] ?? '') },
+        );
+        if (!out) return;
+        return {
+          ...(out.suppressOutput !== undefined ? { suppressOutput: out.suppressOutput } : {}),
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            ...(out.decision ? { permissionDecision: out.decision } : {}),
+            ...(out.reason ? { permissionDecisionReason: out.reason } : {}),
+            ...(out.modifiedArgs ? { updatedInput: out.modifiedArgs } : {}),
+            ...(out.additionalContext ? { additionalContext: out.additionalContext } : {}),
+          },
+        };
+      });
+    }
+
+    if (bridge.onPostToolUse) {
+      hooks['PostToolUse'] = wrap(async (input) => {
+        const out = await bridge.onPostToolUse!(
+          {
+            timestamp: Date.now(),
+            cwd: String(input['cwd'] ?? ''),
+            toolName: String(input['tool_name'] ?? ''),
+            toolArgs: input['tool_input'],
+            toolResult: input['tool_response'],
+          },
+          { sessionId: String(input['session_id'] ?? '') },
+        );
+        if (!out) return;
+        return {
+          ...(out.suppressOutput !== undefined ? { suppressOutput: out.suppressOutput } : {}),
+          hookSpecificOutput: {
+            hookEventName: 'PostToolUse',
+            ...(out.additionalContext ? { additionalContext: out.additionalContext } : {}),
+            ...(out.modifiedResult ? { updatedToolOutput: out.modifiedResult } : {}),
+          },
+        };
+      });
+    }
+
+    if (bridge.onUserPromptSubmitted) {
+      hooks['UserPromptSubmit'] = wrap(async (input) => {
+        const out = await bridge.onUserPromptSubmitted!(
+          {
+            timestamp: Date.now(),
+            cwd: String(input['cwd'] ?? ''),
+            prompt: String(input['prompt'] ?? ''),
+          },
+          { sessionId: String(input['session_id'] ?? '') },
+        );
+        if (!out) return;
+        return {
+          ...(out.suppressOutput !== undefined ? { suppressOutput: out.suppressOutput } : {}),
+          hookSpecificOutput: {
+            hookEventName: 'UserPromptSubmit',
+            ...(out.additionalContext ? { additionalContext: out.additionalContext } : {}),
+          },
+        };
+      });
+    }
+
+    if (bridge.onSessionStart) {
+      hooks['SessionStart'] = wrap(async (input) => {
+        const raw = String(input['source'] ?? 'startup');
+        const source = raw === 'resume' ? 'resume' : raw === 'startup' ? 'startup' : 'new';
+        const out = await bridge.onSessionStart!(
+          { timestamp: Date.now(), cwd: String(input['cwd'] ?? ''), source },
+          { sessionId: String(input['session_id'] ?? '') },
+        );
+        if (!out?.additionalContext) return;
+        return {
+          hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: out.additionalContext },
+        };
+      });
+    }
+
+    if (bridge.onSessionEnd) {
+      hooks['SessionEnd'] = wrap(async (input) => {
+        await bridge.onSessionEnd!(
+          { timestamp: Date.now(), cwd: String(input['cwd'] ?? ''), reason: 'complete' },
+          { sessionId: String(input['session_id'] ?? '') },
+        );
+      });
+    }
+
+    if (bridge.onErrorOccurred) {
+      hooks['PostToolUseFailure'] = wrap(async (input) => {
+        const out = await bridge.onErrorOccurred!(
+          {
+            timestamp: Date.now(),
+            cwd: String(input['cwd'] ?? ''),
+            error: String(input['error'] ?? ''),
+            errorContext: 'tool_execution',
+            recoverable: true,
+          },
+          { sessionId: String(input['session_id'] ?? '') },
+        );
+        if (!out?.userNotification) return;
+        return {
+          hookSpecificOutput: { hookEventName: 'PostToolUseFailure', additionalContext: out.userNotification },
+        };
+      });
+    }
+
+    return hooks as ClaudeOptions['hooks'];
+  }
+
+  /**
    * Builds SDK query options from stored conversation config.
    *
    * @param turnOptions PLN-01 — per-turn overrides from `sendPrompt`. An
@@ -1003,8 +1218,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
    *   HITL-06 `'default'` coercion below, otherwise selecting Plan mode on a
    *   chat that also has a domain permission handler would silently downgrade
    *   to normal permission prompting and writes would not be gated.
-   */
-  private buildQueryOptions(
+   */  private buildQueryOptions(
     config: StoredConversationConfig,
     turnOptions?: SendPromptOptions,
   ): ClaudeOptions {
@@ -1080,6 +1294,22 @@ export class ClaudeAgentProvider implements IAgentHarness {
     // Custom agents
     if (config.agents) {
       options.agents = config.agents as ClaudeOptions['agents'];
+    }
+
+    // Skills — the only place Claude turns skills on. Exact names only.
+    if (config.skills && config.skills.length > 0) {
+      options.skills = config.skills;
+    }
+
+    // Main-thread agent. Replaces the base system prompt, so callers opt in
+    // explicitly (`agentProjection: 'native'`).
+    if (config.agent) {
+      options.agent = config.agent;
+    }
+
+    // HKS-01 — synchronous hook bridge, previously Copilot-only.
+    if (config.hooks) {
+      options.hooks = this.buildClaudeHooks(config.hooks as HookBridge);
     }
 
     // ── Child environment ──────────────────────────────────────────
@@ -1474,6 +1704,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
     this.conversations.delete(conversationId);
     this.conversationMessages.delete(conversationId);
+    this.conversationWarnings.delete(conversationId);
+    this.conversationAgents.delete(conversationId);
     activeSessions.add(-1);
   }
 }

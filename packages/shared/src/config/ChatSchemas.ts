@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import { BrowserConfigSchema } from './BrowserConfigSchema.js';
+import { McpServerConfigSchema, AgentOverridesSchema } from './AgentSchemas.js';
 import { AGENT_MODES, coerceAgentMode, type AgentMode } from '../types/AgentMode.js';
 
 /**
@@ -36,14 +37,10 @@ const AgentHarnessConfigSchema = z.object({
   }).optional(),
   systemPromptAppend: z.string().optional(),
   streaming: z.boolean().optional(),
-  mcpServers: z.record(z.object({
-    type: z.enum(['http', 'stdio']),
-    url: z.string().optional(),
-    command: z.string().optional(),
-    args: z.array(z.string()).optional(),
-  })).optional(),
+  mcpServers: z.record(McpServerConfigSchema).optional(),
   availableTools: z.array(z.string()).optional(),
   excludedTools: z.array(z.string()).optional(),
+  excludedMcpServerIds: z.array(z.string()).optional(),
   skillDirectories: z.array(z.string()).optional(),
   disabledSkills: z.array(z.string()).optional(),
   customAgents: z.array(z.object({
@@ -78,6 +75,10 @@ const AgentHarnessConfigSchema = z.object({
    * plan-mode system reminder. Copilot approximates this via the system message.
    */
   planModeInstructions: z.string().max(20_000).optional(),
+  /** Portable `scope:slug` ref of the agent driving this scope. */
+  agentRef: z.string().max(128).optional(),
+  /** Additive capability delta layered on top of the bound agent. */
+  agentOverrides: AgentOverridesSchema.optional(),
 }).partial();
 
 /** Zod schema for creating a Chat */
@@ -129,6 +130,10 @@ export const CreateChatSchema = z.object({
   defaultAgentMode: AgentModeSchema.optional(),
   /** Chat-scoped permission policy (defaults to `bypassPermissions`). */
   permissionMode: z.enum(['bypassPermissions', 'default', 'acceptEdits', 'plan']).optional(),
+  /** Portable `scope:slug` ref of the agent that should drive this chat. */
+  agentRef: z.string().max(128).optional(),
+  /** Additive capability delta layered on top of the bound agent. */
+  agentOverrides: AgentOverridesSchema.optional(),
 });
 
 // ────────────────────────────────────────────────────────────────

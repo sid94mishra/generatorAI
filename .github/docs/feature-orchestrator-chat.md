@@ -3,6 +3,13 @@
 > A chat can be put into **Orchestrate mode**, in which the agent decomposes a request and delegates sub-tasks to **background agents**. Each background agent is a *real* GeneratorAI Chat — with its own session, its own stream, its own history and its own model — not an in-process SDK subagent. Workers are visible, clickable and resumable; the orchestrator consolidates their results into one answer.
 >
 > Distinct from the **workflow orchestrator** (`generatorai orchestrator …`, DAG runs). This doc is about the *chat* feature.
+>
+> **Agents (AGT-01).** An Agent with `role: 'orchestrator'` turns a chat into an
+> orchestrator automatically and always has the orchestration tool group forced
+> on. Its `orchestration.teamAgentRefs` restricts which agents it may spawn —
+> empty means "any enabled non-orchestrator agent". Workers are spawned with a
+> `agentRef` on the task brief, and the `list_available_agents` tool is exposed
+> only when a team is discoverable. See [feature-agents.md](./feature-agents.md).
 
 ---
 

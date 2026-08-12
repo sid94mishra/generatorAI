@@ -87,8 +87,15 @@ export class WorkflowDefinitionService {
     params: UpdateWorkflowDefinitionParams,
   ): Promise<WorkflowDefinition> {
     const existing = await this.definitionRepo.getById(id);
+    // `null` is the wire form for "clear the binding"; the entity uses undefined.
+    const { defaultAgentRef, ...rest } = params;
     const updated = await this.definitionRepo.update(id, {
-      ...params,
+      ...rest,
+      ...(defaultAgentRef === null
+        ? { defaultAgentRef: undefined }
+        : defaultAgentRef !== undefined
+          ? { defaultAgentRef }
+          : {}),
       version: existing.version + 1,
     });
     this.dagScheduler?.clearCache(id);

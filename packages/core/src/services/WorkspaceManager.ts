@@ -89,7 +89,10 @@ export class WorkspaceManager {
     }
 
     const id = randomUUID();
+    // The workspace root is ALWAYS managed: plans, artifacts, orchestrator state
+    // and task scratch live here and must never be written into a user's repo.
     const rootPath = path.join(this.config.workspacesDir, 'executions', params.ownerId);
+    const codeRoot = params.codeRootOverride?.trim() || undefined;
     const now = new Date();
 
     const workspace: ExecutionWorkspace = {
@@ -98,6 +101,7 @@ export class WorkspaceManager {
       ownerId: params.ownerId,
       projectId: params.projectId,
       rootPath,
+      ...(codeRoot ? { codeRoot } : {}),
       status: 'creating',
       gitEnabled: params.gitEnabled ?? this.config.defaultGitEnabled,
       useWorktree: params.useWorktree ?? true,
@@ -120,6 +124,13 @@ export class WorkspaceManager {
       // Initialize git repository if enabled
       if (workspace.gitEnabled) {
         await this.initGitRepo(rootPath);
+        // The code root needs its own repo or nothing can diff it — and repo
+        // discovery would otherwise auto-init each code-bearing subdirectory
+        // (src/, test/, …) as a separate repo and drop a .gitignore in each.
+        // `git init` is a no-op on an existing repository.
+        if (codeRoot && codeRoot !== rootPath) {
+          await this.initCodeRootRepo(codeRoot);
+        }
       }
 
       // Write workspace manifest
@@ -144,9 +155,12 @@ export class WorkspaceManager {
    * is consistent — the Copilot SDK resolves absolute paths from cwd, and
    * using a subdirectory causes view/edit tools to fail when the model
    * constructs absolute paths from relative glob results.
+   *
+   * `codeRoot` wins when set: that is the tree the user asked the agent to
+   * work in, and it is what diff and checkpoints track.
    */
   getWorkingDirectory(workspace: ExecutionWorkspace): string {
-    return workspace.rootPath;
+    return workspace.codeRoot ?? workspace.rootPath;
   }
 
   /**
@@ -521,6 +535,42 @@ export class WorkspaceManager {
       JSON.stringify(manifest, null, 2),
       'utf-8',
     );
+  }
+
+  /**
+   * Ensure the agent's code root is a repository, without touching its contents.
+   *
+   * Unlike `initGitRepo` this writes no `.gitignore`: the code root is the
+   * user's own folder and may already have one.
+   */
+  private async initCodeRootRepo(codeRoot: string): Promise<void> {
+    try {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      const opts = { cwd: codeRoot, timeout: 15_000 };
+      await execFileAsync('git', ['init'], opts);
+      await execFileAsync('git', ['config', 'user.email', 'generatorai@local'], opts);
+      await execFileAsync('git', ['config', 'user.name', 'GeneratorAI'], opts);
+
+      // A repo with no commits has no baseline, so every diff comes back empty.
+      // Only seed one when the history is genuinely empty — never rewrite a
+      // user's existing repository.
+      try {
+        await execFileAsync('git', ['rev-parse', '--verify', 'HEAD'], opts);
+      } catch {
+        await execFileAsync('git', ['add', '-A'], opts);
+        await execFileAsync(
+          'git',
+          ['commit', '-m', 'GeneratorAI baseline', '--allow-empty', '--allow-empty-message'],
+          opts,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `[WorkspaceManager] Could not initialise git in code root ${codeRoot}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**

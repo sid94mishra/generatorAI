@@ -128,6 +128,7 @@ export function createWorkflowScriptRoutes(container: Container): Router {
             : variables,
           harnessConfigOverrides: stage.config.harnessConfigOverrides,
           agentName: stage.config.agentName,
+          agentRef: stage.config.agentRef,
           contextFilter: stage.config.contextFilter,
           // SCRIPT-2: forward contextSources (.contextFrom([...]) in scripts) —
           // previously dropped here, so a script's explicit context wiring was
@@ -260,6 +261,7 @@ export function createWorkflowScriptRoutes(container: Container): Router {
             : resolvedVars,
           harnessConfigOverrides: stage.config.harnessConfigOverrides,
           agentName: stage.config.agentName,
+          agentRef: stage.config.agentRef,
           contextFilter: stage.config.contextFilter,
           // SCRIPT-2: forward contextSources (.contextFrom([...]) in scripts) —
           // previously dropped here, so a script's explicit context wiring was

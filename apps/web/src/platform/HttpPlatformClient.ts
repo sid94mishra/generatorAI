@@ -21,6 +21,24 @@ import type {
   PlanRevision,
 } from '@generatorai/shared';
 import type { Artifact } from '@generatorai/shared';
+// AGT-01 — first-class agents
+import type {
+  Agent,
+  AgentScope,
+  AgentRole,
+  AgentOverrides,
+  CreateAgentParams,
+  UpdateAgentParams,
+  ResolvedAgentProjection,
+  ResolutionWarning,
+} from '@generatorai/shared';
+
+/** Response of `GET /api/agents/:id/usage`. */
+export interface AgentUsageResponse {
+  chats: Array<{ id: string; name: string }>;
+  stages: Array<{ id: string; name: string; workflowDefinitionId: string }>;
+  workflows: Array<{ id: string; name: string }>;
+}
 import type { CreateSessionParams } from '@generatorai/shared';
 import type { PersistedEvent, AgentEventKind } from '@generatorai/shared';
 import type {
@@ -1619,6 +1637,116 @@ export class HttpPlatformClient implements IPlatformClient {
   // ── System MCP Servers ──
   async listSystemMcpServers(): Promise<any[]> {
     return apiFetch<any[]>(`${this.baseUrl}/api/system/mcp-servers`);
+  }
+
+  // ── Agents API ──
+  // Reading needs `read:workflows`; authoring needs `admin:settings`
+  // (see packages/auth/src/routePolicy.ts → prefix '/agents').
+
+  async listAgents(filter?: {
+    scope?: AgentScope;
+    role?: AgentRole;
+    projectId?: string;
+    q?: string;
+    enabledOnly?: boolean;
+  }): Promise<Agent[]> {
+    const params = new URLSearchParams();
+    if (filter?.scope) params.set('scope', filter.scope);
+    if (filter?.role) params.set('role', filter.role);
+    if (filter?.projectId) params.set('projectId', filter.projectId);
+    if (filter?.q) params.set('q', filter.q);
+    if (filter?.enabledOnly) params.set('enabledOnly', '1');
+    const qs = params.toString();
+    return apiFetch<Agent[]>(`${this.baseUrl}/api/agents${qs ? `?${qs}` : ''}`);
+  }
+
+  /** Picker list: a project agent shadows a global one with the same slug. */
+  async listSelectableAgents(projectId?: string): Promise<Agent[]> {
+    const params = new URLSearchParams({ selectable: '1' });
+    if (projectId) params.set('projectId', projectId);
+    return apiFetch<Agent[]>(`${this.baseUrl}/api/agents?${params.toString()}`);
+  }
+
+  async getAgent(id: string): Promise<Agent> {
+    return apiFetch<Agent>(`${this.baseUrl}/api/agents/${encodeURIComponent(id)}`);
+  }
+
+  async createAgent(params: CreateAgentParams): Promise<Agent & { warnings?: ResolutionWarning[] }> {
+    return apiFetch<Agent & { warnings?: ResolutionWarning[] }>(`${this.baseUrl}/api/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+  }
+
+  async updateAgent(
+    id: string,
+    params: UpdateAgentParams,
+  ): Promise<Agent & { warnings?: ResolutionWarning[] }> {
+    return apiFetch<Agent & { warnings?: ResolutionWarning[] }>(
+      `${this.baseUrl}/api/agents/${encodeURIComponent(id)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      },
+    );
+  }
+
+  /** Without `force` the server answers 409 when the agent is still bound. */
+  async deleteAgent(id: string, force = false): Promise<{ deleted: boolean; soft: boolean }> {
+    return apiFetch<{ deleted: boolean; soft: boolean }>(
+      `${this.baseUrl}/api/agents/${encodeURIComponent(id)}${force ? '?force=1' : ''}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /**
+   * Where the agent is bound. Returns the ENTITIES, not counts — the delete
+   * dialog needs to name what will be affected, and a bare number cannot.
+   */
+  async getAgentUsage(id: string): Promise<AgentUsageResponse> {
+    return apiFetch<AgentUsageResponse>(`${this.baseUrl}/api/agents/${encodeURIComponent(id)}/usage`);
+  }
+
+  async exportAgent(id: string): Promise<string> {
+    const result = await apiFetch<{ markdown: string }>(
+      `${this.baseUrl}/api/agents/${encodeURIComponent(id)}/export`,
+      { method: 'POST' },
+    );
+    return result.markdown;
+  }
+
+  async importAgent(params: {
+    markdown: string;
+    scope?: AgentScope;
+    projectId?: string;
+    overwrite?: boolean;
+  }): Promise<Agent & { warnings?: ResolutionWarning[] }> {
+    return apiFetch<Agent & { warnings?: ResolutionWarning[] }>(`${this.baseUrl}/api/agents/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+  }
+
+  /**
+   * Effective capabilities for a binding (or an unsaved draft). The response is
+   * redacted server-side — MCP `env`/`headers` never reach the browser.
+   */
+  async resolveAgentPreview(body: {
+    agentRef?: string;
+    overrides?: AgentOverrides;
+    projectId?: string;
+    harnessType?: 'copilot' | 'claude-agent';
+    scope: 'chat' | 'stage' | 'worker';
+    draft?: Record<string, unknown>;
+  }): Promise<ResolvedAgentProjection> {
+    return apiFetch<ResolvedAgentProjection>(`${this.baseUrl}/api/agents/resolve-preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
   }
 
   // ── Project Worktree API ──

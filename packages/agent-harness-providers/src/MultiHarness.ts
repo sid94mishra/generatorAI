@@ -24,6 +24,8 @@ import type {
   AttachmentRef,
   SendPromptOptions,
   AgentEvent,
+  ConversationWarning,
+  HarnessAgentInfo,
 } from '@generatorai/core';
 import type { HarnessRegistry } from './HarnessRegistry.js';
 import { ALL_HARNESS_TYPES } from './HarnessRegistry.js';
@@ -171,6 +173,21 @@ export class MultiHarness implements IAgentHarness {
     await adapter.destroyConversation(conversationId);
     this.owners.delete(conversationId);
     await this.store?.remove(conversationId).catch(() => undefined);
+  }
+
+  getConversationWarnings(conversationId: string): ConversationWarning[] {
+    const adapter = this.registry.peek(this.ownerOf(conversationId));
+    return adapter?.getConversationWarnings(conversationId) ?? [];
+  }
+
+  async selectAgent(conversationId: string, agentName: string): Promise<void> {
+    const adapter = await this.adapterFor(conversationId);
+    return adapter.selectAgent(conversationId, agentName);
+  }
+
+  async listAgents(conversationId: string): Promise<HarnessAgentInfo[]> {
+    const adapter = await this.adapterFor(conversationId);
+    return adapter.listAgents(conversationId);
   }
 
   // ── Messaging ──

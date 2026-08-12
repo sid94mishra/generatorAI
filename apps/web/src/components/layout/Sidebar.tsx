@@ -8,7 +8,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-import { Settings, Zap, MessageSquare, GitBranch, LayoutDashboard, RefreshCw, FolderKanban, FileCode2, PanelLeftClose } from 'lucide-react';
+import { Settings, Zap, MessageSquare, GitBranch, LayoutDashboard, RefreshCw, FolderKanban, FileCode2, PanelLeftClose, Bot } from 'lucide-react';
 import { Kbd } from '@/components/ui/index.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
@@ -22,6 +22,7 @@ export function Sidebar() {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
 
   const isChatRoute = location.pathname.startsWith('/chats');
+  const isAgentRoute = location.pathname.startsWith('/agents');
   const isWorkflowRoute = location.pathname.startsWith('/workflows');
   const isAutomationRoute = location.pathname.startsWith('/automations');
   const isProjectRoute = location.pathname.startsWith('/projects');
@@ -79,6 +80,7 @@ export function Sidebar() {
         {navItem('/', 'Dashboard', LayoutDashboard, location.pathname === '/')}
         {navItem('/projects', 'Projects', FolderKanban, isProjectRoute)}
         {navItem('/chats', 'Chats', MessageSquare, isChatRoute)}
+        {navItem('/agents', 'Agents', Bot, isAgentRoute)}
         {navItem('/workflows', 'Workflows', GitBranch, isWorkflowRoute)}
         {navItem('/scripts', 'Scripts', FileCode2, isScriptRoute)}
         {navItem('/automations', 'Automations', RefreshCw, isAutomationRoute)}

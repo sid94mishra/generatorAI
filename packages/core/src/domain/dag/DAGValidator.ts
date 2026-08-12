@@ -36,8 +36,12 @@ export function validateDAG(
   // almost always a misconfiguration (forgot to add a prompt). It's only a
   // warning, not an error, because a stage can be a placeholder while the
   // workflow is in-progress in the builder UI.
+  //
+  // A stage bound to an agent is exempt: the agent's instructions are the
+  // instruction, so the stage is complete without a separate prompt.
   for (const stage of stages) {
-    if (!stage.prompts || stage.prompts.length === 0) {
+    const hasAgent = !!stage.agentRef || !!stage.agentName;
+    if ((!stage.prompts || stage.prompts.length === 0) && !hasAgent) {
       warnings.push(`Stage '${stage.name}' has no prompts \u2014 it will not produce any output`);
     }
   }

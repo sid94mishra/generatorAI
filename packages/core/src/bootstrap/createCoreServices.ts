@@ -64,6 +64,9 @@ import { DataSourceResolver } from '../services/DataSourceResolver.js';
 import { HitlService } from '../services/HitlService.js';
 import { AgentInteractionService } from '../services/AgentInteractionService.js';
 import { PlanService } from '../services/PlanService.js';
+import type { AgentService } from '../services/AgentService.js';
+import type { AgentResolver } from '../services/AgentResolver.js';
+import type { AgentStagingService } from '../services/AgentStagingService.js';
 import type { IPlanRepository, IAgentInteractionRepository } from '../domain/ports/IPlanRepository.js';
 import { Semaphore } from '../utils/Semaphore.js';
 import type { GitManager } from '../infrastructure/GitManager.js';
@@ -137,6 +140,17 @@ export interface CoreServicesInputs {
    */
   planRepo?: IPlanRepository;
   agentInteractionRepo?: IAgentInteractionRepository;
+
+  /**
+   * AGT-01 — first-class agents. Supplied pre-constructed because
+   * `AgentService` needs an artifact catalog and a model-list probe, both of
+   * which are platform concerns the composition-root already owns. When
+   * omitted, agent bindings simply do not resolve and every surface behaves
+   * exactly as it did before agents existed.
+   */
+  agentResolver?: AgentResolver;
+  agentService?: AgentService;
+  agentStaging?: AgentStagingService;
 }
 
 /**
@@ -178,6 +192,10 @@ export interface CoreServices {
   /** PLN-01 — present only when the plan repositories were supplied. */
   planService?: PlanService;
   agentInteractionService?: AgentInteractionService;
+  /** AGT-01 — present only when the caller supplied them. */
+  agentService?: AgentService;
+  agentResolver?: AgentResolver;
+  agentStaging?: AgentStagingService;
 }
 
 export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
@@ -391,6 +409,18 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   // through a setter to avoid widening an already long constructor.
   if (planService) stageExecutionService.setPlanService(planService);
 
+  // AGT-01 — late-wire the agent graph exactly where the server's
+  // composition-root does, so an SDK embedder that supplies the services gets
+  // identical behaviour instead of a half-enabled feature.
+  if (inputs.agentResolver) {
+    stageExecutionService.setAgentServices(inputs.agentResolver, inputs.agentStaging);
+    if (inputs.chatExtensions) {
+      inputs.chatExtensions.agentResolver = inputs.agentResolver;
+      if (inputs.agentStaging) inputs.chatExtensions.agentStaging = inputs.agentStaging;
+    }
+  }
+  if (inputs.agentService) orchestratorService.setAgentService(inputs.agentService);
+
   const workflowRunService = new WorkflowRunService(
     workflowRunRepo,
     stageRunRepo,
@@ -480,6 +510,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     hitlService,
     ...(planService ? { planService } : {}),
     ...(agentInteractionService ? { agentInteractionService } : {}),
-    ...(planService ? { planService } : {}),
-    ...(agentInteractionService ? { agentInteractionService } : {}),  };
+    ...(inputs.agentService ? { agentService: inputs.agentService } : {}),
+    ...(inputs.agentResolver ? { agentResolver: inputs.agentResolver } : {}),
+    ...(inputs.agentStaging ? { agentStaging: inputs.agentStaging } : {}),
+  };
 }

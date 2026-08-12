@@ -27,17 +27,19 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
 
   const isLoading = systemLoading || projectLoading;
 
-  // Merge system and project skills, de-duplicating by id
+  // Merge system and project skills, de-duplicating by NAME.
+  //
+  // `disabledSkills` is a list of skill NAMES on the wire (that is what the
+  // Copilot SDK's `disabledSkills` field takes), so de-duplicating by `id`
+  // left two rows sharing one name: toggling either appeared to toggle both,
+  // and "deselect all" produced duplicate entries. A project skill shadows the
+  // system skill of the same name, matching server-side precedence.
   const allSkills = useMemo(() => {
-    const seen = new Set<string>();
-    const merged = [];
+    const byName = new Map<string, { id: string; name: string; description?: string; source: string }>();
     for (const s of [...(systemSkills ?? []), ...(projectSkills ?? [])]) {
-      if (!seen.has(s.id)) {
-        seen.add(s.id);
-        merged.push(s);
-      }
+      byName.set(s.name, s);
     }
-    return merged;
+    return [...byName.values()];
   }, [systemSkills, projectSkills]);
 
   const currentOverrides = stage.harnessConfigOverrides as Partial<HarnessConfig> | undefined;
@@ -129,7 +131,7 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
           const isEnabled = !disabledSkills.has(skill.name);
           return (
             <label
-              key={skill.id}
+              key={skill.name}
               className={cn(
                 'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-xs cursor-pointer transition-all',
                 isEnabled

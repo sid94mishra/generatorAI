@@ -18,7 +18,17 @@ import type { IAgentHarness, HarnessModel } from '../../domain/ports/IAgentHarne
 import type { EventBus } from '../../events/EventBus.js';
 import type { ChatManagementService } from '../ChatManagementService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
+import type { Agent } from '@generatorai/shared';
 import { WORKER_SYSTEM_PROMPT, renderBriefMessage } from './prompts.js';
+
+/**
+ * Narrow view of AgentService. Structural rather than a direct import so the
+ * orchestrator does not participate in the ChatManagementService cycle.
+ */
+export interface AgentServiceLike {
+  listSelectable(projectId?: string): Promise<Agent[]>;
+  getByRef(ref: string): Promise<Agent | null>;
+}
 
 export interface OrchestratorConfig {
   /** Max total workers a single orchestrator may spawn. */
@@ -91,6 +101,7 @@ export class OrchestratorService {
 
   private chatManagementService!: ChatManagementService;
   private workspaceManager?: WorkspaceManager;
+  private agentService?: AgentServiceLike;
 
   constructor(
     private chatRepo: IChatRepository,
@@ -109,6 +120,30 @@ export class OrchestratorService {
   /** Late-bind WorkspaceManager (for the shared-workspace scratchpad). */
   setWorkspaceManager(wm: WorkspaceManager): void {
     this.workspaceManager = wm;
+  }
+
+  /** Late-bind AgentService so workers can be driven by a custom agent. */
+  setAgentService(svc: AgentServiceLike): void {
+    this.agentService = svc;
+  }
+
+  /**
+   * Agents this orchestrator may assign to a worker. When the orchestrator is
+   * itself agent-driven and declares a team, the list is restricted to it.
+   */
+  async listAssignableAgents(
+    parentChatId: string,
+  ): Promise<Array<{ ref: string; name: string; description: string }>> {
+    if (!this.agentService) return [];
+    const parent = await this.chatRepo.getById(parentChatId).catch(() => null);
+    const selectable = await this.agentService.listSelectable(parent?.projectId);
+    const team = parent?.agentRef
+      ? (await this.agentService.getByRef(parent.agentRef))?.orchestration?.teamAgentRefs ?? []
+      : [];
+    const pool = team.length > 0
+      ? selectable.filter((a) => team.includes(a.ref))
+      : selectable.filter((a) => a.role !== 'orchestrator');
+    return pool.map((a) => ({ ref: a.ref, name: a.name, description: a.description }));
   }
 
   getConfig(): OrchestratorConfig {
@@ -153,6 +188,22 @@ export class OrchestratorService {
 
     const taskIndex = existing.length;
 
+    // A worker agent must be one this orchestrator is allowed to spawn.
+    let workerAgentRef: string | undefined;
+    if (brief.agentRef) {
+      const assignable = await this.listAssignableAgents(parentChatId);
+      const hit = assignable.find((a) => a.ref === brief.agentRef);
+      if (!hit) {
+        return {
+          ok: false,
+          error:
+            `Agent "${brief.agentRef}" is not assignable from this orchestrator. ` +
+            `Call list_available_agents to see valid refs, or omit agentRef.`,
+        };
+      }
+      workerAgentRef = hit.ref;
+    }
+
     // Warm-first: if a wave leader for this parent is still priming, wait
     // (bounded) for it to start producing before spawning more, so the shared
     // tools+system prefix is cached first. The wave resets once all workers
@@ -193,6 +244,13 @@ export class OrchestratorService {
         // background-agent tool set (no recursive spawning in v1). The
         // `parentChatId` guard in createChat also enforces this.
         orchestratorMode: false,
+        // Without this a worker sharing the orchestrator's workspace falls back
+        // to the managed execution directory and writes where the orchestrator
+        // never looks — which reads as "the worker did nothing".
+        ...(parent.gitRepositories?.length ? { gitRepositories: parent.gitRepositories } : {}),
+        // The agent instructions are appended AFTER the constant worker prompt, so
+        // the shared cache prefix survives for workers that share an agent.
+        ...(workerAgentRef ? { agentRef: workerAgentRef } : {}),
         harnessConfig: {
           ...(workerModel ? { model: workerModel } : {}),
           systemMessage: { mode: 'append', content: WORKER_SYSTEM_PROMPT },
@@ -267,7 +325,14 @@ export class OrchestratorService {
 
     // Kick off the worker turn (fire-and-forget streaming — do NOT await the
     // full turn here; the orchestrator collects results with check_*).
-    const briefMessage = renderBriefMessage(brief);
+    // Scratch goes to the MANAGED root so worker notes never litter the
+    // user's repository, which is where the code deliverables land.
+    let taskDir: string | undefined;
+    if (this.workspaceManager && parent.workspaceId) {
+      const ws = await this.workspaceManager.getExecutionWorkspace(parent.workspaceId).catch(() => null);
+      if (ws) taskDir = path.join(ws.rootPath, 'tasks', brief.taskName);
+    }
+    const briefMessage = renderBriefMessage(brief, taskDir);
     this.chatManagementService.sendPrompt(record.taskId, briefMessage).catch((err) => {
       record.status = 'failed';
       record.lastError = err instanceof Error ? err.message : String(err);
@@ -656,7 +721,7 @@ export class OrchestratorService {
           model: t.model,
           status: t.status,
           reviewRounds: t.reviewRounds,
-          artifactDir: `tasks/${t.taskName}`,
+          artifactDir: path.join(ws.rootPath, 'tasks', t.taskName),
         }));
       const state = { orchestratorChatId: parentChatId, updatedAt: new Date().toISOString(), tasks };
       await fs.writeFile(path.join(dir, 'state.json'), JSON.stringify(state, null, 2), 'utf-8');

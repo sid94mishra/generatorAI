@@ -2,6 +2,19 @@
 
 > These are the "tool surfaces" a stage can configure. All four kinds plug into the harness via `CreateConversationParams` and are mergeable at four scopes (system, project, workflow, stage).
 
+> **See also — [feature-agents.md](./feature-agents.md).** The **first-class Agent**
+> entity (AGT-01) sits on top of this catalog: it bundles instructions with a fixed
+> set of skill ids, MCP server ids and capability groups, and is bound to a chat
+> or stage by a portable `scope:slug` ref. This document describes the raw
+> assets; that one describes how an Agent selects from them and how the union
+> algebra combines an agent with binding-site additions.
+>
+> A stage now has **two** ways to reach an agent:
+> - `stage.agentRef` — a first-class Agent (preferred; brings its own skills,
+>   MCP servers and tool policy).
+> - `stage.agentName` — the legacy artifact-name lookup below, still resolved
+>   for backwards compatibility.
+
 ---
 
 ## 1. The four kinds

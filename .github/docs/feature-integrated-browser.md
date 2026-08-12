@@ -16,10 +16,10 @@ A single Chromium instance (headed or headless) bound 1:1 to an [`ExecutionWorks
 
 Two host implementations exist behind the `IBrowserBridge` port:
 
-| Bridge | When it's used | Chromium runs where |
-|---|---|---|
-| `ServerPlaywrightHost` | Web browser + server-only deployments | Playwright-launched Chromium **inside the server process** (headless by default; head-full when `visibility: 'visible'`). Frames are streamed to the SPA as MJPEG. |
-| `ElectronBridgeAdapter` | Desktop app when `GENERATORAI_DESKTOP_NATIVE_BROWSER=1` | Electron's **own Chromium** hosts a `WebContentsView` in the desktop main process. The renderer sees native pixels; the agent attaches via Electron's `--remote-debugging-port`. |
+| Bridge                    | When it's used                                           | Chromium runs where                                                                                                                                                                       |
+| ------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ServerPlaywrightHost`  | Web browser + server-only deployments                    | Playwright-launched Chromium**inside the server process** (headless by default; head-full when `visibility: 'visible'`). Frames are streamed to the SPA as MJPEG.                 |
+| `ElectronBridgeAdapter` | Desktop app when`GENERATORAI_DESKTOP_NATIVE_BROWSER=1` | Electron's**own Chromium** hosts a `WebContentsView` in the desktop main process. The renderer sees native pixels; the agent attaches via Electron's `--remote-debugging-port`. |
 
 The composition root tries `ElectronBridgeAdapter` first, then falls back to `ServerPlaywrightHost`. All downstream code (services, routes, SPA) is bridge-agnostic.
 
@@ -120,22 +120,22 @@ Per-workspace **FIFO emit queue** (`emitQueue: Promise<unknown>` on each `Sessio
 
 ### REST endpoints (`/api/workspaces/:id/browser`)
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/start` | Ensure + optionally seed with `{ url, config }` |
-| `POST` | `/stop` | Terminate session, clear artefacts optional |
-| `POST` | `/actions` | Discriminated union: `navigate` \| `reload` \| `back` \| `forward` \| `screenshot` \| `snapshot` \| `inspector` |
-| `POST` | `/selection` | **Inspector script → server**: element selection payload from injected `INSPECTOR_SCRIPT` |
-| `POST` | `/attach` \| `/detach` | Flip `attachedToChat` (disabled while `agentBusy`) |
-| `POST` | `/capture` | Rectangle crop from current viewport (returns PNG) |
-| `POST` | `/input` | Legacy REST input dispatch (superseded by WS but kept for tests) |
-| `POST` | `/resize` | Update viewport |
-| `GET`  | `/descriptor` | Current mode / status / URL / `attachedToChat` |
-| `GET`  | `/snapshots` | List `browser_*` artefacts for this workspace |
-| `GET`  | `/scroll` | Absolute + max scroll positions |
-| `GET`  | `/screencast.jpg` | Single JPEG frame (used as `<img>` fallback) |
-| `GET`  | `/screencast.mjpg` | Long-lived MJPEG stream (legacy — WS is primary) |
-| `GET`  | `/files/*` | Serve a persisted browser artefact by relative path |
+| Method   | Path                       | Purpose                                                                                                                      |
+| -------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `POST` | `/start`                 | Ensure + optionally seed with`{ url, config }`                                                                             |
+| `POST` | `/stop`                  | Terminate session, clear artefacts optional                                                                                  |
+| `POST` | `/actions`               | Discriminated union:`navigate` \| `reload` \| `back` \| `forward` \| `screenshot` \| `snapshot` \| `inspector` |
+| `POST` | `/selection`             | **Inspector script → server**: element selection payload from injected `INSPECTOR_SCRIPT`                           |
+| `POST` | `/attach` \| `/detach` | Flip`attachedToChat` (disabled while `agentBusy`)                                                                        |
+| `POST` | `/capture`               | Rectangle crop from current viewport (returns PNG)                                                                           |
+| `POST` | `/input`                 | Legacy REST input dispatch (superseded by WS but kept for tests)                                                             |
+| `POST` | `/resize`                | Update viewport                                                                                                              |
+| `GET`  | `/descriptor`            | Current mode / status / URL /`attachedToChat`                                                                              |
+| `GET`  | `/snapshots`             | List`browser_*` artefacts for this workspace                                                                               |
+| `GET`  | `/scroll`                | Absolute + max scroll positions                                                                                              |
+| `GET`  | `/screencast.jpg`        | Single JPEG frame (used as`<img>` fallback)                                                                                |
+| `GET`  | `/screencast.mjpg`       | Long-lived MJPEG stream (legacy — WS is primary)                                                                            |
+| `GET`  | `/files/*`               | Serve a persisted browser artefact by relative path                                                                          |
 
 ### WebSocket transport (`/api/workspaces/:id/browser/stream`)
 
@@ -144,7 +144,7 @@ Registered via `noServer: true` in [apps/server/src/browser-ws.ts](../../apps/se
 - **Server → client (binary)** — one JPEG per frame, delivered as a WebSocket binary message. The server drives a self-clocked loop that calls `BrowserService.frame(workspaceId, { quality: 55 })` (which is `page.screenshot({ type: 'jpeg', quality })`) at a target **15 fps** with adaptive back-pressure: if `ws.bufferedAmount > 512 KB` the current frame is dropped rather than queued, so a stalled client can't cause seconds of stale frames to pile up. Empirically this delivers ~9–12 fps of *fresh* frames on a mid-range Windows laptop with a ~940 px viewport.
 
   > **Why frame-polling and not `Page.startScreencast`?** Both paths are implemented in `ServerPlaywrightHost.screencast()` (ref-counted fan-out for multiple consumers). In practice the CDP screencast events did not fire reliably across Playwright + Chromium version combinations on Windows headless, whereas `page.screenshot()` is consistently fast (30–70 ms per JPEG) and side-effect-free. The WS handler picks the reliable path; the fan-out iterator remains available for future callers.
-
+  >
 - **Client → server (text JSON)** — `BrowserInputEvent` union: `mouse.click`, `mouse.move`, `mouse.wheel`, `mouse.down/up`, `key.type`, `key.press`. Each connection has an `inputChain: Promise<void>` and every message is `.then()`-appended to it, so a rapid **click-then-type sequence reaches Chromium in strict issue order** — without this, the click's target-focus transition races the first keystroke and the browser routes text to the previously-focused element (URL bar / body). Combined with the click-settle delay (§10) this makes typing into DocSearch-style lazy modals reliable.
 
 Why WS (and not HTTP MJPEG): bypasses the Vite dev proxy's `multipart/x-mixed-replace` buffering + eliminates per-frame TLS/TCP handshake overhead + supports bidirectional input.
@@ -238,18 +238,18 @@ BrowserService.navigate(workspace, url, 'user')
 
 Event kinds published by `BrowserService` (all under `browser.*` in [`AgentEvent`](../../packages/shared/src/types/AgentEvent.ts)):
 
-| Kind | When |
-|---|---|
-| `browser.session_created` | After Chromium boots. Carries `mode: 'native' \| 'screencast'` + optional initial `url`. |
-| `browser.session_stopped` | On explicit stop / crash / idle-reap. |
-| `browser.session_updated` | On `attachedToChat` flip + other descriptor mutations. |
-| `browser.action_started` | Before every user/agent action (`navigate`, `click`, `type`, `screenshot`, `inspector on/off`, …). |
-| `browser.action_completed` | After each action, with `ok`, `durationMs`, `artifactId?`, `error?`. |
-| `browser.snapshot` | Whenever a `browser_*` artefact is persisted. |
-| `browser.selection` | Inspector picked an element (both automated and user-triggered). |
-| `browser.error` | Chromium crash / restart-cap hit / capacity refusal. |
+| Kind                         | When                                                                                                          |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `browser.session_created`  | After Chromium boots. Carries`mode: 'native' \| 'screencast'` + optional initial `url`.                    |
+| `browser.session_stopped`  | On explicit stop / crash / idle-reap.                                                                         |
+| `browser.session_updated`  | On`attachedToChat` flip + other descriptor mutations.                                                       |
+| `browser.action_started`   | Before every user/agent action (`navigate`, `click`, `type`, `screenshot`, `inspector on/off`, …). |
+| `browser.action_completed` | After each action, with`ok`, `durationMs`, `artifactId?`, `error?`.                                   |
+| `browser.snapshot`         | Whenever a`browser_*` artefact is persisted.                                                                |
+| `browser.selection`        | Inspector picked an element (both automated and user-triggered).                                              |
+| `browser.error`            | Chromium crash / restart-cap hit / capacity refusal.                                                          |
 
-All routed via `EventBus.emit(scopeSession=\`browser:<workspaceId>\`, event)`. The SPA subscribes to `scope=session&id=browser:<workspaceId>` to see them.
+All routed via `EventBus.emit(scopeSession=\`browser:<workspaceId></workspaceid>\`, event)`. The SPA subscribes to `scope=session&id=browser:<workspaceId></workspaceid>` to see them.
 
 ---
 
@@ -267,21 +267,7 @@ Break any of these and the SPA's Browser panel will corrupt state.
 
 ## 9. CLI
 
-The live view is a graphical feature (MJPEG over WS), but every **control-plane** operation is scriptable via the `generatorai browser` command group ([apps/cli/src/commands/browser.ts](../../apps/cli/src/commands/browser.ts)). All subcommands take a `<workspaceId>` as their first argument.
-
-| Command | Description |
-|---|---|
-| `browser start <workspaceId> [url]` | Start (or attach to) the workspace browser; optionally navigate to `url` on boot. |
-| `browser stop <workspaceId>` | Terminate the session and release the Chromium process. |
-| `browser status <workspaceId>` | Print the descriptor — `mode` / `status` / `currentUrl` / `viewport` / `ready` / `config`. |
-| `browser navigate <workspaceId> <url>` | Navigate to a URL. Returns the resolved URL, page title and duration. |
-| `browser screenshot <workspaceId>` | Capture a PNG; registered as a `browser_screenshot` workspace artifact. |
-| `browser snapshot <workspaceId>` | Capture a DOM snapshot; registered as a `browser_dom` artifact. |
-| `browser inspect <workspaceId> [on\|off]` | Toggle the element-inspector overlay (omit the state to flip it). |
-| `browser snapshots <workspaceId>` | List browser artifacts (screenshots, DOM, HAR, inspector selections). |
-| `browser tail <workspaceId>` | Follow `browser.*` events for the workspace over SSE (Ctrl+C to stop). |
-
-For deeper programmatic control (raw Playwright), use the SDK's `services.browserService` (advanced; see the composition root export).
+The browser is a graphical feature — there is intentionally no CLI surface. If you need programmatic control, use the SDK's `services.browserService` directly (advanced; see the composition root export).
 
 ---
 

@@ -45,7 +45,7 @@ import { replayEventsIntoStore } from '../utils/replayEvents.js';
 import { widgetBridge } from '../lib/widgetBridge.js';
 import type { PersistedEvent } from '@generatorai/shared';
 import type { WorkflowRunStatus, StageRunStatus } from '@generatorai/shared';
-import type { SystemCategory, QuestionBlock } from './streamStore.js';
+import type { SystemCategory, QuestionBlock, PlanBlock } from './streamStore.js';
 import type { ContextUsageSnapshot } from '@generatorai/client-core';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
 import { openAuthenticatedEventSource } from '../platform/authTransport.js';
@@ -107,12 +107,54 @@ interface ConnectionState {
   watchdogTimer: ReturnType<typeof setInterval> | null;
   /** Re-entrancy guard so overlapping ticks don't double-fetch. */
   gapFilling: boolean;
+  /**
+   * Highest sequence below which NOTHING is missing.
+   *
+   * Distinct from `maxSeenSequence`: a single dropped frame leaves a hole
+   * below the tip, and replaying from the tip can never fetch it back. Gap
+   * fill therefore resumes from this frontier, not from the high-water mark.
+   */
+  contiguousSequence: number;
+  /** Consecutive stall ticks that found nothing new, for the terminal reconcile. */
+  emptyGapFills: number;
 }
 
 // ── Module singleton state ──
 
 const connections = new Map<string, ConnectionState>();
 const FLUSH_INTERVAL = 100; // ms — 10 flushes/sec, matches prior behaviour
+
+/** Kinds that carry no state and must not count as proof of life. */
+const IGNORED_FOR_LIVENESS = new Set<string>(['harness.session_info', 'harness.unknown']);
+
+const PLAN_STATUSES = new Set([
+  'drafting', 'recorded', 'awaiting_review', 'changes_requested',
+  'approved', 'rejected', 'superseded', 'expired',
+]);
+
+/**
+ * A plan filed by the non-blocking `record_plan` tool is born `recorded` and
+ * gets no follow-up status event, so pinning `drafting` left its card spinning
+ * forever.
+ */
+function planStatusOf(data: Record<string, unknown>): PlanBlock['status'] {
+  const s = data['status'];
+  return typeof s === 'string' && PLAN_STATUSES.has(s) ? (s as PlanBlock['status']) : 'drafting';
+}
+
+/**
+ * Record a sequence as delivered and push the contiguous frontier forward.
+ *
+ * The frontier is what gap fill resumes from, so a dropped frame stops it
+ * advancing and the missing event stays reachable.
+ */
+function noteSeen(conn: ConnectionState, seq: number): void {
+  conn.seenSequenceIds.add(seq);
+  if (seq > conn.maxSeenSequence) conn.maxSeenSequence = seq;
+  while (conn.seenSequenceIds.has(conn.contiguousSequence + 1)) {
+    conn.contiguousSequence += 1;
+  }
+}
 
 function connKey(scope: StreamScope, scopeId: string): string {
   return `${scope}:${scopeId}`;
@@ -216,9 +258,13 @@ function stopFlushTimer(conn: ConnectionState): void {
 function processEvent(sessionId: string, conn: ConnectionState, event: PersistedEvent): void {
   if (!event?.kind || !event?.sessionId) return;
 
-  // Touch the stall-watchdog clock on every processed event so a genuinely
-  // active turn (events still flowing) is never mistaken for a stalled one.
-  conn.lastEventAt = Date.now();
+  // Touch the stall-watchdog clock only for events that can actually advance a
+  // stream. `harness.session_info` / `harness.unknown` are raw SDK passthrough
+  // and made up 98% of one orchestrator turn's traffic — letting them refresh
+  // the clock kept the stall detector permanently asleep.
+  if (!IGNORED_FOR_LIVENESS.has(event.kind)) {
+    conn.lastEventAt = Date.now();
+  }
 
   const { recordEvent } = useConnectionStore.getState();
   recordEvent(sessionId);
@@ -457,7 +503,7 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
         title: String(data['title'] ?? 'Plan'),
         fileName: String(data['fileName'] ?? 'plan.md'),
         summary: String(data['summary'] ?? ''),
-        status: 'drafting',
+        status: planStatusOf(data),
         actions: [],
       });
       invalidatePlanDocument(data['chatId'], data['planId']);
@@ -465,7 +511,7 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
     }
     case 'chat.plan.updated': {
       flushNow(sessionId, conn);
-      useStreamStore.getState().setPlanStatus(sk, String(data['planId'] ?? ''), 'drafting', {
+      useStreamStore.getState().setPlanStatus(sk, String(data['planId'] ?? ''), planStatusOf(data), {
         revision: Number(data['revision'] ?? 1),
       });
       invalidatePlanDocument(data['chatId'], data['planId']);
@@ -1106,6 +1152,23 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
     case 'chat.deleted':
       queryClient.invalidateQueries({ queryKey: queryKeys.chats });
       break;
+
+    // ── Agent catalog events ──
+    // The catalog is cached for 30s, so without this a newly created agent
+    // would not show up in an already-open picker.
+    case 'agent.created':
+    case 'agent.updated':
+    case 'agent.deleted':
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+      break;
+    case 'chat.agent_changed': {
+      const chatId = data['chatId'] as string;
+      if (chatId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
+      }
+      queryClient.invalidateQueries({ queryKey: queryKeys.chats });
+      break;
+    }
     case 'chat.prompt_sent': {
       const chatId = data['chatId'] as string;
       if (chatId) {
@@ -1357,6 +1420,8 @@ function openConnection(
     lastReplayedSequence: 0,
     maxSeenSequence: 0,
     seenSequenceIds: new Set(),
+    contiguousSequence: 0,
+    emptyGapFills: 0,
     stageBuffers: new Map(),
     flushTimer: null,
     idleTimer: null,
@@ -1503,6 +1568,7 @@ function openConnection(
         const maxSeq = events.reduce((m, e) => Math.max(m, e.sequenceId), 0);
         conn.lastReplayedSequence = maxSeq;
         conn.maxSeenSequence = maxSeq;
+        conn.contiguousSequence = maxSeq;
       };
 
       while (true) {
@@ -1559,8 +1625,7 @@ function openConnection(
     for (const ev of pending) {
       if (ev.sequenceId != null && ev.sequenceId > 0) {
         if (ev.sequenceId <= conn.lastReplayedSequence || conn.seenSequenceIds.has(ev.sequenceId)) continue;
-        conn.seenSequenceIds.add(ev.sequenceId);
-        if (ev.sequenceId > conn.maxSeenSequence) conn.maxSeenSequence = ev.sequenceId;
+        noteSeen(conn, ev.sequenceId);
       }
       processEvent(ev.sessionId, conn, ev);
     }
@@ -1597,6 +1662,9 @@ function openConnection(
           }
           conn.seenSequenceIds.add(event.sequenceId);
           if (event.sequenceId > conn.maxSeenSequence) conn.maxSeenSequence = event.sequenceId;
+          while (conn.seenSequenceIds.has(conn.contiguousSequence + 1)) {
+            conn.contiguousSequence += 1;
+          }
           // Bounded seen set: use a sliding window that retains the last N sequence
           // IDs based on the maximum seen, pruning entries well below the window.
           // A wider window (maxSeenSequence - 500) prevents legitimate late arrivals
@@ -1649,9 +1717,14 @@ function openConnection(
   const gapFill = async (): Promise<void> => {
     if (conn.gapFilling || conn.refCount <= 0) return;
     conn.gapFilling = true;
+    let applied = 0;
     try {
       const PAGE_SIZE = 500;
-      let afterSeq = conn.maxSeenSequence;
+      // Resume from the contiguous frontier, not the tip: a dropped frame
+      // leaves a hole BELOW `maxSeenSequence`, and replaying from the tip can
+      // never fetch it back. Bounded by the dedup window — anything older has
+      // been pruned from `seenSequenceIds` and would re-process.
+      let afterSeq = Math.max(conn.contiguousSequence, conn.maxSeenSequence - 2000);
       while (conn.refCount > 0) {
         let page: Awaited<ReturnType<typeof platform.streamReplay>>;
         try {
@@ -1670,8 +1743,8 @@ function openConnection(
         for (const row of page) {
           const seq = row.seq;
           if (seq <= conn.lastReplayedSequence || conn.seenSequenceIds.has(seq)) continue;
-          conn.seenSequenceIds.add(seq);
-          if (seq > conn.maxSeenSequence) conn.maxSeenSequence = seq;
+          noteSeen(conn, seq);
+          applied += 1;
           const payload = (row.payload ?? {}) as Record<string, unknown>;
           processEvent((payload['sessionId'] as string) || primarySessionId, conn, {
             id: row.id,
@@ -1687,6 +1760,15 @@ function openConnection(
       }
     } finally {
       conn.gapFilling = false;
+      // Last resort. Replay is authoritative, so several stall windows that
+      // surface nothing new mean the turn really is over and its terminal
+      // event is unrecoverable — settle the stream rather than spin forever.
+      if (applied > 0) {
+        conn.emptyGapFills = 0;
+      } else if (++conn.emptyGapFills >= 3 && connHasActiveStream()) {
+        conn.emptyGapFills = 0;
+        useStreamStore.getState().completeStream(primarySessionId);
+      }
       // Push the clock forward so we re-poll at most once per STALL window
       // even if the turn is genuinely still running (no new events found).
       conn.lastEventAt = Date.now();

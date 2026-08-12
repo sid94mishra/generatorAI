@@ -8,6 +8,7 @@ import { registerConfigCommands } from './config.js';
 import { registerInitCommand } from './init.js';
 import { registerCompletionsCommand } from './completions.js';
 import { registerChatCommands } from './chat.js';
+import { registerAgentCommands } from './agent.js';
 import { registerWorkflowCommands } from './workflow.js';
 import { registerRunCommands } from './run.js';
 import { registerOrchestratorCommands } from './orchestrator.js';
@@ -31,6 +32,7 @@ export function registerAllCommands(
   registerCopilotCommands(program, getClient);
   registerConfigCommands(program, getClient);
   registerChatCommands(program, getClient);
+  registerAgentCommands(program, getClient);
   registerWorkflowCommands(program, getClient);
   registerRunCommands(program, getClient);
   registerOrchestratorCommands(program, getClient);

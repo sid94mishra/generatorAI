@@ -10,17 +10,17 @@
 
 GeneratorAI is a **TypeScript monorepo** for building, running and observing AI agent workloads. It supports three top-level "execution objects":
 
-| Object                 | What it is                                                                                                                               | Real-time?                                                |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| **Chat**         | A single long-lived conversation against a provider (Copilot SDK / Claude Agent SDK) with optional project + codebase context.           | Yes — SSE stream of tokens, tool calls, thinking blocks. |
-| **Workflow Run** | One execution of a multi-stage**DAG workflow definition**, with conditional edges, retries, hooks, HITL gates and artifacts.       | Yes — SSE per run + per stage.                           |
-| **Automation**   | A scheduled / webhook-triggered / manual trigger that fans out into multiple workflow runs (single / loop / batch / data-source-driven). | Yes — SSE per automation execution + per nested run.     |
+| Object | What it is | Real-time? |
+|---|---|---|
+| **Chat** | A single long-lived conversation against a provider (Copilot SDK / Claude Agent SDK) with optional project + codebase context. | Yes — SSE stream of tokens, tool calls, thinking blocks. |
+| **Workflow Run** | One execution of a multi-stage **DAG workflow definition**, with conditional edges, retries, hooks, HITL gates and artifacts. | Yes — SSE per run + per stage. |
+| **Automation** | A scheduled / webhook-triggered / manual trigger that fans out into multiple workflow runs (single / loop / batch / data-source-driven). | Yes — SSE per automation execution + per nested run. |
 
 All three are observed through the **same unified SSE endpoint** (`GET /api/stream?scope=…&id=…`) with `Last-Event-ID` resume and REST replay fallback.
 
 Underlying everything is the **Agent Harness** abstraction (`IAgentHarness`), a port that hides whether the model lives behind GitHub Copilot CLI or Anthropic Claude Code CLI. Providers are runtime-switchable via `HarnessProxy`.
 
-Layered on top, the runtime is **extensible without a rebuild**. Hot-loadable [extensions](./docs/feature-extensions-widgets.md) contribute widgets (sandboxed HTML surfaces the agent renders **inline** in chat or **full-page** in the right-pane Widget tab), tools, skills, prompts, and hooks. Complex widgets expose a typed action catalog the agent drives via `widget_action` / `widget_exec`. The agent can even author new extensions from a chat prompt via built-in `write_extension` / `render_widget` tools — the same primitives external contributors use.
+Layered on top, the runtime is **extensible without a rebuild**. Hot-loadable [extensions](./docs/feature-extensions-widgets.md) contribute widgets (sandboxed HTML surfaces the agent renders on the canvas / chat / right-pane), tools, skills, prompts, and hooks. The agent can even author new extensions from a chat prompt via built-in `write_extension` / `render_widget` / `read_widget` tools — the same primitives external contributors use.
 
 ---
 
@@ -60,31 +60,29 @@ GeneratorAI/
 
 ### Where to read what
 
-| Topic                                                                                                                                                                                                                                                             | File                                                                        |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| **Top-level architecture, layered model, dependency rules**                                                                                                                                                                                                 | [docs/architecture.md](./docs/architecture.md)                               |
-| **Every package** (shared, core, db, sdk, agent-harness-providers, mcp-server)                                                                                                                                                                              | [docs/packages.md](./docs/packages.md)                                       |
-| **Every app** (server, web, cli, desktop)                                                                                                                                                                                                                   | [docs/apps.md](./docs/apps.md)                                               |
-| **Chat feature** lifecycle, configs, edge cases                                                                                                                                                                                                             | [docs/feature-chat.md](./docs/feature-chat.md)                               |
-| **Orchestrator mode (chat)** — background agents as real chats, cost-aware model routing, shared workspace + scratchpad, `TASK_RESULT` reference handoff, prompt-cache strategy                                                                          | [docs/feature-orchestrator-chat.md](./docs/feature-orchestrator-chat.md)     |
-| **Workflow definitions** (CRUD, builder, validation, templates)                                                                                                                                                                                             | [docs/feature-workflows.md](./docs/feature-workflows.md)                     |
-| **Stage definitions** (every config / option / edge case)                                                                                                                                                                                                   | [docs/feature-stages.md](./docs/feature-stages.md)                           |
-| **Workflow runs** (state machine, DAG scheduling, profiles, HITL, retries, validation, predecessor summaries)                                                                                                                                               | [docs/feature-workflow-runs.md](./docs/feature-workflow-runs.md)             |
-| **Automations** (triggers, input modes, data sources, concurrency, error policy)                                                                                                                                                                            | [docs/feature-automations.md](./docs/feature-automations.md)                 |
-| **Projects + codebases** (git-remote / git-local / local-dir, link / fetch / branches / files)                                                                                                                                                              | [docs/feature-projects-codebases.md](./docs/feature-projects-codebases.md)   |
-| **Workspaces + file management** (execution workspaces, worktrees, artifacts at run/stage/project/global level)                                                                                                                                             | [docs/feature-workspaces-files.md](./docs/feature-workspaces-files.md)       |
-| **Integrated Browser** (workspace-scoped Chromium: WebSocket JPEG stream, viewport auto-matches the panel, click-through + typing, live scroll indicator, inspector, share/attach, VSCode-parity panel)                                                     | [docs/feature-integrated-browser.md](./docs/feature-integrated-browser.md)   |
-| **Integrated Terminal** (workspace-scoped PTY: xterm.js, WebSocket transport, watermark flow control, multi-tab)                                                                                                                                            | [docs/feature-integrated-terminal.md](./docs/feature-integrated-terminal.md) |
-| **Extensions & Widgets** (hot-loadable extensions contributing UI/tools/skills; sandboxed widget iframes rendered **inline** in chat or **full-page** in the right-pane Widget tab; `render_widget` / `update_widget` / `read_widget` / `describe_widget` / `widget_action` / `widget_exec` tools; `write_extension` for LLM-authored extensions) | [docs/feature-extensions-widgets.md](./docs/feature-extensions-widgets.md)   |
-| **Hooks** (22 phases × 3 types × failure policies, HookBridge HKS-01)                                                                                                                                                                                     | [docs/feature-hooks.md](./docs/feature-hooks.md)                             |
-| **Skills / custom agents / prompts / MCP servers** (per-stage selection, project vs system scope)                                                                                                                                                           | [docs/feature-skills-agents-mcp.md](./docs/feature-skills-agents-mcp.md)     |
-| **Templates + Programmatic Workflow Scripts** (`.workflow.mjs`, profiles, materialize)                                                                                                                                                                    | [docs/feature-templates-scripts.md](./docs/feature-templates-scripts.md)     |
-| **Streaming + events** (SSE, StreamBroker, EventBus, durability)                                                                                                                                                                                            | [docs/feature-streaming-events.md](./docs/feature-streaming-events.md)       |
-| **SDK usage** (`@generatorai/sdk` for external integrators)                                                                                                                                                                                               | [docs/usage-sdk.md](./docs/usage-sdk.md)                                     |
-| **CLI usage** (every command + TUI)                                                                                                                                                                                                                         | [docs/usage-cli.md](./docs/usage-cli.md)                                     |
-| **Web UI usage** (every page + dialog + setting)                                                                                                                                                                                                            | [docs/usage-web.md](./docs/usage-web.md)                                     |
-| **Build / deploy / env vars / troubleshooting**                                                                                                                                                                                                             | [docs/operations.md](./docs/operations.md)                                   |
-| **Packaging & release** (desktop installers, staged native runtime, signing, update channels, tag-driven release)                                                                                                                                            | [docs/packaging.md](./docs/packaging.md)                                     |
+| Topic | File |
+|---|---|
+| **Top-level architecture, layered model, dependency rules** | [docs/architecture.md](./docs/architecture.md) |
+| **Every package** (shared, core, db, sdk, agent-harness-providers, mcp-server) | [docs/packages.md](./docs/packages.md) |
+| **Every app** (server, web, cli, desktop) | [docs/apps.md](./docs/apps.md) |
+| **Chat feature** lifecycle, configs, edge cases | [docs/feature-chat.md](./docs/feature-chat.md) |
+| **Workflow definitions** (CRUD, builder, validation, templates) | [docs/feature-workflows.md](./docs/feature-workflows.md) |
+| **Stage definitions** (every config / option / edge case) | [docs/feature-stages.md](./docs/feature-stages.md) |
+| **Workflow runs** (state machine, DAG scheduling, profiles, HITL, retries, validation, predecessor summaries) | [docs/feature-workflow-runs.md](./docs/feature-workflow-runs.md) |
+| **Automations** (triggers, input modes, data sources, concurrency, error policy) | [docs/feature-automations.md](./docs/feature-automations.md) |
+| **Projects + codebases** (git-remote / git-local / local-dir, link / fetch / branches / files) | [docs/feature-projects-codebases.md](./docs/feature-projects-codebases.md) |
+| **Workspaces + file management** (execution workspaces, worktrees, artifacts at run/stage/project/global level) | [docs/feature-workspaces-files.md](./docs/feature-workspaces-files.md) |
+| **Integrated Browser** (workspace-scoped Chromium: WebSocket JPEG stream, viewport auto-matches the panel, click-through + typing, live scroll indicator, inspector, share/attach, VSCode-parity panel) | [docs/feature-integrated-browser.md](./docs/feature-integrated-browser.md) |
+| **Integrated Terminal** (workspace-scoped PTY: xterm.js, WebSocket transport, watermark flow control, multi-tab) | [docs/feature-integrated-terminal.md](./docs/feature-integrated-terminal.md) |
+| **Extensions & Widgets** (hot-loadable extensions contributing UI/tools/skills; sandboxed widget iframes on the canvas / chat / right-pane; `render_widget` / `update_widget` / `read_widget` tools; `write_extension` for LLM-authored extensions) | [docs/feature-extensions-widgets.md](./docs/feature-extensions-widgets.md) |
+| **Hooks** (22 phases × 3 types × failure policies, HookBridge HKS-01) | [docs/feature-hooks.md](./docs/feature-hooks.md) |
+| **Skills / custom agents / prompts / MCP servers** (per-stage selection, project vs system scope) | [docs/feature-skills-agents-mcp.md](./docs/feature-skills-agents-mcp.md) |
+| **Templates + Programmatic Workflow Scripts** (`.workflow.mjs`, profiles, materialize) | [docs/feature-templates-scripts.md](./docs/feature-templates-scripts.md) |
+| **Streaming + events** (SSE, StreamBroker, EventBus, durability) | [docs/feature-streaming-events.md](./docs/feature-streaming-events.md) |
+| **SDK usage** (`@generatorai/sdk` for external integrators) | [docs/usage-sdk.md](./docs/usage-sdk.md) |
+| **CLI usage** (every command + TUI) | [docs/usage-cli.md](./docs/usage-cli.md) |
+| **Web UI usage** (every page + dialog + setting) | [docs/usage-web.md](./docs/usage-web.md) |
+| **Build / deploy / env vars / troubleshooting** | [docs/operations.md](./docs/operations.md) |
 
 ---
 
@@ -183,7 +181,7 @@ pnpm dev:server
 pnpm dev:web
 
 # 3. CLI
-pnpm dev:cli -- workflow list
+pnpm start:cli -- workflow list
 # or after `pnpm --filter @generatorai/cli build`
 node apps/cli/dist/index.js workflow list
 
@@ -197,79 +195,60 @@ pnpm --filter agent-tests test                  # Playwright E2E
 pnpm lint
 pnpm typecheck
 pnpm format
-
-# 6. Desktop installers for this platform
-pnpm package:desktop
 ```
-
-Packaging has constraints that are enforced rather than documented — you must
-build on the platform you are targeting, and the installer architecture must
-match the staged server runtime. See
-[docs/packaging.md](./docs/packaging.md) before changing anything under
-`apps/desktop/scripts/`.
 
 Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 
-| Var                                        | Default                       | Purpose                                                                                                                                 |
-| ------------------------------------------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `GENERATORAI_PORT`                       | `3100`                      | API server port                                                                                                                         |
-| `GENERATORAI_WEB_PORT`                   | `5173`                      | Vite dev port                                                                                                                           |
-| `GENERATORAI_DB_PATH`                    | `~/.generatorai/data.db`    | SQLite path                                                                                                                             |
-| `GENERATORAI_WORKSPACES_DIR`             | `~/.generatorai/workspaces` | Worktree + workspace root                                                                                                               |
-| `GENERATORAI_ARTIFACTS_DIR`              | `~/.generatorai/artifacts`  | Project + artifact root                                                                                                                 |
-| `GENERATORAI_TEMPLATES_DIR`              | `~/.generatorai/templates`  | System templates + system MCP / artifacts                                                                                               |
-| `HARNESS_TYPE`                           | `copilot`                   | `copilot` or `claude-agent`                                                                                                         |
-| `COPILOT_GH_HOST`                        | (none)                        | Set for GHEC tenants (`https://<tenant>.ghe.com/`)                                                                                    |
-| `COPILOT_CLI_PATH`                       | auto-resolved                 | Override the platform binary path                                                                                                       |
-| `SANDBOX_ENABLED`                        | `false`                     | Enable Docker sandbox for`script` hooks                                                                                               |
-| `GENERATORAI_LOG_LEVEL`                  | `info`                      | `trace` / `debug` / `info` / `warn` / `error`                                                                                 |
-| `GENERATORAI_SSE_CAP_PER_SCOPE`          | per-scope defaults            | Override SSE connection cap                                                                                                             |
-| `GENERATORAI_TERMINAL`                   | `1`                         | Set`0` to disable the Integrated Terminal (REST + WS return 501).                                                                     |
-| `GENERATORAI_TERMINAL_IDLE_TTL_MS`       | `1800000` (30 min)          | Idle-reap threshold; bumped on any activity.                                                                                            |
-| `GENERATORAI_TERMINAL_MAX_PER_WORKSPACE` | `5`                         | Per-workspace concurrent PTY cap.                                                                                                       |
-| `GENERATORAI_TERMINAL_MAX_GLOBAL`        | `20`                        | Server-wide concurrent PTY cap.                                                                                                         |
-| `GENERATORAI_TERMINAL_PWSH_PROFILE`      | (unset)                       | `1` = load PowerShell `$PROFILE` (default off — fast startup).                                                                     |
-| `GENERATORAI_TERMINAL_ALLOW_SECRETS`     | (unset)                       | `1` = inherit `SSH_AUTH_SOCK` / AWS session tokens into the shell env (default off).                                                |
-| `GENERATORAI_BROWSER_MAX_CONCURRENT`     | `5`                         | Server-wide cap on concurrent Chromium sessions.                                                                                        |
-| `GENERATORAI_BROWSER_STREAM_FPS`         | `20`                        | Browser MJPEG framerate over the WS transport.                                                                                          |
-| `GENERATORAI_BROWSER_STREAM_QUALITY`     | `60`                        | JPEG quality 0–100 for browser frames.                                                                                                 |
-| `GENERATORAI_DESKTOP_NATIVE_BROWSER`     | (unset)                       | `1` in the desktop shell = use Electron's native `WebContentsView` for the browser feature instead of the server-hosted Playwright. |
-| `GENERATORAI_STT`                        | `1`                         | Set`0` to disable voice input (mic button hidden, STT WebSocket returns 501).                                                       |
-| `STT_MODEL`                              | `Xenova/whisper-base.en`    | Whisper model id used for local speech-to-text.                                                                                       |
-| `WIDGET_PORT`                            | `3101` (API port + 1)       | Port of the **separate widget asset origin** (real cross-origin iframe sandbox). Auto-assigned in desktop/standalone mode.       |
-| `WIDGET_CONNECT_SRC`                     | the API origin                | CSP`connect-src` granted to widget iframes.                                                                                         |
-| `GENERATORAI_ORCH_MAX_WORKERS`           | governor default              | Max concurrent background agents per orchestrator chat.                                                                               |
-| `GENERATORAI_ORCH_DEFAULT_WORKER_MODEL`  | (unset → auto-cheapest)      | Pin the worker model instead of cost-based auto-routing.                                                                              |
-| `GENERATORAI_ORCH_WARM_FIRST`            | `1`                         | Set`0` to release the whole worker wave in parallel (loses the shared prompt-cache prefix).                                          |
+| Var | Default | Purpose |
+|---|---|---|
+| `GENERATORAI_PORT` | `3100` | API server port |
+| `GENERATORAI_WEB_PORT` | `5173` | Vite dev port |
+| `GENERATORAI_DB_PATH` | `~/.generatorai/data.db` | SQLite path |
+| `GENERATORAI_WORKSPACES_DIR` | `~/.generatorai/workspaces` | Worktree + workspace root |
+| `GENERATORAI_ARTIFACTS_DIR` | `~/.generatorai/artifacts` | Project + artifact root |
+| `GENERATORAI_TEMPLATES_DIR` | `~/.generatorai/templates` | System templates + system MCP / artifacts |
+| `HARNESS_TYPE` | `copilot` | `copilot` or `claude-agent` |
+| `COPILOT_GH_HOST` | (none) | Set for GHEC tenants (`https://<tenant>.ghe.com/`) |
+| `COPILOT_CLI_PATH` | auto-resolved | Override the platform binary path |
+| `SANDBOX_ENABLED` | `false` | Enable Docker sandbox for `script` hooks |
+| `GENERATORAI_LOG_LEVEL` | `info` | `trace` / `debug` / `info` / `warn` / `error` |
+| `GENERATORAI_SSE_CAP_PER_SCOPE` | per-scope defaults | Override SSE connection cap |
+| `GENERATORAI_TERMINAL` | `1` | Set `0` to disable the Integrated Terminal (REST + WS return 501). |
+| `GENERATORAI_TERMINAL_IDLE_TTL_MS` | `1800000` (30 min) | Idle-reap threshold; bumped on any activity. |
+| `GENERATORAI_TERMINAL_MAX_PER_WORKSPACE` | `5` | Per-workspace concurrent PTY cap. |
+| `GENERATORAI_TERMINAL_MAX_GLOBAL` | `20` | Server-wide concurrent PTY cap. |
+| `GENERATORAI_TERMINAL_PWSH_PROFILE` | (unset) | `1` = load PowerShell `$PROFILE` (default off — fast startup). |
+| `GENERATORAI_TERMINAL_ALLOW_SECRETS` | (unset) | `1` = inherit `SSH_AUTH_SOCK` / AWS session tokens into the shell env (default off). |
+| `GENERATORAI_BROWSER_MAX_CONCURRENT` | `5` | Server-wide cap on concurrent Chromium sessions. |
+| `GENERATORAI_BROWSER_STREAM_FPS` | `20` | Browser MJPEG framerate over the WS transport. |
+| `GENERATORAI_BROWSER_STREAM_QUALITY` | `60` | JPEG quality 0–100 for browser frames. |
+| `GENERATORAI_DESKTOP_NATIVE_BROWSER` | (unset) | `1` in the desktop shell = use Electron's native `WebContentsView` for the browser feature instead of the server-hosted Playwright. |
 
 ---
 
 ## 7. Quick reference — feature matrix
 
-| Feature                                                                                                              | Web                                                        | CLI                                                         | SDK                                                        | Notes                                                                                                                          |
-| -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Chats: create / list / send / archive / delete                                                                       | ✅                                                         | ✅ (`chat …`)                                            | ✅ (`ai.chat`)                                           | Streaming via SSE. Optional project + up to 3 codebases + worktree.                                                            |
-| Workflow defs: CRUD / validate / import-json / import-template / export                                              | ✅                                                         | ✅ (`workflow …`)                                        | ✅ (`ai.workflows.create/list/get`)                      | Visual DAG builder in web.                                                                                                     |
-| Workflow runs: start / pause / resume / cancel / retry / watch / messages / workspace                                | ✅                                                         | ✅ (`run …`)                                             | ✅ (`ai.workflows.run/stream/pause/resume/cancel/retry`) | Run profiles supported in CLI + SDK + script materialize.                                                                      |
-| Stage CRUD + edge CRUD                                                                                               | ✅                                                         | ✅ (`workflow stage`, `workflow edge`)                  | via builder (`StageBuilder`)                             | All edge types (`on_success / on_failure / on_completion / always`).                                                         |
-| HITL (permission mode + approve/reject)                                                                              | ✅                                                         | ✅ (`run hitl`)                                           | via`services.hitlService` (advanced)                     | 4 modes:`bypassPermissions / default / acceptEdits / plan`.                                                                  |
-| Automations: CRUD / enable / disable / trigger / executions                                                          | ✅                                                         | ✅ (`automation …`)                                      | ✅ (`ai.automations`)                                    | 3 triggers × 4 input modes + 7 data-source scripts shipped.                                                                   |
-| Projects + codebases (3 types) + configs (agents/prompts/skills/mcp)                                                 | ✅                                                         | ✅ (`project …`)                                         | partial (via`services.projectService`)                   | Worktree creation per run / chat / automation iteration.                                                                       |
-| Workspaces (per-run isolated filesystem + artifacts)                                                                 | ✅ (Files & Uploads tab, ChatFilesPanel)                   | ✅ (`workspace …`)                                       | via`services.workspaceManager`                           | `creating / active / completed / archived / failed`.                                                                         |
-| Integrated Browser (workspace-scoped Chromium: live view, click-through, inspector, share/detach, capture)           | ✅ (RightPane → Browser tab)                              | n/a                                                         | via`services.browserService` (advanced)                  | Two hosts:`ServerPlaywrightHost` (default, MJPEG over WS) + `ElectronBridgeAdapter` (desktop, native `WebContentsView`). |
-| Integrated Terminal (workspace-scoped PTY: xterm.js, multi-tab, search, attach-selection-to-chat, worktree quick-cd) | ✅ (RightPane → Terminal tab)                             | n/a                                                         | via`services.terminalService` (advanced)                 | `node-pty` on Win/mac/Linux with `FallbackChildProcessHost` degradation; ephemeral in-memory sessions.                     |
-| Hooks (22 phases × script / http / function)                                                                        | ✅ (Workflow Settings → Hooks; Stage Properties → Hooks) | ✅ (`hook phases`, `hook test`)                         | via`services.hookExecutor`                               | Failure policy + timeout + retries + priority.                                                                                 |
-| Webhooks (incoming for automations + outgoing GH webhook)                                                            | ✅                                                         | ✅ (`webhook …`)                                         | ✅ (`services.webhookService`)                           | HMAC verification + delivery audit log.                                                                                        |
-| MCP servers (system + per-project)                                                                                   | ✅                                                         | ✅ (`project mcp …`, `system mcp-servers`)             | passed via`params.mcpServers` to harness                 | 8 system servers by default.                                                                                                   |
-| Programmatic Workflow Scripts (PWS)                                                                                  | ✅ (Scripts page + Run with profile)                       | ✅ (`script …`)                                          | ✅ (`ai.scripts`)                                        | `.workflow.mjs` reloadable without restart.                                                                                  |
-| Templates                                                                                                            | ✅                                                         | ✅ (`orchestrator templates`, `workflow from-template`) | ✅ via`services.templateRegistry`                        | 5 built-in v2 templates.                                                                                                       |
-| Provider switch (Copilot ↔ Claude Agent)                                                                            | ✅ (Settings → Provider)                                  | ✅ (`harness …`)                                         | constructor option                                         | Hot-swappable via`HarnessProxy.switchAdapter`.                                                                               |
-| Orchestrator mode (chat) — background agents, cost routing, shared workspace                                        | ✅ (New Chat → Orchestrate; RightPane → Background Tasks) | n/a                                                         | via`services.orchestratorService` (advanced)              | Workers are real chats, hidden from the sidebar. See [docs/feature-orchestrator-chat.md](./docs/feature-orchestrator-chat.md). |
-| Voice input (local Whisper STT)                                                                                      | ✅ (mic button in chat input)                              | n/a                                                         | n/a                                                        | On-device, no cloud key. Disable with`GENERATORAI_STT=0`.                                                                     |
-| Integrated Browser control plane                                                                                     | ✅ (RightPane → Browser tab)                              | ✅ (`browser …`, 9 subcommands)                           | via`services.browserService` (advanced)                   | `start / stop / status / navigate / screenshot / snapshot / inspect / snapshots / tail`.                                       |
-| Custom tools (Zod-typed)                                                                                             | n/a                                                        | n/a                                                         | ✅ (`ai.tools.register / tool()`)                        | SDK-only.                                                                                                                      |
-| Custom event subscription                                                                                            | n/a                                                        | via`run watch` SSE                                        | ✅ (`ai.events.onAll/onRun/onSession/replay/emit`)       |                                                                                                                                |
-| TUI (Ink)                                                                                                            | n/a                                                        | ✅ (`generatorai tui`)                                    | n/a                                                        | 5 views: Dashboard / Chats / Workflows / Runs / Settings.                                                                      |
+| Feature | Web | CLI | SDK | Notes |
+|---|---|---|---|---|
+| Chats: create / list / send / archive / delete | ✅ | ✅ (`chat …`) | ✅ (`ai.chat`) | Streaming via SSE. Optional project + up to 3 codebases + worktree. |
+| Workflow defs: CRUD / validate / import-json / import-template / export | ✅ | ✅ (`workflow …`) | ✅ (`ai.workflows.create/list/get`) | Visual DAG builder in web. |
+| Workflow runs: start / pause / resume / cancel / retry / watch / messages / workspace | ✅ | ✅ (`run …`) | ✅ (`ai.workflows.run/stream/pause/resume/cancel/retry`) | Run profiles supported in CLI + SDK + script materialize. |
+| Stage CRUD + edge CRUD | ✅ | ✅ (`workflow stage`, `workflow edge`) | via builder (`StageBuilder`) | All edge types (`on_success / on_failure / on_completion / always`). |
+| HITL (permission mode + approve/reject) | ✅ | ✅ (`run hitl`) | via `services.hitlService` (advanced) | 4 modes: `bypassPermissions / default / acceptEdits / plan`. |
+| Automations: CRUD / enable / disable / trigger / executions | ✅ | ✅ (`automation …`) | ✅ (`ai.automations`) | 3 triggers × 4 input modes + 7 data-source scripts shipped. |
+| Projects + codebases (3 types) + configs (agents/prompts/skills/mcp) | ✅ | ✅ (`project …`) | partial (via `services.projectService`) | Worktree creation per run / chat / automation iteration. |
+| Workspaces (per-run isolated filesystem + artifacts) | ✅ (Files & Uploads tab, ChatFilesPanel) | ✅ (`workspace …`) | via `services.workspaceManager` | `creating / active / completed / archived / failed`. |
+| Integrated Browser (workspace-scoped Chromium: live view, click-through, inspector, share/detach, capture) | ✅ (RightPane → Browser tab) | n/a | via `services.browserService` (advanced) | Two hosts: `ServerPlaywrightHost` (default, MJPEG over WS) + `ElectronBridgeAdapter` (desktop, native `WebContentsView`). |
+| Integrated Terminal (workspace-scoped PTY: xterm.js, multi-tab, search, attach-selection-to-chat, worktree quick-cd) | ✅ (RightPane → Terminal tab) | n/a | via `services.terminalService` (advanced) | `node-pty` on Win/mac/Linux with `FallbackChildProcessHost` degradation; ephemeral in-memory sessions. |
+| Hooks (22 phases × script / http / function) | ✅ (Workflow Settings → Hooks; Stage Properties → Hooks) | ✅ (`hook phases`, `hook test`) | via `services.hookExecutor` | Failure policy + timeout + retries + priority. |
+| Webhooks (incoming for automations + outgoing GH webhook) | ✅ | ✅ (`webhook …`) | ✅ (`services.webhookService`) | HMAC verification + delivery audit log. |
+| MCP servers (system + per-project) | ✅ | ✅ (`project mcp …`, `system mcp-servers`) | passed via `params.mcpServers` to harness | 8 system servers by default. |
+| Programmatic Workflow Scripts (PWS) | ✅ (Scripts page + Run with profile) | ✅ (`script …`) | ✅ (`ai.scripts`) | `.workflow.mjs` reloadable without restart. |
+| Templates | ✅ | ✅ (`orchestrator templates`, `workflow from-template`) | ✅ via `services.templateRegistry` | 5 built-in v2 templates. |
+| Provider switch (Copilot ↔ Claude Agent) | ✅ (Settings → Provider) | ✅ (`harness …`) | constructor option | Hot-swappable via `HarnessProxy.switchAdapter`. |
+| Custom tools (Zod-typed) | n/a | n/a | ✅ (`ai.tools.register / tool()`) | SDK-only. |
+| Custom event subscription | n/a | via `run watch` SSE | ✅ (`ai.events.onAll/onRun/onSession/replay/emit`) | |
+| TUI (Ink) | n/a | ✅ (`generatorai tui`) | n/a | 5 views: Dashboard / Chats / Workflows / Runs / Settings. |
 
 ---
 
@@ -278,7 +257,6 @@ Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 Common change patterns and the bare-minimum checklist:
 
 **Add a new stage option** (e.g., a new validation rule type):
-
 1. `packages/shared/src/types/StageDefinition.ts` — extend the union.
 2. `packages/shared/src/config/WorkflowDefinitionSchemas.ts` — extend the Zod schema for `CreateStageSchema` *and* `ImportStageSchema`.
 3. `packages/db/src/repositories/StageDefinitionRepository.ts` — read/write the new field (if it lives in its own column) or it inherits the JSON column.
@@ -288,14 +266,12 @@ Common change patterns and the bare-minimum checklist:
 7. Add unit + Playwright E2E coverage.
 
 **Add a new hook phase**:
-
 1. `packages/shared/src/types/HookDefinition.ts` — extend `HookPhase` union.
 2. `packages/core/src/services/HookInterceptor.ts` (or `WorkflowRunService` / `StageExecutionService`) — find the right call site and invoke `hookExecutor.executePhase(phase, ctx)`.
 3. `apps/server/src/routes/hooks.ts` — confirm it surfaces in `GET /api/hooks/phases`.
 4. `apps/web/src/components/workflow/settings/HooksTab.tsx` (or `StagePropertiesPanel`) — add to the dropdown.
 
 **Add a new SSE event kind**:
-
 1. `packages/shared/src/types/AgentEvent.ts` — extend `AgentEventKind` and create a typed payload variant.
 2. Emit via `eventBus.emit(sessionId, { kind, data })` *or* `eventBus.emitGlobal({ kind, data })` for global scope.
 3. Bridge auto-routes to all scopes (session / run / chat / global). No route change required for new kinds.
@@ -323,9 +299,8 @@ When designing a new feature: start in `shared/types`, sketch the port, write th
 
 ## 10. Status & known gaps (as of this commit)
 
-- ✅ Copilot SDK **1.0.8** upgrade complete (bundles `@github/copilot@1.0.75` CLI). `CopilotProvider` uses `RuntimeConnection.forStdio({ path })`. No breaking changes from 1.0.2 — all call sites verified. Live catalog: **19 models** (Claude / GPT / Gemini families).
-- ✅ **Copilot per-chat model switching fixed.** `client.resumeSession(id, { model })` does *not* override the model a session was created with (the SDK rehydrates it from its persistent store), so every turn silently kept running the original model. `CopilotProvider.resumeConversation` now calls `session.setModel(model, { reasoningEffort, contextTier })` — both for an in-place switch and immediately after a post-restart resume. Verified across families (Claude → GPT → Gemini) and across providers. See [docs/packages.md](./docs/packages.md#gotchas).
-- ✅ Claude Agent SDK **0.3.220** provider stable, includes its own bundled `claude` CLI. No breaking changes from 0.3.185 — all call sites verified.
+- ✅ Copilot SDK 1.0 GA upgrade complete. `CopilotProvider` uses `RuntimeConnection.forStdio({ path })`.
+- ✅ Claude Agent SDK 0.3.183 provider stable, includes its own bundled `claude` CLI.
 - ✅ Workspace + worktree unification (migration v8) complete; per-run isolation in `<workspaces>/<runId>/source/<alias>/`.
 - ✅ Programmatic Workflow Scripts (PWS): profiles propagate `stageOverrides` + `permissionMode`.
 - ✅ Streaming Phase 4 complete: `stream_cursors` + unified `/api/stream`.
@@ -333,10 +308,6 @@ When designing a new feature: start in `shared/types`, sketch the port, write th
 - ✅ **`apps/desktop/`** is a working Electron app: the main process spawns the real server (production mode, serving `apps/web/dist` same‑origin) on a loopback port and loads it in a window → full web + CLI(API) parity with zero UI divergence. See [docs/apps.md](./docs/apps.md#appsdesktop--electron-desktop-app) + [apps/desktop/README.md](../apps/desktop/README.md). Packaging into a signed installer still needs `better-sqlite3` rebuilt for Electron's ABI + the server dependency tree bundled.
 - ✅ **Integrated Browser** shipped — workspace-scoped Chromium session with VSCode-style share/inspect/capture panel. Two host implementations (`ServerPlaywrightHost` + `ElectronBridgeAdapter`) behind the `IBrowserBridge` port. See [docs/feature-integrated-browser.md](./docs/feature-integrated-browser.md).
 - ✅ **Integrated Terminal** shipped — workspace-scoped PTY via `node-pty` + xterm.js, WebSocket transport at `/api/workspaces/:id/terminals/:sid/stream`, watermark flow control, multi-tab support, attach-to-chat. Phase 2 items (sandbox-attached terminal, agent-typed commands, DB persistence, recording) tracked in [docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md](../docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md). See [docs/feature-integrated-terminal.md](./docs/feature-integrated-terminal.md).
-- ✅ **Orchestrator mode (chat)** shipped — background agents are real chats (migration v17), cost-aware model routing via `list_models`, shared workspace + `orchestrator/state.json` scratchpad, `TASK_RESULT` reference handoff, warm-first prompt-cache strategy. See [docs/feature-orchestrator-chat.md](./docs/feature-orchestrator-chat.md).
-- ✅ **Voice input** shipped — local Whisper STT over a dedicated WebSocket; no cloud key. See [docs/feature-chat.md](./docs/feature-chat.md#42-voice-input-speech-to-text).
-- ✅ **Live model picker** — provider-driven catalog with context window / reasoning levels / pricing / long-context tier, plus per-provider readiness in the dropdown. See [docs/feature-chat.md](./docs/feature-chat.md#41-model-picker-input-toolbar).
-- ✅ **Separate widget asset origin** (`WIDGET_PORT`, default `3101`) — widgets get a genuine cross-origin iframe sandbox. See [docs/feature-extensions-widgets.md](./docs/feature-extensions-widgets.md#21-separate-widget-asset-origin).
 - ⚠️ **`packages/mcp-server/`** exposes a tool adapter but does not yet ship a standalone MCP server binary; system MCP definitions live in [templates/system/mcp-servers.json](../templates/system/mcp-servers.json).
 - ⚠️ **`StageDefinition.iterationConfig`** has a schema but the runtime "iteration" feature is deferred (use Automation `input mode: loop` or `batch` instead).
 - ⚠️ **`auto` and `gpt-5.3-codex` Copilot models** hang on at least one GHEC tenant — default model was changed to `claude-sonnet-4.6`.
@@ -345,22 +316,22 @@ When designing a new feature: start in `shared/types`, sketch the port, write th
 
 ## 11. Glossary
 
-| Term                                        | Meaning                                                                                                                                                                                                                                      |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Harness**                           | Abstraction over the underlying AI agent SDK. Implementations:`CopilotProvider`, `ClaudeAgentProvider`.                                                                                                                                  |
-| **HarnessProxy**                      | A wrapper that lets you`switchAdapter()` at runtime without restarting services.                                                                                                                                                           |
-| **DAG**                               | Directed Acyclic Graph of`StageDefinition`s connected by `StageEdge`s. Cycle detection via Kahn's algorithm.                                                                                                                             |
-| **PWS / Workflow Script**             | `.workflow.mjs` programmatic alternative to JSON definitions. Lives in `templates/scripts/`.                                                                                                                                             |
-| **RunProfile**                        | A reusable preset of`{variables, sessionMode, permissionMode, stageOverrides, …}` applied at run start.                                                                                                                                   |
-| **HITL**                              | Human-In-The-Loop. Stage parks in`awaiting_input` until approved / rejected via the HITL API.                                                                                                                                              |
-| **Execution Workspace**               | Per-run / per-chat isolated filesystem (`<workspacesDir>/<id>/{source, artifacts, cache}`).                                                                                                                                                |
-| **Worktree**                          | Git worktree carved from a project codebase clone, lifetime-scoped to a single run.                                                                                                                                                          |
-| **StreamBroker**                      | Persistent SSE broker backed by`stream_cursors` + `stream_sequences`.                                                                                                                                                                    |
-| **Skill / Custom Agent / MCP server** | Per-stage configurable "tool surfaces" — see[docs/feature-skills-agents-mcp.md](./docs/feature-skills-agents-mcp.md).                                                                                                                        |
-| **ConfigResolver**                    | Service that deep-merges WorkflowDefinition → StageDefinition → runtime overrides into a final resolved config.                                                                                                                            |
-| **RightPane**                         | The unified tabbed dock on the right side of Chat / Workflow Run pages. Hosts`Changes`, `Inspector`, `Browser`, `Terminal` tabs. See [apps/web/src/components/layout/RightPane.tsx](../apps/web/src/components/layout/RightPane.tsx). |
-| **BrowserSession**                    | Chromium instance attached to a workspace.`IBrowserBridge` port; two hosts: `ServerPlaywrightHost` + `ElectronBridgeAdapter`. Descriptor persisted on `execution_workspaces.browser*` columns.                                       |
-| **TerminalSession**                   | Server-side PTY attached to a workspace.`ITerminalHost` port; three hosts: `NodePtyHost` / `SandboxPtyHost` (Phase 2) / `FallbackChildProcessHost`. **Ephemeral** — no DB rows.                                               |
+| Term | Meaning |
+|---|---|
+| **Harness** | Abstraction over the underlying AI agent SDK. Implementations: `CopilotProvider`, `ClaudeAgentProvider`. |
+| **HarnessProxy** | A wrapper that lets you `switchAdapter()` at runtime without restarting services. |
+| **DAG** | Directed Acyclic Graph of `StageDefinition`s connected by `StageEdge`s. Cycle detection via Kahn's algorithm. |
+| **PWS / Workflow Script** | `.workflow.mjs` programmatic alternative to JSON definitions. Lives in `templates/scripts/`. |
+| **RunProfile** | A reusable preset of `{variables, sessionMode, permissionMode, stageOverrides, …}` applied at run start. |
+| **HITL** | Human-In-The-Loop. Stage parks in `awaiting_input` until approved / rejected via the HITL API. |
+| **Execution Workspace** | Per-run / per-chat isolated filesystem (`<workspacesDir>/<id>/{source, artifacts, cache}`). |
+| **Worktree** | Git worktree carved from a project codebase clone, lifetime-scoped to a single run. |
+| **StreamBroker** | Persistent SSE broker backed by `stream_cursors` + `stream_sequences`. |
+| **Skill / Custom Agent / MCP server** | Per-stage configurable "tool surfaces" — see [docs/feature-skills-agents-mcp.md](./docs/feature-skills-agents-mcp.md). |
+| **ConfigResolver** | Service that deep-merges WorkflowDefinition → StageDefinition → runtime overrides into a final resolved config. |
+| **RightPane** | The unified tabbed dock on the right side of Chat / Workflow Run pages. Hosts `Changes`, `Inspector`, `Browser`, `Terminal` tabs. See [apps/web/src/components/layout/RightPane.tsx](../apps/web/src/components/layout/RightPane.tsx). |
+| **BrowserSession** | Chromium instance attached to a workspace. `IBrowserBridge` port; two hosts: `ServerPlaywrightHost` + `ElectronBridgeAdapter`. Descriptor persisted on `execution_workspaces.browser*` columns. |
+| **TerminalSession** | Server-side PTY attached to a workspace. `ITerminalHost` port; three hosts: `NodePtyHost` / `SandboxPtyHost` (Phase 2) / `FallbackChildProcessHost`. **Ephemeral** — no DB rows. |
 
 ---
 

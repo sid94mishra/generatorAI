@@ -48,6 +48,11 @@ export const TaskBriefSchema = z.object({
   sharedWorkspace: z.boolean().optional().default(true),
   /** Per-task budget. */
   budget: TaskBudgetSchema,
+  /**
+   * Optional `scope:slug` ref of a custom agent that should drive this worker.
+   * Validated against the orchestrator's team when it declares one.
+   */
+  agentRef: z.string().max(128).optional(),
 });
 
 export type TaskBrief = z.infer<typeof TaskBriefSchema>;

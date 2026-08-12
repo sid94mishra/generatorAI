@@ -4,13 +4,16 @@
 
 import type { WorkflowStatus } from './WorkflowStateMachine.js';
 import type { HookDefinition } from './HookDefinition.js';
+import type { McpServerConfig } from './CreateSessionParams.js';
+import type { AgentMode, AgentPermissionMode } from './AgentMode.js';
+import type { AgentOverrides } from './Agent.js';
 
 export interface HarnessConfig {
   model: string;
   systemMessage?: { mode: 'append' | 'replace'; content: string };
   systemPromptAppend?: string;
   streaming: boolean;
-  mcpServers: Record<string, { type: 'http' | 'stdio'; url?: string; command?: string; args?: string[] }>;
+  mcpServers: Record<string, McpServerConfig>;
   availableTools: string[];
   excludedTools: string[];
   skillDirectories: string[];
@@ -29,6 +32,21 @@ export interface HarnessConfig {
   harnessType?: 'copilot' | 'claude-agent';
   /** Maximum tool-call turns before forcing completion */
   maxTurns?: number;
+  /** Session-level permission mode (plan / bypassPermissions / …). */
+  permissionMode?: AgentPermissionMode;
+  /** Workflow instructions used while the agent is planning (Claude native, folded into the prompt elsewhere). */
+  planModeInstructions?: string;
+  /** Sticky agent mode for this scope. */
+  defaultAgentMode?: AgentMode;
+  /**
+   * Catalog ids of MCP servers to exclude. Replaces the historical abuse of
+   * `excludedTools` for MCP toggling.
+   */
+  excludedMcpServerIds?: string[];
+  /** Portable `scope:slug` ref of the agent driving this scope. */
+  agentRef?: string;
+  /** Additive capability delta applied on top of the bound agent. */
+  agentOverrides?: AgentOverrides;
 }
 
 export interface Workflow {

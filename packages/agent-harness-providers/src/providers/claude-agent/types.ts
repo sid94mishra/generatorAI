@@ -79,6 +79,10 @@ export interface StoredConversationConfig {
   disallowedTools?: string[];
   mcpServers?: Record<string, unknown>;
   agents?: Record<string, unknown>;
+  /** Explicit skill allow-list by name. Claude's only way to turn skills on. */
+  skills?: string[];
+  /** Name of the agent to run on the main thread (replaces the base system prompt). */
+  agent?: string;
   hooks?: unknown;
   sdkSessionId?: string;
   env?: Record<string, string | undefined>;

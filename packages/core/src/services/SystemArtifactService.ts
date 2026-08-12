@@ -4,8 +4,8 @@
 // ────────────────────────────────────────────────────────────────
 
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, basename, extname, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { join, basename, extname, resolve, relative, sep } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import type { ConfigType, SystemConfig, ArtifactWithSource, ProjectConfig, ILogger } from '@generatorai/shared';
 
 export interface ISystemConfigRepository {
@@ -15,6 +15,30 @@ export interface ISystemConfigRepository {
   deleteAll(): Promise<void>;
 }
 
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
+
+/**
+ * Read `name` / `description` / arbitrary metadata out of a skill or prompt
+ * file's YAML frontmatter. Returns empty metadata for files without one, which
+ * is the common case for plain-markdown prompts.
+ */
+function readFrontmatter(raw: string): { name?: string; description?: string; metadata: Record<string, unknown> } {
+  const match = FRONTMATTER_RE.exec(raw.replace(/^\uFEFF/, ''));
+  if (!match) return { metadata: {} };
+  try {
+    const parsed = parseYaml(match[1] ?? '', { maxAliasCount: 0 }) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { metadata: {} };
+    const fm = parsed as Record<string, unknown>;
+    return {
+      ...(typeof fm['name'] === 'string' ? { name: fm['name'] } : {}),
+      ...(typeof fm['description'] === 'string' ? { description: fm['description'] } : {}),
+      metadata: fm,
+    };
+  } catch {
+    return { metadata: {} };
+  }
+}
+
 export class SystemArtifactService {
   constructor(
     private systemConfigRepo: ISystemConfigRepository,
@@ -22,9 +46,18 @@ export class SystemArtifactService {
     private logger: ILogger,
   ) {}
 
+  /** Absolute path of the directory this service scans. */
+  get artifactsDir(): string {
+    return this.systemArtifactsDir;
+  }
+
   /**
    * Scan the system artifacts directory and upsert into DB.
    * Called at boot time.
+   *
+   * Ids are derived from the path RELATIVE to the category root, not the
+   * basename: two files with the same basename in different subfolders used to
+   * collide and silently overwrite each other.
    */
   async loadSystemArtifacts(): Promise<void> {
     const categories: ConfigType[] = ['skill', 'prompt', 'agent'];
@@ -35,25 +68,36 @@ export class SystemArtifactService {
       try {
         const dirStat = await stat(dir).catch(() => null);
         if (!dirStat?.isDirectory()) continue;
+        const root = resolve(dir);
 
         const files = await readdir(dir, { recursive: true });
         for (const file of files) {
-          const filePath = join(dir, file);
-          const fileStat = await stat(filePath);
-          if (!fileStat.isFile()) continue;
+          const filePath = resolve(join(dir, file));
+          const rel = relative(root, filePath);
+          // Reject anything that escapes the category root (symlink, ..).
+          if (rel.startsWith('..') || rel.startsWith(sep)) continue;
+          const fileStat = await stat(filePath).catch(() => null);
+          if (!fileStat?.isFile()) continue;
 
-          const name = basename(file, extname(file));
-          const id = `system-${type}-${name}`;
+          const slug = rel.slice(0, rel.length - extname(rel).length).split(sep).join('-');
+          const id = `system-${type}-${slug}`;
           const now = new Date();
+
+          let front: ReturnType<typeof readFrontmatter> = { metadata: {} };
+          try {
+            front = readFrontmatter(await readFile(filePath, 'utf-8'));
+          } catch {
+            // Binary or unreadable file — still catalog it, just without metadata.
+          }
 
           await this.systemConfigRepo.upsert({
             id,
             type,
-            name,
-            description: `System ${type}: ${name}`,
-            filePath: resolve(filePath),
-            version: '1.0.0',
-            metadata: {},
+            name: front.name ?? basename(file, extname(file)),
+            description: front.description ?? `System ${type}: ${basename(file, extname(file))}`,
+            filePath,
+            version: typeof front.metadata['version'] === 'string' ? front.metadata['version'] : '1.0.0',
+            metadata: front.metadata,
             createdAt: now,
             updatedAt: now,
           });
@@ -77,17 +121,21 @@ export class SystemArtifactService {
   }
 
   /**
-   * Get merged list: system + project artifacts with source indicator.
+   * Merged list: system + project artifacts with a source indicator.
+   *
+   * This is a PRECEDENCE merge, not a concatenation: a project artifact with
+   * the same `(type, name)` as a system one shadows it, so resolving an
+   * artifact by name is unambiguous.
    */
   async getAvailableArtifacts(
     projectConfigs: ProjectConfig[],
     type?: ConfigType,
   ): Promise<ArtifactWithSource[]> {
     const systemArtifacts = await this.listSystemArtifacts(type);
-    const result: ArtifactWithSource[] = [];
+    const byKey = new Map<string, ArtifactWithSource>();
 
     for (const sa of systemArtifacts) {
-      result.push({
+      byKey.set(`${sa.type}:${sa.name.toLowerCase()}`, {
         id: sa.id,
         type: sa.type,
         name: sa.name,
@@ -103,7 +151,7 @@ export class SystemArtifactService {
       : projectConfigs;
 
     for (const pc of filteredProjectConfigs) {
-      result.push({
+      byKey.set(`${pc.type}:${pc.name.toLowerCase()}`, {
         id: pc.id,
         type: pc.type,
         name: pc.name,
@@ -114,6 +162,6 @@ export class SystemArtifactService {
       });
     }
 
-    return result;
+    return [...byKey.values()];
   }
 }

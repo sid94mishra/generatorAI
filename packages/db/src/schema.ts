@@ -12,6 +12,11 @@ import type {
   IterationMode,
   AutomationDataset,
   AutomationRetryPolicy,
+  AgentToolPolicy,
+  AgentRuntimePolicy,
+  AgentOrchestrationPolicy,
+  AgentOverrides,
+  ResolvedAgentProjection,
 } from '@generatorai/shared';
 
 // ── Sessions ──
@@ -197,6 +202,9 @@ export const chatMessages = sqliteTable(
     /** Rich metadata (thinking, tool calls, system msgs) for assistant messages */
     metadata: text('metadata', { mode: 'json' }).$type<ChatMessageMetadata>(),
     chatId: text('chat_id'),
+    /** Agent that produced this message, for correct replay after a mid-chat switch. */
+    agentRef: text('agent_ref'),
+    agentVersion: integer('agent_version'),
     timestamp: integer('timestamp', { mode: 'timestamp' }).notNull(),
   },
   (table) => ({
@@ -318,6 +326,16 @@ export const chats = sqliteTable(
     })
       .notNull()
       .default('bypassPermissions'),
+    // ── Agent binding (v26) ──
+    /** Portable `scope:slug` ref — authoritative. */
+    agentRef: text('agent_ref'),
+    /** Resolution cache for `agentRef`. Allowed to be stale/orphaned. */
+    agentId: text('agent_id'),
+    /** Agent version at bind time. Part of the conversation binding key. */
+    agentVersion: integer('agent_version'),
+    agentOverrides: text('agent_overrides', { mode: 'json' }).$type<AgentOverrides>(),
+    /** Frozen, redacted projection captured at session creation. */
+    agentSnapshot: text('agent_snapshot', { mode: 'json' }).$type<ResolvedAgentProjection>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   },
@@ -327,6 +345,7 @@ export const chats = sqliteTable(
     projectIdx: index('idx_chats_project_id').on(table.projectId),
     createdAtIdx: index('idx_chats_created_at').on(table.createdAt),
     parentChatIdx: index('idx_chats_parent_chat_id').on(table.parentChatId),
+    agentRefIdx: index('idx_chats_agent_ref').on(table.agentRef),
   }),
 );
 
@@ -350,6 +369,8 @@ export const workflowDefinitions = sqliteTable(
     useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
     hooks: text('hooks', { mode: 'json' }).$type<unknown[]>().default([]),
     hooksFile: text('hooks_file', { mode: 'json' }),
+    /** Portable `scope:slug` ref of the default agent for stages without their own. */
+    defaultAgentRef: text('default_agent_ref'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   },
@@ -357,6 +378,7 @@ export const workflowDefinitions = sqliteTable(
     createdAtIdx: index('idx_workflow_defs_created_at').on(table.createdAt),
     scopeIdx: index('idx_workflow_defs_scope').on(table.scope),
     projectIdx: index('idx_workflow_defs_project').on(table.projectId),
+    agentRefIdx: index('idx_workflow_defs_agent_ref').on(table.defaultAgentRef),
   }),
 );
 
@@ -394,11 +416,14 @@ export const stageDefinitions = sqliteTable(
      * With `approvalRequired`, `plan` gates the plan for human approval.
      */
     agentMode: text('agent_mode', { enum: ['auto', 'plan'] }),
+    /** Portable `scope:slug` ref of the agent driving this stage. Supersedes `agentName`. */
+    agentRef: text('agent_ref'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   },
   (table) => ({
     workflowIdx: index('idx_stage_defs_workflow').on(table.workflowDefinitionId),
     orderIdx: index('idx_stage_defs_order').on(table.workflowDefinitionId, table.order),
+    agentRefIdx: index('idx_stage_defs_agent_ref').on(table.agentRef),
   }),
 );
 
@@ -460,6 +485,8 @@ export const workflowRuns = sqliteTable(
     workspaceId: text('workspace_id'),
     /** Links this run to a parent iteration stage (if it's a sub-workflow child) */
     parentStageRunId: text('parent_stage_run_id'),
+    /** Frozen, redacted agent projection captured when the run started. */
+    agentSnapshot: text('agent_snapshot', { mode: 'json' }).$type<ResolvedAgentProjection>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
     startedAt: integer('started_at', { mode: 'timestamp' }),
@@ -854,6 +881,9 @@ export const executionWorkspaces = sqliteTable(
     ownerId: text('owner_id').notNull(),
     projectId: text('project_id'),
     rootPath: text('root_path').notNull(),
+    // Where the agent works; defaults to root_path. Set when a chat is bound
+    // to a local folder so artifacts stay out of the user's repository.
+    codeRoot: text('code_root'),
     status: text('status', {
       enum: ['creating', 'active', 'completed', 'archived', 'failed'],
     }).notNull().default('creating'),
@@ -1241,3 +1271,47 @@ export const widgetInstances = sqliteTable(
     stageIdx: index('idx_widget_instances_stage').on(table.stageRunId),
   }),
 );
+
+// ── Agents (first-class, user-authored agent definitions) ──
+//
+// An agent bundles instructions, a capability policy and a runtime policy under a
+// portable `scope:slug` ref. Bindings elsewhere store that REF, not this id, so
+// workflow templates and exports stay portable across machines.
+export const agents = sqliteTable(
+  'agents',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope', { enum: ['system', 'global', 'project'] }).notNull(),
+    // NOT NULL DEFAULT '' — SQLite treats NULLs as distinct in UNIQUE indexes,
+    // so a nullable column would allow unlimited ('global', NULL, slug) rows.
+    projectId: text('project_id').notNull().default(''),
+    slug: text('slug').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    instructions: text('instructions').notNull(),
+    role: text('role', { enum: ['agent', 'orchestrator'] }).notNull().default('agent'),
+    projection: text('projection', { enum: ['append', 'replace'] }).notNull().default('append'),
+    icon: text('icon'),
+    color: text('color'),
+    tags: text('tags', { mode: 'json' }).$type<string[]>().default([]),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    skillIds: text('skill_ids', { mode: 'json' }).$type<string[]>().default([]),
+    mcpServerIds: text('mcp_server_ids', { mode: 'json' }).$type<string[]>().default([]),
+    tools: text('tools', { mode: 'json' }).$type<Partial<AgentToolPolicy>>().default({}),
+    runtime: text('runtime', { mode: 'json' }).$type<AgentRuntimePolicy>().default({}),
+    orchestration: text('orchestration', { mode: 'json' }).$type<AgentOrchestrationPolicy>(),
+    version: integer('version').notNull().default(1),
+    sourcePath: text('source_path'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    scopeIdx: index('idx_agents_scope').on(table.scope, table.projectId),
+    slugIdx: uniqueIndex('idx_agents_slug_unique').on(table.scope, table.projectId, table.slug),
+    roleIdx: index('idx_agents_role').on(table.role),
+  }),
+);
+
+/** Re-exported so repositories can reference the JSON column shapes. */
+export type AgentChatOverrides = AgentOverrides;
+export type AgentChatSnapshot = ResolvedAgentProjection;

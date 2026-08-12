@@ -43,6 +43,7 @@ import {
   DrizzleProjectRepository,
   DrizzleProjectCodebaseRepository,
   DrizzleProjectConfigRepository,
+  DrizzleAgentRepository,
   DrizzleWorktreeRepository,
   DrizzleSystemConfigRepository,
   // Workspace Management repositories
@@ -96,6 +97,10 @@ import {
   ProjectConfigService,
   WorktreeCleanupService,
   SystemArtifactService,
+  ArtifactCatalog,
+  AgentService,
+  AgentResolver,
+  AgentStagingService,
   // Workspace Management service
   WorkspaceManager,
   // Workflow Script loader
@@ -196,7 +201,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // stage or an orchestrator subagent can each pick a different provider by
   // passing `harnessType` (or simply a model that belongs to that provider).
   const primaryHarnessType = (config.harness?.type ?? 'copilot') as HarnessType;
-
   /**
    * Isolated config/home directory for a harness instance.
    *
@@ -236,6 +240,20 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       ? path.join(path.dirname(resolve(config.dbPath)), 'harnesses', instanceId, 'home')
       : undefined;
 
+  /**
+   * Claude filesystem settings sources. Defaults to none: `.claude/settings.json`
+   * in a cloned repo can define shell hooks, so loading it is a per-deployment
+   * trust decision rather than a default.
+   */
+  const parseSettingSources = (raw?: string): Array<'user' | 'project' | 'local'> => {
+    if (!raw) return [];
+    const allowed = new Set(['user', 'project', 'local']);
+    return raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s): s is 'user' | 'project' | 'local' => allowed.has(s));
+  };
+
   /** Per-provider construction options, resolved lazily by the registry. */
   const buildHarnessConfig = (type: HarnessType) => ({
     type,
@@ -263,6 +281,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       defaultTimeoutMs: config.copilot.defaultTimeoutMs,
       includePartialMessages: config.harness?.claudeAgent?.includePartialMessages ?? true,
       enableFileCheckpointing: config.harness?.claudeAgent?.enableFileCheckpointing ?? false,
+      // Default OFF. `project`/`local` load `.claude/settings.json` from the
+      // cloned repo, which can define shell hooks — enabling it globally would
+      // execute settings from any repository the user opens.
+      settingSources: parseSettingSources(process.env['GENERATORAI_CLAUDE_SETTING_SOURCES']),
       verbose: config.logLevel === 'debug',
       homeDir: harnessHomeDir(type),
     } : undefined,
@@ -726,6 +748,31 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
   );
 
+  // ── Agents (first-class agent entity) ──
+  const artifactCatalog = new ArtifactCatalog(
+    systemArtifactService,
+    projectConfigRepo,
+    resolve(config.templatesDir, 'system'),
+    logger,
+  );
+  const agentRepo = new DrizzleAgentRepository(db);
+  const agentResolver = new AgentResolver(agentRepo, artifactCatalog, logger);
+  const agentStaging = new AgentStagingService(logger);
+  const agentService = new AgentService({
+    agentRepo,
+    catalog: artifactCatalog,
+    logger,
+    resolver: agentResolver,
+    listModels: async () => {
+      const models = await harness.getModels();
+      return models.map((m) => ({ id: m.id, ...(m.provider ? { provider: m.provider } : {}) }));
+    },
+    emitEvent: (kind, data) => {
+      // Global scope so every connected client invalidates its agent cache.
+      void eventBus.emitGlobal({ kind, data } as Parameters<typeof eventBus.emitGlobal>[0]);
+    },
+  });
+
   const worktreeCleanupService = new WorktreeCleanupService(
     worktreeService,
     worktreeRepo,
@@ -1082,6 +1129,23 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // Give the orchestrator the workspace manager so it can write the shared
   // `orchestrator/state.json` scratchpad into the (shared) workspace.
   orchestratorService.setWorkspaceManager(workspaceManager);
+  // Agents — wired into every path that can bind one. A missing wiring here
+  // makes an agent-bound chat/stage fail loudly rather than silently drop its
+  // skills, MCP servers and tool policy.
+  chatExtensions.agentResolver = agentResolver;
+  chatExtensions.agentStaging = agentStaging;
+  stageExecutionService.setAgentServices(agentResolver, agentStaging);
+  orchestratorService.setAgentService(agentService);
+  // Staged skill files live under `<workspace>/.generatorai`, outside every
+  // worktree; drop them with the workspace (invariant §5.14).
+  workspaceManager.registerBeforeDelete(async (workspaceId) => {
+    try {
+      const ws = await workspaceManager.getExecutionWorkspace(workspaceId);
+      if (ws) await agentStaging.cleanup(ws.rootPath);
+    } catch {
+      // Best effort — never block workspace deletion.
+    }
+  });
   chatExtensions.codebaseRepo = projectCodebaseRepo;  // ── Integrated Browser (v13) ──
   // BrowserService owns the per-workspace Chromium lifecycle. The bridge
   // chain is tried in order: `ElectronBridgeAdapter` first (only available
@@ -1275,6 +1339,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     worktreeCleanupService,
     systemArtifactService,
 
+    // Agents (first-class agent entity)
+    agentRepo,
+    agentService,
+    agentResolver,
+    agentStaging,
+    artifactCatalog,
+
     // Workspace Management
     workspaceManager,
 
@@ -1433,6 +1504,16 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // Load system-level artifacts (skills, prompts, agents)
       await systemArtifactService.loadSystemArtifacts();
 
+      // Upsert the bundled `*.agent.md` definitions. Runs after the artifact
+      // scan so an agent's declared skills resolve to real catalog ids.
+      try {
+        await agentService.syncSystemAgents(systemArtifactService.artifactsDir);
+      } catch (err) {
+        logger.warn(
+          `[Container] System agent sync failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
       // Load installed extensions (system + user scopes; workspace scope is
       // lazy on API access). Failures for individual extensions are logged
       // per-record and never abort boot.
@@ -1556,6 +1637,11 @@ export interface Container {
   worktreeCleanupService: WorktreeCleanupService;
   projectConfigService: ProjectConfigService;
   systemArtifactService: SystemArtifactService;
+  agentRepo: DrizzleAgentRepository;
+  agentService: AgentService;
+  agentResolver: AgentResolver;
+  agentStaging: AgentStagingService;
+  artifactCatalog: ArtifactCatalog;
 
   // Workspace Management
   workspaceManager: WorkspaceManager;

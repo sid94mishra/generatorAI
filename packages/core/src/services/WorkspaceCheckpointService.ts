@@ -196,12 +196,15 @@ export class WorkspaceCheckpointService {
    * the change-set engine.
    */
   async resolveRepos(workspace: ExecutionWorkspace): Promise<WorkspaceRepoRef[]> {
+    // Checkpoints track the tree the agent edits, which is the local folder
+    // when one is bound — not the managed artifact root.
+    const codeRoot = workspace.codeRoot ?? workspace.rootPath;
     const worktreeRows = await this.worktreeRepo.findByWorkspace(workspace.id);
     const worktrees = worktreeRows.map((wt) => ({
       alias: wt.alias,
-      worktreePath: resolveWorktreePath(workspace.rootPath, wt.relativePath),
+      worktreePath: resolveWorktreePath(codeRoot, wt.relativePath),
     }));
-    return discoverRepos(this.git, { rootPath: workspace.rootPath, worktrees, autoInit: true });
+    return discoverRepos(this.git, { rootPath: codeRoot, worktrees, autoInit: true });
   }
 
   /** Resolve a single repo alias to its absolute directory. */

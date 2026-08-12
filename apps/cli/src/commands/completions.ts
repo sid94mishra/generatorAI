@@ -6,7 +6,7 @@ import chalk from 'chalk';
 // Keep these in sync with `registerAllCommands` + per-command subcommands.
 // Adding a new top-level command? Update TOP_LEVEL + (optionally) SUBCOMMANDS.
 const TOP_LEVEL = [
-  'system', 'health', 'models', 'copilot', 'config', 'chat',
+  'system', 'health', 'models', 'copilot', 'config', 'chat', 'agent',
   'workflow', 'wf', 'run', 'orchestrator', 'orch', 'automation', 'auto',
   'project', 'proj', 'workspace', 'ws', 'webhook', 'hook', 'harness',
   'script', 'sc', 'init', 'completions', 'tui',
@@ -18,6 +18,7 @@ const SUBCOMMANDS: Record<string, string[]> = {
   copilot: ['conversations', 'messages', 'ping'],
   profile: ['list', 'create', 'use', 'delete'],
   chat: ['list', 'create', 'show', 'send', 'messages', 'watch', 'delete'],
+  agent: ['list', 'ls', 'show', 'create', 'export', 'usage', 'delete', 'rm', 'resolve'],
   workflow: ['list', 'create', 'show', 'update', 'delete', 'validate', 'export', 'import', 'stage', 'edge', 'from-template', 'template'],
   wf: ['list', 'create', 'show', 'update', 'delete', 'validate', 'export', 'import', 'stage', 'edge', 'from-template', 'template'],
   run: ['list', 'start', 'show', 'watch', 'messages', 'pause', 'resume', 'cancel', 'retry', 'hitl', 'stage', 'profile', 'workspace'],

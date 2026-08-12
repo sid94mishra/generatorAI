@@ -849,6 +849,9 @@ export function ChatPage() {
             if (chatId) updateChatMutation.mutate({ defaultAgentMode: mode });
           }}
           showAgentModePicker={!chat?.parentChatId}
+          {...(chat?.agentSnapshot?.driving?.name
+            ? { agentName: chat.agentSnapshot.driving.name }
+            : {})}
           pendingInteractionLabel={pendingInteractionLabel}
           onCancelPendingInteraction={() => {
             if (!chatId) return;

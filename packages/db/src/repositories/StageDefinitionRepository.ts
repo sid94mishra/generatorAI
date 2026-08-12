@@ -63,6 +63,7 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
         contextSources: stage.contextSources ?? null,
         outputFormat: stage.outputFormat ?? 'text',
         agentName: stage.agentName ?? null,
+        agentRef: stage.agentRef ?? null,
         resultValidation: stage.resultValidation ?? null,
         expectedOutput: stage.expectedOutput ?? null,
         outputSchema: stage.outputSchema ?? null,
@@ -108,6 +109,10 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
     if (updates.hooks !== undefined) validateJsonColumn(updates.hooks, stageJsonGuards.hooks, { column: 'hooks', table: 'stage_definitions' });
     if (updates.retryPolicy !== undefined) validateJsonColumn(updates.retryPolicy, stageJsonGuards.retryPolicy, { column: 'retryPolicy', table: 'stage_definitions' });
     if (updates.condition !== undefined) validateJsonColumn(updates.condition, stageJsonGuards.condition, { column: 'condition', table: 'stage_definitions' });
+    if (updates.resultValidation !== undefined) validateJsonColumn(updates.resultValidation, stageJsonGuards.hooks, { column: 'resultValidation', table: 'stage_definitions' });
+    if (updates.outputSchema !== undefined) validateJsonColumn(updates.outputSchema, stageJsonGuards.variables, { column: 'outputSchema', table: 'stage_definitions' });
+    if (updates.contextSources !== undefined) validateJsonColumn(updates.contextSources, stageJsonGuards.prompts, { column: 'contextSources', table: 'stage_definitions' });
+    if (updates.iterationConfig !== undefined) validateJsonColumn(updates.iterationConfig, stageJsonGuards.variables, { column: 'iterationConfig', table: 'stage_definitions' });
 
     const values: Record<string, unknown> = {};
     if (updates.name !== undefined) values['name'] = updates.name;
@@ -126,6 +131,7 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
     if (updates.contextSources !== undefined) values['contextSources'] = updates.contextSources;
     if (updates.outputFormat !== undefined) values['outputFormat'] = updates.outputFormat;
     if (updates.agentName !== undefined) values['agentName'] = updates.agentName;
+    if (updates.agentRef !== undefined) values['agentRef'] = updates.agentRef ?? null;
     if (updates.resultValidation !== undefined) values['resultValidation'] = updates.resultValidation;
     if (updates.expectedOutput !== undefined) values['expectedOutput'] = updates.expectedOutput;
     if (updates.outputSchema !== undefined) values['outputSchema'] = updates.outputSchema;
@@ -199,6 +205,7 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
       contextSources: (safeJsonColumn(row.contextSources, jsonArray, { fallback: undefined }) ?? undefined) as string[] | undefined,
       outputFormat: (row.outputFormat ?? 'text') as 'text' | 'json',
       agentName: row.agentName ?? undefined,
+      agentRef: row.agentRef ?? undefined,
       resultValidation: (safeJsonColumn(row.resultValidation, jsonArray, { fallback: undefined }) ?? undefined) as ResultValidationRule[] | undefined,
       expectedOutput: row.expectedOutput ?? undefined,
       outputSchema: safeJsonColumn(row.outputSchema, jsonRecord, { fallback: undefined }) as Record<string, unknown> | undefined,

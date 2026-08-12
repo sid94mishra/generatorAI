@@ -23,6 +23,25 @@
 
 import type { PlanBlock, QuestionBlock, SystemCategory, WidgetBlock } from './types.js';
 
+/**
+ * A plan filed by the non-blocking `record_plan` tool is born `recorded` and
+ * never receives a follow-up status event, so pinning `drafting` here left its
+ * card spinning forever.
+ */
+function planStatusOf(data: Record<string, unknown>): PlanBlock['status'] {
+  const s = data['status'];
+  return s === 'drafting' ||
+    s === 'recorded' ||
+    s === 'awaiting_review' ||
+    s === 'changes_requested' ||
+    s === 'approved' ||
+    s === 'rejected' ||
+    s === 'superseded' ||
+    s === 'expired'
+    ? s
+    : 'drafting';
+}
+
 /** A mutation to apply to the stream store. */
 export type StreamEffect =
   | { op: 'appendToken'; key: string; text: string }
@@ -325,7 +344,7 @@ export class StreamEventRouter {
             title: String(data['title'] ?? 'Plan'),
             fileName: String(data['fileName'] ?? 'plan.md'),
             summary: String(data['summary'] ?? ''),
-            status: 'drafting',
+            status: planStatusOf(data),
             actions: [],
           },
         });
@@ -338,7 +357,7 @@ export class StreamEventRouter {
           op: 'setPlanStatus',
           key,
           planId: String(data['planId'] ?? ''),
-          status: 'drafting',
+          status: planStatusOf(data),
           extra: { revision: Number(data['revision'] ?? 1) },
         });
         out.push({ op: 'invalidate', resource: 'plans' });

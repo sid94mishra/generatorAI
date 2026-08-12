@@ -61,6 +61,17 @@ const MAX_SYNC_REPLAY = 1000;
 /** Hard ceiling on filter prefix count — STR-06 says 10. */
 const MAX_KIND_PREFIXES = 10;
 
+/**
+ * Raw SDK passthrough that no client renders.
+ *
+ * These were 98% of one orchestrator turn's 19k events and ~1M rows of
+ * `stream_cursors`. Dropping them at the broker shrinks the window in which a
+ * frame can be lost and stops them masking a stalled stream.
+ * Set `GENERATORAI_STREAM_DEBUG_NOISE=1` to keep them for diagnostics.
+ */
+const NOISE_KINDS = new Set(['harness.session_info', 'harness.unknown']);
+const KEEP_NOISE = process.env['GENERATORAI_STREAM_DEBUG_NOISE'] === '1';
+
 export class StreamBroker {
   private subscribers = new Map<string, Set<StreamEventHandler>>();
 
@@ -82,6 +93,9 @@ export class StreamBroker {
     kind: string,
     data: unknown,
   ): Promise<StreamBrokerPublishResult> {
+    if (!KEEP_NOISE && NOISE_KINDS.has(kind)) {
+      return { seq: -1, id: -1, ts: Date.now() };
+    }
     const row = await this.repo.append(scope, scopeId, kind, data);
 
     const key = this.keyFor(scope, scopeId);

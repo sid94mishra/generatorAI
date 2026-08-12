@@ -106,6 +106,12 @@ export type AgentEvent =
   | { kind: 'chat.question.asked'; data: { chatId: string; interactionId: string; turnId?: string; questions: unknown[] } }
   | { kind: 'chat.question.answered'; data: { chatId: string; interactionId: string; answers: Record<string, string[]>; freeformResponse?: string } }
   | { kind: 'chat.question.expired'; data: { chatId: string; interactionId: string; reason: string } }
+
+  // ── Agents (first-class agent entity) ──
+  | { kind: 'agent.created'; data: { agentId: string; ref: string; name: string; scope: string } }
+  | { kind: 'agent.updated'; data: { agentId: string; ref: string; name: string; version: number } }
+  | { kind: 'agent.deleted'; data: { agentId: string; ref: string; soft: boolean } }
+  | { kind: 'chat.agent_changed'; data: { chatId: string; agentRef?: string; agentVersion?: number } }
   // ── Harness plan passthrough (telemetry/observability only) ──
   | { kind: 'harness.plan_changed'; data: { operation: string } }
   | { kind: 'harness.mode_changed'; data: { previousMode: string; newMode: string } }

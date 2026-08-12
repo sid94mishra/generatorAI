@@ -29,6 +29,9 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
       validateJsonColumn(definition.variables, jsonArray, { column: 'variables', table: 'workflow_definitions' });
       validateJsonColumn(definition.tags, stringArray, { column: 'tags', table: 'workflow_definitions' });
       validateJsonColumn(definition.orchestratorConfig, jsonRecord, { column: 'orchestratorConfig', table: 'workflow_definitions' });
+      validateJsonColumn(definition.selectedArtifacts, jsonRecord, { column: 'selectedArtifacts', table: 'workflow_definitions' });
+      validateJsonColumn(definition.hooks, jsonArray, { column: 'hooks', table: 'workflow_definitions' });
+      validateJsonColumn(definition.hooksFile, jsonRecord, { column: 'hooksFile', table: 'workflow_definitions' });
 
       await this.db.insert(workflowDefinitions).values({
         id: definition.id,
@@ -44,6 +47,7 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
         selectedArtifacts: definition.selectedArtifacts ?? {},
         hooks: definition.hooks ?? [],
         hooksFile: definition.hooksFile ?? null,
+        defaultAgentRef: definition.defaultAgentRef ?? null,
         createdAt: definition.createdAt,
         updatedAt: definition.updatedAt,
       });
@@ -98,6 +102,15 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
     if (updates.orchestratorConfig !== undefined) {
       validateJsonColumn(updates.orchestratorConfig, jsonRecord, { column: 'orchestratorConfig', table: 'workflow_definitions' });
     }
+    if (updates.selectedArtifacts !== undefined) {
+      validateJsonColumn(updates.selectedArtifacts, jsonRecord, { column: 'selectedArtifacts', table: 'workflow_definitions' });
+    }
+    if (updates.hooks !== undefined) {
+      validateJsonColumn(updates.hooks, jsonArray, { column: 'hooks', table: 'workflow_definitions' });
+    }
+    if (updates.hooksFile !== undefined) {
+      validateJsonColumn(updates.hooksFile, jsonRecord, { column: 'hooksFile', table: 'workflow_definitions' });
+    }
 
     const values: Record<string, unknown> = {};
     if (updates.name !== undefined) values['name'] = updates.name;
@@ -112,6 +125,7 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
     if (updates.selectedArtifacts !== undefined) values['selectedArtifacts'] = updates.selectedArtifacts;
     if (updates.hooks !== undefined) values['hooks'] = updates.hooks;
     if (updates.hooksFile !== undefined) values['hooksFile'] = updates.hooksFile;
+    if (updates.defaultAgentRef !== undefined) values['defaultAgentRef'] = updates.defaultAgentRef ?? null;
     values['updatedAt'] = new Date();
 
     await this.db
@@ -155,6 +169,7 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
       useWorktree: row.useWorktree ?? true,
       hooks: (safeJsonColumn(row.hooks, jsonArray, { fallback: [] }) ?? []) as WorkflowHookDefinition[],
       hooksFile: safeJsonColumn(row.hooksFile, jsonRecord, { fallback: undefined }) as HooksFileConfig | undefined,
+      defaultAgentRef: row.defaultAgentRef ?? undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

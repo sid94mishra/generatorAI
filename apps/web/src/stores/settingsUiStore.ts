@@ -9,6 +9,7 @@ import { create } from 'zustand';
 export type SettingsSectionId =
   | 'general'
   | 'providers'
+  | 'agents'
   | 'skills'
   | 'mcp'
   | 'templates'

@@ -27,7 +27,7 @@ import {
   Square, ArrowUp, Gauge, Search, Check, Info,
   Eye, Globe, Cpu, SlidersHorizontal, Lock,
   Sparkles, ScrollText, Wrench, FileText, TerminalSquare, AtSign,
-  ClipboardList, Zap,
+  ClipboardList, Zap, Bot,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { ModelPicker, ProviderIcon, formatTokens, DetailRow } from '@/components/shared/ModelPicker.js';
@@ -106,6 +106,13 @@ interface ChatInputProps {
    */
   pendingInteractionLabel?: string | null;
   onCancelPendingInteraction?: () => void;
+  /**
+   * AGT-01 — name of the agent driving this chat, when one is bound. Shown as
+   * a read-only chip: the binding is frozen for the life of the conversation
+   * (rebinding mid-thread would invalidate the prompt-cache prefix), so it is
+   * deliberately not editable from the composer.
+   */
+  agentName?: string | undefined;
 }
 
 /**
@@ -148,6 +155,7 @@ export function ChatInput({
   showAgentModePicker = true,
   pendingInteractionLabel,
   onCancelPendingInteraction,
+  agentName,
 }: ChatInputProps) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -946,6 +954,18 @@ export function ChatInput({
                 onChange={(id) => onModelChange?.(id)}
                 ariaLabel="Select model"
               />
+            )}
+
+            {/* Bound agent — read-only; the binding is frozen per conversation. */}
+            {agentName && (
+              <span
+                data-testid="chat-agent-chip"
+                title={`Driven by the “${agentName}” agent`}
+                className="flex h-7 flex-shrink-0 items-center gap-1 rounded-full bg-[var(--color-primary)]/10 px-2 text-[11px] font-medium text-[var(--color-primary)]"
+              >
+                <Bot className="h-3 w-3" />
+                <span className="max-w-[10rem] truncate">{agentName}</span>
+              </span>
             )}
 
             {/* Agent mode — Interactive vs Plan.

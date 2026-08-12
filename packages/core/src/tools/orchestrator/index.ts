@@ -15,6 +15,12 @@ export interface OrchestratorToolSetDeps {
   orchestratorService: OrchestratorService;
   parentChatId: string;
   owner?: string;
+  /**
+   * Append `list_available_agents`. Off by default: adding a 7th tool
+   * unconditionally would change the tools prefix of EVERY existing
+   * orchestrator chat and cost a one-time full prompt-cache miss on upgrade.
+   */
+  includeAgentDiscovery?: boolean;
 }
 
 export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDefinition[] {
@@ -28,6 +34,9 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       'Provide a complete, self-contained brief: the worker inherits NOTHING except what you pass here. ' +
       'Include objective, self-contained context, and explicit boundaries to avoid overlap with sibling workers. ' +
       'Prefer referencing artifact paths (inputArtifacts) over pasting large content. ' +
+      'If list_available_agents returns a specialised agent that fits the subtask, you MUST pass its ' +
+      '`ref` as `agentRef` — naming the agent in your narration does NOT bind it, and a worker spawned ' +
+      'without `agentRef` gets no instructions, skills or tool policy. ' +
       'Use check_background_agents to collect results.',
     parametersSchema: {
       type: 'object',
@@ -44,6 +53,15 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
             maxTokens: { type: 'number' },
             maxToolCalls: { type: 'number' },
           },
+        },
+        // APPENDED LAST on purpose — inserting a key mid-object would change
+        // the schema hash for every existing orchestrator chat.
+        agentRef: {
+          type: 'string',
+          description:
+            'Optional `scope:slug` ref of a custom agent that should drive this worker ' +
+            '(see list_available_agents). Gives the worker that agent\'s instructions, skills, ' +
+            'MCP servers and tool policy. Omit for a generic worker.',
         },
       },
       required: ['taskName', 'objective'],
@@ -158,6 +176,28 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
     },
   };
 
-  // Deterministic order (M2).
-  return [listModels, spawn, checkAll, checkOne, send, list];
+  const listAvailableAgents: ToolDefinition = {
+    name: 'list_available_agents',
+    description:
+      'List the custom agents you may assign to background workers. Each entry has a ' +
+      '`ref` (pass it as `agentRef` to spawn_background_agent), a name and a description ' +
+      'of when to use it. Prefer picking a specialised agent over writing the same ' +
+      'instructions into every brief. After calling this, every spawn whose subtask ' +
+      'matches one of these agents MUST carry that agent\'s `ref` in `agentRef`.',
+    parametersSchema: {
+      type: 'object',
+      properties: {},
+    },
+    skipPermission: true,
+    owner: owner ?? `orchestrator:${parentChatId}`,
+    handler: async () => {
+      const agents = await orchestratorService.listAssignableAgents(parentChatId);
+      return { count: agents.length, agents };
+    },
+  };
+
+  // Deterministic order (M2). The optional 7th tool is APPENDED so the prefix
+  // of the original six hashes identically for chats that do not use it.
+  const base = [listModels, spawn, checkAll, checkOne, send, list];
+  return deps.includeAgentDiscovery ? [...base, listAvailableAgents] : base;
 }

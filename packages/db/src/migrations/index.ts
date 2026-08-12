@@ -511,6 +511,25 @@ export function migrateDB(db: AppDatabase): void {
   // feedback follow-up before the DAG advances. Default 0 (auto-advance).
   safeAddColumn(`ALTER TABLE stage_definitions ADD COLUMN approval_required INTEGER NOT NULL DEFAULT 0`);
 
+  // v26 — first-class agents. Every ADD COLUMN lives here rather than in the
+  // versioned block below: the pre-versioned block runs FIRST on every boot,
+  // so a duplicate raw ALTER inside v26 would throw on a fresh DB, roll the
+  // migration back, and stop the server from starting.
+  safeAddColumn(`ALTER TABLE chats ADD COLUMN agent_ref TEXT`);
+  safeAddColumn(`ALTER TABLE chats ADD COLUMN agent_id TEXT`);
+  safeAddColumn(`ALTER TABLE chats ADD COLUMN agent_version INTEGER`);
+  safeAddColumn(`ALTER TABLE chats ADD COLUMN agent_overrides TEXT`);
+  safeAddColumn(`ALTER TABLE chats ADD COLUMN agent_snapshot TEXT`);
+  safeAddColumn(`ALTER TABLE chat_messages ADD COLUMN agent_ref TEXT`);
+  safeAddColumn(`ALTER TABLE chat_messages ADD COLUMN agent_version INTEGER`);
+  safeAddColumn(`ALTER TABLE stage_definitions ADD COLUMN agent_ref TEXT`);
+  safeAddColumn(`ALTER TABLE workflow_definitions ADD COLUMN default_agent_ref TEXT`);
+  safeAddColumn(`ALTER TABLE workflow_runs ADD COLUMN agent_snapshot TEXT`);
+
+  // Where the agent works, when that differs from the managed root. NULL means
+  // "same as root_path", which is every workspace created before this column.
+  safeAddColumn(`ALTER TABLE execution_workspaces ADD COLUMN code_root TEXT`);
+
   // NOTE: Integrated Browser columns (browser_config, browser_status, ...)
   // are added inside the versioned v13 migration below so they run AFTER
   // `execution_workspaces` is guaranteed to exist (v8 creates it). Using
@@ -1547,6 +1566,54 @@ export function migrateDB(db: AppDatabase): void {
           muted_until   INTEGER
         );`,
         `CREATE INDEX IF NOT EXISTS idx_device_push_provider ON device_push_tokens(provider);`,
+      ],
+    },
+
+    {
+      // ── v26 — first-class agents ──
+      //
+      // Only CREATE statements live here. Every ADD COLUMN this feature needs
+      // is in the idempotent pre-versioned block above, because that block
+      // runs before this loop on every boot and a duplicate raw ALTER would
+      // abort the migration and prevent startup.
+      //
+      // `project_id` is NOT NULL DEFAULT '' rather than nullable: SQLite treats
+      // NULLs as distinct inside a UNIQUE index, so a nullable column would let
+      // unlimited ('global', NULL, 'code-reviewer') rows coexist and quietly
+      // break slug resolution and the boot-time system-agent upsert.
+      version: 26,
+      name: 'first_class_agents',
+      sql: [
+        `CREATE TABLE IF NOT EXISTS agents (
+          id             TEXT PRIMARY KEY,
+          scope          TEXT NOT NULL CHECK(scope IN ('system','global','project')),
+          project_id     TEXT NOT NULL DEFAULT '',
+          slug           TEXT NOT NULL,
+          name           TEXT NOT NULL,
+          description    TEXT NOT NULL,
+          instructions   TEXT NOT NULL,
+          role           TEXT NOT NULL DEFAULT 'agent' CHECK(role IN ('agent','orchestrator')),
+          projection     TEXT NOT NULL DEFAULT 'append' CHECK(projection IN ('append','replace')),
+          icon           TEXT,
+          color          TEXT,
+          tags           TEXT DEFAULT '[]',
+          enabled        INTEGER NOT NULL DEFAULT 1,
+          skill_ids      TEXT DEFAULT '[]',
+          mcp_server_ids TEXT DEFAULT '[]',
+          tools          TEXT DEFAULT '{}',
+          runtime        TEXT DEFAULT '{}',
+          orchestration  TEXT,
+          version        INTEGER NOT NULL DEFAULT 1,
+          source_path    TEXT,
+          created_at     INTEGER NOT NULL,
+          updated_at     INTEGER NOT NULL
+        );`,
+        `CREATE INDEX IF NOT EXISTS idx_agents_scope ON agents(scope, project_id);`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_slug_unique ON agents(scope, project_id, slug);`,
+        `CREATE INDEX IF NOT EXISTS idx_agents_role ON agents(role);`,
+        `CREATE INDEX IF NOT EXISTS idx_chats_agent_ref ON chats(agent_ref);`,
+        `CREATE INDEX IF NOT EXISTS idx_stage_defs_agent_ref ON stage_definitions(agent_ref);`,
+        `CREATE INDEX IF NOT EXISTS idx_workflow_defs_agent_ref ON workflow_definitions(default_agent_ref);`,
       ],
     },
   ];

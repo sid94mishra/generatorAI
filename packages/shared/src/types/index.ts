@@ -49,6 +49,35 @@ export type { WebhookRegistration, WebhookDelivery } from './Webhook.js';
 export type { CreateSessionParams, McpServerConfig } from './CreateSessionParams.js';
 export type { ILogger } from './ILogger.js';
 
+// ── Agents (first-class agent entity) ──
+export type {
+  Agent,
+  AgentScope,
+  AgentRole,
+  AgentProjectionMode,
+  AgentToolPolicy,
+  AgentRuntimePolicy,
+  AgentOrchestrationPolicy,
+  AgentOverrides,
+  CreateAgentParams,
+  UpdateAgentParams,
+  ResolutionWarning,
+  ResolutionWarningCode,
+  ResolvedAgentProjection,
+  ResolvedSkillRef,
+  ResolvedTeamAgent,
+} from './Agent.js';
+export {
+  AGENT_TOOL_GROUPS,
+  DEFAULT_AGENT_TOOL_POLICY,
+  AGENT_SLUG_PATTERN,
+  AGENT_INSTRUCTIONS_MAX_BYTES,
+  AGENT_INSTRUCTIONS_WARN_BYTES,
+  agentRef,
+  parseAgentRef,
+  slugifyAgentName,
+} from './Agent.js';
+
 // ── v2 New Types ──
 export type { Chat, ChatStatus, ChatLocalFolder, CreateChatParams, BackgroundTaskStatus, BackgroundTaskMeta, ChatPermissionMode } from './Chat.js';
 export { DEFAULT_CHAT_PERMISSION_MODE } from './Chat.js';

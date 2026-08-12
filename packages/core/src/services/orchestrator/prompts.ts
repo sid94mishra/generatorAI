@@ -70,11 +70,10 @@ When in doubt on a substantive task, prefer orchestrating.
    out, consolidate what you have and state the gaps plainly.
 
 ── Shared workspace ────────────────────────────────────────────────
-By default workers SHARE your workspace (same filesystem). Their outputs land
-under tasks/<taskName>/, so after a wave you can open those files directly to
-verify or reuse them — you do NOT need the worker to paste content back; the
-digest's artifact paths point right at them. For multi-file / coding work this
-means every worker's changes are already in your workspace. You may keep your own
+By default workers SHARE your workspace and your working directory, so code they
+write is already where you can see it. Their notes and digests land in the task
+directory named in each brief, and the digest's artifact paths point right at
+them — you do NOT need the worker to paste content back. You may keep your own
 plan/notes in orchestrator/plan.md if it helps you track a long run; a
 machine-written orchestrator/state.json (the task tree + statuses) is maintained
 for you automatically.
@@ -93,15 +92,15 @@ Rules:
   • Self-containment: treat the brief as your only context. If something you need
     is missing, set status "needs_input" and say precisely what you need — do not
     guess or invent facts.
-  • SHARED WORKSPACE: you share ONE workspace with the orchestrator and sibling
-    workers. Write ALL your output files UNDER the directory named in your brief
-    ("Write files under: tasks/<your-task>/") so you never overwrite a sibling's
-    files. You may READ shared files the brief points you to (e.g.
-    orchestrator/plan.md, another task's output) but do NOT edit files outside
-    your task directory unless the brief explicitly tells you to.
-  • Persist then digest: if you produce substantial output (code, analysis, data),
-    write it to a file under your task directory and reference the path — don't
-    paste huge blobs back.
+  • SHARED WORKSPACE: you share ONE working directory with the orchestrator and
+    sibling workers. Code deliverables named in your brief go there. Everything
+    else you produce — notes, analysis, digests — goes UNDER the task directory
+    named in your brief, so you never overwrite a sibling's files. You may READ
+    shared files the brief points you to (e.g. orchestrator/plan.md, another
+    task's output) but do NOT edit files outside your brief's scope.
+  • Persist then digest: if you produce substantial non-deliverable output
+    (analysis, data), write it to a file under your task directory and reference
+    the path — don't paste huge blobs back.
   • End EVERY final message with a machine-readable digest block, exactly:
 
     <TASK_RESULT>
@@ -118,14 +117,18 @@ Rules:
 `.trim();
 
 /** Render the first user message (the brief) sent to a spawned worker. */
-export function renderBriefMessage(brief: {
-  taskName: string;
-  objective: string;
-  context?: string;
-  inputArtifacts?: string[];
-  boundaries?: string;
-  budget?: { maxTokens?: number; maxToolCalls?: number };
-}): string {
+export function renderBriefMessage(
+  brief: {
+    taskName: string;
+    objective: string;
+    context?: string;
+    inputArtifacts?: string[];
+    boundaries?: string;
+    budget?: { maxTokens?: number; maxToolCalls?: number };
+  },
+  /** Absolute scratch directory. Omit to fall back to a cwd-relative path. */
+  taskDir?: string,
+): string {
   const lines: string[] = [];
   lines.push(`# Task: ${brief.taskName}`);
   lines.push('');
@@ -148,8 +151,11 @@ export function renderBriefMessage(brief: {
   }
   lines.push('');
   lines.push('## Where to write');
-  lines.push(`You share ONE workspace with the orchestrator and sibling workers. Write ALL files you produce under this directory (create it if needed):`);
-  lines.push(`    tasks/${brief.taskName}/`);
+  lines.push(
+    `Deliverables named above go in the working directory. Everything ELSE you produce ` +
+      `— notes, digests, scratch — goes under this directory (create it if needed):`,
+  );
+  lines.push(`    ${taskDir ?? `tasks/${brief.taskName}`}`);
   lines.push('Reference those paths in your digest. Do not edit files outside this directory unless explicitly told to above.');
   if (brief.budget && (brief.budget.maxTokens || brief.budget.maxToolCalls)) {
     lines.push('');

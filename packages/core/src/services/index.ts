@@ -90,6 +90,22 @@ export { WorktreeCleanupService } from './WorktreeCleanupService.js';
 export { SystemArtifactService } from './SystemArtifactService.js';
 export type { ISystemConfigRepository } from './SystemArtifactService.js';
 
+// ── Agents (first-class agent entity) ──
+export { ArtifactCatalog } from './ArtifactCatalog.js';
+export type { CatalogSkill, CatalogMcpServer, IProjectConfigReader } from './ArtifactCatalog.js';
+export { AgentResolver, redactProjection } from './AgentResolver.js';
+export type { ResolveAgentInput } from './AgentResolver.js';
+export { AgentService } from './AgentService.js';
+export type { AgentServiceDeps, ModelCatalogProbe } from './AgentService.js';
+export { AgentStagingService } from './AgentStagingService.js';
+export type { StagingResult } from './AgentStagingService.js';
+export {
+  parseAgentMarkdown,
+  serialiseAgentMarkdown,
+  AGENT_MARKDOWN_MAX_BYTES,
+} from './agentMarkdown.js';
+export type { ParsedAgentMarkdown } from './agentMarkdown.js';
+
 // Workspace Management services
 export { WorkspaceManager } from './WorkspaceManager.js';
 export type { WorkspaceManagerConfig } from './WorkspaceManager.js';

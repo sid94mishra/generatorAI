@@ -31,50 +31,38 @@ export function McpServerSelector({ stage, onUpdate }: McpServerSelectorProps) {
     ...(projectServers ?? []),
   ], [systemServers, projectServers, disabledMcp]);
 
-  // Get currently excluded MCP servers from harnessConfigOverrides
-  // TODO: HarnessConfig lacks an `excludedMcpServers` field.
-  // Using `excludedTools` as temporary storage; the runtime needs
-  // a dedicated field or the `mcpServers` record for proper exclusion.
+  // Exclusions live on `excludedMcpServerIds`.
+  //
+  // They used to be written into `excludedTools`, which is a list of TOOL
+  // names the harness must not expose — putting server names there excluded
+  // nothing (no tool is called `github`) while silently corrupting the tool
+  // deny-list. Keyed by ID, not name, because two registries can each define
+  // a server called "github".
   const currentOverrides = stage.harnessConfigOverrides as Partial<HarnessConfig> | undefined;
-  const excludedServers = useMemo(() => {
-    const excluded = currentOverrides?.excludedTools ?? [];
-    return new Set(excluded);
-  }, [currentOverrides]);
+  const excludedServers = useMemo(
+    () => new Set(currentOverrides?.excludedMcpServerIds ?? []),
+    [currentOverrides],
+  );
 
-  const toggleServer = (serverName: string) => {
-    const newExcluded = new Set(excludedServers);
-    if (newExcluded.has(serverName)) {
-      newExcluded.delete(serverName);
-    } else {
-      newExcluded.add(serverName);
-    }
-
-    const excludedArray = [...newExcluded];
+  const writeExcluded = (ids: string[]) => {
     onUpdate({
       harnessConfigOverrides: {
         ...currentOverrides,
-        excludedTools: excludedArray.length > 0 ? excludedArray : undefined,
+        excludedMcpServerIds: ids.length > 0 ? ids : undefined,
       } as Partial<HarnessConfig>,
     });
   };
 
-  const selectAll = () => {
-    onUpdate({
-      harnessConfigOverrides: {
-        ...currentOverrides,
-        excludedTools: undefined,
-      } as Partial<HarnessConfig>,
-    });
+  const toggleServer = (serverId: string) => {
+    const next = new Set(excludedServers);
+    if (next.has(serverId)) next.delete(serverId);
+    else next.add(serverId);
+    writeExcluded([...next]);
   };
 
-  const deselectAll = () => {
-    onUpdate({
-      harnessConfigOverrides: {
-        ...currentOverrides,
-        excludedTools: allServers.map((s) => s.name),
-      } as Partial<HarnessConfig>,
-    });
-  };
+  const selectAll = () => writeExcluded([]);
+
+  const deselectAll = () => writeExcluded(allServers.map((s) => s.id));
 
   if (isLoading) {
     return (
@@ -129,7 +117,7 @@ export function McpServerSelector({ stage, onUpdate }: McpServerSelectorProps) {
 
       <div className="space-y-1 max-h-48 overflow-y-auto">
         {allServers.map((server) => {
-          const isEnabled = !excludedServers.has(server.name);
+          const isEnabled = !excludedServers.has(server.id);
           return (
             <label
               key={server.id}
@@ -143,7 +131,7 @@ export function McpServerSelector({ stage, onUpdate }: McpServerSelectorProps) {
               <input
                 type="checkbox"
                 checked={isEnabled}
-                onChange={() => toggleServer(server.name)}
+                onChange={() => toggleServer(server.id)}
                 className="h-3.5 w-3.5 rounded"
               />
               <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

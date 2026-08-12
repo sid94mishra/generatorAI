@@ -17,6 +17,7 @@ import { createHooksRoutes } from './hooks.js';
 import { createUnifiedStreamRoutes } from './stream.js';
 // v2 route imports
 import { createChatApiRoutes } from './chats.js';
+import { createAgentApiRoutes } from './agents.js';
 import { createWorkflowDefinitionRoutes } from './workflowDefinitions.js';
 import { createWorkflowRunRoutes } from './workflowRuns.js';
 import { createOrchestratorRoutes } from './orchestrator.js';
@@ -48,6 +49,9 @@ export function createApiRouter(container: Container): Router {
 
   // Chat management (v2) — first-class top-level entity
   router.use('/chats', createChatApiRoutes(container));
+
+  // Agents — first-class agent definitions (CRUD, import/export, preview)
+  router.use('/agents', createAgentApiRoutes(container));
 
   // Workflow definitions (v2) — CRUD + stages + edges
   router.use('/workflow-definitions', createWorkflowDefinitionRoutes(container));

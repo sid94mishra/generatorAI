@@ -23,6 +23,8 @@ export class DrizzleChatRepository implements IChatRepository {
       // paper over on read.
       validateJsonColumn(chat.harnessConfig, jsonRecord, { column: 'harnessConfig', table: 'chats' });
       validateJsonColumn(chat.tags, stringArray, { column: 'tags', table: 'chats' });
+      validateJsonColumn(chat.agentOverrides, jsonRecord, { column: 'agentOverrides', table: 'chats' });
+      validateJsonColumn(chat.agentSnapshot, jsonRecord, { column: 'agentSnapshot', table: 'chats' });
 
       await this.db.insert(chats).values({
         id: chat.id,
@@ -47,6 +49,11 @@ export class DrizzleChatRepository implements IChatRepository {
         backgroundTaskStatus: chat.backgroundTask?.status ?? null,
         defaultAgentMode: chat.defaultAgentMode ?? DEFAULT_AGENT_MODE,
         permissionMode: chat.permissionMode ?? 'bypassPermissions',
+        agentRef: chat.agentRef ?? null,
+        agentId: chat.agentId ?? null,
+        agentVersion: chat.agentVersion ?? null,
+        agentOverrides: chat.agentOverrides ?? null,
+        agentSnapshot: chat.agentSnapshot ?? null,
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,
       });
@@ -106,6 +113,12 @@ export class DrizzleChatRepository implements IChatRepository {
     if (updates.tags !== undefined) {
       validateJsonColumn(updates.tags, stringArray, { column: 'tags', table: 'chats' });
     }
+    if (updates.agentOverrides !== undefined) {
+      validateJsonColumn(updates.agentOverrides, jsonRecord, { column: 'agentOverrides', table: 'chats' });
+    }
+    if (updates.agentSnapshot !== undefined) {
+      validateJsonColumn(updates.agentSnapshot, jsonRecord, { column: 'agentSnapshot', table: 'chats' });
+    }
 
     const values: Record<string, unknown> = {};
     if (updates.name !== undefined) values['name'] = updates.name;
@@ -117,6 +130,13 @@ export class DrizzleChatRepository implements IChatRepository {
     if (updates.projectId !== undefined) values['projectId'] = updates.projectId;
     if (updates.defaultAgentMode !== undefined) values['defaultAgentMode'] = updates.defaultAgentMode;
     if (updates.permissionMode !== undefined) values['permissionMode'] = updates.permissionMode;
+    // Binding an agent is a run-time act, so unlike codebaseIds these stay mutable.
+    if (updates.agentRef !== undefined) values['agentRef'] = updates.agentRef ?? null;
+    if (updates.agentId !== undefined) values['agentId'] = updates.agentId ?? null;
+    if (updates.agentVersion !== undefined) values['agentVersion'] = updates.agentVersion ?? null;
+    if (updates.agentOverrides !== undefined) values['agentOverrides'] = updates.agentOverrides ?? null;
+    if (updates.agentSnapshot !== undefined) values['agentSnapshot'] = updates.agentSnapshot ?? null;
+    if (updates.orchestratorMode !== undefined) values['orchestratorMode'] = updates.orchestratorMode;
     values['updatedAt'] = new Date();
 
     await this.db.update(chats).set(values).where(eq(chats.id, id));
@@ -181,6 +201,11 @@ export class DrizzleChatRepository implements IChatRepository {
       backgroundTask,
       defaultAgentMode: coerceAgentMode(row.defaultAgentMode) ?? DEFAULT_AGENT_MODE,
       permissionMode: (row.permissionMode as Chat['permissionMode']) ?? 'bypassPermissions',
+      agentRef: row.agentRef ?? undefined,
+      agentId: row.agentId ?? undefined,
+      agentVersion: row.agentVersion ?? undefined,
+      agentOverrides: safeJsonColumn(row.agentOverrides, jsonRecord, { fallback: undefined }) as Chat['agentOverrides'],
+      agentSnapshot: safeJsonColumn(row.agentSnapshot, jsonRecord, { fallback: undefined }) as Chat['agentSnapshot'],
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

@@ -568,13 +568,17 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       edgeKeys.add(key);
     }
 
-    // Check stages have prompts
+    // A stage needs SOMETHING to drive it: prompts, or a bound agent whose
+    // instructions are the instruction. `StageBuilder._build` uses the same rule, so
+    // rejecting an agent-only stage here would make the builder stricter than
+    // the scripts it is supposed to be equivalent to.
     for (const node of state.nodes) {
       const stage = node.data.stage;
-      if (!stage.prompts || stage.prompts.length === 0) {
+      const hasAgent = !!stage.agentRef || !!stage.agentName;
+      if ((!stage.prompts || stage.prompts.length === 0) && !hasAgent) {
         errors.push({
           type: 'missing_prompts',
-          message: `Stage "${stage.name}" has no prompts configured`,
+          message: `Stage "${stage.name}" has no prompts or agent configured`,
           stageIds: [stage.id],
         });
       }

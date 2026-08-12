@@ -131,8 +131,20 @@ export function createChatApiRoutes(container: Container): Router {
   router.patch('/:id', async (req, res, next) => {
     try {
       const chatId = String(req.params['id']);
-      const { name, description, model, tags, status, projectId, harnessConfig, defaultAgentMode, permissionMode } =
-        req.body ?? {};
+      const {
+        name,
+        description,
+        model,
+        tags,
+        status,
+        projectId,
+        harnessConfig,
+        defaultAgentMode,
+        permissionMode,
+        agentRef,
+        agentOverrides,
+        orchestratorMode,
+      } = req.body ?? {};
 
       // Archive via PATCH { status: 'archived' }
       if (status === 'archived') {
@@ -165,8 +177,36 @@ export function createChatApiRoutes(container: Container): Router {
       ) {
         updates.permissionMode = permissionMode;
       }
+      // Binding an agent is a RUN-TIME act (covered by `write:chats`), unlike
+      // authoring one, which needs `admin:settings`.
+      if (agentRef !== undefined) {
+        updates.agentRef = agentRef || null;
+        if (agentRef) {
+          const agent = await container.agentService?.getByRef(String(agentRef));
+          if (agent) {
+            updates.agentId = agent.id;
+            updates.agentVersion = agent.version;
+          }
+        } else {
+          updates.agentId = null;
+          updates.agentVersion = null;
+        }
+      }
+      if (agentOverrides !== undefined) updates.agentOverrides = agentOverrides ?? null;
+      if (orchestratorMode !== undefined) updates.orchestratorMode = !!orchestratorMode;
 
       const updated = await container.chatEntityRepo.update(chatId, updates);
+      if (agentRef !== undefined || agentOverrides !== undefined) {
+        // Other clients (a second tab, a paired phone) must see the rebind.
+        await eventBus.emit(updated.sessionId, {
+          kind: 'chat.agent_changed',
+          data: {
+            chatId,
+            ...(updated.agentRef ? { agentRef: updated.agentRef } : {}),
+            ...(updated.agentVersion ? { agentVersion: updated.agentVersion } : {}),
+          },
+        });
+      }
       res.json(updated);
     } catch (err) {
       next(err);

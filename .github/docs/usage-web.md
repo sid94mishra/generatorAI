@@ -76,7 +76,7 @@ For the component map and pages list, see [apps.md → apps/web](./apps.md#appsw
   - Send / Stop button
 - Between the input and the message list: a **`📎 N capture pending`** banner appears whenever the Browser panel's Inspect / Capture actions or the Terminal panel's Attach button has queued a file. Consumed on the next send.
 
-### Right side pane (Changes / Browser / Terminal / Widget)
+### Right side pane (Changes / Browser / Terminal / Canvas)
 
 Same shared `RightPane` component the workflow-run page uses. Tab strip + `+` add-menu + drag-resizable width, all state persisted to `localStorage:generatorai:rightPane:chat`.
 
@@ -85,7 +85,7 @@ Same shared `RightPane` component the workflow-run page uses. Tab strip + `+` ad
 | **Changes** *(always present, default)* | `ChatFilesPanel` — workspace files, per-worktree files, response markdown, attachments. Click any file → `FileViewerModal`. |
 | **Browser** *(add-able, singleton)* | Integrated Browser panel (`BrowserPanel`) — VSCode-style share/inspect/capture bar, WebSocket JPEG live-view with click-through + typing, viewport that follows the panel size (no letterbox), overlay scroll indicator on the right edge. Disabled until the chat has a workspace. See [feature-integrated-browser.md](./feature-integrated-browser.md). |
 | **Terminal** *(add-able, multi-tab)* | Integrated Terminal panel (`TerminalPanel`) — xterm.js with inline search, Attach-selection-to-chat, Clear, Kill. Multiple parallel terminals per workspace. See [feature-integrated-terminal.md](./feature-integrated-terminal.md). |
-| **Widget** *(auto-added on first `surface: 'widget'` render)* | `WidgetHost` — stacked sandboxed widget iframes served from `/api/widget-assets`. Agent-rendered UI (polls, forms, editors, kanban boards, dashboards) that users can click through; clicks round-trip back to the agent via `read_widget`, and the agent drives complex widgets via `widget_action` / `widget_exec`. See [feature-extensions-widgets.md](./feature-extensions-widgets.md). |
+| **Canvas** *(auto-added on first widget render)* | `CanvasHost` — stacked sandboxed widget iframes served from `/api/widget-assets`. Agent-rendered UI (polls, forms, editors, dashboards) that users can click through; clicks and typing round-trip back to the agent via `read_widget`. See [feature-extensions-widgets.md](./feature-extensions-widgets.md). |
 
 ---
 

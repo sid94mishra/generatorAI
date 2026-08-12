@@ -87,6 +87,11 @@ export default function ChatsScreen(): React.ReactElement {
     queryKey: queryKeys.projects(),
     queryFn: () => api.projects.list(),
   });
+  // Picker list only — authoring an agent grants capability and stays on web.
+  const agents = useQuery({
+    queryKey: ['agents', 'selectable'] as const,
+    queryFn: () => api.agents.selectable(),
+  });
 
   // Reused purely for `runningChatIds` — the chat entity itself carries no
   // "is a turn in flight" flag, and a live dot is the single most useful
@@ -256,6 +261,7 @@ export default function ChatsScreen(): React.ReactElement {
         error={create.isError ? 'Could not create the chat. Check the name and try again.' : null}
         models={models.data}
         projects={projects.data}
+        agents={agents.data}
       />
 
       <ActionSheet

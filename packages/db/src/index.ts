@@ -48,6 +48,7 @@ export { DrizzleWebhookRepository } from './repositories/WebhookRepository.js';
 
 // v2 repositories
 export { DrizzleChatRepository } from './repositories/ChatRepository.js';
+export { DrizzleAgentRepository } from './repositories/AgentRepository.js';
 export { DrizzleWorkflowDefinitionRepository } from './repositories/WorkflowDefinitionRepository.js';
 export { DrizzleStageDefinitionRepository } from './repositories/StageDefinitionRepository.js';
 export { DrizzleStageEdgeRepository } from './repositories/StageEdgeRepository.js';
@@ -299,6 +300,7 @@ import { DrizzleChatMessageRepository } from './repositories/ChatMessageReposito
 import { DrizzleArtifactRepository } from './repositories/ArtifactRepository.js';
 import { DrizzleWebhookRepository } from './repositories/WebhookRepository.js';
 import { DrizzleChatRepository } from './repositories/ChatRepository.js';
+import { DrizzleAgentRepository } from './repositories/AgentRepository.js';
 import { DrizzleWorkflowDefinitionRepository } from './repositories/WorkflowDefinitionRepository.js';
 import { DrizzleStageDefinitionRepository } from './repositories/StageDefinitionRepository.js';
 import { DrizzleStageEdgeRepository } from './repositories/StageEdgeRepository.js';
@@ -329,6 +331,7 @@ export function createAllRepositories(db: AppDatabase) {
     artifactRepo: new DrizzleArtifactRepository(db),
     webhookRepo: new DrizzleWebhookRepository(db),
     chatEntityRepo: new DrizzleChatRepository(db),
+    agentRepo: new DrizzleAgentRepository(db),
     workflowDefinitionRepo: new DrizzleWorkflowDefinitionRepository(db),
     stageDefinitionRepo: new DrizzleStageDefinitionRepository(db),
     stageEdgeRepo: new DrizzleStageEdgeRepository(db),

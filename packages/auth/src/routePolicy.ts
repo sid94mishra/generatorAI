@@ -67,6 +67,11 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: '/stream', read: ['stream:events'], write: ['stream:events'] },
 
   { prefix: '/chats', read: ['read:chats'], write: ['write:chats'] },
+  // Authoring an agent GRANTS capability (skills, MCP servers, tool policy), so
+  // writes are admin. Reading the catalog is not: a paired device must be able
+  // to list agents to pick one, and BINDING an agent happens through
+  // PATCH /chats/:id under `write:chats`.
+  { prefix: '/agents', read: ['read:workflows'], write: ['admin:settings'], riskLevel: 'high' },
   { prefix: '/orchestrator', read: ['read:chats'], write: ['write:chats', 'exec:agent'] },
   { prefix: '/sessions', read: ['read:chats'], write: ['write:chats'] },
 

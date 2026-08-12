@@ -9,6 +9,7 @@ import { NotFoundError, StorageError } from '@generatorai/shared';
 import { projectConfigs } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
+import { validateJsonColumn } from '../utils/validateJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
 
 export class DrizzleProjectConfigRepository implements IProjectConfigRepository {
@@ -16,6 +17,7 @@ export class DrizzleProjectConfigRepository implements IProjectConfigRepository 
 
   async create(config: ProjectConfig): Promise<ProjectConfig> {
     try {
+      validateJsonColumn(config.metadata, jsonRecord, { column: 'metadata', table: 'project_configs' });
       await this.db.insert(projectConfigs).values({
         id: config.id,
         projectId: config.projectId,

@@ -37,6 +37,8 @@ const ProjectDetailPage = lazy(() => import('@/pages/ProjectDetailPage.js').then
 const CodebaseDetailPage = lazy(() => import('@/pages/CodebaseDetailPage.js').then((m) => ({ default: m.CodebaseDetailPage })));
 const ScriptsListPage = lazy(() => import('@/pages/ScriptsListPage.js').then((m) => ({ default: m.ScriptsListPage })));
 const ScriptDetailPage = lazy(() => import('@/pages/ScriptDetailPage.js').then((m) => ({ default: m.ScriptDetailPage })));
+const AgentsListPage = lazy(() => import('@/pages/AgentsListPage.js').then((m) => ({ default: m.AgentsListPage })));
+const AgentEditorPage = lazy(() => import('@/pages/AgentEditorPage.js').then((m) => ({ default: m.AgentEditorPage })));
 
 function PageLoader() {
   return (
@@ -63,6 +65,9 @@ export const router = createBrowserRouter([
       { index: true, element: withBoundary('Dashboard', <DashboardPage />) },
       { path: 'chats', element: withBoundary('Chats', <ChatsListPage />) },
       { path: 'chats/:id', element: withBoundary('Chat', <ChatPage />) },
+      { path: 'agents', element: withBoundary('Agents', <AgentsListPage />) },
+      { path: 'agents/new', element: withBoundary('New Agent', <AgentEditorPage />) },
+      { path: 'agents/:id', element: withBoundary('Agent', <AgentEditorPage />) },
       { path: 'settings', element: withBoundary('Settings', <SettingsRoute />) },
       { path: 'workflows', element: withBoundary('Workflows', <WorkflowListPage />) },
       { path: 'workflows/new', element: withBoundary('Workflow Builder', <WorkflowBuilderPage />) },

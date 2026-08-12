@@ -14,6 +14,7 @@ export function createSdkTool(toolDef: ToolDefinition): Tool {
   return defineTool(toolDef.name, {
     description: toolDef.description,
     parameters: toolDef.parametersSchema,
+    ...(toolDef.skipPermission ? { skipPermission: true } : {}),
     handler: async (args: unknown) => {
       // Validate args is a proper object before passing to domain handler.
       // The SDK may pass null, undefined, or a primitive; normalise to {}.

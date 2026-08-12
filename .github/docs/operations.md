@@ -77,6 +77,19 @@ Transient `500` errors in the browser console can appear during `tsx watch` reco
 | `COPILOT_GH_HOST` | (none) | Set for GHEC tenants (`https://<tenant>.ghe.com/`) |
 | `COPILOT_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN` | (none) | Fallback auth. **Scrub these when using `COPILOT_GH_HOST`** to avoid 401. |
 | `ANTHROPIC_API_KEY` | (none) | Claude Agent uses `~/.claude/.credentials.json` by default; only set this if you've configured the SDK to read from env |
+| `GENERATORAI_CLAUDE_SETTING_SOURCES` | (empty) | Comma-separated Claude Agent SDK `settingSources` (`user`, `project`, `local`). **Defaults to none** — the SDK would otherwise silently inherit the operator's local `~/.claude` settings, including hooks and permissions, into every run. |
+
+### Agents (AGT-01)
+
+Agents need no configuration to work, but two paths matter operationally:
+
+| Path | Purpose |
+|---|---|
+| `<templatesDir>/artifacts/agents/*.agent.md` | Bundled `system`-scope agents. Re-synced on **every boot** — edits made in the UI to a system agent would be overwritten, which is why they are read-only. Deleting a file disables the row rather than removing it, so existing bindings keep their frozen snapshot. |
+| `<workspaceRoot>/.generatorai/skills/` | Where an agent's selected skills are staged at run time (5 MB / 200-file budget, content-addressed `manifest.json`). Cleaned up on workspace delete. |
+
+Authoring an agent requires the `admin:settings` scope; listing them requires
+only `read:workflows`. See [feature-agents.md](./feature-agents.md).
 
 ### Logging & observability
 

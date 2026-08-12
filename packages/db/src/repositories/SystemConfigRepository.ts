@@ -8,6 +8,7 @@ import { NotFoundError, StorageError } from '@generatorai/shared';
 import { systemConfigs } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
+import { validateJsonColumn } from '../utils/validateJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
 
 export class DrizzleSystemConfigRepository {
@@ -15,6 +16,7 @@ export class DrizzleSystemConfigRepository {
 
   async upsert(config: SystemConfig): Promise<SystemConfig> {
     try {
+      validateJsonColumn(config.metadata, jsonRecord, { column: 'metadata', table: 'system_configs' });
       // Try insert first; on conflict update
       await this.db
         .insert(systemConfigs)

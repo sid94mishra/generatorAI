@@ -33,3 +33,5 @@ export { WorkspaceFacade } from './WorkspaceFacade.js';
 export type { CreateWorkspaceInput, WorkspaceFilters } from './WorkspaceFacade.js';
 
 export { BrowserFacade } from './BrowserFacade.js';
+
+export { AgentFacade } from './AgentFacade.js';

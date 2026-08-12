@@ -7,11 +7,16 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCreateChat } from '@/hooks/queries.js';
 import { useProjects, useProjectCodebases } from '@/hooks/projectQueries.js';
-import { X, MessageSquarePlus, Loader2, Tag, Plus, GitBranch, FolderGit2, FolderOpen, Boxes } from 'lucide-react';
-import { Select, Modal, Button, Input, Textarea } from '@/components/ui/index.js';
+import { X, MessageSquarePlus, Loader2, Tag, Plus, GitBranch, FolderGit2, FolderOpen, Boxes, Bot, Network } from 'lucide-react';
+import { Select, Modal, Button, Input, Textarea, Badge } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { getDefaultChatModel } from '@/lib/appPreferences.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
+import { AgentPicker } from '@/components/agents/AgentPicker.js';
+import { AgentOverridesEditor } from '@/components/agents/AgentOverridesEditor.js';
+import { EffectiveCapabilitiesPanel } from '@/components/agents/EffectiveCapabilitiesPanel.js';
+import { useResolveAgentPreview } from '@/hooks/agentQueries.js';
+import type { Agent, AgentOverrides, ResolvedAgentProjection } from '@generatorai/shared';
 import {
   BrowserVisibilityPicker,
   DEFAULT_BROWSER_PICKER_VALUE,
@@ -39,6 +44,15 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
   const [localFolderPath, setLocalFolderPath] = useState('');
   const [browserPicker, setBrowserPicker] = useState<BrowserPickerValue>(DEFAULT_BROWSER_PICKER_VALUE);
   const [orchestratorMode, setOrchestratorMode] = useState(false);
+
+  // AGT-01 — agent binding. The chat stores the portable `scope:slug` ref plus
+  // an additive override delta; the server resolves the union at create time.
+  const [agentRef, setAgentRef] = useState<string | undefined>(undefined);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | undefined>(undefined);
+  const [agentOverrides, setAgentOverrides] = useState<AgentOverrides>({});
+  const [showCapabilities, setShowCapabilities] = useState(false);
+  const [projection, setProjection] = useState<ResolvedAgentProjection | undefined>(undefined);
+  const resolvePreview = useResolveAgentPreview();
 
   const { data: projects } = useProjects();
   const { data: codebases, isLoading: codebasesLoading } = useProjectCodebases(selectedProjectId || undefined);
@@ -74,8 +88,37 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
       setSelectedCodebases([]);
       setLocalFolderPath('');
       setBrowserPicker(DEFAULT_BROWSER_PICKER_VALUE);
+      setAgentRef(undefined);
+      setSelectedAgent(undefined);
+      setAgentOverrides({});
+      setShowCapabilities(false);
+      setProjection(undefined);
     }
   }, [open]);
+
+  // Resolve the effective capabilities whenever the binding changes. Debounced
+  // because toggling several skills in a row would otherwise fire a request per
+  // click. The response is redacted server-side.
+  const overridesKey = JSON.stringify(agentOverrides);
+  const resolveMutate = resolvePreview.mutateAsync;
+  useEffect(() => {
+    if (!open) return;
+    if (!agentRef && overridesKey === '{}') {
+      setProjection(undefined);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void resolveMutate({
+        scope: 'chat',
+        ...(agentRef ? { agentRef } : {}),
+        ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
+        overrides: JSON.parse(overridesKey) as AgentOverrides,
+      })
+        .then(setProjection)
+        .catch(() => setProjection(undefined));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [open, agentRef, overridesKey, selectedProjectId, resolveMutate]);
 
   const handleAddTag = useCallback(() => {
     const tag = tagInput.trim();
@@ -112,6 +155,8 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
         codebaseIds: selectedCodebases.length > 0 ? selectedCodebases : undefined,
         createWorktree: selectedCodebases.length > 0 ? true : undefined,
         orchestratorMode: orchestratorMode || undefined,
+        agentRef: agentRef || undefined,
+        agentOverrides: Object.keys(agentOverrides).length > 0 ? agentOverrides : undefined,
       };
 
       // If a local folder path is provided, pass as gitRepositories
@@ -129,7 +174,7 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
     } catch {
       // Error displayed via mutation state
     }
-  }, [name, description, model, tags, selectedProjectId, selectedCodebases, localFolderPath, browserPicker, orchestratorMode, createMutation, onOpenChange, navigate]);
+  }, [name, description, model, tags, selectedProjectId, selectedCodebases, localFolderPath, browserPicker, orchestratorMode, agentRef, agentOverrides, createMutation, onOpenChange, navigate]);
 
   const toggleCodebase = useCallback(
     (alias: string) => {
@@ -214,6 +259,88 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
             />
           </div>
 
+          {/* Agent binding — reusable instructions with their own skills, MCP
+              servers and capabilities. Capabilities selected below are a
+              UNION with the agent's own, never a replacement. */}
+          <div>
+            <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-foreground">
+              <Bot className="h-4 w-4 text-primary" />
+              Agent
+            </label>
+            <AgentPicker
+              value={agentRef}
+              projectId={selectedProjectId || undefined}
+              data-testid="create-chat-agent-picker"
+              onChange={(ref, agent) => {
+                setAgentRef(ref);
+                setSelectedAgent(agent);
+                // An orchestrator agent IS the orchestrator: keep the checkbox
+                // in sync rather than letting the two disagree.
+                if (agent?.role === 'orchestrator') setOrchestratorMode(true);
+              }}
+            />
+            {selectedAgent?.role === 'orchestrator' && (
+              <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-primary">
+                <Network className="h-3 w-3" />
+                Orchestrate mode is enabled by this agent.
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowCapabilities((v) => !v)}
+              data-testid="create-chat-customize-capabilities"
+              className="mt-2 text-xs font-medium text-primary hover:underline"
+            >
+              {showCapabilities ? 'Hide capabilities' : 'Customize capabilities'}
+            </button>
+
+            {projection && !showCapabilities && (
+              <div className="mt-2 flex flex-wrap gap-1.5" data-testid="create-chat-capability-chips">
+                <Badge tone="neutral" size="sm">
+                  {projection.skills.names.length} skills
+                  {selectedAgent
+                    ? ` (${selectedAgent.skillIds.length} from agent + ${Math.max(
+                        0,
+                        projection.skills.names.length - selectedAgent.skillIds.length,
+                      )} added)`
+                    : ''}
+                </Badge>
+                <Badge tone="neutral" size="sm">
+                  {Object.keys(projection.mcpServers ?? {}).length} MCP servers
+                </Badge>
+              </div>
+            )}
+
+            {showCapabilities && (
+              <div className="mt-3 space-y-3 rounded-lg border border-border p-3">
+                <AgentOverridesEditor
+                  agent={selectedAgent}
+                  value={agentOverrides}
+                  onChange={setAgentOverrides}
+                  {...(selectedProjectId ? { projectId: selectedProjectId } : {})}
+                  {...(projection
+                    ? { effectiveGroups: projection.toolPolicy.groups }
+                    : {})}
+                />
+                <div className="border-t border-border pt-3">
+                  <EffectiveCapabilitiesPanel
+                    projection={projection}
+                    isLoading={resolvePreview.isPending && !projection}
+                    {...(selectedAgent
+                      ? {
+                          baseCounts: {
+                            skills: selectedAgent.skillIds.length,
+                            mcpServers: selectedAgent.mcpServerIds.length,
+                          },
+                        }
+                      : {})}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Orchestrate mode */}
           <div className="rounded-lg border border-[var(--color-border)] p-3">
             <label className="flex cursor-pointer items-start gap-2.5">
@@ -221,6 +348,7 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
                 type="checkbox"
                 className="mt-0.5 h-4 w-4 accent-[var(--color-primary)]"
                 checked={orchestratorMode}
+                disabled={selectedAgent?.role === 'orchestrator'}
                 onChange={(e) => setOrchestratorMode(e.target.checked)}
               />
               <span className="min-w-0">
@@ -331,7 +459,8 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
               className="font-mono"
             />
             <p className="mt-1 text-[10px] text-muted-foreground">
-              The agent will use this folder as the working directory for commands.
+              The agent works directly in this folder, and Changes, checkpoints and discard all
+              track it. Leave empty to use an isolated managed workspace.
             </p>
           </div>
 

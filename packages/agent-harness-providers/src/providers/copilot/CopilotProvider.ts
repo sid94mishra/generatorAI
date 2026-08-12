@@ -24,6 +24,8 @@ import type {
   AttachmentRef,
   SendPromptOptions,
   CustomAgentConfig,
+  ConversationWarning,
+  HarnessAgentInfo,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
 import { HarnessSessionError, withSpan, getMeter } from '@generatorai/shared';
@@ -225,6 +227,10 @@ export class CopilotProvider implements IAgentHarness {
    * per-message `agentMode` field is not sufficient on its own.
    */
   private sessionModes = new Map<string, NonNullable<SendPromptOptions['agentMode']>>();
+  /** Warnings raised while translating the last create/resume for a conversation. */
+  private conversationWarnings = new Map<string, ConversationWarning[]>();
+  /** Agents registered on each conversation, so `listAgents` needs no SDK round-trip. */
+  private conversationAgents = new Map<string, HarnessAgentInfo[]>();
   private verbose: boolean;
   /**
    * Locally-tracked client connection state. The Copilot SDK 1.0 GA removed the
@@ -502,11 +508,111 @@ export class CopilotProvider implements IAgentHarness {
 
   // ── Conversation Lifecycle ──
 
+  /**
+   * Map the domain agent surface onto `SessionConfig` / `ResumeSessionConfig`.
+   * Shared by create and resume: the two used to drift, which silently dropped
+   * agents and MCP servers after a restart.
+   */
+  private applyAgentConfig(
+    config: SessionConfig | ResumeSessionConfig,
+    params: CreateConversationParams,
+    warnings: ConversationWarning[],
+  ): HarnessAgentInfo[] {
+    const registered: HarnessAgentInfo[] = [];
+
+    if (params.customAgents?.length) {
+      config.customAgents = params.customAgents.map((a: CustomAgentConfig) => {
+        registered.push({
+          name: a.name,
+          ...(a.description ? { description: a.description } : {}),
+          ...(a.model ? { model: a.model } : {}),
+          source: 'programmatic',
+        });
+        if (a.disallowedTools?.length) {
+          // Copilot has no per-agent deny-list; fold it into the session exclusions.
+          const existing = Array.isArray(config.excludedTools) ? config.excludedTools : [];
+          config.excludedTools = [...existing, ...a.disallowedTools];
+          warnings.push({
+            code: 'FIELD_COERCED',
+            params: { field: 'customAgents[].disallowedTools', to: 'excludedTools', agent: a.name },
+          });
+        }
+        for (const unsupported of ['permissionMode', 'maxTurns', 'background'] as const) {
+          if (a[unsupported] !== undefined) {
+            warnings.push({
+              code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+              params: { field: `customAgents[].${unsupported}`, provider: 'copilot', agent: a.name },
+            });
+          }
+        }
+        return {
+          name: a.name,
+          ...(a.displayName ? { displayName: a.displayName } : {}),
+          description: a.description,
+          prompt: a.instructions,
+          ...(a.tools ? { tools: a.tools } : {}),
+          ...(a.model ? { model: a.model } : {}),
+          ...(a.reasoningEffort ? { reasoningEffort: a.reasoningEffort } : {}),
+          ...(a.skills ? { skills: a.skills } : {}),
+          ...(a.mcpServers
+            ? { mcpServers: a.mcpServers as NonNullable<SessionConfig['customAgents']>[number]['mcpServers'] }
+            : {}),
+          ...(a.infer !== undefined ? { infer: a.infer } : {}),
+        };
+      });
+    }
+
+    // Activating a named agent replaces the provider's base system prompt. Only do
+    // it when the caller explicitly asked for native projection.
+    if (params.defaultAgent && params.agentProjection === 'native') {
+      const known = params.customAgents?.some((a) => a.name === params.defaultAgent);
+      if (known) {
+        (config as SessionConfig).agent = params.defaultAgent;
+      } else {
+        warnings.push({ code: 'AGENT_NOT_REGISTERED', params: { agent: params.defaultAgent } });
+      }
+    }
+
+    if (params.excludedBuiltinTools?.length) {
+      config.defaultAgent = { excludedTools: params.excludedBuiltinTools };
+    }
+
+    if (params.mcpServers) {
+      config.mcpServers = params.mcpServers as SessionConfig['mcpServers'];
+    }
+
+    if (params.skillDirectories) config.skillDirectories = params.skillDirectories;
+    if (params.disabledSkills) config.disabledSkills = params.disabledSkills;
+
+    if (params.provider) {
+      config.provider = {
+        baseUrl: params.provider.baseUrl,
+        apiKey: params.provider.apiKey,
+      };
+      if (params.provider.model) {
+        warnings.push({
+          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+          params: { field: 'provider.model', provider: 'copilot' },
+        });
+      }
+    }
+
+    if (params.maxTurns !== undefined) {
+      warnings.push({
+        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+        params: { field: 'maxTurns', provider: 'copilot' },
+      });
+    }
+
+    return registered;
+  }
+
   async createConversation(params: CreateConversationParams): Promise<string> {
     return withSpan('copilot-bridge', 'copilot.createConversation', async (span) => {
       span.setAttribute('copilot.conversation_id', params.conversationId);
       span.setAttribute('copilot.model', params.model ?? 'claude-sonnet-4.6');
 
+    const warnings: ConversationWarning[] = [];
     const sdkTools = buildSdkTools(params.tools ?? []);
 
     const systemMessage = params.systemMessage
@@ -559,37 +665,13 @@ export class CopilotProvider implements IAgentHarness {
       // Default to approveAll; overridden below if params.onPermissionRequest is provided.
       onPermissionRequest: approveAll,
     };
-    if (params.maxTurns !== undefined) {
-      console.warn(
-        `[CopilotAdapter] maxTurns=${params.maxTurns} is set but the Copilot SDK does not support a session turn limit; it will NOT be enforced. Use harness.type='claude-agent' to enforce maxTurns.`,
-      );
+    // Copilot has no `Options.skills` equivalent: an explicit allow-list is
+    // expressed by disabling everything outside it.
+    if (params.skills && params.disabledSkills === undefined) {
+      sessionConfig.enableSkills = true;
     }
 
-    // Map domain McpServerConfig to SDK MCPServerConfig if provided.
-    // Phase 2, 2.22 — the domain and SDK shapes happen to coincide field-for-field
-    // today; cast narrowly via the SDK type instead of `as unknown as` so future
-    // SDK shape drift surfaces at compile time.
-    if (params.mcpServers) {
-      sessionConfig.mcpServers = params.mcpServers as SessionConfig['mcpServers'];
-    }
-
-    // Map domain CustomAgentConfig to SDK CustomAgentConfig
-    if (params.customAgents) {
-      sessionConfig.customAgents = params.customAgents.map((a: CustomAgentConfig) => ({
-        name: a.name,
-        description: a.description,
-        prompt: a.instructions,
-        tools: a.tools,
-      }));
-    }
-
-    // Map domain BYOKProviderConfig to SDK ProviderConfig
-    if (params.provider) {
-      sessionConfig.provider = {
-        baseUrl: params.provider.baseUrl,
-        apiKey: params.provider.apiKey,
-      };
-    }
+    const registeredAgents = this.applyAgentConfig(sessionConfig, params, warnings);
 
     // HKS-01 — Bridge the domain `HookBridge` to the SDK's native
     // `SessionHooks`. The domain shape is intentionally field-compatible;
@@ -763,6 +845,8 @@ export class CopilotProvider implements IAgentHarness {
     this.attachTurnTextTracker(params.conversationId, session);
     this.conversations.set(params.conversationId, session);
     this.conversationModels.set(params.conversationId, resolvedModel);
+    this.conversationWarnings.set(params.conversationId, warnings);
+    this.conversationAgents.set(params.conversationId, registeredAgents);
     activeSessions.add(1);
     return params.conversationId;
     });
@@ -854,6 +938,8 @@ export class CopilotProvider implements IAgentHarness {
     // tools (and the systemMessage hint + tool filters) rebinds them on the
     // resumed session while the SDK preserves the persisted history.
     const resumeConfig: ResumeSessionConfig = { onPermissionRequest: approveAll };
+    const warnings: ConversationWarning[] = [];
+    let registeredAgents: HarnessAgentInfo[] = [];
     if (params) {
       resumeConfig.tools = buildSdkTools(params.tools ?? []);
       if (params.systemMessage) {
@@ -865,24 +951,12 @@ export class CopilotProvider implements IAgentHarness {
       if (resolvedAvailableTools) resumeConfig.availableTools = resolvedAvailableTools;
       if (params.excludedTools) resumeConfig.excludedTools = params.excludedTools;
       if (params.model) resumeConfig.model = params.model;
-      if (params.skillDirectories) resumeConfig.skillDirectories = params.skillDirectories;
-      if (params.disabledSkills) resumeConfig.disabledSkills = params.disabledSkills;
       if (params.workingDirectory) resumeConfig.workingDirectory = params.workingDirectory;
       if (params.reasoningEffort) resumeConfig.reasoningEffort = params.reasoningEffort;
       if (params.contextTier) resumeConfig.contextTier = params.contextTier;
       if (params.configDir) resumeConfig.configDirectory = params.configDir;
-      if (params.mcpServers) resumeConfig.mcpServers = params.mcpServers as ResumeSessionConfig['mcpServers'];
-      if (params.customAgents) {
-        resumeConfig.customAgents = params.customAgents.map((a: CustomAgentConfig) => ({
-          name: a.name,
-          description: a.description,
-          prompt: a.instructions,
-          tools: a.tools,
-        }));
-      }
-      if (params.provider) {
-        resumeConfig.provider = { baseUrl: params.provider.baseUrl, apiKey: params.provider.apiKey };
-      }
+      if (params.streaming !== undefined) resumeConfig.streaming = params.streaming;
+      registeredAgents = this.applyAgentConfig(resumeConfig, params, warnings);
     }
     // PLN-01 — reinstall the plan-mode gates on resume (see installPlanGates).
     if (params) this.installPlanGates(resumeConfig, params);
@@ -908,6 +982,32 @@ export class CopilotProvider implements IAgentHarness {
       }
       this.conversationModels.set(conversationId, params.model);
     }
+    this.conversationWarnings.set(conversationId, warnings);
+    this.conversationAgents.set(conversationId, registeredAgents);
+  }
+
+  getConversationWarnings(conversationId: string): ConversationWarning[] {
+    return this.conversationWarnings.get(conversationId) ?? [];
+  }
+
+  async selectAgent(conversationId: string, agentName: string): Promise<void> {
+    const session = this.conversations.get(conversationId);
+    if (!session) throw new HarnessSessionError(`Conversation ${conversationId} not found`);
+    // `session.rpc.agent.select` is the same RPC family `applySessionMode` uses
+    // for mode switching; it is not part of the typed surface.
+    const rpc = (session as unknown as { rpc?: { agent?: { select?: (a: { name: string }) => Promise<void> } } }).rpc;
+    const select = rpc?.agent?.select;
+    if (typeof select !== 'function') {
+      const existing = this.conversationWarnings.get(conversationId) ?? [];
+      existing.push({ code: 'FIELD_UNSUPPORTED_BY_PROVIDER', params: { field: 'selectAgent', provider: 'copilot' } });
+      this.conversationWarnings.set(conversationId, existing);
+      return;
+    }
+    await select.call(rpc!.agent, { name: agentName });
+  }
+
+  async listAgents(conversationId: string): Promise<HarnessAgentInfo[]> {
+    return this.conversationAgents.get(conversationId) ?? [];
   }
 
   /** Whether the SDK session handle is live in memory (tools registered). */
@@ -1132,6 +1232,8 @@ export class CopilotProvider implements IAgentHarness {
     this.conversationLeakWarned.delete(conversationId);
     this.permissionPending.delete(conversationId);
     this.sessionModes.delete(conversationId);
+    this.conversationWarnings.delete(conversationId);
+    this.conversationAgents.delete(conversationId);
     const session = this.conversations.get(conversationId);
     if (session) {
       await session.disconnect();

@@ -2,6 +2,12 @@
 
 > Direct conversational AI interaction. One Chat ↔ One Session ↔ One harness conversation. Optional project + codebase context. Live SSE streaming.
 
+> **Agent binding (AGT-01).** A chat can be driven by a first-class Agent via
+> `agentRef` (+ an additive `agentOverrides` delta). At create time the resolved
+> projection is FROZEN into `chats.agent_snapshot`; resume and replay must use
+> that snapshot rather than re-resolving, or an agent edit would change the tool
+> set of an in-flight conversation. See [feature-agents.md](./feature-agents.md).
+
 ---
 
 ## 1. Entity & DB shape

@@ -13,8 +13,8 @@
 
 import React, { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
-import { ChevronLeft, ChevronRight, Cpu, FolderGit2, ShieldCheck, Wand2 } from 'lucide-react-native';
-import type { AgentMode, ModelInfo, ProjectSummary } from '@generatorai/client-core';
+import { Bot, ChevronLeft, ChevronRight, Cpu, FolderGit2, ShieldCheck, Wand2 } from 'lucide-react-native';
+import type { AgentMode, AgentSummary, ModelInfo, ProjectSummary } from '@generatorai/client-core';
 
 import { Sheet, SheetRow, SheetSection } from '../ui/Sheet';
 import { Button, IconButton } from '../ui/Button';
@@ -32,9 +32,11 @@ export interface NewChatValues {
   defaultAgentMode?: AgentMode;
   permissionMode?: string;
   orchestratorMode?: boolean;
+  /** Portable `scope:slug` ref of the agent driving the chat. */
+  agentRef?: string;
 }
 
-type Page = 'main' | 'model' | 'project' | 'permission';
+type Page = 'main' | 'model' | 'project' | 'permission' | 'agent';
 
 export function NewChatSheet({
   visible,
@@ -44,6 +46,7 @@ export function NewChatSheet({
   error,
   models,
   projects,
+  agents,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -52,6 +55,7 @@ export function NewChatSheet({
   error?: string | null;
   models: ModelInfo[] | undefined;
   projects: ProjectSummary[] | undefined;
+  agents?: AgentSummary[] | undefined;
 }): React.ReactElement {
   const { colors } = useTheme();
   const [page, setPage] = useState<Page>('main');
@@ -63,6 +67,7 @@ export function NewChatSheet({
   const [agentMode, setAgentMode] = useState<AgentMode>('auto');
   const [permissionMode, setPermissionMode] = useState('default');
   const [orchestrator, setOrchestrator] = useState(false);
+  const [agentRef, setAgentRef] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
   const groups = useModelGroups(models);
@@ -70,6 +75,11 @@ export function NewChatSheet({
   const selectedProject = useMemo(
     () => projects?.find((p) => p.id === projectId),
     [projects, projectId],
+  );
+  const selectableAgents = useMemo(() => (agents ?? []).filter((a) => a.enabled), [agents]);
+  const selectedAgent = useMemo(
+    () => selectableAgents.find((a) => a.ref === agentRef),
+    [selectableAgents, agentRef],
   );
 
   const reset = (): void => {
@@ -81,6 +91,7 @@ export function NewChatSheet({
     setAgentMode('auto');
     setPermissionMode('default');
     setOrchestrator(false);
+    setAgentRef(null);
     setExpanded(false);
   };
 
@@ -96,7 +107,9 @@ export function NewChatSheet({
         ? 'Project'
         : page === 'permission'
           ? 'Permissions'
-          : 'New chat';
+          : page === 'agent'
+            ? 'Agent'
+            : 'New chat';
 
   return (
     <Sheet
@@ -169,6 +182,33 @@ export function NewChatSheet({
             }}
           />
         ))
+      ) : page === 'agent' ? (
+        <>
+          <SheetRow
+            title="No agent"
+            subtitle="Use the platform default instructions and capabilities."
+            selected={agentRef === null}
+            onPress={() => {
+              setAgentRef(null);
+              setPage('main');
+            }}
+          />
+          {selectableAgents.map((entry) => (
+            <SheetRow
+              key={entry.ref}
+              title={entry.name}
+              subtitle={`${entry.description} — ${entry.skillIds.length} skills, ${entry.mcpServerIds.length} MCP`}
+              selected={entry.ref === agentRef}
+              onPress={() => {
+                setAgentRef(entry.ref);
+                // An orchestrator agent IS the orchestrator; keep the toggle
+                // from contradicting the chosen agent.
+                if (entry.role === 'orchestrator') setOrchestrator(true);
+                setPage('main');
+              }}
+            />
+          ))}
+        </>
       ) : (
         <View className="gap-4 px-4 py-4">
           <Field
@@ -193,6 +233,13 @@ export function NewChatSheet({
               label="Project"
               value={selectedProject?.name ?? 'None'}
               onPress={() => setPage('project')}
+            />
+            <View className="ml-4 h-px bg-border-muted" />
+            <PickerRow
+              icon={<Bot size={18} color={colors['muted-foreground']} />}
+              label="Agent"
+              value={selectedAgent?.name ?? 'None'}
+              onPress={() => setPage('agent')}
             />
           </View>
 
@@ -263,6 +310,7 @@ export function NewChatSheet({
                 ...(projectId ? { projectId } : {}),
                 defaultAgentMode: agentMode,
                 permissionMode,
+                ...(agentRef ? { agentRef } : {}),
                 ...(orchestrator ? { orchestratorMode: true } : {}),
               })
             }

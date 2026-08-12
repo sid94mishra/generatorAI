@@ -4,6 +4,11 @@
 
 For package internals see [packages.md → sdk](./packages.md#sdk).
 
+`ai.agents` exposes the agent catalog and the capability resolver. It is only
+functional when the host passes `agentService` / `agentResolver` to
+`createCoreServices()`; otherwise every method throws a clear error rather than
+returning an empty catalog. See [feature-agents.md](./feature-agents.md#10-sdk).
+
 ---
 
 ## 1. Install

@@ -4,6 +4,10 @@
 
 For the full command surface organized by feature, see each `feature-*.md` doc.
 
+`generatorai agent …` (`list` · `show` · `create` · `export` · `usage` · `delete`
+· `resolve`) manages first-class agents; `generatorai chat create --agent <ref>`
+binds one. See [feature-agents.md](./feature-agents.md#9-cli).
+
 ---
 
 ## 1. Install / run

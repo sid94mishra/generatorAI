@@ -56,15 +56,27 @@ export function registerChatCommands(
     .option('--description <desc>', 'Chat description')
     .option('--tags <tags>', 'Comma-separated tags')
     .option('--worktree', 'Create a dedicated worktree')
+    .option('--agent <ref>', 'Bind an agent by its portable scope:slug ref')
+    .option('--add-skill <id...>', 'Skill ids to add ON TOP of the agent\'s own')
+    .option('--add-mcp <id...>', 'MCP server ids to add ON TOP of the agent\'s own')
     .action(async (name: string, cmdOpts: {
       model?: string;
       project?: string;
       description?: string;
       tags?: string;
       worktree?: boolean;
+      agent?: string;
+      addSkill?: string[];
+      addMcp?: string[];
     }) => {
       const opts = program.opts();
       const client = await getClient();
+      // Additions UNION with the agent's own capabilities — an agent with 5
+      // skills plus 2 here gives the chat 7.
+      const agentOverrides = {
+        ...(cmdOpts.addSkill?.length ? { addSkillIds: cmdOpts.addSkill } : {}),
+        ...(cmdOpts.addMcp?.length ? { addMcpServerIds: cmdOpts.addMcp } : {}),
+      };
       const chat = await client.createChat({
         name,
         description: cmdOpts.description,
@@ -72,6 +84,8 @@ export function registerChatCommands(
         projectId: cmdOpts.project,
         createWorktree: cmdOpts.worktree,
         tags: cmdOpts.tags ? cmdOpts.tags.split(',').map((t) => t.trim()) : undefined,
+        ...(cmdOpts.agent ? { agentRef: cmdOpts.agent } : {}),
+        ...(Object.keys(agentOverrides).length > 0 ? { agentOverrides } : {}),
       });
 
       if (opts['json']) { outputJson(chat); return; }
@@ -80,6 +94,7 @@ export function registerChatCommands(
       process.stderr.write(chalk.dim(`    ID: ${chat.id}\n`));
       process.stderr.write(chalk.dim(`    Session: ${chat.sessionId}\n`));
       if (chat.model) process.stderr.write(chalk.dim(`    Model: ${chat.model}\n`));
+      if (chat.agentRef) process.stderr.write(chalk.dim(`    Agent: ${chat.agentRef}\n`));
       process.stderr.write(chalk.dim(`\n    Send a message: generatorai chat send ${chat.id.slice(0, 8)} "your prompt"\n\n`));
     });
 

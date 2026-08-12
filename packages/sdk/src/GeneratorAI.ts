@@ -60,6 +60,7 @@ import {
   HitlFacade,
   WorkspaceFacade,
   BrowserFacade,
+  AgentFacade,
 } from './facades/index.js';
 
 import * as fs from 'node:fs';
@@ -97,6 +98,11 @@ export class GeneratorAI {
   readonly workspaces: WorkspaceFacade;
   /** Integrated Browser (v13) — Chromium under CDP for chats/runs. */
   readonly browser: BrowserFacade;
+  /**
+   * AGT-01 — reusable agents (instructions + skills + MCP servers + capabilities).
+   * Throws on use when the host did not supply the agent services.
+   */
+  readonly agents: AgentFacade;
 
   /**
    * Direct access to the raw core service graph.
@@ -174,6 +180,7 @@ export class GeneratorAI {
     this.hitl = new HitlFacade(services);
     this.workspaces = new WorkspaceFacade(workspaceManager);
     this.browser = new BrowserFacade(browserService, workspaceManager);
+    this.agents = new AgentFacade(services);
   }
 
   /**
