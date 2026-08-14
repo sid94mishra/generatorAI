@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import { HarnessRegistry, MultiHarness, type HarnessType } from '@generatorai/agent-harness-providers';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
+import { resolveCuaDriverBinary } from './computer/driverBinary.js';
 import { RelayHostBroker } from './relay/RelayHostBroker.js';
 import {
   ExpoPushProvider,
@@ -50,6 +51,7 @@ import {
   DrizzleExecutionWorkspaceRepository,
   DrizzleWorkspaceWorktreeRepository,
   DrizzleWorkspaceArtifactRepository,
+  DrizzleComputerUseRepository,
   DrizzleCheckpointRepository,
   DrizzleReviewRepository,
   DrizzlePlanRepository,
@@ -109,6 +111,11 @@ import {
   ServerPlaywrightHost,
   ElectronBridgeAdapter,
   BrowserService,
+  // Computer Use
+  ComputerService,
+  CuaDriverBridge,
+  NullComputerBridge,
+  PendingConsentStore,
   // Integrated Terminal
   TerminalService,
   NodePtyHost,
@@ -1134,6 +1141,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // skills, MCP servers and tool policy.
   chatExtensions.agentResolver = agentResolver;
   chatExtensions.agentStaging = agentStaging;
+  chatExtensions.systemArtifacts = systemArtifactService;
   stageExecutionService.setAgentServices(agentResolver, agentStaging);
   orchestratorService.setAgentService(agentService);
   // Staged skill files live under `<workspace>/.generatorai`, outside every
@@ -1198,11 +1206,57 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // Late-wire browserService into ChatManagementService so chats with
   // `browserConfig.enabled: true` auto-boot a shared Chromium and inject
   // the CDP endpoint into the harness system prompt.
-  chatExtensions.browserService = browserService;
-  // Same story for stage sessions — the workflow path builds sessions
+  chatExtensions.browserService = browserService;  // Same story for stage sessions — the workflow path builds sessions
   // via StageExecutionService which needs BrowserService to register
   // the built-in browser tool set per stage.
   stageExecutionService.setBrowserService(browserService);
+
+  // Computer Use. The bridge chain ends in NullComputerBridge so that with no
+  // desktop attached every call resolves to a typed refusal rather than
+  // falling off the end of the chain.
+  //
+  // CuaDriverBridge resolves an endpoint in this order: one pushed by the
+  // desktop shell, then a socket somebody else manages, then a daemon it
+  // spawns from the bundled executable, then the in-process runtime. Only the
+  // daemon forms own the agent-cursor overlay; in-process works but cannot
+  // show the user what the agent is doing.
+  //
+  // `GENERATORAI_CUA_DRIVER_SOCKET` is the escape hatch for a server sitting
+  // in Windows Session 0 or behind SSH, where a daemon it spawned itself would
+  // inherit a session with no desktop and silently return no windows.
+  const computerUseConfig = config.computerUse;
+  const computerUseRepo = new DrizzleComputerUseRepository(db);
+  const driverBinaryPath = resolveCuaDriverBinary();
+  if (driverBinaryPath) logger.info?.(`[computer-use] driver executable: ${driverBinaryPath}`);
+  const computerConsentStore = new PendingConsentStore(computerUseRepo, eventBus, logger, {
+    autoApproveForDevelopment: process.env['GENERATORAI_COMPUTER_USE_AUTO_APPROVE'] === '1',
+  });
+  const cuaDriverBridge = new CuaDriverBridge({
+    logger,
+    maxSnapshotElements: computerUseConfig.maxSnapshotElements,
+    maxSnapshotDepth: computerUseConfig.maxSnapshotDepth,
+    ...(driverBinaryPath ? { driverBinaryPath } : {}),
+    ...(process.env['GENERATORAI_CUA_DRIVER_SOCKET']
+      ? { attachSocketPath: process.env['GENERATORAI_CUA_DRIVER_SOCKET'] }
+      : {}),
+  });
+  const computerService = new ComputerService(
+    workspaceArtifactRepo,
+    eventBus,
+    logger,
+    computerConsentStore,
+    { record: (entry) => computerUseRepo.recordAudit(entry) },
+    computerUseConfig,
+    [cuaDriverBridge, new NullComputerBridge()],
+  );
+  // Late-wired like browserService: chats only see the computer_* tools when
+  // the feature is enabled AND a workspace root exists.
+  chatExtensions.computerService = computerService;
+  // A deleted workspace must not leave a driver session attached to the user's
+  // desktop — the session outlives the thing that authorised it otherwise.
+  workspaceManager.registerBeforeDelete(async (workspaceId) => {
+    await computerService.stop(workspaceId, 'workspace-deleted');
+  });
 
   // ── Integrated Terminal ──
   //
@@ -1363,6 +1417,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Exposed so routes/internal-browser.ts can push each workspace's
     // scoped CDP endpoint as Electron main's active tab changes.
     electronBridgeAdapter,
+
+    // Computer Use
+    computerService,
+    computerUseRepo,
+    cuaDriverBridge,
+    computerConsentStore,
     // Expose the execution-workspace + artifact repos so routes can read
     // browser artifacts + workspace rows without a full service round-trip.
     executionWorkspaceRepo,
@@ -1555,6 +1615,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // outlive the process on shutdown paths where OS reaping is unreliable).
       await terminalService.shutdown();
 
+      // Deny every parked consent prompt before tearing the service down, so
+      // no `act()` is left awaiting an answer that can never arrive, and end
+      // any live driver sessions.
+      computerConsentStore.cancelAll();
+      await computerService.dispose();
+
       // Destroy any active sandboxes
       if (sandboxLifecycleManager) {
         await sandboxLifecycleManager.destroyAll();
@@ -1658,6 +1724,14 @@ export interface Container {
   /** Desktop CDP bridge — exposed so routes/internal-browser.ts can push
    *  per-workspace scoped CDP endpoints from Electron main. */
   electronBridgeAdapter: ElectronBridgeAdapter;
+
+  /** Computer Use service. Refuses everything unless a desktop is attached. */
+  computerService: ComputerService;
+  computerUseRepo: DrizzleComputerUseRepository;
+  /** Exposed so routes/internal-computer.ts can push the driver socket path. */
+  cuaDriverBridge: CuaDriverBridge;
+  /** Exposed so routes/internal-computer.ts can deliver the user's answer. */
+  computerConsentStore: PendingConsentStore;
   /** Execution workspace repo — exposed for the browser route (read workspace row). */
   executionWorkspaceRepo: InstanceType<typeof DrizzleExecutionWorkspaceRepository>;
   /** Workspace artifact repo — exposed for the browser route (list browser artifacts). */

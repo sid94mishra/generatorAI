@@ -60,6 +60,41 @@ export function skillToCommand(a: {
   };
 }
 
+const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
+
+/**
+ * The Computer Use skill command.
+ *
+ * Only NAMES the skill — the body is registered with the harness server-side
+ * (see `ChatManagementService.registerComputerUseSkill`) so the model loads it
+ * on demand. An earlier version inlined the whole manual here, which buried the
+ * user's actual sentence under two thousand words in their own transcript.
+ */
+export function computerUseSkillToCommand(a: {
+  id: string;
+  name: string;
+  description?: string;
+}): SlashCommand {
+  return {
+    id: `skill:system:${a.id}`,
+    name: a.name,
+    description: a.description || 'Operate desktop applications on this machine',
+    kind: 'skill',
+    source: 'system',
+    argHint: 'Describe the desktop task — which app, and what to do…',
+    takesInput: true,
+    format: (input) => {
+      const task = input.trim();
+      // Names the STAGED skill, not the display name: a user-level skill from
+      // another vendor also calls itself `computer-use`, and naming that here
+      // would hand the task to a CLI that bypasses every gate we built.
+      const header =
+        'Use the generatorai-computer-use skill and the computer_* tools to drive the desktop for this task.';
+      return task ? `${header}\n\n${task}` : header;
+    },
+  };
+}
+
 /**
  * Turn a prompt config artifact into a slash command. The template body is
  * fetched lazily via `loadTemplate` (only when the command is actually sent),

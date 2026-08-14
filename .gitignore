@@ -67,3 +67,5 @@ playwright-report/
 **/impeccable/
 *impeccable*
 **/packages/db/data/*
+# Fetched per build by scripts/fetch-cua-driver.mjs (~69 MB of native binaries).
+apps/desktop/resources/cua-driver/

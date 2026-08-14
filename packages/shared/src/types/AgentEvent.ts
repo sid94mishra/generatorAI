@@ -6,6 +6,11 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { HookPhase } from './HookDefinition.js';
+import type {
+  ComputerActionPath,
+  ComputerConsentDecision,
+  ComputerRefusalCode,
+} from './ComputerUse.js';
 
 export type AgentEvent =
   // ── LLM Harness Events (provider-agnostic) ──
@@ -335,6 +340,76 @@ export type AgentEvent =
       };
     }
   | { kind: 'browser.error'; data: { workspaceId: string; error: string; kind?: 'crash' | 'timeout' | 'blocked' | 'capacity' | 'unknown' } }
+  // ── Computer Use Events ──
+  // Emitted by ComputerService. Like browser events these never carry inline
+  // image data — screenshots are written as `computer_screenshot` artifacts
+  // first and referenced by artifactId (INV-3).
+  | { kind: 'computer.session_started'; data: { workspaceId: string; provider: string; providerVersion: string; platform: string } }
+  | { kind: 'computer.session_stopped'; data: { workspaceId: string; reason?: string } }
+  | {
+      kind: 'computer.snapshot';
+      data: {
+        workspaceId: string;
+        appIdentity: string;
+        appLabel: string;
+        windowTitle: string;
+        snapshotId: string;
+        elementCount: number;
+        truncated: boolean;
+        artifactId?: string;
+      };
+    }
+  | {
+      kind: 'computer.action';
+      data: {
+        workspaceId: string;
+        chatId?: string;
+        appIdentity: string;
+        appLabel: string;
+        action: string;
+        /** Element label or identifier — NEVER typed content. */
+        target?: string;
+        path: ComputerActionPath;
+        verified: boolean;
+        artifactId?: string;
+        durationMs?: number;
+      };
+    }
+  | {
+      kind: 'computer.refusal';
+      data: {
+        workspaceId: string;
+        chatId?: string;
+        appIdentity?: string;
+        appLabel?: string;
+        action: string;
+        code: ComputerRefusalCode;
+        message: string;
+      };
+    }
+  | {
+      kind: 'computer.consent_required';
+      data: {
+        workspaceId: string;
+        chatId?: string;
+        requestId: string;
+        appIdentity: string;
+        appLabel: string;
+        action: string;
+        summary: string;
+        path: ComputerActionPath;
+        expiresAt: number;
+      };
+    }
+  | {
+      kind: 'computer.consent_resolved';
+      data: {
+        workspaceId: string;
+        requestId: string;
+        decision: ComputerConsentDecision | 'expired';
+      };
+    }
+  | { kind: 'computer.error'; data: { workspaceId: string; error: string; kind?: 'crash' | 'timeout' | 'capacity' | 'unknown' } }
   // ── Integrated Terminal Events ──
   // Lifecycle only; raw output stays on the dedicated WebSocket transport
   // (`/api/workspaces/:id/terminals/:sid/stream`) to keep the event log
@@ -471,6 +546,10 @@ export function isHookEvent(event: AgentEvent): boolean {
 
 export function isBrowserEvent(event: AgentEvent): boolean {
   return event.kind.startsWith('browser.');
+}
+
+export function isComputerEvent(event: AgentEvent): boolean {
+  return event.kind.startsWith('computer.');
 }
 
 /** Helper to create a typed AgentEvent */

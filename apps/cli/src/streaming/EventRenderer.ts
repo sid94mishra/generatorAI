@@ -124,6 +124,36 @@ export class EventRenderer {
         this.handleHITLPrompt(data);
         break;
 
+      // Computer Use — always rendered, never gated on `showToolCalls`. These
+      // describe an agent acting on the operator's real machine; a `run watch`
+      // that stays silent through that is the wrong default.
+      case 'computer.session_started':
+        process.stderr.write(
+          chalk.magenta(`\n  🖥  computer use active (${String(data['provider'] ?? '')} on ${String(data['platform'] ?? '')})\n`),
+        );
+        break;
+
+      case 'computer.action':
+        this.handleComputerAction(data);
+        break;
+
+      case 'computer.refusal':
+        process.stderr.write(
+          chalk.yellow(
+            `  ⛔ computer ${String(data['action'] ?? '')} refused on ${String(data['appLabel'] ?? '')}: ${String(data['code'] ?? '')}\n`,
+          ),
+        );
+        break;
+
+      case 'computer.consent_required':
+        process.stderr.write(
+          chalk.bold.yellow(
+            `\n  ❓ computer use is asking permission: ${String(data['summary'] ?? String(data['action'] ?? ''))}\n` +
+              `     Approve it in the app — this prompt expires on its own.\n`,
+          ),
+        );
+        break;
+
       default: {
         // Stage/workflow lifecycle events (not in PersistedEvent union — use string match)
         const kindStr = kind as string;
@@ -157,8 +187,22 @@ export class EventRenderer {
     }
   }
 
-  private handleToken(text: string): void {
-    if (!this.state.isStreaming) {
+  /** Synthetic input took the operator's keyboard/mouse — always say so. */
+  private handleComputerAction(data: Record<string, unknown>): void {
+    const action = String(data['action'] ?? '');
+    const app = String(data['appLabel'] ?? '');
+    const target = data['target'] ? ` → ${String(data['target'])}` : '';
+    const path = String(data['path'] ?? '');
+    const stole = path === 'synthetic' || path === 'clipboard';
+    const mark = data['verified'] === true ? chalk.green('✓') : chalk.dim('·');
+    process.stderr.write(
+      `  ${mark} ${chalk.magenta('computer')} ${action} ${chalk.dim(app)}${chalk.dim(target)}` +
+        (stole ? chalk.yellow('  [took the screen]') : '') +
+        '\n',
+    );
+  }
+
+  private handleToken(text: string): void {    if (!this.state.isStreaming) {
       this.state.isStreaming = true;
       process.stderr.write('\n');
     }

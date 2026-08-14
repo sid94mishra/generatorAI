@@ -4,6 +4,10 @@
 
 import { z } from 'zod';
 
+// Single source of truth for the consent TTL — the zod default is derived from
+// it below rather than repeating `120` in a second unit.
+import { COMPUTER_USE_CONSENT_TTL_MS } from '../constants/index.js';
+
 export const AppConfigSchema = z.object({
   port: z.number().min(1024).max(65535).default(3100),
   dbPath: z.string().default('~/.generatorai/data.db'),
@@ -257,6 +261,60 @@ export const AppConfigSchema = z.object({
       snapshotOnComplete: z.boolean().default(false),
       /** Interval between cleanup sweeps in minutes */
       cleanupIntervalMinutes: z.number().int().min(1).default(60),
+    })
+    .default({}),
+
+  // Computer Use — driving native desktop apps on the user's machine. OFF by
+  // default and gated again by the `GENERATORAI_COMPUTER_USE=disabled` env
+  // kill switch, which beats every other source so an enterprise can turn the
+  // feature off without touching per-workspace config.
+  computerUse: z
+    .object({
+      enabled: z.boolean().default(false),
+      /**
+       * The physical desktop is a singleton resource — two agents typing into
+       * the same machine interleave keystrokes. Capped low on purpose.
+       */
+      maxConcurrentSessions: z.number().int().min(1).max(4).default(1),
+      /**
+       * Allow Tier 3 (synthetic OS input). This TAKES OVER the user's pointer
+       * and keyboard and can never be verified, so it is opt-in and always
+       * re-prompts for consent.
+       */
+      allowSyntheticFallback: z.boolean().default(false),
+      screenshotEveryAction: z.boolean().default(true),
+      /** Caps on the a11y tree returned to the model, to bound token cost. */
+      maxSnapshotElements: z.number().int().min(50).max(10_000).default(1_200),
+      maxSnapshotDepth: z.number().int().min(4).max(256).default(64),
+      /** Screenshots above this are downscaled, then dropped if still over. */
+      screenshotMaxBytes: z.number().int().min(50_000).max(20_000_000).default(900_000),
+      screenshotMaxEdge: z.number().int().min(320).max(4096).default(1280),
+      actionTimeoutMs: z.number().int().min(1_000).max(300_000).default(30_000),
+      /** Seconds a `computer.consent_required` prompt stays answerable. */
+      consentTtlSeconds: z
+        .number()
+        .int()
+        .min(10)
+        .max(600)
+        .default(COMPUTER_USE_CONSENT_TTL_MS / 1000),
+      /** Idle sessions are torn down after this long with no activity. */
+      idleTimeoutMs: z.number().int().min(30_000).max(24 * 60 * 60 * 1000).default(15 * 60 * 1000),
+      /**
+       * Blocklist ADDITIONS. Named `extra*` and defaulted to `[]` on purpose:
+       * a field that defaulted to the built-in list would let any config writer
+       * (settings UI, extension, hook, or the agent itself via a file write)
+       * delete every built-in entry by supplying `[]`. The built-ins are
+       * unioned in by `buildBlocklist()` and are not expressible as "removed".
+       */
+      extraBlockedBundleIds: z.array(z.string().trim().min(1).max(200)).max(500).default([]),
+      extraBlockedNameFragments: z.array(z.string().trim().min(1).max(200)).max(500).default([]),
+      extraBlockedExecutables: z.array(z.string().trim().min(1).max(200)).max(500).default([]),
+      /**
+       * Escape hatch, matched by exact bundle id / AUMID only. Names and window
+       * titles are spoofable, so allowing them here would be the bypass. Cannot
+       * un-block our own app, and never suppresses the window-title scan.
+       */
+      alwaysAllowedApps: z.array(z.string().trim().min(1).max(200)).max(100).default([]),
     })
     .default({}),
 

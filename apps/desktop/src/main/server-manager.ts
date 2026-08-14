@@ -55,6 +55,7 @@ export class ServerManager extends EventEmitter {
    * so `ElectronBridgeAdapter.isAvailable()` returns true.
    */
   private electronIpcToken: string | null = null;
+  private nativeBrowserEnabled = false;
 
   /**
    * Which OS backend protected the vault key for the current child process.
@@ -133,6 +134,14 @@ export class ServerManager extends EventEmitter {
   /** Setter used by main/index.ts once the handshake token is generated. */
   setElectronIpcToken(token: string | null): void {
     this.electronIpcToken = token;
+    // The caller only supplies a token when the native browser is on; the
+    // token itself is now shared with computer use and minted regardless.
+    this.nativeBrowserEnabled = token !== null;
+  }
+
+  /** Exposed so the desktop shell can authenticate its own loopback pushes. */
+  get ipcToken(): string | null {
+    return this.electronIpcToken;
   }
 
   get url(): string | null {
@@ -382,11 +391,16 @@ export class ServerManager extends EventEmitter {
     env['GENERATORAI_DESKTOP_ADMIN_TOKEN'] = this.desktopAdminToken;
 
     // Plumb the handshake token through so the server can authenticate
-    // per-workspace CDP-endpoint pushes from Electron main (see
-    // routes/internal-browser.ts). Absent when the native browser feature
-    // flag is off.
-    if (this.electronIpcToken) {
-      env['GENERATORAI_ELECTRON_IPC_TOKEN'] = this.electronIpcToken;
+    // loopback pushes from Electron main — per-workspace CDP endpoints
+    // (routes/internal-browser.ts) and the computer-use driver socket +
+    // consent answers (routes/internal-computer.ts).
+    //
+    // Minted unconditionally: it used to be set only when the native-browser
+    // flag produced a token, which silently 401'd every computer-use
+    // handshake whenever that flag was off.
+    this.electronIpcToken ??= randomUUID();
+    env['GENERATORAI_ELECTRON_IPC_TOKEN'] = this.electronIpcToken;
+    if (this.nativeBrowserEnabled) {
       env['GENERATORAI_DESKTOP_NATIVE_BROWSER'] = '1';
     }
 

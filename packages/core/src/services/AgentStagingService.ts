@@ -121,6 +121,26 @@ export class AgentStagingService {
     }
   }
 
+  /**
+   * Stages a platform-owned skill that no agent selected.
+   *
+   * Deliberately a sibling directory of `skills/` rather than an entry in it:
+   * `ensureStaged` prunes anything missing from its manifest, so a skill the
+   * platform contributes would vanish the moment an agent-bound chat restaged.
+   */
+  async ensurePlatformSkill(
+    workspaceRoot: string,
+    skill: { name: string; content: string },
+  ): Promise<string> {
+    const dir = path.join(this.stagingRoot(workspaceRoot), 'platform-skills');
+    const safeName = skill.name.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 100) || 'skill';
+    const target = path.join(dir, safeName, 'SKILL.md');
+    await mkdir(path.dirname(target), { recursive: true });
+    const existing = await readFile(target, 'utf-8').catch(() => null);
+    if (existing !== skill.content) await writeFile(target, skill.content, 'utf-8');
+    return dir;
+  }
+
   private async readManifest(manifestPath: string): Promise<StagingManifest | null> {
     try {
       const parsed = JSON.parse(await readFile(manifestPath, 'utf-8')) as StagingManifest;

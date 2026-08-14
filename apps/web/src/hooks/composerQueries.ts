@@ -6,21 +6,38 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { COMPUTER_USE_SKILL_ID } from '@generatorai/shared';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import { useSystemArtifacts, useAvailableArtifacts } from './projectQueries.js';
 import { useCatalogPrefsStore } from '../stores/catalogPrefsStore.js';
 import {
   BUILTIN_COMMANDS,
+  computerUseSkillToCommand,
   skillToCommand,
   promptToCommand,
 } from '../components/chat/composer/builtins.js';
 import type { SlashCommand, MentionFile } from '../components/chat/composer/types.js';
+import type { ComputerUseSettings } from '../platform/HttpPlatformClient.js';
 
 interface ArtifactLike {
   id: string;
   name: string;
   description?: string;
   source?: 'system' | 'project';
+}
+
+/**
+ * Server-side Computer Use enablement (Settings → Computer Use). Server-owned
+ * rather than a client preference because it gates whether the agent gets the
+ * `computer_*` tools at all — a localStorage flag could not do that.
+ */
+export function useComputerUseSettings() {
+  const platform = usePlatform();
+  return useQuery<ComputerUseSettings>({
+    queryKey: ['computer-use-settings'],
+    queryFn: () => platform.getComputerUseSettings(),
+    staleTime: 30_000,
+  });
 }
 
 /**
@@ -40,12 +57,24 @@ export function useSlashCommands(projectId?: string): SlashCommand[] {
 
   // Skills disabled in Settings → Skills are hidden from the `/` menu.
   const disabledSkills = useCatalogPrefsStore((s) => s.disabledSkills);
+  // Computer Use is off by default; offering `/computer-use` while the server
+  // has no computer_* tools registered would produce a command that silently
+  // does nothing.
+  const computerUse = useComputerUseSettings();
+  const computerUseEnabled = computerUse.data?.enabled === true;
 
   return useMemo(() => {
     const commands: SlashCommand[] = [...BUILTIN_COMMANDS];
 
     for (const s of skills ?? []) {
       if (disabledSkills.includes(s.id)) continue;
+      if (s.id === COMPUTER_USE_SKILL_ID) {
+        if (!computerUseEnabled) continue;
+        commands.push(
+          computerUseSkillToCommand({ id: s.id, name: s.name, description: s.description }),
+        );
+        continue;
+      }
       const source = (s.source ?? 'system') as 'system' | 'project';
       commands.push(skillToCommand({ id: s.id, name: s.name, description: s.description, source }));
     }
@@ -62,7 +91,7 @@ export function useSlashCommands(projectId?: string): SlashCommand[] {
     }
 
     return commands;
-  }, [prompts, skills, platform, projectId, disabledSkills]);
+  }, [prompts, skills, platform, projectId, disabledSkills, computerUseEnabled]);
 }
 
 /**

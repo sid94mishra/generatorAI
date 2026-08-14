@@ -35,7 +35,7 @@ import type {
 } from '@generatorai/shared';
 import { matchesAnyHostPattern } from '@generatorai/shared';
 import { importBrowserCookies, type SupportedCookieBrowser } from '../infrastructure/browser/CookieImport.js';
-import { redactPii, flagPromptInjection } from '../infrastructure/browser/ContentSafety.js';
+import { redactPii, flagPromptInjection } from '../infrastructure/ContentSafety.js';
 import type {
   BrowserHandle,
   BrowserHostObserver,

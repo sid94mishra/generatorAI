@@ -110,6 +110,11 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // `resolveRoutePolicy`, which prefers the longest matching prefix).
   { prefix: '/workspaces/:id/terminals', read: ['exec:terminal'], write: ['exec:terminal'], riskLevel: 'high' },
   { prefix: '/workspaces/:id/browser', read: ['exec:browser'], write: ['exec:browser'], riskLevel: 'high' },
+  // Reading is window captures of the user's desktop; writing is answering a
+  // consent prompt, which hands the agent control of the machine. Neither is in
+  // any default grant — a paired phone must not be able to approve a prompt
+  // about a window it cannot see.
+  { prefix: '/workspaces/:id/computer', read: ['exec:computer'], write: ['exec:computer'], riskLevel: 'high' },
   { prefix: '/workspaces/:id/review', read: ['read:reviews'], write: ['write:reviews'] },
   { prefix: '/workspaces', read: ['read:workspaces'], write: ['write:workspaces'] },
 

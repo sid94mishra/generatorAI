@@ -15,6 +15,7 @@ export type SettingsSectionId =
   | 'templates'
   | 'source-control'
   | 'browser-terminal'
+  | 'computer-use'
   | 'extensions'
   | 'security'
   | 'diagnostics';

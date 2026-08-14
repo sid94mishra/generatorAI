@@ -21,11 +21,12 @@
  * we broaden it only when a real tool needs finer discrimination.
  */
 export type PermissionKind =
-  | 'shell_exec'  // Running a shell command
-  | 'file_write'  // Creating, modifying, or deleting a file
-  | 'file_read'   // Reading a file
-  | 'network'     // HTTP fetch / URL access
-  | 'mcp'         // Invoking a tool on an MCP server
+  | 'shell_exec'    // Running a shell command
+  | 'file_write'    // Creating, modifying, or deleting a file
+  | 'file_read'     // Reading a file
+  | 'network'       // HTTP fetch / URL access
+  | 'mcp'           // Invoking a tool on an MCP server
+  | 'computer_use'  // Driving a native desktop application on the user's machine
   | 'other';
 
 /**
@@ -36,7 +37,12 @@ export type PermissionKind =
  */
 export interface Permission {
   kind: PermissionKind;
-  /** Optional resource matcher (glob / pattern / substring — rule-defined). */
+  /**
+   * Optional resource matcher (glob / pattern / substring — rule-defined).
+   * For `computer_use` this is the app identity — bundle id on macOS,
+   * executable or AUMID on Windows, desktop-file id on Linux — so policy
+   * rules can be written per-app rather than all-or-nothing.
+   */
   resource?: string;
   /** Human-readable description shown in prompts + logs. */
   description?: string;

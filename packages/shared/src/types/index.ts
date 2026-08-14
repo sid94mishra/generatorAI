@@ -14,6 +14,7 @@ export {
   isGitEvent,
   isHookEvent,
   isBrowserEvent,
+  isComputerEvent,
   createAgentEvent,
   isEventOfKind,
   narrowEvent,
@@ -45,6 +46,22 @@ export type { StageRunTransition } from './StageRunStateMachine.js';
 
 export type { ChatMessage, ChatMessageMetadata } from './ChatMessage.js';
 export type { Artifact } from './Artifact.js';
+
+export type {
+  ComputerActionPath,
+  ComputerRefusalCode,
+  ComputerVerification,
+  ComputerElement,
+  ComputerAppInfo,
+  ComputerWindowInfo,
+  ComputerSnapshot,
+  ComputerScreenshot,
+  ComputerActionResult,
+  ComputerConsentDecision,
+  ComputerGrantDecision,
+  ComputerConsentRequest,
+  ComputerCapabilities,
+} from './ComputerUse.js';
 export type { WebhookRegistration, WebhookDelivery } from './Webhook.js';
 export type { CreateSessionParams, McpServerConfig } from './CreateSessionParams.js';
 export type { ILogger } from './ILogger.js';

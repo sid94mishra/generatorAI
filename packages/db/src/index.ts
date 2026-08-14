@@ -94,6 +94,8 @@ export { DrizzleReviewRepository } from './repositories/ReviewRepository.js';
 export { DrizzlePlanRepository } from './repositories/PlanRepository.js';
 export { DrizzleAgentInteractionRepository } from './repositories/AgentInteractionRepository.js';
 export { DrizzleWorkspaceArtifactRepository } from './repositories/WorkspaceArtifactRepository.js';
+export { DrizzleComputerUseRepository } from './repositories/ComputerUseRepository.js';
+export type { ComputerUseGrantRow } from './repositories/ComputerUseRepository.js';
 
 // Widgets & Extensions
 export { DrizzleWidgetInstanceRepository } from './repositories/WidgetInstanceRepository.js';

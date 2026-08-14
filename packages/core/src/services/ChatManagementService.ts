@@ -21,7 +21,7 @@ import type {
   HarnessConfig,
   ResolvedAgentProjection,
 } from '@generatorai/shared';
-import { generateId, DEFAULT_AGENT_MODE, ValidationError } from '@generatorai/shared';
+import { generateId, DEFAULT_AGENT_MODE, ValidationError, COMPUTER_USE_SKILL_ID, COMPUTER_USE_SKILL_NAME } from '@generatorai/shared';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import type { IChatRepository } from '../domain/ports/IChatRepository.js';
@@ -48,6 +48,7 @@ import {
   type RecordPlanResult,
 } from '../tools/recordPlanTool.js';
 import { buildBrowserToolSet } from '../tools/browser/index.js';
+import { buildComputerToolSet } from '../tools/computer/index.js';
 import { buildWidgetTools } from '../tools/widgetTools.js';
 import { buildOrchestratorToolSet } from '../tools/orchestrator/index.js';
 import { ORCHESTRATOR_SYSTEM_PROMPT } from './orchestrator/prompts.js';
@@ -57,12 +58,14 @@ import type { WorktreeService } from './WorktreeService.js';
 import type { WorkspaceManager } from './WorkspaceManager.js';
 import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
 import type { BrowserService } from './BrowserService.js';
+import type { ComputerService } from './ComputerService.js';
 import type { WidgetService } from './WidgetService.js';
 import type { IWidgetRegistry } from '../domain/ports/IWidgetRegistry.js';
 import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebaseRepository.js';
 import { AgentResolver, redactProjection } from './AgentResolver.js';
 import type { AgentStagingService } from './AgentStagingService.js';
-import { BROWSER_SYSTEM_HINT, WIDGET_SYSTEM_HINT } from './chatSystemHints.js';
+import type { SystemArtifactService } from './SystemArtifactService.js';
+import { BROWSER_SYSTEM_HINT, COMPUTER_USE_SYSTEM_HINT, WIDGET_SYSTEM_HINT } from './chatSystemHints.js';
 
 /** Local alias so the helper reads cleanly at its call sites. */
 const AgentResolverEmpty = (): ResolvedAgentProjection => AgentResolver.empty();
@@ -101,6 +104,12 @@ export interface ChatManagementServiceExtensions {
    * the `playwright-cli` skill through a system-prompt append.
    */
   browserService?: BrowserService;
+  /**
+   * Computer Use — registers the `computer_*` tool set on chats whose
+   * workspace has a root, so the agent can drive native desktop applications.
+   * Gated: the service's own feature switch decides whether any of it exists.
+   */
+  computerService?: ComputerService;
   /**
    * Widgets — extension-rendered UI. When set, every new chat conversation
    * gets the v2 widget tools (`render_widget` / `update_widget` /
@@ -149,6 +158,8 @@ export interface ChatManagementServiceExtensions {
   agentResolver?: AgentResolver;
   /** Materialises the projection's skills into the workspace for the harness. */
   agentStaging?: AgentStagingService;
+  /** Source of platform-owned skill bodies (Computer Use). */
+  systemArtifacts?: SystemArtifactService;
 }
 
 export class ChatManagementService {
@@ -830,6 +841,43 @@ export class ChatManagementService {
    */
   private readonly conversationBindings = new Map<string, string>();
 
+  /**
+   * Publishes the Computer Use skill through the harness's own skill mechanism.
+   *
+   * The alternative — pasting the manual into the user's message when they type
+   * `/computer-use` — put two thousand words of instructions in the transcript
+   * where the user's sentence should be, and re-sent them on every replay of
+   * that turn. Registered here, the model loads the body itself, once, only if
+   * it decides the task needs it.
+   */
+  private async registerComputerUseSkill(
+    conversationConfig: Record<string, unknown>,
+    workspaceRoot: string,
+  ): Promise<void> {
+    const { systemArtifacts, agentStaging } = this.extensions;
+    if (!systemArtifacts || !agentStaging) return;
+
+    const skills = await systemArtifacts.listSystemArtifacts('skill');
+    const skill = skills.find((s) => s.id === COMPUTER_USE_SKILL_ID);
+    if (!skill) return;
+
+    const content = await systemArtifacts.getSystemArtifactContent(skill.id);
+    // Staged under our own name, never the artifact's — see COMPUTER_USE_SKILL_NAME.
+    const dir = await agentStaging.ensurePlatformSkill(workspaceRoot, {
+      name: COMPUTER_USE_SKILL_NAME,
+      content,
+    });
+
+    const names = Array.isArray(conversationConfig['skills'])
+      ? (conversationConfig['skills'] as string[])
+      : [];
+    conversationConfig['skills'] = [...new Set([...names, COMPUTER_USE_SKILL_NAME])];
+    const dirs = Array.isArray(conversationConfig['skillDirectories'])
+      ? (conversationConfig['skillDirectories'] as string[])
+      : [];
+    conversationConfig['skillDirectories'] = [...new Set([...dirs, dir])];
+  }
+
   /** The model + provider + agent a chat currently asks for. */
   private conversationBindingKey(chat: Chat): string {
     const model = chat.harnessConfig?.model ?? chat.model ?? '';
@@ -838,7 +886,12 @@ export class ChatManagementService {
     // plan-mode toggle would force a full conversation rebind.
     const agentRef = chat.agentRef ?? '-';
     const agentVersion = chat.agentVersion ?? 0;
-    return `${harnessType}::${model}::${agentRef}::${agentVersion}`;
+    // Computer Use is a Settings toggle that applies live. Without it here, a
+    // chat that was open when the user turned the feature on would keep the
+    // tool-less conversation until the server restarted — and one that was open
+    // when they turned it OFF would keep driving their desktop.
+    const computerUse = this.extensions.computerService?.isEnabled() ? '1' : '0';
+    return `${harnessType}::${model}::${agentRef}::${agentVersion}::cu${computerUse}`;
   }
 
   /**
@@ -1243,6 +1296,38 @@ export class ChatManagementService {
       }
     }
 
+    if (this.extensions.computerService?.isEnabled() && workspaceId) {
+      try {
+        const workspace = await this.extensions.workspaceManager?.getExecutionWorkspace(workspaceId);
+        const workspaceRoot = workspace
+          ? this.extensions.workspaceManager?.getWorkingDirectory(workspace)
+          : undefined;
+        if (workspaceRoot) {
+          const computerTools = buildComputerToolSet({
+            computerService: this.extensions.computerService,
+            workspaceId,
+            workspaceRoot,
+            chatId,
+            owner: `chat:${chatId}`,
+          });
+          const existingTools = Array.isArray(conversationConfig['tools'])
+            ? (conversationConfig['tools'] as unknown[])
+            : [];
+          conversationConfig['tools'] = [...existingTools, ...computerTools];
+          const existingSys = conversationConfig['systemMessage'] as
+            | { mode?: string; content?: string }
+            | undefined;
+          conversationConfig['systemMessage'] = {
+            mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
+            content: (existingSys?.content ?? '') + COMPUTER_USE_SYSTEM_HINT,
+          };
+          await this.registerComputerUseSkill(conversationConfig, workspaceRoot);
+        }
+      } catch (err) {
+        console.warn(`[ChatManagement] Computer tool registration failed for chat ${chatId}:`, err);
+      }
+    }
+
     // Widgets — extension-rendered UI. When a widget service is wired,
     // bind the v2 widget tools (render/update/close/search + legacy ui_*
     // aliases) to this chat's session.
@@ -1577,6 +1662,43 @@ export class ChatManagementService {
           mode: (existingMsg?.mode as 'append' | 'replace' | undefined) ?? 'append',
           content: (existingMsg?.content ?? '') + BROWSER_SYSTEM_HINT,
         };
+      } catch {
+        // Non-fatal.
+      }
+    }
+
+    // Re-register the computer-use tools too. Without this they exist only on
+    // the turn that created the chat: on the next message the model finds them
+    // gone mid-task and falls back to shelling out, which routes around every
+    // gate this feature has.
+    if (this.extensions.computerService?.isEnabled() && chat.workspaceId) {
+      try {
+        const workspace = await this.extensions.workspaceManager?.getExecutionWorkspace(chat.workspaceId);
+        const workspaceRoot = workspace
+          ? this.extensions.workspaceManager?.getWorkingDirectory(workspace)
+          : undefined;
+        if (workspaceRoot) {
+          const computerTools = buildComputerToolSet({
+            computerService: this.extensions.computerService,
+            workspaceId: chat.workspaceId,
+            workspaceRoot,
+            chatId: chat.id,
+            owner: `chat:${chat.id}`,
+          });
+          const existing = Array.isArray(conversationConfig['tools'])
+            ? (conversationConfig['tools'] as unknown[])
+            : [];
+          conversationConfig['tools'] = [...existing, ...computerTools];
+
+          const existingMsg = conversationConfig['systemMessage'] as
+            | { mode?: string; content?: string }
+            | undefined;
+          conversationConfig['systemMessage'] = {
+            mode: (existingMsg?.mode as 'append' | 'replace' | undefined) ?? 'append',
+            content: (existingMsg?.content ?? '') + COMPUTER_USE_SYSTEM_HINT,
+          };
+          await this.registerComputerUseSkill(conversationConfig, workspaceRoot);
+        }
       } catch {
         // Non-fatal.
       }

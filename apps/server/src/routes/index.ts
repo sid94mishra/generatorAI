@@ -32,6 +32,7 @@ import { createHarnessRoutes } from './harness.js';
 import { createSourceControlRoutes } from './sourceControl.js';
 import { createWorkflowScriptRoutes } from './workflowScripts.js';
 import { createBrowserRoutes } from './browser.js';
+import { createComputerRoutes } from './computer.js';
 import { createTerminalRoutes } from './terminals.js';
 
 // Widgets & Extensions
@@ -82,6 +83,9 @@ export function createApiRouter(container: Container): Router {
   // Integrated Browser (v13) — nested under workspaces so a browser session
   // is scoped to its owning workspace/chat/run/automation-iteration.
   router.use('/workspaces/:id/browser', createBrowserRoutes(container));
+
+  // Computer Use — read-only: window frames + audit for the preview panel.
+  router.use('/workspaces/:id/computer', createComputerRoutes(container));
 
   // Integrated Terminal — nested under workspaces, mirrors the browser
   // topology. Live IO is served via the WebSocket registered in

@@ -975,6 +975,8 @@ export const workspaceArtifacts = sqliteTable(
         'browser_console_log',
         'browser_video',
         'browser_selection',
+        // Computer Use — always a single-window capture, never full-screen.
+        'computer_screenshot',
       ],
     }).notNull(),
     relativePath: text('relative_path').notNull(),
@@ -986,6 +988,64 @@ export const workspaceArtifacts = sqliteTable(
   (table) => ({
     workspaceIdx: index('idx_workspace_artifacts_workspace').on(table.workspaceId),
     stageRunIdx: index('idx_workspace_artifacts_stage').on(table.stageRunId),
+  }),
+);
+
+// ── Computer Use ──
+//
+// `computer_use_grants` holds only durable decisions. `allow_once` is never
+// written: a one-shot approval that survived the turn would be a standing
+// grant under another name.
+export const computerUseGrants = sqliteTable(
+  'computer_use_grants',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => executionWorkspaces.id, { onDelete: 'cascade' }),
+    /** Bundle id / AUMID / desktop-file id — never the display name. */
+    appIdentity: text('app_identity').notNull(),
+    appLabel: text('app_label').notNull(),
+    decision: text('decision', { enum: ['always_allow', 'deny'] }).notNull(),
+    /**
+     * Privilege tier the grant covers. Approving a prompt that read
+     * "snapshot in Slack" must not authorise every future keystroke there.
+     */
+    scope: text('scope', { enum: ['read', 'mutate', 'synthetic'] }).notNull().default('read'),
+    grantedAt: integer('granted_at', { mode: 'timestamp' }).notNull(),
+    lastUsedAt: integer('last_used_at', { mode: 'timestamp' }),
+  },
+  (table) => ({
+    unique: uniqueIndex('idx_cu_grants_unique').on(table.workspaceId, table.appIdentity),
+  }),
+);
+
+// Refusals are recorded alongside successes — a blocked attempt against a
+// password manager is the row a security review most needs to see, and it is
+// the only evidence the control fired.
+export const computerUseAudit = sqliteTable(
+  'computer_use_audit',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    chatId: text('chat_id'),
+    appIdentity: text('app_identity').notNull(),
+    appLabel: text('app_label').notNull(),
+    action: text('action').notNull(),
+    /** Element label or identifier — never typed content. */
+    target: text('target'),
+    /** ComputerActionPath: accessibility | hit-tested | synthetic | clipboard. */
+    path: text('path'),
+    verified: integer('verified', { mode: 'boolean' }).notNull().default(false),
+    refusalCode: text('refusal_code'),
+    /** `<field>:<blocklist entry>` when the refusal was `app_blocked`. */
+    blockedOn: text('blocked_on'),
+    artifactPath: text('artifact_path'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    workspaceTimeIdx: index('idx_cu_audit_ws_time').on(table.workspaceId, table.createdAt),
+    refusalIdx: index('idx_cu_audit_refusal').on(table.refusalCode),
   }),
 );
 

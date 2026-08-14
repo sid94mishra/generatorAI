@@ -39,6 +39,29 @@ export interface AgentUsageResponse {
   stages: Array<{ id: string; name: string; workflowDefinitionId: string }>;
   workflows: Array<{ id: string; name: string }>;
 }
+
+/** Driver process health, from `GET /api/workspaces/:id/computer/runtime`. */
+export interface ComputerRuntime {
+  provider: string;
+  providerVersion?: string;
+  host: 'in-process' | 'attached' | 'none';
+  state: 'ready' | 'stopped' | 'degraded' | 'unavailable';
+  detail?: string;
+  checks?: Array<{ name: string; status: 'pass' | 'fail' | 'skip'; message: string }>;
+  enabled: boolean;
+  sessionActive: boolean;
+}
+
+/** Response of `GET|PUT /api/system/computer-use`. */
+export interface ComputerUseSettings {
+  enabled: boolean;
+  /** Synthetic OS input — the only tier that can take over the screen. */
+  allowSynthetic: boolean;
+  /** Hard-disabled by `GENERATORAI_COMPUTER_USE` in the server environment. */
+  killSwitch: boolean;
+  skillId: string;
+  runtime?: ComputerRuntime;
+}
 import type { CreateSessionParams } from '@generatorai/shared';
 import type { PersistedEvent, AgentEventKind } from '@generatorai/shared';
 import type {
@@ -1774,6 +1797,34 @@ export class HttpPlatformClient implements IPlatformClient {
   async getSystemArtifactContent(id: string): Promise<string> {
     const result = await apiFetch<{ content: string }>(`${this.baseUrl}/api/system/artifacts/${encodeURIComponent(id)}`);
     return result.content;
+  }
+
+  // ── Computer Use enablement ──
+  async getComputerUseSettings(): Promise<ComputerUseSettings> {
+    return apiFetch<ComputerUseSettings>(`${this.baseUrl}/api/system/computer-use`);
+  }
+
+  async setComputerUseEnabled(enabled: boolean, allowSynthetic?: boolean): Promise<ComputerUseSettings> {
+    return apiFetch<ComputerUseSettings>(`${this.baseUrl}/api/system/computer-use`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled, ...(allowSynthetic === undefined ? {} : { allowSynthetic }) }),
+    });
+  }
+
+  async getComputerRuntime(workspaceId: string): Promise<ComputerRuntime> {
+    return apiFetch<ComputerRuntime>(
+      `${this.baseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/computer/runtime`,
+    );
+  }
+
+  async controlComputerRuntime(
+    workspaceId: string,
+    action: 'start' | 'restart' | 'stop',
+  ): Promise<ComputerRuntime> {
+    return apiFetch<ComputerRuntime>(
+      `${this.baseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/computer/runtime`,
+      { method: 'POST', body: JSON.stringify({ action }) },
+    );
   }
 
   // ── Available Artifacts (system + project merged) ──

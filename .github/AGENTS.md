@@ -223,6 +223,7 @@ Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 | `GENERATORAI_BROWSER_STREAM_FPS` | `20` | Browser MJPEG framerate over the WS transport. |
 | `GENERATORAI_BROWSER_STREAM_QUALITY` | `60` | JPEG quality 0–100 for browser frames. |
 | `GENERATORAI_DESKTOP_NATIVE_BROWSER` | (unset) | `1` in the desktop shell = use Electron's native `WebContentsView` for the browser feature instead of the server-hosted Playwright. |
+| `GENERATORAI_COMPUTER_USE` | (unset) | Kill switch for Computer Use. `0` / `false` / `off` / `no` / `disabled` hard-disables it regardless of the setting. `1` seeds the default only until Settings → Computer Use has been written once (persisted as `computer-use.json` next to the DB); after that the setting wins. Default off. |
 
 ---
 

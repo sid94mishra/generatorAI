@@ -24,6 +24,11 @@ export const SCOPES = [
   'exec:agent',
   'exec:terminal',
   'exec:browser',
+  // Answering a Computer Use consent prompt and revoking its grants. Separate
+  // from `exec:browser` because it authorises control of the physical machine,
+  // and separate from `exec:agent` so approving an agent's QUESTION never
+  // implies approving its access to the desktop.
+  'exec:computer',
   'admin:harnesses',
   'admin:credentials',
   'admin:devices',
@@ -48,8 +53,9 @@ export const ALL_SCOPES: readonly Scope[] = SCOPES;
 
 /**
  * Default grant for a newly paired interactive device (web browser / desktop
- * on another machine). Deliberately excludes `admin:*` and `exec:terminal` /
- * `exec:browser`; those must be granted explicitly per device.
+ * on another machine). Deliberately excludes `admin:*`, `exec:terminal`,
+ * `exec:browser` and `exec:computer`; those must be granted explicitly per
+ * device.
  */
 export const DEFAULT_DEVICE_SCOPES: readonly Scope[] = [
   'read:status',

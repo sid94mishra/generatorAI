@@ -21,6 +21,18 @@ export type {
   BrowserToolName,
 } from './browser/index.js';
 
+// Computer Use tool set — desktop application automation.
+export {
+  buildComputerToolSet,
+  COMPUTER_TOOL_NAMES,
+  isComputerToolName,
+} from './computer/index.js';
+export type {
+  ComputerToolContext,
+  ComputerToolFactory,
+  ComputerToolName,
+} from './computer/index.js';
+
 // v2 widget tools — render / update / close / search widgets.
 // Legacy `ui_*` names are also exported as aliases from the same module.
 export {

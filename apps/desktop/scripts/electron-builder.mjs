@@ -86,6 +86,31 @@ if (requestedArch && requestedArch !== stage.arch) {
   );
 }
 
+// The SDK verifies contract and capability versions against the daemon and
+// refuses before dispatch, so a driver that disagrees with the installed npm
+// package disables computer use entirely — silently, and everywhere at once.
+const driverTarget = `${{ win: 'win32', mac: 'darwin', linux: 'linux' }[platform]}-${stage.arch}`;
+const driverDir = path.join(desktopRoot, 'resources', 'cua-driver', driverTarget);
+const driverStamp = path.join(driverDir, '.version');
+if (!existsSync(driverStamp)) {
+  fail(
+    `the cua-driver payload for ${driverTarget} has not been staged.\n` +
+      `        Run \`node scripts/fetch-cua-driver.mjs\` first.`,
+  );
+}
+const sdkVersion = JSON.parse(
+  readFileSync(path.resolve(desktopRoot, '..', '..', 'node_modules', '@trycua', 'cua-driver', 'package.json'), 'utf8'),
+).version;
+const stagedDriver = readFileSync(driverStamp, 'utf8').trim();
+if (stagedDriver !== sdkVersion) {
+  fail(
+    `cua-driver ${stagedDriver} is staged but the SDK is ${sdkVersion}.\n` +
+      `        Every computer-use call would refuse on a version mismatch.\n` +
+      `        Re-run \`node scripts/fetch-cua-driver.mjs\`.`,
+  );
+}
+console.log(`[electron-builder] cua-driver ${stagedDriver} staged for ${driverTarget}`);
+
 // ── Configuration ────────────────────────────────────────────────
 const version = JSON.parse(readFileSync(path.join(desktopRoot, 'package.json'), 'utf8')).version;
 const channel = process.env['GENERATORAI_RELEASE_CHANNEL'] ?? resolveChannel(version);

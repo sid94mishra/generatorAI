@@ -17,6 +17,7 @@ import { DEFAULT_AGENT_MODE } from '@generatorai/shared';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useChatStore } from '@/stores/chatStore.js';
 import { useStickToBottom } from '@/hooks/useStickToBottom.js';
+import { useComputerUseSettings } from '@/hooks/composerQueries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { connectChatSession } from '@/stores/sseManager.js';
 import { hydrateWidgetsForChat } from '@/utils/hydrateWidgets.js';
@@ -34,7 +35,7 @@ import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { WidgetHost } from '@/components/widgets/WidgetHost.js';
 import { widgetTabId, parseWidgetTabId } from '@/components/widgets/widgetTabId.js';
 import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js';
-import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList, PauseCircle } from 'lucide-react';
+import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList, PauseCircle, MonitorCog } from 'lucide-react';
 import { openAuthenticatedEventSource } from '@/platform/authTransport.js';
 import { cn } from '@/lib/utils.js';
 
@@ -47,6 +48,9 @@ const TerminalPanel = React.lazy(() =>
 );
 const ChangesSurface = React.lazy(() =>
   import('@/components/diff/ChangesSurface.js').then((m) => ({ default: m.ChangesSurface })),
+);
+const ComputerPanel = React.lazy(() =>
+  import('@/components/chat/ComputerPanel.js').then((m) => ({ default: m.ComputerPanel })),
 );
 
 function PanelFallback() {
@@ -153,6 +157,21 @@ export function ChatPage() {
   // orchestrator chats. When the first task appears, pop the Background Tasks
   // tab automatically so the user sees the delegation happen.
   const isOrchestrator = !!chat?.orchestratorMode;
+  // The Computer tab is only offered when desktop automation is actually on —
+  // otherwise it is a tab that can never show anything.
+  const computerUseEnabled = useComputerUseSettings().data?.enabled === true;
+  const addableRightPaneTabs = useMemo(
+    () => [
+      'files',
+      'browser',
+      'terminal',
+      ...(computerUseEnabled ? ['computer'] : []),
+      'widget',
+      'plan',
+      ...(isOrchestrator ? ['background_tasks'] : []),
+    ],
+    [computerUseEnabled, isOrchestrator],
+  );
   const { data: backgroundTasksData } = useBackgroundTasks(chatId, isOrchestrator);
   const backgroundTaskCount = backgroundTasksData?.tasks?.length ?? 0;
   const [bgTabAutoOpened, setBgTabAutoOpened] = useState(false);
@@ -447,6 +466,39 @@ export function ChatPage() {
       try { es.close(); } catch { /* noop */ }
     };
   }, [chatWorkspaceId, setRightPaneOpen]);
+
+  // Computer Use — pop the Computer tab open when the agent starts driving the
+  // desktop, and unconditionally when it asks for consent. A consent prompt
+  // that renders inside a tab nobody has open is the same as no prompt at all:
+  // it expires into a denial while the user watches an idle chat.
+  useEffect(() => {
+    if (!chatWorkspaceId || !computerUseEnabled) return;
+    let cancelled = false;
+    const es = openAuthenticatedEventSource(
+      `/api/stream?scope=session&id=${encodeURIComponent('computer:' + chatWorkspaceId)}&filter=computer.`,
+      { scope: 'session', id: `computer:${chatWorkspaceId}` },
+      {
+        onMessage: (e) => {
+          if (cancelled) return;
+          try {
+            const frame = JSON.parse(e.data) as { kind?: string };
+            if (
+              frame.kind !== 'computer.session_started' &&
+              frame.kind !== 'computer.consent_required'
+            ) {
+              return;
+            }
+            setRightPaneOpen(true);
+            setBrowserTabFocusRequest({ type: 'computer', token: Date.now() });
+          } catch { /* ignore */ }
+        },
+      },
+    );
+    return () => {
+      cancelled = true;
+      try { es.close(); } catch { /* noop */ }
+    };
+  }, [chatWorkspaceId, computerUseEnabled, setRightPaneOpen]);
 
   // Auto-open a tab per full-page widget. The tab id encodes the instance, so
   // a second widget gets its OWN tab instead of re-focusing the first one's,
@@ -874,7 +926,7 @@ export function ChatPage() {
         storageKey={rightPaneStorageKey}
         widthStorageKey="generatorai:rightPane:chat:width"
         defaultTabType="changes"
-        addableTabTypes={isOrchestrator ? ['files', 'browser', 'terminal', 'widget', 'plan', 'background_tasks'] : ['files', 'browser', 'terminal', 'widget', 'plan']}
+        addableTabTypes={addableRightPaneTabs}
         focusTabRequest={browserTabFocusRequest}
         onTabClose={handleRightPaneTabClose}
         tabs={{
@@ -967,6 +1019,18 @@ export function ChatPage() {
                   }
                   agentBusy={isCopilotWorking}
                 />
+              </React.Suspense>
+            ),
+          },
+          computer: {
+            label: 'Computer',
+            description: 'Watch the desktop windows the agent reads and acts on',
+            icon: <MonitorCog className="h-3.5 w-3.5" />,
+            disabled: !chat?.workspaceId,
+            disabledReason: 'Send a message first to create a workspace',
+            render: () => (
+              <React.Suspense fallback={<PanelFallback />}>
+                <ComputerPanel embedded workspaceId={chat?.workspaceId} />
               </React.Suspense>
             ),
           },

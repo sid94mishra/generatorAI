@@ -1616,6 +1616,122 @@ export function migrateDB(db: AppDatabase): void {
         `CREATE INDEX IF NOT EXISTS idx_workflow_defs_agent_ref ON workflow_definitions(default_agent_ref);`,
       ],
     },
+    {
+      // Phase 27: Computer Use. Widens the workspace_artifacts CHECK for
+      // `computer_screenshot`, and adds the grant + audit tables.
+      //
+      // Audit rows are written for REFUSALS as well as successes: a denied
+      // action against a password manager is exactly what a security review
+      // needs to see, and it is the only record that the control fired.
+      version: 27,
+      name: 'computer_use',
+      sql: [
+        `
+        CREATE TABLE IF NOT EXISTS workspace_artifacts_v27 (
+          id              TEXT PRIMARY KEY,
+          workspace_id    TEXT NOT NULL REFERENCES execution_workspaces(id) ON DELETE CASCADE,
+          stage_run_id    TEXT,
+          artifact_type   TEXT NOT NULL
+            CHECK(artifact_type IN (
+              'code_file', 'response_md', 'attachment', 'script_output', 'log', 'snapshot',
+              'browser_screenshot', 'browser_dom', 'browser_har',
+              'browser_console_log', 'browser_video', 'browser_selection',
+              'computer_screenshot'
+            )),
+          relative_path   TEXT NOT NULL,
+          file_size       INTEGER,
+          mime_type       TEXT,
+          metadata        TEXT,
+          created_at      INTEGER NOT NULL
+        );
+        `,
+        `
+        INSERT INTO workspace_artifacts_v27
+          (id, workspace_id, stage_run_id, artifact_type, relative_path, file_size, mime_type, metadata, created_at)
+        SELECT
+          id, workspace_id, stage_run_id, artifact_type, relative_path, file_size, mime_type, metadata, created_at
+        FROM workspace_artifacts;
+        `,
+        `DROP TABLE workspace_artifacts;`,
+        `ALTER TABLE workspace_artifacts_v27 RENAME TO workspace_artifacts;`,
+        `CREATE INDEX IF NOT EXISTS idx_workspace_artifacts_workspace ON workspace_artifacts(workspace_id);`,
+        `CREATE INDEX IF NOT EXISTS idx_workspace_artifacts_stage ON workspace_artifacts(stage_run_id);`,
+        `CREATE INDEX IF NOT EXISTS idx_workspace_artifacts_type ON workspace_artifacts(artifact_type);`,
+        `
+        CREATE TABLE IF NOT EXISTS computer_use_grants (
+          id            TEXT PRIMARY KEY,
+          workspace_id  TEXT NOT NULL REFERENCES execution_workspaces(id) ON DELETE CASCADE,
+          app_identity  TEXT NOT NULL,
+          app_label     TEXT NOT NULL,
+          decision      TEXT NOT NULL CHECK(decision IN ('always_allow','deny')),
+          scope         TEXT NOT NULL DEFAULT 'read' CHECK(scope IN ('read','mutate','synthetic')),
+          granted_at    INTEGER NOT NULL,
+          last_used_at  INTEGER
+        );
+        `,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_cu_grants_unique ON computer_use_grants(workspace_id, app_identity);`,
+        `
+        CREATE TABLE IF NOT EXISTS computer_use_audit (
+          id            TEXT PRIMARY KEY,
+          workspace_id  TEXT NOT NULL,
+          chat_id       TEXT,
+          app_identity  TEXT NOT NULL,
+          app_label     TEXT NOT NULL,
+          action        TEXT NOT NULL,
+          target        TEXT,
+          path          TEXT,
+          verified      INTEGER NOT NULL DEFAULT 0,
+          refusal_code  TEXT,
+          blocked_on    TEXT,
+          artifact_path TEXT,
+          created_at    INTEGER NOT NULL
+        );
+        `,
+        `CREATE INDEX IF NOT EXISTS idx_cu_audit_ws_time ON computer_use_audit(workspace_id, created_at DESC);`,
+        `CREATE INDEX IF NOT EXISTS idx_cu_audit_refusal ON computer_use_audit(refusal_code);`,
+      ],
+    },
+    {
+      // Phase 28: adds `computer_use_grants.scope`.
+      //
+      // Migration 27 was edited in place after it had already been applied on
+      // developer machines, so those databases have the pre-edit table and no
+      // `scope` column — every consent lookup then failed with
+      // `no such column: "scope"`, which surfaced as every computer-use tool
+      // erroring out. A shipped migration must never be edited; the correction
+      // has to be a new version so already-migrated databases get it too.
+      //
+      // Rebuilt rather than ALTERed so the CHECK constraint on the new column
+      // is present, matching the shape migration 27 now produces on a fresh DB.
+      version: 28,
+      name: 'computer_use_grant_scope',
+      sql: [
+        `
+        CREATE TABLE IF NOT EXISTS computer_use_grants_v28 (
+          id            TEXT PRIMARY KEY,
+          workspace_id  TEXT NOT NULL REFERENCES execution_workspaces(id) ON DELETE CASCADE,
+          app_identity  TEXT NOT NULL,
+          app_label     TEXT NOT NULL,
+          decision      TEXT NOT NULL CHECK(decision IN ('always_allow','deny')),
+          scope         TEXT NOT NULL DEFAULT 'read' CHECK(scope IN ('read','mutate','synthetic')),
+          granted_at    INTEGER NOT NULL,
+          last_used_at  INTEGER
+        );
+        `,
+        // Existing rows predate scoping. 'read' is the least privilege that
+        // keeps them meaningful; anything wider must be re-approved by a human.
+        `
+        INSERT INTO computer_use_grants_v28
+          (id, workspace_id, app_identity, app_label, decision, scope, granted_at, last_used_at)
+        SELECT
+          id, workspace_id, app_identity, app_label, decision, 'read', granted_at, last_used_at
+        FROM computer_use_grants;
+        `,
+        `DROP TABLE computer_use_grants;`,
+        `ALTER TABLE computer_use_grants_v28 RENAME TO computer_use_grants;`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_cu_grants_unique ON computer_use_grants(workspace_id, app_identity);`,
+      ],
+    },
   ];
 
 

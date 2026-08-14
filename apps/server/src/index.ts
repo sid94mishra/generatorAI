@@ -43,6 +43,7 @@ import { attachTerminalWebSocket } from './terminal-ws.js';
 import { attachSttWebSocket } from './stt-ws.js';
 import { resolveAdvertisedEndpoints } from './network/advertisedEndpoints.js';
 import { readExposureMode, resolveBindHost } from './network/exposure.js';
+import { readComputerUsePreferences } from './settings/computerUse.js';
 import { publishLocalAdminToken, removeLocalAdminToken } from './composition/localAdminToken.js';
 
 // Killing the process on a failed write to an already-exited child is the
@@ -194,9 +195,19 @@ async function startServer(): Promise<void> {
           }
         : {}),
     },
+    // Computer Use. Off unless the user has turned it on in Settings (persisted
+    // next to the database). The env vars only supply the default before the
+    // setting has ever been written; a `GENERATORAI_COMPUTER_USE` disable token
+    // still wins over everything inside ComputerService.
+    computerUse: (() => {
+      const prefs = readComputerUsePreferences(dirname(resolve(dbPath)), {
+        enabled: process.env['GENERATORAI_COMPUTER_USE'] === '1',
+        allowSynthetic: process.env['GENERATORAI_COMPUTER_USE_SYNTHETIC'] === '1',
+      });
+      return { enabled: prefs.enabled, allowSyntheticFallback: prefs.allowSynthetic };
+    })(),
     sandbox: {
-      enabled: process.env['SANDBOX_ENABLED'] === 'true',
-      ...(process.env['SANDBOX_PROVIDER'] ? { provider: process.env['SANDBOX_PROVIDER'] } : {}),
+      enabled: process.env['SANDBOX_ENABLED'] === 'true',      ...(process.env['SANDBOX_PROVIDER'] ? { provider: process.env['SANDBOX_PROVIDER'] } : {}),
       ...(process.env['SANDBOX_IMAGE'] ? { image: process.env['SANDBOX_IMAGE'] } : {}),
       ...(process.env['SANDBOX_CLI_PORT'] ? { cliPort: parseInt(process.env['SANDBOX_CLI_PORT'], 10) } : {}),
       ...(process.env['SANDBOX_STARTUP_TIMEOUT_MS'] ? { startupTimeoutMs: parseInt(process.env['SANDBOX_STARTUP_TIMEOUT_MS'], 10) } : {}),

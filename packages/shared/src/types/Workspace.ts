@@ -29,7 +29,10 @@ export type WorkspaceArtifactType =
   | 'browser_har'
   | 'browser_console_log'
   | 'browser_video'
-  | 'browser_selection';
+  | 'browser_selection'
+  // Computer Use artifact types. Always a single-window capture, never the
+  // full screen — see ComputerService.
+  | 'computer_screenshot';
 
 // ── Browser Session Status (attached to workspace) ──
 

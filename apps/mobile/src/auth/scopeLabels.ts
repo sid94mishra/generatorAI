@@ -31,6 +31,7 @@ const LABELS: Record<string, string> = {
   'exec:agent': 'Run agents and answer their questions',
   'exec:terminal': 'Run terminal commands on your machine',
   'exec:browser': 'Control the built-in browser',
+  'exec:computer': 'Watch and approve the agent operating apps on your desktop',
 
   'admin:harnesses': 'Change which AI provider is used',
   'admin:credentials': 'View and change stored credentials',
@@ -53,6 +54,7 @@ const LABELS: Record<string, string> = {
 export const SENSITIVE_SCOPES = new Set([
   'exec:terminal',
   'exec:browser',
+  'exec:computer',
   'write:projects',
   'write:workspaces',
   'write:files',

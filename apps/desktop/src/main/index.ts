@@ -15,6 +15,7 @@ import { getServerManager } from './server-manager';
 import { resolveTarget } from './serverConnections';
 import { getWindowManager } from './window-manager';
 import { getNativeBrowserHost, nativeBrowserEnabled } from './browser-host';
+import { disposeComputerHost, initComputerHost } from './computer-host-registry';
 import { setIpcToken } from './cdp/ipc-token';
 import { registerIpc } from './ipc';
 import { buildMenu, syncMenuThemeFromSettings } from './menu';
@@ -97,6 +98,10 @@ function main(): void {
     isQuitting = true;
     log.info('Quitting — shutting down embedded server');
     try {
+      // Before the server: the driver holds OS-level input grants, and
+      // leaving it running past the app that is responsible for it is exactly
+      // the orphaned-automation case the TCC model is meant to prevent.
+      await disposeComputerHost();
       if (mode === 'standalone') await getServerManager().stop();
     } catch (e) {
       log.warn('Error stopping server during quit', e);
@@ -180,6 +185,19 @@ async function onReady(): Promise<void> {
   if (!appUrl) {
     wm.showError('No application URL could be resolved.');
     return;
+  }
+
+  // Constructed, not started: the driver spawns on the first workspace that
+  // asks for it, so users who never enable computer use never see the macOS
+  // Accessibility prompt.
+  const serverBaseUrl = sm.url;
+  const computerIpcToken = sm.ipcToken;
+  if (serverBaseUrl && computerIpcToken) {
+    initComputerHost({
+      serverBaseUrl,
+      ipcToken: computerIpcToken,
+      log: (message) => log.info(message),
+    });
   }
 
   wm.createMainWindow(appUrl);

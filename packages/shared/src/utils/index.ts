@@ -2,6 +2,20 @@
 
 export * from './pairingCode.js';
 
+export {
+  evaluateBlocklist,
+  buildBlocklist,
+  normaliseAppText,
+  executableBasename,
+  DEFAULT_COMPUTER_USE_BLOCKLIST,
+} from './computerUseBlocklist.js';
+export type {
+  ComputerUseBlocklist,
+  BlocklistCandidate,
+  BlocklistVerdict,
+  BlocklistOptions,
+} from './computerUseBlocklist.js';
+
 /**
  * Generate a unique ID using the Web Crypto `randomUUID`, available on
  * `globalThis.crypto` in Node.js 19+ and all modern browsers. This package

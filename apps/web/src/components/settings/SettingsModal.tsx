@@ -9,7 +9,7 @@
 import React from 'react';
 import {
   Settings2, Cpu, Sparkles, Server, LayoutTemplate,
-  GitPullRequest, SquareTerminal, Blocks, HeartPulse, ShieldCheck, X, Bot,
+  GitPullRequest, SquareTerminal, Blocks, HeartPulse, ShieldCheck, X, Bot, MonitorCog,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
@@ -21,6 +21,7 @@ import { SkillsSection, McpSection, TemplatesSection } from './sections/Catalogs
 import { AgentsSection } from './sections/Agents.js';
 import { SourceControlSection } from './sections/SourceControl.js';
 import { BrowserTerminalSection } from './sections/BrowserTerminal.js';
+import { ComputerUseSection } from './sections/ComputerUse.js';
 import { ExtensionsSection } from './sections/Extensions.js';
 import { SecuritySection } from './sections/Security.js';
 import { DiagnosticsSection } from './sections/Diagnostics.js';
@@ -58,6 +59,7 @@ const NAV: NavGroup[] = [
     items: [
       { id: 'source-control', label: 'Source Control', icon: GitPullRequest },
       { id: 'browser-terminal', label: 'Browser & Terminal', icon: SquareTerminal },
+      { id: 'computer-use', label: 'Computer Use', icon: MonitorCog },
       { id: 'extensions', label: 'Extensions', icon: Blocks },
     ],
   },
@@ -79,6 +81,7 @@ const SECTIONS: Record<SettingsSectionId, React.ReactNode> = {
   templates: <TemplatesSection />,
   'source-control': <SourceControlSection />,
   'browser-terminal': <BrowserTerminalSection />,
+  'computer-use': <ComputerUseSection />,
   extensions: <ExtensionsSection />,
   security: <SecuritySection />,
   diagnostics: <DiagnosticsSection />,

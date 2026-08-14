@@ -50,7 +50,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-import { RUNTIME_PACKAGES, ABI_SENSITIVE_PACKAGES, NATIVE_PACKAGES } from '../../server/bundle-externals.mjs';
+import { RUNTIME_PACKAGES, ABI_SENSITIVE_PACKAGES, NATIVE_PACKAGES, driverPlatformPackage } from '../../server/bundle-externals.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(here, '..');
@@ -203,6 +203,21 @@ for (const name of NATIVE_PACKAGES) {
         `        node-pty ships no Linux prebuild, so a Linux build needs python3 and a C++ toolchain.`,
     );
   }
+}
+
+// The driver's library lives in a per-target optional dependency, so the loop
+// above cannot see it. A wrong-target stage installs cleanly and then fails on
+// the first computer-use call.
+const driver = driverPlatformPackage(targetPlatform, targetArch);
+const driverLib = path.join(nodeModules, driver.name, driver.lib);
+if (!fs.existsSync(path.join(nodeModules, '@trycua', 'cua-driver', 'package.json'))) {
+  fail('@trycua/cua-driver is missing from the staged tree; computer use would be unavailable.');
+}
+if (!fs.existsSync(driverLib)) {
+  fail(
+    `${driver.name} has no ${driver.lib} for ${targetPlatform}-${targetArch}.\n` +
+      `        Looked at ${path.relative(stageDir, driverLib)}.`,
+  );
 }
 
 const staged = fs.readdirSync(nodeModules).filter((name) => !name.startsWith('.'));

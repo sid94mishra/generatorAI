@@ -120,6 +120,24 @@ export { ElectronBridgeAdapter } from './browser/ElectronBridgeAdapter.js';
 export type { ElectronBridgeAdapterOptions } from './browser/ElectronBridgeAdapter.js';
 export { INSPECTOR_SCRIPT } from './browser/InspectorScript.js';
 
+// Computer Use
+export { NullComputerBridge } from './computer/NullComputerBridge.js';
+export type { NullComputerBridgeOptions } from './computer/NullComputerBridge.js';
+export { CuaDriverBridge } from './computer/CuaDriverBridge.js';
+export type { CuaDriverBridgeOptions, CuaDriverEndpoint } from './computer/CuaDriverBridge.js';
+export {
+  parseListApps,
+  parseListWindows,
+  parseWindowState,
+  UnrecognisedDriverPayloadError,
+} from './computer/driverPayloads.js';
+export type { ParsedWindowState } from './computer/driverPayloads.js';
+export { PendingConsentStore } from './computer/PendingConsentStore.js';
+export type {
+  PendingConsentStoreOptions,
+  IComputerGrantRepository,
+} from './computer/PendingConsentStore.js';
+
 // Integrated Terminal hosts
 export { NodePtyHost, resolveDefaultShell } from './terminal/NodePtyHost.js';
 export type { NodePtyHostOptions } from './terminal/NodePtyHost.js';

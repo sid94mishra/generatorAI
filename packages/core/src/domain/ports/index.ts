@@ -143,6 +143,27 @@ export type {
   TerminalSpawnOptions,
 } from './ITerminalHost.js';
 
+// ── Computer Use Port ──
+export type {
+  IComputerBridge,
+  ComputerHandle,
+  ComputerStartOptions,
+  ComputerHostObserver,
+  ComputerAppRef,
+  ComputerAppIdentity,
+  ComputerWindowSelector,
+  ComputerWindowTarget,
+  ComputerModifier,
+  ComputerRefusal,
+  ListAppsResult,
+  ListWindowsResult,
+  SnapshotRequest,
+  ActionRequest,
+  ActionRequestType,
+  ElementAddressedRequest,
+} from './IComputerBridge.js';
+export { isElementAddressed } from './IComputerBridge.js';
+
 // ── Extensions & Widgets Ports ──
 export type { IExtensionRegistry } from './IExtensionRegistry.js';
 export type { IWidgetRegistry } from './IWidgetRegistry.js';

@@ -25,6 +25,13 @@
  *   @huggingface/transformers  Large, and already behind a guarded dynamic
  *                              import that degrades to "voice input
  *                              unavailable". Optional by design.
+ *
+ *   @trycua/cua-driver        Finds its native library through
+ *                              `createRequire(callerUrl).resolve()` against a
+ *                              sibling platform package. Inlined, `callerUrl`
+ *                              becomes the bundle and that resolve fails — the
+ *                              same breakage as playwright, but silent until
+ *                              the first computer-use call.
  */
 export const BUNDLE_EXTERNALS = [
   'better-sqlite3',
@@ -32,6 +39,7 @@ export const BUNDLE_EXTERNALS = [
   'playwright',
   'playwright-core',
   '@huggingface/transformers',
+  '@trycua/cua-driver',
 ];
 
 /**
@@ -46,7 +54,31 @@ export const BUNDLE_EXTERNALS = [
  *                              designed to be absent. Excluding it is what
  *                              makes the guarded import worth having.
  */
-export const RUNTIME_PACKAGES = ['better-sqlite3', 'node-pty', 'playwright'];
+export const RUNTIME_PACKAGES = ['better-sqlite3', 'node-pty', 'playwright', '@trycua/cua-driver'];
+
+/**
+ * `@trycua/cua-driver` keeps its compiled library in a per-target optional
+ * dependency, so the generic `NATIVE_PACKAGES` check below cannot see it.
+ *
+ * pnpm resolves the optional dependency from `supportedArchitectures`, which
+ * means a wrong-target stage installs cleanly and then fails to load the
+ * library at runtime.
+ */
+export function driverPlatformPackage(platform, arch) {
+  const triple =
+    platform === 'win32'
+      ? `win32-${arch}-msvc`
+      : platform === 'darwin'
+        ? `darwin-${arch}`
+        : `linux-${arch}-gnu`;
+  const lib =
+    platform === 'win32'
+      ? 'cua_driver_sdk.dll'
+      : platform === 'darwin'
+        ? 'libcua_driver_sdk.dylib'
+        : 'libcua_driver_sdk.so';
+  return { name: `@trycua/cua-driver-${triple}`, lib };
+}
 
 /**
  * Runtime packages whose `.node` binary is compiled against a specific V8/Node

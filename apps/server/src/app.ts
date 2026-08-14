@@ -16,6 +16,7 @@ import { createErrorMiddleware } from './middleware/errorHandler.js';
 import { createStaticFilesMiddleware } from './middleware/staticFiles.js';
 import { createApiRouter } from './routes/index.js';
 import { createInternalBrowserRoutes } from './routes/internal-browser.js';
+import { createInternalComputerRoutes } from './routes/internal-computer.js';
 import { createInternalDesktopRoutes } from './routes/internal-desktop.js';
 
 /**
@@ -125,6 +126,8 @@ export function createApp(container: Container): Express {
   // pushes). Deliberately NOT under /api — own auth (bearer token + loopback
   // check), not the API key gate. See routes/internal-browser.ts.
   app.use('/internal/browser', createInternalBrowserRoutes(container));
+  // Same trust model: loopback + the desktop's per-lifetime bearer token.
+  app.use('/internal/computer', createInternalComputerRoutes(container));
 
   // 4e. Internal desktop shell channel — lets the Electron main process mint
   // a pairing grant for its own renderer. Same loopback + per-launch-token

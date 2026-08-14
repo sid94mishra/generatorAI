@@ -128,6 +128,19 @@ export type { ScriptMetadata, LoadedScript } from './WorkflowScriptLoader.js';
 export { BrowserService } from './BrowserService.js';
 export type { BrowserServiceConfig } from './BrowserService.js';
 
+export { ComputerService } from './ComputerService.js';
+export type {
+  ComputerServiceConfig,
+  ComputerUseConfig,
+  ComputerCallContext,
+  ComputerConsentPrompt,
+  ComputerConsentScope,
+  ComputerStoredGrant,
+  ComputerAuditEntry,
+  IComputerConsentStore,
+  IComputerAuditSink,
+} from './ComputerService.js';
+
 // Integrated Terminal service
 export { TerminalService } from './TerminalService.js';
 export type { TerminalServiceConfig } from './TerminalService.js';

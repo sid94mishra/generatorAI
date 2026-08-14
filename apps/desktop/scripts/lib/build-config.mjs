@@ -260,6 +260,14 @@ export function createBuildConfig({ platform, arch, channel, signed, publish, en
       },
       { from: '../../apps/web/dist', to: 'web/dist', filter: ['**/*', ...SHARED_RESOURCE_EXCLUSIONS] },
       { from: '../../templates', to: 'templates' },
+      // One target's payload only. The driver spawns `cua-driver-uia` and
+      // `cua-cursor-theme` as siblings, so the whole directory ships or the
+      // driver starts and then cannot read a window.
+      {
+        from: `resources/cua-driver/${platform === 'win' ? 'win32' : platform === 'mac' ? 'darwin' : 'linux'}-${arch}`,
+        to: 'cua-driver',
+        filter: ['**/*', '!.version', ...SHARED_RESOURCE_EXCLUSIONS],
+      },
     ],
     asarUnpack: ['**/*.node'],
     protocols: [{ name: PRODUCT_NAME, schemes: ['generatorai'] }],
