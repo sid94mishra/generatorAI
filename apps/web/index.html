@@ -7,23 +7,30 @@
 
   </head>
   <body class="min-h-screen bg-background text-foreground antialiased">
-    <!-- Prevent theme flash: apply stored theme class + accent BEFORE React renders.
-         Keep in sync with providers/ThemeProvider.tsx. -->
+    <!-- Prevent theme flash: apply the stored mode class, palette and accent
+         BEFORE React renders. Keep in sync with providers/ThemeProvider.tsx.
+
+         Deliberately inline and dependency-free: this has to run before the
+         first paint, and anything that needs a module fetch is by definition
+         too late. -->
     <script>
       (function() {
-        var theme, accent;
+        var mode, theme, accent;
         try {
-          theme = localStorage.getItem('generatorai-theme') || 'dark';
+          mode = localStorage.getItem('generatorai-theme') || 'dark';
+          theme = localStorage.getItem('generatorai-theme-palette') || 'github';
           accent = localStorage.getItem('generatorai-accent') || 'blue';
         } catch (e) {
-          theme = 'dark';
+          mode = 'dark';
+          theme = 'github';
           accent = 'blue';
         }
-        var resolved = theme === 'system'
+        var resolved = mode === 'system'
           ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-          : theme;
+          : mode;
         var root = document.documentElement;
         root.classList.add(resolved);
+        root.setAttribute('data-mode', mode);
         root.setAttribute('data-theme', theme);
         root.setAttribute('data-accent', accent);
       })();

@@ -50,6 +50,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { cn } from '@/lib/utils.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
+import { resolveTerminalPalette } from '@generatorai/design-tokens';
 import { buildAuthenticatedSocketUrl } from '@/platform/authTransport.js';
 import type { TerminalSessionDescriptor } from '@generatorai/shared';
 
@@ -182,10 +183,23 @@ export function TerminalPanel({
 
   const sessionEnded = exitInfo !== null;
 
-  // Live theme — xterm's palette is refreshed when the user toggles
-  // light/dark from Settings, and the surrounding chrome adopts the
-  // active color tokens automatically via CSS vars.
-  const { resolvedTheme } = useTheme();
+  // Live theme — xterm's palette is refreshed whenever the user changes the
+  // theme or the light/dark mode, and the surrounding chrome adopts the active
+  // tokens automatically via CSS vars.
+  //
+  // xterm paints to a canvas, so it cannot resolve `var(--…)` the way the rest
+  // of the app does: it needs literals. Those come from the token package
+  // rather than from `getComputedStyle`, which would read whatever was painted
+  // last and race the theme swap.
+  const { resolvedTheme, theme } = useTheme();
+  const xtermTheme = useMemo(
+    () => resolveTerminalPalette(theme, resolvedTheme),
+    [theme, resolvedTheme],
+  );
+  // Held in a ref so the mount effect can read the current palette without
+  // taking it as a dependency — re-running that effect would tear down the PTY.
+  const xtermThemeRef = useRef(xtermTheme);
+  xtermThemeRef.current = xtermTheme;
 
   // ── Setup: mount xterm once ─────────────────────────────
   useEffect(() => {
@@ -198,7 +212,7 @@ export function TerminalPanel({
       fontSize: 12,
       lineHeight: 1.2,
       allowProposedApi: true,
-      theme: getXtermTheme(resolvedTheme),
+      theme: xtermThemeRef.current,
     });
     const fit = new FitAddon();
     const search = new SearchAddon();
@@ -246,7 +260,7 @@ export function TerminalPanel({
       searchRef.current = null;
     };
     // Mounted once; the palette is refreshed reactively via a separate
-    // effect (`term.options.theme = …`) when `resolvedTheme` changes.
+    // effect (`term.options.theme = …`) when the theme or mode changes.
   }, []);
 
   // ── Session lookup / create + WS attach ─────────────────
@@ -456,8 +470,8 @@ export function TerminalPanel({
   useEffect(() => {
     const term = xtermRef.current;
     if (!term) return;
-    try { term.options.theme = getXtermTheme(resolvedTheme); } catch { /* ignore */ }
-  }, [resolvedTheme]);
+    try { term.options.theme = xtermTheme; } catch { /* ignore */ }
+  }, [xtermTheme]);
 
   // ── Cleanup on unmount: kill the server-side session ─────
   useEffect(() => {
@@ -877,62 +891,4 @@ function shortenPath(p: string): string {
   const parts = p.replace(/\\/g, '/').split('/').filter(Boolean);
   if (parts.length <= 3) return p;
   return '…/' + parts.slice(-3).join('/');
-}
-
-/** xterm palette matching the active app theme (light / dark). */
-function getXtermTheme(
-  appearance: 'light' | 'dark',
-): NonNullable<ConstructorParameters<typeof Xterm>[0]>['theme'] {
-  if (appearance === 'light') {
-    // GitHub-Primer-ish light palette, tuned to match the `--background`
-    // / `--foreground` tokens defined in globals.css so xterm blends into
-    // the surrounding chrome.
-    return {
-      background: '#ffffff',
-      foreground: '#1f2328',
-      cursor: '#1f2328',
-      cursorAccent: '#ffffff',
-      selectionBackground: '#0969da33',
-      black: '#24292f',
-      red: '#cf222e',
-      green: '#116329',
-      yellow: '#4d2d00',
-      blue: '#0969da',
-      magenta: '#8250df',
-      cyan: '#1b7c83',
-      white: '#6e7781',
-      brightBlack: '#57606a',
-      brightRed: '#a40e26',
-      brightGreen: '#1a7f37',
-      brightYellow: '#633c01',
-      brightBlue: '#218bff',
-      brightMagenta: '#a475f9',
-      brightCyan: '#3192aa',
-      brightWhite: '#8c959f',
-    };
-  }
-  // Dark (default) palette — aligned with One Dark / VSCode dark+.
-  return {
-    background: '#0d1117',
-    foreground: '#e6edf3',
-    cursor: '#e6edf3',
-    cursorAccent: '#0d1117',
-    selectionBackground: '#1f6feb66',
-    black: '#1e1e1e',
-    red: '#e06c75',
-    green: '#98c379',
-    yellow: '#d19a66',
-    blue: '#61afef',
-    magenta: '#c678dd',
-    cyan: '#56b6c2',
-    white: '#dcdfe4',
-    brightBlack: '#5c6370',
-    brightRed: '#e06c75',
-    brightGreen: '#98c379',
-    brightYellow: '#e5c07b',
-    brightBlue: '#61afef',
-    brightMagenta: '#c678dd',
-    brightCyan: '#56b6c2',
-    brightWhite: '#ffffff',
-  };
 }

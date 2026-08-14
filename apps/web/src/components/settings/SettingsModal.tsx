@@ -9,13 +9,14 @@
 import React from 'react';
 import {
   Settings2, Cpu, Sparkles, Server, LayoutTemplate,
-  GitPullRequest, SquareTerminal, Blocks, HeartPulse, ShieldCheck, X, Bot, MonitorCog,
+  GitPullRequest, SquareTerminal, Blocks, HeartPulse, ShieldCheck, X, Bot, MonitorCog, Palette,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { useSettingsUiStore, type SettingsSectionId } from '@/stores/settingsUiStore.js';
 
-import { GeneralSection } from './sections/GeneralAppearance.js';
+import { GeneralSection } from './sections/General.js';
+import { AppearanceSection } from './sections/Appearance.js';
 import { ProvidersSection } from './sections/Providers.js';
 import { SkillsSection, McpSection, TemplatesSection } from './sections/Catalogs.js';
 import { AgentsSection } from './sections/Agents.js';
@@ -42,6 +43,7 @@ const NAV: NavGroup[] = [
     heading: 'App',
     items: [
       { id: 'general', label: 'General', icon: Settings2 },
+      { id: 'appearance', label: 'Appearance', icon: Palette },
     ],
   },
   {
@@ -74,6 +76,7 @@ const NAV: NavGroup[] = [
 
 const SECTIONS: Record<SettingsSectionId, React.ReactNode> = {
   general: <GeneralSection />,
+  appearance: <AppearanceSection />,
   providers: <ProvidersSection />,
   agents: <AgentsSection />,
   skills: <SkillsSection />,

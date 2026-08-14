@@ -106,26 +106,26 @@ const STATUS_STYLE: Record<string, { label: string; title: string; className: st
   added: {
     label: 'A',
     title: 'Added',
-    className: 'bg-emerald-500/15 text-emerald-500',
-    color: 'var(--color-emerald-500, #10b981)',
+    className: 'bg-success-muted text-success',
+    color: 'var(--color-success)',
   },
   modified: {
     label: 'M',
     title: 'Modified',
-    className: 'bg-amber-500/15 text-amber-500',
-    color: 'var(--color-amber-500, #f59e0b)',
+    className: 'bg-warning-muted text-warning',
+    color: 'var(--color-warning)',
   },
   deleted: {
     label: 'D',
     title: 'Deleted',
-    className: 'bg-rose-500/15 text-rose-500',
-    color: 'var(--color-rose-500, #f43f5e)',
+    className: 'bg-danger-muted text-danger',
+    color: 'var(--color-danger)',
   },
   renamed: {
     label: 'R',
     title: 'Renamed',
-    className: 'bg-sky-500/15 text-sky-500',
-    color: 'var(--color-sky-500, #0ea5e9)',
+    className: 'bg-info-muted text-info',
+    color: 'var(--color-info)',
   },
 };
 

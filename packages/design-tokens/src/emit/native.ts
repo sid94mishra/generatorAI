@@ -3,20 +3,24 @@
 //
 // Emits a plain TS module for apps/mobile containing:
 //
-//   themeVars       (appearance, accent) → NativeWind `vars()` input
-//   rawTokens       (appearance, accent) → concrete colours, for consumers
-//                   that cannot read a CSS variable: Skia, the status bar,
-//                   the xterm WebView theme, Live Activities.
+//   themeVars       (theme, appearance, accent) → NativeWind `vars()` input
+//   rawTokens       same data, for consumers that cannot read a CSS variable:
+//                   Skia, the status bar, the xterm WebView theme, Live
+//                   Activities
+//   themeMeta       id/label/description/fonts/radius/swatch, so the mobile
+//                   Appearance screen renders from the registry rather than
+//                   from a second hand-maintained list
+//   terminalThemes  (theme, appearance) → xterm ITheme
 //   tailwindColors  colour name → `var(--name)`, for tailwind.config.js
 //
-// Why both: NativeWind resolves `var()` at style time, which is what we want
-// for `className`. But Skia paints, native module props and the iOS
-// status-bar API all take a literal string.
+// Why both var-shaped and literal: NativeWind resolves `var()` at style time,
+// which is what we want for `className`. But Skia paints, native module props
+// and the iOS status-bar API all take a literal string.
 // ────────────────────────────────────────────────────────────────
 
 import {
-  ACCENTS,
-  APPEARANCE_TOKENS,
+  ACCENT_IDS,
+  DEFAULT_THEME,
   FILE_ICON_COLORS,
   FONT_SIZE,
   LINE_HEIGHT,
@@ -24,10 +28,15 @@ import {
   NATIVE_FONT_FAMILY,
   RADIUS,
   SPACING,
+  THEMES,
   TWO_PANE_MIN_WIDTH,
-  resolveAccent,
+  resolveAccentTokens,
+  resolveAppearanceTokens,
+  resolveChartRamp,
+  resolveTerminalPalette,
+  themeSwatch,
   type Appearance,
-} from '../tokens.js';
+} from '../index.js';
 
 /** camelCase token key → kebab-case CSS variable name. */
 const kebab = (s: string): string => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
@@ -37,12 +46,25 @@ export interface ResolvedTokenSet {
 }
 
 /**
- * Every token for one (appearance, accent) pair, keyed by CSS variable name
+ * Every token for one (theme, appearance, accent), keyed by CSS variable name
  * so the shape is identical to the web's Layer 1.
  */
-export function resolveTokenSet(appearance: Appearance, accentId: string): ResolvedTokenSet {
-  const t = APPEARANCE_TOKENS[appearance];
-  const a = resolveAccent(accentId, appearance);
+export function resolveTokenSet(
+  themeId: string,
+  appearance: Appearance,
+  accentId: string,
+): ResolvedTokenSet {
+  const theme = THEMES.find((t) => t.id === themeId);
+  if (!theme) throw new Error(`Unknown theme: ${themeId}`);
+
+  const t = resolveAppearanceTokens(theme, appearance);
+  const a = resolveAccentTokens(
+    theme,
+    (ACCENT_IDS as readonly string[]).includes(accentId)
+      ? (accentId as (typeof ACCENT_IDS)[number])
+      : theme.defaultAccent,
+    appearance,
+  );
   const out: ResolvedTokenSet = {};
 
   for (const [key, value] of Object.entries(t)) {
@@ -55,6 +77,10 @@ export function resolveTokenSet(appearance: Appearance, accentId: string): Resol
   out['--sidebar-accent'] = a.sidebarAccent;
   out['--sidebar-accent-foreground'] = a.sidebarAccentForeground;
 
+  resolveChartRamp(theme, appearance).forEach((colour, i) => {
+    out[`--chart-${i + 1}`] = colour;
+  });
+
   for (const [name, pair] of Object.entries(FILE_ICON_COLORS)) {
     out[`--file-icon-${name}`] = pair[appearance];
   }
@@ -64,7 +90,7 @@ export function resolveTokenSet(appearance: Appearance, accentId: string): Resol
 
 /** Colour names exposed as Tailwind utilities on mobile. */
 export function tailwindColorNames(): string[] {
-  const sample = resolveTokenSet('dark', 'blue');
+  const sample = resolveTokenSet(DEFAULT_THEME, 'dark', 'blue');
   return Object.keys(sample).map((v) => v.slice(2));
 }
 
@@ -77,12 +103,35 @@ const stringify = (value: unknown, indent: number): string =>
 export function emitNative(): string {
   const appearances: Appearance[] = ['dark', 'light'];
 
-  const themeVars: Record<string, Record<string, ResolvedTokenSet>> = {};
-  for (const appearance of appearances) {
-    themeVars[appearance] = {};
-    for (const accent of ACCENTS) {
-      themeVars[appearance][accent.id] = resolveTokenSet(appearance, accent.id);
+  const themeVars: Record<string, Record<string, Record<string, ResolvedTokenSet>>> = {};
+  const terminalThemes: Record<string, Record<string, unknown>> = {};
+  const themeMeta: Array<Record<string, unknown>> = [];
+
+  for (const theme of THEMES) {
+    const perAppearance: Record<string, Record<string, ResolvedTokenSet>> = {};
+    const perTerminal: Record<string, unknown> = {};
+
+    for (const appearance of appearances) {
+      const perAccent: Record<string, ResolvedTokenSet> = {};
+      for (const accentId of ACCENT_IDS) {
+        perAccent[accentId] = resolveTokenSet(theme.id, appearance, accentId);
+      }
+      perAppearance[appearance] = perAccent;
+      perTerminal[appearance] = resolveTerminalPalette(theme, appearance);
     }
+
+    themeVars[theme.id] = perAppearance;
+    terminalThemes[theme.id] = perTerminal;
+
+    themeMeta.push({
+      id: theme.id,
+      label: theme.label,
+      description: theme.description,
+      credit: theme.credit ?? null,
+      defaultAccent: theme.defaultAccent,
+      radius: theme.radius,
+      swatch: { dark: themeSwatch(theme, 'dark'), light: themeSwatch(theme, 'light') },
+    });
   }
 
   const tailwindColors: Record<string, string> = {};
@@ -93,7 +142,7 @@ export function emitNative(): string {
   return `// ────────────────────────────────────────────────────────────────
 // GENERATED FILE — do not edit.
 //
-// Source of truth: packages/design-tokens/src/tokens.ts
+// Source of truth: packages/design-tokens/src/themes/
 // Regenerate:      pnpm --filter @generatorai/design-tokens tokens:write
 //
 // CI runs \`tokens:check\`, so an edit here fails the build rather than
@@ -102,7 +151,7 @@ export function emitNative(): string {
 
 export type Appearance = 'dark' | 'light';
 
-/** NativeWind \`vars()\` input, per (appearance, accent). */
+/** NativeWind \`vars()\` input, per (theme, appearance, accent). */
 export const themeVars = ${stringify(themeVars, 0)} as const;
 
 /**
@@ -111,6 +160,12 @@ export const themeVars = ${stringify(themeVars, 0)} as const;
  * Same data as \`themeVars\` — kept as one object so they cannot diverge.
  */
 export const rawTokens = themeVars;
+
+/** xterm \`ITheme\` per (theme, appearance). */
+export const terminalThemes = ${stringify(terminalThemes, 0)} as const;
+
+/** Registry metadata for the Appearance screen. */
+export const themeMeta = ${stringify(themeMeta, 0)} as const;
 
 /** For tailwind.config.js \`theme.extend.colors\`. */
 export const tailwindColors = ${stringify(tailwindColors, 0)} as const;

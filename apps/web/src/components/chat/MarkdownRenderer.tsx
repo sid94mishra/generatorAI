@@ -10,7 +10,6 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { Check, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { useHighlightTheme } from '@/hooks/useHighlightTheme.js';
 
 /** Extract raw text from a DOM element (used for copy-to-clipboard on highlighted code) */
 function extractDomText(el: HTMLElement | null): string {
@@ -57,7 +56,6 @@ export const MarkdownBody = React.memo(function MarkdownBody({ content }: { cont
 });
 
 export const MarkdownRenderer = React.memo(function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
-  useHighlightTheme();
   return (
     <div className={cn('markdown-content text-sm', className)}>
       <MarkdownBody content={content} />

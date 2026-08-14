@@ -118,3 +118,56 @@ export function flatten(fg: string | Rgba, bg: string | Rgba): Rgba {
     a: 1,
   };
 }
+
+/** Linear sRGB blend of two opaque colours, `amount` = share of `to` (0..1). */
+export function mix(from: string | Rgba, to: string | Rgba, amount: number): Rgba {
+  const a = typeof from === 'string' ? parseHex(from) : from;
+  const b = typeof to === 'string' ? parseHex(to) : to;
+  const t = Math.max(0, Math.min(1, amount));
+  return {
+    r: a.r + (b.r - a.r) * t,
+    g: a.g + (b.g - a.g) * t,
+    b: a.b + (b.b - a.b) * t,
+    a: 1,
+  };
+}
+
+/**
+ * Push `colour` toward black or white until it clears `minRatio` against
+ * `against`, and return the first step that does.
+ *
+ * This is what makes a new theme AA-compliant *by construction* rather than by
+ * review: a theme author declares the hue they want, and the filled-button
+ * variant of it is computed, not guessed. Direction is chosen from `against`
+ * (dark text ⇒ lighten the fill, light text ⇒ darken it), because moving the
+ * wrong way makes the pair monotonically worse.
+ *
+ * Returns the input unchanged when it already clears the bar, so hand-authored
+ * palettes that are already correct are never nudged.
+ */
+export function ensureContrast(
+  colour: string | Rgba,
+  against: string | Rgba,
+  minRatio: number,
+): Rgba {
+  const start = typeof colour === 'string' ? parseHex(colour) : colour;
+  const target = typeof against === 'string' ? parseHex(against) : against;
+  if (contrastRatio(start, target) >= minRatio) return { ...start, a: 1 };
+
+  // Move away from the text colour: toward black under light text, toward
+  // white under dark text.
+  const toward: Rgba =
+    relativeLuminance(target) > 0.5
+      ? { r: 0, g: 0, b: 0, a: 1 }
+      : { r: 255, g: 255, b: 255, a: 1 };
+
+  // Each candidate is round-tripped through hex before it is measured.
+  // Without that, the loop exits on a float that clears the bar and then the
+  // 8-bit value actually emitted lands just under it — which is how a token
+  // ends up at 4.49:1 while its generator insists it is at 4.5:1.
+  for (let step = 1; step <= 100; step += 1) {
+    const candidate = parseHex(toHex(mix(start, toward, step / 100)));
+    if (contrastRatio(candidate, target) >= minRatio) return candidate;
+  }
+  return toward;
+}

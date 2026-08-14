@@ -1,8 +1,12 @@
 // ────────────────────────────────────────────────────────────────
-// The design token source of truth.
+// Non-colour design tokens + the file-icon palette.
 //
-// This module is the ONLY place a colour, radius or type scale is decided.
-// Three consumers read it:
+// Colour lives in `themes/` — one file per theme, all of them expanded
+// through the same derivation in `themes/types.ts`. This module holds the
+// things that are the same in every theme (type scale, spacing, motion) plus
+// the one palette that deliberately ignores the theme system.
+//
+// Three consumers read this package:
 //
 //   • apps/web    — via the generated token layers in styles/globals.css
 //   • apps/mobile — via the generated theme/tokens.generated.ts
@@ -10,272 +14,10 @@
 //
 // Anything that reads a colour from somewhere else is a bug: that is exactly
 // how the web and the mobile app drift apart within one release.
-//
-// ── Structure ────────────────────────────────────────────────────
-// Tokens split along two ORTHOGONAL axes:
-//
-//   appearance : 'dark' | 'light'   → surfaces, text, borders, status
-//   accent     : 6 accents          → interactive colour only
-//
-// Status colours are deliberately NOT accent-controlled. "Danger" must look
-// like danger regardless of the user's accent preference.
 // ────────────────────────────────────────────────────────────────
 
-import { toHex, withAlpha } from './color.js';
-
-export type Appearance = 'dark' | 'light';
-
-// ── Appearance-scoped tokens ────────────────────────────────────
-
-export interface AppearanceTokens {
-  // Surfaces
-  background: string;
-  foreground: string;
-  card: string;
-  cardForeground: string;
-  popover: string;
-  popoverForeground: string;
-  raised: string;
-  overlay: string;
-  subtle: string;
-  emphasis: string;
-
-  // Interactive (accent-independent parts)
-  primaryForeground: string;
-  secondary: string;
-  secondaryForeground: string;
-  muted: string;
-  mutedForeground: string;
-  accentForeground: string;
-  destructive: string;
-  destructiveForeground: string;
-
-  // Borders
-  border: string;
-  borderMuted: string;
-  input: string;
-
-  // Status — semantic, never accent-controlled
-  success: string;
-  successMuted: string;
-  warning: string;
-  warningMuted: string;
-  info: string;
-  infoMuted: string;
-  danger: string;
-  dangerMuted: string;
-  done: string;
-
-  // Sidebar
-  sidebar: string;
-  sidebarForeground: string;
-  sidebarBorder: string;
-
-  // Canvas (DAG surface: React Flow on web, Skia on mobile)
-  canvasBg: string;
-  canvasDot: string;
-}
-
-export const APPEARANCE_TOKENS: Record<Appearance, AppearanceTokens> = {
-  dark: {
-    background: '#0d1117',
-    foreground: '#e6edf3',
-    card: '#161b22',
-    cardForeground: '#e6edf3',
-    popover: '#1c2129',
-    popoverForeground: '#e6edf3',
-    raised: '#161b22',
-    overlay: '#1c2129',
-    subtle: '#21262d',
-    emphasis: '#30363d',
-
-    primaryForeground: '#ffffff',
-    secondary: '#21262d',
-    secondaryForeground: '#e6edf3',
-    muted: '#21262d',
-    mutedForeground: '#8b949e',
-    accentForeground: '#e6edf3',
-    destructive: '#f85149',
-    destructiveForeground: '#ffffff',
-
-    border: '#30363d',
-    borderMuted: '#21262d',
-    input: '#30363d',
-
-    success: '#3fb950',
-    successMuted: '#23863626',
-    warning: '#d29922',
-    warningMuted: '#9e6a0326',
-    info: '#4493f8',
-    infoMuted: '#4493f826',
-    danger: '#f85149',
-    dangerMuted: '#da363326',
-    done: '#a371f7',
-
-    sidebar: '#161b22',
-    sidebarForeground: '#8b949e',
-    sidebarBorder: '#30363d',
-
-    canvasBg: '#0d1117',
-    canvasDot: 'rgba(48, 54, 61, 0.6)',
-  },
-  light: {
-    background: '#ffffff',
-    foreground: '#1f2328',
-    card: '#f6f8fa',
-    cardForeground: '#1f2328',
-    popover: '#ffffff',
-    popoverForeground: '#1f2328',
-    raised: '#f6f8fa',
-    overlay: '#ffffff',
-    subtle: '#f0f3f6',
-    emphasis: '#dfe2e5',
-
-    primaryForeground: '#ffffff',
-    secondary: '#f0f3f6',
-    secondaryForeground: '#1f2328',
-    muted: '#f0f3f6',
-    mutedForeground: '#656d76',
-    accentForeground: '#1f2328',
-    destructive: '#d1242f',
-    destructiveForeground: '#ffffff',
-
-    border: '#d0d7de',
-    borderMuted: '#d8dee4',
-    input: '#d0d7de',
-
-    success: '#1a7f37',
-    successMuted: '#1a7f3720',
-    warning: '#9a6700',
-    warningMuted: '#9a670020',
-    info: '#0969da',
-    infoMuted: '#0969da20',
-    danger: '#d1242f',
-    dangerMuted: '#d1242f20',
-    done: '#8250df',
-
-    sidebar: '#f6f8fa',
-    sidebarForeground: '#656d76',
-    sidebarBorder: '#d0d7de',
-
-    canvasBg: '#ffffff',
-    canvasDot: 'rgba(208, 215, 222, 0.6)',
-  },
-};
-
-// ── Accent axis ─────────────────────────────────────────────────
-
-export interface AccentDef {
-  /** Stable id — persisted, and used as `data-accent` on web. */
-  id: string;
-  label: string;
-  /**
-   * `primary` is the readable-on-background colour used for links, icons and
-   * accent text. `emphasis` is the FILLED-BUTTON background: it must clear
-   * WCAG AA against `primaryForeground` (#ffffff), which `primary` often
-   * does not. Splitting the two is the whole reason this palette passes AA.
-   */
-  dark: { primary: string; emphasis: string };
-  light: { primary: string; emphasis: string };
-}
-
-export const ACCENTS: AccentDef[] = [
-  {
-    id: 'blue',
-    label: 'Blue',
-    dark: { primary: '#4493f8', emphasis: '#1f6feb' },
-    light: { primary: '#0969da', emphasis: '#0969da' },
-  },
-  {
-    id: 'violet',
-    label: 'Violet',
-    dark: { primary: '#a371f7', emphasis: '#8957e5' },
-    light: { primary: '#8250df', emphasis: '#8250df' },
-  },
-  {
-    id: 'green',
-    label: 'Green',
-    dark: { primary: '#3fb950', emphasis: '#238636' },
-    light: { primary: '#1a7f37', emphasis: '#1f883d' },
-  },
-  {
-    id: 'orange',
-    label: 'Orange',
-    dark: { primary: '#db6d28', emphasis: '#bc4c00' },
-    light: { primary: '#bc4c00', emphasis: '#bc4c00' },
-  },
-  {
-    id: 'rose',
-    label: 'Rose',
-    dark: { primary: '#f778ba', emphasis: '#bf4b8a' },
-    light: { primary: '#bf3989', emphasis: '#bf3989' },
-  },
-  {
-    id: 'teal',
-    label: 'Teal',
-    dark: { primary: '#39c5cf', emphasis: '#1b7c83' },
-    light: { primary: '#1b7c83', emphasis: '#1b7c83' },
-  },
-];
-
-export const DEFAULT_ACCENT = 'blue';
-
-/**
- * Alpha percentages used to derive the accent tints.
- *
- * Dark tints derive from `emphasis` (the deeper colour reads better as a
- * wash on a dark surface); light tints derive from `primary`.
- */
-export const TINT = {
-  /** `--accent` — selected rows, hovered menu items. */
-  accent: { dark: 20, light: 10 },
-  /** `--sidebar-accent` — the active nav item's pill. */
-  sidebar: { dark: 13, light: 8 },
-} as const;
-
-export interface AccentTokens {
-  primary: string;
-  primaryEmphasis: string;
-  ring: string;
-  accent: string;
-  sidebarAccent: string;
-  sidebarAccentForeground: string;
-}
-
-export function getAccent(id: string): AccentDef | undefined {
-  return ACCENTS.find((a) => a.id === id);
-}
-
-/**
- * Resolve the six interactive tokens for an (accent, appearance) pair.
- *
- * Two invariants are encoded here rather than repeated per accent, because
- * they held for every accent in the hand-written CSS and repeating them is
- * how they eventually stop holding:
- *
- *   ring                     === primary
- *   sidebarAccentForeground  === primary
- */
-export function resolveAccent(accentId: string, appearance: Appearance): AccentTokens {
-  const def = getAccent(accentId) ?? getAccent(DEFAULT_ACCENT);
-  if (!def) throw new Error(`Unknown accent and no default: ${accentId}`);
-  const { primary, emphasis } = def[appearance];
-  const tintBase = appearance === 'dark' ? emphasis : primary;
-
-  return {
-    primary,
-    primaryEmphasis: emphasis,
-    ring: primary,
-    accent: toHex(withAlpha(tintBase, TINT.accent[appearance])),
-    sidebarAccent: toHex(withAlpha(tintBase, TINT.sidebar[appearance])),
-    sidebarAccentForeground: primary,
-  };
-}
-
-/** Swatch colours for the Settings picker: [dark, light]. */
-export function accentSwatch(def: AccentDef): [dark: string, light: string] {
-  return [def.dark.primary, def.light.primary];
-}
+import { SYSTEM_MONO, SYSTEM_SANS } from './themes/fonts.js';
+import type { Appearance } from './themes/types.js';
 
 // ── File-type icon palette ──────────────────────────────────────
 //
@@ -283,21 +25,19 @@ export function accentSwatch(def: AccentDef): [dark: string, light: string] {
 // colour in the tree (painted inside a shadow root, out of reach of page
 // CSS) as it is on a tab, a diff row or a file header.
 //
+// Deliberately NOT theme-scoped. The whole value of these tokens is that they
+// agree with the tree's own shadow-root rendering, which knows nothing about
+// our themes; re-tinting them per theme would make every file icon disagree
+// with the tree sitting next to it.
+//
 // ⚠ KNOWN DEFECT — `vermilion` is inverted UPSTREAM.
 // Every other pair puts the darker colour on light and the lighter colour
 // on dark. Vermilion does the opposite, which lands it at 2.29:1 on a white
-// background (see FILE_ICON_CONTRAST_WAIVERS in the tests).
+// background (see the waiver in the tests).
 //
-// We mirror the defect deliberately. The entire value of this token is that
-// it agrees with the tree's own shadow-root rendering; "fixing" it here
+// We mirror the defect deliberately, for the same reason: "fixing" it here
 // would make our tabs and diff headers visibly disagree with the tree next
 // to them, which is worse than being consistently wrong.
-//
-// The real fix is an app-level override — @pierre/trees resolves
-// `--trees-file-icon-vermilion` ahead of its own `--trees-icon-vermilion`,
-// so both sides can be corrected together. Tracked as a follow-up; it is a
-// deliberate visual change and does not belong in a token extraction that
-// promises zero visual diff.
 
 export const FILE_ICON_COLORS = {
   gray: { light: '#84848a', dark: '#adadb1' },
@@ -320,6 +60,13 @@ export type FileIconColor = keyof typeof FILE_ICON_COLORS;
 
 // ── Scales ──────────────────────────────────────────────────────
 
+/**
+ * Fallback radii, used when a consumer has no theme in hand.
+ *
+ * The live values come from the active theme (`ThemeDef.radius`) — corner
+ * radius is a real part of a theme's feel, and pinning it globally is what
+ * would make every theme look like the same theme in different colours.
+ */
 export const RADIUS = {
   /** 6px — the default for buttons, inputs, chips. */
   DEFAULT: 6,
@@ -328,9 +75,10 @@ export const RADIUS = {
   full: 9999,
 } as const;
 
+/** Fallback type stacks. Live values come from `ThemeDef.fonts`. */
 export const FONT_FAMILY = {
-  sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif',
-  mono: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+  sans: SYSTEM_SANS,
+  mono: SYSTEM_MONO,
 } as const;
 
 /**

@@ -162,30 +162,46 @@ export function ContextUsageGauge({
   );
 }
 
-/** Ordered, labelled, colour-coded breakdown rows. */
-const BREAKDOWN_ROWS: Array<{ key: keyof NonNullable<ResolvedContextUsage['breakdown']>; label: string; color: string }> = [
-  { key: 'system', label: 'System prompt', color: 'bg-violet-500' },
-  { key: 'tools', label: 'Tool definitions', color: 'bg-amber-500' },
-  { key: 'mcpTools', label: 'MCP tools', color: 'bg-orange-500' },
-  { key: 'memoryFiles', label: 'Memory files', color: 'bg-lime-500' },
-  { key: 'skills', label: 'Skills', color: 'bg-teal-500' },
-  { key: 'agents', label: 'Sub-agents', color: 'bg-cyan-500' },
-  { key: 'conversation', label: 'Conversation', color: 'bg-sky-500' },
-  { key: 'userMessages', label: '· User messages', color: 'bg-sky-400' },
-  { key: 'assistantMessages', label: '· Assistant messages', color: 'bg-sky-300' },
-  { key: 'toolCalls', label: '· Tool calls', color: 'bg-indigo-400' },
-  { key: 'toolResults', label: '· Tool results', color: 'bg-indigo-300' },
-  { key: 'attachments', label: '· Attachments', color: 'bg-fuchsia-400' },
+/**
+ * Ordered, labelled, colour-coded breakdown rows.
+ *
+ * Colours come from the theme's six-slot categorical chart ramp, not from the
+ * Tailwind palette: this is the one chart in the app, and a fixed
+ * `bg-violet-500` here was the reason the popover kept its own colour scheme
+ * while everything around it followed the theme.
+ *
+ * Nested ("·") rows deliberately reuse their parent's slot at reduced opacity
+ * rather than taking a slot of their own — they are a decomposition of the
+ * parent, and giving them independent hues implied they were peers.
+ */
+const BREAKDOWN_ROWS: Array<{
+  key: keyof NonNullable<ResolvedContextUsage['breakdown']>;
+  label: string;
+  color: string;
+  dim?: number;
+}> = [
+  { key: 'system', label: 'System prompt', color: 'var(--chart-2)' },
+  { key: 'tools', label: 'Tool definitions', color: 'var(--chart-3)' },
+  { key: 'mcpTools', label: 'MCP tools', color: 'var(--chart-3)', dim: 0.6 },
+  { key: 'memoryFiles', label: 'Memory files', color: 'var(--chart-4)' },
+  { key: 'skills', label: 'Skills', color: 'var(--chart-5)' },
+  { key: 'agents', label: 'Sub-agents', color: 'var(--chart-5)', dim: 0.6 },
+  { key: 'conversation', label: 'Conversation', color: 'var(--chart-1)' },
+  { key: 'userMessages', label: '· User messages', color: 'var(--chart-1)', dim: 0.75 },
+  { key: 'assistantMessages', label: '· Assistant messages', color: 'var(--chart-1)', dim: 0.55 },
+  { key: 'toolCalls', label: '· Tool calls', color: 'var(--chart-6)', dim: 0.75 },
+  { key: 'toolResults', label: '· Tool results', color: 'var(--chart-6)', dim: 0.55 },
+  { key: 'attachments', label: '· Attachments', color: 'var(--chart-2)', dim: 0.55 },
 ];
 
 /** Segments shown in the stacked bar — the nested "·" rows would double-count. */
 const BAR_SEGMENTS: Array<{ key: keyof NonNullable<ResolvedContextUsage['breakdown']>; label: string; color: string }> = [
-  { key: 'system', label: 'System', color: '#8b5cf6' },
-  { key: 'tools', label: 'Tools', color: '#f59e0b' },
-  { key: 'mcpTools', label: 'MCP tools', color: '#f97316' },
-  { key: 'memoryFiles', label: 'Memory', color: '#84cc16' },
-  { key: 'skills', label: 'Skills', color: '#14b8a6' },
-  { key: 'conversation', label: 'Conversation', color: '#0ea5e9' },
+  { key: 'system', label: 'System', color: 'var(--chart-2)' },
+  { key: 'tools', label: 'Tools', color: 'var(--chart-3)' },
+  { key: 'mcpTools', label: 'MCP tools', color: 'var(--chart-6)' },
+  { key: 'memoryFiles', label: 'Memory', color: 'var(--chart-4)' },
+  { key: 'skills', label: 'Skills', color: 'var(--chart-5)' },
+  { key: 'conversation', label: 'Conversation', color: 'var(--chart-1)' },
 ];
 
 function ContextUsagePopover({
@@ -285,7 +301,7 @@ function ContextUsagePopover({
                 const v = breakdown?.[row.key];
                 if (v == null || v === 0) return null;
                 return (
-                  <Row key={row.key} color={row.color} label={row.label} value={v.toLocaleString()} />
+                  <Row key={row.key} color={row.color} dim={row.dim} label={row.label} value={v.toLocaleString()} />
                 );
               })}
             </div>
@@ -334,11 +350,16 @@ function ContextUsagePopover({
   );
 }
 
-function Row({ color, label, value, hint }: { color?: string; label: string; value: string; hint?: string }) {
+function Row({ color, dim, label, value, hint }: { color?: string; dim?: number; label: string; value: string; hint?: string }) {
   return (
     <div className="flex items-center justify-between gap-2">
       <span className="flex items-center gap-1.5 text-[var(--color-muted-foreground)]" title={hint}>
-        {color && <span className={cn('h-2 w-2 flex-shrink-0 rounded-sm', color)} />}
+        {color && (
+          <span
+            className="h-2 w-2 flex-shrink-0 rounded-sm"
+            style={{ background: color, opacity: dim ?? 1 }}
+          />
+        )}
         {label}
       </span>
       <span className="font-mono tabular-nums text-[var(--color-foreground)]">{value}</span>

@@ -1,32 +1,55 @@
 // ────────────────────────────────────────────────────────────────
-// ThemeProvider — Dark/Light mode with system preference detection
-// + orthogonal accent color (see themes/registry.ts).
-// Applies `.dark`/`.light` class, `data-theme` and `data-accent` on
-// <html>; the pre-hydration script in index.html mirrors this before
-// first paint (keep both in sync).
+// ThemeProvider — the single writer of the three appearance axes.
+//
+//   mode    'light' | 'dark' | 'system'   →  .light / .dark class + data-mode
+//   theme   palette id                    →  data-theme
+//   accent  accent id                     →  data-accent
+//
+// All three land on <html>, and CSS does the rest: the generated token layers
+// in globals.css key off exactly those selectors, so switching a theme is one
+// attribute write and zero re-renders of the tree below. Nothing here reads a
+// colour — if a component needs a literal, it reads it from
+// `@generatorai/design-tokens`, not from this provider.
+//
+// The pre-hydration script in index.html mirrors this before first paint.
+// Keep the two in sync; that script is the only thing standing between a
+// dark-mode user and a white flash on every cold start.
 // ────────────────────────────────────────────────────────────────
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import {
   ACCENT_STORAGE_KEY,
-  DEFAULT_ACCENT,
+  DEFAULT_MODE,
+  DEFAULT_THEME,
+  MODE_STORAGE_KEY,
   THEME_STORAGE_KEY,
-  getAccent,
+  getThemeDef,
+  isKnownMode,
+  isKnownTheme,
+  resolveAccentId,
+  resolveAppearance,
+  type AccentId,
+  type Appearance,
+  type ThemeDef,
+  type ThemeMode,
 } from '@generatorai/design-tokens';
 
-type Theme = 'light' | 'dark' | 'system';
-
 interface ThemeContextValue {
-  theme: Theme;
-  resolvedTheme: 'light' | 'dark';
-  setTheme: (theme: Theme) => void;
-  accent: string;
+  /** The user's light/dark preference, `system` included. */
+  mode: ThemeMode;
+  setMode: (mode: ThemeMode) => void;
+  /** What `mode` actually resolved to right now. */
+  resolvedTheme: Appearance;
+  /** Palette id. */
+  themeId: string;
+  setThemeId: (id: string) => void;
+  /** The full definition of the active palette — label, fonts, radii, hues. */
+  theme: ThemeDef;
+  accent: AccentId;
   setAccent: (accent: string) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
-
-const STORAGE_KEY = THEME_STORAGE_KEY;
 
 export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext);
@@ -34,45 +57,28 @@ export function useTheme(): ThemeContextValue {
   return ctx;
 }
 
-function getSystemTheme(): 'light' | 'dark' {
-  if (typeof window === 'undefined') return 'dark';
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+function systemPrefersDark(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
-function getStoredTheme(): Theme {
-  if (typeof window === 'undefined') return 'system';
+/**
+ * localStorage throws outright in some privacy modes, so every access is
+ * guarded. A theme preference is not worth a blank screen.
+ */
+function read(key: string): string | null {
+  if (typeof window === 'undefined') return null;
   try {
-    return (localStorage.getItem(STORAGE_KEY) as Theme) ?? 'system';
+    return localStorage.getItem(key);
   } catch {
-    // Private browsing / security settings can throw on localStorage access.
-    return 'system';
+    return null;
   }
 }
 
-function storeTheme(theme: Theme): void {
+function write(key: string, value: string): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, theme);
-  } catch {
-    // Swallow QuotaExceededError / SecurityError in private mode.
-  }
-}
-
-function getStoredAccent(): string {
-  if (typeof window === 'undefined') return DEFAULT_ACCENT;
-  try {
-    const stored = localStorage.getItem(ACCENT_STORAGE_KEY);
-    // Unknown ids (removed accents) fall back to the default.
-    return stored && getAccent(stored) ? stored : DEFAULT_ACCENT;
-  } catch {
-    return DEFAULT_ACCENT;
-  }
-}
-
-function storeAccent(accent: string): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(ACCENT_STORAGE_KEY, accent);
+    localStorage.setItem(key, value);
   } catch {
     // Swallow QuotaExceededError / SecurityError in private mode.
   }
@@ -80,69 +86,92 @@ function storeAccent(accent: string): void {
 
 interface ThemeProviderProps {
   children: React.ReactNode;
-  defaultTheme?: Theme;
+  defaultMode?: ThemeMode;
 }
 
-export function ThemeProvider({ children, defaultTheme = 'dark' }: ThemeProviderProps) {
-  const [theme, setThemeState] = useState<Theme>(() => getStoredTheme() || defaultTheme);
-  const [accent, setAccentState] = useState<string>(() => getStoredAccent());
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => {
-    const stored = getStoredTheme() || defaultTheme;
-    return stored === 'system' ? getSystemTheme() : stored;
+export function ThemeProvider({ children, defaultMode = DEFAULT_MODE }: ThemeProviderProps) {
+  const [mode, setModeState] = useState<ThemeMode>(() => {
+    const stored = read(MODE_STORAGE_KEY);
+    return isKnownMode(stored) ? stored : defaultMode;
   });
 
-  const setTheme = useCallback((newTheme: Theme) => {
-    setThemeState(newTheme);
-    // SSR-safe + private-browsing-safe (Phase 1, 1.21). See `storeTheme`.
-    storeTheme(newTheme);
+  // An unknown id — a theme we removed, or a hand-edited value — must not
+  // wedge the app on a palette that no longer has CSS behind it.
+  const [themeId, setThemeIdState] = useState<string>(() => {
+    const stored = read(THEME_STORAGE_KEY);
+    return isKnownTheme(stored) ? (stored as string) : DEFAULT_THEME;
+  });
+
+  const theme = useMemo(() => getThemeDef(themeId), [themeId]);
+
+  const [accent, setAccentState] = useState<AccentId>(() =>
+    resolveAccentId(getThemeDef(read(THEME_STORAGE_KEY)), read(ACCENT_STORAGE_KEY)),
+  );
+
+  const [resolvedTheme, setResolvedTheme] = useState<Appearance>(() =>
+    resolveAppearance(mode, systemPrefersDark()),
+  );
+
+  const setMode = useCallback((next: ThemeMode) => {
+    setModeState(next);
+    write(MODE_STORAGE_KEY, next);
   }, []);
 
-  const setAccent = useCallback((newAccent: string) => {
-    const valid = getAccent(newAccent) ? newAccent : DEFAULT_ACCENT;
-    setAccentState(valid);
-    storeAccent(valid);
+  const setThemeId = useCallback((next: string) => {
+    const valid = isKnownTheme(next) ? next : DEFAULT_THEME;
+    setThemeIdState(valid);
+    write(THEME_STORAGE_KEY, valid);
   }, []);
 
-  // Apply theme class to <html>
+  const setAccent = useCallback(
+    (next: string) => {
+      const valid = resolveAccentId(theme, next);
+      setAccentState(valid);
+      write(ACCENT_STORAGE_KEY, valid);
+    },
+    [theme],
+  );
+
+  // Mode → class + data-mode.
   useEffect(() => {
-    const resolved = theme === 'system' ? getSystemTheme() : theme;
+    const resolved = resolveAppearance(mode, systemPrefersDark());
     setResolvedTheme(resolved);
 
     const root = document.documentElement;
-    root.classList.remove('light', 'dark', 'system-theme');
+    root.classList.remove('light', 'dark');
     root.classList.add(resolved);
-    if (theme === 'system') {
-      root.classList.add('system-theme');
-    }
-    // Central hook for named themes (theme registry) — CSS keys on [data-theme].
-    root.dataset.theme = theme;
-  }, [theme]);
+    root.dataset.mode = mode;
+  }, [mode]);
 
-  // Apply accent attribute to <html> — CSS keys on [data-accent].
+  // Palette + accent → data attributes. Two separate effects so changing the
+  // accent does not re-run the (more expensive) style recalculation that a
+  // full palette swap triggers.
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeId;
+  }, [themeId]);
+
   useEffect(() => {
     document.documentElement.dataset.accent = accent;
   }, [accent]);
 
-  // Listen for system preference changes
+  // Follow the OS while, and only while, the user has chosen to.
   useEffect(() => {
-    if (theme !== 'system') return;
-
+    if (mode !== 'system') return undefined;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const handler = () => {
-      const resolved = getSystemTheme();
+      const resolved = resolveAppearance('system', media.matches);
       setResolvedTheme(resolved);
       document.documentElement.classList.remove('light', 'dark');
       document.documentElement.classList.add(resolved);
-      // Keep system-theme class since we're still in system mode
     };
-
     media.addEventListener('change', handler);
     return () => media.removeEventListener('change', handler);
-  }, [theme]);
+  }, [mode]);
 
-  return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme, setTheme, accent, setAccent }}>
-      {children}
-    </ThemeContext.Provider>
+  const value = useMemo<ThemeContextValue>(
+    () => ({ mode, setMode, resolvedTheme, themeId, setThemeId, theme, accent, setAccent }),
+    [mode, setMode, resolvedTheme, themeId, setThemeId, theme, accent, setAccent],
   );
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

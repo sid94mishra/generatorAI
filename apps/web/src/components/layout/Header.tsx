@@ -33,7 +33,7 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
   const { id: routeId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { theme, setTheme } = useTheme();
+  const { mode, setMode } = useTheme();
   const rightPaneController = useRightPaneStore((s) => s.controller);
 
   // Determine context: chat vs dashboard
@@ -153,18 +153,21 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
         {/* Separator */}
         {chatId && <div className="mx-1 h-5 w-px bg-[var(--color-border)]" />}
 
-        {/* Theme Toggle */}
-        <Tooltip content={`Theme: ${theme}`}>
+        {/* Light/dark/system cycle. The PALETTE is not cycled here — with six
+            themes a blind rotation stops being a shortcut and starts being a
+            way to lose the theme you had. That lives in Settings. */}
+        <Tooltip content={`Appearance: ${mode}`}>
           <button
             onClick={() => {
-              const next = theme === 'dark' ? 'light' : theme === 'light' ? 'system' : 'dark';
-              setTheme(next);
+              const next = mode === 'dark' ? 'light' : mode === 'light' ? 'system' : 'dark';
+              setMode(next);
             }}
+            aria-label={`Appearance: ${mode}. Click to change.`}
             className="rounded-md border border-border p-1 text-[var(--color-muted-foreground)] hover:bg-subtle hover:text-[var(--color-foreground)]"
           >
-          {theme === 'dark' ? (
+          {mode === 'dark' ? (
             <Moon className="h-4 w-4" />
-          ) : theme === 'light' ? (
+          ) : mode === 'light' ? (
             <Sun className="h-4 w-4" />
           ) : (
             <Monitor className="h-4 w-4" />

@@ -47,10 +47,10 @@ function getEdgeStyle(sourceStatus: string, targetStatus: string, edgeType: stri
     };
   }
 
-  // Source or target failed → red
+  // Source or target failed → danger
   if (sourceStatus === 'failed' || targetStatus === 'failed') {
     return {
-      stroke: '#ef4444',
+      stroke: 'var(--color-danger)',
       strokeWidth: 2,
       opacity: 0.7,
       animated: false,
@@ -59,7 +59,7 @@ function getEdgeStyle(sourceStatus: string, targetStatus: string, edgeType: stri
 
   // Default → muted
   return {
-    stroke: '#94a3b8',
+    stroke: 'var(--color-muted-foreground)',
     strokeWidth: 1.5,
     opacity: 0.4,
     animated: false,

@@ -217,20 +217,21 @@ function RuntimeDAGCanvasComponent({ definitionEdges, className }: RuntimeDAGCan
     }
   }, [selectedStageRunId]);
 
-  // Minimap node color
+  // Minimap node colour. CSS variables rather than hexes so the minimap
+  // follows a theme switch along with everything else on the canvas.
   const minimapNodeColor = useCallback(
     (node: Node) => {
       const data = node.data as RuntimeStageNodeData;
       const status = data?.stageRun?.status;
       switch (status) {
-        case 'completed': return '#22c55e';
-        case 'running': return '#3b82f6';
-        case 'failed': return '#ef4444';
-        case 'paused': return '#f59e0b';
-        case 'cancelled': return '#6b7280';
-        case 'skipped': return '#9ca3af';
-        case 'queued': return '#60a5fa';
-        default: return '#d1d5db';
+        case 'completed': return 'var(--color-success)';
+        case 'running': return 'var(--color-info)';
+        case 'failed': return 'var(--color-danger)';
+        case 'paused': return 'var(--color-warning)';
+        case 'cancelled': return 'var(--color-muted-foreground)';
+        case 'skipped': return 'var(--color-border)';
+        case 'queued': return 'var(--color-primary)';
+        default: return 'var(--color-emphasis)';
       }
     },
     [],

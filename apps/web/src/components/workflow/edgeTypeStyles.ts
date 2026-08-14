@@ -13,12 +13,20 @@ export const EDGE_TYPE_ORDER: StageEdgeType[] = [
   'always',
 ];
 
-/** Edge type → colour. Chosen to stay legible on both light and dark canvases. */
+/**
+ * Edge type → colour.
+ *
+ * These are CSS variables rather than hexes because the canvas is SVG: a
+ * `stroke` accepts `var(--…)` exactly like a `color` does, so the edges follow
+ * a theme switch with no re-render and no JS reading computed styles. They map
+ * onto the STATUS tokens, not the accent — a success edge has to look like
+ * success in every theme and under every accent.
+ */
 export const EDGE_TYPE_COLORS: Record<StageEdgeType, string> = {
-  on_success: '#16a34a', // green-600
-  on_failure: '#dc2626', // red-600
-  on_completion: '#2563eb', // blue-600
-  always: '#7c3aed', // violet-600
+  on_success: 'var(--color-success)',
+  on_failure: 'var(--color-danger)',
+  on_completion: 'var(--color-info)',
+  always: 'var(--color-done)',
 };
 
 /** Edge type → human-readable label. */

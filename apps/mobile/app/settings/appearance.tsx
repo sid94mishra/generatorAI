@@ -1,11 +1,10 @@
 // ────────────────────────────────────────────────────────────────
 // Settings → Appearance.
 //
-// The palette is fully wired for light, dark and six accents, and has been
-// since the tokens were generated — but nothing in the app ever called
-// `setTheme` or `setAccent`, so the only way to reach light mode was to
-// change the whole OS. Shipping a theme the user cannot select is the same
-// as not having one.
+// The mobile counterpart of the web's Appearance section, and it reads from
+// exactly the same registry: mode, theme, accent. Adding a theme in
+// `packages/design-tokens/src/themes/` makes it appear here with no change to
+// this file.
 //
 // Selection is applied immediately rather than behind a Save button: the
 // entire screen is a live preview of the choice, so a confirmation step would
@@ -15,40 +14,95 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 import { Check, Monitor, Moon, Sun } from 'lucide-react-native';
+import {
+  resolveAccentTokens,
+  resolveAppearanceTokens,
+  themesByGroup,
+  type AccentId,
+  type ThemeDef,
+  type Appearance,
+} from '@generatorai/design-tokens';
 
 import { Badge, Card, SectionHeader } from '../../src/components/ui/primitives';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { Touchable } from '../../src/components/ui/Touchable';
 import { Screen } from '../../src/components/ui/Screen';
-import { ACCENTS, THEMES, useTheme } from '../../src/theme/ThemeProvider';
+import { MODES, useTheme } from '../../src/theme/ThemeProvider';
 
-const THEME_ICON: Record<string, typeof Sun> = {
+const MODE_ICON: Record<string, typeof Sun> = {
   system: Monitor,
   light: Sun,
   dark: Moon,
 };
 
+/**
+ * A miniature of the app chrome painted in a theme that is not currently
+ * active. Swatch dots were tried first and are useless at this size: six
+ * palettes of similar hues are indistinguishable as dots, and the question a
+ * user is actually asking ("how loud is this, and can I read it?") is about
+ * surfaces in composition.
+ *
+ * `accentId` is the LIVE accent, not the theme's default — selecting a theme
+ * keeps the accent you already chose, so previewing anything else would be
+ * previewing a combination the app will never render.
+ */
+function ThemePreview({
+  theme,
+  appearance,
+  accentId,
+}: {
+  theme: ThemeDef;
+  appearance: Appearance;
+  accentId: AccentId;
+}) {
+  const t = resolveAppearanceTokens(theme, appearance);
+  const accent = resolveAccentTokens(theme, accentId, appearance);
+  return (
+    <View
+      className="h-14 w-24 flex-row overflow-hidden rounded-lg border"
+      style={{ backgroundColor: t.background, borderColor: t.border }}
+    >
+      <View className="w-1/3 gap-1 p-1.5" style={{ backgroundColor: t.sidebar }}>
+        <View className="h-1 w-full rounded-full" style={{ backgroundColor: accent.primary }} />
+        <View className="h-1 w-2/3 rounded-full" style={{ backgroundColor: t.emphasis }} />
+      </View>
+      <View className="flex-1 justify-between p-1.5">
+        <View className="gap-1">
+          <View className="h-1 w-2/3 rounded-full" style={{ backgroundColor: t.foreground }} />
+          <View className="h-1 w-full rounded-full" style={{ backgroundColor: t.mutedForeground }} />
+        </View>
+        <View className="flex-row gap-1">
+          {[t.success, t.warning, t.danger].map((c) => (
+            <View key={c} className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: c }} />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function AppearanceScreen(): React.ReactElement {
-  const { theme, appearance, accent, setTheme, setAccent, colors } = useTheme();
+  const { mode, appearance, themeId, accents, accent, setMode, setThemeId, setAccent, colors } =
+    useTheme();
 
   return (
     <Screen title="Appearance" back>
-      <SectionHeader title="Theme" />
+      <SectionHeader title="Mode" />
       <ListGroup>
-        {THEMES.map((option) => {
-          const Icon = THEME_ICON[option.id] ?? Monitor;
-          const selected = theme === option.id;
+        {MODES.map((option) => {
+          const Icon = MODE_ICON[option.id] ?? Monitor;
+          const selected = mode === option.id;
           return (
             <ListRow
               key={option.id}
               title={option.label}
               icon={<Icon size={18} color={selected ? colors.primary : colors['muted-foreground']} />}
-              onPress={() => setTheme(option.id as 'system' | 'light' | 'dark')}
+              onPress={() => setMode(option.id)}
               chevron={false}
               trailing={
                 <View className="flex-row items-center gap-2">
-                  {/* `system` resolves to a concrete appearance the user
-                      cannot otherwise see — so say which one it landed on. */}
+                  {/* `system` resolves to a variant the user cannot otherwise
+                      see — so say which one it landed on. */}
                   {option.id === 'system' ? <Badge label={appearance} tone="neutral" /> : null}
                   {selected ? <Check size={18} color={colors.primary} /> : null}
                 </View>
@@ -58,14 +112,41 @@ export default function AppearanceScreen(): React.ReactElement {
         })}
       </ListGroup>
 
+      {themesByGroup().map((group) => (
+        <React.Fragment key={group.id}>
+          <SectionHeader title={group.label} />
+          <ListGroup>
+            {group.themes.map((option) => {
+              const selected = themeId === option.id;
+              return (
+                <ListRow
+                  key={option.id}
+                  title={option.label}
+                  subtitle={option.description}
+                  onPress={() => setThemeId(option.id)}
+                  chevron={false}
+                  trailing={
+                    <View className="flex-row items-center gap-2">
+                      <ThemePreview theme={option} appearance={appearance} accentId={accent} />
+                      {selected ? <Check size={18} color={colors.primary} /> : null}
+                    </View>
+                  }
+                />
+              );
+            })}
+          </ListGroup>
+        </React.Fragment>
+      ))}
+
       <SectionHeader title="Accent" />
       <Card className="gap-3 p-4">
         <View className="flex-row flex-wrap gap-3">
-          {ACCENTS.map((option) => {
+          {accents.map((option) => {
             const selected = accent === option.id;
-            // Swatch comes from the palette for the CURRENT appearance, so the
-            // dot matches what the accent will actually look like right now.
-            const swatch = option[appearance]?.primary ?? colors.primary;
+            // Swatch comes from the palette for the CURRENT theme and
+            // appearance, so the dot matches what the accent will actually
+            // look like right now.
+            const swatch = option[appearance].primary;
             return (
               <Touchable
                 key={option.id}

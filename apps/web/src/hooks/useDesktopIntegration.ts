@@ -46,7 +46,7 @@ export function useDesktopIntegration(): DesktopWindowChrome {
   const [chrome, setChrome] = useState<DesktopWindowChrome>(NATIVE_CHROME);
   const navigate = useNavigate();
   const location = useLocation();
-  const { theme, setTheme } = useTheme();
+  const { mode, setMode } = useTheme();
 
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const rightPaneController = useRightPaneStore((s) => s.controller);
@@ -157,10 +157,10 @@ export function useDesktopIntegration(): DesktopWindowChrome {
       // the session history depth: index 0 means nothing to go back to.
       canGoBack: window.history.length > 1,
       canGoForward: false,
-      theme,
+      theme: mode,
       recent: next,
     });
-  }, [location.pathname, sidebarOpen, rightPaneOpen, theme]);
+  }, [location.pathname, sidebarOpen, rightPaneOpen, mode]);
 
   // The native View ▸ Appearance radio group writes to the shell's settings;
   // reflect that back into the SPA theme provider.
@@ -172,9 +172,12 @@ export function useDesktopIntegration(): DesktopWindowChrome {
     if (!bridgeTheme) return undefined;
     return bridgeTheme((resolved) => {
       // Only follow the OS when the user has not pinned a mode themselves.
-      if (theme === 'system') document.documentElement.classList.toggle('dark', resolved === 'dark');
+      // Toggling the class directly (rather than calling setMode) keeps the
+      // stored preference on `system` — the OS is the source of truth here,
+      // and persisting its current value would silently pin it.
+      if (mode === 'system') document.documentElement.classList.toggle('dark', resolved === 'dark');
     });
-  }, [theme, setTheme]);
+  }, [mode, setMode]);
 
   return chrome;
 }

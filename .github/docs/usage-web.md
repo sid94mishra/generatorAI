@@ -243,11 +243,13 @@ Buttons: Enable / Disable / Trigger / Rotate Webhook Token / Delete.
 
 ## 10. Settings
 
-`/settings` page with 4 tabs:
+`/settings` page, grouped into sections:
 
 | Tab | Contents |
 |---|---|
-| **General** | Appearance: Light / Dark / System (toggles `<html class="dark">`); **Integrated Browser** — web-only interactivity toggle (default OFF: user can only view + scroll + Inspect; desktop always full); **Integrated Terminal** — default shell override, Load PowerShell profile toggle, Allow SSH/AWS secrets toggle (all persisted to localStorage; apply next time you open a Terminal tab); About (version 0.1.0). |
+| **General** | Default model for new chats; About (version 0.1.0). |
+| **Appearance** | **Mode** — Light / Dark / System (System shows which variant it resolved to); **Theme** — 17 palettes, each with a light and a dark variant and a live mini-preview, grouped as *Product* (GitHub, Graphite, Carbon, Clay), *Editor* (One, Dracula, Tokyo Night, Catppuccin, Ayu, Night Owl, Rosé Pine) and *Low glare* (Nord, Everforest, Gruvbox, Solarized, Flexoki, High Contrast). A theme owns surfaces, hues, type stack and corner radii; **Accent** — six accents drawn from the active theme's own palette. All three apply instantly, persist per device, and drive every surface including the integrated terminal, code blocks, the DAG canvas and charts. `High Contrast` targets WCAG AAA rather than AA. See [apps/web/DESIGN_SYSTEM.md](../../apps/web/DESIGN_SYSTEM.md#1-tokens--theming). |
+| **Browser & Terminal** | **Integrated Browser** — web-only interactivity toggle (default OFF: user can only view + scroll + Inspect; desktop always full); **Integrated Terminal** — default shell override, Load PowerShell profile toggle, Allow SSH/AWS secrets toggle (all persisted to localStorage; apply next time you open a Terminal tab). |
 | **Provider** | GitHub Copilot (Active, disabled button) / Claude Agent SDK (clickable to switch); provider notes |
 | **Copilot** | SDK Connection: Connected (Refresh button), 12+ Available Models list |
 | **Advanced** | Server Health (Status/Database/Copilot SDK/Uptime), Sandbox status, Configuration info |
@@ -256,7 +258,9 @@ Buttons: Enable / Disable / Trigger / Rotate Webhook Token / Delete.
 
 ## 11. Theme
 
-Tailwind 4 + CSS custom properties. The **System** option respects `prefers-color-scheme`. The chosen theme is persisted in `settingsStore` (localStorage).
+Tailwind 4 + CSS custom properties, generated from [`packages/design-tokens`](../../packages/design-tokens/). Three orthogonal axes — mode × theme × accent — applied as a class plus two `data-` attributes on `<html>`, so a switch is two attribute writes and zero re-renders. The **System** mode respects `prefers-color-scheme` and keeps following it live. All three are persisted to `localStorage` (`generatorai-theme`, `generatorai-theme-palette`, `generatorai-accent`) and re-applied by an inline script before first paint, so there is no flash on reload.
+
+Every theme × appearance × accent combination is asserted against WCAG AA in `packages/design-tokens/src/__tests__/tokens.test.ts`. Full details: [apps/web/DESIGN_SYSTEM.md](../../apps/web/DESIGN_SYSTEM.md#1-tokens--theming).
 
 ---
 

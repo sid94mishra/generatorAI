@@ -43,9 +43,9 @@ landed on the run page). All confirmed from a user's perspective:
 
 ## 📝 Standardization / polish debt (Phase 5 remainder + nice-to-haves)
 5. **Stage properties drawer** (`StagePropertiesPanel.tsx`) — standardize sections on `CollapsibleSection` + `Input`/`Select` primitives (Phase 5 "stage drawer" item; the **files panel** part of Phase 5 was already complete — `RunArtifactsPanel` has the file tree, A/M/D/R change badges, and a unified diff viewer).
-6. **Settings → Appearance** picker is hardcoded Light/Dark/System — wire it to `themes/registry.ts` `VISIBLE_THEMES` so newly-registered themes appear automatically.
+6. ~~**Settings → Appearance** picker is hardcoded Light/Dark/System — wire it to the registry so newly-registered themes appear automatically.~~ **Done** — Appearance is now its own settings section with three registry-driven axes (mode × theme × accent) reading from `@generatorai/design-tokens`.
 7. **Builder canvas** initial view: nodes cluster low-center with large empty canvas; node labels are small; one node sits slightly misaligned. Tighten initial fit/auto-layout.
-8. **`DESIGN_SYSTEM.md`** — document the new primitives (`StatusBadge`, `PageHeader`, `SearchInput`, `Tabs`, `EmptyState`), the theme registry, and the contrast rule.
+8. **`DESIGN_SYSTEM.md`** — document the new primitives (`StatusBadge`, `PageHeader`, `SearchInput`, `Tabs`, `EmptyState`). ~~the theme registry, and the contrast rule~~ **Theme registry + contrast rules documented.**
 
 ## ⚠️ Data/config (not UI) — worth fixing so the flagship demo runs
 9. The seeded **"Playwright CLI E2E Test Run"** workflow pins stages to model **`gpt-4.1`**, which this harness does not expose → stages fail instantly with *"Model 'gpt-4.1' is not available."* Repoint its stage model to an available one (`claude-sonnet-4.6`, `auto`, etc.). Surfaced because the live-run test initially used this workflow; a fresh workflow on the default model streamed end-to-end with no issues.

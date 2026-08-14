@@ -6,7 +6,6 @@ import React, { useMemo, useState } from 'react';
 import hljs from 'highlight.js';
 import { Copy, Check } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { useHighlightTheme } from '@/hooks/useHighlightTheme.js';
 
 /** Map common file extensions to highlight.js language aliases */
 const EXT_LANG_MAP: Record<string, string> = {
@@ -55,7 +54,6 @@ export function SyntaxHighlightedCode({
   className,
 }: SyntaxHighlightedCodeProps) {
   const [copied, setCopied] = useState(false);
-  useHighlightTheme();
 
   const ext = fileName ? fileName.split('.').pop() ?? '' : '';
   const lang = language ?? extToLang(ext);
