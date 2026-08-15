@@ -63,6 +63,8 @@ import type {
   ComputerRuntimeStatus,
   ComputerWindowTarget,
   IComputerBridge,
+  RecordingRequest,
+  RecordingState,
   VerifyPredicate,
   VerifyResult,
 } from '../domain/ports/IComputerBridge.js';
@@ -147,7 +149,6 @@ interface SnapshotEntry {
   snapshotId: string;
   app: ComputerAppIdentity;
   windowKey: string;
-  count: number;
   /** Advertised actions per element index — the allowlist for performAction. */
   actions: Map<number, readonly string[]>;
   labels: Map<number, string>;
@@ -164,6 +165,12 @@ interface SessionRecord {
   /** Newest snapshot per window, keyed `${pid}:${windowId}`. Insertion-ordered LRU. */
   snapshots: Map<string, SnapshotEntry>;
   snapshotIndex: Map<string, string>;
+  /**
+   * Window the agent last looked at. Kept apart from `snapshots`, which is
+   * emptied after every action to invalidate element indices — the preview
+   * still needs to know what it is showing between those.
+   */
+  lastTarget?: { app: ComputerAppIdentity; windowId: number };
 }
 
 export interface ComputerServiceConfig {
@@ -357,6 +364,41 @@ export class ComputerService {
   ): Promise<ComputerRuntimeStatus & { enabled: boolean; sessionActive: boolean }> {
     await this.stop(ctx.workspaceId, 'restart-requested');
     return this.startRuntime(ctx);
+  }
+
+  // ── Trajectory recording ─────────────────────────────────────
+  //
+  // Operator-facing, not agent-facing. Recording writes a screen video and a
+  // full before/after trace of every action, which is a surveillance surface —
+  // an agent must not be able to switch it on for itself.
+
+  async startRecording(
+    ctx: ComputerCallContext,
+    req: RecordingRequest,
+  ): Promise<RecordingState> {
+    const gate = this.featureGate();
+    if (gate) return { recording: false, refusal: gate };
+    const session = await this.ensureSession(ctx);
+    if (!session.bridge.startRecording) {
+      return { recording: false, refusal: this.refusal('provider_unavailable', 'This driver cannot record.') };
+    }
+    const state = await session.bridge.startRecording(session.handle, req);
+    if (!state.refusal) {
+      this.logger.info?.(`[ComputerService] recording started for ${ctx.workspaceId} → ${state.outputDir}`);
+    }
+    return state;
+  }
+
+  async stopRecording(workspaceId: string): Promise<RecordingState> {
+    const session = this.sessions.get(workspaceId);
+    if (!session?.bridge.stopRecording) return { recording: false };
+    return session.bridge.stopRecording(session.handle);
+  }
+
+  async recordingState(workspaceId: string): Promise<RecordingState> {
+    const session = this.sessions.get(workspaceId);
+    if (!session?.bridge.recordingState) return { recording: false };
+    return session.bridge.recordingState(session.handle);
   }
 
   private async ensureSession(ctx: ComputerCallContext): Promise<SessionRecord> {
@@ -1112,7 +1154,12 @@ export class ComputerService {
         'That snapshot belongs to a different application than the one named in this call.',
       );
     }
-    if (!Number.isInteger(req.elementIndex) || req.elementIndex < 0 || req.elementIndex >= entry.count) {
+    // Membership, not range. A `query`ed snapshot returns a PROJECTION whose
+    // elements keep their original driver indices, so element 140 of 872 can
+    // legitimately arrive from a 13-element view. Comparing against the view's
+    // length rejected every element the projection was built to reach, and the
+    // agent's only recovery was to abandon `query` and re-read whole windows.
+    if (!Number.isInteger(req.elementIndex) || !entry.actions.has(req.elementIndex)) {
       return this.refusal('stale_snapshot', `Element ${req.elementIndex} is not in snapshot ${req.snapshotId}.`);
     }
     if (req.type === 'performAction') {
@@ -1172,6 +1219,7 @@ export class ComputerService {
     const snapshot = result.snapshot;
     if (!snapshot) return;
     const windowKey = `${app.pid}:${snapshot.window.id}`;
+    session.lastTarget = { app, windowId: snapshot.window.id };
     const previous = session.snapshots.get(windowKey);
     if (previous) {
       session.snapshotIndex.delete(previous.snapshotId);
@@ -1188,7 +1236,6 @@ export class ComputerService {
       snapshotId: snapshot.snapshotId,
       app,
       windowKey,
-      count: snapshot.elements.length,
       actions,
       labels,
     });
@@ -1232,6 +1279,65 @@ export class ComputerService {
   }
 
   // ── Artifacts, audit, events ─────────────────────────────────
+
+  /**
+   * A captured frame as base64, for handing to a multimodal model.
+   *
+   * Separate from `persistScreenshot` on purpose: every snapshot writes a PNG
+   * for the Computer panel, but only a caller that explicitly asked to see the
+   * image should pay a megabyte of context for it.
+   */
+  async readScreenshot(
+    workspaceId: string,
+    artifactId: string,
+  ): Promise<{ base64: string; mimeType: string } | null> {
+    const session = this.sessions.get(workspaceId);
+    if (!session) return null;
+    try {
+      const artifacts = await this.artifactRepo.findByWorkspace(workspaceId);
+      const artifact = artifacts.find(
+        (a) => a.id === artifactId && a.artifactType === 'computer_screenshot',
+      );
+      if (!artifact) return null;
+      // Same containment rule as the write path: the stored path is relative,
+      // and resolving it through the session root keeps a tampered row from
+      // reading a file outside the workspace.
+      const absolute = await resolveWithinBase(session.workspaceRoot, artifact.relativePath);
+      if (!absolute) return null;
+      const bytes = await fs.readFile(absolute);
+      if (bytes.byteLength > this.computerConfig.screenshotMaxBytes) return null;
+      return { base64: bytes.toString('base64'), mimeType: artifact.mimeType ?? 'image/png' };
+    } catch (err) {
+      this.logger.warn?.(`[ComputerService] could not read screenshot ${artifactId}: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Screen bounds of the window the preview is showing.
+   *
+   * The recorder writes cursor positions in SCREEN coordinates and captures
+   * frames of a WINDOW, so the two only line up once the window's origin is
+   * known. Reads through `list_windows`, which — unlike `get_window_state` —
+   * does not replace the driver's element index map, so polling it cannot
+   * break the agent's snapshot fence.
+   */
+  async previewWindow(
+    workspaceId: string,
+  ): Promise<{ x: number; y: number; w: number; h: number; title: string } | null> {
+    const session = this.sessions.get(workspaceId);
+    const target = session?.lastTarget;
+    if (!session || !target) return null;
+
+    try {
+      const result = await session.bridge.listWindows(session.handle, target.app);
+      const window = result.windows.find((w) => w.id === target.windowId) ?? result.windows[0];
+      if (!window?.bounds) return null;
+      return { ...window.bounds, title: window.title };
+    } catch {
+      return null;
+    }
+  }
 
   private async persistScreenshot(
     session: SessionRecord,

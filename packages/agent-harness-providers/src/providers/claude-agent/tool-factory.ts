@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
-import type { ToolDefinition } from '@generatorai/core';
+import { takeToolBinaries, type ToolDefinition } from '@generatorai/core';
 import { jsonSchemaToZodShape } from './jsonSchemaToZodShape.js';
 
 const MCP_SERVER_NAME = 'generatorai-tools';
@@ -36,11 +36,14 @@ export function buildClaudeAgentMcpTools(toolDefs: ToolDefinition[]): {
       handler: async (args: Record<string, unknown>) => {
         try {
           const result = await def.handler(args);
+          // MCP content blocks carry images natively, so an attachment goes on
+          // the wire as one rather than as base64 inside the text.
+          const { text: payload, binaries } = takeToolBinaries(result);
           let text: string;
           try {
-            text = typeof result === 'string' ? result : JSON.stringify(result);
+            text = typeof payload === 'string' ? payload : JSON.stringify(payload);
           } catch {
-            text = String(result);
+            text = String(payload);
           }
           return {
             content: [
@@ -48,6 +51,11 @@ export function buildClaudeAgentMcpTools(toolDefs: ToolDefinition[]): {
                 type: 'text' as const,
                 text,
               },
+              ...binaries.map((b) => ({
+                type: 'image' as const,
+                data: b.data,
+                mimeType: b.mimeType,
+              })),
             ],
           };
         } catch (err) {

@@ -49,7 +49,7 @@ function driverError(text: string) {
   return { text, isError: true, degraded: false, action: { effect: 4, route: 1 } };
 }
 
-/** One live, non-minimised window so `requireLiveWindow` lets calls through. */
+/** One live, non-minimised window so `ensureLiveWindow` lets calls through. */
 const WINDOWS = {
   windows: [
     { window_id: 7, pid: 42, title: 'Untitled - Notepad', minimized: false, focused: true, index: 0 },
@@ -152,6 +152,74 @@ const SNAPSHOT_PAYLOAD = {
   window_id: 7,
   elements: [{ element_index: 3, role: 'Button', label: 'Save' }],
 };
+
+describe('CuaDriverBridge window selection', () => {
+  // The driver's contract: "higher values are closer to the front... To select
+  // a frontmost candidate, take the maximum integer z_index." Measured on a
+  // live desktop, the backmost window ("Program Manager") is 0. Reading 0 as
+  // topmost sent every unqualified call to the OLDEST window of the app — so a
+  // freshly created workbook was ignored and the writes landed in the one the
+  // user already had open.
+  const TWO_WINDOWS = {
+    windows: [
+      { window_id: 11, pid: 42, title: 'Book1', minimized: false, is_on_screen: true, z_index: 0 },
+      { window_id: 22, pid: 42, title: 'Book2', minimized: false, is_on_screen: true, z_index: 5 },
+    ],
+  };
+
+  it('targets the highest z_index, not the lowest', async () => {
+    const snapshots: Record<string, unknown>[] = [];
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') return ok(TWO_WINDOWS);
+        if (tool === 'get_window_state') {
+          snapshots.push(args);
+          return ok({ ...SNAPSHOT_PAYLOAD, window_id: args['window_id'] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    await fake.bridge.snapshot(handle, {
+      app: { appId: 'excel', name: 'Excel', pid: 42 },
+      window: { by: 'focused' },
+    });
+
+    expect(snapshots[0]?.['window_id']).toBe(22);
+  });
+
+  it('falls back explicitly when the driver reports no stacking order', async () => {
+    // A null z_index means "unavailable"; the contract says callers must not
+    // infer one, so the fallback is the first window that is not minimised.
+    const snapshots: Record<string, unknown>[] = [];
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') {
+          return ok({
+            windows: [
+              { window_id: 11, pid: 42, title: 'Book1', minimized: true, is_on_screen: false, z_index: null },
+              { window_id: 22, pid: 42, title: 'Book2', minimized: false, is_on_screen: true, z_index: null },
+            ],
+          });
+        }
+        if (tool === 'get_window_state') {
+          snapshots.push(args);
+          return ok({ ...SNAPSHOT_PAYLOAD, window_id: args['window_id'] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    await fake.bridge.snapshot(handle, {
+      app: { appId: 'excel', name: 'Excel', pid: 42 },
+      window: { by: 'focused' },
+    });
+
+    expect(snapshots[0]?.['window_id']).toBe(22);
+  });
+});
 
 describe('CuaDriverBridge session recovery', () => {
   it('reopens a session the driver retired, then retries the same call once', async () => {
@@ -285,12 +353,49 @@ describe('CuaDriverBridge minimised-window guard', () => {
       { window_id: 7, pid: 42, title: 'Untitled - Notepad', minimized: true, focused: false, index: 0 },
     ],
   };
+  const RESTORED = {
+    windows: [
+      { window_id: 7, pid: 42, title: 'Untitled - Notepad', minimized: false, focused: true, index: 0 },
+    ],
+  };
 
-  it('refuses synthetic input before dispatch — those coordinates are off-screen', async () => {
+  it('restores the window itself rather than spending a round trip asking', async () => {
+    // The refusal this replaces named `computer_bring_to_front` as the fix, so
+    // the agent always took exactly this action next — at the cost of a refused
+    // call, a restore and a re-snapshot each time.
+    const dispatched: string[] = [];
+    let restored = false;
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(restored ? RESTORED : MINIMISED);
+        if (tool === 'bring_to_front') {
+          restored = true;
+          return ok({});
+        }
+        dispatched.push(tool);
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+    dispatched.length = 0;
+
+    const result = await fake.bridge.act(handle, {
+      type: 'pressKey',
+      key: 'a',
+      target: { app: { appId: 'notepad', name: 'Notepad', pid: 42 }, window: { by: 'id', id: 7 } },
+    } as never);
+
+    expect(result.ok).toBe(true);
+    expect(restored).toBe(true);
+    expect(dispatched).toContain('press_key');
+  });
+
+  it('refuses synthetic input when the window will not restore', async () => {
     const dispatched: string[] = [];
     const fake = makeBridge({
       reply: (tool) => {
         if (tool === 'list_windows') return ok(MINIMISED);
+        if (tool === 'bring_to_front') return ok({});
         dispatched.push(tool);
         return ok({});
       },
@@ -307,16 +412,16 @@ describe('CuaDriverBridge minimised-window guard', () => {
 
     expect(result.ok).toBe(false);
     expect(result.refusal?.code).toBe('background_occluded');
-    expect(result.refusal?.message).toMatch(/bring_to_front/);
     expect(dispatched).toHaveLength(0);
   });
 
-  it('still refuses set_value — the one write proven to vanish on restore', async () => {
+  it('still refuses set_value when the window will not restore — that write vanishes', async () => {
     const dispatched: string[] = [];
     const fake = makeBridge({
       reply: (tool) => {
         if (tool === 'list_windows') return ok(MINIMISED);
         if (tool === 'get_window_state') return ok(SNAPSHOT_PAYLOAD);
+        if (tool === 'bring_to_front') return ok({});
         dispatched.push(tool);
         return ok({});
       },
@@ -357,6 +462,70 @@ describe('CuaDriverBridge minimised-window guard', () => {
 
     expect(result.ok).toBe(true);
     expect(dispatched).toContain('click');
+  });
+});
+
+describe('CuaDriverBridge phantom value writes', () => {
+  // Measured on Excel: set_value on a DataItem returns `effect: unverifiable`,
+  // the next get_window_state echoes the value back, and the screenshot shows
+  // an empty cell. Read-back cannot catch it — it asks the provider that
+  // accepted the write — so the only honest move is to refuse before dispatch.
+  const GRID_SNAPSHOT = {
+    snapshot_id: 's1',
+    pid: 42,
+    window_id: 7,
+    elements: [
+      { element_index: 3, role: 'DataItem', label: 'A1' },
+      { element_index: 4, role: 'Edit', label: 'Name Box' },
+    ],
+  };
+
+  async function gridBridge() {
+    const dispatched: string[] = [];
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'get_window_state') return ok(GRID_SNAPSHOT);
+        dispatched.push(tool);
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+    await seedSnapshot(fake, handle);
+    dispatched.length = 0;
+    return { fake, handle, dispatched };
+  }
+
+  it('refuses a value write to a grid cell and names the route that works', async () => {
+    const { fake, handle, dispatched } = await gridBridge();
+
+    const result = await fake.bridge.act(handle, {
+      type: 'setValue',
+      snapshotId: 's1',
+      elementIndex: 3,
+      value: 'Scenario 1 OK',
+      app: { appId: 'excel', name: 'Excel', pid: 42 },
+    } as never);
+
+    expect(result.ok).toBe(false);
+    expect(result.refusal?.code).toBe('background_unavailable');
+    expect(result.refusal?.message).toMatch(/computer_type_text/);
+    expect(dispatched).not.toContain('set_value');
+  });
+
+  it('still allows a value write to an ordinary field', async () => {
+    const { fake, handle, dispatched } = await gridBridge();
+
+    const result = await fake.bridge.act(handle, {
+      type: 'setValue',
+      snapshotId: 's1',
+      elementIndex: 4,
+      value: 'A1',
+      app: { appId: 'excel', name: 'Excel', pid: 42 },
+    } as never);
+
+    expect(result.ok).toBe(true);
+    expect(dispatched).toContain('set_value');
   });
 });
 

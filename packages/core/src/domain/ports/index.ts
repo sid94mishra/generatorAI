@@ -36,7 +36,10 @@ export type {
   ConversationWarning,
   ConversationResult,
   HarnessAgentInfo,
+  ToolBinaryAttachment,
 } from './IAgentHarness.js';
+
+export { TOOL_BINARY_KEY, takeToolBinaries } from './IAgentHarness.js';
 
 export type {
   ISessionRepository,

@@ -448,6 +448,27 @@ describe('ComputerService snapshot fencing', () => {
     expect(result.refusal?.code).toBe('stale_snapshot');
   });
 
+  it('accepts a sparse index from a query-filtered snapshot', async () => {
+    // A `query`ed snapshot is a PROJECTION: it returns few elements but keeps
+    // their real window indices, so index 455 can legitimately arrive from a
+    // 2-element view. Fencing on the view's LENGTH rejected exactly the
+    // elements the projection existed to reach, and the agent's only recovery
+    // was to stop using `query` and re-read whole windows.
+    const harness = makeService([SLACK], enabled());
+    harness.consent.answer = 'always_allow';
+    harness.bridge.elements = [
+      { index: 45, role: 'cell', label: 'A1', secure: false, value: '', traits: [], actions: ['AXPress'], childCount: 0 },
+      { index: 455, role: 'cell', label: 'A1', secure: false, value: '', traits: [], actions: ['AXPress'], childCount: 0 },
+    ];
+    const snap = await harness.service.snapshot(CTX, { by: 'appId', appId: SLACK.id }, { query: 'A1' });
+
+    const result = await harness.service.act(CTX, { by: 'appId', appId: SLACK.id }, {
+      type: 'click', snapshotId: snap.snapshot!.snapshotId, elementIndex: 455,
+    });
+    expect(result.ok).toBe(true);
+    expect(harness.bridge.actCalls).toHaveLength(1);
+  });
+
   it('rejects an action the element never advertised', async () => {
     const { service, bridge, snapshotId } = await snapshotted();
     const result = await service.act(CTX, { by: 'appId', appId: SLACK.id }, {

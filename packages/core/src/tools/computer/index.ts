@@ -12,6 +12,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ToolDefinition } from '../../domain/ports/IAgentHarness.js';
+import { TOOL_BINARY_KEY } from '../../domain/ports/IAgentHarness.js';
 import type { ComputerToolContext, ComputerToolFactory } from './computerToolTypes.js';
 import {
   APP_TARGET_PROPERTIES,
@@ -130,7 +131,10 @@ const createSnapshotTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       },
       includeScreenshot: {
         type: 'boolean',
-        description: 'Also capture a PNG of this window (never the whole screen). Only useful for visual layout questions.',
+        description:
+          'Also capture a PNG of this window (never the whole screen) and return the IMAGE to you. Use it when ' +
+          'the tree cannot answer the question — a write that may not have landed, a canvas, a chart. It costs ' +
+          'real context, so do not set it by default.',
       },
     },
     additionalProperties: false,
@@ -139,16 +143,33 @@ const createSnapshotTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     const ref = toAppRef(args);
     if ('error' in ref) return { ok: false, error: ref.error };
     const query = coerceString(args['query']);
+    // Only when the model ASKED for the image. Left undefined otherwise so
+    // `screenshotEveryAction` still captures a frame for the Computer panel
+    // without spending a megabyte of context on every read.
+    const wantsImage = args['includeScreenshot'] === true;
     const result = await ctx.computerService.snapshot(callContext(ctx), ref, {
       windowId: coerceInt(args['windowId']),
       ...(query ? { query } : {}),
-      // Left UNDEFINED when the model says nothing, so `screenshotEveryAction`
-      // decides. Coercing an absent arg to `false` silently disabled every
-      // capture, which is what the Computer preview panel renders from — and
-      // the frame never reaches the model either way, only its artifact id.
       includeScreenshot: typeof args['includeScreenshot'] === 'boolean' ? args['includeScreenshot'] : undefined,
     });
-    return snapshotPayload(result, query);
+    const payload = snapshotPayload(result, query);
+    if (!wantsImage || !result.screenshot?.artifactId) return payload;
+
+    const image = await ctx.computerService.readScreenshot(
+      callContext(ctx).workspaceId,
+      result.screenshot.artifactId,
+    );
+    if (!image) return payload;
+    return {
+      ...payload,
+      [TOOL_BINARY_KEY]: [
+        {
+          data: image.base64,
+          mimeType: image.mimeType,
+          description: `Screenshot of ${result.snapshot?.window.title ?? 'the target window'}`,
+        },
+      ],
+    };
   },
 });
 

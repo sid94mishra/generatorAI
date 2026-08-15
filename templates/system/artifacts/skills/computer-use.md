@@ -23,15 +23,21 @@ fallback, not the plan.
 
 ```
 computer_capabilities        once per task — what this machine supports
-computer_list_apps           find the app; if absent → computer_launch_app
+computer_launch_app          name the app; attaches if it is already running
 computer_snapshot            read the window → snapshotId + indexed elements
 computer_click / set_value / perform_action   act on an elementIndex
 computer_verify              confirm it landed — one call, definitive answer
 ```
 
+`computer_launch_app` attaches to a running instance instead of starting a
+second one, so when you already know the app you want, go straight to it.
+`computer_list_apps` is for the case where you do not — you need to discover what
+is open, or the display name did not resolve.
+
 Notice what is **not** in that loop: focusing the window. Reading and acting
 through the accessibility layer work while the window sits in the background,
-which is the whole point — the user keeps their screen and their pointer.
+which is the whole point — the user keeps their screen and their pointer. A
+minimised window is restored for you when an action genuinely needs it.
 
 **The one rule that breaks tasks when ignored:** element indices belong to
 exactly one `snapshotId`. The moment you act, they are stale. Snapshot again
@@ -90,7 +96,7 @@ Returns:
 | Tool | Use for | Why it is preferred |
 |---|---|---|
 | `computer_click` | Buttons, menu items, links, list rows, tabs | Delivered via accessibility. No pointer movement. Supports `button: "right"` and `clickCount: 2`. |
-| `computer_set_value` | Text fields, combo boxes, address bars | Atomic, no focus steal, **verified by read-back**. Always prefer over typing. |
+| `computer_set_value` | Text fields, combo boxes, address bars | Atomic and no focus steal. Prefer over typing — but it is **refused on grid cells**, which silently discard it. |
 | `computer_perform_action` | Expand a tree node, press a control that has no click target, confirm a dialog | `actionName` must appear in that element's `actions` array. |
 
 All three take `{ appId, snapshotId, elementIndex, ... }`. All three return
@@ -101,9 +107,11 @@ the call and never confirmed the effect. Some applications accept a write,
 report success, and change nothing:
 
 > **Excel is the reference case.** `computer_set_value` on a cell returns
-> success, and every later snapshot reads the value back — while the cell is
-> visibly empty. The read goes through the same provider that lied about the
-> write, so read-back proves nothing.
+> success and every later snapshot reads the value back — while the cell is
+> visibly empty. Measured: a write of `PHANTOM-CHECK` into D9 read back as
+> `PHANTOM-CHECK` and the screenshot showed an empty cell. The read goes
+> through the same provider that lied about the write, so read-back proves
+> nothing. Only pixels do.
 
 ### Confirming a change
 
@@ -136,21 +144,70 @@ task into a twenty-minute one.
 
 ### Writing into a spreadsheet
 
-`computer_set_value` does not work on Excel cells. What works is how a person
-does it:
+Excel cells are `DataItem`s labelled by address (`A1`, `B7`) and they carry
+their current contents in `value`, so **reading** them works normally.
 
-1. `computer_click` the cell (they are exposed as `DataItem` elements labelled
-   `A1`, `B1`, …), or type the reference into the **Name Box** and press Enter.
-2. `computer_type_text` the value.
-3. `computer_press_key` `Enter` to commit — without this the cell stays in edit
-   mode and the value is not stored.
+**Writing with `computer_set_value` does not work, and fails silently.** The
+cell accepts the UIA write, reports success, and echoes your value back on
+every later read — while staying empty on screen. `computer_set_value` now
+refuses on grid cells for exactly this reason.
 
-Enter moves the selection **down one row**, so writing A1 then B1 needs a fresh
-click on B1, not a second Enter.
+This exact four-step sequence is the one that works, verified against pixels:
 
-You cannot verify the result. A cell address is not a unique label and the
-formula bar does not expose a readable value, so `computer_verify` returns
-`unknown` for every spreadsheet cell. Say so rather than claiming success.
+1. `computer_snapshot` with `query: "A1"` — the cell comes back with its
+   **current `value`**, so you can see whether it is already occupied.
+2. `computer_click` the cell.
+3. `computer_press_key` **`Escape`**.
+4. `computer_type_text` the value, then `computer_press_key` `Enter`.
+
+**Step 3 is the whole trick.** An accessibility click on a cell *invokes* it,
+which opens it for editing with the caret after the existing text — so typing
+**appends**, turning `Video run OK` into `VideoVerified run A1run OK`. `Escape`
+leaves edit mode and returns to a plain selection, and typing over a selected
+cell replaces it.
+
+Things that look like they should work and do not:
+
+* **`Delete` after clicking** — you are in edit mode with the caret at the end,
+  so there is nothing to the right to delete. The value still appends.
+* **`Ctrl+A` after clicking** — selects the whole sheet, not the cell's text.
+* **Clicking the Name Box** — the click does not take focus, so the address you
+  type lands in whatever cell is selected. Measured: typing `A2` wrote the
+  literal text `A2` into a cell.
+* **Tab characters inside `computer_type_text`** — a `\t` in the string does
+  **not** move to the next cell. The whole row collapses into the one cell you
+  started in. Measured: typing `"Breakfast\tOats+milk\t1 bowl\t320"` produced a
+  single cell reading `BreakfastOats+milk1 bowl320`. To move across a row, Tab
+  must be its own `computer_press_key` call between `computer_type_text` calls.
+
+`Enter` moves the selection **down one row**, so a column runs straight down
+with no re-selection. `computer_press_key` `Tab` moves **right one column**, so
+a row runs across as `type_text → Tab → type_text → Tab → … → Enter`.
+
+**Read the `value` before you write.** A cell with contents belongs to someone.
+If the task did not say to overwrite it, stop and ask. Silently replacing a
+populated cell is data loss, and the user may not notice for days.
+
+For a **new** workbook, launch a second Excel instance with
+`computer_launch_app` rather than pressing Ctrl+N: the new window comes back in
+the response, so you know which window id you are writing to. A window created
+by a keystroke has to be found afterwards with `computer_list_windows`, and it
+may not be the frontmost one.
+
+**Finish one target before reading the next.** The driver keeps exactly one
+snapshot per window: reading A2 replaces the snapshot A1's index came from, so
+`read A1 → read A2 → write A1` always refuses `stale_snapshot`. Go
+`read A1 → write A1 → read A2 → write A2`.
+
+**Confirm with pixels.** `computer_snapshot(includeScreenshot: true)` returns
+the **image itself** to you, not just an artifact id — so look at it. That is
+the only reading that settles a spreadsheet write, because the accessibility
+tree will happily echo a value the screen never took. It costs real context, so
+use it once at the end rather than on every read.
+
+`computer_verify` cannot close the gap: its selector matches labels by
+substring, so `A1` also matches `A10`, `A11`, … and the predicate returns
+`unknown` with `multi_match`.
 
 ### Acting — the synthetic path (last resort)
 
@@ -226,7 +283,7 @@ React to the code, do not blind-retry.
 |---|---|---|
 | `stale_snapshot` | Indices expired | Take a fresh `computer_snapshot` and redo the call. |
 | `background_unavailable` | This window class will not accept the action in the background | Retry the SAME call once — the tool escalates for that one action and restores the user's foreground afterwards. Do not call `computer_bring_to_front`. |
-| `background_occluded` | The window is minimised, so a write would be lost | `computer_bring_to_front`, then retry. |
+| `background_occluded` | The window is minimised and could not be restored | Restoring is automatic, so seeing this means it failed — a locked session or a window the OS will not raise. Tell the user; do not retry. |
 | `target_not_focused` | Synthetic action needs focus | Retry the same call once; it acquires focus for itself. |
 | `target_lost` | No app matched | Re-run `computer_list_apps`. If the app is genuinely absent, `computer_launch_app`. |
 | `app_blocked` / `target_lost` on a sensitive app | Permanently blocked (password managers, credential UIs) | Stop. Tell the user this app cannot be automated. Do not look for a workaround. |
@@ -309,23 +366,28 @@ snapshot is a page of structured text. Keep it small:
 
 1. **Plan the whole sequence before the first call.** Know which app, which
    window, and which controls you need.
-2. **One snapshot per state change.** Not one per thought. If you already know
+2. **Always pass `query` when you know what you are looking for.** An Excel
+   window is 27 KB of tree unfiltered and 0.6 KB filtered — 45x. The filtered
+   elements keep their real indices, so you address them exactly as shown.
+   Read the whole tree only when you genuinely do not know what is in it.
+3. **One snapshot per state change.** Not one per thought. If you already know
    the next two clicks from the current snapshot, do them — then re-snapshot.
    To check a result, use `computer_verify`, which is far cheaper than a tree.
-3. **Never `includeScreenshot` by default.** The tree answers almost every
+4. **Never `includeScreenshot` by default.** The tree answers almost every
    question; the image answers only visual ones.
-4. **Prefer `computer_set_value` over `computer_type_text`.** One verified call
+5. **Prefer `computer_set_value` over `computer_type_text`.** One verified call
    beats a keystroke stream plus a confirmation snapshot.
-5. **Don't re-list apps.** `computer_list_apps` once per task; keep the `appId`.
-6. **Use keyboard shortcuts for app-level commands** (`Ctrl+S`, `Ctrl+N`)
+6. **Skip discovery you do not need.** `computer_launch_app` attaches to a
+   running app, so naming the app you want beats listing every app first.
+7. **Use keyboard shortcuts for app-level commands** (`Ctrl+S`, `Ctrl+N`)
    instead of hunting menus through three snapshots.
-7. **Stop when done.** Verify once, report, and do not take a victory snapshot.
-8. **Give up early when the app will not cooperate.** Two empty snapshots or
+8. **Stop when done.** Verify once, report, and do not take a victory snapshot.
+9. **Give up early when the app will not cooperate.** Two empty snapshots or
    two identical refusals is the whole budget. Twenty tool calls spent losing
    is worse than one honest "this app cannot be driven".
 
-A well-run task looks like: capabilities → list/launch → bring to front →
-snapshot → 1–3 actions → snapshot to verify → report. If you are past a dozen
+A well-run task looks like: capabilities → launch/attach → filtered snapshot →
+1–3 actions → verify → report. That is under ten calls. If you are past a dozen
 snapshots, something is wrong with the approach, not the app.
 
 ---

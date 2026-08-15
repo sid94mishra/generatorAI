@@ -160,7 +160,7 @@ export function snapshotPayload(
     ...(query
       ? {
           filteredBy: query,
-          filterNote: `Only elements matching "${query}" and their parents are listed. This is NOT the whole window — snapshot without \`query\` to see everything.`,
+          filterNote: `Only elements matching "${query}" and their parents are listed, and their indices are the real window indices — address them exactly as shown. This is NOT the whole window — snapshot without \`query\` to see everything.`,
         }
       : {}),
     ...(injectionSuspected
@@ -220,8 +220,9 @@ export function actionPayload(result: ComputerActionResult): Record<string, unkn
           warning:
             'NOT CONFIRMED. The application accepted this but did not confirm it took effect, and reading the ' +
             'value back is not proof — some applications (Excel cell writes especially) echo what you wrote ' +
-            'while the UI stays unchanged. Confirm with computer_snapshot(includeScreenshot: true) and look at ' +
-            'the image, or tell the user it could not be verified. Do not report success on this alone.',
+            'while the UI stays unchanged. Take computer_snapshot(includeScreenshot: true) and READ THE IMAGE, ' +
+            'which is returned to you, or tell the user it could not be verified. Do not report success on ' +
+            'this alone.',
         }
       : {}),
     note: 'The UI may have changed. Take a new computer_snapshot before addressing elements again.',

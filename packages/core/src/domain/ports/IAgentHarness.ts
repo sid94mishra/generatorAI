@@ -276,6 +276,37 @@ export type QuestionRequestHandler = (
  * that don't expose an equivalent) simply ignore the extras and compile
  * the core `{name, description, parametersSchema, handler}` as before.
  */
+/**
+ * A binary payload a tool wants the MODEL to see, not just the user.
+ *
+ * Returned under `TOOL_BINARY_KEY` on a tool result. Kept vendor-neutral here
+ * (INV-1) and mapped by each provider: Copilot has `binaryResultsForLlm`, and
+ * adapters without an equivalent strip it rather than dumping base64 into the
+ * text channel.
+ */
+export interface ToolBinaryAttachment {
+  /** Base64, no `data:` prefix. */
+  data: string;
+  mimeType: string;
+  description?: string;
+}
+
+/** Property under which a tool result carries `ToolBinaryAttachment[]`. */
+export const TOOL_BINARY_KEY = '__binary';
+
+/** Splits a tool result into its text payload and any binary attachments. */
+export function takeToolBinaries(result: unknown): { text: unknown; binaries: ToolBinaryAttachment[] } {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) {
+    return { text: result, binaries: [] };
+  }
+  const record = result as Record<string, unknown>;
+  const raw = record[TOOL_BINARY_KEY];
+  if (!Array.isArray(raw)) return { text: result, binaries: [] };
+  const rest = { ...record };
+  delete rest[TOOL_BINARY_KEY];
+  return { text: rest, binaries: raw as ToolBinaryAttachment[] };
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;

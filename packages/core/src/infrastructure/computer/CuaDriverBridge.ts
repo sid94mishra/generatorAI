@@ -31,6 +31,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import type {
   ComputerActionPath,
@@ -55,6 +56,8 @@ import type {
   ListAppsResult,
   ListWindowsResult,
   LaunchAppResult,
+  RecordingRequest,
+  RecordingState,
   SnapshotRequest,
   VerifyRequest,
   VerifyResult,
@@ -64,6 +67,7 @@ import {
   UnrecognisedDriverPayloadError,
   parseListApps,
   parseListWindows,
+  parseRecordingState,
   parseVerifyState,
   parseWindowState,
 } from './driverPayloads.js';
@@ -132,6 +136,16 @@ const EFFECT_REFUSED = 4;
 const CAPTURE_WINDOW = 1;
 
 /**
+ * How long the agent cursor stays visible while nothing moves.
+ *
+ * The driver's default is 20 s, which is shorter than the gaps between a
+ * model's tool calls — so the pointer disappears mid-task and the run looks
+ * abandoned. 60 s is the driver's ceiling: it silently clamps anything larger,
+ * so asking for more would only misreport what the user will actually see.
+ */
+const AGENT_CURSOR_IDLE_HIDE_MS = 60_000;
+
+/**
  * Driver error codes → our refusal vocabulary. Codes observed in the contract
  * and in live probes; anything unmapped becomes `provider_unavailable`, which
  * is the honest answer for an error we do not understand.
@@ -196,6 +210,12 @@ export interface CuaDriverBridgeOptions {
   /** Reverse-DNS label the driver echoes back in `check_permissions`. */
   hostBundleId?: string;
   /**
+   * Agent-cursor theme to select for each session. Must already be installed
+   * in the driver's theme store; an unknown id is refused and the session
+   * keeps the driver default rather than failing to start.
+   */
+  cursorThemeId?: string;
+  /**
    * Substitute for the real SDK. Exists because the behaviours that cost the
    * most to get wrong here — reopening a retired session, escalating to
    * foreground delivery, refusing a minimised window — are all decisions made
@@ -232,7 +252,7 @@ export class CuaDriverBridge implements IComputerBridge {
    */
   private readonly snapshotScopes = new Map<
     string,
-    { pid: number; windowId: number; tokens: Map<number, string> }
+    { pid: number; windowId: number; tokens: Map<number, string>; roles: Map<number, string> }
   >();
   private modulePromise: Promise<DriverModule | null> | null = null;
   /**
@@ -320,9 +340,9 @@ export class CuaDriverBridge implements IComputerBridge {
           // Never true — it disables the driver's own approval gate, the last
           // line of defence if our service-side gates are ever bypassed.
           dangerouslyBypassApprovals: false,
-          // Empty rather than inherited: this process's environment holds
-          // tokens the driver has no business seeing.
-          environment: [],
+          // An allowlist, not the inherited environment: this process holds
+          // provider tokens the driver has no business seeing.
+          environment: daemonEnvironment(),
           inheritStderr: false,
         });
         const connection = await host.start();
@@ -534,17 +554,7 @@ export class CuaDriverBridge implements IComputerBridge {
     // user what the agent is doing without the agent ever moving the real one.
     // It only renders on a daemon-backed connection — the same-process runtime
     // does not own the overlay — so this is a no-op in-process by design.
-    try {
-      const cursor = await client.callTool(
-        'set_agent_cursor_enabled',
-        JSON.stringify({ session: sessionId, enabled: true }),
-      );
-      if (cursor.isError) {
-        this.options.logger.debug?.(`[CuaDriverBridge] agent cursor refused: ${cursor.errorCode ?? cursor.text}`);
-      }
-    } catch (error) {
-      this.options.logger.debug?.(`[CuaDriverBridge] agent cursor unavailable: ${String(error)}`);
-    }
+    await this.applyAgentCursor(client, sessionId);
 
     let driverVersion = endpoint?.driverVersion ?? '0';
     try {
@@ -639,7 +649,7 @@ export class CuaDriverBridge implements IComputerBridge {
       // says so: only `screenshot` and foreground delivery need it restored.
       // The tree itself reads fine, so a plain snapshot is left alone.
       if (req.includeScreenshot) {
-        const dead = await this.requireLiveWindow(connection, req.app.pid, windowId);
+        const dead = await this.ensureLiveWindow(connection, req.app.pid, windowId, signal);
         if (dead) return refuse(dead);
       }
 
@@ -773,6 +783,58 @@ export class CuaDriverBridge implements IComputerBridge {
     }
   }
 
+  // ── Trajectory recording ─────────────────────────────────────
+  //
+  // The recorder lives in the daemon and is global to it, not scoped to our
+  // session: it captures every action tool call that reaches the daemon while
+  // enabled, and `stop_recording` stops whatever is running. That is the
+  // driver's contract, not a simplification here.
+
+  async startRecording(handle: ComputerHandle, req: RecordingRequest): Promise<RecordingState> {
+    const connection = this.connections.get(handle.workspaceId);
+    if (!connection) return { recording: false, refusal: disconnected() };
+
+    try {
+      const result = await this.call(connection, 'start_recording', {
+        output_dir: req.outputDir,
+        ...(req.video ? { record_video: true } : {}),
+      });
+      const refusal = this.refusalFor(result);
+      if (refusal) return { recording: false, refusal };
+      return { ...parseRecordingState(this.structuredOrNull(result)), outputDir: req.outputDir };
+    } catch (err) {
+      return { recording: false, refusal: this.errorRefusal(err) };
+    }
+  }
+
+  async stopRecording(handle: ComputerHandle): Promise<RecordingState> {
+    const connection = this.connections.get(handle.workspaceId);
+    if (!connection) return { recording: false, refusal: disconnected() };
+
+    try {
+      const result = await this.call(connection, 'stop_recording', {});
+      const refusal = this.refusalFor(result);
+      if (refusal) return { recording: false, refusal };
+      return parseRecordingState(this.structuredOrNull(result));
+    } catch (err) {
+      return { recording: false, refusal: this.errorRefusal(err) };
+    }
+  }
+
+  async recordingState(handle: ComputerHandle): Promise<RecordingState> {
+    const connection = this.connections.get(handle.workspaceId);
+    if (!connection) return { recording: false, refusal: disconnected() };
+
+    try {
+      const result = await this.call(connection, 'get_recording_state', {});
+      const refusal = this.refusalFor(result);
+      if (refusal) return { recording: false, refusal };
+      return parseRecordingState(this.structuredOrNull(result));
+    } catch (err) {
+      return { recording: false, refusal: this.errorRefusal(err) };
+    }
+  }
+
   async act(handle: ComputerHandle, req: ActionRequest, signal?: AbortSignal): Promise<ComputerActionResult> {
     const connection = this.connections.get(handle.workspaceId);
     if (!connection) return refuse(disconnected());
@@ -850,7 +912,9 @@ export class CuaDriverBridge implements IComputerBridge {
       // to a minimised Excel grid reported success, read back correctly, and
       // vanished on restore.
       if (req.type === 'setValue') {
-        const dead = await this.requireLiveWindow(connection, cached.pid, cached.windowId);
+        const phantom = phantomValueWrite(cached.roles.get(req.elementIndex));
+        if (phantom) return { refusal: phantom };
+        const dead = await this.ensureLiveWindow(connection, cached.pid, cached.windowId);
         if (dead) return { refusal: dead };
       }
       const scope = { pid: cached.pid, window_id: cached.windowId, snapshot_id: req.snapshotId };
@@ -888,7 +952,7 @@ export class CuaDriverBridge implements IComputerBridge {
     }
     // Coordinates of a minimised window describe nothing on screen, and every
     // action below this line is synthetic input aimed at the real display.
-    const dead = await this.requireLiveWindow(connection, pid, windowId);
+    const dead = await this.ensureLiveWindow(connection, pid, windowId);
     if (dead) return { refusal: dead };
     const target = { pid, window_id: windowId };
 
@@ -957,29 +1021,46 @@ export class CuaDriverBridge implements IComputerBridge {
   }
 
   /**
-   * Rejects a window that cannot honestly be driven.
+   * Makes a window safe to write to, restoring it if that is what it takes.
    *
    * A minimised window still exposes a UIA tree, and reading it is fine — the
    * driver's contract says so explicitly. Writing to it is not: a `set_value`
    * reports success, reads back the value it just wrote, and is discarded the
    * moment the window renders. Verified against Excel, where 24 "successful"
-   * writes vanished on restore. The driver's only hint is `effect:
-   * unverifiable`, far too quiet for silent data loss, so callers that mutate
-   * check the window state up front instead.
+   * writes vanished on restore.
+   *
+   * Restoring here rather than refusing is not a new privilege. The refusal
+   * this replaces named `computer_bring_to_front` as the fix, so the agent
+   * always took exactly this action next — it just cost a refused call, a
+   * restore call and a re-snapshot to get there, three times over in a single
+   * Excel run. Same end state, same consent, three fewer round trips.
    */
-  private async requireLiveWindow(
+  private async ensureLiveWindow(
     connection: Connection,
     pid: number,
     windowId: number,
+    signal?: AbortSignal,
   ): Promise<ComputerRefusal | null> {
     const windows = await this.windowsFor(connection, pid);
     const window = windows.find((w) => w.id === windowId);
     if (!window) return { code: 'target_lost', message: 'That window is no longer open.' };
-    if (window.minimised) {
+    if (!window.minimised) return null;
+
+    this.options.logger.info?.(`[CuaDriverBridge] restoring minimised window ${windowId} before writing`);
+    await this.call(connection, 'bring_to_front', { pid, window_id: windowId }, signal);
+
+    // Judged by observation, not by the driver's error flag: Windows refuses
+    // foreground activation to a background process, so the driver reports
+    // failure even when it restored the window — and restoring is the part
+    // that matters, since it is what un-virtualises the accessibility tree.
+    const after = await this.windowsFor(connection, pid);
+    const restored = after.find((w) => w.id === windowId);
+    if (!restored) return { code: 'target_lost', message: 'That window is no longer open.' };
+    if (restored.minimised) {
       return {
         code: 'background_occluded',
         message:
-          'That window is minimised, so a write to it would be silently discarded. Restore it with computer_bring_to_front, then retry.',
+          'That window is minimised and could not be restored, so a write to it would be silently discarded.',
       };
     }
     return null;
@@ -994,9 +1075,9 @@ export class CuaDriverBridge implements IComputerBridge {
     const windows = await this.windowsFor(connection, pid);
     if (windows.length === 0) return null;
     if (selector.by === 'index') return windows[selector.index]?.id ?? null;
-    // `focused`: the driver reports stacking order, so the topmost on-screen
-    // window is the closest honest answer. Fall back to the first window so a
-    // fully background app is still addressable — input does not need focus.
+    // `focused` is the frontmost on-screen window by the driver's stacking
+    // order. Falling back past it matters: a newly created window that has not
+    // been raised yet is still addressable, because input does not need focus.
     return (windows.find((w) => w.focused) ?? windows.find((w) => !w.minimised) ?? windows[0])?.id ?? null;
   }
 
@@ -1014,10 +1095,12 @@ export class CuaDriverBridge implements IComputerBridge {
     elements: readonly ComputerElement[],
   ): void {
     const tokens = new Map<number, string>();
+    const roles = new Map<number, string>();
     for (const element of elements) {
       if (element.token) tokens.set(element.index, element.token);
+      roles.set(element.index, element.role);
     }
-    this.snapshotScopes.set(snapshotId, { pid, windowId, tokens });
+    this.snapshotScopes.set(snapshotId, { pid, windowId, tokens, roles });
     while (this.snapshotScopes.size > 32) {
       const oldest = this.snapshotScopes.keys().next().value;
       if (oldest === undefined) break;
@@ -1161,15 +1244,56 @@ export class CuaDriverBridge implements IComputerBridge {
     // Element indices were minted by the dead session and mean nothing now.
     this.snapshotScopes.clear();
     await connection.client.startSession({ session: connection.sessionId, captureScope: CAPTURE_WINDOW });
-    try {
-      await connection.client.callTool(
-        'set_agent_cursor_enabled',
-        JSON.stringify({ session: connection.sessionId, enabled: true }),
-      );
-    } catch {
-      // Cosmetic only — never block the retry.
-    }
+    await this.applyAgentCursor(connection.client, connection.sessionId);
     return invoke();
+  }
+
+  /**
+   * Turns the agent cursor on and, when configured, gives it our colour.
+   *
+   * Both are cosmetic and neither may block a session: a driver that refuses
+   * the overlay still drives the desktop correctly, it just does so invisibly.
+   */
+  private async applyAgentCursor(client: DriverClient, sessionId: string): Promise<void> {
+    try {
+      const cursor = await client.callTool(
+        'set_agent_cursor_enabled',
+        JSON.stringify({ session: sessionId, enabled: true }),
+      );
+      if (cursor.isError) {
+        this.options.logger.debug?.(`[CuaDriverBridge] agent cursor refused: ${cursor.errorCode ?? cursor.text}`);
+        return;
+      }
+      if (!this.options.cursorThemeId) return;
+
+      // A distinct colour is the whole point: the user has to be able to tell
+      // the agent's pointer from their own at a glance.
+      const theme = await client.callTool(
+        'set_agent_cursor_theme',
+        JSON.stringify({ session: sessionId, theme_id: this.options.cursorThemeId }),
+      );
+      if (theme.isError) {
+        this.options.logger.warn?.(
+          `[CuaDriverBridge] cursor theme '${this.options.cursorThemeId}' refused: ${theme.errorCode ?? theme.text}`,
+        );
+      }
+
+      // The driver hides the cursor after 20 s of stillness, which is most of a
+      // run: the agent spends far longer reading trees and waiting on the model
+      // than moving. The user then sees the pointer vanish and reads it as the
+      // agent having stopped. Keep it on screen for the life of the session.
+      const motion = await client.callTool(
+        'set_agent_cursor_motion',
+        JSON.stringify({ session: sessionId, idle_hide_ms: AGENT_CURSOR_IDLE_HIDE_MS }),
+      );
+      if (motion.isError) {
+        this.options.logger.debug?.(
+          `[CuaDriverBridge] agent cursor motion refused: ${motion.errorCode ?? motion.text}`,
+        );
+      }
+    } catch (error) {
+      this.options.logger.debug?.(`[CuaDriverBridge] agent cursor unavailable: ${String(error)}`);
+    }
   }
 
   private async loadModule(): Promise<DriverModule | null> {
@@ -1197,6 +1321,11 @@ export class CuaDriverBridge implements IComputerBridge {
   private requireStructured(result: DriverToolResult): string {
     if (!result.structuredJson) throw new UnrecognisedDriverPayloadError('response', []);
     return result.structuredJson;
+  }
+
+  /** For payloads whose absence is informational rather than a fault. */
+  private structuredOrNull(result: DriverToolResult): string | null {
+    return result.structuredJson ?? null;
   }
 
   private refusalFor(result: DriverToolResult): ComputerRefusal | null {
@@ -1237,6 +1366,68 @@ function refuse(refusal: ComputerRefusal): ComputerActionResult {
 
 function disconnected(): ComputerRefusal {
   return { code: 'provider_unavailable', message: 'No computer-use session is connected for this workspace.' };
+}
+
+/**
+ * Grid cells accept a UIA `ValuePattern` write, report success, and echo the
+ * value back on every later read — while the cell stays empty on screen.
+ *
+ * Measured on Excel: `set_value` on D9 returned `effect: unverifiable`, the
+ * next `get_window_state` reported `D9 = "PHANTOM-CHECK"`, and the screenshot
+ * showed an empty cell. Read-back cannot catch this because it goes through the
+ * provider that accepted the write, so the only honest move is to refuse before
+ * dispatch and name the route that does work.
+ *
+ * `DataItem` is the role every grid cell reports — spreadsheet cells and
+ * Explorer list rows alike. Neither is writable this way.
+ */
+function phantomValueWrite(role: string | undefined): ComputerRefusal | null {
+  if (role?.toLowerCase() !== 'dataitem') return null;
+  return {
+    code: 'background_unavailable',
+    message:
+      'Grid cells silently discard value writes — the provider reports success and echoes the value back while ' +
+      'the cell stays empty. Select the cell and type instead: computer_click it, computer_type_text the value, ' +
+      'then computer_press_key Enter to commit.',
+  };
+}
+
+/**
+ * What the daemon is allowed to inherit.
+ *
+ * An allowlist rather than the whole environment, because this process holds
+ * provider tokens. But not empty either: the driver keeps its per-user state
+ * (installed cursor themes, config) under these paths, and without them it
+ * silently falls back to built-in defaults. `PATH` is here because trajectory
+ * video shells out to ffmpeg.
+ *
+ * The driver enforces its own allowlist on top of this and refuses to start at
+ * all when a name is not on it — `USERPROFILE` is rejected, which is why the
+ * home directory is only used to derive the two paths below.
+ */
+const DAEMON_ENV_ALLOWLIST =
+  process.platform === 'win32'
+    ? ['PATH', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'SystemRoot']
+    : ['PATH', 'HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'DISPLAY', 'WAYLAND_DISPLAY'];
+
+function daemonEnvironment(): Array<{ name: string; value: string }> {
+  const env: Array<{ name: string; value: string }> = [];
+  for (const name of DAEMON_ENV_ALLOWLIST) {
+    const value = process.env[name];
+    if (value) env.push({ name, value });
+  }
+  // Task runners and service managers routinely drop these. The driver then
+  // reports "LOCALAPPDATA is unavailable" and loses its theme store, so derive
+  // them from the home directory rather than letting that happen silently.
+  const home = process.env['USERPROFILE'] ?? process.env['HOME'] ?? os.homedir();
+  if (!home) return env;
+  if (process.platform === 'win32') {
+    if (!process.env['LOCALAPPDATA']) env.push({ name: 'LOCALAPPDATA', value: path.join(home, 'AppData', 'Local') });
+    if (!process.env['APPDATA']) env.push({ name: 'APPDATA', value: path.join(home, 'AppData', 'Roaming') });
+  } else if (!process.env['HOME']) {
+    env.push({ name: 'HOME', value: home });
+  }
+  return env;
 }
 
 /**

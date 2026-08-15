@@ -4,7 +4,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import type { Tool } from '@github/copilot-sdk';
-import type { ToolDefinition } from '@generatorai/core';
+import { takeToolBinaries, type ToolDefinition } from '@generatorai/core';
 
 /**
  * Wraps a single domain ToolDefinition into a Copilot SDK tool
@@ -22,7 +22,23 @@ export function createSdkTool(toolDef: ToolDefinition): Tool {
         args != null && typeof args === 'object' && !Array.isArray(args)
           ? (args as Record<string, unknown>)
           : {};
-      return toolDef.handler(safeArgs);
+      const result = await toolDef.handler(safeArgs);
+
+      // A tool that captured an image meant the MODEL to see it. Left in the
+      // text channel it would arrive as a wall of base64; the SDK carries it
+      // properly on `binaryResultsForLlm`.
+      const { text, binaries } = takeToolBinaries(result);
+      if (binaries.length === 0) return result;
+      return {
+        textResultForLlm: typeof text === 'string' ? text : JSON.stringify(text),
+        binaryResultsForLlm: binaries.map((b) => ({
+          data: b.data,
+          mimeType: b.mimeType,
+          type: 'image' as const,
+          ...(b.description ? { description: b.description } : {}),
+        })),
+        resultType: 'success' as const,
+      };
     },
   });
 }

@@ -1,19 +1,29 @@
 // ────────────────────────────────────────────────────────────────
 // ComputerPanel — watch what the agent is doing on the desktop.
 //
-// There is no live video here and there should not be: the driver captures a
-// PNG of the TARGET WINDOW each time the agent reads it, never the whole
-// screen, so this panel can only ever show what the agent itself looked at.
-// That is the point — it is a record of the agent's perception, not a remote
-// desktop.
+// Two views, and the difference matters:
+//
+//   • Frame — the PNG the driver captured of the TARGET WINDOW each time the
+//     agent read it. Never the whole screen. This is a record of the agent's
+//     perception, not a remote desktop, and it is always available.
+//   • Video — playback of the run. Two sources, and which one you get depends
+//     on how the preview was started:
+//       – the driver's per-turn window captures, played as a sequence. This is
+//         the default and the only one that works window-scoped, over RDP, or
+//         after the workstation locks. It outlives the run.
+//       – an ffmpeg screen capture, when the operator opted into one. A real
+//         fragmented MP4, so it plays live and seeks afterwards — but it
+//         records the whole display, including the lock screen.
+//     The frame sequence is always there, so the tab is never a dead end.
 //
 // Frames arrive on the `computer.snapshot` event; the timeline is built from
 // `computer.action` / `computer.refusal` / `computer.consent_required`.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Ban, Check, Eye, Hand, KeyRound, Keyboard, MonitorCog, ShieldQuestion,
+  AlertTriangle, Ban, Check, Circle, Eye, Hand, Image, KeyRound, Keyboard, MonitorCog,
+  Pause, Play, ShieldQuestion, Square, Video,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { openAuthenticatedEventSource } from '@/platform/authTransport.js';
@@ -30,6 +40,8 @@ interface TimelineEntry {
   path?: string;
   verified?: boolean;
   message?: string;
+  /** The window capture taken for this entry, when one was taken. */
+  artifactId?: string;
 }
 
 interface PendingConsent {
@@ -55,11 +67,65 @@ interface Props {
   embedded?: boolean;
 }
 
+interface RecordingState {
+  recording: boolean;
+  outputDir?: string;
+  videoPath?: string;
+  detail?: string;
+  turnCount?: number;
+  hasCast?: boolean;
+  cast?: { active: boolean; startedAt?: number; detail?: string };
+  refusal?: { code: string; message: string };
+}
+
+interface ReplayTurnFrame {
+  turn: string;
+  kind: 'before' | 'click' | 'after';
+  tool: string | null;
+  point?: { x: number; y: number };
+}
+type PreviewFrame = ReplayTurnFrame;
+
+/** One entry of the replay index: a turn and the captures taken during it. */
+interface TurnIndexEntry {
+  turn: string;
+  tool: string | null;
+  at: string;
+  frames: string[];
+}
+
+/** Milliseconds per turn during frame playback. */
+const REPLAY_INTERVAL_MS = 700;
+
+/**
+ * The frame that best represents a turn. `after` shows the result of the
+ * action, which is what someone reviewing a run wants to see; the others are
+ * only there when the driver had no reason to capture an `after`.
+ */
+function bestFrame(entry: TurnIndexEntry): 'before' | 'click' | 'after' {
+  if (entry.frames.includes('after')) return 'after';
+  if (entry.frames.includes('click')) return 'click';
+  return 'before';
+}
+
+interface WindowBounds {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  title: string;
+}
+
 const MAX_ENTRIES = 60;
 
 /** Synthetic input is the only tier that can steal focus — worth calling out. */
 function tookScreen(path?: string): boolean {
   return path === 'synthetic' || path === 'clipboard';
+}
+
+function formatOffset(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
 function safeParse(raw: string): Record<string, unknown> | null {
@@ -89,7 +155,218 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
   const [showGrants, setShowGrants] = useState(false);
   const [runtime, setRuntime] = useState<ComputerRuntime | null>(null);
   const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [view, setView] = useState<'frame' | 'video'>('frame');
+  const [recording, setRecording] = useState<RecordingState>({ recording: false });
+  const [recordingBusy, setRecordingBusy] = useState(false);
+  const [videoNonce, setVideoNonce] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [pinned, setPinned] = useState<string | null>(null);
+  const [pinnedIsFallback, setPinnedIsFallback] = useState(false);
+  const [previewFrame, setPreviewFrame] = useState<PreviewFrame | null>(null);
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  const [windowBounds, setWindowBounds] = useState<WindowBounds | null>(null);
+  const [turns, setTurns] = useState<TurnIndexEntry[]>([]);
+  const [playhead, setPlayhead] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  /** Set once the viewer scrubs, so live capture stops yanking the playhead. */
+  const scrubbedRef = useRef(false);
+  const pinnedRef = useRef<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const previewImgRef = useRef<HTMLImageElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    pinnedRef.current = pinned;
+  }, [pinned]);
+
+  const recordingRequest = useCallback(
+    async (
+      action: 'start' | 'stop' | 'status',
+      opts: { windowTitle?: string; screenVideo?: boolean } = {},
+    ): Promise<RecordingState | null> => {
+      if (!workspaceId) return null;
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/computer/recording`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, ...opts }),
+        });
+        if (!res.ok) return null;
+        return (await res.json()) as RecordingState;
+      } catch {
+        return null;
+      }
+    },
+    [workspaceId],
+  );
+
+  /**
+   * Turns the live preview on and off.
+   *
+   * `screenVideo` is opt-in and separate: the preview itself costs nothing but
+   * the driver's own per-turn capture, while a screen video spawns ffmpeg and
+   * records the whole display — which becomes the lock screen the moment the
+   * workstation locks.
+   */
+  const togglePreview = useCallback(
+    async (screenVideo: boolean) => {
+      setRecordingBusy(true);
+      try {
+        if (recording.recording) {
+          const stopped = await recordingRequest('stop');
+          const status = await recordingRequest('status');
+          setRecording({ ...(stopped ?? { recording: false }), ...(status ?? {}), recording: false });
+          setVideoNonce((n) => n + 1);
+          setCursor(null);
+        } else {
+          const started = await recordingRequest('start', {
+            ...(windowTitle ? { windowTitle } : {}),
+            ...(screenVideo ? { screenVideo: true } : {}),
+          });
+          if (started) {
+            setRecording(started);
+            setVideoNonce((n) => n + 1);
+            setPreviewFrame(null);
+            setView(screenVideo ? 'video' : 'frame');
+          }
+        }
+      } finally {
+        setRecordingBusy(false);
+      }
+    },
+    [recording.recording, recordingRequest, windowTitle],
+  );
+
+  // Activity marks on the player timeline, YouTube-chapter style. The capture
+  // origin comes from the cast rather than the first event: the recorder is
+  // started before the agent is, so the two clocks would otherwise disagree by
+  // however long the model spent thinking.
+  const markers = useMemo(() => {
+    const origin = recording.cast?.startedAt;
+    if (!origin || videoDuration <= 0) return [];
+    return entries
+      .map((entry) => {
+        const offset = (entry.at - origin) / 1000;
+        return {
+          id: entry.id,
+          kind: entry.kind,
+          offset,
+          percent: (offset / videoDuration) * 100,
+          label: `${entry.action}${entry.target ? ` · ${entry.target}` : ''}`,
+        };
+      })
+      .filter((m) => m.percent >= 0 && m.percent <= 100)
+      .reverse();
+  }, [entries, recording.cast?.startedAt, videoDuration]);
+
+  // Live preview. Frames and cursor arrive separately because they change at
+  // different rates — a window frame per action, a cursor sample every ~30 ms.
+  useEffect(() => {
+    if (!workspaceId || !recording.recording) {
+      setCursor(null);
+      return;
+    }
+    const source = new EventSource(`/api/workspaces/${workspaceId}/computer/preview/stream`);
+
+    source.addEventListener('frame', (event) => {
+      try {
+        setPreviewFrame(JSON.parse((event as MessageEvent).data) as PreviewFrame);
+      } catch {
+        // A malformed frame just means the preview holds the previous one.
+      }
+    });
+    source.addEventListener('window', (event) => {
+      try {
+        setWindowBounds(JSON.parse((event as MessageEvent).data) as WindowBounds);
+      } catch {
+        // Keep the last known bounds.
+      }
+    });
+    source.addEventListener('cursor', (event) => {
+      try {
+        const samples = JSON.parse((event as MessageEvent).data) as Array<{ x: number; y: number }>;
+        const last = samples.at(-1);
+        if (last) setCursor({ x: last.x, y: last.y });
+      } catch {
+        // Keep the last known position.
+      }
+    });
+
+    return () => source.close();
+  }, [workspaceId, recording.recording]);
+
+  // Screen coordinates onto the rendered frame. The recorder reports the cursor
+  // against the whole desktop but captures a single window, so without the
+  // window's origin the pointer lands somewhere else entirely.
+  const cursorOnFrame = useMemo(() => {
+    if (!cursor || !windowBounds || windowBounds.w <= 0 || windowBounds.h <= 0) return null;
+    const left = ((cursor.x - windowBounds.x) / windowBounds.w) * 100;
+    const top = ((cursor.y - windowBounds.y) / windowBounds.h) * 100;
+    if (left < -2 || left > 102 || top < -2 || top > 102) return null;
+    return { left, top };
+  }, [cursor, windowBounds]);
+
+  // The replay index. Kept current while the Video tab is open so a finished
+  // run stays watchable — the captures outlive the driver session that made
+  // them, and this is the only playback that exists without an ffmpeg cast.
+  useEffect(() => {
+    if (!workspaceId || view !== 'video') return;
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const res = await fetch(
+          `/api/workspaces/${workspaceId}/computer/recording/turns`,
+          { cache: 'no-store' },
+        );
+        if (!res.ok || cancelled) return;
+        const body = (await res.json()) as { turns?: TurnIndexEntry[] };
+        if (cancelled) return;
+        const next = body.turns ?? [];
+        setTurns(next);
+        // Follow the newest capture while recording, unless the viewer scrubbed.
+        if (!scrubbedRef.current && next.length > 0) setPlayhead(next.length - 1);
+      } catch {
+        // Leave whatever is already loaded rather than blanking the player.
+      }
+    };
+
+    void load();
+    if (!recording.recording) return;
+    const timer = window.setInterval(load, 2_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [workspaceId, view, recording.recording, videoNonce]);
+
+  // Frame playback. A fixed cadence rather than the real timestamps: the gaps
+  // between turns are mostly model latency, so real time would be minutes of a
+  // still image.
+  useEffect(() => {
+    if (!playing || turns.length === 0) return;
+    const timer = window.setInterval(() => {
+      setPlayhead((current) => {
+        if (current >= turns.length - 1) {
+          setPlaying(false);
+          return current;
+        }
+        return current + 1;
+      });
+    }, REPLAY_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [playing, turns.length]);
+
+  const activeTurn = turns[Math.min(playhead, Math.max(0, turns.length - 1))] ?? null;
+
+  // Decode the next frame before it is shown, so stepping does not flash white.
+  useEffect(() => {
+    if (!workspaceId) return;
+    const upcoming = turns[playhead + 1];
+    if (!upcoming) return;
+    const img = new window.Image();
+    img.src = `/api/workspaces/${workspaceId}/computer/recording/turns/${upcoming.turn}/${bestFrame(upcoming)}`;
+  }, [workspaceId, turns, playhead]);
 
   const loadRuntime = useCallback(async () => {
     if (!workspaceId) return;
@@ -208,6 +485,32 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
     [workspaceId],
   );
 
+  // Clicking an entry holds its frame. Read through a ref inside the stream
+  // handler so a newly arriving snapshot does not yank the view away from the
+  // moment the user is looking at.
+  //
+  // Only snapshots carry a frame of their own: capturing one for an action
+  // would mean a second `get_window_state`, and that replaces the driver's
+  // element index map — the agent's next click would land on a stale index. So
+  // an action falls back to the last window the agent actually read, which is
+  // the state it decided to act on.
+  const pinTo = useCallback(
+    (entry: TimelineEntry) => {
+      if (pinned === entry.id) {
+        setPinned(null);
+        return;
+      }
+      const index = entries.findIndex((e) => e.id === entry.id);
+      const source = entries.slice(index).find((e) => e.artifactId);
+      if (!source?.artifactId) return;
+      setPinned(entry.id);
+      setPinnedIsFallback(source.id !== entry.id);
+      setView('frame');
+      void loadFrame(source.artifactId);
+    },
+    [entries, loadFrame, pinned],
+  );
+
   // Seed from history so opening the panel mid-task shows the latest window
   // and what led to it, rather than an empty box until the agent acts again.
   useEffect(() => {
@@ -236,7 +539,7 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
           const body = (await activityRes.json()) as {
             entries?: Array<{
               action: string; appLabel: string; target: string | null; path: string | null;
-              verified: boolean; refusalCode: string | null; createdAt: string;
+              verified: boolean; refusalCode: string | null; artifactId: string | null; createdAt: string;
             }>;
           };
           const seeded: TimelineEntry[] = (body.entries ?? []).map((e, i) => ({
@@ -249,6 +552,7 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
             ...(e.path ? { path: e.path } : {}),
             verified: e.verified,
             ...(e.refusalCode ? { message: e.refusalCode } : {}),
+            ...(e.artifactId ? { artifactId: e.artifactId } : {}),
           }));
           setEntries(seeded.reverse().slice(0, MAX_ENTRIES));
         }
@@ -258,8 +562,27 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
     })();
     void loadGrants();
     void loadRuntime();
+    void (async () => {
+      const status = await recordingRequest('status');
+      if (status && !cancelled) setRecording(status);
+    })();
     return () => { cancelled = true; };
-  }, [workspaceId, loadFrame, loadGrants, loadRuntime]);
+  }, [workspaceId, loadFrame, loadGrants, loadRuntime, recordingRequest]);
+
+  // Both of these change outside this panel — the driver can fault or be
+  // restarted, and a recording can be started from another tab or survive a
+  // page reload. Without a re-read the toggle lies about its own state and a
+  // health banner stays up long after the restart that cleared it.
+  useEffect(() => {
+    if (!workspaceId) return;
+    const timer = setInterval(() => {
+      void loadRuntime();
+      void recordingRequest('status').then((status) => {
+        if (status) setRecording((prev) => ({ ...prev, ...status }));
+      });
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [workspaceId, loadRuntime, recordingRequest]);
 
   useEffect(() => () => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
@@ -296,12 +619,13 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
               break;
             case 'computer.snapshot':
               setWindowTitle(String(d['windowTitle'] ?? ''));
-              if (typeof d['artifactId'] === 'string') void loadFrame(d['artifactId']);
+              if (typeof d['artifactId'] === 'string' && !pinnedRef.current) void loadFrame(d['artifactId']);
               push({
                 kind: 'action',
                 action: 'snapshot',
                 appLabel: String(d['appLabel'] ?? ''),
                 target: `${String(d['elementCount'] ?? 0)} elements`,
+                ...(typeof d['artifactId'] === 'string' ? { artifactId: d['artifactId'] } : {}),
               });
               break;
             case 'computer.action':
@@ -311,6 +635,7 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
                 appLabel: String(d['appLabel'] ?? ''),
                 ...(typeof d['target'] === 'string' ? { target: d['target'] } : {}),
                 ...(typeof d['path'] === 'string' ? { path: d['path'] } : {}),
+                ...(typeof d['artifactId'] === 'string' ? { artifactId: d['artifactId'] } : {}),
                 verified: d['verified'] === true,
               });
               break;
@@ -388,6 +713,80 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
           {live ? 'Watching' : 'Idle'}
         </span>
       </div>
+
+      <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+        <div className="flex items-center gap-0.5 rounded border border-border p-0.5">
+          {(['frame', 'video'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setView(mode)}
+              aria-pressed={view === mode}
+              className={cn(
+                'flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors',
+                view === mode
+                  ? 'bg-subtle text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {mode === 'frame' ? <Image className="h-3 w-3" /> : <Video className="h-3 w-3" />}
+              {mode === 'frame' ? 'Frame' : 'Video'}
+            </button>
+          ))}
+        </div>
+
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            disabled={recordingBusy || !workspaceId}
+            onClick={() => void togglePreview(false)}
+            className={cn(
+              'flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+              recording.recording
+                ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                : 'border-border bg-card text-foreground hover:bg-subtle',
+            )}
+            title={
+              recording.recording
+                ? 'Stop the live preview'
+                : 'Watch the agent work — window frames and its cursor, which keep working if you lock the screen'
+            }
+          >
+            {recording.recording ? <Square className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+            {recordingBusy ? 'Working…' : recording.recording ? 'Stop' : 'Live preview'}
+          </button>
+          {!recording.recording && (
+            <button
+              type="button"
+              disabled={recordingBusy || !workspaceId}
+              onClick={() => void togglePreview(true)}
+              className="rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-subtle disabled:opacity-50"
+              title="Also record a screen video. Needs ffmpeg, captures the whole display, and records the lock screen if the workstation locks."
+            >
+              <Video className="h-3 w-3" />
+              <span className="sr-only">Live preview with a screen video recording</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {recording.recording && (
+        <div className="shrink-0 border-b border-border bg-subtle/50 px-3 py-1.5 text-[11px] text-muted-foreground">
+          {recording.cast?.active
+            ? 'Live preview on, plus a whole-screen video recording.'
+            : 'Live preview on — the agent’s window and cursor. Nothing else on screen is captured.'}
+        </div>
+      )}
+      {recording.detail && !recording.recording && (
+        <div className="shrink-0 border-b border-warning/40 bg-warning/10 px-3 py-1.5 text-[11px] text-warning">
+          {recording.detail}
+        </div>
+      )}
+      {recording.refusal && (
+        <div className="shrink-0 border-b border-warning/40 bg-warning/10 px-3 py-1.5 text-[11px] text-warning">
+          {recording.refusal.message}
+        </div>
+      )}
 
       {runtime && runtime.enabled && runtime.state !== 'ready' && (
         <div className="shrink-0 border-b border-border bg-subtle/30 px-3 py-2">
@@ -503,7 +902,133 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
         )}
 
         <div className="flex min-h-[8rem] flex-[3] items-center justify-center overflow-auto bg-subtle/40 p-2">
-          {frameSrc ? (
+          {view === 'video' ? (
+            recording.hasCast || recording.cast?.active ? (
+              <div className="flex h-full w-full flex-col gap-1">
+                <video
+                  key={videoNonce}
+                  ref={videoRef}
+                  autoPlay={recording.recording}
+                  muted
+                  playsInline
+                  controls={!recording.recording}
+                  onDurationChange={(e) => setVideoDuration(e.currentTarget.duration || 0)}
+                  className="min-h-0 flex-1 rounded border border-border bg-black object-contain shadow-sm"
+                  src={`/api/workspaces/${workspaceId}/computer/recording/video?v=${videoNonce}`}
+                />
+                {markers.length > 0 && (
+                  <div className="shrink-0">
+                    <div className="relative h-1.5 rounded-full bg-border">
+                      {markers.map((marker) => (
+                        <button
+                          key={marker.id}
+                          type="button"
+                          title={`${marker.label} — ${formatOffset(marker.offset)}`}
+                          onClick={() => {
+                            if (videoRef.current) videoRef.current.currentTime = marker.offset;
+                          }}
+                          style={{ left: `${marker.percent}%` }}
+                          className={cn(
+                            'absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm',
+                            marker.kind === 'refusal' ? 'bg-destructive' : 'bg-primary',
+                          )}
+                        >
+                          <span className="sr-only">{marker.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      {markers.length} action{markers.length === 1 ? '' : 's'} on the timeline — click a mark to jump
+                      {recording.recording ? ' (seeking is available once the recording stops)' : ''}
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : turns.length > 0 && activeTurn ? (
+              // No ffmpeg cast — play the driver's per-turn window captures.
+              // This is the recording for the default path, and unlike a screen
+              // video it survives a locked workstation and outlives the run.
+              <div className="flex h-full w-full flex-col gap-1.5">
+                <div className="flex min-h-0 flex-1 items-center justify-center">
+                  <img
+                    src={`/api/workspaces/${workspaceId}/computer/recording/turns/${activeTurn.turn}/${bestFrame(activeTurn)}`}
+                    alt={`Turn ${playhead + 1} — ${activeTurn.tool ?? 'window'}`}
+                    className="max-h-full max-w-full rounded border border-border object-contain shadow-sm"
+                  />
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!playing && playhead >= turns.length - 1) {
+                        scrubbedRef.current = true;
+                        setPlayhead(0);
+                      }
+                      setPlaying((p) => !p);
+                    }}
+                    title={playing ? 'Pause' : 'Play the run back'}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-card text-foreground transition-colors hover:bg-subtle"
+                  >
+                    {playing ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                    <span className="sr-only">{playing ? 'Pause' : 'Play'}</span>
+                  </button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, turns.length - 1)}
+                    value={Math.min(playhead, turns.length - 1)}
+                    onChange={(e) => {
+                      scrubbedRef.current = true;
+                      setPlaying(false);
+                      setPlayhead(Number(e.currentTarget.value));
+                    }}
+                    aria-label="Scrub the recording"
+                    className="h-1 flex-1 cursor-pointer accent-primary"
+                  />
+                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                    {playhead + 1}/{turns.length}
+                  </span>
+                </div>
+                <p className="shrink-0 text-[10px] text-muted-foreground">
+                  {activeTurn.tool ?? 'window'} — the window the agent was working in.
+                  {recording.recording ? ' Still capturing.' : ''}
+                </p>
+              </div>
+            ) : (
+              <div className="max-w-xs text-center text-xs text-muted-foreground">
+                <Video className="mx-auto mb-2 h-6 w-6 opacity-40" />
+                No captures yet. Press <span className="text-foreground">Live preview</span> and
+                each action the agent takes is recorded here to play back.
+              </div>
+            )
+          ) : previewFrame && recording.recording && !pinned ? (
+            // Live: the recorder's window capture with the agent cursor drawn
+            // on top. The cursor is a separate overlay window, so it is never
+            // in the capture — which is exactly why it travels as coordinates.
+            <div className="relative inline-block max-h-full max-w-full">
+              <img
+                ref={previewImgRef}
+                src={`/api/workspaces/${workspaceId}/computer/recording/turns/${previewFrame.turn}/${previewFrame.kind}`}
+                alt={`Live — ${previewFrame.tool ?? 'window'}`}
+                className="max-h-full max-w-full rounded border border-border object-contain shadow-sm"
+              />
+              {cursorOnFrame && (
+                <span
+                  aria-hidden
+                  style={{ left: `${cursorOnFrame.left}%`, top: `${cursorOnFrame.top}%` }}
+                  className="pointer-events-none absolute z-10 -translate-x-[2px] -translate-y-[1px]"
+                >
+                  <svg width="18" height="24" viewBox="0 0 18 24" className="drop-shadow">
+                    <path d="M1 1 L1 18 L5.5 13.8 L8.5 20.5 L11.5 19.2 L8.6 12.8 L14 12.5 Z"
+                      fill="#e51c24" stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" />
+                  </svg>
+                </span>
+              )}
+              <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+                live · {previewFrame.tool ?? 'window'}
+              </span>
+            </div>
+          ) : frameSrc ? (
             <img
               src={frameSrc}
               alt="Most recent window the agent read"
@@ -519,8 +1044,23 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
         </div>
 
         <div className="flex min-h-0 flex-[2] flex-col border-t border-border">
-          <div className="shrink-0 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Activity
+          <div className="flex shrink-0 items-center justify-between px-3 py-1.5">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Activity
+            </span>
+            {pinned ? (
+              <button
+                type="button"
+                onClick={() => setPinned(null)}
+                className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-subtle"
+              >
+                {pinnedIsFallback ? 'Last window read before this step' : 'Showing a past frame'} — back to live
+              </button>
+            ) : (
+              <span className="text-[10px] text-muted-foreground">
+                Click an entry to see the window at that moment
+              </span>
+            )}
           </div>
           <div className="min-h-0 flex-1 overflow-auto px-2 pb-2">
             {entries.length === 0 ? (
@@ -530,34 +1070,41 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
             ) : (
               <ul className="space-y-0.5">
                 {entries.map((entry) => (
-                  <li
-                    key={entry.id}
-                    className="flex items-start gap-2 rounded px-1.5 py-1 text-xs hover:bg-subtle"
-                  >
-                    <span className="mt-0.5 shrink-0">{iconFor(entry)}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="font-medium text-foreground">{entry.action}</span>
-                      {entry.appLabel && (
-                        <span className="text-muted-foreground"> · {entry.appLabel}</span>
+                  <li key={entry.id}>
+                    <button
+                      type="button"
+                      onClick={() => pinTo(entry)}
+                      aria-pressed={pinned === entry.id}
+                      className={cn(
+                        'flex w-full items-start gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-subtle',
+                        pinned === entry.id && 'bg-subtle ring-1 ring-inset ring-border',
                       )}
-                      {entry.target && (
-                        <span className="text-muted-foreground"> · {entry.target}</span>
+                    >
+                      <span className="mt-0.5 shrink-0">{iconFor(entry)}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="font-medium text-foreground">{entry.action}</span>
+                        {entry.appLabel && (
+                          <span className="text-muted-foreground"> · {entry.appLabel}</span>
+                        )}
+                        {entry.target && (
+                          <span className="text-muted-foreground"> · {entry.target}</span>
+                        )}
+                        {entry.message && (
+                          <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                            {entry.message}
+                          </span>
+                        )}
+                        {tookScreen(entry.path) && (
+                          <span className="mt-0.5 flex items-center gap-1 text-[11px] text-warning">
+                            <AlertTriangle className="h-3 w-3" />
+                            took over the screen
+                          </span>
+                        )}
+                      </span>
+                      {entry.kind === 'action' && entry.verified && (
+                        <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
                       )}
-                      {entry.message && (
-                        <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                          {entry.message}
-                        </span>
-                      )}
-                      {tookScreen(entry.path) && (
-                        <span className="mt-0.5 flex items-center gap-1 text-[11px] text-warning">
-                          <AlertTriangle className="h-3 w-3" />
-                          took over the screen
-                        </span>
-                      )}
-                    </span>
-                    {entry.kind === 'action' && entry.verified && (
-                      <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
-                    )}
+                    </button>
                   </li>
                 ))}
               </ul>

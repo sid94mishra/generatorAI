@@ -10,7 +10,8 @@ import * as path from 'node:path';
 import { HarnessRegistry, MultiHarness, type HarnessType } from '@generatorai/agent-harness-providers';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
-import { resolveCuaDriverBinary } from './computer/driverBinary.js';
+import { installAgentCursorTheme, resolveCuaDriverBinary } from './computer/driverBinary.js';
+import { ScreenCast } from './computer/screenCast.js';
 import { RelayHostBroker } from './relay/RelayHostBroker.js';
 import {
   ExpoPushProvider,
@@ -1228,6 +1229,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const computerUseRepo = new DrizzleComputerUseRepository(db);
   const driverBinaryPath = resolveCuaDriverBinary();
   if (driverBinaryPath) logger.info?.(`[computer-use] driver executable: ${driverBinaryPath}`);
+  const cursorThemeId = driverBinaryPath ? installAgentCursorTheme(logger) : null;
   const computerConsentStore = new PendingConsentStore(computerUseRepo, eventBus, logger, {
     autoApproveForDevelopment: process.env['GENERATORAI_COMPUTER_USE_AUTO_APPROVE'] === '1',
   });
@@ -1236,10 +1238,15 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     maxSnapshotElements: computerUseConfig.maxSnapshotElements,
     maxSnapshotDepth: computerUseConfig.maxSnapshotDepth,
     ...(driverBinaryPath ? { driverBinaryPath } : {}),
+    ...(cursorThemeId ? { cursorThemeId } : {}),
     ...(process.env['GENERATORAI_CUA_DRIVER_SOCKET']
       ? { attachSocketPath: process.env['GENERATORAI_CUA_DRIVER_SOCKET'] }
       : {}),
   });
+  // Screen capture for the Computer panel's live feed. The driver records too,
+  // but with `+faststart` — unplayable until the run ends — so this runs the
+  // same ffmpeg with fragmented-MP4 flags instead.
+  const screenCast = new ScreenCast(logger);
   const computerService = new ComputerService(
     workspaceArtifactRepo,
     eventBus,
@@ -1423,6 +1430,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     computerUseRepo,
     cuaDriverBridge,
     computerConsentStore,
+    screenCast,
     // Expose the execution-workspace + artifact repos so routes can read
     // browser artifacts + workspace rows without a full service round-trip.
     executionWorkspaceRepo,
@@ -1732,6 +1740,7 @@ export interface Container {
   cuaDriverBridge: CuaDriverBridge;
   /** Exposed so routes/internal-computer.ts can deliver the user's answer. */
   computerConsentStore: PendingConsentStore;
+  screenCast: ScreenCast;
   /** Execution workspace repo — exposed for the browser route (read workspace row). */
   executionWorkspaceRepo: InstanceType<typeof DrizzleExecutionWorkspaceRepository>;
   /** Workspace artifact repo — exposed for the browser route (list browser artifacts). */

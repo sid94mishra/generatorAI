@@ -123,7 +123,46 @@ export function parseVerifyState(structuredJson: string): {
   return { outcome: toOutcome(root['status']), results };
 }
 
-export function parseListApps(structuredJson: string): ComputerAppInfo[] {  const root = parseJson('list_apps', structuredJson);
+/**
+ * Recorder state. Every field is optional in practice: a driver that has never
+ * recorded reports nulls throughout, and a missing payload is normal for a
+ * build without the recorder rather than a fault, so this never throws.
+ *
+ * Windows paths come back in `\\?\` extended form. It is valid but leaks into
+ * UI and log lines as noise, so it is stripped here.
+ */
+export function parseRecordingState(structuredJson: string | null): {
+  recording: boolean;
+  outputDir?: string;
+  nextTurn?: number;
+  videoPath?: string;
+  detail?: string;
+} {
+  if (!structuredJson) return { recording: false };
+  let root: Json;
+  try {
+    root = parseJson('get_recording_state', structuredJson);
+  } catch {
+    return { recording: false };
+  }
+
+  const plain = (v: unknown): string | undefined => asString(v)?.replace(/^\\\\\?\\/, '');
+  const outputDir = plain(root['output_dir']);
+  const videoPath = plain(root['last_video_path']);
+  const nextTurn = asNumber(root['next_turn']);
+  const detail = asString(root['last_error']);
+
+  return {
+    recording: asBool(root['recording']) || asBool(root['enabled']),
+    ...(outputDir ? { outputDir } : {}),
+    ...(nextTurn !== undefined ? { nextTurn } : {}),
+    ...(videoPath ? { videoPath } : {}),
+    ...(detail ? { detail } : {}),
+  };
+}
+
+export function parseListApps(structuredJson: string): ComputerAppInfo[] {
+  const root = parseJson('list_apps', structuredJson);
   const raw = root['apps'];
   if (!Array.isArray(raw)) throw new UnrecognisedDriverPayloadError('list_apps', Object.keys(root));
 
@@ -156,25 +195,41 @@ export function parseListWindows(structuredJson: string): Map<number, ComputerWi
   const raw = root['windows'];
   if (!Array.isArray(raw)) throw new UnrecognisedDriverPayloadError('list_windows', Object.keys(root));
 
-  const byPid = new Map<number, ComputerWindowInfo[]>();
+  // The driver reports stacking order, not focus, and HIGHER z_index is closer
+  // to the front — measured: the desktop's "Program Manager" is 0 and the
+  // frontmost window is the maximum. A null means the order is unavailable and
+  // the contract says callers must not infer one.
+  const staged = new Map<number, Array<{ window: ComputerWindowInfo; z: number | undefined }>>();
   for (const entry of raw) {
     if (!isObject(entry)) continue;
     const pid = asNumber(entry['pid']);
     const id = asNumber(entry['window_id']);
     if (pid === undefined || id === undefined) continue;
 
-    const list = byPid.get(pid) ?? [];
+    const list = staged.get(pid) ?? [];
     list.push({
-      id,
-      title: asString(entry['title']) ?? '',
-      index: list.length,
-      // The driver reports stacking order, not focus. z_index 0 is topmost
-      // among on-screen windows, which is the closest honest signal.
-      focused: asNumber(entry['z_index']) === 0 && asBool(entry['is_on_screen']),
-      minimised: asBool(entry['minimized']),
-      bounds: parseFrame(entry),
+      window: {
+        id,
+        title: asString(entry['title']) ?? '',
+        index: list.length,
+        focused: false,
+        minimised: asBool(entry['minimized']),
+        bounds: parseFrame(entry),
+      },
+      z: asBool(entry['is_on_screen']) ? asNumber(entry['z_index']) : undefined,
     });
-    byPid.set(pid, list);
+    staged.set(pid, list);
+  }
+
+  const byPid = new Map<number, ComputerWindowInfo[]>();
+  for (const [pid, entries] of staged) {
+    let front: { window: ComputerWindowInfo; z: number } | undefined;
+    for (const entry of entries) {
+      if (entry.z === undefined) continue;
+      if (!front || entry.z > front.z) front = { window: entry.window, z: entry.z };
+    }
+    if (front) front.window.focused = true;
+    byPid.set(pid, entries.map((e) => e.window));
   }
   return byPid;
 }
@@ -245,14 +300,14 @@ export function parseWindowState(structuredJson: string, filtered = false): Pars
   }
 
   // `elements_complete` is false whenever the returned set is smaller than the
-  // walk — which a `query` projection always is. Reporting that as truncation
-  // tells the agent elements were dropped for size, so it distrusts its own
-  // filter and re-reads the whole window. A zero-element truncation is noise
-  // for the same reason.
+  // walk — and it stays false even when nothing was dropped, so the counts are
+  // the only honest signal. A `query` projection is a filter, not truncation:
+  // reporting it as dropped elements makes the agent distrust its own filter
+  // and re-read the whole window.
   const total = asNumber(root['total_element_count']) ?? elements.length;
-  const dropped = filtered ? 0 : Math.max(0, total - elements.length);
-  const complete = root['elements_complete'] !== false;
-  const truncated = !complete && dropped > 0 ? { elements: dropped, depth: 0 } : null;
+  const returned = asNumber(root['returned_element_count']) ?? elements.length;
+  const dropped = filtered ? 0 : Math.max(0, total - returned);
+  const truncated = dropped > 0 ? { elements: dropped, depth: 0 } : null;
 
   const width = asNumber(root['screenshot_width']);
   const height = asNumber(root['screenshot_height']);

@@ -268,6 +268,9 @@ export function createBuildConfig({ platform, arch, channel, signed, publish, en
         to: 'cua-driver',
         filter: ['**/*', '!.version', ...SHARED_RESOURCE_EXCLUSIONS],
       },
+      // Platform-independent: the agent cursor theme is a Lottie bundle the
+      // server installs into the driver's theme store on boot.
+      { from: 'resources/cursor-themes', to: 'cursor-themes', filter: ['**/*', ...SHARED_RESOURCE_EXCLUSIONS] },
     ],
     asarUnpack: ['**/*.node'],
     protocols: [{ name: PRODUCT_NAME, schemes: ['generatorai'] }],

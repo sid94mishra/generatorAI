@@ -261,6 +261,29 @@ export interface LaunchAppResult {
   refusal?: ComputerRefusal;
 }
 
+export interface RecordingRequest {
+  /** Absolute directory for the turn folders and, when enabled, the video. */
+  outputDir: string;
+  /**
+   * Also capture the screen to `<outputDir>/recording.mp4`. Off by default —
+   * on Windows and Linux it needs ffmpeg on PATH, and when ffmpeg is missing
+   * the per-turn capture still runs while the video silently does not.
+   */
+  video?: boolean;
+}
+
+export interface RecordingState {
+  recording: boolean;
+  outputDir?: string;
+  /** 1-based index of the next turn folder the recorder will write. */
+  nextTurn?: number;
+  /** Set by `stopRecording` when video was on and the mp4 was finalised. */
+  videoPath?: string;
+  /** Recorder-reported problem — a missing ffmpeg, most often. */
+  detail?: string;
+  refusal?: ComputerRefusal;
+}
+
 /**
  * Fired by the host on out-of-band events so ComputerService can emit
  * `computer.*` events and drive restart policy. Never called synchronously
@@ -375,4 +398,18 @@ export interface IComputerBridge {
     req: VerifyRequest,
     signal?: AbortSignal,
   ): Promise<VerifyResult>;
+
+  /**
+   * Trajectory recording: per-action before/after state, screenshots and
+   * arguments, plus an optional screen video.
+   *
+   * Optional because only a daemon-backed adapter can do it — the recorder
+   * lives in the daemon, so the in-process runtime and the null bridge have
+   * nothing to turn on. It is also daemon-global rather than per-session: the
+   * driver records every action that reaches it while enabled, and stopping
+   * stops whatever is running.
+   */
+  startRecording?(handle: ComputerHandle, req: RecordingRequest): Promise<RecordingState>;
+  stopRecording?(handle: ComputerHandle): Promise<RecordingState>;
+  recordingState?(handle: ComputerHandle): Promise<RecordingState>;
 }

@@ -1,5 +1,15 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "LOCALAPPDATA",
+    "APPDATA",
+    "USERPROFILE",
+    "HOME",
+    "XDG_DATA_HOME",
+    "GENERATORAI_COMPUTER_USE_AUTO_APPROVE",
+    "GENERATORAI_CUA_DRIVER_SOCKET",
+    "GENERATORAI_CUA_DRIVER_PATH"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
