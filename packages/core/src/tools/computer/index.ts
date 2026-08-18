@@ -114,7 +114,9 @@ const createSnapshotTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     'desktop application: it is cheaper and far more reliable than a screenshot, and the returned element ' +
     'indices are what every other tool targets. The indices are valid ONLY for the returned snapshotId, and ' +
     'any action invalidates them \u2014 always snapshot again after acting. When you already know what you are ' +
-    'looking for, pass `query`: it filters at the source and can cut the response by 30x on a large grid.',
+    'looking for, pass `query`: it filters at the source and can cut the response by 30x on a large grid. ' +
+    'A window too large to return whole comes back with only its first page of elements and a `clipped` ' +
+    'field \u2014 repeating the same call returns the same page, so narrow it with `query` instead.',
   owner: ctx.owner ?? 'computer-tools',
   requiredPermissions: permission('Read the contents of a desktop window'),
   parametersSchema: {
@@ -303,6 +305,28 @@ const SYNTHETIC_WARNING =
   'focused. It is disabled by default and always asks the user. Use the snapshot-based tools instead ' +
   'wherever the control appears in a snapshot.';
 
+/**
+ * The driver's Chromium/Electron escape hatch: it pixel-clicks this point to
+ * establish real renderer focus before delivering input. Posted keystrokes
+ * never reach those surfaces, so without it VS Code's terminal, Electron apps
+ * and web views silently swallow everything.
+ */
+const FOCUS_POINT_PROPERTIES = {
+  focusX: {
+    type: 'number',
+    description:
+      'Window-local screenshot-pixel X to click first, establishing focus. Needed for Chromium/Electron surfaces (VS Code terminal, Slack, Discord) where posted input is dropped. Read it off the snapshot screenshot, same convention as computer_click_point. Pass with focusY.',
+  },
+  focusY: { type: 'number', description: 'Window-local screenshot-pixel Y (see focusX).' },
+} as const;
+
+/** Reads the optional Chromium/Electron focus point off tool arguments. */
+function focusPoint(args: Record<string, unknown>): { x: number; y: number } | undefined {
+  const x = args['focusX'];
+  const y = args['focusY'];
+  return typeof x === 'number' && typeof y === 'number' ? { x, y } : undefined;
+}
+
 const createTypeTextTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   name: 'computer_type_text',
   description: `Type text into the focused window using synthetic keystrokes. ${SYNTHETIC_WARNING}`,
@@ -314,6 +338,16 @@ const createTypeTextTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       ...APP_TARGET_PROPERTIES,
       windowId: { type: 'number', description: 'Target window. Defaults to the focused window.' },
       text: { type: 'string', description: 'Text to type.' },
+      snapshotId: {
+        type: 'string',
+        description:
+          'Snapshot the element came from. Pass with elementIndex for XAML/WinUI hosts (Windows 11 File Explorer, Settings, Calculator, modern Notepad), which drop plain typed characters and must be written through the element.',
+      },
+      elementIndex: {
+        type: 'number',
+        description: 'Index of the text field to write into. Requires snapshotId.',
+      },
+      ...FOCUS_POINT_PROPERTIES,
     },
     required: ['text'],
     additionalProperties: false,
@@ -323,14 +357,73 @@ const createTypeTextTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     if ('error' in ref) return { ok: false, error: ref.error };
     const text = typeof args['text'] === 'string' ? args['text'] : undefined;
     if (text === undefined) return { ok: false, error: '`text` is required.' };
+    const focus = focusPoint(args);
+    const snapshotId = coerceString(args['snapshotId']);
+    const elementIndex = args['elementIndex'];
+    const element =
+      snapshotId && typeof elementIndex === 'number' ? { snapshotId, elementIndex } : undefined;
     const result = await ctx.computerService.act(callContext(ctx), ref, {
       type: 'typeText',
       target: windowTarget(args),
       text,
+      ...(focus ? { focus } : {}),
+      ...(element ? { element } : {}),
     });
     return actionPayload(result);
   },
 });
+
+/** Spellings a model reaches for, mapped to our closed modifier union. */
+const MODIFIER_ALIASES: ReadonlyMap<string, 'Alt' | 'Control' | 'Meta' | 'Shift'> = new Map([
+  ['alt', 'Alt'], ['opt', 'Alt'], ['option', 'Alt'],
+  ['ctrl', 'Control'], ['control', 'Control'],
+  ['cmd', 'Meta'], ['command', 'Meta'], ['meta', 'Meta'], ['super', 'Meta'], ['win', 'Meta'], ['windows', 'Meta'],
+  ['shift', 'Shift'],
+]);
+
+/**
+ * Splits a chord written into `key` — `"ctrl+\`"`, `"Meta+S"` — into modifiers
+ * and the key itself.
+ *
+ * Models write shortcuts the way humans do, and the schema cannot stop them.
+ * Forwarding the whole string as a key NAME is what broke: the driver could not
+ * resolve `ctrl+\``, fell back to synthetic input, and typed a bare `c` into the
+ * focused editor of the user's repository.
+ *
+ * Only leading segments that are known modifiers are consumed, so a literal
+ * `"+"` and unrecognised names survive untouched.
+ */
+export function parseKeyChord(raw: string): {
+  key: string;
+  modifiers: ReadonlyArray<'Alt' | 'Control' | 'Meta' | 'Shift'>;
+} {
+  const trimmed = raw.trim();
+  const unparsed = { key: trimmed, modifiers: [] as const };
+  if (!trimmed.includes('+') || trimmed === '+') return unparsed;
+
+  let key: string;
+  let modifierPart: string;
+  if (trimmed.endsWith('+')) {
+    // The key IS '+', so what precedes it must still end with a separator.
+    const body = trimmed.slice(0, -1);
+    if (!body.endsWith('+')) return unparsed;
+    key = '+';
+    modifierPart = body.slice(0, -1);
+  } else {
+    const split = trimmed.lastIndexOf('+');
+    key = trimmed.slice(split + 1).trim();
+    modifierPart = trimmed.slice(0, split);
+  }
+
+  const modifiers: Array<'Alt' | 'Control' | 'Meta' | 'Shift'> = [];
+  for (const segment of modifierPart.split('+')) {
+    const found = MODIFIER_ALIASES.get(segment.trim().toLowerCase());
+    // One unrecognised segment means this was never a chord.
+    if (!found) return unparsed;
+    if (!modifiers.includes(found)) modifiers.push(found);
+  }
+  return key.length > 0 ? { key, modifiers } : unparsed;
+}
 
 const createPressKeyTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   name: 'computer_press_key',
@@ -343,12 +436,17 @@ const createPressKeyTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     properties: {
       ...APP_TARGET_PROPERTIES,
       windowId: { type: 'number', description: 'Target window. Defaults to the focused window.' },
-      key: { type: 'string', description: 'Key name, e.g. "Enter", "Escape", "a".' },
+      key: {
+        type: 'string',
+        description:
+          'Key name, e.g. "Enter", "Escape", "a". A chord such as "Control+`" is also accepted and split.',
+      },
       modifiers: {
         type: 'array',
         items: { type: 'string', enum: ['Alt', 'Control', 'Meta', 'Shift'] },
         description: 'Modifiers held during the press.',
       },
+      ...FOCUS_POINT_PROPERTIES,
     },
     required: ['key'],
     additionalProperties: false,
@@ -356,18 +454,22 @@ const createPressKeyTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   handler: async (args) => {
     const ref = toAppRef(args);
     if ('error' in ref) return { ok: false, error: ref.error };
-    const key = coerceString(args['key']);
-    if (!key) return { ok: false, error: '`key` is required.' };
+    const rawKey = coerceString(args['key']);
+    if (!rawKey) return { ok: false, error: '`key` is required.' };
+    const chord = parseKeyChord(rawKey);
     const raw = Array.isArray(args['modifiers']) ? args['modifiers'] : [];
-    const modifiers = raw.filter(
+    const declared = raw.filter(
       (m): m is 'Alt' | 'Control' | 'Meta' | 'Shift' =>
         m === 'Alt' || m === 'Control' || m === 'Meta' || m === 'Shift',
     );
+    const modifiers = [...new Set([...declared, ...chord.modifiers])];
+    const focus = focusPoint(args);
     const result = await ctx.computerService.act(callContext(ctx), ref, {
       type: 'pressKey',
       target: windowTarget(args),
-      key,
+      key: chord.key,
       modifiers: modifiers.length > 0 ? modifiers : undefined,
+      ...(focus ? { focus } : {}),
     });
     return actionPayload(result);
   },
@@ -613,7 +715,10 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     'Start a desktop application that is not currently running, and wait until it has a window. Use this when ' +
     'computer_list_apps does not show the app you need. Give the display name, e.g. "Excel", "Notepad", ' +
     '"Calculator". Pass `url` to open a web page in the default browser instead of navigating one by hand. ' +
-    'Returns the appId to use with the other computer_* tools.',
+    'To open a SPECIFIC file or folder, pass its path in `arguments` — e.g. name "Code" with ' +
+    'arguments ["C:\\\\src\\\\myrepo"] opens that folder in one call. Launching the app bare and then ' +
+    'clicking through its Recent list or a file manager costs many more calls and usually lands on the ' +
+    'wrong window. Returns the appId to use with the other computer_* tools.',
   owner: ctx.owner ?? 'computer-tools',
   requiredPermissions: permission('Launch a desktop application'),
   parametersSchema: {
@@ -631,6 +736,14 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
           'Start a separate copy of the app instead of reusing a running one. Use when the app may already ' +
           'be open with the user’s own work in it, so you get your own window rather than typing into theirs.',
       },
+      arguments: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Command-line arguments for the app. The direct way to open a document or folder: ' +
+          'name "explorer.exe" with arguments ["C:\\\\Users\\\\me\\\\project"] opens that folder in one call, ' +
+          'instead of navigating a file manager by hand. Prefer this over driving an address bar.',
+      },
     },
     required: ['name'],
     additionalProperties: false,
@@ -639,11 +752,15 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     const name = coerceString(args['name']);
     if (!name) return { ok: false, error: '`name` is required.' };
     const url = coerceString(args['url']);
-    const { app, refusal } = await ctx.computerService.launchApp(
+    const launchArgs = Array.isArray(args['arguments'])
+      ? args['arguments'].filter((a): a is string => typeof a === 'string')
+      : undefined;
+    const { app, window, refusal } = await ctx.computerService.launchApp(
       callContext(ctx),
       name,
       url,
       args['newInstance'] === true,
+      launchArgs,
     );
     if (refusal || !app) {
       return { ok: false, refusal: refusal?.code, message: refusal?.message };
@@ -653,7 +770,13 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       appId: app.appId,
       name: app.name,
       pid: app.pid,
-      note: 'The window is ready to drive. Take a computer_snapshot next — clicking and setting values work without focusing it, so there is usually no need to bring it to the front.',
+      ...(window ? { windowId: window.id, windowTitle: window.title } : {}),
+      note: window
+        ? `The launch opened window ${window.id} ("${window.title}"). Pass that windowId to every ` +
+          'later call: this app can host several windows in one process, and without the id you will ' +
+          'read or click whichever one the user happens to have in front. Take a computer_snapshot ' +
+          'next — clicking and setting values work without focusing it.'
+        : 'The window is ready to drive. Take a computer_snapshot next — clicking and setting values work without focusing it, so there is usually no need to bring it to the front.',
     };
   },
 });

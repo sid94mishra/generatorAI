@@ -200,8 +200,27 @@ export type ActionRequest =
   | { type: 'setValue'; snapshotId: string; elementIndex: number; value: string }
   | { type: 'performAction'; snapshotId: string; elementIndex: number; actionName: string }
   | { type: 'clickPoint'; target: ComputerWindowTarget; x: number; y: number; button?: 'left' | 'right' }
-  | { type: 'typeText'; target: ComputerWindowTarget; text: string }
-  | { type: 'pressKey'; target: ComputerWindowTarget; key: string; modifiers?: readonly ComputerModifier[] }
+  // `focus` is the driver's Chromium/Electron form: it pixel-clicks that point
+  // to establish real renderer focus first, because posted input never reaches
+  // those surfaces. Window-local screenshot pixels, same convention as click.
+  //
+  // `element` is the XAML/WinUI form. Those hosts consume only system-queue
+  // input, so the driver routes through ValuePattern.SetValue instead and
+  // requires the element to write into. Windows 11 File Explorer is one.
+  | {
+      type: 'typeText';
+      target: ComputerWindowTarget;
+      text: string;
+      focus?: { x: number; y: number };
+      element?: { snapshotId: string; elementIndex: number };
+    }
+  | {
+      type: 'pressKey';
+      target: ComputerWindowTarget;
+      key: string;
+      modifiers?: readonly ComputerModifier[];
+      focus?: { x: number; y: number };
+    }
   | { type: 'pasteText'; target: ComputerWindowTarget; text: string }
   | { type: 'scroll'; target: ComputerWindowTarget; deltaX: number; deltaY: number; x?: number; y?: number }
   | {
@@ -258,6 +277,15 @@ export interface ListWindowsResult {
 
 export interface LaunchAppResult {
   app?: ComputerAppIdentity;
+  /**
+   * The window the launch produced.
+   *
+   * Single-instance apps (VS Code, Explorer, Office) hand the request to a
+   * process that is already running, so the returned pid can own a dozen
+   * unrelated windows. Naming the new one is the only way a caller can drive
+   * what it just opened rather than whatever the user had in front.
+   */
+  window?: { id: number; title: string };
   refusal?: ComputerRefusal;
 }
 
@@ -361,7 +389,7 @@ export interface IComputerBridge {
   launchApp(
     handle: ComputerHandle,
     name: string,
-    opts?: { url?: string; newInstance?: boolean },
+    opts?: { url?: string; newInstance?: boolean; args?: readonly string[] },
     signal?: AbortSignal,
   ): Promise<LaunchAppResult>;
 
@@ -412,4 +440,7 @@ export interface IComputerBridge {
   startRecording?(handle: ComputerHandle, req: RecordingRequest): Promise<RecordingState>;
   stopRecording?(handle: ComputerHandle): Promise<RecordingState>;
   recordingState?(handle: ComputerHandle): Promise<RecordingState>;
+
+  /** Main display in physical pixels — the space screenshots and clicks use. */
+  screenSize?(handle: ComputerHandle): Promise<{ width: number; height: number } | null>;
 }

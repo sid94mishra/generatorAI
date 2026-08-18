@@ -113,7 +113,11 @@ export class PendingConsentStore implements IComputerConsentStore {
       // Still emitted, so the transcript and the event stream show exactly what
       // would have been asked. Never `always_allow`: a dev shortcut must not
       // write a durable grant that outlives the dev session.
-      await this.emitPrompt(request).catch(() => undefined);
+      //
+      // NOT awaited: the bus serialises emits per scope, so one stuck delivery
+      // parked the approval behind it until the prompt expired and the action
+      // came back `consent_denied` — with auto-approve switched on.
+      void this.emitPrompt(request).catch(() => undefined);
       this.logger.warn?.(
         `[PendingConsentStore] auto-approved ${request.action} on ${request.app.name} (development)`,
       );

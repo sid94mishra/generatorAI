@@ -81,7 +81,28 @@ class FakeBridge implements IComputerBridge {
   async start(opts: { workspaceId: string }): Promise<ComputerHandle> {
     return { workspaceId: opts.workspaceId, provider: this.id, providerVersion: '1', hostRef: 'fake', operational: true };
   }
-  async stop(): Promise<void> {}
+  async stop(): Promise<void> { this.recording = false; }
+
+  recordingStarts: unknown[] = [];
+  recording = false;
+  /** Set to make the driver refuse a start, exercising the disarm path. */
+  refuseRecording = false;
+
+  async startRecording(_h: ComputerHandle, req: unknown) {
+    if (this.refuseRecording) {
+      return { recording: false, refusal: { code: 'provider_unavailable' as const, message: 'no' } };
+    }
+    this.recordingStarts.push(req);
+    this.recording = true;
+    return { recording: true, outputDir: '/tmp/run' };
+  }
+  async stopRecording() {
+    this.recording = false;
+    return { recording: false };
+  }
+  async recordingState() {
+    return { recording: this.recording };
+  }
 
   async listApps(): Promise<ListAppsResult> {
     return {
@@ -311,6 +332,280 @@ describe('ComputerService blocklist', () => {
   });
 });
 
+describe('ComputerService live preview', () => {
+  beforeEach(() => { delete process.env['GENERATORAI_COMPUTER_USE']; });
+
+  const enabled = () => ({ ...baseConfig(), enabled: true });
+
+  it('re-arms the preview on a new session after the old one goes away', async () => {
+    // Sessions are closed by the idle sweeper and recreated by the next
+    // action. Recording lives on the session, so without re-arming the panel
+    // keeps showing a live badge while nothing is being captured.
+    const { service, bridge } = makeService([SLACK], enabled());
+    await service.startRecording(CTX, { outputDir: '/tmp/run' });
+    expect(bridge.recordingStarts).toHaveLength(1);
+
+    await service.stop(CTX.workspaceId, 'idle');
+    await service.listApps(CTX);
+
+    expect(bridge.recordingStarts).toHaveLength(2);
+    expect((await service.recordingState(CTX.workspaceId)).recording).toBe(true);
+  });
+
+  it('reports an armed preview as on while no session is open', async () => {
+    // Nothing is captured in that gap, but nothing happens in it either: no
+    // session means no agent activity to miss.
+    const { service } = makeService([SLACK], enabled());
+    await service.startRecording(CTX, { outputDir: '/tmp/run' });
+    await service.stop(CTX.workspaceId, 'idle');
+
+    expect((await service.recordingState(CTX.workspaceId)).recording).toBe(true);
+  });
+
+  it('stops re-arming once the operator turns the preview off', async () => {
+    const { service, bridge } = makeService([SLACK], enabled());
+    await service.startRecording(CTX, { outputDir: '/tmp/run' });
+    await service.stopRecording(CTX.workspaceId);
+
+    await service.stop(CTX.workspaceId, 'idle');
+    await service.listApps(CTX);
+
+    expect(bridge.recordingStarts).toHaveLength(1);
+    expect((await service.recordingState(CTX.workspaceId)).recording).toBe(false);
+  });
+
+  it('disarms after a stop issued with no session open', async () => {
+    const { service, bridge } = makeService([SLACK], enabled());
+    await service.startRecording(CTX, { outputDir: '/tmp/run' });
+    await service.stop(CTX.workspaceId, 'idle');
+    await service.stopRecording(CTX.workspaceId);
+
+    await service.listApps(CTX);
+
+    expect(bridge.recordingStarts).toHaveLength(1);
+  });
+
+  it('gives up re-arming when the driver refuses, rather than retrying forever', async () => {
+    const { service, bridge } = makeService([SLACK], enabled());
+    await service.startRecording(CTX, { outputDir: '/tmp/run' });
+    await service.stop(CTX.workspaceId, 'idle');
+
+    bridge.refuseRecording = true;
+    await service.listApps(CTX);
+    expect((await service.recordingState(CTX.workspaceId)).recording).toBe(false);
+
+    bridge.refuseRecording = false;
+    await service.stop(CTX.workspaceId, 'idle');
+    await service.listApps(CTX);
+    expect(bridge.recordingStarts).toHaveLength(1);
+  });
+});
+
+describe('ComputerService blind input', () => {
+  beforeEach(() => { delete process.env['GENERATORAI_COMPUTER_USE']; });
+
+  const enabled = () => ({ ...baseConfig(), enabled: true, allowSyntheticFallback: true });
+  const press = {
+    type: 'pressKey' as const,
+    target: { app: { appId: SLACK.id, name: SLACK.name, pid: SLACK.pid }, window: { by: 'focused' } },
+    key: 'a',
+  } satisfies ActionRequest;
+
+  /** Makes the bridge deliver synthetic input the driver cannot confirm. */
+  function goBlind(bridge: FakeBridge) {
+    bridge.act = async (_h, req) => {
+      bridge.actCalls.push(req);
+      return {
+        ok: true,
+        snapshot: null,
+        screenshot: null,
+        action: { path: 'synthetic' as const, verification: { state: 'unverified' as const } },
+      };
+    };
+  }
+
+  it('stops the agent once unconfirmed synthetic input piles up', async () => {
+    const { service, bridge } = makeService([SLACK], enabled());
+    goBlind(bridge);
+
+    for (let i = 0; i < 5; i += 1) {
+      expect((await service.act(CTX, { by: 'appId', appId: SLACK.id }, press)).refusal).toBeUndefined();
+    }
+    const blocked = await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+
+    expect(blocked.refusal?.code).toBe('provider_unavailable');
+    expect(blocked.refusal?.message).toMatch(/could not be confirmed/);
+    expect(bridge.actCalls).toHaveLength(5);
+  });
+
+  it('tells the agent how to prove the window is still reachable', async () => {
+    const { service, bridge } = makeService([SLACK], enabled());
+    goBlind(bridge);
+    for (let i = 0; i < 5; i += 1) await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+
+    const message = (await service.act(CTX, { by: 'appId', appId: SLACK.id }, press)).refusal?.message ?? '';
+    expect(message).toMatch(/Stop sending input/);
+    expect(message).toMatch(/computer_snapshot/);
+  });
+
+  it('is cleared by a snapshot that finds the window focused', async () => {
+    // Chromium/Electron hosts never confirm synthetic input, so without this
+    // the breaker fired on the 6th keystroke of every VS Code run while the
+    // accessibility layer was demonstrably healthy.
+    const { service, bridge } = makeService([SLACK], enabled());
+    goBlind(bridge);
+    for (let i = 0; i < 5; i += 1) await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+
+    const read = await service.snapshot(CTX, { by: 'appId', appId: SLACK.id });
+    expect(read.snapshot?.window.focused).toBe(true);
+
+    for (let i = 0; i < 5; i += 1) {
+      expect((await service.act(CTX, { by: 'appId', appId: SLACK.id }, press)).refusal).toBeUndefined();
+    }
+  });
+
+  it('records the stop in the audit trail', async () => {
+    const { service, bridge, audit } = makeService([SLACK], enabled());
+    goBlind(bridge);
+    for (let i = 0; i < 6; i += 1) await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+
+    expect(audit.entries.some((e) => e.refusalCode === 'provider_unavailable')).toBe(true);
+  });
+
+  it('forgives a confirmed synthetic action in between', async () => {
+    // Synthetic input landing proves the driver can still reach the window, so
+    // the streak is not evidence of a blind session.
+    const { service, bridge } = makeService([SLACK], enabled());
+    goBlind(bridge);
+
+    for (let i = 0; i < 4; i += 1) await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+    bridge.act = async (_h, req) => {
+      bridge.actCalls.push(req);
+      return {
+        ok: true,
+        snapshot: null,
+        screenshot: null,
+        action: { path: 'synthetic' as const, verification: { state: 'verified' as const } },
+      };
+    };
+    await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+    goBlind(bridge);
+    for (let i = 0; i < 5; i += 1) {
+      expect((await service.act(CTX, { by: 'appId', appId: SLACK.id }, press)).refusal).toBeUndefined();
+    }
+  });
+
+  it('is not reset by an accessibility action that succeeds alongside blind input', async () => {
+    // Measured against a real run: `bring_to_front` kept returning verified
+    // while every keystroke was rejected by the Windows foreground lock. If
+    // that cleared the streak the breaker would never fire when it matters.
+    const { service, bridge } = makeService([SLACK], enabled());
+    let syntheticTurn = true;
+    bridge.act = async (_h, req) => {
+      bridge.actCalls.push(req);
+      const blind = syntheticTurn;
+      return {
+        ok: true,
+        snapshot: null,
+        screenshot: null,
+        action: {
+          path: blind ? ('synthetic' as const) : ('accessibility' as const),
+          verification: { state: blind ? ('unverified' as const) : ('verified' as const) },
+        },
+      };
+    };
+    for (let i = 0; i < 5; i += 1) {
+      syntheticTurn = true;
+      await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+      syntheticTurn = false;
+      await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+    }
+    syntheticTurn = true;
+    const blocked = await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+
+    expect(blocked.refusal?.code).toBe('provider_unavailable');
+  });
+
+  it('leaves accessibility-driven actions alone', async () => {
+    // Those are verifiable and do not touch the user's focus, so they must not
+    // be caught by a control aimed at blind synthetic input.
+    const { service, bridge } = makeService([SLACK], enabled());
+    bridge.act = async (_h, req) => {
+      bridge.actCalls.push(req);
+      return {
+        ok: true,
+        snapshot: null,
+        screenshot: null,
+        action: { path: 'accessibility' as const, verification: { state: 'unverified' as const } },
+      };
+    };
+    for (let i = 0; i < 8; i += 1) {
+      expect((await service.act(CTX, { by: 'appId', appId: SLACK.id }, press)).refusal).toBeUndefined();
+    }
+  });
+});
+
+describe('ComputerService run-scoped consent', () => {
+  beforeEach(() => { delete process.env['GENERATORAI_COMPUTER_USE']; });
+
+  const enabled = () => ({ ...baseConfig(), enabled: true, allowSyntheticFallback: true });
+  const press = {
+    type: 'pressKey' as const,
+    target: { app: { appId: SLACK.id, name: SLACK.name, pid: SLACK.pid }, window: { by: 'focused' } },
+    key: 'a',
+  } satisfies ActionRequest;
+
+  it('stops asking for the rest of the run, including synthetic input', async () => {
+    // A standing grant deliberately never covers synthetic, so before this the
+    // only way through a long task was answering a prompt every few actions —
+    // and an unanswered one expires as a denial and ends the run.
+    const { service, consent } = makeService([SLACK], enabled());
+    consent.answer = 'allow_run';
+    await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+    expect(consent.prompts).toHaveLength(1);
+
+    consent.answer = 'deny';
+    for (let i = 0; i < 3; i += 1) {
+      expect((await service.act(CTX, { by: 'appId', appId: SLACK.id }, press)).refusal).toBeUndefined();
+    }
+    expect(consent.prompts).toHaveLength(1);
+  });
+
+  it('is dropped when the desktop session ends', async () => {
+    const { service, consent } = makeService([SLACK], enabled());
+    consent.answer = 'allow_run';
+    await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+
+    await service.stop(CTX.workspaceId, 'idle');
+    consent.answer = 'deny';
+
+    expect((await service.act(CTX, { by: 'appId', appId: SLACK.id }, press)).refusal?.code).toBe(
+      'consent_denied',
+    );
+  });
+
+  it('does not leak to another chat', async () => {
+    const { service, consent } = makeService([SLACK], enabled());
+    consent.answer = 'allow_run';
+    await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+
+    consent.answer = 'deny';
+    const otherChat = { ...CTX, chatId: 'a-different-chat' };
+    expect((await service.act(otherChat, { by: 'appId', appId: SLACK.id }, press)).refusal?.code).toBe(
+      'consent_denied',
+    );
+  });
+
+  it('is never written to the persistent grant store', async () => {
+    // It must not outlive the run, so nothing about it belongs on disk.
+    const { service, consent } = makeService([SLACK], enabled());
+    consent.answer = 'allow_run';
+    await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+
+    expect(consent.stored.size).toBe(0);
+  });
+});
+
 describe('ComputerService consent', () => {
   const enabled = () => ({ ...baseConfig(), enabled: true });
 
@@ -474,7 +769,10 @@ describe('ComputerService snapshot fencing', () => {
     const result = await service.act(CTX, { by: 'appId', appId: SLACK.id }, {
       type: 'performAction', snapshotId, elementIndex: 0, actionName: 'AXDelete',
     });
-    expect(result.refusal?.code).toBe('stale_snapshot');
+    // Not `stale_snapshot`: the snapshot is current, so telling the agent it is
+    // stale sends it round a re-snapshot loop that can never help.
+    expect(result.refusal?.code).toBe('unsupported_action');
+    expect(result.refusal?.message).toMatch(/AXPress/);
     expect(bridge.actCalls).toHaveLength(0);
   });
 

@@ -110,6 +110,52 @@ describe('evaluateBlocklist', () => {
     expect(evaluateBlocklist({ name: 'GeneratorAI' }).blocked).toBe(true);
   });
 
+  it('does not block someone else\u2019s window for merely naming us in its title', () => {
+    // Our own name is matched on identity — bundle id, executable, app name —
+    // never on a title bar. A user working ON this product has our name in
+    // their editor, their browser tab and their file manager; blocking those
+    // hid them from `listApps` entirely and made the agent unable to open them.
+    for (const candidate of [
+      {
+        id: 'C:\\Users\\dev\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
+        name: 'Visual Studio Code',
+        windowTitles: ['package.json - GeneratorAI - Visual Studio Code'],
+      },
+      { name: 'Google Chrome', windowTitles: ['GeneratorAI \u2014 localhost:5173'] },
+      { name: 'explorer.exe', windowTitles: ['GeneratorAI'] },
+    ]) {
+      expect(evaluateBlocklist(candidate).blocked).toBe(false);
+    }
+  });
+
+  it('still blocks our own app however the provider identifies it', () => {
+    // The Windows driver reports appId as the executable path, macOS as a
+    // bundle id. Dropping the title dimension must not cost us any of these.
+    expect(
+      evaluateBlocklist({
+        id: 'C:\\Program Files\\GeneratorAI\\GeneratorAI.exe',
+        name: 'GeneratorAI',
+        windowTitles: ['GeneratorAI'],
+      }),
+    ).toMatchObject({ blocked: true, matchedOn: 'self' });
+    expect(evaluateBlocklist({ name: 'GeneratorAI Desktop' })).toMatchObject({
+      blocked: true,
+      matchedOn: 'self',
+    });
+  });
+
+  it('keeps scanning titles for every fragment that is not our own name', () => {
+    // The exemption is scoped to self fragments only — a vault or a shell
+    // surfacing under an innocuous host is exactly what titles are for.
+    expect(evaluateBlocklist({ name: 'Google Chrome', windowTitles: ['1Password \u2014 Unlock'] })).toMatchObject({
+      blocked: true,
+      matchedOn: 'windowTitle',
+    });
+    expect(
+      evaluateBlocklist({ name: 'ApplicationFrameHost', windowTitles: ['Windows PowerShell'] }),
+    ).toMatchObject({ blocked: true, matchedOn: 'windowTitle' });
+  });
+
   it('honours the allowlist for an exact bundle id', () => {
     expect(
       evaluateBlocklist({ id: 'com.apple.terminal', name: 'Terminal' }, { allowlist: ['com.apple.terminal'] })

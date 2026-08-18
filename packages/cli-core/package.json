@@ -1,0 +1,32 @@
+{
+  "name": "@generatorai/cli-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@generatorai/client-core": "workspace:*",
+    "@generatorai/client-runtime": "workspace:*",
+    "@generatorai/client-transport": "workspace:*",
+    "@generatorai/secrets": "workspace:*",
+    "@generatorai/shared": "workspace:*",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "commander": "^13.1.0"
+  }
+}

@@ -31,15 +31,14 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(fetchImpl: ApiFetch, path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(fetchImpl: ApiFetch, path: string, init?: RequestInit): Promise<T> {
   const res = await fetchImpl(path, init);
   if (!res.ok) {
     // Prefer the server's message: it distinguishes "missing scope" from
     // "not found", which the status code alone does not.
     let detail = `${res.status} ${res.statusText}`;
     try {
-      const body = (await res.json()) as { error?: string; message?: string };
-      detail = body.error ?? body.message ?? detail;
+      detail = describeErrorBody(await res.json()) ?? detail;
     } catch {
       // Non-JSON error body; the status line is all we have.
     }
@@ -49,11 +48,75 @@ async function request<T>(fetchImpl: ApiFetch, path: string, init?: RequestInit)
   return (await res.json()) as T;
 }
 
-const json = (body: unknown): RequestInit => ({
+/**
+ * Renders an error body as a sentence.
+ *
+ * `error` is a string on some routes and `{ code, message }` on others, and a
+ * failed Zod parse puts the whole issue array in `message`. Interpolating any
+ * of those directly yields "[object Object]", which tells the user nothing
+ * about what they typed wrong.
+ */
+function describeErrorBody(body: unknown): string | null {
+  if (typeof body === 'string') return body;
+  if (!body || typeof body !== 'object') return null;
+
+  const shape = body as { error?: unknown; message?: unknown };
+  const candidate = shape.error ?? shape.message;
+
+  if (typeof candidate === 'string') return formatZodIssues(candidate) ?? candidate;
+  if (candidate && typeof candidate === 'object') {
+    const nested = (candidate as { message?: unknown }).message;
+    if (typeof nested === 'string') return formatZodIssues(nested) ?? nested;
+    if (Array.isArray(nested)) return summariseIssues(nested);
+    return JSON.stringify(candidate);
+  }
+  return null;
+}
+
+/** Zod's `error.message` is a JSON array of issues; unpack it when it is. */
+function formatZodIssues(message: string): string | null {
+  if (!message.trimStart().startsWith('[')) return null;
+  try {
+    const issues: unknown = JSON.parse(message);
+    return Array.isArray(issues) ? summariseIssues(issues) : null;
+  } catch {
+    return null;
+  }
+}
+
+function summariseIssues(issues: unknown[]): string {
+  return issues
+    .map((issue) => {
+      const i = issue as { path?: unknown[]; message?: string };
+      const where = Array.isArray(i.path) && i.path.length ? `${i.path.join('.')}: ` : '';
+      return `${where}${i.message ?? 'invalid'}`;
+    })
+    .join('; ');
+}
+
+export const json = (body: unknown): RequestInit => ({
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify(body),
 });
+
+/** Same as `json` but for the verbs the server uses for partial updates. */
+export const jsonWith = (method: 'PUT' | 'PATCH' | 'DELETE', body?: unknown): RequestInit => ({
+  method,
+  ...(body === undefined
+    ? {}
+    : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+});
+
+/** Builds `?a=1&b=2`, omitting undefined values. Returns '' when empty. */
+export function qs(params: Record<string, string | number | boolean | undefined | null>): string {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) q.set(key, String(value));
+  }
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
 
 // ── Wire shapes ─────────────────────────────────────────────────
 
@@ -837,7 +900,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
         request<void>(fetchImpl, `/api/chats/${id}/permission-mode`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ permissionMode: mode }),
+          // `SetChatPermissionModeSchema` names this `mode`.
+          body: JSON.stringify({ mode }),
         }),
     },
 

@@ -86,6 +86,32 @@ export async function readCursorSince(
 }
 
 /**
+ * Whether a turn's captures are scoped to a target window.
+ *
+ * The recorder falls back to grabbing the WHOLE DISPLAY when an action has no
+ * target process — `launch_app` is the common case, since the app it is asked
+ * to start does not exist yet. Those frames show whatever the operator had on
+ * screen, including the lock screen, which breaks the promise the preview makes
+ * about capturing only the agent's window.
+ *
+ * The driver says so itself in `evidence.json`: a real capture is
+ * `{status: 'captured'}`, a fallback is
+ * `{status: 'not_applicable', classification: 'no_target_pid'}`. Missing or
+ * unreadable evidence counts as unscoped, so this fails closed.
+ */
+export async function isWindowScopedTurn(turnDir: string): Promise<boolean> {
+  try {
+    const evidence = JSON.parse(await fs.readFile(path.join(turnDir, 'evidence.json'), 'utf8')) as Record<
+      string,
+      { state?: { status?: unknown } } | undefined
+    >;
+    return (['after', 'before'] as const).some((phase) => evidence[phase]?.state?.status === 'captured');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Turn folders that have appeared since we last looked.
  *
  * A turn is only reported once it has a readable `action.json`, so a folder
@@ -113,6 +139,11 @@ export async function readFramesSince(
         unknown
       >;
     } catch {
+      continue;
+    }
+
+    if (!(await isWindowScopedTurn(path.join(runDir, name)))) {
+      seen.add(name);
       continue;
     }
 

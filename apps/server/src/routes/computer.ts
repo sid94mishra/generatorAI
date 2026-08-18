@@ -22,8 +22,8 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import type { Container } from '../composition-root.js';
-import { screenCastFile } from '../computer/screenCast.js';
-import { readCursorSince, readFramesSince } from '../computer/previewStream.js';
+import { screenCastFile, CAST_FILE as SCREEN_CAST_FILE } from '../computer/screenCast.js';
+import { readCursorSince, readFramesSince, isWindowScopedTurn } from '../computer/previewStream.js';
 
 type WorkspaceIdParams = { id: string };
 
@@ -31,25 +31,37 @@ function idOf(req: Request<WorkspaceIdParams>): string {
   return String((req.params as WorkspaceIdParams).id ?? '');
 }
 
-/** Newest recorder run directory, or null when nothing has been recorded. */
-async function newestRun(root: string): Promise<string | null> {  let runs: string[];
+/**
+ * Newest recorder run directory that actually holds something, or null.
+ *
+ * Restarting a preview mints a fresh run folder, so the newest one is routinely
+ * empty while the run worth watching sits behind it — measured as a 0-turn
+ * folder shadowing 20 turns and a 406 MB video, which made the panel report
+ * "no recording yet". An empty run recorded nothing, so it is never the answer.
+ */
+async function newestRun(root: string): Promise<string | null> {
+  let runs: string[];
   try {
     runs = await fs.readdir(root);
   } catch {
     return null;
   }
   let best: { dir: string; at: number } | null = null;
+  let newest: { dir: string; at: number } | null = null;
   for (const run of runs) {
     const dir = path.join(root, run);
     try {
       const stat = await fs.stat(dir);
       if (!stat.isDirectory()) continue;
-      if (!best || stat.mtimeMs > best.at) best = { dir, at: stat.mtimeMs };
+      if (!newest || stat.mtimeMs > newest.at) newest = { dir, at: stat.mtimeMs };
+      const entries = await fs.readdir(dir);
+      const hasContent = entries.some((e) => e.startsWith('turn-') || e === SCREEN_CAST_FILE);
+      if (hasContent && (!best || stat.mtimeMs > best.at)) best = { dir, at: stat.mtimeMs };
     } catch {
       // Vanished between readdir and stat — skip it.
     }
   }
-  return best?.dir ?? null;
+  return (best ?? newest)?.dir ?? null;
 }
 
 /**
@@ -62,12 +74,13 @@ async function newestRun(root: string): Promise<string | null> {  let runs: stri
  * PNGs come from Windows Graphics Capture scoped to the target window, so they
  * survive locking, occlusion and other windows entirely.
  *
- * Turns without an `action.json` are skipped, and that is a privacy rule rather
- * than tidiness. The recorder opens a turn folder and takes a `before` frame
- * before the target window is resolved, so if the run ends there the capture it
- * leaves behind is a full-display grab of whatever the operator had on screen —
- * measured at 1920x1200 against 1918x1138 for real window captures. No agent
- * action happened in such a turn, so nothing of value is lost by dropping it.
+ * Turns without an `action.json` are skipped, and so are turns whose captures
+ * the driver did not scope to a target window — both are privacy rules rather
+ * than tidiness. The recorder grabs the WHOLE DISPLAY when an action has no
+ * target process: an abandoned turn, or a `launch_app` for an app that does not
+ * exist yet. Measured at 1920x1200 against 1918x1138 for real window captures,
+ * and observed showing an unrelated chat app and a lock screen. No agent action
+ * is visible in such a frame anyway, so nothing of value is lost.
  */
 async function replayTurns(runDir: string): Promise<Array<Record<string, unknown>>> {
   let entries: string[];
@@ -85,6 +98,7 @@ async function replayTurns(runDir: string): Promise<Array<Record<string, unknown
       // No action ran in this turn, so its frames are not window-scoped.
       continue;
     }
+    if (!(await isWindowScopedTurn(path.join(runDir, name)))) continue;
     const frames: string[] = [];
     for (const kind of ['before', 'click', 'after']) {
       try {
@@ -166,7 +180,7 @@ async function tailFile(
 const ConsentBodySchema = z.object({
   requestId: z.string().min(1),
   appIdentity: z.string().min(1),
-  decision: z.enum(['allow_once', 'always_allow', 'deny']),
+  decision: z.enum(['allow_once', 'allow_run', 'always_allow', 'deny']),
 });
 
 const RuntimeActionSchema = z.object({ action: z.enum(['start', 'restart', 'stop']) });
@@ -349,9 +363,15 @@ export function createComputerRoutes(container: Container): Router {
         { workspaceId, workspaceRoot, chatId: 'system' },
         { outputDir },
       );
-      const cast = started.refusal || !parsed.data.screenVideo
-        ? { active: false }
-        : screenCast.start(workspaceId, started.outputDir ?? outputDir, parsed.data.windowTitle);
+      const cast =
+        started.refusal || !parsed.data.screenVideo
+          ? { active: false }
+          : screenCast.start(
+              workspaceId,
+              started.outputDir ?? outputDir,
+              parsed.data.windowTitle,
+              await computerService.screenSize(workspaceId),
+            );
       res.json({ ...started, cast });
     } catch (err) {
       next(err);
@@ -574,12 +594,10 @@ export function createComputerRoutes(container: Container): Router {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such frame' } });
         return;
       }
-      // Same rule as the index: a turn with no action never resolved a target
-      // window, so its frame is a full-display grab. Refuse it here too, or a
-      // client holding a stale index could still pull the operator's screen.
-      try {
-        await fs.access(path.join(run, turn, 'action.json'));
-      } catch {
+      // Same rule as the index: only frames the driver scoped to a target
+      // window may be served. Checked here too, or a client holding a stale
+      // index could still pull a full-display grab of the operator's screen.
+      if (!(await isWindowScopedTurn(path.join(run, turn)))) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such frame' } });
         return;
       }

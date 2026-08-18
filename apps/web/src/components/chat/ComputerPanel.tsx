@@ -3,10 +3,10 @@
 //
 // Two views, and the difference matters:
 //
-//   • Frame — the PNG the driver captured of the TARGET WINDOW each time the
+//   • Now — the PNG the driver captured of the TARGET WINDOW each time the
 //     agent read it. Never the whole screen. This is a record of the agent's
 //     perception, not a remote desktop, and it is always available.
-//   • Video — playback of the run. Two sources, and which one you get depends
+//   • Replay — play the run back. Two sources, and which one you get depends
 //     on how the preview was started:
 //       – the driver's per-turn window captures, played as a sequence. This is
 //         the default and the only one that works window-scoped, over RDP, or
@@ -165,6 +165,8 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
   const [previewFrame, setPreviewFrame] = useState<PreviewFrame | null>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [windowBounds, setWindowBounds] = useState<WindowBounds | null>(null);
+  /** Natural pixel size of the live frame — the space its click point is in. */
+  const [frameSize, setFrameSize] = useState<{ w: number; h: number } | null>(null);
   const [turns, setTurns] = useState<TurnIndexEntry[]>([]);
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -298,13 +300,33 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
   // Screen coordinates onto the rendered frame. The recorder reports the cursor
   // against the whole desktop but captures a single window, so without the
   // window's origin the pointer lands somewhere else entirely.
+  const lastCursorRef = useRef<{ left: number; top: number } | null>(null);
   const cursorOnFrame = useMemo(() => {
-    if (!cursor || !windowBounds || windowBounds.w <= 0 || windowBounds.h <= 0) return null;
-    const left = ((cursor.x - windowBounds.x) / windowBounds.w) * 100;
-    const top = ((cursor.y - windowBounds.y) / windowBounds.h) * 100;
-    if (left < -2 || left > 102 || top < -2 || top > 102) return null;
-    return { left, top };
-  }, [cursor, windowBounds]);
+    // The action's own click point is already in the frame's pixel space, so it
+    // needs no conversion and cannot be thrown off by the wrong window bounds.
+    // On a multi-monitor desktop the cursor stream reports points like x=4474
+    // while the bounds feed flips between monitors, which put every sample out
+    // of range and drew nothing at all.
+    if (previewFrame?.point && frameSize && frameSize.w > 0 && frameSize.h > 0) {
+      lastCursorRef.current = {
+        left: (previewFrame.point.x / frameSize.w) * 100,
+        top: (previewFrame.point.y / frameSize.h) * 100,
+      };
+      return lastCursorRef.current;
+    }
+    if (cursor && windowBounds && windowBounds.w > 0 && windowBounds.h > 0) {
+      const left = ((cursor.x - windowBounds.x) / windowBounds.w) * 100;
+      const top = ((cursor.y - windowBounds.y) / windowBounds.h) * 100;
+      if (left >= -2 && left <= 102 && top >= -2 && top <= 102) {
+        lastCursorRef.current = { left, top };
+        return lastCursorRef.current;
+      }
+    }
+    // Hold the last known spot rather than blinking out. The agent's pointer
+    // does not stop existing between actions, and a marker that disappears for
+    // seconds at a time reads as the feature being broken.
+    return lastCursorRef.current;
+  }, [cursor, windowBounds, previewFrame, frameSize]);
 
   // The replay index. Kept current while the Video tab is open so a finished
   // run stays watchable — the captures outlive the driver session that made
@@ -426,7 +448,7 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
   );
 
   const answerConsent = useCallback(
-    async (decision: 'allow_once' | 'always_allow' | 'deny') => {
+    async (decision: 'allow_once' | 'allow_run' | 'always_allow' | 'deny') => {
       if (!workspaceId || !consent) return;
       setAnswering(true);
       try {
@@ -730,7 +752,7 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
               )}
             >
               {mode === 'frame' ? <Image className="h-3 w-3" /> : <Video className="h-3 w-3" />}
-              {mode === 'frame' ? 'Frame' : 'Video'}
+              {mode === 'frame' ? 'Now' : 'Replay'}
             </button>
           ))}
         </div>
@@ -760,11 +782,11 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
               type="button"
               disabled={recordingBusy || !workspaceId}
               onClick={() => void togglePreview(true)}
-              className="rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-subtle disabled:opacity-50"
+              className="flex items-center gap-1 rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-subtle disabled:opacity-50"
               title="Also record a screen video. Needs ffmpeg, captures the whole display, and records the lock screen if the workstation locks."
             >
               <Video className="h-3 w-3" />
-              <span className="sr-only">Live preview with a screen video recording</span>
+              + screen video
             </button>
           )}
         </div>
@@ -772,9 +794,14 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
 
       {recording.recording && (
         <div className="shrink-0 border-b border-border bg-subtle/50 px-3 py-1.5 text-[11px] text-muted-foreground">
-          {recording.cast?.active
-            ? 'Live preview on, plus a whole-screen video recording.'
-            : 'Live preview on — the agent’s window and cursor. Nothing else on screen is captured.'}
+          {recording.cast?.active ? (
+            <>
+              Live preview on. <span className="text-foreground">Now</span> updates once per action;
+              open <span className="text-foreground">Replay</span> for the smooth screen video.
+            </>
+          ) : (
+            'Live preview on — the agent’s window and cursor. Nothing else on screen is captured.'
+          )}
         </div>
       )}
       {recording.detail && !recording.recording && (
@@ -799,7 +826,7 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
             />
             <span className="min-w-0 flex-1 truncate text-xs text-foreground">
               {runtime.state === 'stopped'
-                ? 'Desktop driver is not started'
+                ? 'Desktop driver idle — starts on its own'
                 : runtime.state === 'degraded'
                   ? 'Desktop driver reports problems'
                   : 'Desktop driver unavailable'}
@@ -811,12 +838,17 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
                 onClick={() => void controlRuntime(runtime.state === 'stopped' ? 'start' : 'restart')}
                 className="shrink-0 rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-foreground transition-colors hover:bg-subtle disabled:opacity-50"
               >
-                {runtimeBusy ? 'Working…' : runtime.state === 'stopped' ? 'Start' : 'Restart'}
+                {runtimeBusy ? 'Working…' : runtime.state === 'stopped' ? 'Start now' : 'Restart'}
               </button>
             )}
           </div>
-          {runtime.detail && (
-            <p className="mt-1 text-[11px] text-muted-foreground">{runtime.detail}</p>
+          {runtime.state === 'stopped' ? (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              The agent opens a session itself the first time it touches the desktop. Starting one
+              here only saves that first wait.
+            </p>
+          ) : (
+            runtime.detail && <p className="mt-1 text-[11px] text-muted-foreground">{runtime.detail}</p>
           )}
         </div>
       )}
@@ -875,6 +907,18 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
                 className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 Allow once
+              </button>
+              {/* The only answer that covers synthetic input without asking
+                  again. Offered because an unanswered prompt expires as a
+                  denial and ends the run — the common way a long task dies. */}
+              <button
+                type="button"
+                disabled={answering}
+                onClick={() => void answerConsent('allow_run')}
+                title="Approve every desktop action for the rest of this run, including ones that take over the keyboard and mouse. Ends when the desktop session does."
+                className="rounded border border-primary/50 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+              >
+                Allow all this run
               </button>
               {/* Synthetic input is never persisted as a standing grant, so
                   offering the option here would promise something the server
@@ -1010,6 +1054,12 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
                 ref={previewImgRef}
                 src={`/api/workspaces/${workspaceId}/computer/recording/turns/${previewFrame.turn}/${previewFrame.kind}`}
                 alt={`Live — ${previewFrame.tool ?? 'window'}`}
+                onLoad={(e) =>
+                  setFrameSize({
+                    w: e.currentTarget.naturalWidth,
+                    h: e.currentTarget.naturalHeight,
+                  })
+                }
                 className="max-h-full max-w-full rounded border border-border object-contain shadow-sm"
               />
               {cursorOnFrame && (

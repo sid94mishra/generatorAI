@@ -85,6 +85,7 @@ const SELF_SET: ReadonlySet<string> = new Set(
   [...SELF_BUNDLE_IDS, ...SELF_EXECUTABLES].map(normaliseAppText),
 );
 const SELF_FRAGMENTS: readonly string[] = SELF_NAME_FRAGMENTS.map(normaliseAppText);
+const SELF_FRAGMENT_SET: ReadonlySet<string> = new Set(SELF_FRAGMENTS);
 
 /** Prevents a `wordFragments` entry from matching inside a longer word. */
 function containsWord(haystack: string, word: string): boolean {
@@ -135,14 +136,17 @@ export interface BlocklistOptions {
 function matchFragments(
   haystack: string,
   blocklist: ComputerUseBlocklist,
+  options: { excludeSelf?: boolean } = {},
 ): string | undefined {
   if (!haystack) return undefined;
   for (const fragment of blocklist.nameFragments) {
     const needle = normaliseAppText(fragment);
+    if (options.excludeSelf && SELF_FRAGMENT_SET.has(needle)) continue;
     if (needle && haystack.includes(needle)) return fragment;
   }
   for (const fragment of blocklist.wordFragments) {
     const needle = normaliseAppText(fragment);
+    if (options.excludeSelf && SELF_FRAGMENT_SET.has(needle)) continue;
     if (needle && containsWord(haystack, needle)) return fragment;
   }
   return undefined;
@@ -219,9 +223,17 @@ export function evaluateBlocklist(
     }
   }
 
+  // Our OWN name is deliberately not matched here, though every other fragment
+  // is. Self-blocking exists so the agent cannot drive our app and approve its
+  // own consent prompts — that is process identity, which the bundle id and
+  // executable checks above establish. A title bar merely mentioning us proves
+  // nothing: a user with our repo open in their editor, our docs in a browser
+  // tab, or a folder named after us would otherwise have those windows blocked
+  // and hidden from `listApps`. Credential fragments still scan titles, because
+  // there the title is the only signal a vault popup is hosted in a browser.
   for (const rawTitle of candidate.windowTitles ?? []) {
     if (typeof rawTitle !== 'string') continue;
-    const hit = matchFragments(normaliseAppText(rawTitle), blocklist);
+    const hit = matchFragments(normaliseAppText(rawTitle), blocklist, { excludeSelf: true });
     if (hit) return { blocked: true, matchedOn: 'windowTitle', matchedValue: hit };
   }
 

@@ -171,6 +171,15 @@ interface SessionRecord {
    * still needs to know what it is showing between those.
    */
   lastTarget?: { app: ComputerAppIdentity; windowId: number };
+  /**
+   * Consecutive synthetic actions the driver could not confirm.
+   *
+   * When accessibility goes down the driver keeps accepting input, it just
+   * cannot see what the input did. The agent then has no feedback and improvises
+   * — measured once as twenty straight unconfirmed clicks and chords, one of
+   * which landed a stray character in a user's source file.
+   */
+  blindStreak: number;
 }
 
 export interface ComputerServiceConfig {
@@ -190,6 +199,7 @@ const REFUSAL_MESSAGES: Record<ComputerRefusalCode, string> = {
   target_not_focused: 'The target window is not focused, and this action requires focus.',
   provider_unavailable: 'Computer use is not available in this environment.',
   stale_snapshot: 'That snapshot is out of date. Take a new computer_snapshot and retry.',
+  unsupported_action: 'That element does not expose the action you asked for.',
   capacity_exhausted: 'Too many computer-use actions are in flight.',
   target_lost: 'No available application matched that reference.',
 };
@@ -211,6 +221,21 @@ const SYNTHETIC_ACTIONS: ReadonlySet<ActionRequest['type']> = new Set([
   'drag',
 ]);
 
+/**
+ * Unconfirmed synthetic actions tolerated in a row before refusing more.
+ *
+ * Some individual actions are legitimately unverifiable, so this cannot be 1.
+ * It is small enough that a genuinely blind session stops before it can do much,
+ * and any confirmed action resets it.
+ */
+const BLIND_INPUT_LIMIT = 5;
+
+/** Cold-starting a large desktop app routinely outlives the per-action budget. */
+const LAUNCH_TIMEOUT_MS = 90_000;
+
+/** Ceiling on a "this run" consent answer, in case no session close clears it. */
+const RUN_GRANT_TTL_MS = 60 * 60 * 1000;
+
 /** Refusal returned to the AGENT for a blocked app. */
 function opaqueBlockRefusal(): ComputerRefusal {
   // Deliberately identical to "no such app". Returning `app_blocked` would let
@@ -223,6 +248,26 @@ function opaqueBlockRefusal(): ComputerRefusal {
 export class ComputerService {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly pendingStarts = new Map<string, Promise<SessionRecord>>();
+  /**
+   * Live-preview requests, kept per workspace rather than per session.
+   *
+   * Recording is a property of the driver session, and sessions come and go
+   * underneath the operator: the idle sweeper closes them, a crash restarts
+   * them, and the next action opens a fresh one. Holding the request here lets
+   * `startSession` re-arm it, so "watch this run" survives a sweep instead of
+   * going quiet with the panel still showing a live badge.
+   */
+  private readonly recordingRequests = new Map<string, RecordingRequest>();
+  /**
+   * "Allow for this run" answers, per workspace.
+   *
+   * Deliberately not persisted and deliberately not per-app: the point is to
+   * stop a long task stalling on a prompt every few actions, which is what
+   * silently killed runs — an unanswered prompt expires as a denial and the
+   * agent gives up. Dropped when the desktop session ends, so it cannot outlive
+   * the work it was granted for, and pinned to the chat that asked.
+   */
+  private readonly runGrants = new Map<string, { chatId?: string; expiresAt: number }>();
   private readonly bridges: IComputerBridge[];
   private readonly blocklist: ComputerUseBlocklist;
   private readonly semaphore: Semaphore;
@@ -384,20 +429,35 @@ export class ComputerService {
     }
     const state = await session.bridge.startRecording(session.handle, req);
     if (!state.refusal) {
+      this.recordingRequests.set(ctx.workspaceId, req);
       this.logger.info?.(`[ComputerService] recording started for ${ctx.workspaceId} → ${state.outputDir}`);
     }
     return state;
   }
 
   async stopRecording(workspaceId: string): Promise<RecordingState> {
+    // Cleared first, so a stop still disarms the preview when the session has
+    // already gone away and there is nothing left to tell the driver.
+    this.recordingRequests.delete(workspaceId);
     const session = this.sessions.get(workspaceId);
     if (!session?.bridge.stopRecording) return { recording: false };
     return session.bridge.stopRecording(session.handle);
   }
 
+  /** Main display in physical pixels, for sizing a screen capture. */
+  async screenSize(workspaceId: string): Promise<{ width: number; height: number } | null> {
+    const session = this.sessions.get(workspaceId);
+    if (!session?.bridge.screenSize) return null;
+    return session.bridge.screenSize(session.handle);
+  }
+
   async recordingState(workspaceId: string): Promise<RecordingState> {
     const session = this.sessions.get(workspaceId);
-    if (!session?.bridge.recordingState) return { recording: false };
+    if (!session?.bridge.recordingState) {
+      // No session means no desktop activity to capture, so an armed preview
+      // has missed nothing and will resume the moment one opens.
+      return { recording: this.recordingRequests.has(workspaceId) };
+    }
     return session.bridge.recordingState(session.handle);
   }
 
@@ -441,8 +501,28 @@ export class ComputerService {
       lastActivityAt: Date.now(),
       snapshots: new Map(),
       snapshotIndex: new Map(),
+      blindStreak: 0,
     };
     this.sessions.set(ctx.workspaceId, record);
+
+    // Re-arm a preview the operator turned on under an earlier session.
+    const wanted = this.recordingRequests.get(ctx.workspaceId);
+    if (wanted && bridge.startRecording && handle.operational) {
+      try {
+        const resumed = await bridge.startRecording(handle, wanted);
+        if (resumed.refusal) {
+          this.recordingRequests.delete(ctx.workspaceId);
+          this.logger.warn?.(
+            `[ComputerService] could not resume recording for ${ctx.workspaceId}: ${resumed.refusal.message}`,
+          );
+        }
+      } catch (err) {
+        this.recordingRequests.delete(ctx.workspaceId);
+        this.logger.warn?.(
+          `[ComputerService] could not resume recording for ${ctx.workspaceId}: ${(err as Error).message}`,
+        );
+      }
+    }
 
     // A non-operational handle (NullComputerBridge) is a dead end, not a
     // session — announcing one would put a "computer connected" affordance in
@@ -478,6 +558,8 @@ export class ComputerService {
   }
 
   async stop(workspaceId: string, reason?: string): Promise<void> {
+    // A run answer is scoped to the desktop session it was given during.
+    this.runGrants.delete(workspaceId);
     const record = this.sessions.get(workspaceId);
     if (!record) return;
     // The queue is captured before the record is dropped so the terminal event
@@ -576,7 +658,12 @@ export class ComputerService {
     name: string,
     url?: string,
     newInstance?: boolean,
-  ): Promise<{ app?: ComputerAppIdentity; refusal?: ComputerRefusal }> {
+    args?: readonly string[],
+  ): Promise<{
+    app?: ComputerAppIdentity;
+    window?: { id: number; title: string };
+    refusal?: ComputerRefusal;
+  }> {
     const gate = this.featureGate();
     if (gate) return { refusal: gate };
 
@@ -607,17 +694,31 @@ export class ComputerService {
       return { refusal: denied };
     }
 
-    const result = await this.withPermit((signal) =>
-      session.bridge
-        .launchApp(
-          session.handle,
-          name,
-          { ...(url ? { url } : {}), ...(newInstance ? { newInstance } : {}) },
-          signal,
-        )
-        .then((r) => ({ ok: !r.refusal, snapshot: null, screenshot: null, refusal: r.refusal, launched: r.app })),
+    const result = await this.withPermit(
+      (signal) =>
+        session.bridge
+          .launchApp(
+            session.handle,
+            name,
+            { ...(url ? { url } : {}), ...(newInstance ? { newInstance } : {}), ...(args && args.length > 0 ? { args } : {}) },
+            signal,
+          )
+          .then((r) => ({
+            ok: !r.refusal,
+            snapshot: null,
+            screenshot: null,
+            refusal: r.refusal,
+            launched: r.app,
+            launchedWindow: r.window,
+          })),
+      // A cold start is not an "action": measured, launching VS Code blew the
+      // 30 s action budget and came back `capacity_exhausted` even though the
+      // window had opened — so the agent went hunting for a window it already
+      // had.
+      LAUNCH_TIMEOUT_MS,
     );
     const launched = (result as { launched?: ComputerAppIdentity }).launched;
+    const launchedWindow = (result as { launchedWindow?: { id: number; title: string } }).launchedWindow;
 
     if (result.refusal || !launched) {
       const refusal = result.refusal ?? this.refusal('target_lost');
@@ -640,7 +741,7 @@ export class ComputerService {
       verified: true,
       createdAt: new Date(),
     });
-    return { app: after };
+    return { app: after, ...(launchedWindow ? { window: launchedWindow } : {}) };
   }
 
   /**
@@ -819,6 +920,14 @@ export class ComputerService {
       return result;
     }
 
+    // A readable tree for a FOCUSED window is positive evidence that the
+    // accessibility layer is up and that synthetic keystrokes are reaching the
+    // window we think they are. Without this reset the blind-input tripwire is
+    // unescapable on Chromium/Electron hosts (VS Code, Chrome), which never
+    // confirm synthetic input: measured, the 5th keystroke always aborted the
+    // run with "the accessibility layer is down" while snapshots kept working.
+    if (result.snapshot?.window.focused) session.blindStreak = 0;
+
     await this.writeAudit({
       workspaceId: ctx.workspaceId,
       chatId: ctx.chatId,
@@ -869,6 +978,20 @@ export class ComputerService {
       return refusalResult(refusal);
     }
 
+    if (synthetic && session.blindStreak >= BLIND_INPUT_LIMIT) {
+      const refusal = this.refusal(
+        'provider_unavailable',
+        `The last ${session.blindStreak} keystrokes and clicks were delivered but could not be confirmed, ` +
+          'and no snapshot since then has found this window focused — so they may be landing in ' +
+          'another window. Stop sending input. Take a computer_snapshot of the target window: if it ' +
+          'comes back focused, the run can continue. If it does not, bring the window to the front ' +
+          'first, and if that also fails tell the user to restart the desktop driver from the ' +
+          'Computer panel.',
+      );
+      await this.recordRefusal(ctx, app, req.type, refusal);
+      return refusalResult(refusal);
+    }
+
     // The label is read before the permit because dispatch invalidates the
     // snapshot it lives in; afterwards the lookup always misses.
     const targetLabel = this.describeTarget(session, req);
@@ -904,6 +1027,14 @@ export class ComputerService {
     }
 
     const verified = result.action?.verification?.state === 'verified';
+    // Only synthetic input is dangerous when unconfirmed: it goes to whatever
+    // has focus, so a blind run edits whatever the user happened to leave open.
+    // A verified accessibility action does NOT clear the streak — reads and
+    // focus changes can keep succeeding while every keystroke misses, which is
+    // exactly the pattern seen when Windows refuses the foreground swap.
+    if (result.action?.path === 'synthetic') {
+      session.blindStreak = verified ? 0 : session.blindStreak + 1;
+    }
     await this.writeAudit({
       workspaceId: ctx.workspaceId,
       chatId: ctx.chatId,
@@ -1064,6 +1195,15 @@ export class ComputerService {
   ): Promise<ComputerRefusal | null> {
     const stored = await this.consent.find(ctx.workspaceId, app.appId);
     if (stored?.decision === 'deny') return this.refusal('consent_denied');
+
+    // A run grant covers synthetic input too — that is the whole reason it
+    // exists — so it is checked before the stored grant, which never can.
+    const run = this.runGrants.get(ctx.workspaceId);
+    if (run && run.expiresAt > Date.now() && (run.chatId === undefined || run.chatId === ctx.chatId)) {
+      return null;
+    }
+    if (run) this.runGrants.delete(ctx.workspaceId);
+
     // A stored grant never covers synthetic input: it takes over the user's
     // pointer and keyboard, so it re-asks every time.
     if (
@@ -1097,12 +1237,18 @@ export class ComputerService {
       await this.consent.save(ctx.workspaceId, app.appId, app.name, 'deny', scope);
       return this.refusal('consent_denied');
     }
+    if (decision === 'allow_run') {
+      this.runGrants.set(ctx.workspaceId, {
+        ...(ctx.chatId ? { chatId: ctx.chatId } : {}),
+        expiresAt: Date.now() + RUN_GRANT_TTL_MS,
+      });
+    }
     if (decision === 'always_allow' && scope !== 'synthetic') {
       await this.consent.save(ctx.workspaceId, app.appId, app.name, 'always_allow', scope);
     }
     // Allowlist, not denylist: a store that returns undefined, '', or a value
     // that failed to deserialise must not be read as approval.
-    if (decision !== 'allow_once' && decision !== 'always_allow') {
+    if (decision !== 'allow_once' && decision !== 'allow_run' && decision !== 'always_allow') {
       return this.refusal('consent_denied');
     }
     return null;
@@ -1165,9 +1311,15 @@ export class ComputerService {
     if (req.type === 'performAction') {
       const advertised = entry.actions.get(req.elementIndex) ?? [];
       if (!advertised.includes(req.actionName)) {
+        // NOT a stale snapshot: the snapshot is current and the element is in
+        // it. Reporting staleness sent the model off to re-snapshot, which
+        // returns the same element with the same actions, forever.
         return this.refusal(
-          'stale_snapshot',
-          `Element ${req.elementIndex} does not advertise the action "${req.actionName}".`,
+          'unsupported_action',
+          `Element ${req.elementIndex} does not expose the action "${req.actionName}". ` +
+            (advertised.length > 0
+              ? `It exposes: ${advertised.join(', ')}. Use one of those, or computer_click it instead.`
+              : 'It exposes no named actions at all — use computer_click on it instead.'),
         );
       }
     }
@@ -1187,18 +1339,23 @@ export class ComputerService {
    */
   private async withPermit(
     work: (signal: AbortSignal) => Promise<ComputerActionResult>,
+    timeoutMs?: number,
   ): Promise<ComputerActionResult> {
-    return this.withPermitFor(work, (refusal) => refusalResult(refusal));
+    return this.withPermitFor(work, (refusal) => refusalResult(refusal), timeoutMs);
   }
 
   /** Same budget and cancellation as `withPermit`, for calls with their own result shape. */
   private async withPermitFor<T>(
     work: (signal: AbortSignal) => Promise<T>,
     onFailure: (refusal: ComputerRefusal) => T,
+    timeoutMs?: number,
   ): Promise<T> {
     await this.semaphore.acquire();
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.computerConfig.actionTimeoutMs);
+    const timer = setTimeout(
+      () => controller.abort(),
+      timeoutMs ?? this.computerConfig.actionTimeoutMs,
+    );
     try {
       return await work(controller.signal);
     } catch (err) {

@@ -131,13 +131,38 @@ export function projectElements(elements: readonly ComputerElement[]): Record<st
   });
 }
 
+/**
+ * Byte budget for the projected element list.
+ *
+ * Harnesses divert an oversized tool result to a temp file and hand the model
+ * a "read this yourself" stub instead. Measured against VS Code: one
+ * unqualified snapshot is 265 elements / 22.6 KB, which tripped that stub on
+ * every read — so the model never saw the tree OR the attached screenshot,
+ * re-issued the identical snapshot nine times, and shelled out to PowerShell
+ * to parse the temp file. Clipping the list keeps the result inline, which is
+ * the only form the model can actually use.
+ */
+const ELEMENT_BUDGET_BYTES = 12_000;
+
+function clipToBudget(
+  elements: Record<string, unknown>[],
+): { kept: Record<string, unknown>[]; clipped: boolean } {
+  let used = 0;
+  for (let i = 0; i < elements.length; i++) {
+    used += JSON.stringify(elements[i]).length + 1;
+    if (used > ELEMENT_BUDGET_BYTES) return { kept: elements.slice(0, i), clipped: true };
+  }
+  return { kept: elements, clipped: false };
+}
+
 export function snapshotPayload(
   result: ComputerActionResult,
   query?: string,
 ): Record<string, unknown> {
   if (!result.ok || !result.snapshot) return refusalPayload(result);
   const snapshot = result.snapshot;
-  const elements = projectElements(snapshot.elements);
+  const allElements = projectElements(snapshot.elements);
+  const { kept: elements, clipped } = clipToBudget(allElements);
   // On-screen text is the injection vector the threat model names first, and
   // until now the only mitigation was a sentence in the system prompt. Scanning
   // what we are about to hand the model costs one pass over strings it is
@@ -153,6 +178,16 @@ export function snapshotPayload(
     elementCount: snapshot.elements.length,
     truncated: snapshot.truncated ?? undefined,
     elements,
+    ...(clipped
+      ? {
+          clipped: { shown: elements.length, total: allElements.length },
+          clippedNote:
+            `This window is too large to return whole, so only the first ${elements.length} of ` +
+            `${allElements.length} elements are listed. Re-snapshotting will return the same first ` +
+            'page — it will not reveal the rest. Pass `query` with a role, label or value substring ' +
+            'to read the part you actually need.',
+        }
+      : {}),
     screenshotArtifactId: result.screenshot?.artifactId,
     // A filtered view that does not say it is filtered reads as "this window
     // contains 13 things", and the agent concludes the control it wants is

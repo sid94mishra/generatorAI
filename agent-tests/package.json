@@ -9,7 +9,9 @@
     "report": "playwright show-report test-results/html-report"
   },
   "devDependencies": {
+    "@playwright/cli": "^0.1.1",
     "@playwright/test": "^1.58.2",
-    "@playwright/cli": "^0.1.1"
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.1.0"
   }
 }

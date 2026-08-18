@@ -71,6 +71,31 @@ import { BROWSER_SYSTEM_HINT, COMPUTER_USE_SYSTEM_HINT, WIDGET_SYSTEM_HINT } fro
 const AgentResolverEmpty = (): ResolvedAgentProjection => AgentResolver.empty();
 
 /**
+ * How long to wait for the agent provider to bind a conversation.
+ *
+ * The provider CLI answers `session.create` / `session.resume` in a few
+ * seconds normally, but it can stop answering altogether — measured, three
+ * consecutive requests never returned. With no deadline the whole turn parked
+ * there forever behind a 202, so nothing was persisted, no event was emitted,
+ * and the chat looked like it had swallowed the message.
+ */
+const CONVERSATION_BIND_TIMEOUT_MS = 90_000;
+
+async function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms trying to ${what}.`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * Section 8 extension points — optional at the service boundary so existing
  * callers keep working. All three are harness-agnostic and live in
  * `@generatorai/core`; the Copilot adapter (or any future adapter) simply
@@ -1848,20 +1873,45 @@ export class ChatManagementService {
     if (!this.harness.hasLiveConversation(session.conversationId) || bindingChanged) {
       const cfg = await this.buildConversationConfig(chat, session.conversationId);
       try {
-        await this.harness.resumeConversation(
-          session.conversationId,
-          cfg as unknown as CreateConversationParams,
+        await withDeadline(
+          this.harness.resumeConversation(
+            session.conversationId,
+            cfg as unknown as CreateConversationParams,
+          ),
+          CONVERSATION_BIND_TIMEOUT_MS,
+          'resume the conversation',
         );
         this.conversationBindings.set(session.conversationId, desiredBinding);
       } catch {
         try {
-          await this.ensureConversation(chat, session.conversationId);
+          await withDeadline(
+            this.ensureConversation(chat, session.conversationId),
+            CONVERSATION_BIND_TIMEOUT_MS,
+            'recreate the conversation',
+          );
           this.conversationBindings.set(session.conversationId, desiredBinding);
         } catch (recreateErr) {
           console.warn(
             `[ChatManagement] Failed to recover conversation for chat ${chatId}:`,
             recreateErr,
           );
+          // Without this the turn dies here: the route already answered 202,
+          // nothing is persisted, and no event is ever emitted — the chat just
+          // stops, which reads as "my message disappeared".
+          await this.eventBus.emit(chat.sessionId, {
+            kind: 'harness.error',
+            data: {
+              chatId,
+              message:
+                `Could not reach the agent provider: ${(recreateErr as Error).message}. ` +
+                'Send the message again.',
+            },
+          } as unknown as AgentEvent);
+          await this.eventBus.emit(chat.sessionId, {
+            kind: 'harness.idle',
+            data: { chatId },
+          } as unknown as AgentEvent);
+          throw recreateErr;
         }
       }
     }

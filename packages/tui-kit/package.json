@@ -1,0 +1,34 @@
+{
+  "name": "@generatorai/tui-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@generatorai/cli-core": "workspace:*",
+    "@generatorai/design-tokens": "workspace:*",
+    "@generatorai/shared": "workspace:*",
+    "cli-highlight": "^2.1.11",
+    "ink": "^6.3.1",
+    "marked": "^15.0.0",
+    "react": "^19.0.0",
+    "string-width": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "ink-testing-library": "^4.0.0"
+  }
+}

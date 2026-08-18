@@ -1,0 +1,666 @@
+
+┏━ DASHBOARD ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Dashboard
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Dashboard                                                                                                                      │
+┃│ Chats     Workflows   Runs    Automations   Projects                                                                           │
+┃│ 197/200   318         0/771   33            0                                                                                  │
+┃│                                                                                                                                │
+┃│ Recent runs                                                                                                                    │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed ctx-wf2-1785500172164 - Run… 15d ago                                                                               │
+┃│ ✓ completed ctx-wf1-1785499653468 - Run… 16d ago                                                                               │
+┃│ ✓ completed AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✗ failed    AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✓ completed AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✗ cancelled AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ○ created   AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ○ created   AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✓ completed SDK Upgrade Smoke WF - Run … 18d ago                                                                               │
+┃│ ✓ completed Fresh App Codegen (SCM diff… 27d ago                                                                               │
+┃│ ✗ cancelled Fresh App Codegen (SCM diff… 27d ago                                                                               │
+┃│ ✗ cancelled Fresh App Codegen (SCM diff… 27d ago                                                                               │
+┃│ ✓ completed Fresh App Codegen (SCM diff… 28d ago                                                                               │
+┃│                                                                                                                                │
+┃│ 127.0.0.1:3100 · http://127.0.0.1:3100 · unpaired                                                                              │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • Not paired — run `generatorai device pair <code>` in another shell.
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ CHATS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Chats
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Chats  200                                                                                                                     │
+┃│   Name                          Status    Model              Updated     ID                                                    │
+┃│ ▸ Test                          ⟳ active  claude-opus-5      16d ago     73465658                                              │
+┃│   Browser Chat 1781239761764    ⟳ active  —                  2026-06-12  d18fd3b9                                              │
+┃│   Browser Chat 1781240021951    ⟳ active  —                  2026-06-12  21f73524                                              │
+┃│   Thinking Demo (gpt-5.4-mini)  ⟳ active  gpt-5.4-mini       2026-06-12  7a4affc8                                              │
+┃│   Browser test chat             ⟳ active  claude-sonnet-4.6  2026-06-24  264a7da6                                              │
+┃│   Streaming E2E Test            ⟳ active  —                  2026-06-28  f5ec6420                                              │
+┃│   testing                       ⟳ active  —                  2026-06-30  3982f62c                                              │
+┃│   Browser E2E Test — 13:42      ⟳ active  claude-sonnet-4.6  2026-07-08  07f22454                                              │
+┃│   Browser E2E Test              ⟳ active  claude-sonnet-4.6  2026-07-08  84c0a3b6                                              │
+┃│   TEST Browser                  ⟳ active  claude-sonnet-4.6  2026-07-08  5bbd9a8d                                              │
+┃│   Built-in browser tools E2E    ⟳ active  claude-sonnet-4.6  2026-07-08  db859415                                              │
+┃│   Builtin tools + evalAllowed   ⟳ active  claude-sonnet-4.6  2026-07-08  fc69a105                                              │
+┃│   P2 E2E Browser Test           ⟳ active  —                  2026-07-08  93a3085f                                              │
+┃│   Phase2 fresh                  ⟳ active  claude-sonnet-4.6  2026-07-08  48f3ee51                                              │
+┃│   Phase2 headless default       ⟳ active  claude-sonnet-4.6  2026-07-08  e84056c9                                              │
+┃│   Desktop P2 test               ⟳ active  claude-sonnet-4.6  2026-07-08  20349645                                              │
+┃│   Final validation headless     ⟳ active  claude-sonnet-4.6  2026-07-08  56c1bede                                              │
+┃│   Final validation visible      ⟳ active  claude-sonnet-4.6  2026-07-08  1aa261b4                                              │
+┃│   Final validation headless     ⟳ active  claude-sonnet-4.6  2026-07-08  f64edcd9                                              │
+┃│   Final visible                 ⟳ active  claude-sonnet-4.6  2026-07-08  6c2a8773                                              │
+┃│   Dedup test                    ⟳ active  claude-sonnet-4.6  2026-07-08  26783704                                              │
+┃│   Post-fix natural prompt       ⟳ active  claude-sonnet-4.6  2026-07-08  6bfc76dc                                              │
+┃│   AfterFix                      ⟳ active  claude-sonnet-4.6  2026-07-08  469b2a2e                                              │
+┃│   flicker-fix-validate          ⟳ active  claude-sonnet-4.6  2026-07-08  066bb414                                              │
+┃│   flicker-fix-validate          ⟳ active  claude-sonnet-4.6  2026-07-08  38980d53                                              │
+┃│   1–26 of 200                                                                                                                  │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ WORKFLOWS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Workflows
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Workflows  318                                                                                                                 │
+┃│   Name                           Ver  Session  Updated     ID                                                                  │
+┃│ ▸ Playwright CLI E2E Test Run    2    single   15d ago     0f2ef410                                                            │
+┃│   Playwright CLI E2E Test Run    8    auto     2026-04-01  312cb878                                                            │
+┃│   Detailed Code Generation Demo  1    single   2026-03-10  78748ae3                                                            │
+┃│   E2E Test Workflow              1    single   2026-03-12  e3ee7493                                                            │
+┃│   Run Lifecycle Test             1    single   2026-03-12  55e18c47                                                            │
+┃│   Orchestrated E2E Test          1    single   2026-03-12  cb42ea15                                                            │
+┃│   Upload Test Workflow           1    single   2026-03-12  be4c27ed                                                            │
+┃│   E2E Full Flow Workflow         1    single   2026-03-12  ee4f4507                                                            │
+┃│   Artifact Test Workflow         1    single   2026-03-12  571d2e65                                                            │
+┃│   Artifact Test Workflow 2       1    single   2026-03-12  e91eba8c                                                            │
+┃│   SSE Stream Test                2    single   2026-07-03  31d7d487                                                            │
+┃│   SSE Events Test                1    single   2026-03-12  7b69a8ca                                                            │
+┃│   Progress Tracking Test         1    single   2026-03-12  e150732a                                                            │
+┃│   E2E Full Flow Workflow         1    single   2026-03-12  1961a6ed                                                            │
+┃│   Artifact Test Workflow         1    single   2026-03-12  464d754e                                                            │
+┃│   SSE Stream Test                1    single   2026-03-12  44dd1907                                                            │
+┃│   SSE Events Test                1    single   2026-03-12  41ac96bc                                                            │
+┃│   Progress Tracking Test         1    single   2026-03-12  da37b30b                                                            │
+┃│   Stage Transition Test          1    single   2026-03-12  9ce25172                                                            │
+┃│   Stage List Test                1    single   2026-03-12  8f2bc663                                                            │
+┃│   Upload Integration Test        1    single   2026-03-12  ea81975e                                                            │
+┃│   Upload Integration Test        1    single   2026-03-12  5ec3ae6a                                                            │
+┃│   E2E Full Flow Workflow         1    single   2026-03-12  ec2f260d                                                            │
+┃│   Artifact Test Workflow         1    single   2026-03-12  c0c613b2                                                            │
+┃│   Artifact Test Workflow 2       1    single   2026-03-12  8ca60e57                                                            │
+┃│   1–26 of 318                                                                                                                  │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ RUNS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Runs
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Runs  771                                                                                                                      │
+┃│   Name                                              Status       Workflow  Started     ID                                      │
+┃│ ▸ Playwright CLI E2E Test Run - Run 1773032340501   ✓ completed  312cb878  2026-03-09  79f61faf                                │
+┃│   Playwright CLI E2E Test Run - Run 1773032344330   ✓ completed  312cb878  2026-03-09  70b871fc                                │
+┃│   Playwright CLI E2E Test Run - Run 1773034787411   ✓ completed  0f2ef410  2026-03-09  f5dc6052                                │
+┃│   Playwright CLI E2E Test Run - Run 1773035155014   ✓ completed  0f2ef410  2026-03-09  b25afa6f                                │
+┃│   Playwright CLI E2E Test Run - Run 1773116455557   ○ created    0f2ef410  2026-03-10  40667df5                                │
+┃│   Playwright CLI E2E Test Run - Run 1773117054957   ✓ completed  0f2ef410  2026-03-10  2393ed57                                │
+┃│   Playwright CLI E2E Test Run - Run 1773125424303   ✓ completed  0f2ef410  2026-03-10  6a0e57d2                                │
+┃│   Playwright CLI E2E Test Run - Run 1773126462107   ✓ completed  0f2ef410  2026-03-10  7d0aa28e                                │
+┃│   Playwright CLI E2E Test Run - Run 1773127059502   ✓ completed  0f2ef410  2026-03-10  1080dc86                                │
+┃│   Playwright CLI E2E Test Run - Run 1773127304265   ✓ completed  0f2ef410  2026-03-10  c8b86ec8                                │
+┃│   Detailed Code Generation Demo - Run 17731277528…  ✓ completed  78748ae3  2026-03-10  d5fe18ba                                │
+┃│   Detailed Code Generation Demo - Run 17731303642…  ✓ completed  78748ae3  2026-03-10  ab199ba6                                │
+┃│   Detailed Code Generation Demo - Run 17731320590…  ✓ completed  78748ae3  2026-03-10  2941c92e                                │
+┃│   Detailed Code Generation Demo - Run 17731335246…  ✓ completed  78748ae3  2026-03-10  9619d46d                                │
+┃│   Detailed Code Generation Demo - Run 17731385475…  ✗ cancelled  78748ae3  2026-03-10  8d2fb401                                │
+┃│   Run Lifecycle Test - Run 1773311677837            ✓ completed  55e18c47  2026-03-12  79348605                                │
+┃│   Orchestrated E2E Test - Run 1773311677999         ✓ completed  cb42ea15  2026-03-12  91d60e00                                │
+┃│   Upload Test Workflow - Run 1773311683293          ○ created    be4c27ed  2026-03-12  a8c65f35                                │
+┃│   E2E Test Workflow - Run 1773312143876             ✓ completed  e3ee7493  2026-03-12  6f84f607                                │
+┃│   E2E Full Flow Workflow - Run 1773313523654        ○ created    ee4f4507  2026-03-12  22a0732d                                │
+┃│   E2E Full Flow Workflow - Run 1773313523690        ○ created    ee4f4507  2026-03-12  f0ecc917                                │
+┃│   E2E Full Flow Workflow - Run 1773313523732        ✓ completed  ee4f4507  2026-03-12  90e278a4                                │
+┃│   Artifact Test Workflow - Run 1773313523799        ✓ completed  571d2e65  2026-03-12  6caf4cbc                                │
+┃│   Artifact Test Workflow 2 - Run 1773313523899      ✓ completed  e91eba8c  2026-03-12  42fa5d26                                │
+┃│   Artifact Test Workflow 2 - Run 1773313523910      ✓ completed  e91eba8c  2026-03-12  a8c30b39                                │
+┃│   1–26 of 771                                                                                                                  │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ AUTOMATIONS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Automations
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Automations  33                                                                                                                │
+┃│   Name                                   Trigger   Input   On   Schedule                                                       │
+┃│ ▸ Code Gen Manual Automation             manual    single  ✓    —                                                              │
+┃│   Cron Scheduled Code Gen                schedule  single  ·    —                                                              │
+┃│   Cron Full-Stack App Gen                schedule  single  ·    —                                                              │
+┃│   Manual Code Gen (Claude Sonnet)        manual    single  ✓    —                                                              │
+┃│   Batch Test Single Mode                 manual    single  ✓    —                                                              │
+┃│   Loop Mode Test                         manual    loop    ✓    —                                                              │
+┃│   Batch CSV Test                         manual    batch   ✓    —                                                              │
+┃│   Single Mode - E-Commerce Platform      manual    single  ✓    —                                                              │
+┃│   Loop Mode - Multi-Project Builder      manual    loop    ✓    —                                                              │
+┃│   Batch Mode - Project Portfolio         manual    batch   ✓    —                                                              │
+┃│   E2E Complex Pipeline - Manual Trigger  manual    single  ✓    —                                                              │
+┃│   Loop Code Gen - Multi Project          manual    loop    ✓    —                                                              │
+┃│   Code Review - Script Loop Test         manual    script  ✓    —                                                              │
+┃│   Sandbox Loop Automation E2E            manual    loop    ✓    —                                                              │
+┃│   Sandbox Loop E2E Test                  manual    loop    ✓    —                                                              │
+┃│   CLI-Test-Automation                    manual    single  ✓    —                                                              │
+┃│   Workspace E2E Test Automation          manual    single  ✓    —                                                              │
+┃│   Workspace E2E Test Automation          manual    single  ✓    —                                                              │
+┃│   Codebase E2E Automation                manual    single  ✓    —                                                              │
+┃│   Codebase E2E Automation                manual    single  ✓    —                                                              │
+┃│   Event-Based Completion Test            manual    single  ✓    —                                                              │
+┃│   Event-Based Completion Test            manual    single  ✓    —                                                              │
+┃│   CLI Multi-Workflow Data Source Test    manual    script  ✓    —                                                              │
+┃│   E2E Loop Auto 1777579712595            manual    loop    ✓    —                                                              │
+┃│   Script Automation Test                 manual    script  ✓    —                                                              │
+┃│   1–26 of 33                                                                                                                   │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ PROJECTS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Projects
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Projects  34                                                                                                                   │
+┃│   Name                        Description                                       Created     ID                                 │
+┃│ ▸ Express Test Project        Testing project management with the Express.js …  2026-04-23  a3810cb8                           │
+┃│   CLI E2E Test Project        —                                                 2026-04-30  33e140f1                           │
+┃│   CLI E2E Full Test           Full end-to-end CLI workflow test                 2026-04-30  83f5ba59                           │
+┃│   CT DMV Mordernization       —                                                 2026-05-27  eca0e9a1                           │
+┃│   CLI Cat Project             CLI project test                                  2026-06-11  6d7196de                           │
+┃│   W4 Detail Probe             x                                                 2026-06-14  47d83e45                           │
+┃│   W4 Project 1781408494332    E2E seed project                                  2026-06-14  b7906a48                           │
+┃│   W4 Created 1781408498065    —                                                 2026-06-14  49e3f3b1                           │
+┃│   W4 Detail 1781408500356     E2E seed project                                  2026-06-14  a35c9c33                           │
+┃│   W4 Codebases 1781408580429  E2E seed project                                  2026-06-14  dc306ddf                           │
+┃│   W4 tab probe                x                                                 2026-06-14  e414385a                           │
+┃│   W4 Created 1781408736164    —                                                 2026-06-14  6d32ddc9                           │
+┃│   W4 Detail 1781408738250     E2E seed project                                  2026-06-14  80db30f2                           │
+┃│   W4 Codebases 1781408741339  E2E seed project                                  2026-06-14  26fb3be9                           │
+┃│   W4 Project 1781410137346    E2E seed project                                  2026-06-14  0362fe7f                           │
+┃│   W4 Detail 1781410141792     E2E seed project                                  2026-06-14  e29985c4                           │
+┃│   W4 Codebases 1781410145346  E2E seed project                                  2026-06-14  1cfcd055                           │
+┃│   ChatFilterProj              —                                                 2026-06-26  c1f0668c                           │
+┃│   ChatFilterProj              —                                                 2026-06-26  8ec3a1a0                           │
+┃│   FilterProj2                 —                                                 2026-06-26  51dc17f0                           │
+┃│   AutoProj                    —                                                 2026-06-26  c127bbac                           │
+┃│   AutoProj                    —                                                 2026-06-26  035826ef                           │
+┃│   PM Review Test              —                                                 2026-06-28  d770f130                           │
+┃│   S84 Test Project            —                                                 29d ago     3a2a90ff                           │
+┃│   W4 Project 1785673351162    E2E seed project                                  13d ago     7fbb4796                           │
+┃│   1–26 of 34                                                                                                                   │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ WORKSPACES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Workspaces
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Workspaces  200                                                                                                                │
+┃│   Owner         Status       Size  Created     ID                                                                              │
+┃│ ▸ chat          · archived   —     2026-04-28  7dceb113                                                                        │
+┃│   chat          · archived   —     2026-04-28  9a016485                                                                        │
+┃│   chat          · archived   —     2026-04-28  0e8d3ca8                                                                        │
+┃│   workflow_run  ✓ completed  —     2026-04-28  50ffd89f                                                                        │
+┃│   chat          · archived   —     2026-04-28  4b978784                                                                        │
+┃│   chat          · archived   —     2026-04-28  8d2ded42                                                                        │
+┃│   chat          · archived   —     2026-04-30  cbdf493b                                                                        │
+┃│   chat          · archived   —     2026-04-30  34949543                                                                        │
+┃│   chat          · archived   —     2026-04-30  c1918fe6                                                                        │
+┃│   chat          · archived   —     2026-04-30  a6a562a0                                                                        │
+┃│   workflow_run  ⟳ active     —     2026-04-30  2b6684a8                                                                        │
+┃│   chat          · archived   —     2026-04-30  3018d404                                                                        │
+┃│   chat          · archived   —     2026-04-30  a73215ec                                                                        │
+┃│   chat          · archived   —     2026-04-30  c64e87e0                                                                        │
+┃│   chat          · archived   —     2026-04-30  ba9fdd79                                                                        │
+┃│   workflow_run  ⟳ active     —     2026-04-30  cf22376c                                                                        │
+┃│   workflow_run  ⟳ creating   —     2026-04-30  a5af72d5                                                                        │
+┃│   workflow_run  ⟳ active     —     2026-04-30  fb0b8fa7                                                                        │
+┃│   workflow_run  ⟳ active     —     2026-04-30  ad8652e2                                                                        │
+┃│   chat          · archived   —     2026-05-01  12b60f10                                                                        │
+┃│   chat          · archived   —     2026-05-03  aaff4e6d                                                                        │
+┃│   chat          · archived   —     2026-05-03  711fb28c                                                                        │
+┃│   chat          · archived   —     2026-05-04  cf9c522d                                                                        │
+┃│   chat          · archived   —     2026-05-04  ce518eec                                                                        │
+┃│   chat          · archived   —     2026-05-04  542cdae6                                                                        │
+┃│   1–26 of 200                                                                                                                  │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ AGENTS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Agents
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Agents  7                                                                                                                      │
+┃│   Name                    Scope   Role          On                                                                             │
+┃│ ▸ Bug Fixer               system  agent         ✓                                                                              │
+┃│   Code Reviewer           system  agent         ✓                                                                              │
+┃│   Delivery Lead           system  orchestrator  ✓                                                                              │
+┃│   Docs Writer             system  agent         ✓                                                                              │
+┃│   Implementation Planner  system  agent         ✓                                                                              │
+┃│   Security Auditor        system  agent         ✓                                                                              │
+┃│   Test Author             system  agent         ✓                                                                              │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ SCRIPTS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Scripts
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Scripts  3                                                                                                                     │
+┃│   Name                           Description                                       Path                                        │
+┃│ ▸ Code Review Pipeline           Multi-stage code review with security analysis …  —                                           │
+┃│   Comprehensive Test Workflow    Tests all PWS features: DAG, hooks, profiles, v…  —                                           │
+┃│   E2E Feature Coverage Workflow  Diamond DAG exercising every script feature: va…  —                                           │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ EXTENSIONS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Extensions
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Extensions  20                                                                                                                 │
+┃│   Name  Version  Scope   On                                                                                                    │
+┃│ ▸ —     —        system  ✓                                                                                                     │
+┃│   —     —        system  ✓                                                                                                     │
+┃│   —     —        system  ✓                                                                                                     │
+┃│   —     —        system  ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│   —     —        user    ✓                                                                                                     │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ SETTINGS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Settings
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Settings                                                                                                                       │
+┃│ ▸ Connection: 127.0.0.1:3100 (http://127.0.0.1:3100)                                                                           │
+┃│   Auth state: unpaired                                                                                                         │
+┃│   Device: —                                                                                                                    │
+┃│   Theme: GitHub                                                                                                                │
+┃│   Colour: truecolor                                                                                                            │
+┃│   Glyphs: unicode                                                                                                              │
+┃│                                                                                                                                │
+┃│ Change settings with `generatorai config set <key> <value>`                                                                    │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ COMMAND PALETTE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃
+┃
+┃
+┃                 ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+┃                 │ Command palette                                                                              │
+┃                 │                                                                                              │
+┃                 │ > Type to search commands…                                                                   │
+┃                 │                                                                                              │
+┃                 │ ▸ Connect › List                    Servers this CLI can reach                               │
+┃                 │   Connect › Add                     Register a server and make it active                     │
+┃                 │   Connect › Use                     Switch the active server                                 │
+┃                 │   Connect › Test                    Probe every known route to a server                      │
+┃                 │   Connect › Rename                  Rename a connection                                      │
+┃                 │   Connect › Remove                  Forget a server !                                        │
+┃                 │   Connect › Endpoint Add            Add another route to the same server                     │
+┃                 │   Connect › Endpoint Remove         Remove a route                                           │
+┃                 │   Device › Pair                     Pair this CLI with a server using a pairing code         │
+┃                 │   Device › Status                   This installation's credential and where it is stored    │
+┃                 │   Device › Forget                   Delete this installation's credential for a server !     │
+┃                 │   Device › List                     Devices paired with the server                           │
+┃                 │   Device › Revoke                   Revoke another device's credential !                     │
+┃                 │   Device › Scopes                   Show or set a device's scopes                            │
+┃                 │   Device › Invite                   Mint a pairing code for a new device                     │
+┃                 │   Device › Invites                  Pairing codes that have not been redeemed yet            │
+┃                 │   … 24 more below                                                                            │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │ ↑↓ move · ⏎ run · Esc close   40 of 206                                                      │
+┃                 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+┃
+┃
+┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ PALETTE FILTERED ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃
+┃
+┃
+┃                 ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+┃                 │ Command palette                                                                              │
+┃                 │                                                                                              │
+┃                 │ > workflow                                                                                   │
+┃                 │                                                                                              │
+┃                 │ ▸ Workflow › List                   List workflow definitions                                │
+┃                 │   Workflow › Show                   Show a definition with its stages and edges              │
+┃                 │   Workflow › Clone                  Copy a definition, stages and edges included             │
+┃                 │   Workflow › Create                 Create an empty workflow definition                      │
+┃                 │   Workflow › Delete                 Delete a definition !                                    │
+┃                 │   Workflow › Export                 Export a definition as JSON                              │
+┃                 │   Workflow › Update                 Patch a definition                                       │
+┃                 │   Workflow › Edge Add               Connect two stages                                       │
+┃                 │   Workflow › Validate               Check a definition for cycles, orphans and bad           │
+┃                 │ references                                                                                   │
+┃                 │   Workflow › Edge List              Edges in a definition                                    │
+┃                 │   Workflow › Stage Add              Add a stage                                              │
+┃                 │   Workflow › Stage List             Stages in a definition                                   │
+┃                 │   Workflow › Edge Delete            Delete an edge !                                         │
+┃                 │   Workflow › Import Json            Import a definition from a JSON file                     │
+┃                 │   Workflow › Stage Delete           Delete a stage and its edges !                           │
+┃                 │   Workflow › Stage Update           Patch a stage                                            │
+┃                 │   … 9 more below                                                                             │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │ ↑↓ move · ⏎ run · Esc close   25 of 206                                                      │
+┃                 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+┃
+┃
+┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ HELP PAGE 1 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃
+┃
+┃
+┃                 ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+┃                 │ Keyboard shortcuts                                                                           │
+┃                 │                                                                                              │
+┃                 │ Global                                        Navigate                                       │
+┃                 │ ^K          Command palette                   G D         Dashboard                          │
+┃                 │ ?           Toggle help                       G C         Chats                              │
+┃                 │ ^C          Quit                              G W         Workflows                          │
+┃                 │ ^R          Refresh current view              G R         Runs                               │
+┃                 │ /           Search in view                    G A         Automations                        │
+┃                 │ esc         Back / close overlay              G P         Projects                           │
+┃                 │ tab         Focus next region                 G O         Workspaces                         │
+┃                 │ ⇧tab        Focus previous region             G E         Agents                             │
+┃                 │ ^G          Toggle right pane                 G S         Scripts                            │
+┃                 │                                               G X         Extensions                         │
+┃                 │                                               G ,         Settings                           │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │ ←→ page 1/3 · Esc close                                                                      │
+┃                 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+┃
+┃
+┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ HELP PAGE 2 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃
+┃
+┃
+┃                 ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+┃                 │ Keyboard shortcuts                                                                           │
+┃                 │                                                                                              │
+┃                 │ Panes                                         List                                           │
+┃                 │ ^B          Leader prefix (panes & tabs)      down        Move down                          │
+┃                 │ C           New tab                           up          Move up                            │
+┃                 │ N           Next tab                          PgDn        Page down                          │
+┃                 │ P           Previous tab                      PgUp        Page up                            │
+┃                 │ %           Split vertically                  home        First item                         │
+┃                 │ "           Split horizontally                end         Last item                          │
+┃                 │ left        Focus pane left                   ⏎           Open                               │
+┃                 │ right       Focus pane right                  Y           Copy id                            │
+┃                 │ up          Focus pane up                                                                    │
+┃                 │ down        Focus pane down                                                                  │
+┃                 │ Z           Zoom / unzoom pane                                                               │
+┃                 │ X           Close pane                                                                       │
+┃                 │ ,           Rename tab                                                                       │
+┃                 │ D           Detach stream (run keeps going)                                                  │
+┃                 │ ?           Leader key help                                                                  │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │                                                                                              │
+┃                 │ ←→ page 2/3 · Esc close                                                                      │
+┃                 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+┃
+┃
+┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ LEADER ARMED ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Dashboard
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Dashboard                                                                                                                      │
+┃│ Chats     Workflows   Runs    Automations   Projects                                                                           │
+┃│ 197/200   318         0/771   33            34                                                                                 │
+┃│                                                                                                                                │
+┃│ Recent runs                                                                                                                    │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed ctx-wf2-1785500172164 - Run… 16d ago                                                                               │
+┃│ ✓ completed ctx-wf1-1785499653468 - Run… 16d ago                                                                               │
+┃│ ✓ completed AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✗ failed    AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✓ completed AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✗ cancelled AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ○ created   AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ○ created   AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✓ completed SDK Upgrade Smoke WF - Run … 18d ago                                                                               │
+┃│ ✓ completed Fresh App Codegen (SCM diff… 27d ago                                                                               │
+┃│ ✗ cancelled Fresh App Codegen (SCM diff… 27d ago                                                                               │
+┃│ ✗ cancelled Fresh App Codegen (SCM diff… 27d ago                                                                               │
+┃│ ✓ completed Fresh App Codegen (SCM diff… 28d ago                                                                               │
+┃│                                                                                                                                │
+┃│ 127.0.0.1:3100 · http://127.0.0.1:3100 · unpaired                                                                              │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                          LEADER  ·  ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ SPLIT VERTICAL ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Dashboard
+┃╭───────────────────────────────────────────────────────────────╮╭───────────────────────────────────────────────────────────────╮
+┃│ Dashboard                                                     ││ Dashboard                                                     │
+┃│ Chats     Workflows   Runs    Automations   Projects          ││ Chats     Workflows   Runs    Automations   Projects          │
+┃│ 197/200   318         0/771   33            34                ││ 197/200   318         0/771   33            34                │
+┃│                                                               ││                                                               │
+┃│ Recent runs                                                   ││ Recent runs                                                   │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago               ││ ✓ completed Agent Demo — Plan then Revi… 8d ago               │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago               ││ ✓ completed Agent Demo — Plan then Revi… 8d ago               │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago               ││ ✓ completed Agent Demo — Plan then Revi… 8d ago               │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago               ││ ✓ completed Agent Demo — Plan then Revi… 8d ago               │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago               ││ ✓ completed Agent Demo — Plan then Revi… 8d ago               │
+┃│ ✓ completed ctx-wf2-1785500172164 - Run… 16d ago              ││ ✓ completed ctx-wf2-1785500172164 - Run… 16d ago              │
+┃│ ✓ completed ctx-wf1-1785499653468 - Run… 16d ago              ││ ✓ completed ctx-wf1-1785499653468 - Run… 16d ago              │
+┃│ ✓ completed AgentMode stage E2E - Run 1… 17d ago              ││ ✓ completed AgentMode stage E2E - Run 1… 17d ago              │
+┃│ ✗ failed    AgentMode stage E2E - Run 1… 17d ago              ││ ✗ failed    AgentMode stage E2E - Run 1… 17d ago              │
+┃│ ✓ completed AgentMode stage E2E - Run 1… 17d ago              ││ ✓ completed AgentMode stage E2E - Run 1… 17d ago              │
+┃│ ✗ cancelled AgentMode stage E2E - Run 1… 17d ago              ││ ✗ cancelled AgentMode stage E2E - Run 1… 17d ago              │
+┃│ ○ created   AgentMode stage E2E - Run 1… 17d ago              ││ ○ created   AgentMode stage E2E - Run 1… 17d ago              │
+┃│ ○ created   AgentMode stage E2E - Run 1… 17d ago              ││ ○ created   AgentMode stage E2E - Run 1… 17d ago              │
+┃│ ✓ completed SDK Upgrade Smoke WF - Run … 18d ago              ││ ✓ completed SDK Upgrade Smoke WF - Run … 18d ago              │
+┃│ ✓ completed Fresh App Codegen (SCM diff… 27d ago              ││ ✓ completed Fresh App Codegen (SCM diff… 27d ago              │
+┃│ ✗ cancelled Fresh App Codegen (SCM diff… 27d ago              ││ ✗ cancelled Fresh App Codegen (SCM diff… 27d ago              │
+┃│ ✗ cancelled Fresh App Codegen (SCM diff… 27d ago              ││ ✗ cancelled Fresh App Codegen (SCM diff… 27d ago              │
+┃│ ✓ completed Fresh App Codegen (SCM diff… 28d ago              ││ ✓ completed Fresh App Codegen (SCM diff… 28d ago              │
+┃│                                                               ││                                                               │
+┃│ 127.0.0.1:3100 · http://127.0.0.1:3100 · unpaired             ││ 127.0.0.1:3100 · http://127.0.0.1:3100 · unpaired             │
+┃│                                                               ││                                                               │
+┃│                                                               ││                                                               │
+┃│                                                               ││                                                               │
+┃╰───────────────────────────────────────────────────────────────╯╰───────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┏━ SECOND TAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ GeneratorAI                                                                                                               GitHub
+┃  1 Dashboard   2 Dashboard
+┃╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┃│ Dashboard                                                                                                                      │
+┃│ Chats     Workflows   Runs    Automations   Projects                                                                           │
+┃│ 197/200   318         0/771   33            34                                                                                 │
+┃│                                                                                                                                │
+┃│ Recent runs                                                                                                                    │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed Agent Demo — Plan then Revi… 8d ago                                                                                │
+┃│ ✓ completed ctx-wf2-1785500172164 - Run… 16d ago                                                                               │
+┃│ ✓ completed ctx-wf1-1785499653468 - Run… 16d ago                                                                               │
+┃│ ✓ completed AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✗ failed    AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✓ completed AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✗ cancelled AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ○ created   AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ○ created   AgentMode stage E2E - Run 1… 17d ago                                                                               │
+┃│ ✓ completed SDK Upgrade Smoke WF - Run … 18d ago                                                                               │
+┃│ ✓ completed Fresh App Codegen (SCM diff… 27d ago                                                                               │
+┃│ ✗ cancelled Fresh App Codegen (SCM diff… 27d ago                                                                               │
+┃│ ✗ cancelled Fresh App Codegen (SCM diff… 27d ago                                                                               │
+┃│ ✓ completed Fresh App Codegen (SCM diff… 28d ago                                                                               │
+┃│                                                                                                                                │
+┃│ 127.0.0.1:3100 · http://127.0.0.1:3100 · unpaired                                                                              │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃│                                                                                                                                │
+┃╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┃ • 127.0.0.1:3100  ·  http://127.0.0.1:3100                                                     ^K palette  ·  ? help  ·  ^C quit
+┃ ⏎ open   ^K palette   C new tab   ? help
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

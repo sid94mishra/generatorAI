@@ -21,6 +21,8 @@
     "typecheck": "turbo typecheck",
     "check:security": "node scripts/check-no-app-wide-cdp.mjs && node scripts/check-security-invariants.mjs",
     "check:tokens": "pnpm --filter @generatorai/design-tokens tokens:check",
+    "cli:docs": "pnpm --filter @generatorai/cli docs",
+    "cli:docs:check": "pnpm --filter @generatorai/cli docs:check",
     "package:desktop": "pnpm --filter @generatorai/desktop package",
     "preview:desktop": "pnpm --filter @generatorai/desktop preview",
     "verify:release": "pnpm --filter @generatorai/desktop verify:release",
@@ -46,7 +48,8 @@
     ],
     "overrides": {
       "@types/react": "^19.2.14",
-      "@types/react-dom": "^19.2.3"
+      "@types/react-dom": "^19.2.3",
+      "@types/node": "^22.10.0"
     }
   },
   "devDependencies": {

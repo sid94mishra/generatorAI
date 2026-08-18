@@ -31,6 +31,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import * as fs from 'node:fs/promises';
+import { existsSync, readdirSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type {
@@ -473,7 +474,7 @@ export class CuaDriverBridge implements IComputerBridge {
 
   /** The driver owns the health model; a probe failure is reported, not thrown. */
   private async healthChecks(connection: Connection): Promise<ComputerRuntimeCheck[]> {
-    try {
+    const probe = async (): Promise<ComputerRuntimeCheck[]> => {
       const result = await connection.client.callTool(
         'health_report',
         JSON.stringify({ session: connection.sessionId }),
@@ -486,8 +487,27 @@ export class CuaDriverBridge implements IComputerBridge {
         status: c.status === 'pass' || c.status === 'fail' ? c.status : 'skip',
         message: typeof c.message === 'string' ? c.message : '',
       }));
-    } catch (err) {
-      return [{ name: 'health_report', status: 'fail', message: `Health probe failed: ${String(err)}` }];
+    };
+
+    try {
+      return [...(await probe()), ...(await this.lockCheck(connection))];
+    } catch (err) {      // A session can wedge without being retired: every tool then raises
+      // `DriverError.Tool` and the agent gets `provider_unavailable` for the
+      // rest of the run, while a re-open clears it. Only the read-only probe is
+      // retried — replaying an action here could deliver a keystroke twice.
+      this.options.logger.warn?.(
+        `[CuaDriverBridge] health probe failed (${String(err)}); reopening session ${connection.sessionId}`,
+      );
+      try {
+        this.snapshotScopes.clear();
+        await connection.client.startSession({ session: connection.sessionId, captureScope: CAPTURE_WINDOW });
+        await this.applyAgentCursor(connection.client, connection.sessionId);
+        return await probe();
+      } catch (retryErr) {
+        return [
+          { name: 'health_report', status: 'fail', message: `Health probe failed: ${String(retryErr)}` },
+        ];
+      }
     }
   }
 
@@ -645,13 +665,14 @@ export class CuaDriverBridge implements IComputerBridge {
         return refuse({ code: 'target_lost', message: 'That window is no longer open.' });
       }
 
-      // A screenshot of a minimised window captures nothing, and the driver
-      // says so: only `screenshot` and foreground delivery need it restored.
-      // The tree itself reads fine, so a plain snapshot is left alone.
-      if (req.includeScreenshot) {
-        const dead = await this.ensureLiveWindow(connection, req.app.pid, windowId, signal);
-        if (dead) return refuse(dead);
-      }
+      // A minimised window has no rendered client area, so UIA exposes only its
+      // chrome. Measured on File Explorer: 5 elements minimised (TitleBar,
+      // System, Restore, Maximize, Close) against 114 restored, with the
+      // Address Bar only present in the second. The agent cannot tell those
+      // apart — it reads a successful snapshot with nothing in it and spends
+      // the rest of the run guessing, so restore first and read something real.
+      const dead = await this.ensureLiveWindow(connection, req.app.pid, windowId, signal);
+      if (dead) return refuse(dead);
 
       const screenshotPath = req.includeScreenshot
         ? await this.screenshotPath(connection, handle.workspaceId)
@@ -679,12 +700,15 @@ export class CuaDriverBridge implements IComputerBridge {
       // allows — Excel's grid is the reference case. Step down rather than
       // dropping straight to the floor: a busy app that would have answered a
       // medium scan should not be reduced to a title bar and three buttons.
-      for (const [maxElements, maxDepth] of SCAN_LADDER) {
+      let laddered: (typeof SCAN_LADDER)[number] | null = null;
+      for (const rung of SCAN_LADDER) {
         if (!wantsShallowScan(result)) break;
+        const [maxElements, maxDepth] = rung;
         this.options.logger.info?.(
           `[CuaDriverBridge] provider could not walk the tree; retrying at ${maxElements}/${maxDepth}`,
         );
         result = await this.call(connection, 'get_window_state', args(maxElements, maxDepth), signal);
+        laddered = rung;
       }
       const refusal = this.refusalFor(result);
       if (refusal) return refuse(refusal);
@@ -704,7 +728,12 @@ export class CuaDriverBridge implements IComputerBridge {
           focused: window?.focused ?? false,
         },
         elements: state.elements,
-        truncated: state.truncated,
+        // A laddered read answered a *smaller question* — the driver reports it
+        // as complete because it returned everything within the reduced caps.
+        // Without saying so, the agent takes a depth-3 chrome-only tree for the
+        // whole window and hunts for controls that were never enumerated.
+        truncated:
+          state.truncated ?? (laddered ? { elements: laddered[0], depth: laddered[1] } : null),
         capturedAt: Date.now(),
       };
       this.rememberScope(state.snapshotId, state.pid, state.windowId, state.elements);
@@ -821,8 +850,101 @@ export class CuaDriverBridge implements IComputerBridge {
     }
   }
 
-  async recordingState(handle: ComputerHandle): Promise<RecordingState> {
+  /**
+   * Names the lock screen when it is the reason a foreground swap failed.
+   *
+   * A locked workstation owns the foreground, so `SetForegroundWindow` can
+   * never succeed and every Electron/Chromium action is refused. The driver
+   * reports only the HWND that won, which reads like a driver fault — measured
+   * as a whole run of `foreground_unavailable` refusals that were really just
+   * a locked screen.
+   */
+  private async explainForegroundFailure(
+    connection: Connection,
+    refusal: ComputerRefusal,
+  ): Promise<ComputerRefusal> {
+    try {
+      const result = await this.call(connection, 'list_windows', {});
+      const structured = this.structuredOrNull(result);
+      if (!structured) return refusal;
+      const byPid = parseListWindows(structured);
+      const locked = [...byPid.values()].some((list) =>
+        list.some((w) => /lock ?screen/i.test(w.title)),
+      );
+      if (!locked) return refusal;
+      return {
+        code: refusal.code,
+        message:
+          'The workstation is locked, so Windows will not let any window come to the foreground. ' +
+          'Actions that need real input cannot run until it is unlocked. Background actions — ' +
+          'reading windows, element clicks, menus — still work. Tell the user to unlock and stop.',
+      };
+    } catch {
+      return refusal;
+    }
+  }
+
+  /**
+   * Reports a locked workstation as a health check of its own.
+   *
+   * The driver has no lock signal, and the failure it does surface names only
+   * the HWND that held the foreground. Measured while locked, that HWND is the
+   * lock screen: background work (reading, element clicks, menus) keeps working,
+   * while anything Chromium/Electron is refused for the whole run. Saying so up
+   * front is the difference between one clear line and a page of refusals.
+   */
+  private async lockCheck(connection: Connection): Promise<ComputerRuntimeCheck[]> {
+    try {
+      const result = await this.call(connection, 'list_windows', {});
+      const structured = this.structuredOrNull(result);
+      if (!structured) return [];
+      const locked = [...parseListWindows(structured).values()].some((list) =>
+        list.some((w) => /lock ?screen/i.test(w.title)),
+      );
+      return locked
+        ? [
+            {
+              name: 'workstation_unlocked',
+              status: 'fail',
+              message:
+                'The workstation is locked. Reading windows and element actions still work; anything needing real keyboard or mouse input does not, because Windows will not bring a window to the foreground.',
+            },
+          ]
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Main display in physical pixels, or null when the driver cannot say. */
+  async screenSize(handle: ComputerHandle): Promise<{ width: number; height: number } | null> {
     const connection = this.connections.get(handle.workspaceId);
+    if (!connection) {
+      this.options.logger.warn?.('[CuaDriverBridge] screenSize: no connection');
+      return null;
+    }
+    try {
+      const result = await this.call(connection, 'get_screen_size', {});
+      const structured = this.structuredOrNull(result) ?? result.text ?? null;
+      if (!structured) {
+        this.options.logger.warn?.('[CuaDriverBridge] screenSize: driver returned no payload');
+        return null;
+      }
+      const root = JSON.parse(structured) as { width?: unknown; height?: unknown };
+      const width = Number(root.width);
+      const height = Number(root.height);
+      if (!(Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)) {
+        this.options.logger.warn?.(`[CuaDriverBridge] screenSize: unusable payload ${structured}`);
+        return null;
+      }
+      return { width, height };
+    } catch (err) {
+      this.options.logger.warn?.(`[CuaDriverBridge] screenSize failed: ${String(err)}`);
+      return null;
+    }
+  }
+
+  async recordingState(handle: ComputerHandle): Promise<RecordingState> {    const connection = this.connections.get(handle.workspaceId);
     if (!connection) return { recording: false, refusal: disconnected() };
 
     try {
@@ -856,7 +978,7 @@ export class CuaDriverBridge implements IComputerBridge {
         if (!wantsForegroundDelivery(result)) return refuse(refusal);
         result = await this.call(connection, call.tool, { ...call.args, delivery_mode: 'foreground' }, signal);
         refusal = this.refusalFor(result);
-        if (refusal) return refuse(refusal);
+        if (refusal) return refuse(await this.explainForegroundFailure(connection, refusal));
       }
 
       return {
@@ -962,12 +1084,42 @@ export class CuaDriverBridge implements IComputerBridge {
           tool: req.button === 'right' ? 'right_click' : 'click',
           args: { ...target, x: req.x, y: req.y },
         };
-      case 'typeText':
-        return { tool: 'type_text', args: { ...target, text: req.text } };
-      case 'pressKey':
+      case 'typeText': {
+        // XAML/WinUI hosts drop WM_CHAR, so the driver needs the element to
+        // write through ValuePattern instead. It rejects the pair unless the
+        // window agrees, so the cached scope wins over the resolved window.
+        const cached = req.element ? this.snapshotScopes.get(req.element.snapshotId) : undefined;
+        if (req.element && !cached) {
+          return {
+            refusal: { code: 'stale_snapshot', message: 'That snapshot is no longer held by the driver client.' },
+          };
+        }
+        const addressed =
+          req.element && cached
+            ? {
+                pid: cached.pid,
+                window_id: cached.windowId,
+                snapshot_id: req.element.snapshotId,
+                element_index: req.element.elementIndex,
+                ...(cached.tokens.get(req.element.elementIndex)
+                  ? { element_token: cached.tokens.get(req.element.elementIndex) }
+                  : {}),
+              }
+            : target;
+        return {
+          tool: 'type_text',
+          args: { ...addressed, text: req.text, ...(req.focus ? { x: req.focus.x, y: req.focus.y } : {}) },
+        };
+      }
+      case 'pressKey': {
+        const focus = req.focus ? { x: req.focus.x, y: req.focus.y } : {};
         return req.modifiers && req.modifiers.length > 0
-          ? { tool: 'hotkey', args: { ...target, keys: [...req.modifiers.map(toDriverKey), req.key.toLowerCase()] } }
-          : { tool: 'press_key', args: { ...target, key: req.key } };
+          ? {
+              tool: 'hotkey',
+              args: { ...target, keys: [...req.modifiers.map(toDriverKey), req.key.toLowerCase()], ...focus },
+            }
+          : { tool: 'press_key', args: { ...target, key: req.key, ...focus } };
+      }
       case 'pasteText':
         return { tool: 'paste', args: { ...target, text: req.text } };
       case 'scroll': {
@@ -1111,18 +1263,35 @@ export class CuaDriverBridge implements IComputerBridge {
   async launchApp(
     handle: ComputerHandle,
     name: string,
-    opts: { url?: string; newInstance?: boolean } = {},
+    opts: { url?: string; newInstance?: boolean; args?: readonly string[] } = {},
     signal?: AbortSignal,
   ): Promise<LaunchAppResult> {
     const connection = this.connections.get(handle.workspaceId);
     if (!connection) return { refusal: disconnected() };
     try {
+      // Windows already on screen for this executable, so the one the launch
+      // adds can be told apart from the user's existing windows.
+      const before = new Set<number>();
+      try {
+        const existing = await this.call(connection, 'list_apps', {});
+        if (existing.structuredJson) {
+          for (const app of parseListApps(existing.structuredJson)) {
+            if (!matchesLaunchName(app, name)) continue;
+            for (const w of await this.windowsFor(connection, app.pid)) before.add(w.id);
+          }
+        }
+      } catch {
+        // A failed pre-scan only costs us the ability to name the new window.
+      }
       const result = await this.call(
         connection,
         'launch_app',
         {
           name,
           ...(opts.url ? { urls: [opts.url] } : {}),
+          ...(opts.args && opts.args.length > 0
+            ? { additional_arguments: opts.args.map(quoteArgument) }
+            : {}),
           // Single-instance apps hand every caller the same window, so two
           // concurrent runs otherwise clobber each other's work.
           ...(opts.newInstance ? { creates_new_application_instance: true } : {}),
@@ -1136,21 +1305,37 @@ export class CuaDriverBridge implements IComputerBridge {
       // the window exists. Poll rather than sleep a fixed amount: Office cold
       // start varies by an order of magnitude between first and later runs.
       const deadline = Date.now() + 30_000;
+      // A single-instance app hands the request to a process that is already
+      // running, so the window it opens for us appears a few seconds later
+      // among the ones it already had. Only worth waiting for when we actually
+      // asked it to open something.
+      const wantsNewWindow = (opts.args?.length ?? 0) > 0;
+      const freshDeadline = Date.now() + 5_000;
+      let fallback: LaunchAppResult | undefined;
       while (Date.now() < deadline) {
         const listed = await this.call(connection, 'list_apps', {});
         if (listed.structuredJson) {
           const apps = parseListApps(listed.structuredJson);
           const match = apps.find((a: ComputerAppInfo) => matchesLaunchName(a, name));
-          if (match && (await this.windowsFor(connection, match.pid)).length > 0) {
-            // Deliberately NOT brought to front. The driver launches with
-            // SW_SHOWNOACTIVATE precisely so the user keeps their screen, and
-            // reading and clicking work on a background window; only a write
-            // to a MINIMISED window is unsafe, and that path refuses on its own.
-            return { app: { appId: match.id, name: match.name, pid: match.pid } };
+          if (match) {
+            const windows = await this.windowsFor(connection, match.pid);
+            if (windows.length > 0) {
+              // Deliberately NOT brought to front. The driver launches with
+              // SW_SHOWNOACTIVATE precisely so the user keeps their screen, and
+              // reading and clicking work on a background window; only a write
+              // to a MINIMISED window is unsafe, and that path refuses on its own.
+              const app = { appId: match.id, name: match.name, pid: match.pid };
+              const fresh = windows.find((w) => !before.has(w.id));
+              if (fresh) return { app, window: { id: fresh.id, title: fresh.title } };
+              const chosen = windows.find((w) => w.focused) ?? windows[0];
+              fallback = { app, ...(chosen ? { window: { id: chosen.id, title: chosen.title } } : {}) };
+              if (!wantsNewWindow || before.size === 0 || Date.now() >= freshDeadline) return fallback;
+            }
           }
         }
         await new Promise((r) => setTimeout(r, 750));
       }
+      if (fallback) return fallback;
       return {
         refusal: {
           code: 'target_lost',
@@ -1410,11 +1595,48 @@ const DAEMON_ENV_ALLOWLIST =
     ? ['PATH', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'SystemRoot']
     : ['PATH', 'HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'DISPLAY', 'WAYLAND_DISPLAY'];
 
+/**
+ * Directory of an ffmpeg the daemon would otherwise miss, or null.
+ *
+ * `start_recording { record_video: true }` shells out to ffmpeg and needs it on
+ * PATH. A dev server launched from a shell that predates the install inherits a
+ * PATH without it, and the driver then records turn screenshots but no video,
+ * reporting the reason only in `last_error`. The driver's own `install_ffmpeg`
+ * runs winget, which is blocked outright on managed machines.
+ */
+function findFfmpegDir(): string | null {
+  if (process.platform !== 'win32') return null;
+  const onPath = (process.env['PATH'] ?? '').split(path.delimiter);
+  for (const dir of onPath) {
+    if (dir && existsSync(path.join(dir, 'ffmpeg.exe'))) return null;
+  }
+  const local = process.env['LOCALAPPDATA'] ?? path.join(os.homedir(), 'AppData', 'Local');
+  for (const root of [path.join(local, 'ffmpeg'), path.join(local, 'Microsoft', 'WinGet', 'Packages')]) {
+    let entries: string[];
+    try {
+      entries = readdirSync(root);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const bin = path.join(root, entry, 'bin');
+      if (existsSync(path.join(bin, 'ffmpeg.exe'))) return bin;
+    }
+  }
+  return null;
+}
+
 function daemonEnvironment(): Array<{ name: string; value: string }> {
   const env: Array<{ name: string; value: string }> = [];
   for (const name of DAEMON_ENV_ALLOWLIST) {
     const value = process.env[name];
     if (value) env.push({ name, value });
+  }
+  const ffmpegDir = findFfmpegDir();
+  if (ffmpegDir) {
+    const entry = env.find((e) => e.name === 'PATH');
+    if (entry) entry.value = `${ffmpegDir}${path.delimiter}${entry.value}`;
+    else env.push({ name: 'PATH', value: ffmpegDir });
   }
   // Task runners and service managers routinely drop these. The driver then
   // reports "LOCALAPPDATA is unavailable" and loses its theme store, so derive
@@ -1492,6 +1714,26 @@ function wantsShallowScan(result: DriverToolResult): boolean {
   if (!result.isError) return false;
   const text = result.text ?? '';
   return /UIA provider unresponsive/i.test(text) || /depth-limited scan/i.test(text);
+}
+
+/**
+ * Quotes one launch argument for the driver.
+ *
+ * `additional_arguments` are joined into a single ShellExecuteEx parameter
+ * string, so an unquoted path containing spaces arrives at the target as
+ * several arguments. Measured against VS Code: passing
+ * `C:\Users\me\Desktop\New folder (2)\proj` opened an empty "New" window and
+ * resolved the fragments `folder` and `(2)\proj` relative to the DRIVER's
+ * working directory, creating stray folders there — while the run carried on
+ * against whatever window it found.
+ */
+function quoteArgument(arg: string): string {
+  if (arg.startsWith('"') && arg.endsWith('"') && arg.length > 1) return arg;
+  if (!/[\s"]/u.test(arg)) return arg;
+  // Windows command lines escape an embedded quote, and any run of backslashes
+  // immediately before one, with a backslash.
+  const escaped = arg.replace(/(\\*)"/gu, '$1$1\\"').replace(/(\\+)$/u, '$1$1');
+  return `"${escaped}"`;
 }
 
 /**

@@ -1,12 +1,12 @@
 // The replay index is the one place a Computer Use capture can reach the user's
 // browser, so it carries a privacy rule worth pinning down.
 //
-// The recorder creates a turn folder and takes a `before` frame before the
-// target window has been resolved. If the run ends there, the frame it leaves
-// behind is a grab of the whole physical display — measured at 1920x1200 against
-// 1918x1138 for genuine window captures, and observed containing an unrelated
-// chat app's private messages. Such a turn has no `action.json` because no agent
-// action ran in it, and that absence is what both routes key off.
+// The recorder grabs the WHOLE PHYSICAL DISPLAY whenever an action has no target
+// process to scope to — an abandoned turn, or a `launch_app` for an app that is
+// not running yet. Measured at 1920x1200 against 1918x1138 for genuine window
+// captures, and observed containing an unrelated chat app's private messages and
+// a lock screen. The driver labels these itself in `evidence.json`, which is
+// what both routes key off.
 
 import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
@@ -21,7 +21,16 @@ const PNG = Buffer.from(
   'base64',
 );
 
-/** A run directory with one acted turn and one abandoned, targetless turn. */
+const SCOPED = { before: { state: { status: 'captured' } }, after: { state: { status: 'captured' } } };
+const UNSCOPED = {
+  before: { state: { status: 'not_applicable', classification: 'no_target_pid' } },
+  after: { state: { status: 'not_applicable', classification: 'no_target_pid' } },
+};
+
+/**
+ * A run with one window-scoped turn, one `launch_app` turn the driver could not
+ * scope, and one abandoned turn that never recorded an action at all.
+ */
 async function makeRun(): Promise<string> {
   const workingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'replay-'));
   const run = path.join(workingDir, 'computer', 'recordings', 'run-1');
@@ -34,8 +43,15 @@ async function makeRun(): Promise<string> {
     path.join(acted, 'action.json'),
     JSON.stringify({ tool: 'type_text', timestamp: '1786791885.119' }),
   );
+  await fs.writeFile(path.join(acted, 'evidence.json'), JSON.stringify(SCOPED));
 
-  const abandoned = path.join(run, 'turn-00002');
+  const launched = path.join(run, 'turn-00002');
+  await fs.mkdir(launched, { recursive: true });
+  await fs.writeFile(path.join(launched, 'before.png'), PNG);
+  await fs.writeFile(path.join(launched, 'action.json'), JSON.stringify({ tool: 'launch_app' }));
+  await fs.writeFile(path.join(launched, 'evidence.json'), JSON.stringify(UNSCOPED));
+
+  const abandoned = path.join(run, 'turn-00003');
   await fs.mkdir(abandoned, { recursive: true });
   await fs.writeFile(path.join(abandoned, 'before.png'), PNG);
 
@@ -76,7 +92,29 @@ describe('computer replay index', () => {
     const app = makeApp(await makeRun());
     const res = await request(app).get('/api/workspaces/ws/computer/recording/turns');
 
+    expect(res.body.turns.map((t: { turn: string }) => t.turn)).not.toContain('turn-00003');
+  });
+
+  it('omits a launch_app turn the driver could not scope to a window', async () => {
+    // This one DOES have an action.json, so only the evidence classification
+    // distinguishes it. It is the frame that showed a lock screen in the panel.
+    const app = makeApp(await makeRun());
+    const res = await request(app).get('/api/workspaces/ws/computer/recording/turns');
+
     expect(res.body.turns.map((t: { turn: string }) => t.turn)).not.toContain('turn-00002');
+    expect(res.body.turns).toHaveLength(1);
+  });
+
+  it('refuses an unscoped launch_app frame, even though the PNG exists', async () => {
+    const workingDir = await makeRun();
+    const onDisk = path.join(workingDir, 'computer', 'recordings', 'run-1', 'turn-00002', 'before.png');
+    await expect(fs.access(onDisk)).resolves.toBeUndefined();
+
+    const res = await request(makeApp(workingDir)).get(
+      '/api/workspaces/ws/computer/recording/turns/turn-00002/before',
+    );
+
+    expect(res.status).toBe(404);
   });
 
   it('serves a frame from an acted turn', async () => {
@@ -89,11 +127,11 @@ describe('computer replay index', () => {
 
   it('refuses a frame from a turn with no action, even though the PNG exists', async () => {
     const workingDir = await makeRun();
-    const onDisk = path.join(workingDir, 'computer', 'recordings', 'run-1', 'turn-00002', 'before.png');
+    const onDisk = path.join(workingDir, 'computer', 'recordings', 'run-1', 'turn-00003', 'before.png');
     await expect(fs.access(onDisk)).resolves.toBeUndefined();
 
     const res = await request(makeApp(workingDir)).get(
-      '/api/workspaces/ws/computer/recording/turns/turn-00002/before',
+      '/api/workspaces/ws/computer/recording/turns/turn-00003/before',
     );
 
     expect(res.status).toBe(404);
@@ -104,5 +142,32 @@ describe('computer replay index', () => {
     const res = await request(app).get('/api/workspaces/ws/computer/recording/turns/..%2F..%2Fetc/before');
 
     expect(res.status).toBe(400);
+  });
+
+  it('ignores an empty run folder that a restart left in front of a real one', async () => {
+    // Re-arming a preview mints a fresh folder, so the newest run is routinely
+    // empty. Measured: a 0-turn folder shadowed 20 turns and a 406 MB video,
+    // and the panel reported that nothing had been recorded.
+    const workingDir = await makeRun();
+    const root = path.join(workingDir, 'computer', 'recordings');
+    const empty = path.join(root, 'run-2');
+    await fs.mkdir(empty, { recursive: true });
+    const later = new Date(Date.now() + 60_000);
+    await fs.utimes(empty, later, later);
+
+    const res = await request(makeApp(workingDir)).get('/api/workspaces/ws/computer/recording/turns');
+
+    expect(res.body.turns).toHaveLength(1);
+    expect(res.body.turns[0].turn).toBe('turn-00001');
+  });
+
+  it('still reports the newest run when every run is empty', async () => {
+    const workingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'replay-'));
+    await fs.mkdir(path.join(workingDir, 'computer', 'recordings', 'run-1'), { recursive: true });
+
+    const res = await request(makeApp(workingDir)).get('/api/workspaces/ws/computer/recording/turns');
+
+    expect(res.status).toBe(200);
+    expect(res.body.turns).toEqual([]);
   });
 });

@@ -214,15 +214,120 @@ substring, so `A1` also matches `A10`, `A11`, … and the predicate returns
 `computer_type_text`, `computer_press_key`, `computer_paste_text`,
 `computer_scroll`, `computer_drag`, `computer_click_point`.
 
-These take over the user's **real** keyboard and mouse. They require the window
-to be focused, they cannot be verified, they are disabled by default, and they
-always prompt the user. Reach for them only when:
+These are disabled by default and always prompt the user. They cannot be
+verified by read-back. Reach for them only when:
 
 * the control genuinely does not appear in a snapshot (canvas, custom-drawn UI), or
 * the app needs a keyboard shortcut with no equivalent control (`Ctrl+S`), or
 * you must scroll to reveal off-screen content.
 
+**They do NOT need the window to be frontmost.** The driver delivers keys in
+the background by default — UIA invoke for modern controls, `PostMessage` for
+legacy Win32 — and never raises the window. Do not call
+`computer_bring_to_front` "to make the keystroke work": that steals the focus of
+whoever is using the machine, and the driver did not ask for it. It escalates on
+its own, and only when it has proved background delivery is impossible.
+
 `computer_paste_text` **replaces the user's clipboard**. Say so before using it.
+
+#### Keys the driver can actually send
+
+`computer_press_key` accepts **letters, digits**, and these names only:
+
+`return, tab, escape, up, down, left, right, space, delete, home, end,
+pageup, pagedown, f1`–`f12`
+
+**Punctuation is not in that vocabulary.** There is no backtick, comma, slash or
+bracket key. `Ctrl+`` ` `` is therefore unsendable — measured: it was accepted,
+failed to resolve, and a bare `c` landed in the editor that had focus, editing a
+file nobody asked to change.
+
+When a shortcut needs a key outside that list, use a different route to the same
+command — the command palette (`Ctrl+Shift+P`, all letters) or the menu.
+
+#### Open a folder or file directly — do not drive a file manager
+
+`computer_launch_app` takes `arguments`. Use it:
+
+```
+computer_launch_app  name: "explorer.exe"  arguments: ["C:\\Users\\me\\project"]
+```
+
+That opens the folder in **one call**. Measured against the alternative: driving
+File Explorer's address bar took 31 actions and 12 minutes and never arrived.
+
+Windows 11's address bar is a breadcrumb until it enters edit mode, so
+`computer_set_value` on it sets a value the shell never commits — verified, with
+Enter delivered both in the background and in the foreground: the title stayed
+on the old folder both times. The same applies to opening documents: launch the
+app with the file path rather than navigating a picker.
+
+#### Electron and Chromium surfaces need `focusX` / `focusY`
+
+VS Code's integrated terminal, Slack, Discord and any embedded web view **drop
+posted keystrokes silently**. Background delivery cannot reach them, and the
+refusal you get back is `background_unavailable` or `provider_unavailable` —
+retrying the same call, or a different shortcut, will never work.
+
+Pass the point to click first:
+
+```
+computer_type_text  text: "git pull"  focusX: 900  focusY: 1040
+computer_press_key  key: "return"     focusX: 900  focusY: 1040
+```
+
+The driver pixel-clicks there to establish real renderer focus, then delivers.
+Read the coordinates off the snapshot screenshot, same convention as
+`computer_click_point` — for a terminal, a point inside the terminal panel.
+
+This is the documented path for those targets, not a workaround. Do not reach
+for `computer_bring_to_front` instead: raising the window does not fix renderer
+focus and it steals the user's screen.
+
+#### A locked workstation stops these, and only these
+
+If the screen locks — which it will during a long run — the lock screen owns the
+foreground and Windows refuses to raise any window. Measured on a locked
+machine:
+
+| still works | refused until unlocked |
+|---|---|
+| `computer_snapshot`, window capture | `focusX`/`focusY` on Electron surfaces |
+| `computer_click`, `computer_set_value` | `computer_click_point` |
+| `computer_perform_action` (menus) | anything escalated to foreground |
+| `computer_type_text` with `snapshotId`+`elementIndex` | |
+
+So keep going with the background tools, and when a foreground action is
+refused, **say the screen is locked and stop** — do not try another shortcut.
+Retrying cannot succeed, and each attempt is real input aimed at whatever holds
+focus.
+
+#### XAML / WinUI hosts need `snapshotId` + `elementIndex`
+
+**Windows 11 File Explorer**, Settings, Calculator and modern Notepad consume
+only system-queue input, so plain typed characters are dropped. Snapshot the
+window, find the field, and name it:
+
+```
+computer_type_text  text: "C:\\Users\\me\\project"  snapshotId: "s1a2b3c4d"  elementIndex: 12
+```
+
+The driver then writes through `ValuePattern.SetValue` and reads the value back,
+so this path can come back **verified** — unlike typing blind.
+
+### Menus — `computer_perform_action`
+Application menus have their own accessibility route. Pass the menu path
+separated by `>`:
+
+```
+computer_perform_action  actionName: "Terminal>New Terminal"
+```
+
+The driver resolves one live level at a time and invokes the final item through
+accessibility. **Prefer this over clicking a menu bar.** A synthetic click on a
+menu title opens a popup that belongs to a different window, so your next
+snapshot reads the window behind it and you conclude nothing happened — measured
+on VS Code, where the menu highlighted and the agent looped.
 
 ### The ladder — climb it in order, one rung at a time
 
@@ -243,6 +348,12 @@ something the one above it had.
 Move down a rung when a step reports it did not land — not on a hunch. If rung
 1 refuses with `background_unavailable` or `target_not_focused`, that refusal
 names the rung to try next; follow it rather than guessing.
+
+**Stop when nothing lands.** If several keystrokes or clicks in a row come back
+unverified, the input is not reaching the target and every further one is
+landing somewhere you cannot see. Say so and stop; do not switch to another
+shortcut and try again. The service enforces this after five, but noticing it
+first is the difference between a stuck task and an edited file.
 
 ### Never drive the driver yourself
 

@@ -137,6 +137,8 @@ export class AuthenticatedClientRuntime {
    */
   private allowUnauthenticated: boolean | undefined;
   private postureProbe: Promise<boolean> | null = null;
+  /** Transport error from the posture probe, if it could not reach the server. */
+  private probeFailure: Error | null = null;
   /**
    * Single-flight identity check. `null` = not yet verified this session.
    *
@@ -375,7 +377,25 @@ export class AuthenticatedClientRuntime {
       return this.doFetch(url, init);
     }
 
-    await this.ensureAccessToken();
+    // The probe could not reach the server at all. That is the fact the user
+    // needs; "not paired" would point them at pairing when the address, the
+    // port or the process is what is actually wrong.
+    if (!this.session && this.probeFailure) throw this.probeFailure;
+
+    try {
+      await this.ensureAccessToken();
+    } catch (error) {
+      // A stored session that can no longer be refreshed — the usual cause is
+      // a dev server restarted with fresh keys — must not brick the client.
+      // Only discard it when the server says it needs no credential at all,
+      // because then the stored one is provably worthless; if the server does
+      // require auth, the failure is real and the caller must hear it.
+      if (!(await this.serverAllowsUnauthenticated())) throw error;
+      await this.forget();
+      const url = path.startsWith('http') ? path : `${this.endpoint}${path}`;
+      return this.doFetch(url, init);
+    }
+
     const url = path.startsWith('http') ? path : `${this.endpoint}${path}`;
     let response = await this.signedRequest(url, init);
 
@@ -548,7 +568,13 @@ export class AuthenticatedClientRuntime {
         };
         return body.authentication?.required === false;
       })
-      .catch(() => false)
+      .catch((error: unknown) => {
+        // Remembered so an unreachable server is reported as unreachable
+        // rather than as "not paired", which sends the user to fix the wrong
+        // thing entirely.
+        this.probeFailure = error instanceof Error ? error : new Error(String(error));
+        return false;
+      })
       .then((allow) => {
         this.allowUnauthenticated = allow;
         return allow;

@@ -417,9 +417,13 @@ describe('CuaDriverBridge minimised-window guard', () => {
 
   it('still refuses set_value when the window will not restore — that write vanishes', async () => {
     const dispatched: string[] = [];
+    // Live while the snapshot is taken, minimised by the time the write lands:
+    // a snapshot of a minimised window is refused outright now, so seeding one
+    // any other way would test a state the agent can no longer reach.
+    let live = true;
     const fake = makeBridge({
       reply: (tool) => {
-        if (tool === 'list_windows') return ok(MINIMISED);
+        if (tool === 'list_windows') return ok(live ? RESTORED : MINIMISED);
         if (tool === 'get_window_state') return ok(SNAPSHOT_PAYLOAD);
         if (tool === 'bring_to_front') return ok({});
         dispatched.push(tool);
@@ -428,6 +432,7 @@ describe('CuaDriverBridge minimised-window guard', () => {
     });
     const handle = await started(fake);
     await seedSnapshot(fake, handle);
+    live = false;
 
     const result = await fake.bridge.act(handle, {
       type: 'setValue',
@@ -442,11 +447,105 @@ describe('CuaDriverBridge minimised-window guard', () => {
     expect(dispatched).not.toContain('set_value');
   });
 
-  it('ALLOWS a background click — refusing it only forced needless foreground steals', async () => {
-    const dispatched: string[] = [];
+  it('reports a laddered read as truncated, not as the whole window', async () => {
+    // The ladder answers a smaller question when the provider stalls, and the
+    // driver calls that result complete because it returned everything within
+    // the reduced caps. Measured on File Explorer: reads of 1, 2, 3 and 35
+    // elements arrived looking exactly like a healthy 632-element read, and the
+    // agent hunted for controls that were never enumerated.
+    let attempt = 0;
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(RESTORED);
+        if (tool !== 'get_window_state') return ok({});
+        attempt += 1;
+        return attempt === 1
+          ? { ...driverError('UIA provider unresponsive; retry with a depth-limited scan'), errorCode: 'timeout' }
+          : ok(SNAPSHOT_PAYLOAD);
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.snapshot(handle, {
+      app: { appId: 'notepad', name: 'Notepad', pid: 42 },
+      window: { by: 'id', id: 7 },
+    } as never);
+
+    expect(result.ok).toBe(true);
+    expect(result.snapshot?.truncated).toEqual({ elements: 200, depth: 8 });
+  });
+
+  it('leaves a healthy read untruncated', async () => {
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(RESTORED);
+        return ok(SNAPSHOT_PAYLOAD);
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.snapshot(handle, {
+      app: { appId: 'notepad', name: 'Notepad', pid: 42 },
+      window: { by: 'id', id: 7 },
+    } as never);
+
+    expect(result.snapshot?.truncated).toBeNull();
+  });
+
+  it('restores a minimised window before reading its tree', async () => {    // A minimised window exposes only chrome: measured on File Explorer as 5
+    // elements (TitleBar/System/Restore/Maximize/Close) against 114 restored,
+    // with the Address Bar only in the second. Reading it minimised hands the
+    // agent an empty-looking success and it guesses for the rest of the run —
+    // one measured run burned 31 actions and 12 minutes that way.
+    let restored = false;
+    const order: string[] = [];
+    const fake = makeBridge({
+      reply: (tool) => {
+        order.push(tool);
+        if (tool === 'list_windows') return ok(restored ? RESTORED : MINIMISED);
+        if (tool === 'bring_to_front') {
+          restored = true;
+          return ok({});
+        }
+        return ok(SNAPSHOT_PAYLOAD);
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.snapshot(handle, {
+      app: { appId: 'notepad', name: 'Notepad', pid: 42 },
+      window: { by: 'id', id: 7 },
+    } as never);
+
+    expect(result.ok).toBe(true);
+    expect(order.indexOf('bring_to_front')).toBeLessThan(order.lastIndexOf('get_window_state'));
+  });
+
+  it('refuses a snapshot of a window that will not restore', async () => {
     const fake = makeBridge({
       reply: (tool) => {
         if (tool === 'list_windows') return ok(MINIMISED);
+        if (tool === 'bring_to_front') return ok({});
+        return ok(SNAPSHOT_PAYLOAD);
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.snapshot(handle, {
+      app: { appId: 'notepad', name: 'Notepad', pid: 42 },
+      window: { by: 'id', id: 7 },
+    } as never);
+
+    expect(result.ok).toBe(false);
+    expect(result.refusal?.code).toBe('background_occluded');
+  });
+
+  it('ALLOWS a background click — refusing it only forced needless foreground steals', async () => {
+    const dispatched: string[] = [];
+    let live = true;
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(live ? RESTORED : MINIMISED);
         if (tool === 'get_window_state') return ok(SNAPSHOT_PAYLOAD);
         dispatched.push(tool);
         return ok({});
@@ -454,6 +553,7 @@ describe('CuaDriverBridge minimised-window guard', () => {
     });
     const handle = await started(fake);
     await seedSnapshot(fake, handle);
+    live = false;
 
     const result = await fake.bridge.act(handle, {
       ...CLICK,
@@ -708,6 +808,48 @@ describe('CuaDriverBridge app launching', () => {  it('asks for a separate insta
     const launches = fake.calls.filter((c) => c.tool === 'launch_app');
     expect(launches.at(-1)?.args['creates_new_application_instance']).toBe(true);
   });
+
+  // The driver joins `additional_arguments` into one ShellExecuteEx parameter
+  // string. Measured with VS Code: an unquoted `…\New folder (2)\t3code` was
+  // split into three bogus relative paths, so an EMPTY window opened and the
+  // fragments were resolved against the driver's own working directory.
+  it('quotes a launch argument containing spaces', async () => {
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'list_apps') {
+          return ok({ apps: [{ name: 'Code', pid: 42, running: true, bundle_id: 'code.exe' }] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    await fake.bridge.launchApp(handle, 'Code', {
+      args: ['--new-window', 'C:\\Users\\me\\New folder (2)\\t3code'],
+    });
+
+    expect(fake.calls.find((c) => c.tool === 'launch_app')?.args['additional_arguments'])
+      .toEqual(['--new-window', '"C:\\Users\\me\\New folder (2)\\t3code"']);
+  }, 20_000);
+
+  it('leaves an argument without spaces alone', async () => {
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'list_apps') {
+          return ok({ apps: [{ name: 'Code', pid: 42, running: true, bundle_id: 'code.exe' }] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    await fake.bridge.launchApp(handle, 'Code', { args: ['C:\\src\\repo', '--new-window'] });
+
+    expect(fake.calls.find((c) => c.tool === 'launch_app')?.args['additional_arguments'])
+      .toEqual(['C:\\src\\repo', '--new-window']);
+  }, 20_000);
 });
 
 // ────────────────────────────────────────────────────────────────

@@ -55,6 +55,8 @@ export type ComputerRefusalCode =
   | 'provider_unavailable'
   /** The supplied snapshotId is unknown or has been superseded. */
   | 'stale_snapshot'
+  /** The snapshot is current, but the element does not expose the named action. */
+  | 'unsupported_action'
   /** Concurrency cap reached, or the action exceeded `actionTimeoutMs`. */
   | 'capacity_exhausted'
   /** Provider accepted the call but the target vanished mid-flight. */
@@ -190,8 +192,14 @@ export interface ComputerActionResult {
   refusal?: { code: ComputerRefusalCode; message: string };
 }
 
-/** User decision for a single consent prompt. */
-export type ComputerConsentDecision = 'allow_once' | 'always_allow' | 'deny';
+/**
+ * User decision for a single consent prompt.
+ *
+ * `allow_run` is the only one that covers synthetic input without being asked
+ * again: it lasts for the current chat's desktop session and is dropped when
+ * that session ends, so it cannot outlive the work it was granted for.
+ */
+export type ComputerConsentDecision = 'allow_once' | 'allow_run' | 'always_allow' | 'deny';
 
 /** Persisted per-app grant. `allow_once` is never stored. */
 export type ComputerGrantDecision = 'always_allow' | 'deny';

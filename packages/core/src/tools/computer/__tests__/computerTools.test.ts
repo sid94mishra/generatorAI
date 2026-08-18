@@ -4,6 +4,7 @@ import {
   buildComputerToolSet,
   COMPUTER_TOOL_NAMES,
   isComputerToolName,
+  parseKeyChord,
   projectElements,
 } from '../index.js';
 import { snapshotPayload } from '../computerToolTypes.js';
@@ -34,6 +35,10 @@ function makeCtx(overrides: Partial<Record<string, unknown>> = {}) {
     act: vi.fn(async (...args: unknown[]) => {
       calls.push({ method: 'act', args });
       return ok;
+    }),
+    launchApp: vi.fn(async (...args: unknown[]) => {
+      calls.push({ method: 'launchApp', args });
+      return { app: { appId: 'a', name: 'A', pid: 1 } };
     }),
     ...overrides,
   } as unknown as ComputerService;
@@ -130,6 +135,42 @@ describe('computer tool set', () => {
     expect(request.modifiers).toEqual(['Meta']);
   });
 
+  it('splits a chord written into `key`, instead of sending it as a key name', async () => {
+    // Sending `ctrl+\`` through as a key NAME is what typed a bare `c` into the
+    // editor the agent had focused, corrupting a file in the user's repository.
+    const { tool: press, calls } = tool('computer_press_key');
+    await press.handler({ appId: 'com.a', key: 'ctrl+`' });
+    expect(calls[0]?.args[2]).toMatchObject({ key: '`', modifiers: ['Control'] });
+  });
+
+  it('forwards the Chromium/Electron focus point', async () => {
+    const { tool: type, calls } = tool('computer_type_text');
+    await type.handler({ appId: 'com.a', text: 'git pull', focusX: 900, focusY: 1040 });
+    expect(calls[0]?.args[2]).toMatchObject({ focus: { x: 900, y: 1040 } });
+  });
+
+  it('forwards an element reference for XAML hosts', async () => {
+    const { tool: type, calls } = tool('computer_type_text');
+    await type.handler({ appId: 'com.a', text: 'C:\\', snapshotId: 's1', elementIndex: 3 });
+    expect(calls[0]?.args[2]).toMatchObject({ element: { snapshotId: 's1', elementIndex: 3 } });
+  });
+
+  it('ignores a half-supplied element reference', async () => {
+    // Sending element_index without its snapshot makes the driver fail closed;
+    // dropping the pair keeps the plain typing path available instead.
+    const { tool: type, calls } = tool('computer_type_text');
+    await type.handler({ appId: 'com.a', text: 'x', elementIndex: 3 });
+    expect(calls[0]?.args[2]).not.toHaveProperty('element');
+  });
+
+  it('merges a chord in `key` with modifiers passed separately, without duplicates', async () => {
+    const { tool: press, calls } = tool('computer_press_key');
+    await press.handler({ appId: 'com.a', key: 'Shift+Meta+p', modifiers: ['Shift'] });
+    const request = calls[0]?.args[2] as { key: string; modifiers?: string[] };
+    expect(request.key).toBe('p');
+    expect([...(request.modifiers ?? [])].sort()).toEqual(['Meta', 'Shift']);
+  });
+
   it('steers the model toward snapshot addressing in its descriptions', () => {
     const { ctx } = makeCtx();
     const tools = buildComputerToolSet(ctx);
@@ -142,10 +183,59 @@ describe('computer tool set', () => {
     }
   });
 
+  it('forwards launch arguments so a folder opens in one call', async () => {
+    // Driving File Explorer's address bar instead took 31 actions and 12
+    // minutes without arriving: Windows 11 shows a breadcrumb until it enters
+    // edit mode, so the value set on it is never committed.
+    const { tool: launch, calls } = tool('computer_launch_app');
+    await launch.handler({ name: 'explorer.exe', arguments: ['C:\\Users\\me\\project'] });
+    expect(calls[0]?.args[4]).toEqual(['C:\\Users\\me\\project']);
+  });
+
+  it('drops non-string launch arguments', async () => {
+    const { tool: launch, calls } = tool('computer_launch_app');
+    await launch.handler({ name: 'explorer.exe', arguments: ['C:\\ok', 7, null] });
+    expect(calls[0]?.args[4]).toEqual(['C:\\ok']);
+  });
+
   it('recognises its own tool names', () => {
     expect(isComputerToolName('computer_click')).toBe(true);
     expect(isComputerToolName('click_element')).toBe(false);
     expect(isComputerToolName(42)).toBe(false);
+  });
+});
+
+describe('parseKeyChord', () => {
+  it('splits the spellings a model actually writes', () => {
+    expect(parseKeyChord('ctrl+`')).toEqual({ key: '`', modifiers: ['Control'] });
+    expect(parseKeyChord('Meta+S')).toEqual({ key: 'S', modifiers: ['Meta'] });
+    expect(parseKeyChord('cmd+shift+p')).toEqual({ key: 'p', modifiers: ['Meta', 'Shift'] });
+    expect(parseKeyChord(' alt + F4 ')).toEqual({ key: 'F4', modifiers: ['Alt'] });
+  });
+
+  it('leaves a plain key alone', () => {
+    for (const key of ['Enter', 'Escape', 'a', 'F5']) {
+      expect(parseKeyChord(key)).toEqual({ key, modifiers: [] });
+    }
+  });
+
+  it('treats a literal plus as a key, not a separator', () => {
+    expect(parseKeyChord('+')).toEqual({ key: '+', modifiers: [] });
+    expect(parseKeyChord('ctrl++')).toEqual({ key: '+', modifiers: ['Control'] });
+  });
+
+  it('does not invent modifiers from words it does not know', () => {
+    // Better to send the original string and let the driver refuse than to
+    // guess and deliver a keystroke the agent never asked for.
+    expect(parseKeyChord('hyper+x')).toEqual({ key: 'hyper+x', modifiers: [] });
+    expect(parseKeyChord('a+b')).toEqual({ key: 'a+b', modifiers: [] });
+  });
+
+  it('does not collapse an incomplete chord into a keystroke', () => {
+    // Guessing here would deliver a keystroke the agent never asked for, which
+    // is precisely how a stray character ended up in a user's source file.
+    expect(parseKeyChord('ctrl+')).toEqual({ key: 'ctrl+', modifiers: [] });
+    expect(parseKeyChord('ctrl++x')).toEqual({ key: 'ctrl++x', modifiers: [] });
   });
 });
 
@@ -231,5 +321,26 @@ describe('snapshotPayload', () => {
     const payload = snapshotPayload(result(many));
     expect((payload['elements'] as unknown[]).length).toBe(200);
     expect(payload).not.toHaveProperty('omitted');
+  });
+
+  // Measured on VS Code: one unqualified snapshot serialised to 22.6 KB, past
+  // the harness's inline limit, so the whole result — screenshot included —
+  // was swapped for a "saved to a temp file" stub. The model then re-issued
+  // the identical snapshot nine times and shelled out to PowerShell to parse
+  // the file. Clipping keeps the result in a form it can actually read.
+  it('clips a window too large to return whole, and says so', () => {
+    const wide = Array.from({ length: 400 }, (_, i) => ({
+      ...cell(i),
+      label: `element ${i} with a fairly long accessible label`,
+      value: 'some value text that pushes the payload along',
+    }));
+    const payload = snapshotPayload(result(wide));
+    const shown = (payload['elements'] as unknown[]).length;
+
+    expect(shown).toBeLessThan(400);
+    expect(payload['elementCount']).toBe(400);
+    expect(payload['clipped']).toEqual({ shown, total: 400 });
+    expect(String(payload['clippedNote'])).toMatch(/query/);
+    expect(JSON.stringify(payload).length).toBeLessThan(20_000);
   });
 });

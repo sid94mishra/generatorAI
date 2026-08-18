@@ -42,7 +42,7 @@ const ConsentBodySchema = z.object({
   // approve without also naming what it is approving. The store rejects a
   // mismatch rather than treating it as an answer.
   appIdentity: z.string().min(1),
-  decision: z.enum(['allow_once', 'always_allow', 'deny']),
+  decision: z.enum(['allow_once', 'allow_run', 'always_allow', 'deny']),
 });
 
 function safeEqual(a: string, b: string): boolean {
