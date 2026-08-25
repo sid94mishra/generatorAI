@@ -153,9 +153,16 @@ export default defineConfig({
               id.includes('node_modules/zustand/')) {
             return 'vendor-react-ecosystem';
           }
+          // ── Workflow graph (static dep of WorkflowRunPage) ───────────────
+          // F6 fix: @xyflow/react MUST NOT be in lazy-diff because
+          // WorkflowRunPageV2 → PipelineFlow → @xyflow/react is a static import
+          // chain. Putting it in lazy-diff would make lazy-diff a static dep of
+          // the workflow page, defeating lazy loading for every workflow visitor.
+          if (id.includes('node_modules/@xyflow/')) {
+            return 'vendor-workflow';
+          }
           // ── Diff / code display (lazy — only loaded on diff views) ───────
-          if (id.includes('node_modules/@xyflow/') ||
-              id.includes('packages/changes/') ||
+          if (id.includes('packages/changes/') ||
               id.includes('packages/review/') ||
               id.includes('src/components/diff/')) {
             return 'lazy-diff';

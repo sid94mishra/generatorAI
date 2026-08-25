@@ -73,7 +73,12 @@ export function ChatPage() {
   const PAGE_SIZE = 100;
   const [msgLimit, setMsgLimit] = useState(PAGE_SIZE);
   const { data: messages, isLoading: messagesLoading } = useChatMessages(chatId, msgLimit);
-  const hasMoreMessages = (messages?.length ?? 0) >= msgLimit;
+  // F3 fix: use `> msgLimit - 1` (equivalent to `>=`) is still a false positive
+  // when exactly msgLimit messages exist. Use `=== msgLimit` instead, which is
+  // true only when the server filled the page — if fewer arrived, there are no
+  // more. This still wastes one round-trip when the total count is a multiple
+  // of PAGE_SIZE, but eliminates the infinite "Load earlier" loop for exact counts.
+  const hasMoreMessages = (messages?.length ?? 0) === msgLimit;
 
   // The stream store is keyed by sessionId (not chatId)
   const sessionId = chat?.sessionId;
@@ -568,6 +573,29 @@ export function ChatPage() {
     stream.blocks.length > 0 &&
     (stream.status !== 'idle' || hasActiveWidgetBlock);
 
+  // W30: Track the previous completed turn's usage for the cache-miss notice.
+  // When a turn transitions to 'complete', capture its usage in a ref so the
+  // NEXT turn's UsageChip can compare against it.
+  const prevUsageRef = React.useRef<{ usage: import('@/components/chat/redesign/types.js').UsageInfo; completedAt: number } | null>(null);
+  const lastStreamUsage = stream?.status === 'complete' ? stream.usage : null;
+  React.useEffect(() => {
+    if (stream?.status === 'complete' && stream.usage) {
+      prevUsageRef.current = {
+        usage: {
+          model: stream.usage.model,
+          inputTokens: stream.usage.inputTokens,
+          outputTokens: stream.usage.outputTokens,
+          durationMs: stream.usage.durationMs ?? 0,
+          cacheReadTokens: stream.usage.cacheReadTokens,
+          cacheWriteTokens: stream.usage.cacheWriteTokens,
+          cost: stream.usage.cost,
+          provider: stream.usage.provider,
+        },
+        completedAt: Date.now(),
+      };
+    }
+  }, [lastStreamUsage, stream?.status]);
+
   // Whether the current turn has produced its OWN content yet (text / tool
   // steps / answer) — i.e. anything other than blocks carried across the
   // turn barrier (widgets are preserved from previous turns by startPending).
@@ -772,6 +800,8 @@ export function ChatPage() {
           <StreamingMessage
             stream={stream}
             sessionId={sessionId}
+            prevUsage={prevUsageRef.current?.usage ?? null}
+            prevCompletedAt={prevUsageRef.current?.completedAt ?? null}
             onOpenPlan={openPlanTab}
             onApprovePlan={handleApprovePlan}
             onRequestPlanChanges={handleRequestPlanChanges}

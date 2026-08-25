@@ -24,6 +24,16 @@ interface StreamingMessageProps {
    *  inline — required for the widget bridge to route postMessage
    *  traffic. Falls back to no session (widgets won't be interactive). */
   sessionId?: string;
+  /**
+   * W30: Previous turn's usage — passed through to StreamPanel → UsageChip
+   * to enable the cache-miss notice. When absent, the badge is suppressed.
+   */
+  prevUsage?: UsageInfo | null;
+  /**
+   * W30: Epoch ms when the previous turn completed — used to attribute a
+   * cache miss to "idle > 5 min" vs "model changed".
+   */
+  prevCompletedAt?: number | null;
   /** PLN-01 — handlers for the interactive plan / question cards. */
   onOpenPlan?: (planId: string) => void;
   onApprovePlan?: (planId: string, action: 'implement_interactive' | 'implement_autopilot') => void;
@@ -39,6 +49,8 @@ interface StreamingMessageProps {
 export function StreamingMessage({
   stream,
   sessionId,
+  prevUsage,
+  prevCompletedAt,
   onOpenPlan,
   onApprovePlan,
   onRequestPlanChanges,
@@ -53,7 +65,8 @@ export function StreamingMessage({
     [stream.blocks, isActive],
   );
 
-  // Usage chip — shown after completion (same trigger as before).
+  // Usage chip — shown after completion. W30: preserve all usage fields so
+  // UsageChip can display cacheReadTokens, cost, and the cache-miss notice.
   const usage: UsageInfo | undefined = useMemo(() => {
     if (!stream.usage || stream.status !== 'complete') return undefined;
     return {
@@ -61,6 +74,10 @@ export function StreamingMessage({
       inputTokens: stream.usage.inputTokens,
       outputTokens: stream.usage.outputTokens,
       durationMs: stream.usage.durationMs ?? 0,
+      cacheReadTokens: stream.usage.cacheReadTokens,
+      cacheWriteTokens: stream.usage.cacheWriteTokens,
+      cost: stream.usage.cost,
+      provider: stream.usage.provider,
     };
   }, [stream.usage, stream.status]);
 
@@ -79,6 +96,8 @@ export function StreamingMessage({
           answerStreaming={stream.status === 'streaming'}
           loading={isActive && view.steps.length === 0}
           usage={usage}
+          prevUsage={prevUsage}
+          prevCompletedAt={prevCompletedAt}
           {...(onOpenPlan ? { onOpenPlan } : {})}
           {...(onApprovePlan ? { onApprovePlan } : {})}
           {...(onRequestPlanChanges ? { onRequestPlanChanges } : {})}

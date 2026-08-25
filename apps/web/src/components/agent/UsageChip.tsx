@@ -29,12 +29,17 @@ export function computeCacheMiss(
   usage: UsageInfo,
   prevUsage?: UsageInfo | null,
 ): number {
-  // Only produce a notice if the provider has ever reported a non-zero cache
-  // read. Providers that never report caching (cacheReadTokens always absent
-  // or 0) would generate constant false positives.
-  const reportedCache =
-    (usage.cacheReadTokens ?? 0) > 0 ||
-    (prevUsage?.cacheReadTokens ?? 0) > 0;
+  // Only produce a notice when the PREVIOUS turn reported a cache read. That
+  // is the only reliable signal that the provider supports prompt caching for
+  // this session — if we checked the current turn's cacheReadTokens we'd gate
+  // on data we're already subtracting, which produces a spurious miss=0 on
+  // the very turns that are cache hits.
+  //
+  // F5 fix: use `&&` (only prevUsage.cacheReadTokens) not `||` (either). The
+  // old `||` branch that checked `usage.cacheReadTokens > 0` made no sense:
+  // if the current turn has cache reads, `actualHit` is large → `miss` is
+  // small or zero — it's a hit, not a miss scenario.
+  const reportedCache = (prevUsage?.cacheReadTokens ?? 0) > 0;
   if (!reportedCache) return 0;
   if (!prevUsage) return 0;
 

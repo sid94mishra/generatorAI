@@ -143,11 +143,17 @@ const _pendingInvalidations = new Set<string>();
 let _invalidationQueued = false;
 
 function flushInvalidations(): void {
+  // F7 fix: snapshot the set before clearing so that any synchronous
+  // `invalidateQueries` subscriber that calls `scheduleInvalidation` during
+  // iteration queues a NEW microtask rather than having its key silently eaten
+  // by `.clear()` on the live set. Setting `_invalidationQueued = false` after
+  // `.clear()` also ensures the re-entry path schedules a proper microtask.
+  const keys = [..._pendingInvalidations];
+  _pendingInvalidations.clear();
   _invalidationQueued = false;
-  for (const key of _pendingInvalidations) {
+  for (const key of keys) {
     queryClient.invalidateQueries({ queryKey: JSON.parse(key) as unknown[] });
   }
-  _pendingInvalidations.clear();
 }
 
 /**

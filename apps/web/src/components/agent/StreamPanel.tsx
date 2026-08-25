@@ -67,6 +67,18 @@ export interface StreamPanelProps {
   /** Token usage footer chip (omit to render it elsewhere, as the
    *  stage chips row does). */
   usage?: UsageInfo;
+  /**
+   * W30: Previous turn's usage — enables the cache-miss notice.
+   * Pass the usage from the turn that immediately preceded this one so
+   * `computeCacheMiss` can compare expected vs actual cache reads.
+   * Optional: when absent the cache-miss badge is suppressed (safe).
+   */
+  prevUsage?: UsageInfo | null;
+  /**
+   * W30: Epoch ms when the previous turn completed — used to attribute
+   * a cache miss to "idle > 5 min" vs "model changed".
+   */
+  prevCompletedAt?: number | null;
   /** Error text — rendered in a danger box below the answer. */
   error?: string | null;
   className?: string;
@@ -87,7 +99,8 @@ export interface StreamPanelProps {
 }
 
 export function StreamPanel({
-  segments, steps, answer, widgets, streamKey, answerStreaming = false, active, loading = false, usage, error, className,
+  segments, steps, answer, widgets, streamKey, answerStreaming = false, active, loading = false,
+  usage, prevUsage, prevCompletedAt, error, className,
   onOpenPlan, onApprovePlan, onRequestPlanChanges, onAnswerQuestion, planBusy,
 }: StreamPanelProps) {
   const isActive = active ?? answerStreaming;
@@ -200,8 +213,8 @@ export function StreamPanel({
           </div>
         )}
 
-        {/* Usage footer */}
-        {usage && <UsageChip usage={usage} />}
+        {/* Usage footer — W30: prevUsage enables the cache-miss notice */}
+        {usage && <UsageChip usage={usage} prevUsage={prevUsage} prevCompletedAt={prevCompletedAt} />}
       </div>
     );
   }
