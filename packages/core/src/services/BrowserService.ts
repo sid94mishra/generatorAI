@@ -662,6 +662,15 @@ export class BrowserService {
    * tagged in-line for `browserService.click` / `type` / `hover` etc.
    * Prefer over `domSnapshot` for agent input — ~10× more token-efficient.
    */
+  /**
+   * F1-fix: Return the workspace root path so browser tools can write files
+   * inside the workspace tree (where the harness's Read tool can access them)
+   * rather than os.tmpdir() (which is outside the allowed path).
+   */
+  getWorkspaceRoot(workspaceId: string): string | undefined {
+    return this.sessions.get(workspaceId)?.workspaceRoot;
+  }
+
   async readPage(workspaceId: string): Promise<{ url: string; title: string; snapshot: string }> {
     const record = this.mustRecord(workspaceId);
     this.assertAttachedForAgent(record, 'agent');

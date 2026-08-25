@@ -262,7 +262,7 @@ export function attachTerminalWebSocket(server: HttpServer, container: Container
           // Client is closing the tab — kill the session so the PTY does
           // not linger for the idle-reaper. The subsequent ws.close is
           // then a natural detach.
-          void terminalService.kill(sessionId, 'user_close');
+          void terminalService.kill(sessionId, 'user_close').catch(() => undefined);
           break;
       }
     });

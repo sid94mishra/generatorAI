@@ -41,6 +41,14 @@ export class WorkspaceManager {
    * resources) to release native handles before the row disappears.
    */
   private readonly beforeDeleteListeners: Array<(workspaceId: string) => Promise<void> | void> = [];
+  /**
+   * F3-fix: Per-ownerId in-flight create promises.
+   * Guards against two concurrent callers for the same owner racing through the
+   * `forceCleanup → create` path and producing two workspace rows with the same
+   * `ownerType+ownerId`.  A second caller with the same key awaits the first
+   * call's result rather than starting a new create.
+   */
+  private readonly createInFlight = new Map<string, Promise<ExecutionWorkspace>>();
 
   constructor(
     private readonly workspaceRepo: IExecutionWorkspaceRepository,
@@ -72,6 +80,22 @@ export class WorkspaceManager {
    * Idempotent: returns existing workspace if one exists for this owner.
    */
   async createWorkspace(params: CreateWorkspaceParams): Promise<ExecutionWorkspace> {
+    // F3-fix: Serialize concurrent creates for the same owner so two callers
+    // racing through the `forceCleanup → create` path don't produce duplicate rows.
+    const ownerKey = `${params.ownerType}:${params.ownerId}`;
+    const inflight = this.createInFlight.get(ownerKey);
+    if (inflight) return inflight;
+
+    const doCreate = this._doCreateWorkspace(params);
+    this.createInFlight.set(ownerKey, doCreate);
+    try {
+      return await doCreate;
+    } finally {
+      this.createInFlight.delete(ownerKey);
+    }
+  }
+
+  private async _doCreateWorkspace(params: CreateWorkspaceParams): Promise<ExecutionWorkspace> {
     // Check if workspace already exists for this owner (idempotent)
     const existing = await this.workspaceRepo.findByOwner(params.ownerType, params.ownerId);
     if (existing) {
@@ -304,6 +328,32 @@ export class WorkspaceManager {
 
       for (const record of worktreeRecords) {
         const worktreePath = path.join(workspace.rootPath, record.relativePath);
+
+        // F4-fix: Read the .git file BEFORE removing the worktree so we can
+        // resolve the parent clone path. After `git worktree remove` the
+        // directory no longer exists and `-C <worktreePath>` in `git worktree
+        // prune` would fail (or silently operate on the wrong repo).
+        let parentClonePath: string | undefined;
+        try {
+          const gitFileContent = await fs.readFile(
+            path.join(worktreePath, '.git'),
+            'utf-8',
+          );
+          // Linked worktrees have a `.git` *file* containing:
+          //   gitdir: /path/to/parent/.git/worktrees/<name>
+          // The parent clone root is three levels up from that gitdir.
+          const match = /gitdir:\s*(.+)/.exec(gitFileContent.trim());
+          const matchedGroup = match?.[1];
+          if (matchedGroup) {
+            const gitdirPath = path.resolve(worktreePath, matchedGroup.trim());
+            // gitdirPath = <clone>/.git/worktrees/<name>  → go up 3 levels
+            parentClonePath = path.resolve(gitdirPath, '..', '..', '..');
+          }
+        } catch {
+          // .git file may not exist (workspace without worktrees, or already
+          // partially cleaned up) — skip prune gracefully.
+        }
+
         try {
           // -C <worktreePath> makes git start inside the linked worktree;
           // git follows the .git file back to the parent clone and removes
@@ -321,15 +371,20 @@ export class WorkspaceManager {
             `[WorkspaceManager] git worktree remove failed for ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
-        try {
-          // Sweep any remaining stale refs from the parent clone's git dir.
-          await execFileAsync(
-            'git',
-            ['-C', worktreePath, 'worktree', 'prune'],
-            { timeout: 15_000 },
-          );
-        } catch {
-          // Best effort — the path may already be gone at this point.
+
+        if (parentClonePath) {
+          try {
+            // Sweep any remaining stale refs from the parent clone's git dir.
+            // Must run from the parent clone — not from the now-deleted
+            // worktree path (F4 fix).
+            await execFileAsync(
+              'git',
+              ['-C', parentClonePath, 'worktree', 'prune'],
+              { timeout: 15_000 },
+            );
+          } catch {
+            // Best effort.
+          }
         }
       }
     }

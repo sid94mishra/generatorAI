@@ -1475,6 +1475,7 @@ export class ComputerService {
       () => controller.abort(),
       timeoutMs ?? this.computerConfig.actionTimeoutMs,
     );
+    timer.unref?.();
     try {
       return await work(controller.signal);
     } catch (err) {
@@ -1675,7 +1676,7 @@ export class ComputerService {
     // Silently passing a truncated frame to the model causes hallucinated UI state.
     const isJpeg = stored.endsWith('.jpg') || stored.endsWith('.jpeg')
       || (encoded.mimeType === 'image/jpeg');
-    if (isJpeg && fileBytes.length >= 3) {
+    if (isJpeg && fileBytes.length >= 4) {
       const hasSOI = fileBytes[0] === 0xFF && fileBytes[1] === 0xD8 && fileBytes[2] === 0xFF;
       const hasEOI = fileBytes[fileBytes.length - 2] === 0xFF && fileBytes[fileBytes.length - 1] === 0xD9;
       if (!hasSOI || !hasEOI) {
