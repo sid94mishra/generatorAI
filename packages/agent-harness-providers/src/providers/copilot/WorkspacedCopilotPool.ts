@@ -85,6 +85,13 @@ interface WorkspaceEntry {
   initWaiters: Array<(err: Error | null) => void>;
   /** True once initialize() completed successfully. */
   initialized: boolean;
+  /**
+   * M6-fix: Number of conversations with an active (in-flight) turn.
+   * Incremented when sendPrompt is called; decremented on turn completion.
+   * LRU eviction skips entries with activeConversationCount > 0 to avoid
+   * killing a CLI process mid-turn.
+   */
+  activeConversationCount: number;
 }
 
 // ── WorkspacedCopilotPool ─────────────────────────────────────────
@@ -284,7 +291,13 @@ export class WorkspacedCopilotPool implements IAgentHarness {
     const entry = this.entryFor(conversationId);
     if (!entry) throw new Error(`WorkspacedCopilotPool: no conversation "${conversationId}"`);
     entry.lastUsedAt = Date.now();
-    return entry.provider.sendPrompt(conversationId, prompt, attachments, options);
+    // M6-fix: track in-flight turns so LRU eviction skips this workspace.
+    entry.activeConversationCount++;
+    try {
+      return await entry.provider.sendPrompt(conversationId, prompt, attachments, options);
+    } finally {
+      entry.activeConversationCount = Math.max(0, entry.activeConversationCount - 1);
+    }
   }
 
   async sendPromptAndWait(
@@ -297,7 +310,13 @@ export class WorkspacedCopilotPool implements IAgentHarness {
     const entry = this.entryFor(conversationId);
     if (!entry) throw new Error(`WorkspacedCopilotPool: no conversation "${conversationId}"`);
     entry.lastUsedAt = Date.now();
-    return entry.provider.sendPromptAndWait(conversationId, prompt, attachments, signal, options);
+    // M6-fix: track in-flight turns so LRU eviction skips this workspace.
+    entry.activeConversationCount++;
+    try {
+      return await entry.provider.sendPromptAndWait(conversationId, prompt, attachments, signal, options);
+    } finally {
+      entry.activeConversationCount = Math.max(0, entry.activeConversationCount - 1);
+    }
   }
 
   async getMessages(conversationId: string): Promise<ConversationMessage[]> {
@@ -356,6 +375,7 @@ export class WorkspacedCopilotPool implements IAgentHarness {
       initializing: false,
       initWaiters: [],
       initialized: false,
+      activeConversationCount: 0,
     };
     this.workspaces.set(key, entry);
 
@@ -390,19 +410,26 @@ export class WorkspacedCopilotPool implements IAgentHarness {
       } catch (err) {
         entry.initializing = false;
         const error = err instanceof Error ? err : new Error(String(err));
+        // Notify waiters of the failure before cleaning up state
         for (const resolve of entry.initWaiters) resolve(error);
         entry.initWaiters = [];
         // Remove the failed entry so it can be retried
         this.workspaces.delete(key);
         const unsub = this.workspaceEventUnsubs.get(key);
         if (unsub) { unsub(); this.workspaceEventUnsubs.delete(key); }
-        throw error;
+        // B4-fix: do NOT re-throw here — waiters are already notified above, and
+        // `void doInit()` discards the Promise. Re-throwing would become an
+        // unhandled promise rejection that crashes the process (Node.js ≥ 15).
       } finally {
         releaseCold?.();
       }
     };
 
-    void doInit();
+    // B4-fix: attach a no-op catch to prevent an unhandled rejection if doInit()
+    // rejects before the try/catch above can intercept (e.g. acquireColdStart throw).
+    void doInit().catch(() => {
+      // Errors are handled inside doInit; this suppresses any escaping rejection.
+    });
   }
 
   /** Wait until the entry's initialize() has completed (or re-throw its error). */
@@ -413,11 +440,14 @@ export class WorkspacedCopilotPool implements IAgentHarness {
     });
   }
 
-  /** Evict the least-recently-used workspace entry. */
+  /** Evict the least-recently-used workspace entry that has no active turns. */
   private async evictLru(): Promise<void> {
     let lruKey: string | undefined;
     let lruTime = Infinity;
     for (const [key, entry] of this.workspaces) {
+      // M6-fix: never evict a workspace with an in-flight turn — stopping the
+      // CLI process mid-turn would abort the active conversation with an error.
+      if (entry.activeConversationCount > 0) continue;
       if (entry.lastUsedAt < lruTime) {
         lruTime = entry.lastUsedAt;
         lruKey = key;

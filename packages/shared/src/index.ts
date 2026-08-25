@@ -7,3 +7,5 @@ export * from './utils/index.js';
 export * from './logging/index.js';
 export * from './telemetry/index.js';
 export * from './builders/index.js';
+// W12 — IPC protocol for inter-process communication
+export * from './ipc/AgentHostIpc.js';

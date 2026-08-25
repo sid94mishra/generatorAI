@@ -136,6 +136,8 @@ import {
   // Extension-author built-in tools
   buildWriteExtensionTool,
   buildReloadExtensionTool,
+  // M8-fix: W18 admission controller — value import (cannot be `import type`)
+  AdmissionController,
 } from '@generatorai/core';
 import type {
   IAgentHarness,
@@ -167,7 +169,8 @@ import type {
   HitlService,
   AgentInteractionService,
   PlanService,
-  ChatManagementServiceExtensions} from '@generatorai/core';
+  ChatManagementServiceExtensions,
+} from '@generatorai/core';
 // PRV-01 — harness provider is created via the unified factory from
 // @generatorai/agent-harness-providers. Dynamic imports ensure SDK
 // dependencies are optional at runtime.
@@ -1166,6 +1169,15 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   workflowRunService.setWorktreeService(worktreeService, projectCodebaseRepo);
   workflowRunService.setHookExecutor(hookExecutor);
   workflowRunService.setResultValidator(resultValidator);
+
+  // M8-fix: W18 — wire the AdmissionController so stage launches are gated by
+  // the `ordinary` lane. Interactive chat turns bypass this via ChatManagementService.
+  const admissionController = new AdmissionController({
+    interactiveConcurrency: parseInt(process.env['GENERATORAI_INTERACTIVE_CONCURRENCY'] ?? '4', 10),
+    ordinaryConcurrency: parseInt(process.env['GENERATORAI_ORDINARY_CONCURRENCY'] ?? '8', 10),
+    bulkConcurrency: parseInt(process.env['GENERATORAI_BULK_CONCURRENCY'] ?? '2', 10),
+  });
+  workflowRunService.setAdmissionController(admissionController);
   stageExecutionService.setWorkspaceManager(workspaceManager);
   stageExecutionService.setWorkspaceCheckpointService(workspaceCheckpointService);
 

@@ -315,7 +315,10 @@ export class AgentHostSupervisor {
                                   : 0,
       executionQueueDepth:      exec.queueDepth,
       maxConcurrentColdStarts:  cold.permits,
-      activeColdStarts:         cold.queueDepth > 0 ? cold.permits : 0, // approximate
+      // M7-fix: mirror the same formula used for activeExecutions — derive from
+      // available count rather than queue depth (queue depth counts waiters,
+      // not holders, so it's always wrong when ≤ permits are in use).
+      activeColdStarts:         Math.max(0, cold.permits - (cold as unknown as { available: number }).available),
       instanceCount:            this.instances.size,
     };
   }

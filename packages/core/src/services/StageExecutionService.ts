@@ -408,6 +408,7 @@ export class StageExecutionService {
     workflowRunId: string,
     stageRunId: string,
     groups?: AgentToolPolicy,
+    semaphoreCallbacks?: { pause: () => void; resume: () => Promise<void> },
   ): (request: PermissionRequest) => Promise<PermissionResponse> {
     const runRepo = this.workflowRunRepo;
     const hitl = this.hitlService;
@@ -456,20 +457,30 @@ export class StageExecutionService {
       // wait for `HitlService.resume` to fire (via the approver hitting
       // `PATCH /stages/:id/approve`). The interrupt data is a structured
       // record so the UI can render "wants to run <shell command>" etc.
+      //
+      // M9-fix: release the stage-semaphore permit while parked waiting for
+      // human review — the wait can last hours and holding the permit would
+      // starve other concurrent stages. Re-acquire once the reviewer decides.
       const prompt = `Approve ${request.type}: ${request.description}`;
-      const resolution = await hitl.interrupt(
-        stageRunId,
-        workflowRunId,
-        {
-          kind: 'tool_permission',
-          request: {
-            type: request.type,
-            description: request.description,
-            details: request.details ?? null,
+      semaphoreCallbacks?.pause();
+      let resolution: Awaited<ReturnType<typeof hitl.interrupt>>;
+      try {
+        resolution = await hitl.interrupt(
+          stageRunId,
+          workflowRunId,
+          {
+            kind: 'tool_permission',
+            request: {
+              type: request.type,
+              description: request.description,
+              details: request.details ?? null,
+            },
           },
-        },
-        { prompt },
-      );
+          { prompt },
+        );
+      } finally {
+        await semaphoreCallbacks?.resume();
+      }
       return {
         granted: resolution.approved === true,
         reason: resolution.reason,
@@ -1012,10 +1023,13 @@ export class StageExecutionService {
         // run's `permissionMode` field actually gates tool calls. When both
         // deps are absent (older wiring / tests), sessionAllocator falls back
         // to auto-approve, preserving previous behaviour.
+        // M9-fix: pass semaphoreCallbacks so the permission handler can release
+        // the stage-semaphore permit while awaiting a human decision on tool use.
         onPermissionRequest: this.buildPermissionHandler(
           workflowRunId,
           stageRun.id,
           agentProjection.toolPolicy.groups,
+          semaphoreCallbacks,
         ),
       },
     );

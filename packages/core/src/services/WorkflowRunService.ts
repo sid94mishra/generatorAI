@@ -12,6 +12,7 @@ import type {
   ILogger,
 } from '@generatorai/shared';
 import type { Semaphore } from '../utils/Semaphore.js';
+import type { AdmissionController } from './AdmissionController.js';
 import { generateId, withSpan, getMeter, ValidationError } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -73,6 +74,12 @@ export class WorkflowRunService {
   private runLoggers = new Map<string, RunLogger>();
   /** Optional hook executor for workflow-level lifecycle hooks */
   private hookExecutor?: HookExecutor;
+  /**
+   * M8-fix: W18 AdmissionController — gates stage launches in the `ordinary`
+   * lane so a wide DAG fan-out doesn't saturate the event loop.
+   * Set via setAdmissionController() from the composition root.
+   */
+  private admissionController?: AdmissionController;
 
   constructor(
     private runRepo: IWorkflowRunRepository,
@@ -121,6 +128,16 @@ export class WorkflowRunService {
   /** Late-wire hook executor for workflow-level lifecycle hooks. */
   setHookExecutor(he: HookExecutor): void {
     this.hookExecutor = he;
+  }
+
+  /**
+   * M8-fix: Late-wire the AdmissionController (W18).
+   * Call from the composition root after construction so all workflow stage
+   * launches go through the `ordinary` lane, preventing bulk runs from
+   * crowding out interactive chat turns.
+   */
+  setAdmissionController(ac: AdmissionController): void {
+    this.admissionController = ac;
   }
 
   /** Late-wire result validator (so per-stage resultValidation rules can run
@@ -186,7 +203,11 @@ export class WorkflowRunService {
     // we can yield the permit across HITL approval waits (which can last hours).
     // semaphoreCallbacks are forwarded to executeStage; it calls pause() before
     // each hitl.interrupt() and resume() once the reviewer has decided.
-    const settled = (async () => {
+    //
+    // M8-fix: gate each launch through the `ordinary` admission lane so a wide
+    // DAG fan-out queues (never rejects) rather than running unbounded and
+    // saturating the event loop. Falls through without gating when no controller.
+    const runFn = async () => {
       if (this.stageSemaphore) await this.stageSemaphore.acquire();
       let permitHeld = !!this.stageSemaphore;
       const semaphoreCallbacks = this.stageSemaphore
@@ -222,7 +243,12 @@ export class WorkflowRunService {
         // had no HITL block at all).
         if (permitHeld && this.stageSemaphore) this.stageSemaphore.release();
       }
-    })();
+    };
+
+    const settled = this.admissionController
+      ? this.admissionController.admit('ordinary', runFn)
+      : runFn();
+
     settled.catch((err) => {
       this.onStageFailed(runId, stageRun.id, err).catch(() => {/* swallow */});
     });

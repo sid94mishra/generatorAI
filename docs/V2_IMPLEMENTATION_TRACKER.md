@@ -19,7 +19,7 @@ was checked with `git diff` plus a grep of the specific symbol.
 | **0** | Stop the bleeding | ✅ Complete · 2 review rounds · 24 findings fixed |
 | **1** | Stream spine | ✅ Complete · 1 review round · 3 MAJOR + 2 MINOR findings fixed |
 | **2** | Provider port & contracts | ✅ Complete · 3 review rounds · W34/W35/W13/W42/W44/W45/W41/W46/W37/W38/W39/W10 all done · 17 adversarial findings fixed (6 CRITICAL, 7 MAJOR, 4 MINOR) |
-| **3** | Process split & admission | 🔄 In progress · W33/W18/W19/W20/W21 done · W12/W36 in progress |
+| **3** | Process split & admission | ✅ Complete · W33/W12/W36/W18/W19/W20/W21 all done · adversarial review fixed 4 BLOCKERS + 5 MAJOR + 4 MINOR |
 | **4** | Native hosts | ⬜ Not started |
 | **5** | Client rebuild | ⬜ Not started |
 | **6** | Durability & orchestration | ⬜ Not started |
