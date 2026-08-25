@@ -195,9 +195,33 @@ export function resolveAvailableTools(availableTools?: string[]): string[] | und
   return hasNoRestriction ? undefined : availableTools;
 }
 
+// W36: Maximum number of simultaneously active workspace runtimes (excluding
+// the default client).  When the cap is reached the oldest-idle workspace is
+// stopped (30 s grace) before a new one is created.
+const MAX_CONCURRENT_RUNTIMES = 10;
+
+/** W36: Entry in the per-workspace client registry. */
+interface WorkspaceEntry {
+  client: CopilotClient;
+  /** Number of conversations currently pinned to this workspace. */
+  refCount: number;
+  /** Scheduled teardown timer (cleared if a new conversation arrives). */
+  teardownTimer?: ReturnType<typeof setTimeout>;
+  /** Epoch ms of last activity — used for LRU eviction. */
+  lastUsedAt: number;
+  /** Whether this workspace's client has been started. */
+  started: boolean;
+}
+
 export class CopilotProvider implements IAgentHarness {
   private client: CopilotClient;
   private conversations = new Map<string, CopilotSession>();
+
+  // W36 ── per-workspace runtime pool ──────────────────────────────────────
+  /** Active workspace clients, keyed by absolute working-directory path. */
+  private workspaceClients = new Map<string, WorkspaceEntry>(); /* W36 */
+  /** Maps each conversationId to its workspace key ('__default__' or cwd). */
+  private conversationClientKey = new Map<string, string>(); /* W36 */
   /**
    * Model each live session was last configured with.
    *
@@ -354,6 +378,154 @@ export class CopilotProvider implements IAgentHarness {
     this.client = new CopilotClient(clientOptions as ConstructorParameters<typeof CopilotClient>[0]);
   }
 
+  // ── W36: Per-workspace runtime pool ─────────────────────────────────────
+
+  /**
+   * W36 — Build a CopilotClient for a specific workspace cwd.
+   * Re-uses the same connection options as the default client but overrides
+   * `workingDirectory` so each workspace gets its own CLI subprocess.
+   */
+  private buildWorkspaceClient(cwd: string): CopilotClient {
+    const options = this.options;
+    const clientOptions: Record<string, unknown> = { workingDirectory: cwd };
+    if (options.cliUrl) {
+      clientOptions['connection'] = RuntimeConnection.forUri(options.cliUrl);
+    } else {
+      const resolvedCli = resolveCopilotCliPath(options.cliPath);
+      clientOptions['connection'] = RuntimeConnection.forStdio(
+        resolvedCli ? { path: resolvedCli } : undefined,
+      );
+    }
+    const ghHost = options.githubHost ?? process.env['COPILOT_GH_HOST'] ?? process.env['GH_HOST'];
+    const ambientToken = process.env['COPILOT_GITHUB_TOKEN'] ?? process.env['GITHUB_TOKEN'] ?? process.env['GH_TOKEN'];
+    const githubToken = options.githubToken ?? (ghHost ? undefined : ambientToken);
+    if (githubToken) clientOptions['gitHubToken'] = githubToken;
+    clientOptions['env'] = buildHarnessEnv({
+      passthrough: ['COPILOT_CLI_PATH'],
+      extra: {
+        ...(ghHost ? { COPILOT_GH_HOST: ghHost } : {}),
+        ...(githubToken ? { COPILOT_GITHUB_TOKEN: githubToken } : {}),
+        ...(options.homeDir ? { COPILOT_HOME: options.homeDir } : {}),
+      },
+    });
+    return new CopilotClient(clientOptions as ConstructorParameters<typeof CopilotClient>[0]);
+  }
+
+  /**
+   * W36 — Get or create the WorkspaceEntry for a given cwd.
+   * Returns null if `cwd` matches the default workspace (use `this.client`).
+   */
+  private async getOrCreateWorkspaceEntry(cwd: string | undefined): Promise<WorkspaceEntry | null> {
+    const defaultCwd = this.options.defaultCwd;
+    if (!cwd || cwd === defaultCwd) return null; // use default client
+
+    const existing = this.workspaceClients.get(cwd);
+    if (existing) {
+      // Cancel any pending teardown
+      if (existing.teardownTimer) {
+        clearTimeout(existing.teardownTimer);
+        existing.teardownTimer = undefined;
+      }
+      existing.lastUsedAt = Date.now();
+      return existing;
+    }
+
+    // Enforce LRU cap before creating a new entry
+    if (this.workspaceClients.size >= MAX_CONCURRENT_RUNTIMES) {
+      await this.evictLruWorkspace();
+    }
+
+    const client = this.buildWorkspaceClient(cwd);
+    const entry: WorkspaceEntry = { client, refCount: 0, lastUsedAt: Date.now(), started: false };
+    this.workspaceClients.set(cwd, entry);
+
+    // Start lazily; if the default client isn't running yet, skip (we'll start on first use)
+    if (this.clientState === 'running') {
+      try {
+        await client.start();
+        entry.started = true;
+      } catch (err) {
+        this.workspaceClients.delete(cwd);
+        throw err;
+      }
+    }
+    return entry;
+  }
+
+  /**
+   * W36 — Evict the least-recently-used idle workspace (refCount === 0).
+   * If no idle workspace exists, evicts the LRU regardless of ref count.
+   */
+  private async evictLruWorkspace(): Promise<void> {
+    let lruKey: string | undefined;
+    let lruTime = Infinity;
+    // Prefer idle workspaces first
+    for (const [key, entry] of this.workspaceClients) {
+      if (entry.refCount === 0 && entry.lastUsedAt < lruTime) {
+        lruTime = entry.lastUsedAt;
+        lruKey = key;
+      }
+    }
+    // Fallback: any LRU workspace
+    if (!lruKey) {
+      lruTime = Infinity;
+      for (const [key, entry] of this.workspaceClients) {
+        if (entry.lastUsedAt < lruTime) {
+          lruTime = entry.lastUsedAt;
+          lruKey = key;
+        }
+      }
+    }
+    if (lruKey) {
+      const entry = this.workspaceClients.get(lruKey)!;
+      this.workspaceClients.delete(lruKey);
+      if (entry.teardownTimer) clearTimeout(entry.teardownTimer);
+      if (entry.started) {
+        try { await entry.client.stop(); } catch { /* best-effort */ }
+      }
+    }
+  }
+
+  /**
+   * W36 — Return the CopilotClient that owns `conversationId`.
+   * Falls back to `this.client` (the default workspace).
+   */
+  private clientForConversation(conversationId: string): CopilotClient {
+    const key = this.conversationClientKey.get(conversationId);
+    if (key && key !== '__default__') {
+      const entry = this.workspaceClients.get(key);
+      if (entry) return entry.client;
+    }
+    return this.client;
+  }
+
+  /**
+   * W36 — Release the workspace client ref for a conversation.
+   * When refCount hits 0, schedules a 30 s graceful teardown.
+   */
+  private releaseWorkspaceRef(conversationId: string): void {
+    const key = this.conversationClientKey.get(conversationId);
+    this.conversationClientKey.delete(conversationId);
+    if (!key || key === '__default__') return;
+
+    const entry = this.workspaceClients.get(key);
+    if (!entry) return;
+
+    entry.refCount = Math.max(0, entry.refCount - 1);
+    if (entry.refCount === 0) {
+      // Schedule a 30 s grace teardown
+      entry.teardownTimer = setTimeout(async () => {
+        const current = this.workspaceClients.get(key);
+        if (current && current.refCount === 0) {
+          this.workspaceClients.delete(key);
+          if (current.started) {
+            try { await current.client.stop(); } catch { /* best-effort */ }
+          }
+        }
+      }, 30_000);
+    }
+  }
+
   // ── Client Lifecycle ──
 
   async initialize(): Promise<void> {
@@ -384,6 +556,14 @@ export class CopilotProvider implements IAgentHarness {
   async forceStop(): Promise<void> {
     this.stopClientStatePolling();
     await this.client.forceStop();
+    // W36: also force-stop all workspace clients
+    for (const [key, entry] of this.workspaceClients) {
+      if (entry.teardownTimer) clearTimeout(entry.teardownTimer);
+      if (entry.started) {
+        try { await entry.client.forceStop(); } catch { /* best-effort */ }
+      }
+      this.workspaceClients.delete(key);
+    }
     // Force-stop skips graceful session.disconnect() (the CLI is already gone),
     // but we must still run listener cleanups and drop in-memory handles —
     // otherwise conversations + their SDK event listeners leak when forceStop()
@@ -411,6 +591,7 @@ export class CopilotProvider implements IAgentHarness {
     this.conversationListenerCleanups.clear();
     this.conversationLeakWarned.clear();
     this.conversations.clear();
+    this.conversationClientKey.clear(); /* W36 */
   }
 
   getClientState(): HarnessClientState {
@@ -435,6 +616,14 @@ export class CopilotProvider implements IAgentHarness {
     // the conversations map) so no per-conversation SDK listeners leak.
     this.cleanupAllConversations();
     await this.client.stop();
+    // W36: gracefully stop all workspace clients
+    for (const [key, entry] of this.workspaceClients) {
+      if (entry.teardownTimer) clearTimeout(entry.teardownTimer);
+      if (entry.started) {
+        try { await entry.client.stop(); } catch { /* best-effort */ }
+      }
+      this.workspaceClients.delete(key);
+    }
     this.clientState = 'stopped';
     this.emitClientEvent({ type: 'client.stopped' });
   }
@@ -857,7 +1046,16 @@ export class CopilotProvider implements IAgentHarness {
     // resume; a handler missing on the resume path silently kills plan mode
     // after a server restart.
     this.installPlanGates(sessionConfig, params);
-    const session = await this.client.createSession(sessionConfig);
+    // W36 — route to the workspace-specific client when workingDirectory is set
+    // and differs from the default.  getOrCreateWorkspaceEntry is a no-op when
+    // the cwd matches the default, returning null (→ use this.client).
+    const workspaceEntry = await this.getOrCreateWorkspaceEntry(params.workingDirectory); /* W36 */
+    const createClient = workspaceEntry ? workspaceEntry.client : this.client; /* W36 */
+    const session = await createClient.createSession(sessionConfig);
+    // W36 — record which workspace owns this conversation
+    const wsKey = params.workingDirectory && workspaceEntry ? params.workingDirectory : '__default__'; /* W36 */
+    this.conversationClientKey.set(params.conversationId, wsKey); /* W36 */
+    if (workspaceEntry) { workspaceEntry.refCount++; workspaceEntry.lastUsedAt = Date.now(); } /* W36 */
     this.attachTurnTextTracker(params.conversationId, session);
     this.conversations.set(params.conversationId, session);
     this.conversationModels.set(params.conversationId, resolvedModel);
@@ -976,7 +1174,9 @@ export class CopilotProvider implements IAgentHarness {
     }
     // PLN-01 — reinstall the plan-mode gates on resume (see installPlanGates).
     if (params) this.installPlanGates(resumeConfig, params);
-    const session = await this.client.resumeSession(conversationId, resumeConfig);
+    // W36 — resume on the same workspace client that owns this conversation
+    const resumeClient = this.clientForConversation(conversationId); /* W36 */
+    const session = await resumeClient.resumeSession(conversationId, resumeConfig);
     this.attachTurnTextTracker(conversationId, session);
     this.conversations.set(conversationId, session);
     if (params?.model) {
@@ -1268,7 +1468,10 @@ export class CopilotProvider implements IAgentHarness {
       this.conversations.delete(conversationId);
       activeSessions.add(-1);
     }
-    await this.client.deleteSession(conversationId);
+    // W36 — delete on the workspace client that owns this conversation
+    const deleteClient = this.clientForConversation(conversationId); /* W36 */
+    await deleteClient.deleteSession(conversationId);
+    this.releaseWorkspaceRef(conversationId); /* W36 */
   }
 
   async destroyConversation(conversationId: string): Promise<void> {
@@ -1289,6 +1492,7 @@ export class CopilotProvider implements IAgentHarness {
       this.conversationModels.delete(conversationId);
       activeSessions.add(-1);
     }
+    this.releaseWorkspaceRef(conversationId); /* W36 */
   }
 
   // ── Messaging ──

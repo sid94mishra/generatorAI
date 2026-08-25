@@ -21,8 +21,8 @@ was checked with `git diff` plus a grep of the specific symbol.
 | **2** | Provider port & contracts | ✅ Complete · 3 review rounds · W34/W35/W13/W42/W44/W45/W41/W46/W37/W38/W39/W10 all done · 17 adversarial findings fixed (6 CRITICAL, 7 MAJOR, 4 MINOR) |
 | **3** | Process split & admission | ✅ Complete · W33/W12/W36/W18/W19/W20/W21 all done · adversarial review fixed 4 BLOCKERS + 5 MAJOR + 4 MINOR |
 | **4** | Native hosts | ✅ Complete · W25/W14/W15/W16/W17 done · 26/26 build green |
-| **5** | Client rebuild | ⬜ Not started |
-| **6** | Durability & orchestration | ⬜ Not started |
+| **5** | Client rebuild | 🔄 Implemented (no phase review yet) · W26/W27/W28/W29/W30/W30-b/W30-d/W09-b committed · P0-47 IncrementalMarkdown fix applied |
+| **6** | Durability & orchestration | 🔄 Implemented (no phase review yet) · W22/W23/W24/W47 committed · DurableExecutionEngine + migrations v35-v38 |
 | **7** | Guardrails | ⬜ Not started |
 
 ### Test baseline (established 2026-08-20, identical on clean and dirty trees)
@@ -539,11 +539,32 @@ tests added for all BLOCKER/MAJOR findings; test count rose from 149 → 170.
 |---|---|---|---|
 | 3.1 | **W33** (partial) — ESLint layer boundary rules; DAGScheduler instance-state queues | ✅ | P1-19 (DAG module globals) |
 | 3.2 | **W12** — Agent Host process (single-reader demux, bounded queues, age/RSS recycling) | 🔄 In progress (fork agent) | P0-13, P0-14 |
-| 3.3 | **W36** — One Copilot runtime per workspace (on W12's Host Supervisor) | ⬜ | P0-13 |
+| 3.3 | **W36** — One Copilot runtime per workspace (on W12's Host Supervisor) | ✅ | P0-13 |
 | 3.4 | **W18** — Admission controller (lanes, queue-don't-reject, dynamic sizing, permit released across gates) | ✅ | P1-16, P1-18, P2-d, P3-d |
 | 3.5 | **W19** — Worker pools by blocking class; payload cap; memoised route policy; raw-body limit | ✅ (partial: P2-b raw-body, P3-c existsSync, X-9 JSON limit already 2MB) | X-9, P2-b, P3-c |
 | 3.6 | **W20** — Restart caps + conditional predicate; identity-checked server.lock | ✅ | P0-40, X-18 |
 | 3.7 | **W21** — Event-loop monitor on worker thread; loop-turning liveness probe | ✅ | X-8 |
+
+### W36 Step 3.3 — implemented 2026-08-25
+
+**Per-workspace Copilot RuntimeConnection (P0-13)**
+
+`packages/agent-harness-providers/src/providers/copilot/CopilotProvider.ts`:
+
+- `MAX_CONCURRENT_RUNTIMES = 10` LRU cap on simultaneously active workspace clients.
+- `WorkspaceEntry` interface: `{ client: CopilotClient; refCount: number; teardownTimer?; lastUsedAt: number; started: boolean }`.
+- `workspaceClients: Map<string, WorkspaceEntry>` — registry keyed by absolute cwd path.
+- `conversationClientKey: Map<string, string>` — maps each conversationId → workspace key (`'__default__'` or cwd).
+- `buildWorkspaceClient(cwd)` — creates a new CopilotClient with the same auth/connection options as the default but `workingDirectory` overridden.
+- `getOrCreateWorkspaceEntry(cwd?)` — returns `null` if `cwd === defaultCwd` (use `this.client`), else looks up or creates an entry; starts the client if the provider is already running; evicts LRU if at cap.
+- `evictLruWorkspace()` — prefers idle (refCount=0) entries for eviction, falls back to global LRU.
+- `clientForConversation(id)` — routes to workspace client or `this.client`.
+- `releaseWorkspaceRef(id)` — decrements refCount; schedules 30s graceful teardown when count hits 0; cancels teardown if a new conversation arrives before timeout fires.
+- `createConversation()` — calls `getOrCreateWorkspaceEntry(params.workingDirectory)` and uses the workspace client; records the key in `conversationClientKey`; increments refCount.
+- `resumeConversation()` — uses `clientForConversation()` to resume on the same client.
+- `deleteConversation()` / `destroyConversation()` — calls `releaseWorkspaceRef()` after disconnect.
+- `shutdown()` / `forceStop()` — stops all workspace clients and clears the registry.
+- `cleanupAllConversations()` — also clears `conversationClientKey`.
 
 ### W33 Step 3.1 — implemented 2026-08-25
 
@@ -749,10 +770,61 @@ Files: `packages/core/src/services/ComputerService.ts`,
 
 ---
 
-## Phases 5–7 — not started
+## Phase 5 — Client rebuild 🔄
+
+Implemented 2026-08-25 (runaway fork agent — no per-phase adversarial review yet).
+Build: 26/26 green. P0-47 (IncrementalMarkdown) fix applied 2026-08-25.
+
+### Work items
+
+| # | Item | State | Notes |
+|---|---|---|---|
+| W26 | muxStream client — one SSE connection per tab | ✅ | `apps/web/src/stores/sseManager.ts` unified |
+| W27 | StreamPanel unification | ✅ | `StreamPanel.tsx` extracted, temporal-order segments |
+| W28 | Lazy diff providers (W28) | ✅ | `WorkerPoolManager` lazy init |
+| W29 | Context-usage pipeline (W29) | ✅ | `contextUsagePipeline.ts`, usage chip |
+| W30 | Cache miss notice (W30) | ✅ | `UsageChip` prevUsage/prevCompletedAt props |
+| W30-b | AdmissionController health endpoint wiring | ✅ | health route updated |
+| W30-d | StreamPanel P0-47 IncrementalMarkdown | ✅ | `IncrementalMarkdown.tsx` created; wired into StreamPanel for streaming paths |
+| W09-b | Computer preview migrated to managed stream | ✅ | `previewStream.ts` updated |
+
+### Phase 5 exit criteria
+
+| Criterion | State |
+|---|---|
+| Single SSE connection per browser tab | ✅ |
+| StreamPanel renders segments in temporal order | ✅ |
+| P0-47: streaming answer uses block-level memoised IncrementalMarkdown | ✅ |
+| Independent adversarial review | ⬜ **Pending** |
+
+---
+
+## Phase 6 — Durability & orchestration 🔄
+
+Implemented 2026-08-25 (runaway fork agent — no per-phase adversarial review yet).
+Build: 26/26 green.
+
+### Work items
+
+| # | Item | State | Notes |
+|---|---|---|---|
+| W22 | DurableExecutionEngine (effect sandwich, signal/awakeable, per-tool replay) | ✅ | `packages/core/src/services/DurableExecutionEngine.ts`; P0-41 fix |
+| W23 | Stream cursor durability | ✅ | `StreamCursorRepository`, migration v37 |
+| W24 | Usage ledger | ✅ | `usage_ledger` table, migration v38 |
+| W47 | Ancestor run linkage | ✅ | `ancestor_run_id` column, migration v35 |
+
+### Phase 6 exit criteria
+
+| Criterion | State |
+|---|---|
+| DurableExecutionEngine replay-safe under crash/restart | ✅ code present |
+| Stream cursors persisted; replay picks up from cursor | ✅ code present |
+| Independent adversarial review | ⬜ **Pending** |
+
+---
+
+## Phase 7 — Guardrails ⬜
 
 | Phase | Work items | Headline risk |
 |---|---|---|
-| **5** Client rebuild | W26, W27, W28, W29, W30, W30-b, W30-d, W09-b | Highly visible. Only W26/W28 are truly parallel with 3–4 |
-| **6** Durability & orchestration | W22, W23, W24, W47 | W22 is the most mechanism-dense item in the plan and lands sixth |
-| **7** Guardrails | W31, W32, W33, W44, W48 | Low — this is what stops the effort regressing |
+| **7** | W31, W32, W33, W44, W48 | Low — this is what stops the effort regressing |

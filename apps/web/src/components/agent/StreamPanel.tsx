@@ -18,6 +18,7 @@ import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
+import { IncrementalMarkdown } from '@/components/chat/IncrementalMarkdown.js'; // P0-47
 import { StepRow } from '@/components/agent/StepRow.js';
 import { UsageChip } from '@/components/agent/UsageChip.js';
 import { WidgetFrame } from '@/components/widgets/WidgetFrame.js';
@@ -148,7 +149,11 @@ export function StreamPanel({
                 aria-live="polite"
                 aria-busy={streamingHere}
               >
-                <MarkdownRenderer content={seg.text} />
+                {/* P0-47: use block-level memoised renderer while streaming;
+                    fall back to plain MarkdownRenderer for completed history. */}
+                {streamingHere
+                  ? <IncrementalMarkdown content={seg.text} />
+                  : <MarkdownRenderer content={seg.text} />}
               </div>
             );
           }
@@ -243,7 +248,10 @@ export function StreamPanel({
         >
           {answer ? (
             <>
-              <MarkdownRenderer content={answer} />
+              {/* P0-47: incremental memoised render while streaming */}
+              {answerStreaming
+                ? <IncrementalMarkdown content={answer} />
+                : <MarkdownRenderer content={answer} />}
               {answerStreaming && <StreamingIndicator className="mt-1" />}
             </>
           ) : (
