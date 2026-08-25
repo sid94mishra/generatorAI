@@ -33,6 +33,16 @@ export class DrizzleWorkspaceArtifactRepository implements IWorkspaceArtifactRep
     }
   }
 
+  /** P1-31: Direct lookup avoids loading all workspace artifact rows. */
+  async findById(id: string): Promise<WorkspaceArtifactRecord | null> {
+    const rows = await this.db
+      .select()
+      .from(workspaceArtifacts)
+      .where(eq(workspaceArtifacts.id, id))
+      .limit(1);
+    return rows.length > 0 ? this.mapRow(rows[0]!) : null;
+  }
+
   async findByWorkspace(workspaceId: string): Promise<WorkspaceArtifactRecord[]> {
     const rows = await this.db
       .select()

@@ -32,7 +32,7 @@
 // exact "index 12 meant something else" bug the fence exists to prevent.
 // ────────────────────────────────────────────────────────────────
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type {
@@ -192,6 +192,24 @@ interface SessionRecord {
    * this before dispatch (X-14). Element-index actions are unaffected.
    */
   captureDownscale: number;
+  /**
+   * P1-29: Per-session action semaphore (1 permit).
+   *
+   * Previously a single global semaphore serialised ALL CUA actions for ALL
+   * workspaces process-wide: one stuck action (e.g. a 30 s timeout in one chat)
+   * blocked every other chat from driving their desktop. Each session now owns
+   * its own 1-permit semaphore so a slow session only stalls ITSELF.
+   *
+   * A global cap (ComputerService.globalActionCap) still limits the total number
+   * of concurrently executing actions across all sessions.
+   */
+  semaphore: Semaphore;
+  /**
+   * X-16: Hash of the last JPEG frame sent to the model (or null for first frame).
+   * Used to suppress identical consecutive frames — the model is told the frame is
+   * unchanged and asked not to retry the same action.
+   */
+  lastFrameHash: string | null;
 }
 
 export interface ComputerServiceConfig {
@@ -338,7 +356,13 @@ export class ComputerService {
   private readonly runGrants = new Map<string, { chatId?: string; expiresAt: number }>();
   private readonly bridges: IComputerBridge[];
   private readonly blocklist: ComputerUseBlocklist;
-  private readonly semaphore: Semaphore;
+  /**
+   * P1-29: Global action cap — limits total concurrent CUA actions across ALL
+   * sessions. Was the only semaphore before; now a second line of defense behind
+   * the per-session semaphores stored in each SessionRecord.
+   * Env: GENERATORAI_MAX_COMPUTER_ACTIONS (default from computerConfig.maxConcurrentSessions).
+   */
+  private readonly globalActionCap: Semaphore;
   private readonly maxRetainedSnapshots: number;
   private readonly maxRetainedScreenshots: number;
   private readonly eventScope: string;
@@ -367,7 +391,12 @@ export class ComputerService {
       nameFragments: computerConfig.extraBlockedNameFragments,
       executables: computerConfig.extraBlockedExecutables,
     });
-    this.semaphore = new Semaphore(computerConfig.maxConcurrentSessions);
+    // P1-29: Global cap now guards the TOTAL concurrent CUA actions across
+    // all sessions. Per-session serialisation is enforced by SessionRecord.semaphore.
+    const globalMax = Number(
+      process.env['GENERATORAI_MAX_COMPUTER_ACTIONS'] ?? computerConfig.maxConcurrentSessions,
+    );
+    this.globalActionCap = new Semaphore(globalMax);
     this.userEnabled = computerConfig.enabled;
     this.syntheticAllowed = computerConfig.allowSyntheticFallback;
     this.maxRetainedSnapshots = config?.maxRetainedSnapshots ?? 16;
@@ -571,6 +600,11 @@ export class ComputerService {
       snapshotIndex: new Map(),
       blindStreak: 0,
       captureDownscale: 1,
+      // P1-29: Per-session semaphore (1 permit) so only one CUA action per
+      // session runs at a time while still allowing other sessions to proceed.
+      semaphore: new Semaphore(1),
+      // X-16: No previous frame hash on session start.
+      lastFrameHash: null,
     };
     this.sessions.set(ctx.workspaceId, record);
 
@@ -764,6 +798,7 @@ export class ComputerService {
     }
 
     const result = await this.withPermit(
+      session,
       (signal) =>
         session.bridge
           .launchApp(
@@ -840,6 +875,7 @@ export class ComputerService {
     }
 
     const result = await this.withPermitFor(
+      session,
       (signal) =>
         session.bridge.verify(
           session.handle,
@@ -885,7 +921,7 @@ export class ComputerService {
       return refusalResult(denied);
     }
 
-    const result = await this.withPermit((signal) =>
+    const result = await this.withPermit(session, (signal) =>
       session.bridge.bringToFront(session.handle, resolved.app, signal),
     );
     if (result.refusal) {
@@ -953,7 +989,7 @@ export class ComputerService {
       return refusalResult(denied);
     }
 
-    const result = await this.withPermit(async (signal) => {
+    const result = await this.withPermit(session, async (signal) => {
       const fresh = await this.reResolve(session, resolved.app);
       if (!fresh) return refusalResult(this.refusal('target_lost'));
 
@@ -1072,7 +1108,7 @@ export class ComputerService {
     }
 
     const started = Date.now();
-    const result = await this.withPermit(async (signal) => {
+    const result = await this.withPermit(session, async (signal) => {
       const fresh = await this.reResolve(session, app);
       if (!fresh) return refusalResult(this.refusal('target_lost'));
 
@@ -1409,21 +1445,31 @@ export class ComputerService {
    * timeout fires. Releasing on the race would let a second action start while
    * the first is still in flight against the singleton desktop, and would
    * write a "did not happen" audit row for a keystroke that did.
+   *
+   * P1-29: Now acquires TWO semaphores in order:
+   *   1. session.semaphore  — serialises actions within this session only.
+   *   2. this.globalActionCap — global concurrency ceiling across all sessions.
+   * A slow session no longer blocks other sessions' permits.
    */
   private async withPermit(
+    session: SessionRecord,
     work: (signal: AbortSignal) => Promise<ComputerActionResult>,
     timeoutMs?: number,
   ): Promise<ComputerActionResult> {
-    return this.withPermitFor(work, (refusal) => refusalResult(refusal), timeoutMs);
+    return this.withPermitFor(session, work, (refusal) => refusalResult(refusal), timeoutMs);
   }
 
   /** Same budget and cancellation as `withPermit`, for calls with their own result shape. */
   private async withPermitFor<T>(
+    session: SessionRecord,
     work: (signal: AbortSignal) => Promise<T>,
     onFailure: (refusal: ComputerRefusal) => T,
     timeoutMs?: number,
   ): Promise<T> {
-    await this.semaphore.acquire();
+    // P1-29: Acquire per-session permit first, then the global cap.
+    // Order is always session → global to prevent inversion deadlocks.
+    await session.semaphore.acquire();
+    await this.globalActionCap.acquire();
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(),
@@ -1439,7 +1485,8 @@ export class ComputerService {
       return onFailure(this.refusal('target_lost', (err as Error).message));
     } finally {
       clearTimeout(timer);
-      this.semaphore.release();
+      this.globalActionCap.release();
+      session.semaphore.release();
     }
   }
 
@@ -1524,11 +1571,9 @@ export class ComputerService {
     const session = this.sessions.get(workspaceId);
     if (!session) return null;
     try {
-      const artifacts = await this.artifactRepo.findByWorkspace(workspaceId);
-      const artifact = artifacts.find(
-        (a) => a.id === artifactId && a.artifactType === 'computer_screenshot',
-      );
-      if (!artifact) return null;
+      // P1-31: Direct lookup by id instead of loading every workspace artifact.
+      const artifact = await this.artifactRepo.findById(artifactId);
+      if (!artifact || artifact.artifactType !== 'computer_screenshot') return null;
       // Same containment rule as the write path: the stored path is relative,
       // and resolving it through the session root keeps a tampered row from
       // reading a file outside the workspace.
@@ -1617,12 +1662,45 @@ export class ComputerService {
     // earlier capture would scale the next click by the wrong amount.
     session.captureDownscale = encoded.downscale;
 
-    let fileSize: number | undefined;
+    let fileBytes: Buffer;
     try {
-      fileSize = (await fs.stat(stored)).size;
+      fileBytes = await fs.readFile(stored);
     } catch {
       return null;
     }
+    const fileSize = fileBytes.byteLength;
+
+    // X-15: Validate JPEG frame integrity. A truncated capture (network glitch,
+    // driver crash mid-write) starts with the SOI marker but is missing the EOI.
+    // Silently passing a truncated frame to the model causes hallucinated UI state.
+    const isJpeg = stored.endsWith('.jpg') || stored.endsWith('.jpeg')
+      || (encoded.mimeType === 'image/jpeg');
+    if (isJpeg && fileBytes.length >= 3) {
+      const hasSOI = fileBytes[0] === 0xFF && fileBytes[1] === 0xD8 && fileBytes[2] === 0xFF;
+      const hasEOI = fileBytes[fileBytes.length - 2] === 0xFF && fileBytes[fileBytes.length - 1] === 0xD9;
+      if (!hasSOI || !hasEOI) {
+        this.logger.warn?.(
+          `[ComputerService] rejecting truncated JPEG (${fileSize}B, SOI=${hasSOI}, EOI=${hasEOI})`,
+        );
+        shot.dataOmitted = true;
+        return null;
+      }
+    }
+
+    // X-16: Suppress identical consecutive frames. If the model just received
+    // this exact image, re-sending it wastes context and confuses retry logic.
+    const frameHash = createHash('md5').update(fileBytes).digest('hex');
+    if (frameHash === session.lastFrameHash) {
+      // Stamp an advisory so the model knows the screen didn't change.
+      if (result.action) {
+        (result.action as Record<string, unknown>)['frameUnchanged'] = true;
+        (result.action as Record<string, unknown>)['frameUnchangedHint'] =
+          'Frame unchanged — the action may not have had visible effect. Do not retry the same action.';
+      }
+      // Still return null so no redundant artifact row is written.
+      return null;
+    }
+    session.lastFrameHash = frameHash;
 
     // `screenshotMaxBytes` was configurable and enforced nowhere, which only
     // stayed harmless while capture was accidentally disabled. Now that every
