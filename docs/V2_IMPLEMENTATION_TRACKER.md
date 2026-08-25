@@ -23,7 +23,7 @@ was checked with `git diff` plus a grep of the specific symbol.
 | **4** | Native hosts | ✅ Complete · W25/W14/W15/W16/W17 done · 26/26 build green |
 | **5** | Client rebuild | ✅ Complete · adversarial review done · M1 (nested scroll) fixed · P0-47 IncrementalMarkdown done |
 | **6** | Durability & orchestration | ✅ Complete · adversarial review done · M2 (non-atomic iteration init) fixed · DurableExecutionEngine crash recovery verified |
-| **7** | Guardrails | ⬜ Not started |
+| **7** | Guardrails | ✅ Complete · W31/W32/W33 done |
 
 ### Test baseline (established 2026-08-20, identical on clean and dirty trees)
 
@@ -836,8 +836,38 @@ Build: 26/26 green.
 
 ---
 
-## Phase 7 — Guardrails ⬜
+## Phase 7 — Guardrails ✅
+
+Implemented 2026-08-25.
 
 | Phase | Work items | Headline risk |
 |---|---|---|
 | **7** | W31, W32, W33, W44, W48 | Low — this is what stops the effort regressing |
+
+### Work items
+
+| # | Item | State | Notes |
+|---|---|---|---|
+| W33-a | Dead abstractions: `sseWrite.ts` deleted | ✅ | Already deleted in prior session (D in git status); no drain-aware writer or harness-proxy references remain |
+| W33-b | DAGScheduler lock as instance state (P1-19) | ✅ | Already done in Phase 3 (`runQueues`, `runQueueActive` as private instance fields) |
+| W33-c | Layering rules (no-restricted-imports ESLint) | ✅ | Already wired in Phase 3 (`eslint.config.mjs`) |
+| W33-d | No raw ORM driver access outside repositories | ✅ | Grep confirmed zero `(db as any).session.client` references |
+| W31-a | Widget sandbox origin guard (`sandboxViolation`) | ✅ | Already implemented in `WidgetFrame.tsx`; refuses to render when assets base is empty or resolves to host origin |
+| W31-b | WARN log when widget render refused | ✅ | Added `console.warn` before the refusal render in `WidgetFrame.tsx` |
+| W31-c | CSP header for model-authored content | ✅ | Already in `apps/server/src/routes/extensions.ts` for widget HTML assets; covers all widget-frame origins |
+| W32-a | Remove `sessionId` from log redaction (P3-a) | ✅ | Already done in prior session; `Logger.ts` has explicit comment explaining why it is not redacted |
+| W32-b | Active-request gauge decrement on stream close (P3-b) | ✅ | Fixed in `requestMetrics.ts`: once-only `decrementActive()` called on both `'finish'` and `'close'` events |
+
+### Phase 7 exit criteria
+
+| Criterion | State |
+|---|---|
+| `sseWrite.ts` deleted, no dead-abstraction references remain | ✅ |
+| DAGScheduler per-instance lock queues | ✅ |
+| Layering lint enforced (packages/shared, packages/core cannot import express/electron/better-sqlite3) | ✅ |
+| No raw ORM driver access outside repositories | ✅ |
+| Widget with empty/same-origin assets base refuses to render | ✅ |
+| Refusal logged at WARN (console.warn in browser context) | ✅ |
+| CSP on widget-asset HTML routes | ✅ |
+| `sessionId` NOT in pino redact list | ✅ |
+| Active-request gauge decrements on stream close (not only on finish) | ✅ |

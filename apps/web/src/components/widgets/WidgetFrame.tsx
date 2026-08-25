@@ -187,6 +187,16 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
     );
   }
   if (unsafeOrigin) {
+    // W31/P1-53 — log the refusal at WARN so operators can diagnose missing
+    // widget-asset origin configuration. console.warn is the browser-side
+    // equivalent of a WARN-level logger entry.
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[WidgetFrame] Refused to render widget %s: %s. ' +
+        'Configure a dedicated asset origin (separate loopback port) to enable widgets.',
+      block.extensionId,
+      unsafeOrigin,
+    );
     return (
       <div
         className={className}
