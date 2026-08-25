@@ -104,6 +104,11 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
     if (updates.error !== undefined) values['error'] = updates.error;
     if (updates.permissionMode !== undefined) values['permissionMode'] = updates.permissionMode;
     if (updates.workspaceId !== undefined) values['workspaceId'] = updates.workspaceId;
+    // F8 fix (PLAUSIBLE): ancestorRunId was omitted from the values map, so
+    // any update call attempting to set or correct the ancestor chain was a
+    // silent no-op. ancestorRunId is normally immutable after create(), but
+    // including it here prevents silent data loss in future callers.
+    if (updates.ancestorRunId !== undefined) values['ancestorRunId'] = updates.ancestorRunId;
     if (updates.startedAt !== undefined) values['startedAt'] = updates.startedAt;
     if (updates.completedAt !== undefined) values['completedAt'] = updates.completedAt;
     values['updatedAt'] = new Date();

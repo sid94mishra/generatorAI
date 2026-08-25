@@ -335,11 +335,9 @@ export class WorkflowRunService {
     // 4. Skip unreachable + finalize if already complete.
     await this.skipUnreachableStages(runId, run.workflowDefinitionId);
     await this.finalizeRunIfComplete(runId, run.workflowDefinitionId);
-
-    await this.eventBus.emitGlobal({
-      kind: 'workflow_run.resumed',
-      data: { workflowRunId: runId },
-    });
+    // F3 fix: workflow_run.resumed was emitted twice (before and after stage
+    // launch). The event at line ~308 is the authoritative one that fires
+    // before any stage activity — the duplicate here is removed.
   }
 
   /**

@@ -574,7 +574,19 @@ export class OrchestratorService {
       case 'harness.idle': {
         record.resolveFirstOutput();
         const hasDigest = /<TASK_RESULT>/i.test(record.lastAssistantText);
-        record.status = record.lastError && !record.lastAssistantText ? 'failed' : 'needs_review';
+        // F4 fix: the original condition `record.lastError && !record.lastAssistantText`
+        // incorrectly yielded 'needs_review' for cancelled workers that produced partial
+        // output before the cancellation — lastAssistantText was non-empty, so the
+        // condition was false even though lastError was set to 'cancelled:*'.
+        // Correct logic: any lastError forces a non-success status. Cancellations
+        // (prefix 'cancelled:') become 'cancelled'; other errors become 'failed'.
+        let idleStatus: BackgroundTaskStatus;
+        if (record.lastError) {
+          idleStatus = record.lastError.startsWith('cancelled:') ? 'cancelled' : 'failed';
+        } else {
+          idleStatus = 'needs_review';
+        }
+        record.status = idleStatus;
         record.resolveIdle();
         // Wave bookkeeping: decrement active count; when the parent's wave is
         // fully idle, reset warm-first so the NEXT wave re-primes.

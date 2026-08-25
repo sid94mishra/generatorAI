@@ -271,6 +271,42 @@ export class EntryRepository {
     return row ? mapRow(row) : undefined;
   }
 
+  /**
+   * Find a stage_result entry by its key within a scope. Used by
+   * initializeIterations to check whether an iteration slot already exists
+   * (F1 fix: findToolResult uses kind='tool_result' and cannot find
+   * kind='stage_result' iteration slots).
+   */
+  findStageResultByKey(scope: EntryScope, scopeId: string, key: string): EntryRecord | undefined {
+    const client = rawClient(this.db);
+    const row = client
+      .prepare(
+        `SELECT id, scope, scope_id, kind, artifact_id, key, payload, resolved, resolved_at, created_at
+           FROM entries
+          WHERE scope = ? AND scope_id = ? AND kind = 'stage_result' AND key = ? LIMIT 1`,
+      )
+      .get(scope, scopeId, key) as EntryRow | undefined;
+    return row ? mapRow(row) : undefined;
+  }
+
+  /**
+   * Find the most recently RESOLVED signal entry with the given name. Used
+   * by awaitSignal to return immediately when a signal already fired before
+   * the current process started (F2 fix: recovery path must not hang).
+   */
+  findLastResolvedSignal(scope: EntryScope, scopeId: string, name: string): EntryRecord | undefined {
+    const client = rawClient(this.db);
+    const row = client
+      .prepare(
+        `SELECT id, scope, scope_id, kind, artifact_id, key, payload, resolved, resolved_at, created_at
+           FROM entries
+          WHERE scope = ? AND scope_id = ? AND kind = 'signal' AND key = ? AND resolved = 1
+          ORDER BY resolved_at DESC LIMIT 1`,
+      )
+      .get(scope, scopeId, name) as EntryRow | undefined;
+    return row ? mapRow(row) : undefined;
+  }
+
   // ── Cleanup ───────────────────────────────────────────────────
 
   /** Delete all entries for a scope. Called during workspace teardown. */

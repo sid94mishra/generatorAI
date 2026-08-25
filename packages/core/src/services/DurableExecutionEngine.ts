@@ -335,18 +335,14 @@ export class DurableExecutionEngine {
     name: string,
     timeoutMs = 86_400_000,
   ): Promise<unknown> {
-    // Check for an already-resolved signal entry (recovery path).
-    const priorResolved = this.entryRepo.findUnresolvedSignal(ctx.scope, ctx.scopeId, name);
-    // findUnresolvedSignal returns unresolved entries; if the most-recent is
-    // resolved, we already fired. For simplicity: check the entries store
-    // directly for any resolved signal with this name.
-    // (We optimise the common path — the priorResolved is the unresolved one,
-    //  which means no prior signal has fired yet.)
-    if (!priorResolved) {
-      // No unresolved entry → check for a resolved one meaning it already fired.
-      // We re-query with a different filter for resolved entries.
-      // For now, return a new promise (the resolved entry notification happens via
-      // in-memory subscriber below after the check).
+    // F2 fix: on recovery, a signal that was already resolved before the process
+    // crashed has no unresolved DB row — the old code fell through and returned a
+    // new Promise that would hang until timeout. Now we check for a resolved
+    // signal first and return its payload immediately if found.
+    const priorResolved = this.entryRepo.findLastResolvedSignal(ctx.scope, ctx.scopeId, name);
+    if (priorResolved) {
+      this.logger.debug(`[DurableEngine] awaitSignal '${name}' — returning prior resolved payload (recovery)`);
+      return Promise.resolve(priorResolved.payload);
     }
 
     return new Promise<unknown>((resolve, reject) => {
@@ -431,31 +427,62 @@ export class DurableExecutionEngine {
   }
 
   /**
-   * Re-arm in-memory awakeable subscribers from durable storage. Called
-   * during recovery so pending awakeables registered before the crash are
-   * re-subscribed without losing their tokens.
+   * Re-arm in-memory awakeable subscribers from durable storage and return
+   * a map of token → Promise so the calling recovery code can await them.
+   *
+   * F5 fix: the original implementation set no-op resolve/reject handlers,
+   * which meant resolveAwakeable would mark the DB row but never unblock any
+   * caller. Recovery requires REAL Promises backed by real resolve callbacks.
+   *
+   * Callers must `await` the returned promises for each token. Tokens that
+   * are already resolved in the DB are returned as immediately-resolved
+   * Promises containing the stored payload.
    */
-  recoverAwakeables(ctx: DurableContext, timeoutMs = 86_400_000): void {
+  recoverAwakeables(ctx: DurableContext, timeoutMs = 86_400_000): Map<string, Promise<unknown>> {
+    const result = new Map<string, Promise<unknown>>();
     const entries = this.entryRepo.listByScope(ctx.scope, ctx.scopeId);
+
     for (const entry of entries) {
-      if (entry.kind !== 'awakeable' || entry.resolved || !entry.key) continue;
-      if (this.awakeableSubscribers.has(entry.key)) continue; // already subscribed
+      if (entry.kind !== 'awakeable' || !entry.key) continue;
 
       const token = entry.key;
-      const timer = setTimeout(() => {
-        this.awakeableSubscribers.delete(token);
-      }, timeoutMs);
-      timer.unref?.();
 
-      // We can only re-create the timer guard here; the original promise is gone.
-      // The service that awaited the awakeable must call `createAwakeable` again
-      // on recovery and receive the same token from `listByScope`.
-      this.awakeableSubscribers.set(token, {
-        resolve: () => { /* resolved externally; no-op if nobody is waiting */ },
-        reject: () => { /* timeout; no-op */ },
-        timer,
+      // Already resolved in the DB — return an immediately-resolved Promise.
+      if (entry.resolved) {
+        result.set(token, Promise.resolve(entry.payload));
+        continue;
+      }
+
+      // Already has a real subscriber from this session — don't overwrite it.
+      if (this.awakeableSubscribers.has(token)) {
+        // Expose its promise by creating a new one that mirrors the subscriber.
+        // (This is a rare path — recoverAwakeables called twice in one process.)
+        result.set(token, new Promise<unknown>((resolve, reject) => {
+          const existing = this.awakeableSubscribers.get(token);
+          if (existing) {
+            // Replace with a combined handler.
+            const origResolve = existing.resolve;
+            const origReject = existing.reject;
+            existing.resolve = (v) => { origResolve(v); resolve(v); };
+            existing.reject = (e) => { origReject(e); reject(e); };
+          }
+        }));
+        continue;
+      }
+
+      // Create a real Promise and subscribe so resolveAwakeable will unblock it.
+      const promise = new Promise<unknown>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.awakeableSubscribers.delete(token);
+          reject(new Error(`Awakeable ${token} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+        timer.unref?.();
+        this.awakeableSubscribers.set(token, { resolve, reject, timer });
       });
+      result.set(token, promise);
     }
+
+    return result;
   }
 
   // ── Corruption handling ───────────────────────────────────────
@@ -501,8 +528,11 @@ export class DurableExecutionEngine {
     let written = 0;
     for (const iter of iterations) {
       const key = `iter/${iter.index}`;
-      // Check if the row already exists (recovery: don't duplicate).
-      const existing = this.entryRepo.findToolResult('automation_execution', executionId, key);
+      // F1 fix: iteration slots use kind='stage_result', not 'tool_result'.
+      // findToolResult queries kind='tool_result' and always returned undefined
+      // for iteration slots, causing all slots to be re-inserted on every
+      // recovery instead of being skipped as duplicates.
+      const existing = this.entryRepo.findStageResultByKey('automation_execution', executionId, key);
       if (existing) continue;
 
       this.entryRepo.create({
