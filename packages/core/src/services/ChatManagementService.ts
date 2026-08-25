@@ -192,6 +192,17 @@ export class ChatManagementService {
   private activeSubscriptions = new Map<string, () => void>();
 
   /**
+   * P1-45: Tracks in-flight worktree-creation promises keyed by chatId.
+   *
+   * The physical worktree directory (workspace/source/<alias>) is created
+   * asynchronously via createRunWorktrees, but the SDK's workingDirectory is
+   * set synchronously before that completes.  Any component that needs to
+   * use the working directory (e.g. file tools, diff tools) MUST await
+   * `waitForWorktree(chatId)` before the first filesystem access.
+   */
+  private readonly pendingWorktrees = new Map<string, Promise<void>>();
+
+  /**
    * PLN-01 — the turn a chat's plan/question gates should report against.
    *
    * The gates are installed once when the conversation is created, but must
@@ -1074,6 +1085,25 @@ export class ChatManagementService {
   }
 
   /**
+   * P1-45: Await any in-flight git worktree creation for a chat.
+   *
+   * Returns immediately when no worktree creation is pending (the common
+   * case — chat has no codebase, creation already completed, or this chat
+   * never requested worktrees). Callers SHOULD await this before the first
+   * filesystem access inside the chat's workingDirectory.
+   *
+   * This does NOT throw when the creation failed — the error is already
+   * logged via the `.catch()` in createChat, and the worktree not existing
+   * is surfaced naturally when the filesystem operation fails.
+   */
+  async waitForWorktree(chatId: string): Promise<void> {
+    const pending = this.pendingWorktrees.get(chatId);
+    if (pending) {
+      await pending;
+    }
+  }
+
+  /**
    * Create a new Chat with its backing Session and Copilot conversation.
    */
   async createChat(params: CreateChatParams): Promise<Chat> {
@@ -1189,10 +1219,14 @@ export class ChatManagementService {
         }
       }
 
-      // Fire-and-forget: worktree creation runs in background
+      // P1-45: Track the promise instead of fire-and-forget. The physical
+      // worktree directory is created asynchronously (large repos can take
+      // 10-30s), but workingDirectory is already set synchronously above.
+      // Callers that need the directory to exist before running tools should
+      // await `waitForWorktree(chatId)`.
       const worktreeProjectId = params.projectId;
       const worktreeCodebaseIds = [...params.codebaseIds];
-      this.extensions.worktreeService.createRunWorktrees(
+      const worktreePromise = this.extensions.worktreeService.createRunWorktrees(
         worktreeProjectId,
         chatId,
         worktreeCodebaseIds,
@@ -1200,7 +1234,12 @@ export class ChatManagementService {
         targetDir,
       ).catch(err => {
         console.warn(`[ChatManagement] Background worktree creation failed for chat ${chatId}:`, err);
-      });
+      }).finally(() => {
+        // Drop the entry once settled — the directory now exists (or the
+        // attempt failed and future calls should not block on a dead promise).
+        this.pendingWorktrees.delete(chatId);
+      }) as Promise<void>;
+      this.pendingWorktrees.set(chatId, worktreePromise);
     }
 
     // 2.6: Local folder paths override workingDirectory (highest priority)

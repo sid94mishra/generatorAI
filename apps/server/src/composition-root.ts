@@ -1319,6 +1319,18 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger.debug?.(`[Hook:browser.afterAction] action=${action ?? '?'} ok=${String(ok)}`);
   });
 
+  // P0-35: Register browser teardown BEFORE the workspace filesystem is deleted.
+  // Without this hook, deleting a workspace would rm -rf the profile directory
+  // while Chromium still had it open, leaving the process running against a
+  // dead tree. The beforeDelete listener fires before fs.rm in deleteWorkspace().
+  workspaceManager.registerBeforeDelete(async (workspaceId) => {
+    try {
+      await browserService.stop(workspaceId, 'workspace-deleted');
+    } catch {
+      // Best effort — session may already be stopped.
+    }
+  });
+
   // Late-wire browserService into ChatManagementService so chats with
   // `browserConfig.enabled: true` auto-boot a shared Chromium and inject
   // the CDP endpoint into the harness system prompt.

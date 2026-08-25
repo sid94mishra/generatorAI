@@ -263,13 +263,25 @@ export class WorkspaceManager {
 
   /**
    * Delete a workspace and all its contents.
+   *
+   * Ordering is critical (P0-35, P0-36):
+   *  1. beforeDeleteListeners  — release native handles (Terminals, etc.)
+   *  2. Browser teardown       — registered as a beforeDelete listener by
+   *                              composition-root (must run before filesystem)
+   *  3. git worktree remove    — while the worktree dirs still exist, tell the
+   *                              codebase clone about the removal so it doesn't
+   *                              permanently accumulate orphaned worktree refs.
+   *  4. git worktree prune     — sweep stale metadata from the clone's git dir.
+   *  5. fs.rm                  — destroy the physical tree.
+   *  6. DB rows                — only after git cleanup so orphans can still be
+   *                              found if step 3 threw.
    */
   async deleteWorkspace(workspaceId: string): Promise<void> {
     const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace) return;
 
-    // Give registered listeners (e.g. TerminalService) a chance to release
-    // native handles before we blow the row away.
+    // Step 1 & 2: Give registered listeners a chance to release native handles
+    // before we blow the row away.
     for (const cb of this.beforeDeleteListeners) {
       try {
         await cb(workspaceId);
@@ -280,14 +292,57 @@ export class WorkspaceManager {
       }
     }
 
-    // Remove from filesystem
+    // Step 3 & 4: Remove git worktrees BEFORE touching the filesystem or DB.
+    // Each record's relativePath points to a linked worktree from a codebase
+    // clone. We run `git worktree remove` while the directory still exists so
+    // git can follow the .git file to the parent repo and unregister the entry.
+    const worktreeRecords = await this.worktreeRepo.findByWorkspace(workspaceId);
+    if (worktreeRecords.length > 0) {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+
+      for (const record of worktreeRecords) {
+        const worktreePath = path.join(workspace.rootPath, record.relativePath);
+        try {
+          // -C <worktreePath> makes git start inside the linked worktree;
+          // git follows the .git file back to the parent clone and removes
+          // this entry from its worktree list.
+          await execFileAsync(
+            'git',
+            ['-C', worktreePath, 'worktree', 'remove', '--force', worktreePath],
+            { timeout: 15_000 },
+          );
+          this.logger.debug?.(
+            `[WorkspaceManager] git worktree remove: ${worktreePath}`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `[WorkspaceManager] git worktree remove failed for ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        try {
+          // Sweep any remaining stale refs from the parent clone's git dir.
+          await execFileAsync(
+            'git',
+            ['-C', worktreePath, 'worktree', 'prune'],
+            { timeout: 15_000 },
+          );
+        } catch {
+          // Best effort — the path may already be gone at this point.
+        }
+      }
+    }
+
+    // Step 5: Remove from filesystem
     try {
       await fs.rm(workspace.rootPath, { recursive: true, force: true });
     } catch (err) {
       this.logger.warn(`[WorkspaceManager] Failed to remove workspace directory: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Remove DB records
+    // Step 6: Remove DB records — after git cleanup so orphans are findable
+    // if the cleanup threw partway through.
     await this.artifactRepo.deleteByWorkspace(workspaceId);
     await this.worktreeRepo.deleteByWorkspace(workspaceId);
     await this.workspaceRepo.delete(workspaceId);
@@ -505,9 +560,9 @@ export class WorkspaceManager {
       path.join(rootPath, 'config', 'mcp'),
     ];
 
-    for (const dir of dirs) {
-      await fs.mkdir(dir, { recursive: true });
-    }
+    // P2-46: Create all directories in parallel — they are independent and
+    // the sequential loop was blocking 11 mkdir calls serially on the HTTP path.
+    await Promise.all(dirs.map((dir) => fs.mkdir(dir, { recursive: true })));
   }
 
   /**
