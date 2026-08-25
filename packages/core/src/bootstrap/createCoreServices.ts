@@ -347,6 +347,14 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     defaultWorkerModel: process.env['GENERATORAI_ORCH_DEFAULT_WORKER_MODEL'] || DEFAULT_ORCHESTRATOR_CONFIG.defaultWorkerModel,
     workerTimeoutMs: envInt('GENERATORAI_ORCH_WORKER_TIMEOUT_MS', DEFAULT_ORCHESTRATOR_CONFIG.workerTimeoutMs),
     warmFirst: process.env['GENERATORAI_ORCH_WARM_FIRST'] !== '0',
+    // W24 / X-20: termination conditions, all overridable via env vars.
+    maxWaves: envInt('GENERATORAI_ORCH_MAX_WAVES', DEFAULT_ORCHESTRATOR_CONFIG.maxWaves),
+    timeBudgetMs: envInt('GENERATORAI_ORCH_TIME_BUDGET_MS', DEFAULT_ORCHESTRATOR_CONFIG.timeBudgetMs),
+    convergenceThreshold: (() => {
+      const v = process.env['GENERATORAI_ORCH_CONVERGENCE_THRESHOLD'];
+      const n = v ? parseFloat(v) : NaN;
+      return Number.isFinite(n) && n >= 0 && n <= 1 ? n : DEFAULT_ORCHESTRATOR_CONFIG.convergenceThreshold;
+    })(),
   };
   const orchestratorService = new OrchestratorService(
     chatEntityRepo,

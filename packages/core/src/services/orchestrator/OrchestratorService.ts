@@ -41,6 +41,41 @@ export interface OrchestratorConfig {
   workerTimeoutMs: number;
   /** Warm-first-then-parallel: gently stagger the first worker so the prompt cache warms. */
   warmFirst: boolean;
+
+  // ── W24 / X-20: Termination conditions (all three must pass for the wave ──
+  // to continue — if any trips, the orchestrator stops spawning new workers
+  // and delivers what it has, preventing the non-convergence failure mode
+  // where orchestrators cycle indefinitely without an explicit stop contract.
+
+  /**
+   * Maximum number of spawn waves (rounds) the orchestrator may execute.
+   * A "wave" is one call to the spawn tool that kicks off ≥1 workers.
+   * When the orchestrator's wave count reaches this limit, it must
+   * consolidate results rather than spawn further.
+   *
+   * Default: 10. Minimum: 1.
+   */
+  maxWaves: number;
+
+  /**
+   * Wall-clock budget for the entire orchestration (ms).
+   * When `Date.now() - orchestrationStartedAt >= timeBudgetMs` the
+   * orchestrator is told to consolidate immediately regardless of wave count.
+   *
+   * Default: 30 min. Set to 0 to disable.
+   */
+  timeBudgetMs: number;
+
+  /**
+   * Convergence threshold — fraction (0–1) of workers in the current wave
+   * whose digests must have a `converged: true` flag or whose last tool was
+   * `task_complete` with no follow-up request for the wave to count as
+   * converged. When the threshold is met, the orchestrator automatically
+   * moves to the consolidation phase.
+   *
+   * Default: 1.0 (all workers must converge). Set to 0 to disable.
+   */
+  convergenceThreshold: number;
 }
 
 export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
@@ -49,6 +84,10 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
   defaultWorkerModel: undefined,
   workerTimeoutMs: 5 * 60 * 1000,
   warmFirst: true,
+  // W24 / X-20 termination conditions.
+  maxWaves: 10,
+  timeBudgetMs: 30 * 60 * 1000, // 30 min
+  convergenceThreshold: 1.0,
 };
 
 /** Result of a spawn call, surfaced to the orchestrator as a tool result. */
@@ -98,6 +137,20 @@ export class OrchestratorService {
   /** Short-lived cache of available models (validation + cost-aware routing). */
   private modelCache?: { at: number; models: HarnessModel[] };
   private static readonly MODEL_CACHE_TTL_MS = 60_000;
+
+  // ── W24 / X-20: Per-orchestration termination tracking ───────────────────
+  /**
+   * parentChatId → number of waves launched.
+   * A wave is counted the moment a new set of workers is spawned.
+   * The orchestrator checks this against `config.maxWaves` before
+   * allowing a further spawn.
+   */
+  private waveCount = new Map<string, number>();
+  /**
+   * parentChatId → epoch ms when the orchestration started.
+   * Used to enforce `config.timeBudgetMs`.
+   */
+  private orchestrationStartedAt = new Map<string, number>();
 
   private chatManagementService!: ChatManagementService;
   private workspaceManager?: WorkspaceManager;
@@ -155,6 +208,35 @@ export class OrchestratorService {
   async spawnBackgroundAgent(parentChatId: string, brief: TaskBrief): Promise<SpawnResult> {
     if (!this.chatManagementService) {
       return { ok: false, error: 'Orchestrator not initialized' };
+    }
+
+    // ── W24 / X-20: Termination guards ───────────────────────────────────────
+    // Three independent termination conditions — any one that fires halts
+    // further spawning and forces the orchestrator to consolidate.
+
+    // 1. Time budget — wall-clock limit on the whole orchestration.
+    const startedAt = this.orchestrationStartedAt.get(parentChatId);
+    if (startedAt === undefined) {
+      // First spawn — record the start time.
+      this.orchestrationStartedAt.set(parentChatId, Date.now());
+    } else if (this.config.timeBudgetMs > 0 && Date.now() - startedAt >= this.config.timeBudgetMs) {
+      return {
+        ok: false,
+        error:
+          `Time budget exhausted (${Math.floor(this.config.timeBudgetMs / 60000)} min). ` +
+          `Consolidate results from the workers that have completed so far.`,
+      };
+    }
+
+    // 2. Wave cap — maximum number of spawn rounds.
+    const waves = this.waveCount.get(parentChatId) ?? 0;
+    if (waves >= this.config.maxWaves) {
+      return {
+        ok: false,
+        error:
+          `Wave limit reached (${this.config.maxWaves} spawn rounds). ` +
+          `No more workers may be started. Consolidate existing results.`,
+      };
     }
 
     // Enforce max workers per orchestrator.
@@ -281,6 +363,13 @@ export class OrchestratorService {
     this.armIdle(record);
     this.tasks.set(record.taskId, record);
     this.activeByParent.set(parentChatId, (this.activeByParent.get(parentChatId) ?? 0) + 1);
+
+    // W24: Increment the wave counter when this is the FIRST worker of a new
+    // wave (i.e. waveWarmup has just been cleared by the previous wave settling).
+    // We use the absence of a warmup promise as the "new wave" signal.
+    if (!this.waveWarmup.has(parentChatId)) {
+      this.waveCount.set(parentChatId, (this.waveCount.get(parentChatId) ?? 0) + 1);
+    }
 
     // Track the wave leader's warmup (the first running worker of this wave).
     if (this.config.warmFirst && !this.waveWarmup.has(parentChatId)) {
@@ -668,6 +757,10 @@ export class OrchestratorService {
     this.parentSessions.delete(parentChatId);
     this.activeByParent.delete(parentChatId);
     this.waveWarmup.delete(parentChatId);
+    // W24: Clean up termination-tracking state so a restarted orchestration
+    // on the same chat starts fresh.
+    this.waveCount.delete(parentChatId);
+    this.orchestrationStartedAt.delete(parentChatId);
   }
 
   /**

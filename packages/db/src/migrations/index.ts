@@ -1879,6 +1879,29 @@ export function migrateDB(db: AppDatabase): void {
         `CREATE UNIQUE INDEX IF NOT EXISTS idx_system_configs_unique ON system_configs(type, name);`,
       ],
     },
+    {
+      // W23 / X-24 — Run identity model.
+      //
+      // A user-initiated retry no longer mutates the terminal (failed) run.
+      // Instead, retryRun() creates a NEW WorkflowRun with ancestorRunId
+      // pointing to the run it was retried from. This establishes an
+      // immutable audit chain:
+      //
+      //   - Terminal runs (failed/cancelled/completed) are NEVER mutated.
+      //   - "Retry" is additive: original run stays permanently queryable.
+      //   - Parallel follow-ups are possible (two retries from the same run).
+      //
+      // The column is nullable: absent on first-attempt runs (no ancestor).
+      //
+      // W47 compatibility: existing workflow_runs rows get NULL for the new
+      // column automatically — SQLite ADD COLUMN with no DEFAULT fills NULL.
+      version: 35,
+      name: 'workflow_runs_ancestor_run_id',
+      sql: [
+        `ALTER TABLE workflow_runs ADD COLUMN ancestor_run_id TEXT REFERENCES workflow_runs(id) ON DELETE SET NULL;`,
+        `CREATE INDEX IF NOT EXISTS idx_workflow_runs_ancestor ON workflow_runs(ancestor_run_id) WHERE ancestor_run_id IS NOT NULL;`,
+      ],
+    },
   ];
 
 

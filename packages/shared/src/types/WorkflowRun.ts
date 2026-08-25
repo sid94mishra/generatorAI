@@ -88,6 +88,23 @@ export interface WorkflowRun {
   permissionMode?: WorkflowRunPermissionMode;
   /** Workspace ID — links to the execution workspace for this run */
   workspaceId?: string;
+  /**
+   * W23 — Run identity model (X-24 fix).
+   *
+   * When the user retries a failed run, a NEW run is created rather than
+   * mutating the terminal record. `ancestorRunId` points to the run this
+   * was created from (the failed one, or an earlier ancestor in a retry
+   * chain). This establishes an immutable audit chain so:
+   *
+   *   - A terminal run (failed/cancelled/completed) is never mutated.
+   *   - "Retry" is always additive — the original run stays permanently
+   *     queryable as the lineage root.
+   *   - Parallel follow-ups are possible (two retry runs branching from
+   *     the same ancestor).
+   *
+   * Absent on first-attempt runs (undefined).
+   */
+  ancestorRunId?: string;
   createdAt: Date;
   updatedAt: Date;
   startedAt?: Date;
@@ -161,6 +178,11 @@ export interface CreateWorkflowRunParams {
   workflowDefinitionId: string;
   variables?: Record<string, unknown>;
   projectId?: string;
+  /**
+   * W23: When this run was created by retrying a terminal run, supply the
+   * id of the failed/cancelled ancestor. Absent on first-attempt runs.
+   */
+  ancestorRunId?: string;
 }
 
 // ────────────────────────────────────────────────────────────────

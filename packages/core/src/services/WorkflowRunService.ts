@@ -432,6 +432,8 @@ export class WorkflowRunService {
       sessionMode: definition.sessionMode,
       masterSessionId,
       variables: runVars,
+      // W23: carry the ancestor reference if this run was created by retry.
+      ...(params.ancestorRunId ? { ancestorRunId: params.ancestorRunId } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -482,57 +484,66 @@ export class WorkflowRunService {
     });
   }
   /**
-   * Phase 2, 2.4 — user-initiated retry of a `failed` run.
+   * W23 / X-24 — User-initiated retry of a failed or cancelled run.
    *
-   * Resets every `failed` stage run back to `pending`, clears its error
-   * and timing fields, advances the WorkflowRun state machine via
-   * `user:retry` (failed → created), and returns without auto-starting.
-   * The caller decides whether to immediately `startRun(runId)` or let
-   * the user kick it off.
+   * Creates a NEW WorkflowRun (with `ancestorRunId` pointing to the original)
+   * rather than mutating the terminal record. This preserves the audit chain:
+   *
+   *   - The failed/cancelled run stays permanently queryable as history.
+   *   - A terminal run is NEVER mutated — it is the ground truth of what
+   *     happened before the retry, with its own completedAt/error.
+   *   - Two calls to `retryRun(id)` can produce parallel retry attempts
+   *     (different new run ids, same ancestorRunId).
+   *
+   * Stage runs from the failed ancestor that SUCCEEDED are copied into the
+   * new run as `completed` (skip re-burning tokens for work that worked).
+   * Failed/pending stages in the ancestor start fresh in the new run.
+   *
+   * Returns the new run (not the original). The caller may immediately call
+   * `startRun(newRun.id)` or let the user kick it off.
    */
   async retryRun(runId: string): Promise<WorkflowRun> {
     return withSpan('core.workflow', 'workflow.retryRun', async (span) => {
       span.setAttribute('workflow.run_id', runId);
 
-      const run = await this.runRepo.getById(runId);
-      if (run.status !== 'failed') {
+      const ancestor = await this.runRepo.getById(runId);
+      if (ancestor.status !== 'failed' && ancestor.status !== 'cancelled') {
         throw new Error(
-          `Cannot retry run ${runId}: current status is '${run.status}', expected 'failed'`,
+          `Cannot retry run ${runId}: current status is '${ancestor.status}', expected 'failed' or 'cancelled'`,
         );
       }
 
-      // Walk the state machine so the error surface is consistent with
-      // other lifecycle transitions.
-      const sm = new WorkflowRunStateMachine(run.status);
-      const nextStatus = sm.transition('user:retry');
+      // Create the new run, inheriting the ancestor's definition + variables.
+      const newRun = await this.createRun({
+        workflowDefinitionId: ancestor.workflowDefinitionId,
+        variables: ancestor.variables,
+        projectId: undefined, // definition-scoped, not run-scoped
+        ancestorRunId: runId,
+      });
 
-      // Reset failed stages so the DAG scheduler picks them up on next
-      // startRun. Leave successful stages alone — retrying from scratch
-      // would re-burn tokens for work that already succeeded.
-      const stageRuns = await this.stageRunRepo.getByRunId(runId);
-      for (const sr of stageRuns) {
-        if (sr.status === 'failed') {
-          await this.stageRunRepo.resetForRetry(sr.id);
+      // Copy completed/skipped stage runs from the ancestor into the new run so
+      // the DAG scheduler does not re-execute work that already succeeded.
+      const ancestorStageRuns = await this.stageRunRepo.getByRunId(runId);
+      const newStageRuns = await this.stageRunRepo.getByRunId(newRun.id);
+      const newRunByDefId = new Map(newStageRuns.map((s) => [s.stageDefinitionId, s]));
+      for (const sr of ancestorStageRuns) {
+        if (sr.status === 'completed' || sr.status === 'skipped') {
+          // The new run's stage run for this definition id starts as `pending`.
+          // Promote it to the ancestor's terminal state so the DAG scheduler
+          // skips re-running it.
+          const newSr = newRunByDefId.get(sr.stageDefinitionId);
+          if (newSr) {
+            await this.stageRunRepo.updateStatus(newSr.id, sr.status);
+          }
         }
       }
 
-      await this.runRepo.updateStatus(runId, nextStatus);
-      // Clear the previous run's terminal fields so the retry starts fresh.
-      // `null` (not `undefined`) is required: the repo skips `undefined` keys,
-      // whereas `null` writes SQL NULL. The type models these as optional
-      // (string|Date|undefined), so a cast to null is unavoidable here.
-      await this.runRepo.update(runId, {
-        error: null as unknown as undefined,
-        startedAt: null as unknown as undefined,
-        completedAt: null as unknown as undefined,
-      });
-
       await this.eventBus.emitGlobal({
         kind: 'workflow_run.retried',
-        data: { workflowRunId: runId },
+        data: { workflowRunId: newRun.id, ancestorRunId: runId },
       });
 
-      return this.runRepo.getById(runId);
+      return newRun;
     });
   }
 

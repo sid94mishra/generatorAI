@@ -37,6 +37,8 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
         // HITL — persist chosen mode; NULL reads as 'bypassPermissions'.
         permissionMode: run.permissionMode ?? null,
         workspaceId: run.workspaceId ?? null,
+        // W23: persist the ancestor reference for the retry identity chain.
+        ...(run.ancestorRunId ? { ancestorRunId: run.ancestorRunId } : {}),
         createdAt: run.createdAt,
         updatedAt: run.updatedAt,
         startedAt: run.startedAt ?? null,
@@ -138,6 +140,8 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
       error: row.error ?? undefined,
       permissionMode: (row.permissionMode as WorkflowRunPermissionMode | null) ?? undefined,
       workspaceId: row.workspaceId ?? undefined,
+      // W23: ancestor run for the retry identity chain.
+      ancestorRunId: (row as typeof workflowRuns.$inferSelect & { ancestorRunId?: string | null }).ancestorRunId ?? undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       startedAt: row.startedAt ?? undefined,

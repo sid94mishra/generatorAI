@@ -487,6 +487,13 @@ export const workflowRuns = sqliteTable(
     parentStageRunId: text('parent_stage_run_id'),
     /** Frozen, redacted agent projection captured when the run started. */
     agentSnapshot: text('agent_snapshot', { mode: 'json' }).$type<ResolvedAgentProjection>(),
+    /**
+     * W23 / X-24 — Run identity model.
+     * When this run was created by retrying a terminal run, this field
+     * holds the id of the failed/cancelled ancestor. NULL on first-attempt
+     * runs. A terminal run is NEVER mutated; retry always creates a new run.
+     */
+    ancestorRunId: text('ancestor_run_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
     startedAt: integer('started_at', { mode: 'timestamp' }),

@@ -132,7 +132,7 @@ export type AgentEvent =
   | { kind: 'workflow_run.completed'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.failed'; data: { workflowRunId: string; error: string } }
   | { kind: 'workflow_run.cancelled'; data: { workflowRunId: string } }
-  | { kind: 'workflow_run.retried'; data: { workflowRunId: string } }
+  | { kind: 'workflow_run.retried'; data: { workflowRunId: string; ancestorRunId?: string } }
   // ── WorkflowRun Orchestration Events ──
   | { kind: 'workflow_run.orchestration_started'; data: { workflowRunId: string; hasCodebases: boolean; hasPreprocessing: boolean } }
   | { kind: 'workflow_run.worktree_creating'; data: { workflowRunId: string; codebaseCount: number; codebases: Array<{ alias: string; codebaseId: string }> } }
