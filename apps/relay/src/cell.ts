@@ -43,6 +43,15 @@ const LEASE_MS = 10 * 60_000;
 /** Ceiling on concurrently attached hosts, so one cell cannot be exhausted. */
 const MAX_HOSTS = Number(process.env['GENERATORAI_RELAY_MAX_HOSTS'] ?? 500);
 
+// W48 / TODO(lane-scheduling): Cell currently forwards all streams with equal
+// priority. A future enhancement should implement 3-lane scheduling
+// (interactive / ordinary / bulk) to match AdmissionController's admission
+// policy. Interactive lanes (human-in-the-loop approvals, live chat) would get
+// preferential bandwidth allocation over bulk automation traffic. This requires
+// tagging streams with a lane at the client-hello handshake and tracking
+// per-lane byte budgets in the host entry. See AdmissionController in
+// packages/core/src/services/AdmissionController.ts for the lane definitions.
+
 interface Invite {
   token: string;
   tokenHash: string;

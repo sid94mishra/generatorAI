@@ -2,6 +2,17 @@
 // HarnessProxy — Mutable IAgentHarness wrapper that enables runtime
 // provider switching. All services hold a reference to this proxy;
 // calling switchAdapter() swaps the underlying provider transparently.
+//
+// W33 — Architecture note:
+//   HarnessProxy is the LIVE production shim used by MultiHarness to fan out
+//   conversations to the correct provider adapter at runtime. It is NOT a
+//   testing utility or CLI-only helper — every production conversation goes
+//   through this wrapper. Use it anywhere an IAgentHarness reference is stored
+//   and you want the underlying provider to be hot-swappable without requiring
+//   callers to re-subscribe.
+//
+//   For testing, use FauxProvider (packages/agent-harness-providers/src/providers/faux/)
+//   or the conformance suite (packages/agent-harness-providers/src/conformance/).
 // ────────────────────────────────────────────────────────────────
 
 import type {

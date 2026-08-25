@@ -857,6 +857,12 @@ Implemented 2026-08-25.
 | W31-c | CSP header for model-authored content | ✅ | Already in `apps/server/src/routes/extensions.ts` for widget HTML assets; covers all widget-frame origins |
 | W32-a | Remove `sessionId` from log redaction (P3-a) | ✅ | Already done in prior session; `Logger.ts` has explicit comment explaining why it is not redacted |
 | W32-b | Active-request gauge decrement on stream close (P3-b) | ✅ | Fixed in `requestMetrics.ts`: once-only `decrementActive()` called on both `'finish'` and `'close'` events |
+| W31-c+ | Global CSP header (API server, all routes) | ✅ | Added to `apps/server/src/app.ts` after CORS; covers model-authored markdown, not just widget assets |
+| W33-e | HarnessProxy JSDoc clarifying it is LIVE production shim | ✅ | Added architecture note in `packages/agent-harness-providers/src/HarnessProxy.ts` |
+| W48-a | CLI mux-stream adoption TODO | ✅ | Added in `apps/cli/src/tui/store.ts` `StreamReconciler` JSDoc; references muxStream.ts and sseManager.ts |
+| W48-b | Relay lane-scheduling TODO | ✅ | Added in `apps/relay/src/cell.ts` after `MAX_HOSTS`; references `AdmissionController` for lane definitions |
+| W48-c | AGENTS.md streaming section update | ✅ | Added V2 streaming overhaul bullet to §10 Status; notes CLI mux adoption gap |
+| W30 | Cache hit rate UI indicator | ✅ | Already implemented: `UsageChip.tsx` shows `⚡ Xk cached` badge and `⚠ cache miss` notice |
 
 ### Phase 7 exit criteria
 
@@ -869,5 +875,9 @@ Implemented 2026-08-25.
 | Widget with empty/same-origin assets base refuses to render | ✅ |
 | Refusal logged at WARN (console.warn in browser context) | ✅ |
 | CSP on widget-asset HTML routes | ✅ |
+| Global CSP header on all API routes | ✅ |
 | `sessionId` NOT in pino redact list | ✅ |
 | Active-request gauge decrements on stream close (not only on finish) | ✅ |
+| CLI mux-stream adoption documented as future work | ✅ |
+| Relay lane-scheduling documented as future work | ✅ |
+| AGENTS.md streaming section reflects V2 arch | ✅ |

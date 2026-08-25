@@ -363,6 +363,15 @@ export function useActions(): TuiActions {
  * component would open a socket per mount and leak one per unmount that
  * raced a re-render. Reconciling from the pane tree means the set of live
  * sockets is a pure function of what is on screen.
+ *
+ * W48 / TODO(mux-stream-cli): The CLI currently opens one SSE connection per
+ * pane/scope via StreamPort.subscribe(). The web SPA was upgraded to a single
+ * multiplexed connection (openMultiplexedStream in apps/web/src/platform/muxStream.ts)
+ * in the V2 arch overhaul (STR-04). The CLI should adopt the same approach:
+ * one mux connection per terminal session, with pane subscriptions as logical
+ * sub-channels. This eliminates N×SSE connections when multiple panes are open
+ * and improves reconnect behaviour. See apps/web/src/stores/sseManager.ts for
+ * the reference implementation.
  */
 export class StreamReconciler {
   private readonly active = new Map<string, { key: string; dispose: () => void }>();
