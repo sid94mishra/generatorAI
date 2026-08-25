@@ -76,6 +76,11 @@ export interface ProviderCapabilities {
   sessionPersistence: boolean;
   /** Whether the provider supports cost/budget tracking (maxBudgetUsd). */
   budgetTracking: boolean;
+  /**
+   * Whether the provider can execute computer-use (mouse/keyboard/screenshot)
+   * tool calls. L9 — capabilities declared, not inferred from model name.
+   */
+  computerUse?: boolean;
   /** Maximum token context window in tokens. Absent if not known statically. */
   maxContextTokens?: number;
 }

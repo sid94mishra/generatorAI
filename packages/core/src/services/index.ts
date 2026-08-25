@@ -195,6 +195,18 @@ export * from './push/index.js';
 // W12 — Agent Host client (gateway-side IAgentHarness proxy)
 export { AgentHostClient } from './AgentHostClient.js';
 
+// W14 — PTY Host client (gateway-side PTY proxy)
+export { PtyHostClient } from './PtyHostClient.js';
+export type { PtyHostClientOptions, PtyDataHandler, PtyExitHandler, PtyReadyHandler } from './PtyHostClient.js';
+
+// W15 — Browser Host client (gateway-side browser proxy)
+export { BrowserHostClient } from './BrowserHostClient.js';
+export type { BrowserHostClientOptions, BrowserFrameHandler } from './BrowserHostClient.js';
+
+// W17 — CUA Host client (gateway-side computer-use proxy)
+export { CuaHostClient } from './CuaHostClient.js';
+export type { CuaHostClientOptions } from './CuaHostClient.js';
+
 // W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix)
 export { DurableExecutionEngine } from './DurableExecutionEngine.js';
 export type {

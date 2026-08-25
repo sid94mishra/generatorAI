@@ -4,6 +4,17 @@
 //   SSE bytes → SseParser → StreamEventRouter → effects → store
 //                                             ↘ query invalidation
 //
+// ── STR-04 / W48 — Mobile stream architecture ────────────────────
+// Mobile is already single-connection correct:
+//   • Navigation stack shows one screen at a time; `enabled` is false for
+//     off-screen screens, so only one SseClient is active per app session.
+//   • The AppState listener closes the stream when the app backgrounds,
+//     resuming from the cursor when it comes foreground — no stale socket.
+//   • `SseClient` uses expo/fetch (real streaming body), not EventSource,
+//     with a stall watchdog and jittered reconnect — already better than
+//     a raw EventSource on the web.
+// No mux stream changes are needed for mobile.
+//
 // ── Why the flush is on a timer rather than per event ────────────
 // A fast model emits 100–300 tokens/second. Applying each to the store
 // immediately means that many store updates and React renders per second,

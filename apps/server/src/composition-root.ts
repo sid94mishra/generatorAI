@@ -5,10 +5,12 @@
 import type { AppConfig, ILogger, PersistedEvent } from '@generatorai/shared';
 import { createLogger } from '@generatorai/shared';
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import * as path from 'node:path';
 import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
+import { AgentHostClient, HostSupervisor } from '@generatorai/core';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
 import { installAgentCursorTheme, resolveCuaDriverBinary } from './computer/driverBinary.js';
@@ -279,13 +281,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // maxConcurrentExecutions defaults to 16 (env: GENERATORAI_MAX_CONCURRENT_AGENT_TURNS).
   // maxConcurrentColdStarts defaults to 4 (env: GENERATORAI_MAX_CONCURRENT_COLD_STARTS).
   //
-  // TODO(W12-wiring): AgentHostSupervisor is an in-process concurrency semaphore.
-  // The full W12 goal is an OUT-OF-PROCESS agent-host that isolates provider
-  // runtimes (Claude CLI, Copilot) from the gateway event loop (arch law L5).
-  // Files exist: apps/agent-host/src/, HostSupervisor.ts, AgentHostClient.ts.
-  // To complete W12: build apps/agent-host, wire HostSupervisor in place of
-  // AgentHostSupervisor, route provider harnesses through AgentHostClient IPC.
-  // Until then, L5 is not fully satisfied for provider-runtime process isolation.
+  // W12-wiring: AgentHostClient (out-of-process) is the default when the
+  // agent-host build exists (arch law L5 — native handles never in the gateway).
+  // Set GENERATORAI_AGENT_HOST=false to fall back to the in-process MultiHarness
+  // (useful for local dev without a prior `pnpm --filter @generatorai/agent-host build`).
+  //
+  // The agent-host dist path is resolved relative to this package's location.
+  // In a monorepo pnpm install the symlink structure ensures the built artifact
+  // lands at `<root>/apps/agent-host/dist/index.js`.
   const agentHostSupervisor = new AgentHostSupervisor();
 
   /** Per-provider construction options, resolved lazily by the registry. */
@@ -364,7 +367,59 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   }
   logger.info(`[Container] Harness registry created (primary=${primaryHarnessType})`);
 
-  const harness: IAgentHarness = multiHarness;
+  // W12 — wire AgentHostClient (out-of-process) as the default harness when:
+  //   (a) GENERATORAI_AGENT_HOST is not 'false', AND
+  //   (b) the agent-host dist build exists on disk.
+  // If the build is absent (e.g. first-time dev checkout), we fall back to
+  // MultiHarness with a warning so the server still starts.
+  const agentHostEnabled = process.env['GENERATORAI_AGENT_HOST'] !== 'false';
+  let harness: IAgentHarness;
+  let hostSupervisor: HostSupervisor | undefined;
+
+  if (agentHostEnabled) {
+    // Resolve the agent-host entry point. In the monorepo the package lives
+    // two directories above the server package: <root>/apps/agent-host/dist/index.js.
+    // `fileURLToPath` + `dirname` converts the ESM import.meta.url to a FS path.
+    const __serverDir = dirname(fileURLToPath(import.meta.url));
+    const agentHostEntry = resolve(__serverDir, '..', '..', 'agent-host', 'dist', 'index.js');
+    const hostExists = existsSync(agentHostEntry);
+
+    if (hostExists) {
+      // AgentHostClient must be created BEFORE HostSupervisor so we can pass
+      // the event handler to the supervisor constructor (onHostEvent).
+      // We break the circular dependency with a forward-declared callback.
+      let agentHostClient!: AgentHostClient;
+      const supervisor = new HostSupervisor({
+        hostEntryPath: agentHostEntry,
+        logger,
+        env: {
+          // Forward the primary harness type so the host boots the right provider.
+          GENERATORAI_PRIMARY_HARNESS: primaryHarnessType,
+          // Pass our PID so the host can self-terminate when the gateway dies.
+          GENERATORAI_PARENT_PID: String(process.pid),
+          ...(process.env['LOG_LEVEL'] ? { LOG_LEVEL: process.env['LOG_LEVEL'] } : {}),
+        },
+        // Route agent events from the host process back into the client's
+        // per-conversation handler map. The callback is closed over
+        // `agentHostClient`, which is assigned immediately below.
+        onHostEvent: (msg) => agentHostClient?.handleHostEvent(msg),
+      });
+      agentHostClient = new AgentHostClient(supervisor, logger);
+      hostSupervisor = supervisor;
+      harness = agentHostClient;
+      logger.info('[Container] AgentHostClient wired — provider runtimes will run out-of-process (L5)');
+    } else {
+      logger.warn(
+        `[Container] GENERATORAI_AGENT_HOST is enabled but agent-host build not found at ${agentHostEntry}. ` +
+        'Falling back to in-process MultiHarness. ' +
+        'Run `pnpm --filter @generatorai/agent-host build` to enable process isolation.',
+      );
+      harness = multiHarness;
+    }
+  } else {
+    logger.info('[Container] GENERATORAI_AGENT_HOST=false — using in-process MultiHarness');
+    harness = multiHarness;
+  }
 
   const scriptRunner = new SandboxedScriptRunner(logger);
   const httpClient = new FetchHttpClient();
@@ -1610,6 +1665,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     harness,
     harnessRegistry,
     multiHarness,
+    // W12 — exposed so tests and health routes can check which path is active.
+    // undefined = fell back to in-process MultiHarness.
+    hostSupervisor,
     streamBroker,
     customToolRegistry,
     mcpHub,
@@ -1944,6 +2002,12 @@ export interface Container {
   harnessRegistry: HarnessRegistry;
   /** Router that sends each conversation to the provider that owns it. */
   multiHarness: MultiHarness;
+  /**
+   * W12 — Gateway-side supervisor for the agent-host child process.
+   * `undefined` when the agent-host build is absent or GENERATORAI_AGENT_HOST=false
+   * (i.e. when MultiHarness is the active harness instead of AgentHostClient).
+   */
+  hostSupervisor: HostSupervisor | undefined;
   streamBroker: StreamBroker;
   /** TOL-01 — harness-agnostic custom tool catalog. Empty by default. */
   customToolRegistry: CustomToolRegistry;

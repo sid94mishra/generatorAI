@@ -46,3 +46,4 @@ export {
 export * from './session/PaneModel.js';
 export * from './viewmodels/index.js';
 export * from './client/createCliClient.js';
+export { SharedStreamPort } from './client/SharedStreamPort.js';

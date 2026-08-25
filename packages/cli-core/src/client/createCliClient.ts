@@ -20,6 +20,7 @@ import {
 import type { Api, StreamPort } from '../context/CliContext.js';
 import type { ResolvedCliConfig } from '../config/schema.js';
 import { CliError } from '../errors/CliError.js';
+import { SharedStreamPort } from './SharedStreamPort.js';
 
 export interface CliClient {
   api: Api;
@@ -257,15 +258,24 @@ export async function createCliClient(options: CreateCliClientOptions): Promise<
     },
   };
 
+  // W48 / STR-04 — deduplicate connections for the same scope:id.
+  // `SharedStreamPort` fans multiple pane subscriptions to the same scope out
+  // from a single underlying HTTP SSE connection, eliminating duplicate requests
+  // when the user opens the same chat/run in more than one TUI pane.
+  // The full mux (single connection for ALL scopes) is the next step; see
+  // packages/cli-core/src/client/SharedStreamPort.ts for details.
+  const sharedStream = new SharedStreamPort(stream);
+
   return {
     api,
-    stream,
+    stream: sharedStream,
     runtime,
     baseUrl,
     connection,
     fetch: apiFetch,
     socketUrl: (path, scope, id) => runtime.buildSocketUrl(path, scope, id),
     dispose() {
+      sharedStream.disposeAll();
       for (const dispose of disposers.splice(0)) dispose();
     },
   };
