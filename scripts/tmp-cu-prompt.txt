@@ -1,0 +1,31 @@
+Use the computer-use skill to drive my real Windows desktop.
+
+GOAL
+Open the folder `C:\Users\sidmishra\Desktop\New folder (2)\referenceProjects\t3code`
+in a NEW VS Code window, open the integrated terminal in that window, run `git pull`
+in it, and report back the EXACT text that `git pull` printed.
+
+STEPS
+1. Open that folder in a new VS Code window.
+2. In that new VS Code window, open the integrated terminal.
+3. Type `git pull` in the terminal and press Enter.
+4. Wait for it to finish, then read the terminal output.
+5. Reply with the verbatim `git pull` output.
+
+HARD RULES
+- Drive the desktop. Do NOT use `bash`, `run_in_terminal`, `powershell`, or any other
+  shell tool to run git yourself — the whole point is to operate the real UI. The only
+  shell you may use is the VS Code integrated terminal, driven through computer-use tools.
+- Do NOT repeat a tool call that has already failed the same way twice. If a call is
+  refused or returns `ok: false`, read the refusal text, work out WHY, and change the
+  approach. Repeating an identical failing call is a failure of the run.
+- Take a fresh snapshot only when the screen has actually changed as a result of your
+  last action. Do not snapshot speculatively between every step.
+- Prefer opening a folder or file directly over navigating a file manager UI.
+- If something is genuinely impossible, stop and say exactly what blocked you and which
+  tool call proved it. Do not silently work around the rules.
+
+At the very end of your reply, add a short section titled `RUN REPORT` listing:
+- the total number of computer-use tool calls you made,
+- any tool call that failed, with the reason it failed,
+- anything you had to retry, and why.

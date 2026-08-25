@@ -50,7 +50,13 @@ export function createLogger(config: { level: string; service: string }): ILogge
       'privateKeyPem',
       'private_key_pem',
       'refreshToken',
-      'sessionId',
+      // NOTE: `sessionId` is deliberately NOT redacted. It is the primary
+      // correlation key across the event log, the stream cursors, the harness
+      // and every service log line — scrubbing it made cross-service tracing
+      // impossible. It is an opaque internal identifier, not a bearer token:
+      // possession of one grants nothing without an authenticated, DPoP-bound
+      // request. If a session identifier ever becomes credential-like, it must
+      // be renamed rather than redacted.
       // One-level nested (e.g. `{ user: { apiKey: 'x' } }`)
       '*.apiKey',
       '*.password',

@@ -2,16 +2,19 @@
 // Composition Root — DI container wiring all services together
 // ────────────────────────────────────────────────────────────────
 
-import type { AppConfig, ILogger } from '@generatorai/shared';
+import type { AppConfig, ILogger, PersistedEvent } from '@generatorai/shared';
 import { createLogger } from '@generatorai/shared';
 import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import * as path from 'node:path';
-import { HarnessRegistry, MultiHarness, type HarnessType } from '@generatorai/agent-harness-providers';
+import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor } from '@generatorai/agent-harness-providers';
+import type { ProviderInstanceId } from '@generatorai/core';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
 import { installAgentCursorTheme, resolveCuaDriverBinary } from './computer/driverBinary.js';
 import { ScreenCast } from './computer/screenCast.js';
+import { createPreviewProducer } from './computer/previewProducer.js';
+import { registerEphemeralProducer } from './streaming/ephemeralScopes.js';
 import { RelayHostBroker } from './relay/RelayHostBroker.js';
 import {
   ExpoPushProvider,
@@ -59,6 +62,8 @@ import {
   DrizzleAgentInteractionRepository,
   // Widget & Extension repositories
   DrizzleWidgetInstanceRepository,
+  // W34 / P1-42 — conversation ownership store (migration v33)
+  SqliteConversationOwnershipRepository,
 } from '@generatorai/db';
 import {
   // Bootstrap — shared core services factory
@@ -88,6 +93,8 @@ import {
   SandboxLifecycleManager,
   // Phase 4 streaming rewrite (additive)
   StreamBroker,
+  // W07 — durable delta log, dual-written alongside stream_cursors
+  DeltaLog,
   // Section 8 — custom tool layer + MCP hub (harness-agnostic)
   CustomToolRegistry,
   InMemoryMcpHub,
@@ -262,6 +269,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       .filter((s): s is 'user' | 'project' | 'local' => allowed.has(s));
   };
 
+  // W12 / P0-14 — process-wide supervisor bounding concurrent Claude turns.
+  // maxConcurrentExecutions defaults to 16 (env: GENERATORAI_MAX_CONCURRENT_AGENT_TURNS).
+  // maxConcurrentColdStarts defaults to 4 (env: GENERATORAI_MAX_CONCURRENT_COLD_STARTS).
+  const agentHostSupervisor = new AgentHostSupervisor();
+
   /** Per-provider construction options, resolved lazily by the registry. */
   const buildHarnessConfig = (type: HarnessType) => ({
     type,
@@ -275,6 +287,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       githubToken: config.copilot.githubToken ?? undefined,
       githubHost: config.copilot.githubHost ?? undefined,
       homeDir: harnessHomeDir(type),
+      // W36 / P0-13 — cold-start gating via the shared supervisor.
+      // Each workspace gets its own CLI process; the cold-start semaphore
+      // prevents thundering-herd starts when many workspaces open at once.
+      supervisor: agentHostSupervisor,
     } : undefined,
     claudeAgent: type === 'claude-agent' ? {
       defaultModel: config.harness?.claudeAgent?.defaultModel ?? 'sonnet',
@@ -283,6 +299,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       defaultPermissionMode: config.harness?.claudeAgent?.permissionMode ?? 'bypassPermissions',
       defaultMaxTurns: config.harness?.claudeAgent?.maxTurns,
       defaultMaxBudgetUsd: config.harness?.claudeAgent?.maxBudgetUsd,
+      // W12 / P0-14 — bound concurrent turns to prevent unbounded process spawns
+      supervisor: agentHostSupervisor,
       // HITL-07 — share the same "stuck session" watchdog value as Copilot.
       // Claude uses a rolling-window timer that pauses while a permission
       // request is in flight, so slow human approvals don't spuriously abort.
@@ -302,12 +320,34 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     buildConfig: buildHarnessConfig,
     primary: primaryHarnessType,
     logger: { info: (m) => logger.info(m), warn: (m) => logger.warn(m) },
+    // W41 — disk cache so boot never blocks on a provider probe.
+    diskCacheFile: `${config.artifactsDir}/.generatorai-provider-status-cache.json`,
   });
+  // W41-N2 — disk cache is awaited in initialize() so the seed is guaranteed
+  // to complete before any getAllModels() call. Do NOT call it here (construction
+  // time) — the fire-and-forget races the first user-facing query.
+  // W34 / P1-42 — wire the durable ownership store so conversation→provider
+  // routing survives a server restart. Before this fix `undefined` was passed,
+  // meaning every restart silently lost ownership and routed old conversations
+  // to the wrong (primary) provider. The table is created by migration v33.
+  const conversationOwnershipStore = new SqliteConversationOwnershipRepository(db);
   const multiHarness = new MultiHarness(
     harnessRegistry,
-    undefined,
+    conversationOwnershipStore,
     { info: (m) => logger.info(m), warn: (m) => logger.warn(m) },
   );
+  // W34-M3 / L17: Seed the instanceTypeMap with default provider instances so
+  // that a ProviderInstanceId in the form `<driverType>:default` resolves
+  // correctly via the explicit table path (not just the inline-prefix fallback).
+  // This is the minimal wiring before the full ProviderInstanceRegistry is activated
+  // (see docs/V2_IMPLEMENTATION_TRACKER.md — M3 deferred wiring).
+  /* W34-M3 */
+  {
+    const defaultInstanceMap = new Map<ProviderInstanceId, HarnessType>(
+      ALL_HARNESS_TYPES.map((t) => [`${t}:default` as ProviderInstanceId, t as HarnessType]),
+    );
+    multiHarness.setInstanceTypeMap(defaultInstanceMap);
+  }
   logger.info(`[Container] Harness registry created (primary=${primaryHarnessType})`);
 
   const harness: IAgentHarness = multiHarness;
@@ -578,7 +618,60 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // ring buffers + module-level `streamSubscriptions` fan-out were all
   // deleted once the web migration landed.
   const streamCursorRepo = new DrizzleStreamCursorRepository(db);
-  const streamBroker = new StreamBroker(streamCursorRepo, logger);
+  // W07 — sibling of the other `~/.generatorai/*` directories, keyed off the
+  // same "next to the DB" convention already used for `harnesses/<id>/home`.
+  const deltaLog = new DeltaLog({
+    dir: path.join(path.dirname(resolve(config.dbPath)), 'delta-logs'),
+    logger,
+  });
+  const streamBroker = new StreamBroker(streamCursorRepo, logger, { deltaLog });
+
+  // P1-4 / EVT-01 — the durable stream log is now the event bus's commit point
+  // AND its sequence source. `emit()` awaits `append` before broadcasting, so a
+  // live subscriber can never see an event that replay cannot return, and
+  // `getSessionEvents` reads the same counter that `emit` stamped.
+  //
+  // Global events use the same scope mapping the SSE route does, so
+  // `scope=global&id=all` replays them.
+  const primaryScopeFor = (sessionId: string): { scope: 'session' | 'global'; id: string } =>
+    sessionId === '__global__' ? { scope: 'global', id: 'all' } : { scope: 'session', id: sessionId };
+
+  /** Page size for replay. The API itself is unbounded; this bounds each query. */
+  const REPLAY_PAGE = 500;
+
+  eventBus.setEventStore({
+    append: async (sessionId, event) => {
+      const { scope, id } = primaryScopeFor(sessionId);
+      const row = await streamBroker.publish(scope, id, event.kind, event.data);
+      return { seq: row.seq, id: row.id };
+    },
+    replaySessionEvents: async (sessionId, afterSeq) => {
+      const { scope, id } = primaryScopeFor(sessionId);
+      const out: PersistedEvent[] = [];
+      let cursor = afterSeq;
+      for (;;) {
+        const rows = await streamCursorRepo.replayAfter(scope, id, cursor, REPLAY_PAGE);
+        if (rows.length === 0) break;
+        for (const r of rows) {
+          out.push({
+            id: r.id,
+            sessionId,
+            sequenceId: r.seq,
+            kind: r.kind,
+            data: r.payload,
+            timestamp: r.ts,
+          } as PersistedEvent);
+        }
+        cursor = rows[rows.length - 1]!.seq;
+        if (rows.length < REPLAY_PAGE) break;
+      }
+      return out;
+    },
+    deleteSessionEvents: async (sessionId) => {
+      const { scope, id } = primaryScopeFor(sessionId);
+      await streamCursorRepo.deleteScope(scope, id);
+    },
+  });
 
   // Bridge legacy EventBus → broker so both transports see the same events.
   //
@@ -635,12 +728,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // scope so `GET /api/stream?scope=automation&id=<executionId>` works.
     const executionId = readString(event.data, 'executionId');
 
-    // Primary scope. Global events go to global; session events to session.
-    const primaryScope = event.sessionId === '__global__' ? 'global' : 'session';
-    const primaryId = event.sessionId === '__global__' ? 'all' : event.sessionId;
-    publishToBroker(primaryScope, primaryId, event.kind, event.data);
+    // The primary scope is NOT published here. `eventBus.setEventStore` above
+    // already appended it — awaited, before this broadcast — which is what
+    // makes commit-then-broadcast hold. Publishing it again from the bridge
+    // would double every event on `scope=session` and `scope=global`.
 
     // Secondary per-entity scopes — makes /api/stream?scope=run&id=X work.
+    // These stay fire-and-forget: they are additional views of an event that
+    // is already durable, so losing one costs a resume on that view alone.
     if (runId) publishToBroker('run', runId, event.kind, event.data);
     if (chatId) publishToBroker('chat', chatId, event.kind, event.data);
     if (executionId && event.kind.startsWith('automation_execution.')) {
@@ -667,6 +762,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     db,
     config.retention,
     logger,
+  );
+  // W07 — the delta log's own bound is total bytes, not a TTL cutoff like the
+  // SQL sweeps, so `cutoffTs` is unused; `limit` IS honoured (bounds deletions
+  // per tick, matching every other sweeper's contract) — the extension point
+  // (built for "future EVT-04 blob store, artifact retention, etc.") already
+  // fits a filesystem sweeper without touching `EventRetentionService` itself.
+  eventRetentionService.registerSweeper('deltaLog', async (_cutoffTs, limit) =>
+    deltaLog.enforceGlobalCeiling(limit),
   );
 
   // DUR-05 — durable step.sleep sweeper. Flips `sleeping → queued` for
@@ -1265,6 +1368,22 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     await computerService.stop(workspaceId, 'workspace-deleted');
   });
 
+  // W09 / P1-11 — the live preview is a live-only scope on the shared stream,
+  // not a second SSE endpoint with a poll per connection. One producer per
+  // workspace feeds every watcher; it starts on the first and stops on the last.
+  registerEphemeralProducer(
+    'computer',
+    createPreviewProducer({
+      recordingsRoot: async (workspaceId) => {
+        const ws = await workspaceManager.getExecutionWorkspace(workspaceId);
+        if (!ws) return null;
+        return resolve(workspaceManager.getWorkingDirectory(ws), 'computer', 'recordings');
+      },
+      previewWindow: (workspaceId) => computerService.previewWindow(workspaceId),
+      logger,
+    }),
+  );
+
   // ── Integrated Terminal ──
   //
   // Host chain: `SandboxPtyHost` (only usable when the caller explicitly
@@ -1489,6 +1608,21 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         logger.warn(`[Container] Failed to load workflow scripts — continuing without scripts: ${String(err)}`);
       }
 
+      // W41-N2 — seed provider status from disk before any getAllModels() call.
+      // Never throws (loadDiskCache is best-effort). Must come before hydrate()
+      // so the registry knows which providers are installed before routing.
+      await harnessRegistry.loadDiskCache(); /* W41-N2 */
+
+      // W34 / P1-42 — rehydrate conversation→provider ownership from DB so
+      // routing is correct from the first request after a restart.
+      try {
+        await multiHarness.hydrate();
+        logger.info('[Container] MultiHarness ownership rehydrated');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(`[Container] MultiHarness hydration failed (ownership reset): ${msg}`);
+      }
+
       // Start harness provider — required for operation
       try {
         await harness.initialize();
@@ -1643,6 +1777,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // a session's final events aren't lost on shutdown (and no insert runs
       // against a closed connection).
       await eventBus.flush();
+      // AND the broker's write batcher. `eventBus.flush()` only covers events
+      // emitted through the bus; the bridge publishes the run- and chat-scope
+      // copies fire-and-forget, so those sit in the batcher for up to the delta
+      // window. Closing the handle first ran their commit against a closed
+      // connection and lost the last few hundred milliseconds of every run,
+      // while the session-scope copies survived — a hole on the run page that
+      // the session page did not have.
+      await streamBroker.flushWrites();
       // Close SQLite database
       closeDB(db);
       logger.info('[Container] Shutdown complete');

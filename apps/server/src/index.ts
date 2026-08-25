@@ -45,32 +45,150 @@ import { resolveAdvertisedEndpoints } from './network/advertisedEndpoints.js';
 import { readExposureMode, resolveBindHost } from './network/exposure.js';
 import { readComputerUsePreferences } from './settings/computerUse.js';
 import { publishLocalAdminToken, removeLocalAdminToken } from './composition/localAdminToken.js';
+import {
+  killOwnDescendants,
+  reapOrphanedHarnessChildren,
+  startChildReaperHeartbeat,
+  stopChildReaperHeartbeat,
+} from '@generatorai/agent-harness-providers';
 
-// Killing the process on a failed write to an already-exited child is the
-// wrong trade. The agent CLIs are optional: when one is absent its harness is
-// marked unavailable and the server degrades correctly, but the vendored
-// JSON-RPC writers issue their final writes from background tasks we cannot
-// attach a handler to, so the resulting rejection reaches the process. Node
-// defaults to `--unhandled-rejections=throw`, so that alone was enough to take
-// down a server that had otherwise started cleanly.
+// ── Process-level failure policy (P0-40) ────────────────────────────────────
+//
+// Node defaults to `--unhandled-rejections=throw`, so a single rejected promise
+// anywhere — including from a vendored JSON-RPC writer's background task that
+// we cannot attach a handler to — took down a server that had otherwise started
+// cleanly. One failing session must not be able to kill every other session.
+//
+// The opposite failure is worse though: swallowing everything leaves the
+// process running in an unknown state. So the policy is explicit rather than
+// blanket. A fault is FATAL only when the process itself, not one request, has
+// lost the ability to function:
+//
+//   - ERR_WORKER_OUT_OF_MEMORY: a worker died on allocation; the heap ceiling
+//     applies to us too and the next allocation is a coin flip.
+//   - ERR_DLOPEN_FAILED: a native module could not be loaded. Whatever depends
+//     on it is permanently broken, and it is always something structural
+//     (better-sqlite3, node-pty) because those are the only native deps.
+//
+// Notably NOT fatal, though an earlier draft listed them:
+//   - ERR_MODULE_NOT_FOUND — the harness providers are loaded through a
+//     deliberate optional-dependency dynamic import. A missing provider is
+//     supposed to mark that harness unavailable and degrade, which is the
+//     opposite of exiting.
+//   - ERR_ASSERTION — thrown by `node:assert` inside third-party libraries on
+//     conditions that are usually local to one connection. We cannot tell our
+//     own invariants from `ws`'s.
+//   - V8 heap exhaustion is not represented here because it is not catchable:
+//     it aborts the process before any handler runs.
 //
 // Registered at module scope on purpose: container initialization is where
-// these fire, and a handler installed after `await container.initialize()`
-// is installed too late to ever see them.
+// these fire, and a handler installed after `await container.initialize()` is
+// installed too late to ever see them.
 const DEAD_PIPE_CODES = new Set(['EPIPE', 'ERR_STREAM_DESTROYED', 'ERR_STREAM_WRITE_AFTER_END']);
 
-function isDeadPipeError(value: unknown): boolean {
+const FATAL_ERROR_CODES = new Set(['ERR_WORKER_OUT_OF_MEMORY', 'ERR_DLOPEN_FAILED']);
+
+function errorCode(value: unknown): string | undefined {
   const code = (value as NodeJS.ErrnoException | null | undefined)?.code;
-  return typeof code === 'string' && DEAD_PIPE_CODES.has(code);
+  return typeof code === 'string' ? code : undefined;
 }
 
-process.on('unhandledRejection', (reason) => {
-  if (isDeadPipeError(reason)) {
+function isDeadPipeError(value: unknown): boolean {
+  const code = errorCode(value);
+  return code !== undefined && DEAD_PIPE_CODES.has(code);
+}
+
+function isFatalFault(value: unknown): boolean {
+  const code = errorCode(value);
+  return code !== undefined && FATAL_ERROR_CODES.has(code);
+}
+
+function describeFault(value: unknown): { message: string; stack?: string; code?: string } {
+  if (value instanceof Error) {
+    return { message: value.message, stack: value.stack, code: errorCode(value) };
+  }
+  return { message: String(value), code: errorCode(value) };
+}
+
+/**
+ * Set by `startServer` once a graceful shutdown path exists. A fatal fault
+ * routes through it rather than calling `process.exit` directly — exiting here
+ * would skip `container.shutdown()` and `killOwnDescendants()`, i.e. it would
+ * CREATE the orphan class this same phase exists to delete.
+ */
+let requestShutdown: ((reason: string) => void) | undefined;
+
+/**
+ * True once shutdown has begun. Faults raised DURING shutdown must not be
+ * swallowed: the whole point of continuing after a fault is that the process is
+ * still serving requests, and once it is not, "log and carry on" leaves it
+ * wedged half-torn-down with its listeners closed and its children alive. From
+ * this point a fault is always terminal.
+ */
+let shuttingDown = false;
+
+/** Single funnel so both handlers report identically and the counter is one place. */
+let faultCount = 0;
+function reportFault(kind: 'unhandledRejection' | 'uncaughtException', value: unknown): void {
+  faultCount += 1;
+  const { message, stack, code } = describeFault(value);
+  console.error(
+    `[Server] ${kind} #${faultCount}${code ? ` (${code})` : ''}: ${message}\n${stack ?? ''}`,
+  );
+}
+
+/**
+ * Faults per window before the process is considered to be looping. A handler
+ * that itself throws — a broken logger, an exhausted heap — otherwise produces
+ * an unbounded stream of them and the process spins doing nothing useful.
+ */
+const FAULT_STORM_LIMIT = 50;
+const FAULT_STORM_WINDOW_MS = 10_000;
+let faultWindowStart = 0;
+let faultsInWindow = 0;
+
+function isFaultStorm(now: number): boolean {
+  if (now - faultWindowStart > FAULT_STORM_WINDOW_MS) {
+    faultWindowStart = now;
+    faultsInWindow = 0;
+  }
+  faultsInWindow += 1;
+  return faultsInWindow > FAULT_STORM_LIMIT;
+}
+
+function handleFault(kind: 'unhandledRejection' | 'uncaughtException', value: unknown): void {
+  if (isDeadPipeError(value)) {
     console.warn('[Server] ignored write to a closed child process stream');
     return;
   }
-  throw reason;
-});
+  reportFault(kind, value);
+
+  if (shuttingDown) {
+    console.error('[Server] fault during shutdown — exiting immediately');
+    process.exit(1);
+  }
+  if (isFaultStorm(Date.now())) {
+    console.error(
+      `[Server] more than ${FAULT_STORM_LIMIT} faults in ${FAULT_STORM_WINDOW_MS}ms — ` +
+        'the process is not making progress; shutting down',
+    );
+    if (requestShutdown) requestShutdown('fault-storm');
+    else process.exit(1);
+    return;
+  }
+  if (!isFatalFault(value)) return;
+
+  console.error('[Server] fault class is unrecoverable — shutting down');
+  if (requestShutdown) {
+    requestShutdown(kind);
+  } else {
+    // Faulted before the server was listening; there is nothing to unwind.
+    process.exit(1);
+  }
+}
+
+process.on('unhandledRejection', (reason) => handleFault('unhandledRejection', reason));
+process.on('uncaughtException', (err) => handleFault('uncaughtException', err));
 
 /** Expand leading ~ to the user's home directory and resolve to absolute path. */
 function expandPath(p: string): string {
@@ -247,6 +365,19 @@ async function startServer(): Promise<void> {
   // 2. Create DI container
   const container: Container = await createContainer(config);
 
+  // P0-14 / X-22 — before anything spawns a provider CLI, clean up after a
+  // previous server that died without running its shutdown path, and start
+  // publishing the liveness record the NEXT boot will use to do the same for
+  // us. Both are best-effort: a failure here must never block startup.
+  try {
+    await reapOrphanedHarnessChildren(container.logger);
+  } catch (err) {
+    container.logger.warn('[Server] orphan reap failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  startChildReaperHeartbeat();
+
   // 3. Initialize services (load templates, start Copilot, recover sessions)
   await container.initialize();
 
@@ -383,12 +514,14 @@ async function startServer(): Promise<void> {
   //      stop-grace-period MUST be >= this value + a safety buffer (~10s)
   //      or the orchestrator will SIGKILL us mid-drain.
   const shutdownTimeoutMs = parseInt(process.env['GENERATORAI_SHUTDOWN_TIMEOUT_MS'] ?? '60000', 10);
-  let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) {
       container.logger.warn(`[Server] ${signal} received again while shutting down — ignoring`);
       return;
     }
+    // Module-scoped on purpose: `handleFault` reads it, so that a throw raised
+    // while we are tearing down cannot be swallowed and leave the process
+    // wedged with its listeners closed and its children still running.
     shuttingDown = true;
 
     const shutdownStart = Date.now();
@@ -431,6 +564,23 @@ async function startServer(): Promise<void> {
         const servicesStart = Date.now();
         await container.shutdown();
         timings.servicesShutdownMs = Date.now() - servicesStart;
+
+        // P0-14 — the last thing before exit. Services get first refusal on
+        // stopping their own children gracefully; anything still standing
+        // after that would become an orphan the moment we exit, so it is
+        // terminated here rather than left for the next boot's reaper.
+        //
+        // The liveness record is dropped only AFTER the kill returns. Dropping
+        // it first would mean that a shutdown interrupted mid-kill (SIGKILL,
+        // the shutdown timeout below, the desktop's taskkill window) leaves the
+        // survivors with nothing for the next boot to match them against —
+        // disabling recovery in exactly the case it exists for.
+        const reapStart = Date.now();
+        const killed = await killOwnDescendants(container.logger);
+        stopChildReaperHeartbeat();
+        timings.descendantReapMs = Date.now() - reapStart;
+        timings.descendantsKilled = killed;
+
         timings.totalMs = Date.now() - shutdownStart;
 
         // SEC-09 — single structured summary for ops dashboards.
@@ -449,6 +599,22 @@ async function startServer(): Promise<void> {
 
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
+
+  // The desktop app spawns this process with an IPC channel because Windows
+  // has no way to deliver SIGTERM — Node maps `kill('SIGTERM')` there to
+  // TerminateProcess, which no handler can observe. Without this the graceful
+  // path never ran on the primary distribution's primary platform.
+  process.on('message', (msg: unknown) => {
+    if (msg && typeof msg === 'object' && (msg as { type?: unknown }).type === 'shutdown') {
+      void shutdown('ipc');
+    }
+  });
+
+  // A fatal fault now unwinds through the same path as a signal, so it closes
+  // the DB, flushes the event queues and reaps child processes instead of
+  // leaving them behind. `shutdown` is idempotent via its own `shuttingDown`
+  // guard, and its force-exit timer is the hard ceiling if unwinding hangs.
+  requestShutdown = (reason: string) => { void shutdown(`fatal:${reason}`); };
 }
 
 startServer().catch((err: unknown) => {

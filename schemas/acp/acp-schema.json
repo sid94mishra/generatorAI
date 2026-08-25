@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Pinned ACP v0.2.1 schema — generated from upstream spec. Do not hand-edit.",
+  "title": "ACP Protocol",
+  "description": "Agent Communication Protocol v0.2.1 schema",
+  "definitions": {
+    "InitializeRequest": {
+      "type": "object",
+      "required": ["protocolVersion", "clientInfo"],
+      "properties": {
+        "protocolVersion": { "type": "string", "description": "e.g. '0.2'" },
+        "clientInfo": {
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "string" }
+          }
+        },
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "terminal": { "type": "boolean", "description": "ACP v2: always false — terminal/* removed" },
+            "fs": { "type": "boolean", "description": "ACP v2: always false — fs/* removed" },
+            "approval": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "InitializeResponse": {
+      "type": "object",
+      "required": ["protocolVersion", "serverInfo"],
+      "properties": {
+        "protocolVersion": { "type": "string" },
+        "serverInfo": {
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "string" }
+          }
+        },
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "approval": { "type": "boolean" },
+            "streaming": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "TurnRequest": {
+      "type": "object",
+      "required": ["messageId", "role", "content"],
+      "properties": {
+        "messageId": { "type": "string" },
+        "role": { "type": "string", "enum": ["user"] },
+        "content": { "type": "string" },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Attachment" }
+        }
+      }
+    },
+    "TurnChunk": {
+      "type": "object",
+      "required": ["messageId", "type"],
+      "properties": {
+        "messageId": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "tool_call", "tool_result", "usage_update", "done", "error"] },
+        "text": { "type": "string" },
+        "toolCall": { "$ref": "#/definitions/ToolCall" },
+        "toolResult": { "$ref": "#/definitions/ToolResult" },
+        "usageUpdate": { "$ref": "#/definitions/UsageUpdate" },
+        "error": { "$ref": "#/definitions/ErrorInfo" }
+      }
+    },
+    "CancelRequest": {
+      "type": "object",
+      "required": ["messageId"],
+      "properties": {
+        "messageId": { "type": "string" }
+      }
+    },
+    "CancelResponse": {
+      "type": "object",
+      "required": ["success"],
+      "properties": {
+        "success": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    },
+    "ApprovalRequest": {
+      "type": "object",
+      "required": ["requestId", "toolCall"],
+      "properties": {
+        "requestId": { "type": "string" },
+        "toolCall": { "$ref": "#/definitions/ToolCall" }
+      }
+    },
+    "ApprovalResponse": {
+      "type": "object",
+      "required": ["requestId", "decision"],
+      "properties": {
+        "requestId": { "type": "string" },
+        "decision": { "type": "string", "enum": ["allow", "deny"] },
+        "modifiedInput": { "type": "object" }
+      }
+    },
+    "ToolCall": {
+      "type": "object",
+      "required": ["id", "name", "input"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "input": { "type": "object" }
+      }
+    },
+    "ToolResult": {
+      "type": "object",
+      "required": ["toolCallId", "content"],
+      "properties": {
+        "toolCallId": { "type": "string" },
+        "content": { "type": "string" },
+        "isError": { "type": "boolean" }
+      }
+    },
+    "UsageUpdate": {
+      "type": "object",
+      "properties": {
+        "inputTokens": { "type": "number" },
+        "outputTokens": { "type": "number" },
+        "costUsd": { "type": "number" }
+      }
+    },
+    "ErrorInfo": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "Attachment": {
+      "type": "object",
+      "required": ["type", "content"],
+      "properties": {
+        "type": { "type": "string", "enum": ["text", "image"] },
+        "content": { "type": "string" },
+        "mimeType": { "type": "string" }
+      }
+    }
+  }
+}

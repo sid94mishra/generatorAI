@@ -70,10 +70,10 @@ export function migrateDB(db: AppDatabase): void {
       session_id TEXT PRIMARY KEY,
       next_sequence INTEGER NOT NULL DEFAULT 1
     );
-    -- Seed from existing events so post-migration allocations don't overlap
-    -- with the pre-migration in-memory counter's values.
-    INSERT OR IGNORE INTO event_sequences (session_id, next_sequence)
-    SELECT session_id, COALESCE(MAX(sequence_id), 0) + 1 FROM events GROUP BY session_id;
+    -- P2-c: the seed from the events table used to run on EVERY boot. It is an
+    -- aggregate over a table that grew to 1.19M rows, which cost ~2.1s of
+    -- startup for a statement that is a no-op after the first run. It now
+    -- lives in versioned migration 29 so it runs exactly once per database.
 
     CREATE TABLE IF NOT EXISTS chat_messages (
       id TEXT PRIMARY KEY,
@@ -1730,6 +1730,153 @@ export function migrateDB(db: AppDatabase): void {
         `DROP TABLE computer_use_grants;`,
         `ALTER TABLE computer_use_grants_v28 RENAME TO computer_use_grants;`,
         `CREATE UNIQUE INDEX IF NOT EXISTS idx_cu_grants_unique ON computer_use_grants(workspace_id, app_identity);`,
+      ],
+    },
+    {
+      // Phase 0 / W01 + W02, step 5b — relocate the per-session sequence seed
+      // off the boot path. It used to run as part of the legacy idempotent
+      // block on every start (P2-c): an aggregate over a table that grew to
+      // 1.19M rows, costing ~2.1 s of startup for a statement that is a no-op
+      // after the first run. Here it runs exactly once per database, and it
+      // must stay ahead of migration 30, which reads the result.
+      //
+      // Kept ALONE in its own version. It is a long-running aggregate over the
+      // largest table in the file, and migrations run in one transaction each:
+      // bundling an index build behind it would hold a write lock for the sum
+      // of both and leave no way to roll back one without the other.
+      version: 29,
+      name: 'sequence_seed_once',
+      sql: [
+        `INSERT OR IGNORE INTO event_sequences (session_id, next_sequence)
+         SELECT session_id, COALESCE(MAX(sequence_id), 0) + 1 FROM events GROUP BY session_id;`,
+      ],
+    },
+    {
+      // P1-4 — the event bus now takes its sequence numbers from
+      // `stream_sequences` (the durable stream log) instead of `event_sequences`,
+      // so replay and the live stream finally share one counter.
+      //
+      // On an existing database those two counters hold different values for
+      // the same session. Without this, a session whose `event_sequences`
+      // counter is ahead would see its next `PersistedEvent.sequenceId` jump
+      // BACKWARDS after the upgrade, and any consumer holding a high-water mark
+      // would silently discard every subsequent event. Raising the stream
+      // counter to the max of the two guarantees the sequence only ever moves
+      // forward across the cutover.
+      //
+      // Note the semantic shift this deliberately absorbs: `next_sequence` is
+      // the NEXT number to allocate, `last_seq` is the LAST one allocated.
+      // Copying one into the other burns a single sequence number per session,
+      // which is the safe direction — the alternative would hand out a number
+      // that `events` has already used.
+      version: 30,
+      name: 'unify_event_sequence_space',
+      sql: [
+        `INSERT INTO stream_sequences (scope, scope_id, last_seq)
+         SELECT 'session', session_id, next_sequence FROM event_sequences
+         WHERE session_id <> '__global__'
+         ON CONFLICT(scope, scope_id) DO UPDATE SET
+           last_seq = MAX(last_seq, excluded.last_seq);`,
+        `INSERT INTO stream_sequences (scope, scope_id, last_seq)
+         SELECT 'global', 'all', next_sequence FROM event_sequences
+         WHERE session_id = '__global__'
+         ON CONFLICT(scope, scope_id) DO UPDATE SET
+           last_seq = MAX(last_seq, excluded.last_seq);`,
+      ],
+    },
+    {
+      // Phase 0 / W02, step 5d — indexes declared in schema.ts that no
+      // migration ever emitted, so they exist on no deployed database (P1-6).
+      // `idx_chats_project_id` backs the project-scoped chat list, which was
+      // measured at a 579 ms full scan.
+      //
+      // Separate version from 29 on purpose: building an index takes a write
+      // lock proportional to the table, and this must be revertible on its own.
+      //
+      // Deliberately NO new index on `events`: the same release stops writing
+      // that table and sets retention to empty it, so building an index over
+      // 1.19M rows would take a long write lock to speed up a table that is
+      // being retired.
+      version: 31,
+      name: 'missing_chat_indexes',
+      sql: [
+        `CREATE INDEX IF NOT EXISTS idx_chats_project_id ON chats(project_id);`,
+        `CREATE INDEX IF NOT EXISTS idx_chats_created_at ON chats(created_at);`,
+        `CREATE INDEX IF NOT EXISTS idx_chats_parent_chat_id ON chats(parent_chat_id);`,
+      ],
+    },
+    {
+      // W08 — identity for this database's stream sequence space.
+      //
+      // A resume cursor names a position in a sequence space, so it can only be
+      // validated against the identity of that space. `stream_sequences`
+      // persists and is never reset, so the space belongs to the DATABASE, not
+      // to a process: a per-boot identity would reject every cursor after a
+      // restart and silently skip the replay it exists to guarantee.
+      //
+      // Its own table rather than `system_configs`, whose CHECK constraint
+      // enumerates a closed set of `type` values this is not one of.
+      version: 32,
+      name: 'stream_meta',
+      sql: [
+        `CREATE TABLE IF NOT EXISTS stream_meta (
+           key TEXT PRIMARY KEY,
+           value TEXT NOT NULL
+         );`,
+      ],
+    },
+    {
+      // W34 / P1-42 — durable conversation→harness ownership.
+      //
+      // MultiHarness routes every conversation-scoped call (sendPrompt, abort,
+      // getMessages) back to the provider that originally created that conversation.
+      // Before this migration the ownership map was in-memory only; a server
+      // restart wiped it, and the next call on any old conversation was routed to
+      // the primary provider — which had never seen that session id, causing
+      // "session not found" errors on Claude/Codex/etc. immediately after reboot.
+      //
+      // No FK to `chats`: a harness conversation may exist without a DB chat row
+      // (background tasks, workflow stages). Cascade deletes would silently drop
+      // routing for those rows; explicit remove() via ConversationOwnershipStore
+      // is the intended cleanup path.
+      version: 33,
+      name: 'conversation_ownership',
+      sql: [
+        `CREATE TABLE IF NOT EXISTS conversation_ownership (
+           conversation_id TEXT PRIMARY KEY,
+           harness_type    TEXT NOT NULL,
+           updated_at      INTEGER NOT NULL
+         );`,
+        `CREATE INDEX IF NOT EXISTS idx_conv_ownership_harness ON conversation_ownership(harness_type);`,
+      ],
+    },
+    {
+      // W46-G16 — Extend system_configs to allow type='mcp'.
+      //
+      // The original CHECK constraint enumerated only ('agent', 'prompt', 'skill').
+      // The custom-agents feature stores MCP server configurations as system-config
+      // rows, but the CHECK caused every INSERT with type='mcp' to fail with a
+      // constraint violation. SQLite doesn't support ALTER ... CHECK — the canonical
+      // fix is create-new / copy / drop-old / rename. All existing rows are preserved.
+      version: 34,
+      name: 'system_configs_add_mcp_type',
+      sql: [
+        `CREATE TABLE IF NOT EXISTS system_configs_new (
+           id          TEXT PRIMARY KEY,
+           type        TEXT NOT NULL CHECK(type IN ('agent', 'prompt', 'skill', 'mcp')),
+           name        TEXT NOT NULL,
+           description TEXT,
+           file_path   TEXT NOT NULL,
+           version     TEXT DEFAULT '1.0.0',
+           metadata    TEXT,
+           created_at  INTEGER NOT NULL,
+           updated_at  INTEGER NOT NULL
+         );`,
+        `INSERT INTO system_configs_new SELECT * FROM system_configs;`,
+        `DROP TABLE system_configs;`,
+        `ALTER TABLE system_configs_new RENAME TO system_configs;`,
+        `CREATE INDEX IF NOT EXISTS idx_system_configs_type ON system_configs(type);`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_system_configs_unique ON system_configs(type, name);`,
       ],
     },
   ];

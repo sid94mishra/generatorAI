@@ -125,6 +125,8 @@ export { NullComputerBridge } from './computer/NullComputerBridge.js';
 export type { NullComputerBridgeOptions } from './computer/NullComputerBridge.js';
 export { CuaDriverBridge } from './computer/CuaDriverBridge.js';
 export type { CuaDriverBridgeOptions, CuaDriverEndpoint } from './computer/CuaDriverBridge.js';
+export { transcodeScreenshot } from './computer/screenshotCodec.js';
+export type { ScreenshotFormat, TranscodeRequest, TranscodeResult } from './computer/screenshotCodec.js';
 export {
   parseListApps,
   parseListWindows,

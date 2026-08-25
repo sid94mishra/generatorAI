@@ -99,17 +99,27 @@ export function createAuthMiddleware(options: ApiAuthOptions): RequestHandler {
         // `/api/stream` is the only ticket-redeeming endpoint, and the ticket
         // must match the exact subscription it was minted for.
         const isStreamSubscription = apiPath === '/stream' || apiPath === '/stream/';
-        const streamScope = isStreamSubscription
-          ? {
-              scope: String(req.query['scope'] ?? ''),
-              id:
-                String(req.query['scope'] ?? '') === 'global'
-                  ? 'all'
-                  : typeof req.query['id'] === 'string'
-                    ? req.query['id']
-                    : null,
-            }
-          : undefined;
+        // W09-a — `?c=` is the multiplexed form. Its ticket is bound to the
+        // CONNECTION, not to a scope: the subscriptions are authorised
+        // individually as they are added, so the ticket can never widen access
+        // even though it names no scope of its own (N-12).
+        const muxConnectionId =
+          isStreamSubscription && typeof req.query['c'] === 'string' && req.query['c'].length > 0
+            ? req.query['c']
+            : null;
+        const streamScope = !isStreamSubscription
+          ? undefined
+          : muxConnectionId
+            ? { scope: 'connection', id: muxConnectionId }
+            : {
+                scope: String(req.query['scope'] ?? ''),
+                id:
+                  String(req.query['scope'] ?? '') === 'global'
+                    ? 'all'
+                    : typeof req.query['id'] === 'string'
+                      ? req.query['id']
+                      : null,
+              };
 
         const principal = await auth.authenticate({
           method: req.method,

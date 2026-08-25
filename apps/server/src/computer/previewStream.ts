@@ -19,6 +19,41 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
+import { CAST_FILE as SCREEN_CAST_FILE } from './screenCast.js';
+
+/**
+ * Newest recorder run directory that actually holds something, or null.
+ *
+ * Restarting a preview mints a fresh run folder, so the newest one is routinely
+ * empty while the run worth watching sits behind it — measured as a 0-turn
+ * folder shadowing 20 turns and a 406 MB video, which made the panel report
+ * "no recording yet". An empty run recorded nothing, so it is never the answer.
+ */
+export async function newestRun(root: string): Promise<string | null> {
+  let runs: string[];
+  try {
+    runs = await fs.readdir(root);
+  } catch {
+    return null;
+  }
+  let best: { dir: string; at: number } | null = null;
+  let newest: { dir: string; at: number } | null = null;
+  for (const run of runs) {
+    const dir = path.join(root, run);
+    try {
+      const stat = await fs.stat(dir);
+      if (!stat.isDirectory()) continue;
+      if (!newest || stat.mtimeMs > newest.at) newest = { dir, at: stat.mtimeMs };
+      const entries = await fs.readdir(dir);
+      const hasContent = entries.some((e) => e.startsWith('turn-') || e === SCREEN_CAST_FILE);
+      if (hasContent && (!best || stat.mtimeMs > best.at)) best = { dir, at: stat.mtimeMs };
+    } catch {
+      // Vanished between readdir and stat — skip it.
+    }
+  }
+  return (best ?? newest)?.dir ?? null;
+}
+
 export interface CursorSample {
   /** Milliseconds since the recorder started. */
   t: number;

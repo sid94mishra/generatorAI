@@ -159,11 +159,19 @@ export interface ComputerSnapshot {
 }
 
 export interface ComputerScreenshot {
-  format: 'png';
+  /** What is on disk. The driver writes `png`; we may re-encode (X-14). */
+  format: 'png' | 'jpeg' | 'webp';
   width: number;
   height: number;
   /** Backing-scale factor of the capture (2 on Retina). */
   scale: number;
+  /**
+   * Source pixels per stored pixel, 1 when the capture was not resized.
+   * A coordinate the model reports against this image is multiplied by this
+   * to reach the driver's space — the mapping only stays correct because WE
+   * do the downscale rather than letting the provider do it silently (X-14).
+   */
+  downscale?: number;
   /** Workspace-relative artifact path. Written before the event fires (INV-3). */
   path?: string;
   artifactId?: string;

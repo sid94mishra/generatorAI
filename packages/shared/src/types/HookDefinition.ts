@@ -21,6 +21,10 @@ export type HookPhase =
   | 'on_session_start'
   | 'on_session_idle'
   | 'on_session_error'
+  // W13 / Finding-7 — user-initiated Stop is distinct from an error.
+  // Workflow hooks that fire on on_session_error do NOT automatically fire
+  // on on_session_cancelled. Authors must opt in separately.
+  | 'on_session_cancelled'
   | 'on_client_start'
   | 'on_client_stop'
   | 'on_client_error'

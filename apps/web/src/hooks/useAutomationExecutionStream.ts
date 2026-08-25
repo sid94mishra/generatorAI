@@ -8,7 +8,7 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { automationKeys } from './automationQueries.js';
-import { openAuthenticatedEventSource } from '../platform/authTransport.js';
+import { openMultiplexedStream } from '../platform/muxStream.js';
 
 /** Kinds we care about for cache invalidation. */
 const AUTOMATION_KINDS = new Set([
@@ -43,13 +43,11 @@ export function useAutomationExecutionStream(
   useEffect(() => {
     if (!enabled || !automationId || !executionId) return;
 
-    const url = `/api/stream?scope=automation&id=${encodeURIComponent(executionId)}` +
-      `&filter=${encodeURIComponent('automation_execution.')}`;
-    // EventSource cannot send an Authorization header, so the connection is
-    // authorised by a 30-second single-use ticket instead.
-    const es = openAuthenticatedEventSource(
-      url,
-      { scope: 'automation', id: executionId },
+    // One shared, ticket-authorised connection carries every scope this tab
+    // watches; the prefix filter still runs server-side (W09-a).
+    const es = openMultiplexedStream(
+      'automation',
+      executionId,
       {
         onMessage: (event) => {
           try {
@@ -64,6 +62,7 @@ export function useAutomationExecutionStream(
           }
         },
       },
+      ['automation_execution.'],
     );
 
     return () => {

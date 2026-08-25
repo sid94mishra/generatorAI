@@ -26,10 +26,12 @@ import type {
   AgentEvent,
   ConversationWarning,
   HarnessAgentInfo,
+  ProviderCapabilities,
 } from '@generatorai/core';
 import type { HarnessRegistry } from './HarnessRegistry.js';
 import { ALL_HARNESS_TYPES } from './HarnessRegistry.js';
 import type { HarnessType } from './types.js';
+import type { ProviderInstanceId } from '@generatorai/core';
 
 /** Persists conversation→provider ownership so it survives a restart. */
 export interface ConversationOwnershipStore {
@@ -43,12 +45,40 @@ export class MultiHarness implements IAgentHarness {
   private readonly owners = new Map<string, HarnessType>();
   private readonly clientEventHandlers = new Set<(event: HarnessClientEvent) => void>();
   private readonly clientEventUnsubs = new Map<HarnessType, () => void>();
+  /**
+   * W34 / L17 — ProviderInstanceId → HarnessType translation table.
+   *
+   * Populated by callers that wire a ProviderInstanceRegistry. When undefined
+   * (the deferred case), providerInstanceId routing falls through to harnessType
+   * resolution (safe but loses the specific-instance guarantee).
+   *
+   * Finding-1: this was entirely absent before; the fix adds the routing path
+   * and the population API (`setInstanceTypeMap`). Composition-root will call
+   * `setInstanceTypeMap` once ProviderInstanceRegistry is fully activated.
+   */
+  private instanceTypeMap?: ReadonlyMap<ProviderInstanceId, HarnessType>;
 
   constructor(
     private readonly registry: HarnessRegistry,
     private readonly store?: ConversationOwnershipStore,
     private readonly logger?: { info: (m: string) => void; warn: (m: string) => void },
   ) {}
+
+  /**
+   * Provide a ProviderInstanceId → HarnessType lookup table so that
+   * `createConversation` can honour L17 routing from `params.providerInstanceId`.
+   *
+   * Call this once at startup after populating the ProviderInstanceRegistry:
+   * ```ts
+   * const map = new Map(
+   *   [...registry.listAll()].map((i) => [i.id, i.driverType as HarnessType])
+   * );
+   * multiHarness.setInstanceTypeMap(map);
+   * ```
+   */
+  setInstanceTypeMap(map: ReadonlyMap<ProviderInstanceId, HarnessType>): void {
+    this.instanceTypeMap = map;
+  }
 
   /** Provider used when a caller doesn't name one. */
   get harnessType(): HarnessType {
@@ -75,11 +105,48 @@ export class MultiHarness implements IAgentHarness {
   /**
    * Decide which provider should run a new conversation.
    *
-   * Explicit `harnessType` always wins. Otherwise we look the model up in the
-   * live catalogs, so simply picking "Claude Opus" in the UI routes to Claude
-   * without the caller having to know about providers at all.
+   * Priority order (L17 — providerInstanceId is the authoritative routing key):
+   *  1. `params.providerInstanceId` → look up in instanceTypeMap (when populated).
+   *  2. Explicit `params.harnessType`.
+   *  3. Model-catalog lookup.
+   *  4. Primary provider.
+   *
+   * Finding-1 fix: `providerInstanceId` is now checked FIRST. The `instanceTypeMap`
+   * is populated by callers that wire a ProviderInstanceRegistry (deferred: not yet
+   * wired in composition-root; see docs/V2_IMPLEMENTATION_TRACKER.md Finding-1).
+   * Until that wiring is complete, a supplied providerInstanceId falls through to
+   * harnessType/model resolution, which is safe — it just loses the L17 guarantee
+   * that the specific instance is used, not just the correct provider family.
    */
   private async resolveTarget(params: CreateConversationParams): Promise<HarnessType> {
+    // L17: ProviderInstanceId takes priority over all other routing hints.
+    /* W34-M3 */
+    if (params.providerInstanceId) {
+      // 1. Try the explicit lookup table (populated by setInstanceTypeMap once
+      //    ProviderInstanceRegistry is wired in composition-root).
+      if (this.instanceTypeMap) {
+        const mapped = this.instanceTypeMap.get(params.providerInstanceId);
+        if (mapped) return mapped;
+        this.logger?.warn(
+          `[MultiHarness] providerInstanceId '${params.providerInstanceId}' not in instanceTypeMap — trying inline parse`,
+        );
+      }
+      // 2. Fallback: parse the driver prefix from the ProviderInstanceId itself.
+      //    ProviderInstanceIds are encoded as `<driverType>:<suffix>`, so
+      //    `claude-agent:default` → driver 'claude-agent'. This allows routing to
+      //    work even before the full ProviderInstanceRegistry is wired (W34 deferred
+      //    wiring — see docs/V2_IMPLEMENTATION_TRACKER.md M3 note).
+      const colonIdx = params.providerInstanceId.indexOf(':');
+      if (colonIdx > 0) {
+        const driverPrefix = params.providerInstanceId.slice(0, colonIdx) as HarnessType;
+        if (ALL_HARNESS_TYPES.includes(driverPrefix)) {
+          this.logger?.info(
+            `[MultiHarness] providerInstanceId '${params.providerInstanceId}' resolved via prefix → '${driverPrefix}'`,
+          );
+          return driverPrefix;
+        }
+      }
+    }
     const explicit = params.harnessType as HarnessType | undefined;
     if (explicit) return explicit;
     if (params.model) {
@@ -106,7 +173,9 @@ export class MultiHarness implements IAgentHarness {
     if (params.conversationId && params.conversationId !== id) {
       this.owners.set(params.conversationId, target);
     }
-    await this.store?.save(id, target).catch(() => undefined);
+    /* W34-N6 */ await this.store?.save(id, target).catch((e: unknown) =>
+      this.logger?.warn(`[MultiHarness] Failed to persist ownership for ${id} → ${target}: ${e}`),
+    );
     this.logger?.info(`[MultiHarness] conversation ${id} → '${target}' (model=${params.model ?? 'default'})`);
     return id;
   }
@@ -131,7 +200,9 @@ export class MultiHarness implements IAgentHarness {
         // The old provider may already have dropped it — not fatal.
       }
       this.owners.set(conversationId, target);
-      await this.store?.save(conversationId, target).catch(() => undefined);
+      /* W34-N6 */ await this.store?.save(conversationId, target).catch((e: unknown) =>
+        this.logger?.warn(`[MultiHarness] Failed to persist ownership for ${conversationId} → ${target}: ${e}`),
+      );
       const adapter = await this.registry.get(target);
       await adapter.createConversation({ ...(params as CreateConversationParams), conversationId });
       return;
@@ -165,14 +236,18 @@ export class MultiHarness implements IAgentHarness {
     const adapter = await this.adapterFor(conversationId);
     await adapter.deleteConversation(conversationId);
     this.owners.delete(conversationId);
-    await this.store?.remove(conversationId).catch(() => undefined);
+    /* W34-N6 */ await this.store?.remove(conversationId).catch((e: unknown) =>
+      this.logger?.warn(`[MultiHarness] Failed to remove ownership for ${conversationId}: ${e}`),
+    );
   }
 
   async destroyConversation(conversationId: string): Promise<void> {
     const adapter = await this.adapterFor(conversationId);
     await adapter.destroyConversation(conversationId);
     this.owners.delete(conversationId);
-    await this.store?.remove(conversationId).catch(() => undefined);
+    /* W34-N6 */ await this.store?.remove(conversationId).catch((e: unknown) =>
+      this.logger?.warn(`[MultiHarness] Failed to remove ownership for ${conversationId}: ${e}`),
+    );
   }
 
   getConversationWarnings(conversationId: string): ConversationWarning[] {
@@ -336,5 +411,85 @@ export class MultiHarness implements IAgentHarness {
   /** Merged live catalog across every ready provider. */
   getModels(): Promise<HarnessModel[]> {
     return this.registry.getAllModels();
+  }
+
+  // ── Capability declarations (W42 / N-2) ──
+
+  /**
+   * Returns the GLOBAL capability envelope: a feature is true only when
+   * ALL ready providers declare it.
+   *
+   * Use this for system-wide checks ("does this deployment support MCP?").
+   * Do NOT use this for per-conversation decisions — two providers may differ
+   * in their capabilities, and a conversation runs on exactly one of them.
+   *
+   * Finding-6 fix: callers that need per-conversation capability (e.g. the
+   * reasoning toggle, tool-gating checks) should call `capabilitiesFor(conversationId)`
+   * instead so they get the owning adapter's own declaration.
+   *
+   * W42 — N-2 fix: capability discovery is by declaration, not by exception.
+   */
+  capabilities(): ProviderCapabilities {
+    const adapters = ALL_HARNESS_TYPES
+      .map((t) => this.registry.peek(t))
+      .filter((a): a is IAgentHarness => a !== null && typeof (a as IAgentHarness).capabilities === 'function');
+
+    if (adapters.length === 0) {
+      // No adapters up yet — return the most conservative defaults.
+      return {
+        vision: false,
+        reasoning: false,
+        reasoningEfforts: [],
+        planMode: false,
+        mcpServers: false,
+        skillDirectories: false,
+        fullToolGating: false,
+        sessionPersistence: false,
+        budgetTracking: false,
+      };
+    }
+
+    const caps = adapters.map((a) => a.capabilities());
+    return {
+      vision: caps.every((c) => c.vision),
+      reasoning: caps.every((c) => c.reasoning),
+      // N5 fix: union (not intersect) reasoning efforts — multi-provider
+      // installs can do reasoning when at least ONE provider supports it.
+      // An intersection would always yield [] whenever a non-reasoning
+      // provider (e.g. Copilot) is also installed.
+      /* W42-N5 */ reasoningEfforts: [
+        ...new Set(caps.flatMap((c) => c.reasoningEfforts as Array<'low' | 'medium' | 'high' | 'xhigh' | 'max'>)),
+      ],
+      maxParallelTools: Math.min(...caps.map((c) => c.maxParallelTools ?? 8)),
+      planMode: caps.every((c) => c.planMode),
+      mcpServers: caps.every((c) => c.mcpServers),
+      skillDirectories: caps.every((c) => c.skillDirectories),
+      fullToolGating: caps.every((c) => c.fullToolGating),
+      sessionPersistence: caps.every((c) => c.sessionPersistence),
+      budgetTracking: caps.every((c) => c.budgetTracking),
+    };
+  }
+
+  /**
+   * Per-conversation capability query — routes to the provider that owns this
+   * conversation and returns its own declared capabilities.
+   *
+   * Finding-6 fix: unlike `capabilities()` (global intersection), this method
+   * reflects what the owning provider actually supports. Use this for:
+   * - Reasoning toggle visibility
+   * - Tool-gating enforcement checks
+   * - Budget tracking availability
+   *
+   * Falls back to `capabilities()` if the conversation has no owner yet
+   * (e.g. during construction before `createConversation` is called).
+   */
+  capabilitiesFor(conversationId: string): ProviderCapabilities {
+    const harnessType = this.owners.get(conversationId);
+    if (!harnessType) return this.capabilities();
+    const adapter = this.registry.peek(harnessType);
+    if (!adapter || typeof (adapter as IAgentHarness).capabilities !== 'function') {
+      return this.capabilities();
+    }
+    return (adapter as IAgentHarness).capabilities();
   }
 }

@@ -23,7 +23,10 @@ import type {
   StreamEventRow,
   StreamScope,
 } from '@generatorai/db';
-import type { ILogger } from '@generatorai/shared';
+import { classifyEvent, type ILogger } from '@generatorai/shared';
+import { isNoiseEventKind } from '../events/EventBus.js';
+import type { DeltaLog } from './DeltaLog.js';
+import { StreamWriteBatcher, type StreamWriteBatcherOptions } from './StreamWriteBatcher.js';
 
 export type { StreamEventRow, StreamScope } from '@generatorai/db';
 
@@ -54,6 +57,31 @@ export interface StreamBrokerSubscribeOptions {
    * (enforced by the route, but we clamp again here as defense-in-depth).
    */
   readonly kindPrefixes?: readonly string[];
+  /**
+   * Called once, before any event is delivered, with the truth about resume.
+   *
+   * W08 — a client whose cursor fell outside retention must be TOLD, because
+   * the alternative is a silent, permanent hole. Replaying "everything after
+   * seq 40" when the oldest surviving row is 100 delivers rows the client can
+   * render but leaves 41-99 missing forever, with nothing to detect it by.
+   */
+  readonly onResume?: (status: StreamResumeStatus) => void;
+}
+
+export interface StreamResumeStatus {
+  /**
+   * False when the cursor could not be honoured and the client must
+   * re-snapshot. True when every event after the cursor was delivered.
+   */
+  resumed: boolean;
+  /** Cursor the client asked to resume from. */
+  afterSeq: number;
+  /** Oldest seq still stored for this scope, 0 when the scope is empty. */
+  oldestSeq: number;
+  /** Highest seq delivered during replay. */
+  deliveredUpTo: number;
+  /** Set when `resumed` is false. A closed set so a caller cannot forget one. */
+  reason?: 'cursor_expired' | 'replay_truncated';
 }
 
 /** Hard ceiling on synchronous replay to prevent a client asking for 10k events at once. */
@@ -62,23 +90,57 @@ const MAX_SYNC_REPLAY = 1000;
 const MAX_KIND_PREFIXES = 10;
 
 /**
- * Raw SDK passthrough that no client renders.
- *
- * These were 98% of one orchestrator turn's 19k events and ~1M rows of
- * `stream_cursors`. Dropping them at the broker shrinks the window in which a
- * frame can be lost and stops them masking a stalled stream.
- * Set `GENERATORAI_STREAM_DEBUG_NOISE=1` to keep them for diagnostics.
+ * Defence in depth for direct `publish()` callers. The primary filter now runs
+ * in `EventBus.emit`, before sequence allocation and fan-out — see
+ * `isNoiseEventKind`.
  */
-const NOISE_KINDS = new Set(['harness.session_info', 'harness.unknown']);
-const KEEP_NOISE = process.env['GENERATORAI_STREAM_DEBUG_NOISE'] === '1';
+
+export interface StreamBrokerOptions extends StreamWriteBatcherOptions {
+  /**
+   * W07 — when wired, every DELTA-classified publish is ALSO appended here.
+   *
+   * This is a dual-write, not a cutover: deltas still go through `writer` into
+   * `stream_cursors` exactly as before, so replay-after-reconnect is
+   * unchanged. Moving deltas to read FROM the delta log instead — and
+   * stopping the SQL write for them — is a durable-shape change gated behind
+   * W47's compatibility window, not a decision this constructor makes alone.
+   */
+  deltaLog?: DeltaLog;
+}
 
 export class StreamBroker {
   private subscribers = new Map<string, Set<StreamEventHandler>>();
+  private readonly writer: StreamWriteBatcher;
+  private readonly deltaLog: DeltaLog | undefined;
 
   constructor(
     private readonly repo: DrizzleStreamCursorRepository,
     private readonly logger: ILogger,
-  ) {}
+    options: StreamBrokerOptions = {},
+  ) {
+    this.writer = new StreamWriteBatcher(repo, logger, options);
+    this.deltaLog = options.deltaLog;
+  }
+
+  /** Flush anything still queued — the SQL writer AND the delta log, if wired. Call from the shutdown path. */
+  async flushWrites(): Promise<void> {
+    await Promise.all([this.writer.flush(), this.deltaLog?.flush() ?? Promise.resolve()]);
+  }
+
+  /**
+   * Identity of this database's sequence space, for resume validation (W08).
+   *
+   * Belongs to the DATABASE, not the process: `stream_sequences` persists and
+   * is never reset, so a cursor minted before a restart is still valid.
+   */
+  async streamSpaceId(): Promise<string> {
+    return this.repo.streamSpaceId();
+  }
+
+  /** Events queued but not yet committed. Surfaced on the health endpoint. */
+  get writeDepth(): number {
+    return this.writer.depth;
+  }
 
   /**
    * Persist an event to the durable log and broadcast to current subscribers.
@@ -86,6 +148,10 @@ export class StreamBroker {
    * The DB write happens BEFORE the in-memory fan-out (commit-then-broadcast
    * ordering). This guarantees read-your-writes: a REST replay fetched
    * immediately after the publish resolves will include the new event.
+   *
+   * W07 — the write goes through a batcher now, so several events can share one
+   * WAL commit. The ordering above is unchanged: `write()` resolves only after
+   * the batch containing this event has committed.
    */
   async publish(
     scope: StreamScope,
@@ -93,42 +159,61 @@ export class StreamBroker {
     kind: string,
     data: unknown,
   ): Promise<StreamBrokerPublishResult> {
-    if (!KEEP_NOISE && NOISE_KINDS.has(kind)) {
+    if (isNoiseEventKind(kind, data)) {
       return { seq: -1, id: -1, ts: Date.now() };
     }
-    const row = await this.repo.append(scope, scopeId, kind, data);
+    const row = await this.writer.write(scope, scopeId, kind, data);
+    // W07 — dual-write. Fire-and-forget from the caller's perspective: the
+    // delta log buffers and flushes asynchronously on its own schedule (see
+    // `DeltaLog.append`), so it must never be awaited on the token path.
+    if (this.deltaLog && classifyEvent(kind, data) === 'delta') {
+      this.deltaLog.append(scope, scopeId, { seq: row.seq, kind, payload: data, ts: row.ts });
+    }
+    await this.fanOut(row);
+    return { seq: row.seq, id: row.id, ts: row.ts };
+  }
 
-    const key = this.keyFor(scope, scopeId);
+  /**
+   * Broadcast a committed row to current subscribers.
+   *
+   * Only ever called after the durable write resolves — that ordering IS the
+   * commit-then-broadcast invariant (EVT-01).
+   *
+   * W06 — this used to be fire-and-forget ("the broker never blocks on a slow
+   * consumer"), which is exactly why nothing ever slowed a producer: the
+   * per-connection queue bounded MEMORY, but `publish()` returned regardless
+   * of whether any subscriber actually accepted the frame. Handlers are now
+   * awaited sequentially, matching the plan's "awaited sequential dispatch."
+   * A connection only returns a pending promise from `deliver()` when an ITEM
+   * had to be queued (deltas are dropped, never waited on), so this only ever
+   * slows the caller when there is real, bounded backpressure to apply — and
+   * because `publish()` is awaited by `EventBus`'s per-session emit queue,
+   * that wait reaches back to the harness's own read loop for that session.
+   *
+   * One scope can have more than one live subscriber (two tabs on the same
+   * chat, or during a reconnect overlap); a slow one delays its siblings on
+   * the same scope. That is the accepted trade of a shared physical
+   * connection, not a defect — see `MuxSseConnection`'s per-scope queues for
+   * why an unrelated scope on the SAME connection is not affected.
+   */
+  private async fanOut(row: StreamEventRow): Promise<void> {
+    const key = this.keyFor(row.scope, row.scopeId);
     const handlers = this.subscribers.get(key);
-    if (handlers && handlers.size > 0) {
-      // Copy to avoid set-mutation-during-iteration if a handler unsubscribes.
-      for (const handler of [...handlers]) {
-        try {
-          // Handlers are fire-and-forget from the broker's perspective.
-          // STR-05 — the SSE route is responsible for backpressure; the
-          // broker never blocks on a slow consumer.
-          const ret = handler(row);
-          if (ret && typeof (ret as Promise<void>).catch === 'function') {
-            (ret as Promise<void>).catch((err) => {
-              this.logger.warn?.(
-                `[StreamBroker] handler rejected for ${key}: ${
-                  err instanceof Error ? err.message : String(err)
-                }`,
-              );
-            });
-          }
-        } catch (err) {
-          // STR-05 / RM §2.2 — don't swallow, don't abort the fan-out.
-          this.logger.warn?.(
-            `[StreamBroker] handler threw for ${key}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        }
+    if (!handlers || handlers.size === 0) return;
+
+    // Copy to avoid set-mutation-during-iteration if a handler unsubscribes.
+    for (const handler of [...handlers]) {
+      try {
+        await handler(row);
+      } catch (err) {
+        // STR-05 / RM §2.2 — don't swallow, don't abort the fan-out.
+        this.logger.warn?.(
+          `[StreamBroker] handler threw for ${key}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
     }
-
-    return { seq: row.seq, id: row.id, ts: row.ts };
   }
 
   /**
@@ -186,8 +271,48 @@ export class StreamBroker {
     // Phase 2 — replay persisted events. Any publish arriving during this
     // await lands in `buffer` via `wrapped` (mode='buffering').
     if (opts.afterSeq !== undefined) {
+      const requested = opts.afterSeq;
       try {
-        const replayed = await this.repo.replayAfter(scope, scopeId, opts.afterSeq, syncLimit);
+        // Read the floor AFTER replaying, not before — △ fixed during Phase 1
+        // review. Two separate `await`s are two separate opportunities for a
+        // retention sweep to run in between them, and reading `oldest` first
+        // makes that race land the UNSAFE way: retention deletes rows between
+        // the two reads, `oldest` is now stale-LOW, `oldest > requested + 1`
+        // under-fires, and a genuinely incomplete replay is reported
+        // `resumed: true` — the exact silent hole this mechanism exists to
+        // prevent. Reading `replayAfter` first and `oldestSeq` second means
+        // the floor can only ever be stale-HIGH relative to the replay it is
+        // validating, which fails the other way: an unnecessary
+        // `cursor_expired` on a replay that actually succeeded. That costs a
+        // redundant re-snapshot — cheap, visible, and never a silent lie.
+        const replayed = await this.repo.replayAfter(scope, scopeId, requested, syncLimit);
+        const oldest = await this.repo.oldestSeq(scope, scopeId);
+
+        // The verdict is reached, and reported, BEFORE a single event is
+        // delivered. Both inputs are already known, and a client told about a
+        // hole only after the events following it has already rendered them
+        // into the hole.
+        //
+        // Two distinct ways to fail, and the client's response differs: an
+        // expired cursor needs a full re-snapshot, a truncated replay needs
+        // another page. Collapsing them into one boolean would make the cheap
+        // case as expensive as the expensive one.
+        if (opts.onResume) {
+          let reason: StreamResumeStatus['reason'];
+          if (oldest > 0 && requested > 0 && oldest > requested + 1) {
+            reason = 'cursor_expired';
+          } else if (replayed.length >= syncLimit) {
+            reason = 'replay_truncated';
+          }
+          opts.onResume({
+            resumed: reason === undefined,
+            afterSeq: requested,
+            oldestSeq: oldest,
+            deliveredUpTo: replayed.at(-1)?.seq ?? requested,
+            ...(reason === undefined ? {} : { reason }),
+          });
+        }
+
         for (const row of replayed) {
           if (!this.matchesPrefix(row.kind, prefixes)) continue;
           try {
@@ -208,6 +333,16 @@ export class StreamBroker {
         if (set.size === 0) this.subscribers.delete(key);
         throw err;
       }
+    } else {
+      // No cursor: nothing to resume, and saying so is still the honest answer
+      // — the client knows it is starting from a snapshot rather than guessing.
+      opts.onResume?.({
+        resumed: false,
+        afterSeq: 0,
+        oldestSeq: 0,
+        deliveredUpTo: 0,
+        reason: 'cursor_expired',
+      });
     }
 
     // Phase 3 — drain the buffer (dedup by watermark), then flip to live.

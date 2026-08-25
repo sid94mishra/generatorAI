@@ -14,53 +14,13 @@ import type { DAG } from '../domain/dag/types.js';
 import { createHash } from 'node:crypto';
 
 /**
- * Per-run FIFO queue. Replaces the older promise-chain lock that swallowed
- * prior failures via bare `.catch(() => {})`: now each queued operation
- * rejects its own caller if it throws, and subsequent queued ops still run
- * (the queue doesn't "stick" on one bad op). Errors surface to the caller.
+ * Per-run FIFO queue entry. W33/P1-19 — defined here (not as a module global)
+ * so two DAGScheduler instances each get their own isolated queue state.
  */
 interface QueuedOp<T> {
   fn: () => Promise<T>;
   resolve: (v: T) => void;
   reject: (err: Error) => void;
-}
-const runQueues = new Map<string, Array<QueuedOp<unknown>>>();
-const runQueueActive = new Set<string>();
-
-async function processQueue(runId: string): Promise<void> {
-  if (runQueueActive.has(runId)) return;
-  runQueueActive.add(runId);
-  try {
-    for (;;) {
-      const queue = runQueues.get(runId);
-      if (!queue || queue.length === 0) break;
-      const op = queue.shift()!;
-      try {
-        const result = await op.fn();
-        op.resolve(result);
-      } catch (err) {
-        op.reject(err instanceof Error ? err : new Error(String(err)));
-      }
-    }
-    runQueues.delete(runId);
-  } finally {
-    runQueueActive.delete(runId);
-  }
-}
-
-function withLock<T>(runId: string, fn: () => Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const queue = runQueues.get(runId) ?? [];
-    queue.push({
-      fn: fn as () => Promise<unknown>,
-      resolve: resolve as (v: unknown) => void,
-      reject,
-    });
-    runQueues.set(runId, queue);
-    // Kick off processing asynchronously so the caller's try/await path
-    // completes before we start draining the queue.
-    void processQueue(runId);
-  });
 }
 
 /** Stable hash of (stage ids + their order/conditions + edge tuples) used
@@ -92,6 +52,13 @@ export class DAGScheduler implements IDAGScheduler {
    */
   private dagCache = new Map<string, { hash: string; dag: DAG }>();
 
+  // W33 / P1-19 — per-run FIFO lock queues as INSTANCE state.
+  // Module-level globals caused all DAGScheduler instances to share one lock
+  // table, making two schedulers in the same process contend on the same runId
+  // keys. Instance fields give each scheduler its own isolated queue state.
+  private runQueues = new Map<string, Array<QueuedOp<unknown>>>();
+  private runQueueActive = new Set<string>();
+
   constructor(
     private stageDefRepo: IStageDefinitionRepository,
     private edgeRepo: IStageEdgeRepository,
@@ -105,6 +72,44 @@ export class DAGScheduler implements IDAGScheduler {
      */
     private runRepo?: IWorkflowRunRepository,
   ) {}
+
+  // ── Per-run FIFO lock (W33/P1-19 — instance state, not module globals) ──
+
+  private async processQueue(runId: string): Promise<void> {
+    if (this.runQueueActive.has(runId)) return;
+    this.runQueueActive.add(runId);
+    try {
+      for (;;) {
+        const queue = this.runQueues.get(runId);
+        if (!queue || queue.length === 0) break;
+        const op = queue.shift()!;
+        try {
+          const result = await op.fn();
+          op.resolve(result);
+        } catch (err) {
+          op.reject(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+      this.runQueues.delete(runId);
+    } finally {
+      this.runQueueActive.delete(runId);
+    }
+  }
+
+  private withLock<T>(runId: string, fn: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const queue = this.runQueues.get(runId) ?? [];
+      queue.push({
+        fn: fn as () => Promise<unknown>,
+        resolve: resolve as (v: unknown) => void,
+        reject,
+      });
+      this.runQueues.set(runId, queue);
+      // Kick off processing asynchronously so the caller's try/await path
+      // completes before we start draining the queue.
+      void this.processQueue(runId);
+    });
+  }
 
   /**
    * Fetch the run's variables for condition evaluation. Returns undefined when
@@ -154,7 +159,7 @@ export class DAGScheduler implements IDAGScheduler {
    * Get stages that are ready to execute (all predecessors completed).
    */
   async getReadyStages(workflowRunId: string, workflowDefinitionId: string): Promise<string[]> {
-    return withLock(workflowRunId, async () => {
+    return this.withLock(workflowRunId, async () => {
       const dag = await this.buildDAGForDefinition(workflowDefinitionId);
       const stageRuns = await this.stageRunRepo.getByRunId(workflowRunId);
 

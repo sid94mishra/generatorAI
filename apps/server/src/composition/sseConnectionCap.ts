@@ -20,7 +20,7 @@
 // fire close twice for some transports).
 // ────────────────────────────────────────────────────────────────
 
-export type SseScope = 'session' | 'run' | 'chat' | 'global' | 'automation';
+export type SseScope = 'session' | 'run' | 'chat' | 'global' | 'automation' | 'computer';
 
 /**
  * Default per-(scope,id) cap. 6 matches the browser per-origin connection
@@ -35,6 +35,13 @@ const DEFAULT_CAPS_BY_SCOPE: Record<SseScope, number> = {
   run: DEFAULT_CAP,
   chat: DEFAULT_CAP,
   automation: DEFAULT_CAP,
+  // Computer preview. Same as the rest: `ComputerPanel` constructs a raw
+  // `EventSource`, and per the HTML spec a non-2xx response closes one
+  // PERMANENTLY — the browser will not retry. A tight cap therefore turns a
+  // StrictMode double-mount, an HMR re-run or a reload race into a dead panel
+  // rather than a transient error. The 250 ms poll's own back-off is what
+  // bounds the cost here.
+  computer: DEFAULT_CAP,
   // Global fan-out: intentionally higher — every connected tab shares one.
   global: 32,
 };
@@ -47,9 +54,24 @@ function readEnvCap(): number | undefined {
 }
 
 const configuredCaps: Record<SseScope, number> = (() => {
+  const defaults = { ...DEFAULT_CAPS_BY_SCOPE };
   const envCap = readEnvCap();
-  if (envCap === undefined) return { ...DEFAULT_CAPS_BY_SCOPE };
-  return { session: envCap, run: envCap, chat: envCap, global: envCap, automation: envCap };
+  if (envCap === undefined) return defaults;
+
+  // Derived from the defaults rather than hand-enumerated. The previous form
+  // listed each scope literally, so adding one silently dropped it from the
+  // env path — and it also clamped `global` DOWN from 32 (P3-d), meaning an
+  // operator raising the per-scope cap could break global fan-out.
+  //
+  // `global` is excluded rather than max'd: it is a fan-out scope every tab
+  // shares, provisioned deliberately, and the env var is documented as a
+  // per-scope cap. Every other scope takes the value verbatim, so an operator
+  // can lower it as well as raise it.
+  for (const scope of Object.keys(defaults) as SseScope[]) {
+    if (scope === 'global') continue;
+    defaults[scope] = envCap;
+  }
+  return defaults;
 })();
 
 const openCounts = new Map<string, number>();

@@ -231,6 +231,12 @@ export class HookInterceptor {
         return 'on_session_idle';
       case 'harness.error':
         return 'on_session_error';
+      // W13 / Finding-7: harness.cancelled (user Stop) is a terminal event
+      // distinct from harness.error. Workflow hook authors who write
+      // on_session_error handlers expecting them to fire on any
+      // terminal-non-success must also handle on_session_cancelled.
+      case 'harness.cancelled':
+        return 'on_session_cancelled';
       default:
         return null;
     }

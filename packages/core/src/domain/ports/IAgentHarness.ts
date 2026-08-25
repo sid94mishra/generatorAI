@@ -11,6 +11,7 @@
 
 import type { AgentEvent } from '@generatorai/shared';
 import type { Permission } from '../../permissions/Permission.js';
+import type { ProviderCapabilities, ProviderInstanceId } from './IProviderInstance.js';
 
 export type HarnessClientState = 'starting' | 'running' | 'stopped' | 'error';
 
@@ -365,6 +366,14 @@ export interface CreateConversationParams {
    */
   harnessType?: string;
 
+  /**
+   * W34 / L17 — the persisted ProviderInstanceId to use for this
+   * conversation. When present it takes precedence over `harnessType` and
+   * model-catalog resolution. Restored from DB on boot so Claude-owned
+   * conversations never re-route to Copilot after a restart (P1-42 fix).
+   */
+  providerInstanceId?: ProviderInstanceId;
+
   // ── System Message ──
   systemMessage?: SystemMessageConfig;
   /** @deprecated use systemMessage instead */
@@ -473,6 +482,14 @@ export interface IHarnessClientLifecycle {
   ping(): Promise<boolean>;
   shutdown(): Promise<void>;
   onClientEvent(handler: (event: HarnessClientEvent) => void): () => void;
+  /**
+   * W42 / N-2 — declared capabilities for this adapter.
+   *
+   * L9: Every capability is declared, never discovered by throwing. Callers
+   * branch on the returned struct rather than attempting a feature and
+   * catching the error. All fields default closed (false/undefined).
+   */
+  capabilities(): ProviderCapabilities;
 }
 
 /** Model discovery. */

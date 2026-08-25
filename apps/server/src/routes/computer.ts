@@ -22,8 +22,15 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import type { Container } from '../composition-root.js';
+import { acquireSseSlot } from '../composition/sseConnectionCap.js';
 import { screenCastFile, CAST_FILE as SCREEN_CAST_FILE } from '../computer/screenCast.js';
-import { readCursorSince, readFramesSince, isWindowScopedTurn } from '../computer/previewStream.js';
+import {
+  newestRun,
+  readCursorSince,
+  readFramesSince,
+  isWindowScopedTurn,
+} from '../computer/previewStream.js';
+import { subscribeEphemeral } from '../streaming/ephemeralScopes.js';
 
 type WorkspaceIdParams = { id: string };
 
@@ -31,38 +38,6 @@ function idOf(req: Request<WorkspaceIdParams>): string {
   return String((req.params as WorkspaceIdParams).id ?? '');
 }
 
-/**
- * Newest recorder run directory that actually holds something, or null.
- *
- * Restarting a preview mints a fresh run folder, so the newest one is routinely
- * empty while the run worth watching sits behind it — measured as a 0-turn
- * folder shadowing 20 turns and a 406 MB video, which made the panel report
- * "no recording yet". An empty run recorded nothing, so it is never the answer.
- */
-async function newestRun(root: string): Promise<string | null> {
-  let runs: string[];
-  try {
-    runs = await fs.readdir(root);
-  } catch {
-    return null;
-  }
-  let best: { dir: string; at: number } | null = null;
-  let newest: { dir: string; at: number } | null = null;
-  for (const run of runs) {
-    const dir = path.join(root, run);
-    try {
-      const stat = await fs.stat(dir);
-      if (!stat.isDirectory()) continue;
-      if (!newest || stat.mtimeMs > newest.at) newest = { dir, at: stat.mtimeMs };
-      const entries = await fs.readdir(dir);
-      const hasContent = entries.some((e) => e.startsWith('turn-') || e === SCREEN_CAST_FILE);
-      if (hasContent && (!best || stat.mtimeMs > best.at)) best = { dir, at: stat.mtimeMs };
-    } catch {
-      // Vanished between readdir and stat — skip it.
-    }
-  }
-  return (best ?? newest)?.dir ?? null;
-}
 
 /**
  * The recorder's per-turn window captures, oldest first.
@@ -144,7 +119,21 @@ async function tailFile(
   let offset = 0;
   let idleFor = 0;
 
-  while (!res.writableEnded) {
+  // P1-39 — this was registered inside the loop below, so a long capture
+  // attached hundreds of retained closures to the same response and tripped
+  // Node's max-listener warning after eleven chunks. One listener, and it must
+  // still be able to settle an in-flight pipe: if the client disconnects mid
+  // chunk, `res` is destroyed, the pipe stalls on backpressure and the source
+  // emits neither 'end' nor 'error', so a promise waiting only on those two
+  // never resolves and the stream leaks for the process lifetime.
+  let clientGone = false;
+  let abortInFlight: (() => void) | undefined;
+  res.once('close', () => {
+    clientGone = true;
+    abortInFlight?.();
+  });
+
+  while (!res.writableEnded && !clientGone) {
     let size: number;
     try {
       size = (await fs.stat(file)).size;
@@ -157,12 +146,26 @@ async function tailFile(
       idleFor = 0;
       const chunk = createReadStream(file, { start: offset, end: size - 1 });
       const wrote = await new Promise<boolean>((resolve) => {
-        chunk.on('end', () => resolve(true));
-        chunk.on('error', () => resolve(false));
-        res.on('close', () => resolve(false));
+        let settled = false;
+        const settle = (ok: boolean): void => {
+          if (settled) return;
+          settled = true;
+          abortInFlight = undefined;
+          resolve(ok);
+        };
+        abortInFlight = () => {
+          chunk.destroy();
+          settle(false);
+        };
+        chunk.on('end', () => settle(true));
+        chunk.on('error', () => settle(false));
+        if (clientGone) {
+          abortInFlight();
+          return;
+        }
         chunk.pipe(res, { end: false });
       });
-      if (!wrote) break;
+      if (!wrote || clientGone) break;
       offset = size;
       continue;
     }
@@ -469,7 +472,10 @@ export function createComputerRoutes(container: Container): Router {
         return;
       }
 
-      res.setHeader('Content-Type', 'image/png');
+      // From the artifact row, not a constant: captures are re-encoded to
+      // WebP/JPEG by `screenshotCodec`, and a consumer that trusts the header
+      // (Safari, a download, a transcoding proxy) will not sniff past a lie.
+      res.setHeader('Content-Type', artifact.mimeType ?? 'image/png');
       res.setHeader('Cache-Control', 'private, max-age=300');
       createReadStream(absolute)
         .on('error', () => {
@@ -611,12 +617,13 @@ export function createComputerRoutes(container: Container): Router {
 
   // GET /workspaces/:id/computer/preview/stream — the live feed.
   //
-  // Frames and cursor positions travel separately because they come from
-  // different places and change at wildly different rates: a window frame per
-  // action, a cursor sample every ~30 ms. Sending them as data rather than as
-  // pixels is what makes this work on a locked workstation and over a VPS
-  // link, where a screen video shows the lock screen and a 4K stream is
-  // unaffordable.
+  // W09 — the web client no longer opens this: the preview is a scope on the
+  // shared multiplexed connection. It stays for the CLI, `curl` and any client
+  // that has not moved, exactly like the single-scope `/api/stream`.
+  //
+  // What changed underneath is that it no longer runs a filesystem poll of its
+  // own. It attaches to the same per-workspace producer the multiplexed path
+  // uses, so N watchers cost one poll rather than N (P1-11).
   router.get('/preview/stream', async (req, res, next) => {
     try {
       const workspaceId = idOf(req as Request<WorkspaceIdParams>);
@@ -625,67 +632,70 @@ export function createComputerRoutes(container: Container): Router {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found' } });
         return;
       }
-      const root = path.resolve(workspaceManager.getWorkingDirectory(workspace), 'computer', 'recordings');
+
+      // W08 — this endpoint used to open a stream with no connection slot at
+      // all, so the documented invariant "every stream handler releases its
+      // slot on close" was vacuously true here: it never acquired one. A tab
+      // reload loop could open unbounded preview streams against one workspace.
+      const slot = acquireSseSlot('computer', workspaceId);
+      if (!slot.ok) {
+        res
+          .status(503)
+          .setHeader('Retry-After', '10')
+          .json({
+            error: {
+              code: 'SSE_CAP_EXCEEDED',
+              message: `Max ${slot.cap} concurrent preview streams for this workspace; ${slot.current} open.`,
+            },
+          });
+        return;
+      }
+      // Registered before the first write, so it survives every exit path
+      // below — including the ones that throw into `next`.
+      res.once('close', () => slot.release());
 
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders?.();
 
+      // P1-11 / L2 — this endpoint ignored `res.write()`'s return value
+      // entirely, so a client that stopped reading accumulated frames in Node's
+      // writableBuffer without limit. Now a congested socket is DROPPED FROM,
+      // not queued to. Which frames survive is the producer's `latest` rule: a
+      // window frame is replayed to whoever attaches next, a cursor sample is
+      // not, so a slow reader loses pointer motion and never loses the picture.
+      let congested = false;
+      let droppedWhileCongested = 0;
+      res.on('drain', () => {
+        congested = false;
+      });
       const send = (event: string, data: unknown): void => {
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        if (res.writableEnded) return;
+        if (congested) {
+          droppedWhileCongested += 1;
+          return;
+        }
+        congested = !res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
 
-      let run = await newestRun(root);
-      const seen = new Set<string>();
-      let cursorOffset = 0;
-      let boundsAt = 0;
-      let closed = false;
-      req.on('close', () => {
-        closed = true;
+      // The wire names predate the scope and are what existing clients listen
+      // for, so the kind is mapped back rather than renamed.
+      const detach = subscribeEphemeral(
+        'computer',
+        workspaceId,
+        (ev) => send(ev.kind.replace('computer.preview.', ''), ev.payload),
+        container.logger,
+      );
+      res.once('close', () => {
+        detach();
+        if (droppedWhileCongested > 0) {
+          container.logger.info?.('[ComputerPreview] dropped frames to a slow client', {
+            workspaceId,
+            dropped: droppedWhileCongested,
+          });
+        }
       });
-
-      send('open', { run: run ? path.basename(run) : null });
-
-      while (!closed && !res.writableEnded) {
-        // The recorder starts a new run directory each time; following it keeps
-        // a preview opened before the first recording from staying blank.
-        const newest = await newestRun(root);
-        if (newest && newest !== run) {
-          run = newest;
-          seen.clear();
-          cursorOffset = 0;
-          send('run', { run: path.basename(run) });
-        }
-
-        if (run) {
-          for (const frame of await readFramesSince(run, seen)) send('frame', frame);
-
-          const cursor = await readCursorSince(run, cursorOffset);
-          cursorOffset = cursor.offset;
-          // Thinned to ~20 Hz: the recorder samples faster than a browser can
-          // paint, and every sample is bytes on a remote link.
-          if (cursor.samples.length > 0) {
-            const step = Math.max(1, Math.floor(cursor.samples.length / 20));
-            send(
-              'cursor',
-              cursor.samples.filter((_, i) => i % step === 0 || i === cursor.samples.length - 1),
-            );
-          }
-        }
-
-        // Window bounds translate the cursor's screen coordinates onto the
-        // frame. Refreshed slowly because a window rarely moves, and each read
-        // is a driver round trip.
-        if (Date.now() - boundsAt > 3_000) {
-          boundsAt = Date.now();
-          const bounds = await computerService.previewWindow(workspaceId);
-          if (bounds) send('window', bounds);
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-      res.end();
     } catch (err) {
       next(err);
     }

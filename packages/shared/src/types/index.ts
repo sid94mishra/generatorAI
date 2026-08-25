@@ -20,6 +20,14 @@ export {
   narrowEvent,
 } from './AgentEvent.js';
 
+export type { EventClass } from './eventClass.js';
+export {
+  EVENT_CLASS,
+  DELTA_SESSION_INFO_TYPES,
+  classifyEvent,
+  isDeltaEvent,
+} from './eventClass.js';
+
 export type {
   HookPhase,
   HookType,

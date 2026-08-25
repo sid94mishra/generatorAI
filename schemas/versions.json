@@ -1,0 +1,6 @@
+{
+  "acp": "0.2.1",
+  "opencode": "1.4.0",
+  "codex": "1.0.0",
+  "_comment": "Pinned schema versions. Update these when pulling new upstream schemas and re-run pnpm generate:schemas."
+}

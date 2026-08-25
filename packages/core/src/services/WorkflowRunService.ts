@@ -49,9 +49,22 @@ import type { HookDefinition, WorkflowHookDefinition } from '@generatorai/shared
 export class WorkflowRunService {
   /** Track stage run IDs already processed to prevent duplicate handling */
   private processedStageRuns = new Set<string>();
-  /** Active polling intervals for running workflows */
-  private pollingIntervals = new Map<string, ReturnType<typeof setInterval>>();
-  /** Runs whose poll tick is currently executing — prevents overlapping ticks
+  /**
+   * W18 / P1-18 — process-wide reconciler replaces per-run polling intervals.
+   *
+   * Previously each active run created one `setInterval(3000)`, so 22 live
+   * runs produced ~200 no-op DB queries every 3 s. A single reconciler ticks
+   * once per interval and iterates over all active runs in sequence. The total
+   * query rate is identical but timer handles drop from O(N runs) → O(1).
+   *
+   * The reconciler is started on the first `startPolling()` call and stopped
+   * when the last run is removed. `interval.unref()` prevents it from keeping
+   * the process alive after graceful shutdown.
+   */
+  private reconcilerInterval: ReturnType<typeof setInterval> | undefined;
+  /** Run IDs currently tracked by the reconciler (was: pollingIntervals.keys()). */
+  private activeRunIds = new Set<string>();
+  /** Runs whose reconcile tick is currently executing — prevents overlapping ticks
    *  (a tick that runs validation + backoff can exceed the 3s interval). */
   private pollInFlight = new Set<string>();
   /** Per-run EventBus unsubscribe handles for event-driven DAG routing. */
@@ -781,51 +794,88 @@ export class WorkflowRunService {
   }
 
   /**
-   * Poll for stage completion changes and drive DAG execution forward.
+   * W18 / P1-18 — register a run with the process-wide reconciler.
+   *
+   * Replaces the previous per-run `setInterval`: instead of N intervals, we
+   * have one that iterates over all active runs. The call signature is kept
+   * compatible with the previous `startPolling(runId, workflowDefinitionId)`
+   * so all existing call sites require no changes.
    */
-  private startPolling(runId: string, workflowDefinitionId: string): void {
-    if (this.pollingIntervals.has(runId)) return;
-
-    const interval = setInterval(async () => {
-      // Non-reentrant: skip this tick if the previous one is still running.
-      // A tick can take longer than the interval (validation + retry backoff),
-      // and overlapping ticks could otherwise double-process a stage during
-      // the validation-retry window.
-      if (this.pollInFlight.has(runId)) return;
-      this.pollInFlight.add(runId);
-      try {
-        const run = await this.runRepo.getById(runId);
-        if (run.status !== 'running') {
-          this.stopPolling(runId);
-          return;
-        }
-
-        // Find stages that completed/failed but haven't been processed
-        const stageRuns = await this.stageRunRepo.getByRunId(runId);
-        for (const sr of stageRuns) {
-          if (sr.status === 'completed') {
-            await this.onStageCompleted(runId, sr.id);
-          } else if (sr.status === 'failed') {
-            await this.onStageFailed(runId, sr.id, new Error(sr.error ?? 'Stage failed'));
-          }
-        }
-      } catch {
-        // Swallow errors to keep polling
-      } finally {
-        this.pollInFlight.delete(runId);
-      }
-    }, 3000);
-
-    this.pollingIntervals.set(runId, interval);
+  private startPolling(runId: string, _workflowDefinitionId?: string): void {
+    if (this.activeRunIds.has(runId)) return;
+    this.activeRunIds.add(runId);
+    this.ensureReconciler();
   }
 
+  /**
+   * W18 / P1-18 — deregister a run from the process-wide reconciler.
+   * Stops the reconciler when the last active run is removed.
+   */
   private stopPolling(runId: string): void {
-    const interval = this.pollingIntervals.get(runId);
-    if (interval) {
-      clearInterval(interval);
-      this.pollingIntervals.delete(runId);
-    }
+    this.activeRunIds.delete(runId);
     this.pollInFlight.delete(runId);
+    if (this.activeRunIds.size === 0) {
+      this.stopReconciler();
+    }
+  }
+
+  /**
+   * W18 / P1-18 — start the global reconciler if not already running.
+   *
+   * The reconciler ticks every 3 s and drives all active runs forward.
+   * Each run is processed non-reentrantly via `pollInFlight`. The reconciler
+   * uses `interval.unref()` so it does not keep the event loop alive after
+   * graceful shutdown drains the active set.
+   */
+  private ensureReconciler(): void {
+    if (this.reconcilerInterval !== undefined) return;
+    const interval = setInterval(async () => {
+      // Snapshot the active set so mutations during the tick don't cause
+      // iteration issues (a run may be stopped while we are iterating).
+      const runIds = [...this.activeRunIds];
+      for (const runId of runIds) {
+        // Non-reentrant: skip this run if its previous tick is still running.
+        // A tick can take longer than the interval (validation + retry backoff)
+        // and overlapping ticks could otherwise double-process a stage during
+        // the validation-retry window.
+        if (this.pollInFlight.has(runId)) continue;
+        this.pollInFlight.add(runId);
+        void (async () => {
+          try {
+            const run = await this.runRepo.getById(runId);
+            if (run.status !== 'running') {
+              this.stopPolling(runId);
+              return;
+            }
+            // Find stages that completed/failed but haven't been processed
+            const stageRuns = await this.stageRunRepo.getByRunId(runId);
+            for (const sr of stageRuns) {
+              if (sr.status === 'completed') {
+                await this.onStageCompleted(runId, sr.id);
+              } else if (sr.status === 'failed') {
+                await this.onStageFailed(runId, sr.id, new Error(sr.error ?? 'Stage failed'));
+              }
+            }
+          } catch {
+            // Swallow errors to keep the reconciler running
+          } finally {
+            this.pollInFlight.delete(runId);
+          }
+        })();
+      }
+    }, 3000);
+    // Shutdown drains runs explicitly; the reconciler must not keep the
+    // event loop alive after that has happened.
+    interval.unref?.();
+    this.reconcilerInterval = interval;
+  }
+
+  /** Stop the process-wide reconciler. Called when no runs are active. */
+  private stopReconciler(): void {
+    if (this.reconcilerInterval !== undefined) {
+      clearInterval(this.reconcilerInterval);
+      this.reconcilerInterval = undefined;
+    }
   }
 
   /**
@@ -837,10 +887,9 @@ export class WorkflowRunService {
    * via StartupRecoveryService. Idempotent.
    */
   shutdown(): void {
-    for (const interval of this.pollingIntervals.values()) {
-      clearInterval(interval);
-    }
-    this.pollingIntervals.clear();
+    // W18 / P1-18 — stop the single process-wide reconciler (was: N per-run intervals)
+    this.stopReconciler();
+    this.activeRunIds.clear();
     this.pollInFlight.clear();
 
     for (const unsub of this.eventUnsubscribers.values()) {

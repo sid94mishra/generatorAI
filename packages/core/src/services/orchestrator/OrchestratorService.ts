@@ -474,6 +474,14 @@ export class OrchestratorService {
       case 'harness.error':
         record.lastError = (data?.['message'] as string) ?? 'error';
         break;
+      // W13 / Finding-5: user-initiated Stop must be tracked so harness.idle
+      // records the task as 'cancelled', not 'needs_review'. Without this case,
+      // a cancelled subagent turn falls through to the default branch and
+      // lastError stays undefined — the orchestrator treats it as success and
+      // may continue the DAG into stages that depend on the cancelled output.
+      case 'harness.cancelled':
+        record.lastError = `cancelled:${(data?.['reason'] as string) ?? 'user_abort'}`;
+        break;
       case 'harness.idle': {
         record.resolveFirstOutput();
         const hasDigest = /<TASK_RESULT>/i.test(record.lastAssistantText);

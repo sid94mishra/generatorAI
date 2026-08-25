@@ -71,6 +71,7 @@ import type {
 import { isElementAddressed } from '../domain/ports/IComputerBridge.js';
 import type { IWorkspaceArtifactRepository } from '../domain/ports/IWorkspaceArtifactRepository.js';
 import type { EventBus } from '../events/EventBus.js';
+import { transcodeScreenshot } from '../infrastructure/computer/screenshotCodec.js';
 import { Semaphore } from '../utils/Semaphore.js';
 import { resolveWithinBase } from '../utils/safePath.js';
 
@@ -180,6 +181,17 @@ interface SessionRecord {
    * which landed a stray character in a user's source file.
    */
   blindStreak: number;
+  /**
+   * Source pixels per pixel of the most recent screenshot handed to the model.
+   * 1 when the capture was not resized.
+   *
+   * The tool schema tells the model to read coordinates off the screenshot
+   * ("Window-local screenshot-pixel X"), so once we downscale that screenshot
+   * the numbers it sends back are in the SMALLER space and the driver clicks in
+   * the larger one. Every pixel-addressed action has to be scaled back up by
+   * this before dispatch (X-14). Element-index actions are unaffected.
+   */
+  captureDownscale: number;
 }
 
 export interface ComputerServiceConfig {
@@ -203,6 +215,62 @@ const REFUSAL_MESSAGES: Record<ComputerRefusalCode, string> = {
   capacity_exhausted: 'Too many computer-use actions are in flight.',
   target_lost: 'No available application matched that reference.',
 };
+
+/**
+ * Rescale every pixel coordinate on a request from the screenshot the model
+ * looked at into the driver's native window space (X-14).
+ *
+ * Every tool that takes a coordinate documents it as "window-local
+ * screenshot-pixel" and tells the model to read it off the snapshot image. Once
+ * `screenshotMaxEdge` downscales that image, those two spaces stop being the
+ * same one: a click at the centre of a 3840px window arrives as 640 against a
+ * 1280px capture, and unscaled it lands at 640 — a sixth of the way across.
+ * This is why the downscale must be ours and must be recorded; a provider that
+ * resizes the image server-side gives us no factor to undo.
+ *
+ * Deltas are scaled too (a scroll of 100 downscaled pixels is 300 real ones).
+ * `elementIndex` actions carry no pixels and pass through untouched.
+ *
+ * Exported for test: the failure is silent and looks like a flaky click.
+ */
+export function scalePointsToDriverSpace(
+  req: ActionRequest,
+  factor: number,
+): ActionRequest {
+  if (!Number.isFinite(factor) || factor === 1 || factor <= 0) return req;
+  const s = (v: number | undefined): number | undefined =>
+    v === undefined ? undefined : Math.round(v * factor);
+  const focus = (
+    f: { x: number; y: number } | undefined,
+  ): { x: number; y: number } | undefined =>
+    f === undefined ? undefined : { x: Math.round(f.x * factor), y: Math.round(f.y * factor) };
+
+  switch (req.type) {
+    case 'clickPoint':
+      return { ...req, x: Math.round(req.x * factor), y: Math.round(req.y * factor) };
+    case 'scroll':
+      return {
+        ...req,
+        deltaX: Math.round(req.deltaX * factor),
+        deltaY: Math.round(req.deltaY * factor),
+        ...(req.x === undefined ? {} : { x: s(req.x) }),
+        ...(req.y === undefined ? {} : { y: s(req.y) }),
+      };
+    case 'drag':
+      return {
+        ...req,
+        from: { x: Math.round(req.from.x * factor), y: Math.round(req.from.y * factor) },
+        to: { x: Math.round(req.to.x * factor), y: Math.round(req.to.y * factor) },
+      };
+    case 'typeText':
+    case 'pressKey': {
+      const scaled = focus(req.focus);
+      return scaled === undefined ? req : { ...req, focus: scaled };
+    }
+    default:
+      return req;
+  }
+}
 
 /**
  * Actions delivered as OS-level input. They take over the user's pointer and
@@ -502,6 +570,7 @@ export class ComputerService {
       snapshots: new Map(),
       snapshotIndex: new Map(),
       blindStreak: 0,
+      captureDownscale: 1,
     };
     this.sessions.set(ctx.workspaceId, record);
 
@@ -1010,7 +1079,11 @@ export class ComputerService {
       const fence = this.checkFence(session, fresh, req);
       if (fence) return refusalResult(fence);
 
-      const outcome = await session.bridge.act(session.handle, this.withResolvedApp(req, fresh), signal);
+      const outcome = await session.bridge.act(
+        session.handle,
+        scalePointsToDriverSpace(this.withResolvedApp(req, fresh), session.captureDownscale),
+        signal,
+      );
       // Any action can move the UI, so every snapshot for this app is now
       // suspect. Invalidating wholesale is cheap and cannot under-invalidate.
       this.invalidateSnapshots(session, fresh);
@@ -1526,9 +1599,27 @@ export class ComputerService {
       return null;
     }
 
+    // X-14 — re-encode BEFORE the byte cap is applied. The config comment has
+    // always promised "downscaled, then dropped if still over"; until now only
+    // the dropping existed, so a 4K capture was discarded rather than resized
+    // and the panel simply lost the frame. Transcoding never throws: a capture
+    // it cannot shrink comes back untouched and is judged on its own size.
+    const encoded = await transcodeScreenshot({
+      sourcePath: absolute,
+      format: this.computerConfig.screenshotFormat,
+      maxEdge: this.computerConfig.screenshotMaxEdge,
+      quality: this.computerConfig.screenshotQuality,
+      logger: this.logger,
+    });
+    const stored = encoded.path;
+    // Set here, not after the byte cap: this is the factor for whatever image
+    // the model is about to be shown, and a stale value left over from an
+    // earlier capture would scale the next click by the wrong amount.
+    session.captureDownscale = encoded.downscale;
+
     let fileSize: number | undefined;
     try {
-      fileSize = (await fs.stat(absolute)).size;
+      fileSize = (await fs.stat(stored)).size;
     } catch {
       return null;
     }
@@ -1542,18 +1633,40 @@ export class ComputerService {
       this.logger.warn?.(
         `[ComputerService] dropping ${fileSize}B screenshot (cap ${this.computerConfig.screenshotMaxBytes}B)`,
       );
-      await fs.rm(absolute, { force: true }).catch(() => undefined);
+      await fs.rm(stored, { force: true }).catch(() => undefined);
+      // The file is gone, so the result must stop advertising it — otherwise
+      // `result.screenshot.path` points at nothing and the panel renders a
+      // broken frame instead of showing that the capture was dropped.
+      shot.path = undefined;
+      shot.dataOmitted = true;
       return null;
+    }
+
+    // The result is what the tool payload and the preview panel read, so the
+    // post-transcode geometry has to land back on it. `downscale` is what
+    // `scalePointsToDriverSpace` undoes on the next pixel-addressed action.
+    if (encoded.transcoded) {
+      shot.format = encoded.format;
+      shot.width = encoded.width;
+      shot.height = encoded.height;
+      shot.downscale = encoded.downscale;
+      shot.path = path.relative(session.workspaceRoot, stored);
     }
 
     const artifact: WorkspaceArtifactRecord = {
       id: randomUUID(),
       workspaceId: session.workspaceId,
       artifactType: 'computer_screenshot',
-      relativePath: path.relative(session.workspaceRoot, absolute),
+      relativePath: path.relative(session.workspaceRoot, stored),
       fileSize,
-      mimeType: 'image/png',
-      metadata: { width: shot.width, height: shot.height, scale: shot.scale, engine: shot.engine },
+      mimeType: encoded.mimeType,
+      metadata: {
+        width: shot.width,
+        height: shot.height,
+        scale: shot.scale,
+        downscale: encoded.downscale,
+        engine: shot.engine,
+      },
       createdAt: new Date(),
     };
     // Artifact write happens BEFORE the event that references it (INV-3).

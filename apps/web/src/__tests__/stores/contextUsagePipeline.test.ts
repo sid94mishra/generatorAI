@@ -12,6 +12,7 @@ import { connectChatSession, disconnectAll, _resetForTests } from '@/stores/sseM
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useConnectionStore } from '@/stores/connectionStore.js';
 import { __setAllowUnauthenticatedForTests } from '@/platform/authRuntime.js';
+import { resetMuxStreamForTests } from '@/platform/muxStream.js';
 
 // The SSE manager now mints a stream ticket before opening a connection. These
 // tests are about event plumbing, not auth, so the runtime is put into the
@@ -35,6 +36,7 @@ class MockEventSource {
   onopen: ((ev: Event) => void) | null = null;
   onmessage: ((ev: MessageEvent) => void) | null = null;
   onerror: ((ev: Event) => void) | null = null;
+  private listeners = new Map<string, Array<(ev: Event) => void>>();
 
   constructor(url: string) {
     this.url = url;
@@ -47,16 +49,32 @@ class MockEventSource {
     });
   }
   close() { this.readyState = MockEventSource.CLOSED; }
-  addEventListener() {}
+  addEventListener(type: string, fn: (ev: Event) => void) {
+    const list = this.listeners.get(type) ?? [];
+    list.push(fn);
+    this.listeners.set(type, list);
+  }
   removeEventListener() {}
   dispatchEvent() { return false; }
 
-  push(kind: string, data: Record<string, unknown>, sessionId: string, seq: number) {
-    // The wire frame is `{ kind, payload }` with the sequence in lastEventId —
-    // matching what the server actually sends.
+  /** Named control frame — `hello`, `subs`, `gap`. */
+  control(type: string, data: Record<string, unknown>) {
+    for (const fn of this.listeners.get(type) ?? []) {
+      fn({ data: JSON.stringify(data) } as MessageEvent as Event);
+    }
+  }
+
+  push(kind: string, data: Record<string, unknown>, sessionId: string, seq: number, eventId: number) {
+    // W09-a wire frame: `s` routes, `q` is the per-scope cursor, `e` is the
+    // global event id the client dedups on.
     this.onmessage?.({
-      lastEventId: String(seq),
-      data: JSON.stringify({ kind, payload: { ...data, sessionId } }),
+      data: JSON.stringify({
+        s: `chat:${CHAT}`,
+        q: seq,
+        e: eventId,
+        k: kind,
+        p: { ...data, sessionId },
+      }),
     } as MessageEvent);
   }
 }
@@ -72,10 +90,25 @@ const CHAT = 'chat-1';
 const SESSION = 'session-1';
 
 const originalES = (globalThis as unknown as { EventSource?: unknown }).EventSource;
+const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
   (globalThis as unknown as { EventSource: unknown }).EventSource = MockEventSource;
+  // The multiplexed connection is created by a POST before the EventSource is
+  // opened — the resume vector is a map and cannot ride on a bodyless GET.
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/api/stream/connections')) {
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ connectionId: 'conn-1', ticket: 't' }),
+      } as unknown as Response;
+    }
+    return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+  }) as typeof globalThis.fetch;
   live.length = 0;
+  resetMuxStreamForTests();
   _resetForTests();
   useStreamStore.setState({ streams: {} });
   useConnectionStore.setState({ connections: {} });
@@ -83,6 +116,8 @@ beforeEach(() => {
 
 afterEach(() => {
   disconnectAll();
+  resetMuxStreamForTests();
+  globalThis.fetch = originalFetch;
   if (originalES !== undefined) {
     (globalThis as unknown as { EventSource: unknown }).EventSource = originalES;
   }
@@ -91,14 +126,22 @@ afterEach(() => {
 /** Connect and return the live socket plus a helper to read the snapshot. */
 async function connect() {
   connectChatSession(CHAT, SESSION, mockPlatform());
-  await Promise.resolve();
+  await vi.waitFor(() => expect(live.length).toBeGreaterThan(0));
   await new Promise((r) => setTimeout(r, 60));
   const es = live[live.length - 1]!;
+  es.control('hello', {
+    connectionId: 'conn-1',
+    active: [`chat:${CHAT}`],
+    resumed: { [`chat:${CHAT}`]: true },
+  });
   // The store only records onto an existing stream, so make one.
   useStreamStore.getState().startPending(SESSION, 'hi');
   let seq = 0;
+  let eventId = 1000;
   return {
-    es: { push: (k: string, d: Record<string, unknown>) => es.push(k, d, SESSION, ++seq) },
+    es: {
+      push: (k: string, d: Record<string, unknown>) => es.push(k, d, SESSION, ++seq, ++eventId),
+    },
     snapshot: () => useStreamStore.getState().streams[SESSION]?.contextUsage ?? null,
   };
 }

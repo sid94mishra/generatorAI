@@ -9,13 +9,56 @@ import { jsonSchemaToZodShape } from './jsonSchemaToZodShape.js';
 const MCP_SERVER_NAME = 'generatorai-tools';
 
 /**
+ * W13 / X-1 — Minimal FIFO semaphore for bounding parallel tool execution.
+ *
+ * Declared locally (rather than imported from @generatorai/core) because
+ * agent-harness-providers must not import from the services layer, only from
+ * the domain ports layer, and Semaphore lives in core/utils (services layer).
+ */
+export class ToolSemaphore {
+  private available: number;
+  private readonly waiters: Array<() => void> = [];
+
+  /** @param permits Max concurrent tool calls. <= 0 means unlimited. */
+  constructor(readonly permits: number) {
+    this.available = permits > 0 ? permits : Number.POSITIVE_INFINITY;
+  }
+
+  async acquire(): Promise<void> {
+    if (this.available > 0) {
+      this.available--;
+      return;
+    }
+    await new Promise<void>((resolve) => { this.waiters.push(resolve); });
+  }
+
+  release(): void {
+    const next = this.waiters.shift();
+    if (next) { next(); } else { this.available++; }
+  }
+
+  /** Run `fn` with one permit held, releasing it on completion or error. */
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquire();
+    try { return await fn(); } finally { this.release(); }
+  }
+}
+
+/**
  * Wraps domain ToolDefinition[] into an in-process SDK MCP server.
  * Returns the MCP server config and the list of fully-qualified tool names.
  *
  * Each tool name becomes `mcp__generatorai-tools__<name>` in the SDK's
  * tool namespace, which is how you reference them in `allowedTools`.
+ *
+ * @param semaphore W13 / X-1 — optional semaphore bounding parallel tool
+ *   execution. When provided, each tool call acquires one permit before
+ *   running the handler, bounding concurrent executions to `permits`.
  */
-export function buildClaudeAgentMcpTools(toolDefs: ToolDefinition[]): {
+export function buildClaudeAgentMcpTools(
+  toolDefs: ToolDefinition[],
+  semaphore?: ToolSemaphore,
+): {
   mcpServerConfig: ReturnType<typeof createSdkMcpServer>;
   toolNames: string[];
 } {
@@ -34,8 +77,10 @@ export function buildClaudeAgentMcpTools(toolDefs: ToolDefinition[]): {
       description: def.description,
       inputSchema: jsonSchemaToZodShape(def.parametersSchema),
       handler: async (args: Record<string, unknown>) => {
+        // W13 / X-1 — apply the parallel-tool semaphore when provided.
+        const runHandler = () => def.handler(args);
         try {
-          const result = await def.handler(args);
+          const result = semaphore ? await semaphore.run(runHandler) : await runHandler();
           // MCP content blocks carry images natively, so an attachment goes on
           // the wire as one rather than as base64 inside the text.
           const { text: payload, binaries } = takeToolBinaries(result);

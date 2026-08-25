@@ -12,6 +12,28 @@
 //
 // The provider tears the pool down on unmount, and multiple providers share
 // one pool, so this is safe to mount defensively.
+//
+// P1-52 — it stays mounted at the ROOT and unconditionally. An earlier attempt
+// to defer construction until the first diff render was wrong: inserting the
+// provider above `children` changes the element type at that position, and
+// React does not reconcile across a changed type — it would unmount and
+// remount the entire routed application, destroying every route's state and
+// every SSE/WebSocket subscription the first time a user opened a file.
+//
+// What is deferred instead is the largest part. `WorkerPoolManager`'s
+// constructor calls `queueInitialization(langs)`, which compiled every
+// preloaded TextMate grammar in every worker at app start. Preloading nothing
+// leaves the workers idle until a diff arrives, and the library then loads the
+// grammar a file actually needs on demand.
+//
+// STILL PAID AT ROOT, and deliberately not addressed here: the 8 workers
+// themselves and the shared Shiki/WASM highlighter, because
+// `WorkerPoolManager`'s constructor calls `initialize()` unconditionally and
+// `CodeView` captures the pool at instance-construction time — so a pool that
+// arrives later never reaches an already-mounted diff, and the first file a
+// user opens would render permanently unhighlighted. Removing that cost means
+// owning pool construction rather than the library's provider, which is W28's
+// "diff providers mounted lazily" in Phase 5, not a Phase 0 guard clause.
 
 import { useEffect, type ReactNode } from 'react';
 import { WorkerPoolContextProvider, useWorkerPool } from '@pierre/diffs/react';
@@ -20,27 +42,16 @@ import { diffWorkerFactory } from './diffWorkerFactory.js';
 import { DIFF_THEMES } from './diffTheme.js';
 
 /**
- * Languages preloaded into every worker. Anything not listed still works —
- * it just loads lazily on first use, costing one frame of plain text.
+ * Languages preloaded into every worker at construction time.
+ *
+ * P1-52 — this list used to hold 16 grammars, each compiled in each of 8
+ * workers during app start, for every user on every page, when only the diff
+ * surfaces ever read them. Empty means the workers start idle and the library
+ * loads a file's grammar on first use, costing one frame of plain text on the
+ * first render of each language. That frame is paid by the person looking at a
+ * diff, not by everyone opening the app.
  */
-const PRELOAD_LANGS = [
-  'typescript',
-  'tsx',
-  'javascript',
-  'jsx',
-  'json',
-  'markdown',
-  'python',
-  'bash',
-  'yaml',
-  'css',
-  'html',
-  'sql',
-  'go',
-  'rust',
-  'java',
-  'csharp',
-];
+const PRELOAD_LANGS: string[] = [];
 
 /** Keeps the worker pool's theme in sync with the app theme. */
 function DiffThemeSync() {

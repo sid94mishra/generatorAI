@@ -36,7 +36,7 @@ import { WidgetHost } from '@/components/widgets/WidgetHost.js';
 import { widgetTabId, parseWidgetTabId } from '@/components/widgets/widgetTabId.js';
 import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js';
 import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList, PauseCircle, MonitorCog } from 'lucide-react';
-import { openAuthenticatedEventSource } from '@/platform/authTransport.js';
+import { openMultiplexedStream } from '@/platform/muxStream.js';
 import { cn } from '@/lib/utils.js';
 
 // Right-pane-only surfaces, code-split out of the chat route chunk. They pull
@@ -435,9 +435,9 @@ export function ChatPage() {
       .catch(() => undefined);
     // 2) Live SSE — for sessions that flip to active *after* the page
     //    mounts (e.g. LLM calls open_browser_page lazily).
-    const es = openAuthenticatedEventSource(
-      `/api/stream?scope=session&id=${encodeURIComponent('browser:' + chatWorkspaceId)}&filter=browser.session_created`,
-      { scope: 'session', id: `browser:${chatWorkspaceId}` },
+    const es = openMultiplexedStream(
+      'session',
+      `browser:${chatWorkspaceId}`,
       {
         onMessage: (e) => {
           if (cancelled) return;
@@ -460,6 +460,7 @@ export function ChatPage() {
           } catch { /* ignore */ }
         },
       },
+      ['browser.session_created'],
     );
     return () => {
       cancelled = true;
@@ -474,9 +475,9 @@ export function ChatPage() {
   useEffect(() => {
     if (!chatWorkspaceId || !computerUseEnabled) return;
     let cancelled = false;
-    const es = openAuthenticatedEventSource(
-      `/api/stream?scope=session&id=${encodeURIComponent('computer:' + chatWorkspaceId)}&filter=computer.`,
-      { scope: 'session', id: `computer:${chatWorkspaceId}` },
+    const es = openMultiplexedStream(
+      'session',
+      `computer:${chatWorkspaceId}`,
       {
         onMessage: (e) => {
           if (cancelled) return;
@@ -493,6 +494,7 @@ export function ChatPage() {
           } catch { /* ignore */ }
         },
       },
+      ['computer.'],
     );
     return () => {
       cancelled = true;

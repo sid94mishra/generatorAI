@@ -38,7 +38,6 @@ export type {
   HarnessAgentInfo,
   ToolBinaryAttachment,
 } from './IAgentHarness.js';
-
 export { TOOL_BINARY_KEY, takeToolBinaries } from './IAgentHarness.js';
 
 export type {
@@ -170,3 +169,13 @@ export { isElementAddressed } from './IComputerBridge.js';
 // ── Extensions & Widgets Ports ──
 export type { IExtensionRegistry } from './IExtensionRegistry.js';
 export type { IWidgetRegistry } from './IWidgetRegistry.js';
+
+// ── Provider Instance Port (W34, W42) ──
+export type {
+  IProviderInstance,
+  IProviderInstanceRegistry,
+  ProviderCapabilities,
+  ProviderInstanceId,
+  ProviderWireProtocol,
+} from './IProviderInstance.js';
+export { makeProviderInstanceId } from './IProviderInstance.js';

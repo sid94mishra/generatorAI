@@ -30,6 +30,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "clean": "pnpm -r exec node -e \"const fs=require('fs');for(const d of ['dist','dist-bundle','dist-electron','.turbo'])fs.rmSync(d,{recursive:true,force:true});for(const f of fs.readdirSync('.'))if(f.endsWith('.tsbuildinfo'))fs.rmSync(f,{force:true})\"",
     "db:backup": "pnpm --filter @generatorai/server exec tsx ../../scripts/db-backup.ts",
+    "db:reclaim": "pnpm --filter @generatorai/server exec tsx ../../scripts/db-reclaim.ts",
     "db:generate": "pnpm --filter @generatorai/db db:generate",
     "db:check": "pnpm --filter @generatorai/db db:check",
     "db:reset": "pnpm --filter @generatorai/db db:reset",

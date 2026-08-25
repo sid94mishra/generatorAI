@@ -33,13 +33,15 @@ import type {
   SendPromptOptions,
   ConversationWarning,
   HarnessAgentInfo,
+  ProviderCapabilities,
 } from '@generatorai/core';
 import type { HookBridge } from '@generatorai/core';
 import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
 import { HarnessSessionError, withSpan, getMeter, createAgentEvent } from '@generatorai/shared';
 import { mapClaudeAgentMessageToAgentEvents } from './event-mapper.js';
-import { buildClaudeAgentMcpTools } from './tool-factory.js';
+import { buildClaudeAgentMcpTools, ToolSemaphore } from './tool-factory.js';
 import { mapClaudeToolNameToDomainType } from './permission-map.js';
+import type { AgentHostSupervisor } from '../../AgentHostSupervisor.js';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import type {
@@ -227,6 +229,36 @@ const listenerLeakWarnings = meter.createCounter('claude_agent.listeners.leak_wa
 
 const LISTENER_LEAK_THRESHOLD = 50;
 
+/**
+ * W13 / X-1 — Maximum parallel tool calls per conversation.
+ *
+ * The SDK emits tool_call batches from a single model response; without a
+ * cap a single response with 30 tool calls spawns 30 concurrent shell
+ * executions, file writes, etc. This value is the measured safe point —
+ * above 8 the sequential overhead of inter-process setup starts to exceed
+ * the parallelism benefit for most tool workloads.
+ *
+ * Set `GENERATORAI_MAX_PARALLEL_TOOLS=0` to disable limiting.
+ */
+const MAX_PARALLEL_TOOLS = Number(process.env['GENERATORAI_MAX_PARALLEL_TOOLS'] ?? 8);
+
+/**
+ * W13-B1: Returns true when a model stop reason indicates the response was
+ * cut off before completion. In this case tool call arguments may be
+ * incomplete — executing them risks data loss (X-2 "A truncated path handed
+ * to a delete or write tool").
+ *
+ * References:
+ *  - Anthropic API: stop_reason = 'max_tokens' (output budget exhausted)
+ *  - Some providers use 'length' for the same condition
+ *  - context_length errors can also manifest here
+ */
+/* W13-B1 */
+function isTruncationStopReason(reason: string): boolean {
+  const r = reason.toLowerCase();
+  return r === 'max_tokens' || r === 'length' || r.includes('max_token') || r.includes('context_length');
+}
+
 export class ClaudeAgentProvider implements IAgentHarness {
   // ── Internal State ──
   private conversations = new Map<string, StoredConversationConfig>();
@@ -249,6 +281,22 @@ export class ClaudeAgentProvider implements IAgentHarness {
   private queryFailCount = 0;
 
   /**
+   * W13 / X-1 — process-wide semaphore bounding parallel tool execution.
+   *
+   * Shared across ALL conversations in this adapter so the total concurrent
+   * domain-tool calls is bounded process-wide, not just per-conversation.
+   * MAX_PARALLEL_TOOLS=0 (env override) disables limiting (unlimited).
+   */
+  private readonly toolSemaphore = new ToolSemaphore(MAX_PARALLEL_TOOLS);
+
+  /**
+   * W12 / P0-14 — optional supervisor gating concurrent turns.
+   * When set, each `sendPromptAndWait` acquires one execution slot before
+   * spawning a `query()`, preventing unbounded concurrent process launches.
+   */
+  private readonly supervisor: AgentHostSupervisor | undefined;
+
+  /**
    * PLN-01 — per-conversation plan-mode phase. Populated when a turn runs with
    * `agentMode: 'plan'` and cleared when the turn ends. See `plan-gate.ts` for
    * why the transition is realised here rather than via `setPermissionMode`.
@@ -263,6 +311,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
   private conversationAgents = new Map<string, HarnessAgentInfo[]>();
 
   constructor(private options: ClaudeAgentProviderOptions) {
+    this.supervisor = options.supervisor;
     this.verbose = options.verbose ?? (process.env['GENERATORAI_LOG_LEVEL'] === 'debug');
     this.cliPath = resolveClaudeCliPath(options.cliPath);
     if (this.verbose) {
@@ -341,6 +390,37 @@ export class ClaudeAgentProvider implements IAgentHarness {
     this.conversationEventHandlers.clear();
     this.conversationListenerCleanups.clear();
     this.clientEventHandlers.clear();
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // Capability declarations (W42 / N-2)
+  // ══════════════════════════════════════════════════════════════
+
+  /**
+   * Declared capabilities for the Claude Agent SDK adapter.
+   *
+   * L9: Capability discovery is by declaration, not by exception.
+   * W42 — N-2 fix: no runtime probe required.
+   * W35 — fullToolGating is true: the PreToolUse hook fires on EVERY tool
+   *   call, regardless of allowedTools or permissionMode (N-5 fix).
+   */
+  capabilities(): ProviderCapabilities {
+    return {
+      vision: true,
+      reasoning: true,
+      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      maxParallelTools: MAX_PARALLEL_TOOLS > 0 ? MAX_PARALLEL_TOOLS : undefined,
+      planMode: true,
+      mcpServers: true,
+      skillDirectories: true,
+      // W35 / N-5 fix — fullToolGating is now true because the security gate
+      // is wired to PreToolUse (fires before every tool) rather than canUseTool
+      // (fires only on fall-through).
+      fullToolGating: true,
+      sessionPersistence: true,
+      budgetTracking: true,
+      maxContextTokens: 200_000,
+    };
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -494,10 +574,12 @@ export class ClaudeAgentProvider implements IAgentHarness {
       const registeredAgents: HarnessAgentInfo[] = [];
 
       // Build MCP server for domain tools
+      // W13 / X-1 — pass the process-wide tool semaphore so concurrent domain
+      // tool executions are bounded to MAX_PARALLEL_TOOLS.
       let mcpConfig: Record<string, unknown> = {};
       let domainToolNames: string[] = [];
       if (params.tools && params.tools.length > 0) {
-        const { mcpServerConfig, toolNames } = buildClaudeAgentMcpTools(params.tools);
+        const { mcpServerConfig, toolNames } = buildClaudeAgentMcpTools(params.tools, this.toolSemaphore);
         mcpConfig = { 'generatorai-tools': mcpServerConfig };
         domainToolNames = toolNames;
       }
@@ -887,6 +969,17 @@ export class ClaudeAgentProvider implements IAgentHarness {
       };
       this.activeQueries.set(conversationId, activeQuery);
 
+      // W12 / P0-14 — acquire one execution slot from the supervisor before
+      // spawning the query() process. This caps concurrent CLI spawns to
+      // `maxConcurrentExecutions` (default 16). When the semaphore is full,
+      // new turns queue here rather than spawning unboundedly.
+      let releaseExecution: (() => void) | undefined;
+      if (this.supervisor) {
+        releaseExecution = await this.supervisor.acquireExecution();
+        this.supervisor.registerInstance(conversationId, conversationId);
+        this.supervisor.markInUse(conversationId);
+      }
+
       try {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Sending prompt to ${conversationId} (${prompt.length} chars)`);
 
@@ -896,6 +989,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
         let fullContent = '';
         const toolCalls: { tool: string; args: unknown; result: unknown }[] = [];
         let sessionId: string | undefined;
+        // W13-B1: track truncation so we can fail all in-flight tool calls.
+        let truncationStopReason: string | undefined;
 
         for await (const message of queryHandle) {
           // Idle-watchdog: every SDK message resets the inactivity clock,
@@ -924,6 +1019,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
                 }
               }
             }
+            // W13-B1: Check for truncation on the BetaMessage itself.
+            // A stop_reason of 'max_tokens' or 'length' means the model ran
+            // out of output budget mid-response — tool arguments may be
+            // incomplete. Executing them risks data loss (X-2).
+            /* W13-B1 */ if (betaMsg?.stop_reason) {
+              const reason = String(betaMsg.stop_reason);
+              if (isTruncationStopReason(reason)) {
+                truncationStopReason = reason;
+              }
+            }
           } else if (message.type === 'result') {
             sessionId = message.session_id;
             if (message.subtype === 'success') {
@@ -935,6 +1040,30 @@ export class ClaudeAgentProvider implements IAgentHarness {
             this.recordObservedLimits(message);
             await this.emitContextUsageSnapshot(conversationId, queryHandle);
           }
+        }
+
+        // W13-B1: If the response was truncated and contains tool calls, fail
+        // ALL of them rather than executing potentially-incomplete arguments.
+        // This prevents "a truncated path handed to a delete tool" (X-2).
+        /* W13-B1 */ if (truncationStopReason && toolCalls.length > 0) {
+          const truncMsg =
+            `Response was truncated (stop_reason: ${truncationStopReason}). ` +
+            `All ${toolCalls.length} tool call(s) in this batch are cancelled — ` +
+            `please re-issue your request with a shorter response or fewer tools.`;
+          if (this.verbose) {
+            console.warn(`[ClaudeAgentAdapter] Truncation detected for ${conversationId}: ${truncMsg}`);
+          }
+          for (const tc of toolCalls) {
+            // Use harness.tool_complete with success:false — there is no
+          // harness.tool_error kind; tool failures are signalled via complete+false.
+          /* W13-B1 */ this.emitToHandlers(conversationId, 'harness.tool_complete', {
+              tool: tc.tool,
+              result: { error: truncMsg, truncated: true },
+              success: false,
+            });
+          }
+          // Clear tool calls so the caller's ConversationResponse has none
+          toolCalls.length = 0;
         }
 
         activeQuery.status = 'completed';
@@ -962,11 +1091,12 @@ export class ClaudeAgentProvider implements IAgentHarness {
         this.queryFailCount++;
 
         if (abortController.signal.aborted) {
-          // Emit error event for SSE subscribers before throwing
-          this.emitEventToHandlers(conversationId, createAgentEvent('harness.error', {
-            message: 'sendPromptAndWait aborted or timed out',
-            provider: 'claude-agent',
-          }));
+          // W13 / X-4 fix (Finding-3 from Phase-2 review):
+          // abortConversation() already emits harness.cancelled + harness.idle.
+          // Emitting harness.error HERE would race those two, producing a red
+          // error toast immediately after the neutral "Stopped" badge — the
+          // exact UX regression W13 was meant to prevent. Do NOT emit any event;
+          // just throw so the caller's promise rejects cleanly.
           throw new Error('sendPromptAndWait aborted by caller');
         }
         throw err;
@@ -974,6 +1104,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
         this.activeQueries.delete(conversationId);
         if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
         if (timeoutHandle) clearInterval(timeoutHandle);
+        // W12 / P0-14 — release the execution slot so the next queued turn can start.
+        if (releaseExecution) {
+          this.supervisor?.markIdle(conversationId);
+          releaseExecution();
+        }
       }
     });
   }
@@ -991,12 +1126,17 @@ export class ClaudeAgentProvider implements IAgentHarness {
       aq.status = 'aborted';
       this.activeQueries.delete(conversationId);
 
-      // Emit abort event so downstream consumers (state machine, DAG, UI) learn about it
-      const abortEvent = createAgentEvent('harness.error', {
-        message: 'Conversation aborted',
+      // W13 / X-4 — emit a semantic 'cancelled' outcome, NOT an error.
+      //
+      // A user pressing Stop is NOT an error. The old 'harness.error' event
+      // caused a red error toast in the UI. 'harness.cancelled' is a
+      // success-valued terminal event: downstream state machines treat it as
+      // a clean stop (pending approvals settle, the run records 'cancelled'
+      // rather than 'failed', and the UI renders a neutral "Stopped" badge).
+      this.emitToHandlers(conversationId, 'harness.cancelled', {
+        reason: 'user_abort',
         provider: 'claude-agent',
       });
-      this.emitEventToHandlers(conversationId, abortEvent);
       this.emitEventToHandlers(conversationId, createAgentEvent('harness.idle', {} as Record<string, never>));
     }
   }
@@ -1095,16 +1235,49 @@ export class ClaudeAgentProvider implements IAgentHarness {
     ];
 
     if (bridge.onPreToolUse) {
+      // W35-B2 fix: PreToolUse MUST fail CLOSED on any error or timeout.
+      // The gate is a security boundary (L16/N-5): every tool call goes
+      // through it, and a gate that fails-open on an exception is no gate at
+      // all. The 5-second deadline prevents a hung permission handler from
+      // blocking the agent indefinitely; on timeout we deny rather than allow.
+      const PRE_TOOL_USE_GATE_TIMEOUT_MS = 5_000;
       hooks['PreToolUse'] = wrap(async (input) => {
-        const out = await bridge.onPreToolUse!(
-          {
-            timestamp: Date.now(),
-            cwd: String(input['cwd'] ?? ''),
-            toolName: String(input['tool_name'] ?? ''),
-            toolArgs: input['tool_input'],
-          },
-          { sessionId: String(input['session_id'] ?? '') },
-        );
+        const toolName = String(input['tool_name'] ?? '');
+        let out;
+        try {
+          /* W35-B2 */ out = await Promise.race([
+            bridge.onPreToolUse!(
+              {
+                timestamp: Date.now(),
+                cwd: String(input['cwd'] ?? ''),
+                toolName,
+                toolArgs: input['tool_input'],
+              },
+              { sessionId: String(input['session_id'] ?? '') },
+            ),
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(new Error(`PreToolUse gate timeout after ${PRE_TOOL_USE_GATE_TIMEOUT_MS}ms`)),
+                PRE_TOOL_USE_GATE_TIMEOUT_MS,
+              ),
+            ),
+          ]);
+        } catch (err) {
+          // Fail CLOSED: any error or timeout → deny the tool call.
+          // An open gate on error would be a security regression (L16).
+          if (this.verbose) {
+            console.warn(
+              `[ClaudeAgentAdapter] PreToolUse gate error for tool '${toolName}' — denying (fail-closed): ${err}`,
+            );
+          }
+          return {
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: `Permission gate error: ${String(err)}`,
+            },
+          };
+        }
         if (!out) return;
         return {
           ...(out.suppressOutput !== undefined ? { suppressOutput: out.suppressOutput } : {}),
@@ -1575,6 +1748,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
       activeQuery.closeHandle = () => queryHandle.close();
 
       let fullContent = '';
+      const pendingToolNames: string[] = []; // W13-B1: track tool calls for truncation guard
+      let truncationStopReason: string | undefined; // W13-B1
 
       for await (const message of queryHandle) {
         // Map to domain events and emit
@@ -1598,8 +1773,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
                 if (phase && phase.phase === 'planning') {
                   phase.planText += block.text;
                 }
+              } else if (block.type === 'tool_use') {
+                // W13-B1: track tool calls so we can fail them on truncation.
+                /* W13-B1 */ pendingToolNames.push(block.name);
               }
             }
+          }
+          // W13-B1: detect truncation stop reason.
+          /* W13-B1 */ if (betaMsg?.stop_reason && isTruncationStopReason(String(betaMsg.stop_reason))) {
+            truncationStopReason = String(betaMsg.stop_reason);
           }
         } else if (message.type === 'result') {
           // Store SDK session ID for resume
@@ -1615,6 +1797,22 @@ export class ClaudeAgentProvider implements IAgentHarness {
           // Must happen inside the loop — the handle closes once it drains.
           this.recordObservedLimits(message);
           await this.emitContextUsageSnapshot(conversationId, queryHandle);
+        }
+      }
+
+      // W13-B1: Fail all tool calls when the response was truncated.
+      /* W13-B1 */ if (truncationStopReason && pendingToolNames.length > 0) {
+        const truncMsg =
+          `Response was truncated (stop_reason: ${truncationStopReason}). ` +
+          `All ${pendingToolNames.length} tool call(s) in this batch are cancelled — ` +
+          `please re-issue your request with a shorter response or fewer tools.`;
+        console.warn(`[ClaudeAgentAdapter] Truncation detected (background) for ${conversationId}: ${truncMsg}`);
+        for (const toolName of pendingToolNames) {
+          /* W13-B1 */ this.emitToHandlers(conversationId, 'harness.tool_complete', {
+            tool: toolName,
+            result: { error: truncMsg, truncated: true },
+            success: false,
+          });
         }
       }
 

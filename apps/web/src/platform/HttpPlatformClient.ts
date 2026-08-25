@@ -102,7 +102,7 @@ import type {
 } from '@generatorai/shared';
 import { apiFetch, ApiError } from './apiFetch.js';
 import { getAuthRuntime } from './authRuntime.js';
-import { openAuthenticatedEventSource } from './authTransport.js';
+import { openMultiplexedStream } from './muxStream.js';
 import type {
   ChangeSummary,
   ChangeFileVersions,
@@ -387,33 +387,14 @@ export class HttpPlatformClient implements IPlatformClient {
       onDisconnected?: () => void;
     },
   ): () => void {
-    const params = new URLSearchParams();
-    if (options?.kindPrefixes?.length) {
-      params.set('filter', options.kindPrefixes.join(','));
-    }
-    // Routed to the unified `/api/stream` endpoint: it is the only SSE route
-    // that redeems tickets, and tickets are the only way an EventSource (which
-    // cannot set headers) can authenticate.
-    params.set('scope', 'session');
-    params.set('id', sessionId);
-    const url = `${this.baseUrl}/api/stream?${params.toString()}`;
-
-    // Phase 2, 2.26 — THE WEB APP HAS TWO SSE CALL SITES:
-    //   1. Here (`HttpPlatformClient.subscribeToEvents`) — per-session
-    //      stream. Used in edge cases where the platform-client API is called
-    //      directly (tests, one-off session views) that bypass the global
-    //      multiplexed stream.
-    //   2. `sseManager.ts` — the GLOBAL multiplexed stream used by every
-    //      render component via Zustand. Handles dedup (sequenceId window),
-    //      replay-on-reconnect, and cross-buffer flush.
-    //
-    // Do NOT use both simultaneously for the same session from the same tab —
-    // the browser's 6-connection-per-origin cap will starve other requests.
-    // When a component needs per-session events, consume the sseManager's
-    // session-filtered selector instead of spinning its own EventSource.
-    const handle = openAuthenticatedEventSource(
-      url,
-      { scope: 'session', id: sessionId },
+    // W09-a — the two call sites this comment used to warn about are now one
+    // connection. `sseManager` and this method both subscribe scopes on the
+    // shared multiplexed stream, so using both for the same session costs a
+    // subscription rather than a socket, and the frames are deduplicated by
+    // the global event id.
+    const handle = openMultiplexedStream(
+      'session',
+      sessionId,
       {
         onOpen: () => options?.onConnected?.(),
         onError: (source) => {
@@ -432,6 +413,7 @@ export class HttpPlatformClient implements IPlatformClient {
           }
         },
       },
+      options?.kindPrefixes?.length ? options.kindPrefixes : undefined,
     );
 
     // Unsubscribe function

@@ -162,8 +162,25 @@ const createSnapshotTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       result.screenshot.artifactId,
     );
     if (!image) return payload;
+    // X-14 — the instruction has to reach the model with the image, not as
+    // caption metadata the provider may place after it. Putting it in the text
+    // payload is the only part of the ordering we control: the Claude factory
+    // emits a text content block before the image blocks, while the Copilot SDK
+    // takes text and binaries as separate fields and orders them itself.
+    //
+    // It asks for coordinates in the IMAGE's space on purpose. The image may be
+    // downscaled from the window, and `ComputerService.scalePointsToDriverSpace`
+    // scales them back using the factor recorded for that capture. Asking the
+    // model to do the conversion instead would mean trusting it to multiply.
+    const guidance =
+      'An image of this window follows. Report any pixel coordinate in the space of ' +
+      'THIS image — measure it off the image as shown, do not rescale it yourself; ' +
+      'the capture may be downscaled and the conversion is handled for you. Prefer ' +
+      'the element indices in the accessibility tree above; use the image only to ' +
+      'answer what the tree cannot.';
     return {
       ...payload,
+      imageGuidance: guidance,
       [TOOL_BINARY_KEY]: [
         {
           data: image.base64,

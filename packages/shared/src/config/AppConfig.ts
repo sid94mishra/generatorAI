@@ -221,12 +221,54 @@ export const AppConfigSchema = z.object({
   // these thresholds to prune stale rows on a background cadence.
   retention: z
     .object({
-      /** TTL (days) for event payloads (events + stream_cursors). Default 90. */
-      eventPayloadTtlDays: z.number().int().min(1).max(3650).default(90),
-      /** How often (ms) the retention job sweeps. Default 6 hours. */
-      sweepIntervalMs: z.number().int().min(60_000).default(6 * 60 * 60 * 1000),
+      /**
+       * TTL (days) for event payloads (events + stream_cursors).
+       *
+       * W02 — was 90, which exceeded the age of the oldest row in a database
+       * that had been running for 85 days, so the sweeper had literally never
+       * deleted anything and the token log had grown to 81% of a 1.76 GB file.
+       *
+       * 30 rather than the 14 the plan proposed: `stream_cursors` is now the
+       * only durable event log, so this TTL also bounds how far back SDK replay
+       * can reach. Chat transcripts, tool calls and artifacts live in their own
+       * tables and are untouched — but a run's *event* history is not. Phase 1
+       * splits deltas from items (W04/W07), at which point deltas can drop to
+       * days and items can keep a much longer TTL of their own; until then a
+       * single number has to serve both and 30 is the conservative side of it.
+       *
+       * Note this prunes purely by age, with no exclusion for a run that is
+       * still executing. A run alive longer than the TTL loses its own early
+       * events. W07 owns fixing that properly.
+       */
+      eventPayloadTtlDays: z.number().int().min(1).max(3650).default(30),
+      /** How often (ms) the retention job sweeps. Default 1 hour. */
+      sweepIntervalMs: z.number().int().min(60_000).default(60 * 60 * 1000),
       /** Safety: max rows deleted per sweep to avoid long locks. Default 50k. */
       maxDeletePerSweep: z.number().int().min(100).max(1_000_000).default(50_000),
+      /**
+       * W02 — SQLite never returns freed pages to the filesystem without an
+       * explicit VACUUM, so a bounded delete sweep shrinks the row count and
+       * nothing else. When enabled, the service runs `PRAGMA incremental_vacuum`
+       * after a sweep that actually deleted rows.
+       *
+       * This requires `auto_vacuum=INCREMENTAL`, which no existing database
+       * has, and which can only be changed by a full VACUUM — see
+       * `scripts/db-reclaim.ts` (`pnpm db:reclaim`). The service probes the
+       * pragma at startup and logs whether reclaim is active or inert, because
+       * `incremental_vacuum` on a NONE database succeeds while doing nothing.
+       */
+      incrementalVacuum: z.boolean().default(true),
+      /**
+       * Pages reclaimed per incremental vacuum step. 2000 pages ≈ 8 MB at the
+       * default 4 KB page size. Kept small deliberately: better-sqlite3 is
+       * synchronous, so this runs on the server's only thread.
+       */
+      vacuumPagesPerSweep: z.number().int().min(1).max(1_000_000).default(2_000),
+      /**
+       * Refresh query-planner statistics every N sweeps via `PRAGMA optimize`
+       * (not `ANALYZE` — see EventRetentionService for why). 0 disables.
+       */
+      analyzeEverySweeps: z.number().int().min(0).max(1000).default(24),
       /** Disable the background sweeper entirely (one-off backups, tests, CI). */
       enabled: z.boolean().default(true),
     })
@@ -282,13 +324,31 @@ export const AppConfigSchema = z.object({
        * re-prompts for consent.
        */
       allowSyntheticFallback: z.boolean().default(false),
-      screenshotEveryAction: z.boolean().default(true),
+      /**
+       * P1-30 — capturing a full-screen PNG after every action cost 1–3 MB of
+       * disk, one artifact row and one audit row per click, for a frame the
+       * model usually did not ask for. Off by default; a tool call that needs
+       * to see the result asks for it explicitly via `includeScreenshot`.
+       */
+      screenshotEveryAction: z.boolean().default(false),
       /** Caps on the a11y tree returned to the model, to bound token cost. */
       maxSnapshotElements: z.number().int().min(50).max(10_000).default(1_200),
       maxSnapshotDepth: z.number().int().min(4).max(256).default(64),
       /** Screenshots above this are downscaled, then dropped if still over. */
       screenshotMaxBytes: z.number().int().min(50_000).max(20_000_000).default(900_000),
       screenshotMaxEdge: z.number().int().min(320).max(4096).default(1280),
+      /**
+       * X-14 — the wire format for captured frames. The driver always writes
+       * PNG; this is what we re-encode to before the artifact is stored, so it
+       * governs both disk and the base64 that reaches the model.
+       *
+       * WebP at 75 measures 3-5x smaller than the equivalent PNG with no
+       * observable loss on UI text. `png` disables re-encoding and is only for
+       * diagnosing a suspected transcode artifact. Every provider we ship
+       * accepts all three.
+       */
+      screenshotFormat: z.enum(['png', 'jpeg', 'webp']).default('webp'),
+      screenshotQuality: z.number().int().min(1).max(100).default(75),
       actionTimeoutMs: z.number().int().min(1_000).max(300_000).default(30_000),
       /** Seconds a `computer.consent_required` prompt stays answerable. */
       consentTtlSeconds: z

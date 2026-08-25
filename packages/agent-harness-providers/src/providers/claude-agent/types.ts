@@ -3,8 +3,20 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { PlanReviewRequestHandler, QuestionRequestHandler } from '@generatorai/core';
+import type { AgentHostSupervisor } from '../../AgentHostSupervisor.js';
 
 export interface ClaudeAgentProviderOptions {
+  /**
+   * W12 — optional AgentHostSupervisor that gates concurrent turns via the
+   * execution semaphore. When provided, each `sendPromptAndWait` acquires one
+   * execution slot before spawning a `query()` and releases it when the turn
+   * completes (including on abort or error). Prevents unbounded concurrent
+   * process spawns (P0-14: "Claude spawns one CLI per turn, uncapped").
+   *
+   * Omit in tests that don't need concurrency control. The default singleton
+   * (`defaultAgentHostSupervisor`) is wired at the composition root.
+   */
+  supervisor?: AgentHostSupervisor;
   /** Default model (e.g. 'claude-sonnet-4-6'). */
   defaultModel?: string;
   /**

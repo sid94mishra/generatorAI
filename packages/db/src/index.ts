@@ -38,7 +38,10 @@ export { PushTokenRepository, MAX_PUSH_FAILURES } from './repositories/PushToken
 export type { PushTokenRecord, PushProvider } from './repositories/PushTokenRepository.js';
 export { DrizzleSequenceAllocator } from './repositories/SequenceAllocator.js';
 export { DrizzleSessionAllocationRepository } from './repositories/SessionAllocationRepository.js';
-export { DrizzleStreamCursorRepository } from './repositories/StreamCursorRepository.js';
+export {
+  DrizzleStreamCursorRepository,
+  StreamAppendInTransactionError,
+} from './repositories/StreamCursorRepository.js';
 export type { StreamScope, StreamEventRow } from './repositories/StreamCursorRepository.js';
 export { DrizzleWorkflowRepository } from './repositories/WorkflowRepository.js';
 export { DrizzleEventRepository } from './repositories/EventRepository.js';
@@ -78,6 +81,8 @@ export type {
   HarnessInstanceRecord,
   PermissionProfile,
 } from './repositories/HarnessInstanceRepository.js';
+// W34 / P1-42 — durable conversation→harness ownership (migration v33)
+export { SqliteConversationOwnershipRepository } from './repositories/ConversationOwnershipRepository.js';
 
 // Project & Codebase Management repositories
 export { DrizzleProjectRepository } from './repositories/ProjectRepository.js';
@@ -159,6 +164,28 @@ const DEFAULT_TX_TIMEOUT_MS = 10_000;
 const txQueues = new WeakMap<AppDatabase, Promise<unknown>>();
 
 /**
+ * Thrown when a transaction exceeds its deadline.
+ *
+ * A distinct type because the caller's correct response differs from an
+ * ordinary failure: the work may be partially applied outside the transaction,
+ * so retrying blindly can double-write.
+ */
+export class TransactionTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(
+      `withTransaction: fn exceeded ${timeoutMs}ms deadline and was rolled back. ` +
+        'Do not await network or filesystem I/O inside a transaction.',
+    );
+    this.name = 'TransactionTimeoutError';
+  }
+}
+
+/** True when the handle currently has an open transaction or savepoint. */
+export function isInTransaction(db: AppDatabase): boolean {
+  return (db as unknown as { session: { client: Database.Database } }).session.client.inTransaction;
+}
+
+/**
  * Run `fn` inside a SQLite transaction. All DB writes `fn` performs are
  * committed atomically on success and rolled back on any throw.
  *
@@ -171,9 +198,9 @@ const txQueues = new WeakMap<AppDatabase, Promise<unknown>>();
  * To backstop the "oops I awaited a fetch" footgun, the wrapper enforces
  * an overall deadline (default 10 s, override via `DB_TRANSACTION_TIMEOUT_MS`).
  * If `fn` hasn't resolved in time, the transaction is rolled back and the
- * caller sees a timeout error. This does NOT abort `fn` itself (no
- * AbortSignal is plumbed through most call sites today) — it only prevents
- * the lock from being held indefinitely.
+ * caller sees a `TransactionTimeoutError`. `fn` itself is not aborted — no
+ * AbortSignal is plumbed through most call sites today — so see P1-5 below for
+ * what the queue does about that.
  *
  * Concurrent callers are serialized behind an in-process queue keyed by
  * the `db` handle — nested `BEGIN`s aren't legal on a single sqlite
@@ -191,26 +218,49 @@ export async function withTransaction<T>(
       ? Number(process.env['DB_TRANSACTION_TIMEOUT_MS'])
       : DEFAULT_TX_TIMEOUT_MS);
 
+  /**
+   * Resolves when `fn` has genuinely settled, whether or not we timed out.
+   *
+   * P1-5 — this is the whole fix. Previously a timeout rejected the caller and
+   * released the queue slot immediately, while `fn` kept running and kept
+   * issuing statements on the same connection. The next queued transaction then
+   * opened its `BEGIN` underneath the zombie, and every statement the zombie
+   * still had to run was silently absorbed into a stranger's transaction —
+   * committed or rolled back with work it knew nothing about. Holding the slot
+   * until `fn` settles costs a slow caller its own latency and nobody else's
+   * correctness.
+   */
+  let settled: Promise<unknown> = Promise.resolve();
+
   const runTx = async (): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
-        reject(
-          new Error(
-            `withTransaction: fn exceeded ${timeoutMs}ms deadline. ` +
-            'Do not await network or filesystem I/O inside a transaction.',
-          ),
-        );
+        reject(new TransactionTimeoutError(timeoutMs));
       }, timeoutMs);
     });
 
     sqlite.exec('BEGIN');
     try {
-      const result = await Promise.race([fn(), timeoutPromise]);
+      const work = fn();
+      settled = work.catch(() => undefined);
+      const result = await Promise.race([work, timeoutPromise]);
       sqlite.exec('COMMIT');
       return result;
     } catch (err) {
-      try { sqlite.exec('ROLLBACK'); } catch { /* already rolled back */ }
+      try {
+        sqlite.exec('ROLLBACK');
+      } catch {
+        /* already rolled back */
+      }
+      // Deliberately NOT awaiting `settled` here. The caller learns about the
+      // timeout immediately — making it wait for the very function that already
+      // blew its deadline would turn a bounded failure into an unbounded one.
+      // It is the QUEUE that must wait, and it does: the tail below chains on
+      // `settled`, so the next transaction cannot begin underneath the zombie.
+      // Statements the zombie still issues auto-commit individually, which is
+      // bad but bounded, and far better than landing in a stranger's
+      // transaction.
       throw err;
     } finally {
       if (timer) clearTimeout(timer);
@@ -223,31 +273,59 @@ export async function withTransaction<T>(
   // real error via the returned promise).
   const prev = txQueues.get(db) ?? Promise.resolve();
   const next = prev.then(runTx, runTx);
-  txQueues.set(db, next.catch(() => {}));
+  txQueues.set(
+    db,
+    next.then(
+      () => settled,
+      () => settled,
+    ).catch(() => {}),
+  );
   return next;
 }
 
+/**
+ * P0-1 — better-sqlite3 rebuilds the full SQL text with every parameter
+ * inlined before it can call `verbose`. At ~12.8 statements per streamed
+ * token that was 1k-4k transient allocations per token feeding metrics that
+ * are discarded unless OTel is on. The callback is not passed at all when
+ * telemetry is off, so the driver skips the expansion entirely.
+ */
+function buildVerboseHook(): ((message?: unknown) => void) | undefined {
+  if (process.env['OTEL_ENABLED'] !== 'true') return undefined;
+  return (message?: unknown) => {
+    const sql = typeof message === 'string' ? message : '';
+    const start = performance.now();
+    // The verbose callback fires BEFORE execution, so we record counts only.
+    // Operation type is inferred from the first SQL keyword.
+    const op = sql.trimStart().split(/\s/)[0]?.toUpperCase() ?? 'UNKNOWN';
+    dbQueryCounter.add(1, { operation: op });
+    // Use queueMicrotask so duration metric fires after the sync query completes.
+    queueMicrotask(() => {
+      dbQueryDuration.record(performance.now() - start, { operation: op });
+    });
+  };
+}
+
+/**
+ * Bytes of the database file to memory-map. P1-6 — `mmap_size` defaults to 0,
+ * so every page read is a `pread` syscall. 256 MB covers the hot index pages
+ * of a multi-gigabyte file without reserving the whole thing.
+ */
+const DEFAULT_MMAP_BYTES = 256 * 1024 * 1024;
+
 /** Construct the better-sqlite3-backed Drizzle instance (the only wired driver). */
 function createSqliteDB(dbPath: string) {
-  const sqlite = new Database(dbPath, {
-    verbose: (message?: unknown) => {
-      const sql = typeof message === 'string' ? message : '';
-      const start = performance.now();
-      // The verbose callback fires BEFORE execution, so we record counts only.
-      // Operation type is inferred from the first SQL keyword.
-      const op = sql.trimStart().split(/\s/)[0]?.toUpperCase() ?? 'UNKNOWN';
-      dbQueryCounter.add(1, { operation: op });
-      // Use queueMicrotask so duration metric fires after the sync query completes.
-      queueMicrotask(() => {
-        dbQueryDuration.record(performance.now() - start, { operation: op });
-      });
-    },
-  });
+  const verbose = buildVerboseHook();
+  const sqlite = new Database(dbPath, verbose ? { verbose } : {});
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('synchronous = NORMAL');
   sqlite.pragma('cache_size = -64000');
   sqlite.pragma('foreign_keys = ON');
   sqlite.pragma('busy_timeout = 5000');
+  const mmapBytes = Number(process.env['DB_MMAP_BYTES'] ?? DEFAULT_MMAP_BYTES);
+  if (Number.isFinite(mmapBytes) && mmapBytes > 0) {
+    sqlite.pragma(`mmap_size = ${Math.floor(mmapBytes)}`);
+  }
   return drizzle(sqlite, { schema });
 }
 

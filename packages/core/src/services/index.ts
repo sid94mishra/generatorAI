@@ -36,6 +36,10 @@ export { resolveStageHooks } from './resolveStageHooks.js';
 
 // Phase 4 streaming rewrite (additive — coexists with legacy transports)
 export { StreamBroker } from './StreamBroker.js';
+export { StreamWriteBatcher } from './StreamWriteBatcher.js';
+export type { StreamWriteBatcherOptions } from './StreamWriteBatcher.js';
+export { DeltaLog } from './DeltaLog.js';
+export type { DeltaLogEntry, DeltaLogOptions } from './DeltaLog.js';
 export type {
   StreamEventRow,
   StreamScope,

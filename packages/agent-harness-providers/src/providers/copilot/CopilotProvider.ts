@@ -26,6 +26,7 @@ import type {
   CustomAgentConfig,
   ConversationWarning,
   HarnessAgentInfo,
+  ProviderCapabilities,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
 import { HarnessSessionError, withSpan, getMeter } from '@generatorai/shared';
@@ -133,6 +134,21 @@ const listenerLeakWarnings = meter.createCounter('copilot.listeners.leak_warning
  * almost always indicates a subscription without a matching cleanup.
  */
 const LISTENER_LEAK_THRESHOLD = 50;
+
+/**
+ * W13-B1: Returns true when a model finish/stop reason indicates the response
+ * was cut off before completion. Tool call arguments may be incomplete — executing
+ * them risks data loss (X-2 "A truncated path handed to a delete or write tool").
+ *
+ * Copilot SDK uses `finishReason` on the assistant.message event; the values
+ * may vary across SDK versions so we check a broad set of known truncation signals.
+ */
+/* W13-B1 */
+function isTruncationFinishReason(reason: unknown): boolean {
+  if (typeof reason !== 'string') return false;
+  const r = reason.toLowerCase();
+  return r === 'max_tokens' || r === 'length' || r.includes('max_token') || r.includes('context_length') || r === 'token_limit';
+}
 
 export interface CopilotProviderOptions {
   useStdio?: boolean;
@@ -1196,6 +1212,38 @@ export class CopilotProvider implements IAgentHarness {
     return sessions.map((s) => s.sessionId);
   }
 
+  // ── Capability declarations (W42 / N-2) ──
+
+  /**
+   * Declared capabilities for the Copilot SDK adapter.
+   *
+   * L9: Capability discovery is by declaration, not by exception.
+   * W42 — N-2 fix: no runtime probe required.
+   *
+   * Copilot does not support the PreToolUse hook (N-5), so fullToolGating
+   * is false — permission checking can fall through to the SDK's canUseTool.
+   * vision / reasoning are model-specific; declare conservatively as false;
+   * the model catalogue already surfaces per-model limits.
+   */
+  capabilities(): ProviderCapabilities {
+    return {
+      vision: false,          // model-specific; read from model catalogue
+      reasoning: false,       // model-specific; read from model catalogue
+      reasoningEfforts: [],   // query the live model for supported efforts
+      planMode: true,         // Copilot has plan/normal mode switching
+      mcpServers: false,      // Copilot SDK does not support MCP servers
+      skillDirectories: false,
+      // Finding-9 fix: the Copilot SDK DOES wire onPreToolUse (SessionConfig.hooks)
+      // which fires before every tool call — identical in semantics to Claude's
+      // PreToolUse hook. The original 'false' was wrong (the code at
+      // createConversation line ~686 explicitly maps HookBridge.onPreToolUse to
+      // sessionConfig.hooks.onPreToolUse). fullToolGating is therefore true.
+      fullToolGating: true,
+      sessionPersistence: true,
+      budgetTracking: false,
+    };
+  }
+
   async getLastConversationId(): Promise<string | null> {
     return (await this.client.getLastSessionId()) ?? null;
   }
@@ -1412,9 +1460,33 @@ export class CopilotProvider implements IAgentHarness {
       promptDuration.record(Date.now() - start, { conversation_id: conversationId });
 
       const data = (lastAssistantMessage?.data ?? {}) as Record<string, unknown>;
+
+      // W13-B1: If the model's response was truncated, do NOT execute any tool
+      // calls that may have incomplete arguments — that risks data loss (X-2).
+      // Check `finishReason` on the assistant message; if it indicates truncation,
+      // return no tool calls and include a notice in the content so the model can
+      // re-issue its request on the next turn.
+      /* W13-B1 */
+      const finishReason = (data['finishReason'] ?? data['finish_reason'] ?? data['stopReason'] ?? data['stop_reason']) as unknown;
+      if (isTruncationFinishReason(finishReason)) {
+        const toolRequests = data['toolRequests'] as Array<{ name: string }> | undefined;
+        const toolCount = toolRequests?.length ?? 0;
+        const truncMsg =
+          `Response was truncated (finish_reason: ${String(finishReason)}). ` +
+          `${toolCount > 0 ? `All ${toolCount} tool call(s) in this batch are cancelled. ` : ''}` +
+          `Please re-issue your request with a shorter response or fewer tools.`;
+        if (this.verbose || toolCount > 0) {
+          console.warn(`[CopilotAdapter] Truncation detected for ${conversationId}: ${truncMsg}`);
+        }
+        return {
+          content: ((data['content'] as string) ?? '') || truncMsg,
+          toolCalls: undefined, // All tool calls suppressed — arguments may be incomplete
+        };
+      }
+
       return {
-        content: (data.content as string) ?? '',
-        toolCalls: (data.toolRequests as Array<{ name: string; arguments: unknown }>)?.map((tc) => ({
+        content: (data['content'] as string) ?? '',
+        toolCalls: (data['toolRequests'] as Array<{ name: string; arguments: unknown }>)?.map((tc) => ({
           tool: tc.name,
           args: tc.arguments,
           result: undefined,

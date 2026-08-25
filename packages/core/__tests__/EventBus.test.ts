@@ -3,8 +3,108 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { EventBus } from '../src/events/EventBus.js';
+import { EventBus, type ISessionEventStore } from '../src/events/EventBus.js';
 import type { AgentEvent, PersistedEvent } from '@generatorai/shared';
+
+/** A durable store that records what it was asked to commit. */
+function fakeStore(overrides: Partial<ISessionEventStore> = {}): ISessionEventStore & {
+  appended: Array<{ sessionId: string; kind: string }>;
+  deleted: string[];
+} {
+  const appended: Array<{ sessionId: string; kind: string }> = [];
+  const deleted: string[] = [];
+  let seq = 0;
+  return {
+    appended,
+    deleted,
+    append: async (sessionId, event) => {
+      appended.push({ sessionId, kind: event.kind });
+      seq += 1;
+      return { seq, id: seq * 10 };
+    },
+    replaySessionEvents: async () => [],
+    deleteSessionEvents: async (sessionId) => {
+      deleted.push(sessionId);
+    },
+    ...overrides,
+  };
+}
+
+describe('EventBus durability contract (EVT-01)', () => {
+  it('commits to the durable store before broadcasting', async () => {
+    const order: string[] = [];
+    const store = fakeStore({
+      append: async (_sessionId, event) => {
+        order.push(`append:${event.kind}`);
+        return { seq: 1, id: 1 };
+      },
+    });
+    const bus = new EventBus();
+    bus.setEventStore(store);
+    bus.subscribe('s1', (e) => order.push(`broadcast:${e.kind}`));
+
+    await bus.emit('s1', { kind: 'session.created', data: {} });
+
+    expect(order).toEqual(['append:session.created', 'broadcast:session.created']);
+  });
+
+  it('suppresses the broadcast when the durable append fails', async () => {
+    const store = fakeStore({
+      append: async () => {
+        throw new Error('disk full');
+      },
+    });
+    const bus = new EventBus();
+    bus.setEventStore(store);
+    const handler = vi.fn();
+    bus.subscribe('s1', handler);
+
+    await bus.emit('s1', { kind: 'session.created', data: {} });
+
+    // A live subscriber must never see an event replay cannot return.
+    expect(handler).not.toHaveBeenCalled();
+    expect(bus.getPersistFailures('s1')).toHaveLength(1);
+  });
+
+  it('takes its sequence numbers from the store, so replay shares one space', async () => {
+    const store = fakeStore();
+    const bus = new EventBus();
+    bus.setEventStore(store);
+    const seen: number[] = [];
+    bus.subscribe('s1', (e) => seen.push(e.sequenceId));
+
+    await bus.emit('s1', { kind: 'session.created', data: {} });
+    await bus.emit('s1', { kind: 'session.completed', data: {} });
+
+    expect(seen).toEqual([1, 2]);
+  });
+
+  it('deletes durable rows when a session is deleted', async () => {
+    const store = fakeStore();
+    const bus = new EventBus();
+    bus.setEventStore(store);
+
+    await bus.deleteSessionEvents('s1');
+
+    // Leaving prompts and tool results behind for the retention TTL after a
+    // user deletes a chat is a data-deletion bug, not a cleanup shortcut.
+    expect(store.deleted).toEqual(['s1']);
+  });
+
+  it('does not suppress harness.session_info, which carries plan and subagent state', async () => {
+    const store = fakeStore();
+    const bus = new EventBus();
+    bus.setEventStore(store);
+
+    const persisted = await bus.emit('s1', {
+      kind: 'harness.session_info',
+      data: { infoType: 'unresolved_variables' },
+    } as AgentEvent);
+
+    expect(store.appended).toHaveLength(1);
+    expect(persisted.sequenceId).toBeGreaterThan(0);
+  });
+});
 
 describe('EventBus', () => {
   let eventBus: EventBus;
@@ -102,7 +202,9 @@ describe('EventBus', () => {
       persistGlobal: vi.fn().mockResolvedValue({ id: 1, kind: 'test', data: {}, sessionId: '__global__', sequenceId: 0, timestamp: Date.now() }),
     };
 
-    const persistentBus = new EventBus(mockRepo);
+    // P1-4 — the legacy `events` table is off by default now; this test is
+    // specifically about that table's write, so it opts in.
+    const persistentBus = new EventBus(mockRepo, undefined, undefined, { legacyEventLog: true });
     await persistentBus.emit('s1', { kind: 'session.created', data: {} });
 
     expect(mockRepo.insert).toHaveBeenCalledOnce();
@@ -142,7 +244,7 @@ describe('EventBus', () => {
       deleteBySession: vi.fn(),
       persistGlobal: vi.fn(),
     };
-    const bus = new EventBus(mockRepo);
+    const bus = new EventBus(mockRepo, undefined, undefined, { legacyEventLog: true });
     const handler = vi.fn();
     bus.subscribe('s1', handler);
 
@@ -164,7 +266,7 @@ describe('EventBus', () => {
       persistGlobal: vi.fn(),
     };
     const allocator = { allocate: vi.fn().mockResolvedValue(1) };
-    const bus = new EventBus(mockRepo, undefined, allocator);
+    const bus = new EventBus(mockRepo, undefined, allocator, { legacyEventLog: true });
     const handler = vi.fn();
     bus.subscribeGlobal(handler);
 

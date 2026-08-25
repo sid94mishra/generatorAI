@@ -17,6 +17,7 @@ import {
   isBlockedHarnessEnvVar,
   HARNESS_ENV_ALLOWLIST,
 } from '../src/childEnv.js';
+import { PARENT_PID_ENV, SPAWN_MARKER_ENV } from '../src/childRegistry.js';
 
 /** A parent environment resembling a real GeneratorAI server process. */
 const PARENT: NodeJS.ProcessEnv = {
@@ -170,11 +171,21 @@ describe('buildHarnessEnv', () => {
     expect(serialise(env)).not.toContain('future-secret');
   });
 
-  it('exposes only allowlisted names', () => {
+  it('exposes only allowlisted names, plus the two provenance markers', () => {
     const env = buildHarnessEnv({ source: PARENT });
     for (const name of Object.keys(env)) {
+      if (name === SPAWN_MARKER_ENV || name === PARENT_PID_ENV) continue;
       expect(HARNESS_ENV_ALLOWLIST).toContain(name);
     }
+  });
+
+  it('stamps provenance so the boot reaper can tell our children from the user\u2019s', () => {
+    const env = buildHarnessEnv({ source: PARENT });
+    // Carries no authority: a boot id and a pid, both already visible in any
+    // process listing. They exist so an orphan can be attributed, and are
+    // asserted here so nobody "tidies" them away.
+    expect(env[SPAWN_MARKER_ENV]).toBeTruthy();
+    expect(env[PARENT_PID_ENV]).toBe(String(process.pid));
   });
 });
 

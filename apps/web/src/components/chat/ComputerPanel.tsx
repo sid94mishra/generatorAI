@@ -26,7 +26,7 @@ import {
   Pause, Play, ShieldQuestion, Square, Video,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { openAuthenticatedEventSource } from '@/platform/authTransport.js';
+import { openMultiplexedStream } from '@/platform/muxStream.js';
 import type { ComputerRuntime } from '@/platform/HttpPlatformClient.js';
 
 interface TimelineEntry {
@@ -263,38 +263,46 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
 
   // Live preview. Frames and cursor arrive separately because they change at
   // different rates — a window frame per action, a cursor sample every ~30 ms.
+  //
+  // W09 — this used to be its own `EventSource`, which is why a chat tab with
+  // the right pane open held five of them. It is now a scope on the shared
+  // multiplexed connection, and the feed itself is live-only: nothing about it
+  // is worth replaying, so it never reaches the durable log.
   useEffect(() => {
     if (!workspaceId || !recording.recording) {
       setCursor(null);
       return;
     }
-    const source = new EventSource(`/api/workspaces/${workspaceId}/computer/preview/stream`);
+    const stream = openMultiplexedStream('computer', workspaceId, {
+      onMessage: ({ data }) => {
+        let frame: { kind?: unknown; payload?: unknown };
+        try {
+          frame = JSON.parse(data) as typeof frame;
+        } catch {
+          // A malformed frame just means the preview holds the previous one.
+          return;
+        }
+        switch (frame.kind) {
+          case 'computer.preview.frame':
+            setPreviewFrame(frame.payload as PreviewFrame);
+            break;
+          case 'computer.preview.window':
+            setWindowBounds(frame.payload as WindowBounds);
+            break;
+          case 'computer.preview.cursor': {
+            const last = (frame.payload as Array<{ x: number; y: number }>)?.at(-1);
+            if (last) setCursor({ x: last.x, y: last.y });
+            break;
+          }
+          default:
+            // `open` and `run` carry only the run directory name, which this
+            // panel does not use — it renders whatever the newest frame points at.
+            break;
+        }
+      },
+    });
 
-    source.addEventListener('frame', (event) => {
-      try {
-        setPreviewFrame(JSON.parse((event as MessageEvent).data) as PreviewFrame);
-      } catch {
-        // A malformed frame just means the preview holds the previous one.
-      }
-    });
-    source.addEventListener('window', (event) => {
-      try {
-        setWindowBounds(JSON.parse((event as MessageEvent).data) as WindowBounds);
-      } catch {
-        // Keep the last known bounds.
-      }
-    });
-    source.addEventListener('cursor', (event) => {
-      try {
-        const samples = JSON.parse((event as MessageEvent).data) as Array<{ x: number; y: number }>;
-        const last = samples.at(-1);
-        if (last) setCursor({ x: last.x, y: last.y });
-      } catch {
-        // Keep the last known position.
-      }
-    });
-
-    return () => source.close();
+    return () => stream.close();
   }, [workspaceId, recording.recording]);
 
   // Screen coordinates onto the rendered frame. The recorder reports the cursor
@@ -612,9 +620,9 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
 
   useEffect(() => {
     if (!workspaceId) return;
-    const es = openAuthenticatedEventSource(
-      `/api/stream?scope=session&id=${encodeURIComponent('computer:' + workspaceId)}&filter=computer.`,
-      { scope: 'session', id: `computer:${workspaceId}` },
+    const es = openMultiplexedStream(
+      'session',
+      `computer:${workspaceId}`,
       {
         onOpen: () => setLive(true),
         onError: () => setLive(false),
@@ -694,6 +702,7 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
           }
         },
       },
+      ['computer.'],
     );
     return () => es.close();
   }, [workspaceId, loadFrame]);

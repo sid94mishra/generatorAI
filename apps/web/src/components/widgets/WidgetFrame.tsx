@@ -69,6 +69,40 @@ function buildWidgetUrl(assetsBase: string, extensionId: string, entry: string):
     .join('/')}`;
 }
 
+/**
+ * P1-53 — the iframe carries `allow-scripts` AND `allow-same-origin`, which is
+ * only safe because the widget loads from a different origin (a dedicated
+ * asset port). The pair on the SAME origin is the canonical sandbox escape:
+ * the frame can reach into the host document, its storage and its auth state.
+ *
+ * `buildWidgetUrl` falls back to a relative path when `assetsBase` is empty,
+ * which silently produces exactly that configuration — and widgets are
+ * model-authorable. So the separate origin is treated as a load-bearing
+ * precondition rather than an optimisation: no origin, no render.
+ *
+ * Returns null when safe, or the reason to display when not.
+ */
+function sandboxViolation(assetsBase: string): string | null {
+  // Fail closed. There is no SSR here today, but a guard that silently passes
+  // when it cannot evaluate is the wrong default for a sandbox escape.
+  if (typeof window === 'undefined') {
+    return 'the host origin could not be determined';
+  }
+  if (!assetsBase || assetsBase.length === 0) {
+    return 'no isolated asset origin was configured';
+  }
+  let resolved: URL;
+  try {
+    resolved = new URL(alignLoopbackHost(assetsBase), window.location.href);
+  } catch {
+    return 'the configured asset origin is not a valid URL';
+  }
+  if (resolved.origin === window.location.origin) {
+    return 'the asset origin resolves to this application\u2019s own origin';
+  }
+  return null;
+}
+
 export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight }: WidgetFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [height, setHeight] = useState<number>(minHeight ?? DEFAULT_MIN_HEIGHT);
@@ -88,6 +122,8 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
     () => buildWidgetUrl(block.assetsBase, block.extensionId, block.entry),
     [block.assetsBase, block.extensionId, block.entry],
   );
+
+  const unsafeOrigin = useMemo(() => sandboxViolation(block.assetsBase), [block.assetsBase]);
 
   const src = useMemo(
     () => (reloadNonce > 0 ? `${widgetUrl}${widgetUrl.includes('?') ? '&' : '?'}_r=${reloadNonce}` : widgetUrl),
@@ -147,6 +183,27 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
     return (
       <div className={className} style={{ padding: 12, opacity: 0.6, fontStyle: 'italic', fontSize: 13 }}>
         Widget closed{block.title ? `: ${block.title}` : ''}.
+      </div>
+    );
+  }
+  if (unsafeOrigin) {
+    return (
+      <div
+        className={className}
+        data-widget-refused="sandbox-origin"
+        style={{
+          padding: 12,
+          border: '1px solid var(--color-danger, #cf222e)',
+          borderRadius: 8,
+          background: 'rgba(207, 34, 46, 0.06)',
+          fontSize: 13,
+        }}
+      >
+        <div style={{ fontWeight: 600 }}>Widget not rendered</div>
+        <div style={{ marginTop: 4, color: 'var(--color-muted-foreground, #57606a)' }}>
+          Widgets run untrusted, model-authored code and must load from a separate
+          origin. Rendering was refused because {unsafeOrigin}.
+        </div>
       </div>
     );
   }

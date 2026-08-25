@@ -10,7 +10,9 @@
     "start": "node --import ./dist/instrumentation.js dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "acp": "node --import ./dist/instrumentation.js dist/acp-entry.js",
+    "acp:dev": "tsx --env-file-if-exists=.env --import ./src/instrumentation.ts src/acp-entry.ts"
   },
   "dependencies": {
     "@generatorai/agent-harness-providers": "workspace:*",

@@ -1,16 +1,23 @@
 // ────────────────────────────────────────────────────────────────
 // sseManager — STR-04 / Phase 4 streaming rewrite
 //
-// Each view opens its OWN EventSource against the unified
-// `/api/stream?scope=<s>&id=<id>` endpoint (STR-03). The legacy
-// single-global-multiplexed design was replaced because:
+// Each view subscribes a scope against the unified `/api/stream` endpoint
+// (STR-03). Those subscriptions share ONE `EventSource` per tab, owned by
+// `platform/muxStream.ts` (W09-a, §5.9).
 //
-//   - Per-scope subscriptions are simpler (no cross-session fan-out).
-//   - Only 1-2 EventSources per tab (chat + optionally workflow run)
-//     vs. the old "one global stream + manual fan-out" which still
-//     needed a watchdog for its own flakiness.
-//   - Last-Event-ID resume is built into the server (STR-08), so the
-//     old watchdog-reconnect-and-gap-fill dance is gone.
+// This file used to argue the opposite — that per-scope connections were
+// better because there were "only 1-2 EventSources per tab" and "the old
+// watchdog-reconnect-and-gap-fill dance is gone". Both premises decayed:
+// a chat tab with the right pane open opened FIVE, and the watchdog below is
+// still here. De-multiplexing did not remove it; it multiplied the number of
+// things that can silently stall from one to five.
+//
+// What the shared connection changes here, and nothing else:
+//
+//   - Reconnection, the per-scope cursor map (N-9) and cross-scope dedup on
+//     the global event id (N-10) moved into `muxStream`.
+//   - Frames arrive in the same `{lastEventId, data}` shape, so `parseFrame`,
+//     the replay drain and the stall watchdog are untouched.
 //
 // What we deliberately KEEP from the old implementation (verbatim):
 //
@@ -26,8 +33,8 @@
 //
 // Public API:
 //
-//   - connectChatSession(chatId, sessionId, platform) — one EventSource
-//     at scope=chat&id=<chatId>. Primary caller: ChatPage.
+//   - connectChatSession(chatId, sessionId, platform) — subscribes
+//     scope=chat&id=<chatId>. Primary caller: ChatPage.
 //   - connectWorkflowRun(runId, platform) — one EventSource at
 //     scope=run&id=<runId>. Primary caller: WorkflowRunPage.
 //     Replaces the old per-stage-session connectSession loop.
@@ -48,7 +55,7 @@ import type { WorkflowRunStatus, StageRunStatus } from '@generatorai/shared';
 import type { SystemCategory, QuestionBlock, PlanBlock } from './streamStore.js';
 import type { ContextUsageSnapshot } from '@generatorai/client-core';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
-import { openAuthenticatedEventSource } from '../platform/authTransport.js';
+import { openMultiplexedStream } from '../platform/muxStream.js';
 
 // ── Connection scope ──
 
@@ -1477,7 +1484,10 @@ function openConnection(
         for (const ev of stageEvents) {
           const d = (ev.data ?? {}) as Record<string, unknown>;
           if (d['__isInternalTurn']) continue;
-          if (ev.kind === 'harness.idle' || ev.kind === 'harness.error') return true;
+          // W13 / Finding-4: harness.cancelled is a terminal event (user Stop),
+          // not just harness.idle/harness.error. Without this, a cancelled stage
+          // is never settled → blank stage blocks in the workflow run UI.
+          if (ev.kind === 'harness.idle' || ev.kind === 'harness.error' || ev.kind === 'harness.cancelled') return true;
         }
         return false;
       };
@@ -1633,14 +1643,13 @@ function openConnection(
     useConnectionStore.getState().setConnectionState(primarySessionId, 'connected');
   })();
 
-  // ── 2. Open EventSource ──
-  // Authorised by a short-lived single-use ticket; `openAuthenticatedEventSource`
-  // owns reconnection because a redeemed ticket cannot be replayed by the
-  // browser's built-in retry.
-  const params = new URLSearchParams({ scope, id: scopeId });
-  const handle = openAuthenticatedEventSource(
-    `${platform.baseUrl}/api/stream?${params.toString()}`,
-    { scope, id: scopeId },
+  // ── 2. Join the shared multiplexed stream (W09-a) ──
+  // One `EventSource` per tab, not one per scope. Reconnection, the cursor
+  // map and cross-scope dedup all live in `muxStream`; from here it behaves
+  // exactly like the single-scope source it replaced.
+  const handle = openMultiplexedStream(
+    scope,
+    scopeId,
     {
       onOpen: () => {
         useConnectionStore.getState().setConnectionState(primarySessionId, 'connected');
@@ -1686,6 +1695,16 @@ function openConnection(
         } else {
           state.setConnectionState(primarySessionId, 'disconnected');
         }
+      },
+      onResync: (reason) => {
+        // The server said our view has a hole: it could not honour our cursor
+        // (`hello` with `resumed:false`), or it shed deltas we were too slow to
+        // read (`gap`). Replay is authoritative, so refill from the contiguous
+        // frontier. Before the initial replay finishes it already fetches
+        // everything after that frontier, so there is nothing to add.
+        if (!conn.replayed || conn.refCount <= 0) return;
+        if (import.meta.env?.DEV) console.debug('[sseManager] resync for', key, reason);
+        void gapFill();
       },
     },
   );

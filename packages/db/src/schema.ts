@@ -805,7 +805,7 @@ export const projectConfigs = sqliteTable(
     projectId: text('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
-    type: text('type', { enum: ['agent', 'prompt', 'skill'] }).notNull(),
+    type: text('type', { enum: ['agent', 'prompt', 'skill', 'mcp'] }).notNull(), // W46-G16: project_configs enum
     name: text('name').notNull(),
     description: text('description'),
     filePath: text('file_path').notNull(),
@@ -854,7 +854,7 @@ export const systemConfigs = sqliteTable(
   'system_configs',
   {
     id: text('id').primaryKey(),
-    type: text('type', { enum: ['agent', 'prompt', 'skill'] }).notNull(),
+    type: text('type', { enum: ['agent', 'prompt', 'skill', 'mcp'] }).notNull(), // W46-G16
     name: text('name').notNull(),
     description: text('description'),
     filePath: text('file_path').notNull(),

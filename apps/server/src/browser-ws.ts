@@ -164,6 +164,9 @@ async function streamViaScreencast(
       if (Date.now() - lastFrameAt < KEEPALIVE_MS) return;
       void seedFrame().then(sendFrame).catch(() => undefined);
     }, KEEPALIVE_MS);
+    // A keepalive for one socket must never be the reason the process cannot
+    // exit; the socket close path clears it, and shutdown does not wait for it.
+    keepaliveTimer.unref?.();
     // First `.next()` is where ElectronBridgeAdapter's unsupported-mode
     // throw actually surfaces — everything above this point (the seed
     // frame) is valid in every mode, so nothing is wasted on fallback.

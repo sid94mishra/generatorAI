@@ -25,6 +25,8 @@ export type AgentEvent =
   | { kind: 'harness.tool_complete'; data: { tool: string; result: unknown; callId?: string | null; success?: boolean; parentToolCallId?: string } }
   | { kind: 'harness.idle'; data: Record<string, never> }
   | { kind: 'harness.error'; data: { message: string; provider?: string } }
+  /** W13 / X-4 — semantic cancellation outcome. Not an error: the user pressed Stop. */
+  | { kind: 'harness.cancelled'; data: { reason: 'user_abort' | 'timeout' | 'budget_exceeded'; provider?: string } }
   | { kind: 'harness.session_start'; data: { provider?: string } }
   | { kind: 'harness.usage'; data: { model: string; inputTokens: number; outputTokens: number; cost?: number; durationMs?: number; provider?: string } }
   /**

@@ -16,6 +16,7 @@ import type {
   SendPromptOptions,
   ConversationWarning,
   HarnessAgentInfo,
+  ProviderCapabilities,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
 import type { HarnessType } from './types.js';
@@ -147,5 +148,9 @@ export class HarnessProxy implements IAgentHarness {
   }
   onClientEvent(handler: (event: HarnessClientEvent) => void): () => void {
     return this._adapter.onClientEvent(handler);
+  }
+  // W42 / N-2 — delegate capability declarations to the underlying adapter.
+  capabilities(): ProviderCapabilities {
+    return this._adapter.capabilities();
   }
 }

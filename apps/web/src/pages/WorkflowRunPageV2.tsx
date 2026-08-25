@@ -52,7 +52,7 @@ import { WidgetHost } from '@/components/widgets/WidgetHost.js';
 import { Breadcrumb } from '@/components/layout/Breadcrumb.js';
 import { RightPane, useRightPaneOpen } from '@/components/layout/RightPane.js';
 import { clearBrowserTabUrl } from '@/lib/browserTabUrls.js';
-import { openAuthenticatedEventSource } from '@/platform/authTransport.js';
+import { openMultiplexedStream } from '@/platform/muxStream.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 
 export function WorkflowRunPageV2() {
@@ -193,9 +193,9 @@ export function WorkflowRunPageV2() {
       })
       .catch(() => undefined);
     // Live SSE.
-    const es = openAuthenticatedEventSource(
-      `/api/stream?scope=session&id=${encodeURIComponent('browser:' + runWorkspaceId)}&filter=browser.session_created`,
-      { scope: 'session', id: `browser:${runWorkspaceId}` },
+    const es = openMultiplexedStream(
+      'session',
+      `browser:${runWorkspaceId}`,
       {
         onMessage: (e) => {
           if (cancelled) return;
@@ -216,6 +216,7 @@ export function WorkflowRunPageV2() {
           } catch { /* ignore */ }
         },
       },
+      ['browser.session_created'],
     );
     return () => {
       cancelled = true;

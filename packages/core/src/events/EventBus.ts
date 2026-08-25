@@ -4,7 +4,7 @@
 
 import { EventEmitter } from 'node:events';
 import type { AgentEvent, PersistedEvent, ILogger } from '@generatorai/shared';
-import { getMeter } from '@generatorai/shared';
+import { DELTA_SESSION_INFO_TYPES, getMeter } from '@generatorai/shared';
 import type { IEventRepository } from '../domain/ports/IRepositories.js';
 import type { ISequenceAllocator } from '../domain/ports/ISequenceAllocator.js';
 
@@ -19,6 +19,99 @@ const subscriberErrors = meter.createCounter('eventbus.subscriber.errors', {
 const persistErrors = meter.createCounter('eventbus.persist.errors', {
   description: 'Total event-persist failures (DB insert failed or dead-lettered)',
 });
+const eventsSuppressed = meter.createCounter('eventbus.events.suppressed', {
+  description: 'Events dropped before persistence because their kind is renderer noise',
+});
+
+/**
+ * Raw SDK passthrough that no client renders.
+ *
+ * P1-4 / W01 — the filter used to live in `StreamBroker.publish`, i.e. AFTER
+ * the event had already been sequenced, persisted and fanned out to every
+ * in-process subscriber. Filtering here means a suppressed event costs one Set
+ * lookup instead of a sequence allocation, an INSERT and 20+ handler dispatches.
+ *
+ * Set `GENERATORAI_STREAM_DEBUG_NOISE=1` to keep everything for diagnostics.
+ */
+export const NOISE_EVENT_KINDS: ReadonlySet<string> = new Set(['harness.unknown']);
+
+/**
+ * Suppression, which is not the same thing as classification.
+ *
+ * W04 classifies `tool_partial_result` and `tool_progress` as deltas, and once
+ * W07 lands they will flow to the delta log: coalesced, bounded, droppable, and
+ * costing the relational store nothing. Until then a delta is still an INSERT
+ * into `stream_cursors` — the table that is 81% of the database file — so
+ * un-suppressing them now would trade a real regression for a future benefit.
+ *
+ * They are safe to drop in the meantime because no surface reads them: verified
+ * by call-site search across web, mobile, CLI and replay. The chunk-carrier list
+ * itself lives in `DELTA_SESSION_INFO_TYPES` so there is one definition, not
+ * two that drift.
+ *
+ * REMOVE THIS with W07. It is a stopgap, and the comment is the only thing
+ * stopping it becoming permanent.
+ */
+export function isNoiseEventKind(kind: string, data?: unknown): boolean {
+  if (process.env['GENERATORAI_STREAM_DEBUG_NOISE'] === '1') return false;
+  if (NOISE_EVENT_KINDS.has(kind)) return true;
+  if (kind !== 'harness.session_info') return false;
+  const infoType = (data as { infoType?: unknown } | undefined)?.infoType;
+  return typeof infoType === 'string' && DELTA_SESSION_INFO_TYPES.has(infoType);
+}
+
+/** Sequence number stamped on an event that was suppressed before persistence. */
+export const SUPPRESSED_SEQUENCE_ID = -1;
+
+/**
+ * The durable log behind the event bus (`stream_cursors`), wired by the
+ * composition root because that is where the repository lives.
+ *
+ * This is the single source of both durability and sequence numbers. Before
+ * P1-4 there were two of each: `events` + `event_sequences` for `PersistedEvent`,
+ * and `stream_cursors` + `stream_sequences` for the SSE transport. Replay read
+ * one and the live path read the other, so a caller resuming from a live cursor
+ * was comparing numbers from two independent counters.
+ */
+export interface ISessionEventStore {
+  /**
+   * Append one event and return its durable identity. MUST reject rather than
+   * resolve if the row was not committed — the caller suppresses the broadcast
+   * on rejection to preserve commit-then-broadcast (EVT-01).
+   */
+  append(sessionId: string, event: AgentEvent): Promise<{ seq: number; id: number }>;
+  /** Replay committed events for a session, oldest first. Must NOT truncate. */
+  replaySessionEvents(sessionId: string, afterSeq: number): Promise<PersistedEvent[]>;
+  /** Remove every durable row for a session. Used when a session is deleted. */
+  deleteSessionEvents(sessionId: string): Promise<void>;
+}
+
+/**
+ * P1-4 — the v1 `events` table is a second durable log that nothing reads on
+ * the live path, yet it was written first and synchronously per event, with
+ * unindexed `(workflow_run_id, stage_run_id)` columns behind it.
+ *
+ * Forced on with `GENERATORAI_LEGACY_EVENT_LOG=1`. Otherwise the decision is
+ * made per-emit: a bus with a durable store wired skips it, and a bus WITHOUT
+ * one falls back to it, because then the legacy table is the only durable log
+ * that exists. That matters for the embedded SDK, which builds core services
+ * without a StreamBroker — turning the write off there unconditionally would
+ * have left it broadcasting events that nothing persisted and replaying
+ * nothing.
+ */
+function legacyEventLogForced(): boolean {
+  return process.env['GENERATORAI_LEGACY_EVENT_LOG'] === '1';
+}
+
+export interface EventBusOptions {
+  /**
+   * Write every event to the legacy `events` table as well as broadcasting it.
+   * When unset, defaults to `GENERATORAI_LEGACY_EVENT_LOG`, then to "only if no
+   * durable store has been wired". Set explicitly by tests that exercise the
+   * legacy log's own semantics.
+   */
+  legacyEventLog?: boolean;
+}
 
 export class EventBus {
   private emitter = new EventEmitter();
@@ -55,14 +148,40 @@ export class EventBus {
    */
   private readonly maxListeners: number;
 
+  /** Explicit override; when undefined the decision is made per emit. */
+  private readonly legacyEventLogOverride: boolean | undefined;
+
+  private replaySource: ISessionEventStore | undefined;
+
   constructor(
     private eventRepo?: IEventRepository,
     private logger?: ILogger,
     private sequenceAllocator?: ISequenceAllocator,
+    options?: EventBusOptions,
   ) {
     const envLimit = process.env['EVENT_BUS_MAX_LISTENERS'];
     this.maxListeners = envLimit ? Math.max(1, Number(envLimit)) : 10_000;
     this.emitter.setMaxListeners(this.maxListeners);
+    this.legacyEventLogOverride = options?.legacyEventLog ?? (legacyEventLogForced() ? true : undefined);
+  }
+
+  /** The legacy `events` repo to write to for this emit, or undefined to skip. */
+  private legacyRepo(): IEventRepository | undefined {
+    const enabled = this.legacyEventLogOverride ?? this.replaySource === undefined;
+    return enabled ? this.eventRepo : undefined;
+  }
+
+  /**
+   * Wire the durable stream log. Called by the composition root once
+   * `StreamCursorRepository` exists.
+   *
+   * Once set, it becomes the source of BOTH durability and sequence numbers,
+   * so replay and the live stream speak the same sequence space. Without it
+   * (embedded SDK, unit tests) the bus falls back to the legacy `events` table
+   * and the `event_sequences` allocator.
+   */
+  setEventStore(store: ISessionEventStore): void {
+    this.replaySource = store;
   }
 
   /** Expose the active listener limit for ops / health checks. */
@@ -82,6 +201,20 @@ export class EventBus {
 
   /** Emit an event for a session. Persists to DB and broadcasts to subscribers. */
   async emit(sessionId: string, event: AgentEvent): Promise<PersistedEvent> {
+    // W01 — suppress renderer noise BEFORE the queue, the sequence allocation
+    // and the fan-out. A suppressed event must still return a well-formed
+    // PersistedEvent so callers that read `.sequenceId` don't branch on it.
+    if (isNoiseEventKind(event.kind, event.data)) {
+      eventsSuppressed.add(1, { kind: event.kind });
+      return {
+        id: 0,
+        sessionId,
+        sequenceId: SUPPRESSED_SEQUENCE_ID,
+        kind: event.kind,
+        data: event.data,
+        timestamp: Date.now(),
+      };
+    }
     // Chain onto the per-session queue so emits execute one-at-a-time.
     // Note: we explicitly do NOT swallow prior failures here — if a prior
     // emit's DB insert failed, we recorded it via persistFailures, but the
@@ -115,38 +248,71 @@ export class EventBus {
   private async _doEmit(sessionId: string, event: AgentEvent): Promise<PersistedEvent> {
     eventsEmitted.add(1, { kind: event.kind, session_id: sessionId });
 
-    // Allocate sequence ID. Prefer SQL-allocated (cross-process safe) when
-    // available; fall back to in-memory counter for tests / EventBus-without-DB.
-    let seq: number;
-    if (this.sequenceAllocator) {
-      seq = await this.sequenceAllocator.allocate(sessionId);
-    } else {
-      seq = (this.sequenceCounters.get(sessionId) ?? 0) + 1;
-    }
-    // Keep the in-memory counter tracking the allocator so the `__global__`
-    // fast path and tests still see monotonic values.
-    this.sequenceCounters.set(sessionId, Math.max(this.sequenceCounters.get(sessionId) ?? 0, seq));
-
     const persisted: PersistedEvent = {
       id: 0,
       sessionId,
-      sequenceId: seq,
+      sequenceId: 0,
       kind: event.kind,
       data: event.data,
       timestamp: Date.now(),
     };
 
-    // 1. Persist to SQLite — retry once on transient failure.
-    //    EVT-01: commit THEN broadcast. If persistence ultimately fails we
-    //    record it AND skip the broadcast so SSE clients never observe an
-    //    event that REST replay can't return. The persistFailures log lets
-    //    ops see the gap; live clients will reconcile on reconnect via
-    //    REST replay seeded from the last-known sequence.
-    let persistedOk = !this.eventRepo; // no repo → treat as "nothing to persist"
-    if (this.eventRepo) {
+    // ── 1. Commit ────────────────────────────────────────────────────────
+    // EVT-01: commit THEN broadcast. A live subscriber must never observe an
+    // event that replay cannot return, or a client that reconnects sees a hole
+    // it has no way to detect.
+    //
+    // The durable store, when wired, is BOTH the commit point and the source of
+    // the sequence number. That is what keeps replay and the live stream in one
+    // sequence space: `getSessionEvents` reads the same counter that `emit`
+    // stamped. The `event_sequences` allocator remains the fallback for the
+    // embedded SDK and unit tests, which have no store.
+    let persistedOk = false;
+
+    if (this.replaySource) {
       try {
-        persisted.id = await this.eventRepo.insert(persisted);
+        const row = await this.replaySource.append(sessionId, event);
+        persisted.sequenceId = row.seq;
+        persisted.id = row.id;
         persistedOk = true;
+      } catch (err) {
+        persistErrors.add(1, { session_id: sessionId, kind: event.kind });
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger?.error(
+          '[EventBus] durable append failed — dropping broadcast (EVT-01)',
+          { sessionId, kind: event.kind, error: msg },
+        );
+        this.recordPersistFailure(sessionId, event.kind, msg);
+        return persisted;
+      }
+    } else {
+      // Allocate sequence ID. Prefer SQL-allocated (cross-process safe) when
+      // available; fall back to in-memory counter for tests / no-DB buses.
+      persisted.sequenceId = this.sequenceAllocator
+        ? await this.sequenceAllocator.allocate(sessionId)
+        : (this.sequenceCounters.get(sessionId) ?? 0) + 1;
+      persistedOk = true;
+    }
+
+    this.sequenceCounters.set(
+      sessionId,
+      Math.max(this.sequenceCounters.get(sessionId) ?? 0, persisted.sequenceId),
+    );
+
+    // The legacy `events` table. When a durable store is wired this is an
+    // explicit opt-in mirror and its failure MUST NOT suppress the broadcast:
+    // the event is already committed with an allocated sequence number, so
+    // withholding it gives live subscribers a hole that replay will happily
+    // fill — which is the exact failure EVT-01 exists to prevent, inverted.
+    // Without a store this table IS the commit point, so a failure there does
+    // suppress.
+    const repo = this.legacyRepo();
+    if (repo) {
+      const legacyIsCommitPoint = !this.replaySource;
+      let legacyOk = false;
+      try {
+        persisted.id = await repo.insert(persisted);
+        legacyOk = true;
       } catch (err1) {
         const err1Msg = err1 instanceof Error ? err1.message : String(err1);
         this.logger?.warn('[EventBus] Event persist failed, retrying once', {
@@ -155,29 +321,32 @@ export class EventBus {
           error: err1Msg,
         });
         try {
-          persisted.id = await this.eventRepo.insert(persisted);
-          persistedOk = true;
+          persisted.id = await repo.insert(persisted);
+          legacyOk = true;
         } catch (err2) {
           persistErrors.add(1, { session_id: sessionId, kind: event.kind });
           const err2Msg = err2 instanceof Error ? err2.message : String(err2);
-          this.logger?.error('[EventBus] Event persist failed after retry — dropping broadcast (EVT-01)', {
-            sessionId,
-            sequenceId: seq,
-            kind: event.kind,
-            error: err2Msg,
-          });
-          const failures = this.persistFailures.get(sessionId) ?? [];
-          failures.push({ kind: event.kind, error: err2Msg, at: Date.now() });
-          if (failures.length > 200) failures.splice(0, failures.length - 200);
-          this.persistFailures.set(sessionId, failures);
+          this.logger?.error(
+            legacyIsCommitPoint
+              ? '[EventBus] Event persist failed after retry — dropping broadcast (EVT-01)'
+              : '[EventBus] legacy mirror write failed after retry — broadcasting anyway (already committed)',
+            {
+              sessionId,
+              sequenceId: persisted.sequenceId,
+              kind: event.kind,
+              error: err2Msg,
+            },
+          );
+          this.recordPersistFailure(sessionId, event.kind, err2Msg);
         }
       }
+      if (legacyIsCommitPoint) persistedOk = legacyOk;
     }
 
-    // 2. Broadcast to session subscribers — only when the event is safely
-    //    committed (EVT-01). Per-handler wrappers (see subscribe()) catch
-    //    exceptions and surface them as `subscriber.error` events (EVT-02)
-    //    instead of letting the first broken listener silence the rest.
+    // ── 2. Broadcast ─────────────────────────────────────────────────────
+    // Per-handler wrappers (see subscribe()) catch exceptions and surface them
+    // as `subscriber.error` events (EVT-02) instead of letting the first broken
+    // listener silence the rest.
     if (persistedOk) {
       for (const channel of [`session:${sessionId}`, 'session:*']) {
         this.emitter.emit(channel, persisted);
@@ -185,6 +354,13 @@ export class EventBus {
     }
 
     return persisted;
+  }
+
+  private recordPersistFailure(sessionId: string, kind: string, error: string): void {
+    const failures = this.persistFailures.get(sessionId) ?? [];
+    failures.push({ kind, error, at: Date.now() });
+    if (failures.length > 200) failures.splice(0, failures.length - 200);
+    this.persistFailures.set(sessionId, failures);
   }
 
   /**
@@ -206,7 +382,12 @@ export class EventBus {
    * dropped from the live broadcast so SSE ↔ REST stay consistent.
    */
   async emitGlobal(event: AgentEvent): Promise<void> {
-    if (this.eventRepo) {
+    if (isNoiseEventKind(event.kind, event.data)) {
+      eventsSuppressed.add(1, { kind: event.kind });
+      return;
+    }
+    const repo = this.legacyRepo();
+    if (repo) {
       let persisted: PersistedEvent;
       let persisted_ok = false;
       if (this.sequenceAllocator) {
@@ -216,7 +397,7 @@ export class EventBus {
         // don't collide.
         const seq = await this.sequenceAllocator.allocate('__global__');
         try {
-          const id = await this.eventRepo.insert({
+          const id = await repo.insert({
             sessionId: '__global__',
             sequenceId: seq,
             kind: event.kind,
@@ -248,7 +429,7 @@ export class EventBus {
         // Legacy path: EventRepository's own in-memory counter. Only safe
         // when a single process writes to the DB; tests + any deployment
         // that has not wired the allocator.
-        persisted = await this.eventRepo.persistGlobal({
+        persisted = await repo.persistGlobal({
           kind: event.kind,
           data: event.data,
           timestamp: Date.now(),
@@ -271,14 +452,43 @@ export class EventBus {
       // can't block the others. Exceptions surface as `subscriber.error`.
       this.dispatchGlobalWithErrorCapture(persisted);
     } else {
+      // No legacy log (the default). Sequence numbers come from the durable
+      // store's own counter, exactly as `_doEmit` does, so global replay and
+      // the global live stream share one sequence space. Reaching for the
+      // `event_sequences` allocator here would burn a number that no row
+      // records, on the path whose whole purpose is to stop writing rows.
+      let sequenceId = this.sequenceCounters.get('__global__') ?? 0;
+      let id = 0;
+      if (this.replaySource) {
+        try {
+          const row = await this.replaySource.append('__global__', event);
+          sequenceId = row.seq;
+          id = row.id;
+        } catch (err) {
+          persistErrors.add(1, { session_id: '__global__', kind: event.kind });
+          this.logger?.error(
+            '[EventBus] durable append failed for global event — dropping broadcast (EVT-01)',
+            { kind: event.kind, error: err instanceof Error ? err.message : String(err) },
+          );
+          return;
+        }
+      } else {
+        sequenceId += 1;
+      }
       const faux: PersistedEvent = {
-        id: 0,
+        id,
         sessionId: '__global__',
-        sequenceId: 0,
+        sequenceId,
         kind: event.kind,
         data: event.data,
         timestamp: Date.now(),
       };
+      if (sequenceId > 0) {
+        this.sequenceCounters.set(
+          '__global__',
+          Math.max(this.sequenceCounters.get('__global__') ?? 0, sequenceId),
+        );
+      }
       this.dispatchGlobalWithErrorCapture(faux);
     }
   }
@@ -453,6 +663,12 @@ export class EventBus {
 
   /** Restore sequence counters from DB on startup. */
   async restoreCounters(): Promise<void> {
+    // With a durable store wired, every sequence comes from that store's own
+    // counter on each append, so there is nothing to restore and nothing that
+    // can drift. This path exists for the embedded SDK and tests, where the
+    // in-memory counter IS the source of truth and must be seeded from disk or
+    // a restart reissues sequence numbers that are already in use.
+    if (this.replaySource) return;
     if (!this.eventRepo) return;
     const maxSeqs = await this.eventRepo.getMaxSequencePerSession();
     for (const { sessionId, maxSeq } of maxSeqs) {
@@ -462,14 +678,33 @@ export class EventBus {
 
   /** Delete persisted events for a session (cleanup on session deletion). */
   async deleteSessionEvents(sessionId: string): Promise<void> {
-    if (!this.eventRepo) return;
-    await this.eventRepo.deleteBySession(sessionId);
+    // The durable store holds every prompt, tool argument and tool result for
+    // the session. Deleting a chat that leaves them behind for the retention
+    // TTL is a data-deletion bug, not a cleanup shortcut.
+    await this.replaySource?.deleteSessionEvents(sessionId);
+    await this.eventRepo?.deleteBySession(sessionId);
     this.sequenceCounters.delete(sessionId);
     this.emitQueues.delete(sessionId);
   }
 
-  /** Get persisted events for a session, optionally after a sequence number. */
-  async getSessionEvents(sessionId: string, afterSequence?: number): Promise<PersistedEvent[]> {
+  /**
+   * Get persisted events for a session, optionally after a sequence number.
+   *
+   * P1-4 — reads the durable stream log, which is what the live path writes and
+   * what stamped the sequence numbers. Falls back to the legacy `events` table
+   * only when no store has been wired (tests, embedded SDK without a broker).
+   *
+   * Deliberately NOT paginated: both legacy paths were unbounded, and this is a
+   * public SDK surface. A silent cap here would truncate a run's history with
+   * no marker, which Law L2 forbids. The store paginates internally.
+   */
+  async getSessionEvents(
+    sessionId: string,
+    afterSequence?: number,
+  ): Promise<PersistedEvent[]> {
+    if (this.replaySource) {
+      return this.replaySource.replaySessionEvents(sessionId, afterSequence ?? 0);
+    }
     if (!this.eventRepo) return [];
     if (afterSequence !== undefined) {
       return this.eventRepo.getAfterSequence(sessionId, afterSequence);

@@ -95,5 +95,91 @@ export default [
       ],
     },
   },
+  // ── W33 Layer boundary rules ────────────────────────────────────────────────
+  // L1 (shared, db) and L2 (core, agent-harness-providers) packages may NOT
+  // import the web framework, Electron, or the database driver. Violations block
+  // the build (error, not warn) — the layering rule is a prerequisite for the
+  // process split (Phase 3), not a style preference.
+  //
+  // packages/db is allowed to import better-sqlite3 (it owns the driver);
+  // everything else in L1/L2 is forbidden from touching it.
+  {
+    files: ['packages/core/**/*.ts', 'packages/shared/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['express', 'express/*'],
+              message: 'L1/L2 packages may not import Express. Wire it only in L4 surfaces (apps/server).',
+            },
+            {
+              group: ['electron', 'electron/*'],
+              message: 'L1/L2 packages may not import Electron. Wire it only in L4 surfaces (apps/desktop).',
+            },
+            {
+              group: ['better-sqlite3', 'better-sqlite3/*', 'drizzle-orm/better-sqlite3', 'drizzle-orm/better-sqlite3/*'],
+              message: 'L1/L2 packages may not import the SQLite driver. Use the IDatabase port injected at the composition root.',
+            },
+            {
+              group: ['node-pty', 'node-pty/*'],
+              message: 'L1/L2 packages may not import node-pty. Wire it only in L3 hosts (pty-host).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/agent-harness-providers/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['express', 'express/*'],
+              message: 'L2 packages may not import Express. Wire it only in L4 surfaces (apps/server).',
+            },
+            {
+              group: ['electron', 'electron/*'],
+              message: 'L2 packages may not import Electron. Wire it only in L4 surfaces (apps/desktop).',
+            },
+            {
+              group: ['node-pty', 'node-pty/*'],
+              message: 'L2 packages may not import node-pty. Wire it only in L3 hosts (pty-host).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // packages/db owns the SQLite driver (L1 foundation), but must not
+    // pull in the web framework, Electron, or the PTY library.
+    files: ['packages/db/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['express', 'express/*'],
+              message: 'packages/db may not import Express.',
+            },
+            {
+              group: ['electron', 'electron/*'],
+              message: 'packages/db may not import Electron.',
+            },
+            {
+              group: ['node-pty', 'node-pty/*'],
+              message: 'packages/db may not import node-pty.',
+            },
+          ],
+        },
+      ],
+    },
+  },
   prettierConfig,
 ];

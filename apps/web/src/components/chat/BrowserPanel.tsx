@@ -35,7 +35,8 @@ import {
 import { cn } from '@/lib/utils.js';
 import { isRestorableBrowserUrl, readBrowserTabUrl, writeBrowserTabUrl } from '@/lib/browserTabUrls.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
-import { openAuthenticatedEventSource, buildAuthenticatedSocketUrl } from '@/platform/authTransport.js';
+import { buildAuthenticatedSocketUrl } from '@/platform/authTransport.js';
+import { openMultiplexedStream } from '@/platform/muxStream.js';
 import { NativeBrowserView } from './NativeBrowserView.js';
 import {
   DropdownMenu,
@@ -411,9 +412,9 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
 
   useEffect(() => {
     if (!open || !workspaceId) return;
-    const es = openAuthenticatedEventSource(
-      `/api/stream?scope=session&id=${encodeURIComponent('browser:' + workspaceId)}&filter=browser.`,
-      { scope: 'session', id: `browser:${workspaceId}` },
+    const es = openMultiplexedStream(
+      'session',
+      `browser:${workspaceId}`,
       {
         onMessage: (e) => {
           try {
@@ -449,6 +450,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
           } catch { /* ignore */ }
         },
       },
+      ['browser.'],
     );
     return () => { es.close(); };
   }, [open, workspaceId]);

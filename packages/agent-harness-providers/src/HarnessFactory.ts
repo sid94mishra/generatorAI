@@ -14,14 +14,22 @@ import type {
   HarnessFactoryOptions,
 } from './types.js';
 import type { CopilotProvider } from './providers/copilot/CopilotProvider.js';
+import type { WorkspacedCopilotPool } from './providers/copilot/WorkspacedCopilotPool.js';
 import type { ClaudeAgentProvider } from './providers/claude-agent/ClaudeAgentProvider.js';
+// W37/W38/W39: direct imports (no optional-dependency pattern needed — no external SDK required)
+import { CodexProvider } from './providers/codex/index.js';
+import { OpenCodeProvider } from './providers/opencode/index.js';
+import { AcpProvider } from './providers/acp/index.js';
 
 // ── Lazy Module Cache ──
 // Provider modules are loaded once on first access and cached for the
 // process lifetime. This avoids repeated dynamic imports while still
 // keeping both SDKs optional (they are only resolved when selected).
 
-type CopilotModule = { CopilotProvider: typeof CopilotProvider };
+type CopilotModule = {
+  CopilotProvider: typeof CopilotProvider;
+  WorkspacedCopilotPool: typeof WorkspacedCopilotPool;
+};
 type ClaudeAgentModule = { ClaudeAgentProvider: typeof ClaudeAgentProvider };
 
 let copilotModule: CopilotModule | null = null;
@@ -79,8 +87,12 @@ export async function createHarnessProvider(
 
   switch (type) {
     case 'copilot': {
+      // W36 / P0-13 — always use WorkspacedCopilotPool so each workspace
+      // gets its own CopilotClient (CLI process). The pool is a strict
+      // superset of CopilotProvider: it works correctly with one workspace
+      // and adds no overhead in the single-workspace case.
       const mod = await loadCopilotModule();
-      return new mod.CopilotProvider(config.copilot ?? {});
+      return new mod.WorkspacedCopilotPool(config.copilot ?? {});
     }
 
     case 'claude-agent': {
@@ -88,9 +100,30 @@ export async function createHarnessProvider(
       return new mod.ClaudeAgentProvider(config.claudeAgent ?? {});
     }
 
+    // W37 — Codex app-server (JSON-RPC over stdio)
+    case 'codex': {
+      return new CodexProvider(config.codex ?? {});
+    }
+
+    // W38 — OpenCode serve (HTTP + SSE)
+    case 'opencode': {
+      // No guard needed: OpenCodeProvider defaults baseUrl to http://localhost:4096
+      return new OpenCodeProvider(config.opencode ?? { baseUrl: 'http://localhost:4096' });
+    }
+
+    // W39 — ACP breadth client (long-tail agents)
+    case 'acp': {
+      if (!config.acp?.address) {
+        throw new Error(
+          `Harness type "acp" requires acp.address — the URL of the ACP-compliant agent.`,
+        );
+      }
+      return new AcpProvider(config.acp);
+    }
+
     default: {
       const _exhaustive: never = type;
-      throw new Error(`Unknown harness type: "${type}". Available: copilot, claude-agent`);
+      throw new Error(`Unknown harness type: "${type}". Available: copilot, claude-agent, codex, opencode, acp`);
     }
   }
 }
@@ -115,6 +148,9 @@ export async function getAvailableProviders(): Promise<HarnessType[]> {
   } catch {
     // @anthropic-ai/claude-agent-sdk not installed — claude-agent unavailable
   }
+
+  // W37/W38/W39: directly-imported providers — always available (no optional SDK gate)
+  available.push('codex', 'opencode', 'acp');
 
   return available;
 }

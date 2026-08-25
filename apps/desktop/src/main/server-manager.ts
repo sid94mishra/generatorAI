@@ -187,7 +187,12 @@ export class ServerManager extends EventEmitter {
     const child = spawn(command, args, {
       cwd,
       env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // The 'ipc' channel exists solely so the server can be asked to shut down
+      // gracefully on Windows. Node maps `kill('SIGTERM')` to TerminateProcess
+      // there, so a signal can never reach the server's handler; an IPC message
+      // can. Without it the desktop — our primary distribution — was the one
+      // place the server's teardown and child reaping never ran.
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       windowsHide: true,
     });
     this.child = child;
@@ -265,15 +270,27 @@ export class ServerManager extends EventEmitter {
 
       child.once('exit', done);
       try {
-        // Node maps kill('SIGTERM') to TerminateProcess on Windows, so the
-        // server's graceful handler never runs there and, worse, the agent
-        // subprocesses it spawned are left orphaned holding the inherited
-        // stdio pipes — which keeps our own exit from ever completing.
-        // taskkill /t reaps the whole tree; POSIX keeps the graceful path.
-        if (process.platform === 'win32' && child.pid) {
-          spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
-        } else {
-          child.kill('SIGTERM');
+        // Ask first, force later. The server's own shutdown closes the database,
+        // flushes queued events and terminates the agent CLIs it spawned; if we
+        // go straight to `taskkill /t` none of that happens and the CLIs are
+        // left for the next boot's reaper to find.
+        //
+        // On Windows this MUST be the IPC message: Node maps SIGTERM to
+        // TerminateProcess, so the graceful handler would never run. POSIX
+        // keeps the signal, which the server already handles.
+        let asked = false;
+        if (child.connected) {
+          asked = child.send({ type: 'shutdown' });
+        }
+        if (!asked) {
+          if (process.platform === 'win32' && child.pid) {
+            // No channel to ask over. `taskkill /t` reaps the whole tree, which
+            // at least stops the agent subprocesses from holding the inherited
+            // stdio pipes open and blocking our own exit.
+            spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
+          } else {
+            child.kill('SIGTERM');
+          }
         }
       } catch {
         done();

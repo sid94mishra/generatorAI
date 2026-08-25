@@ -1,0 +1,196 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenCode API",
+    "version": "1.4.0",
+    "description": "Pinned OpenCode v1.4.0 schema for opencode serve HTTP+SSE — generated from upstream spec. Do not hand-edit."
+  },
+  "servers": [
+    { "url": "http://localhost:{port}", "variables": { "port": { "default": "4096" } } }
+  ],
+  "paths": {
+    "/session": {
+      "post": {
+        "operationId": "createSession",
+        "summary": "Create a new conversation session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateSessionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Session" }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listSessions",
+        "summary": "List all sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Session" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/{sessionId}": {
+      "delete": {
+        "operationId": "deleteSession",
+        "parameters": [{ "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/session/{sessionId}/message": {
+      "post": {
+        "operationId": "sendMessage",
+        "parameters": [{ "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SendMessageRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SSE stream of MessageEvents",
+            "content": { "text/event-stream": {} }
+          }
+        }
+      }
+    },
+    "/session/{sessionId}/message/{messageId}/abort": {
+      "post": {
+        "operationId": "abortMessage",
+        "parameters": [
+          { "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "messageId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Aborted" } }
+      }
+    },
+    "/model": {
+      "get": {
+        "operationId": "listModels",
+        "summary": "List available models",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Model" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/doc": {
+      "get": {
+        "operationId": "getOpenApiSpec",
+        "summary": "Get this OpenAPI spec (for schema generation)",
+        "responses": {
+          "200": { "content": { "application/json": {} } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateSessionRequest": {
+        "type": "object",
+        "properties": {
+          "model": { "type": "string" },
+          "systemPrompt": { "type": "string" }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string" },
+          "model": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SendMessageRequest": {
+        "type": "object",
+        "required": ["content"],
+        "properties": {
+          "content": { "type": "string" },
+          "attachments": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Attachment" }
+          }
+        }
+      },
+      "MessageEvent": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["message.start", "message.delta", "message.stop", "tool.input", "tool.output", "error"]
+          },
+          "delta": { "type": "string" },
+          "toolCall": { "$ref": "#/components/schemas/ToolCall" },
+          "toolOutput": { "$ref": "#/components/schemas/ToolOutput" },
+          "error": { "type": "string" },
+          "stopReason": { "type": "string", "enum": ["end_turn", "max_tokens", "tool_use"] }
+        }
+      },
+      "ToolCall": {
+        "type": "object",
+        "required": ["id", "name", "input"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "input": { "type": "object" }
+        }
+      },
+      "ToolOutput": {
+        "type": "object",
+        "required": ["toolCallId", "content"],
+        "properties": {
+          "toolCallId": { "type": "string" },
+          "content": { "type": "string" },
+          "isError": { "type": "boolean" }
+        }
+      },
+      "Attachment": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "enum": ["image", "file"] },
+          "url": { "type": "string" },
+          "base64": { "type": "string" },
+          "mimeType": { "type": "string" }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "provider": { "type": "string" },
+          "contextLength": { "type": "integer" },
+          "supportsStreaming": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

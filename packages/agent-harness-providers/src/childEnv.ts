@@ -26,6 +26,8 @@
 //      (or one injected via explicit `extra`) still cannot escape.
 // ────────────────────────────────────────────────────────────────
 
+import { PARENT_PID_ENV, SPAWN_BOOT_ID, SPAWN_MARKER_ENV } from './childRegistry.js';
+
 /**
  * Environment variables every child needs to function at all.
  *
@@ -144,6 +146,23 @@ export function buildHarnessEnv(options: HarnessEnvOptions = {}): Record<string,
     if (isDenied(name) && !isOwnCredential(name, options.extra)) continue;
     env[name] = value;
   }
+
+  // P0-14 — provenance, NOT a heartbeat.
+  //
+  // Phase 0 item 7 asks for "a parent-PID heartbeat in every spawned child".
+  // That is not achievable here: both vendor SDKs spawn their own CLI binary
+  // internally, so we never see the pid and cannot add cooperating code to a
+  // binary we did not write. Prevention and recovery therefore live entirely on
+  // the parent side (see childRegistry.ts), and these variables are not read by
+  // the reaper — Windows does not expose another process's environment block
+  // anyway.
+  //
+  // They exist for children that CAN cooperate — our own host processes, from
+  // Phase 3 — and for a human reading a process listing during an incident.
+  // They carry no authority: a pid and a random boot id, both already visible
+  // to any local process.
+  env[SPAWN_MARKER_ENV] = SPAWN_BOOT_ID;
+  env[PARENT_PID_ENV] = String(process.pid);
 
   return env;
 }
