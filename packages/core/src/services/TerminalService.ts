@@ -48,17 +48,58 @@ export interface TerminalServiceConfig {
   eventBusScopePrefix?: string;
 }
 
+/**
+ * P0-23: Ring buffer for PTY scrollback. Stores raw Buffer chunks in an array
+ * instead of rebuilding a single concatenated Buffer on every data event.
+ * Maintains a running `totalBytes` counter and trims from the head once
+ * `maxBytes` is reached. `toBuffer()` concatenates on demand (replay only).
+ */
+class ChunkArray {
+  private chunks: Buffer[] = [];
+  private totalBytes = 0;
+  private readonly maxBytes: number;
+
+  constructor(maxBytes: number) {
+    this.maxBytes = maxBytes;
+  }
+
+  append(chunk: Buffer): void {
+    this.chunks.push(chunk);
+    this.totalBytes += chunk.length;
+    // Trim from head while over budget.
+    while (this.totalBytes > this.maxBytes && this.chunks.length > 0) {
+      const oldest = this.chunks.shift()!;
+      this.totalBytes -= oldest.length;
+    }
+  }
+
+  /** Materialise all chunks into a single Buffer (used for scrollback replay). */
+  toBuffer(): Buffer {
+    return Buffer.concat(this.chunks);
+  }
+
+  get byteLength(): number {
+    return this.totalBytes;
+  }
+}
+
 /** Per-session in-memory record. */
 interface TerminalRecord {
   workspaceId: string;
   handle: ITerminalHandle;
-  scrollback: Buffer;
+  /** P0-23: chunk-array ring instead of a re-concatenated flat Buffer. */
+  scrollback: ChunkArray;
   /** Detach listeners on kill. */
   detachData: () => void;
   detachExit: () => void;
   /** Count of currently attached WebSocket clients. */
   wsCount: number;
-  /** Epoch-ms of last activity (input/output/resize/ack). */
+  /**
+   * P1-38: Epoch-ms of last CLIENT activity (WS attach/detach, resize, ack,
+   * input).  No longer bumped on PTY output — output is not a signal that a
+   * human is present, so the idle reaper was kept alive by a process printing
+   * to a terminal that nobody was watching.
+   */
   lastActivityAt: number;
   /** True once the PTY has exited — record kept briefly for replay then dropped. */
   exited: boolean;
@@ -185,7 +226,8 @@ export class TerminalService {
     const rec: TerminalRecord = {
       workspaceId: params.workspaceId,
       handle,
-      scrollback: Buffer.alloc(0),
+      // P0-23: ChunkArray avoids O(n²) Buffer.concat on every data event.
+      scrollback: new ChunkArray(this.cfg.scrollbackBytes),
       detachData: () => undefined,
       detachExit: () => undefined,
       wsCount: 0,
@@ -194,14 +236,9 @@ export class TerminalService {
     };
 
     rec.detachData = handle.onData((chunk) => {
-      rec.lastActivityAt = Date.now();
-      // Append to scrollback ring, trimming from the head if it grows too large.
-      const next = Buffer.concat([rec.scrollback, chunk]);
-      if (next.length > this.cfg.scrollbackBytes) {
-        rec.scrollback = next.subarray(next.length - this.cfg.scrollbackBytes);
-      } else {
-        rec.scrollback = next;
-      }
+      // P1-38: Do NOT bump lastActivityAt on PTY output — idle reaper should
+      // fire when no client is attached, not when the process is printing.
+      rec.scrollback.append(chunk);
     });
 
     rec.detachExit = handle.onExit((info) => {
@@ -353,8 +390,10 @@ export class TerminalService {
   scrollback(sessionId: string, tailBytes = 0): Buffer {
     const rec = this.sessions.get(sessionId);
     if (!rec) return Buffer.alloc(0);
-    if (tailBytes <= 0 || tailBytes >= rec.scrollback.length) return rec.scrollback;
-    return rec.scrollback.subarray(rec.scrollback.length - tailBytes);
+    // Materialise the chunk array only when a caller actually needs it.
+    const buf = rec.scrollback.toBuffer();
+    if (tailBytes <= 0 || tailBytes >= buf.length) return buf;
+    return buf.subarray(buf.length - tailBytes);
   }
 
   // ── WS attach hooks (called from terminal-ws.ts) ──────────────
@@ -383,10 +422,10 @@ export class TerminalService {
   subscribeOutput(sessionId: string, cb: (chunk: Buffer) => void): () => void {
     const rec = this.sessions.get(sessionId);
     if (!rec) return () => undefined;
-    return rec.handle.onData((chunk) => {
-      rec.lastActivityAt = Date.now();
-      cb(chunk);
-    });
+    // P1-38: lastActivityAt is NOT bumped on PTY output. Idle reaper checks
+    // wsCount first (skips if any client is attached), so bumping here served
+    // no purpose and kept dead-corpse sessions alive indefinitely.
+    return rec.handle.onData((chunk) => cb(chunk));
   }
 
   subscribeExit(

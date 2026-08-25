@@ -44,6 +44,52 @@ const BUFFERED_AMOUNT_CIRCUIT_BREAKER = 1024 * 1024;
 /** Input rate limit — max messages/sec/WS to prevent keystroke-spam. */
 const INPUT_RATE_LIMIT_PER_SEC = 200;
 
+/**
+ * P1-27: Coalesce PTY output chunks before sending over WebSocket.
+ *
+ * A busy terminal can produce 2500+ data events per second. Sending each
+ * chunk as a separate WS frame is wasteful at that rate — the browser is
+ * woken up for every tiny write. Instead we accumulate chunks for up to
+ * COALESCE_MS (4 ms — imperceptible latency) or COALESCE_BYTES (32 KB),
+ * whichever comes first, then send one frame.
+ *
+ * Returns a `send(chunk)` function and a `flush()` function (to be called on
+ * WS close to drain any buffered bytes).
+ */
+const COALESCE_MS = 4;
+const COALESCE_BYTES = 32 * 1024;
+
+function makeCoalescer(
+  sendRaw: (buf: Buffer) => void,
+): { send: (chunk: Buffer) => void; flush: () => void } {
+  const pending: Buffer[] = [];
+  let pendingBytes = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const flush = (): void => {
+    if (timer !== null) { clearTimeout(timer); timer = null; }
+    if (pending.length === 0) return;
+    const combined = pending.length === 1 ? pending[0]! : Buffer.concat(pending);
+    pending.length = 0;
+    pendingBytes = 0;
+    sendRaw(combined);
+  };
+
+  const send = (chunk: Buffer): void => {
+    pending.push(chunk);
+    pendingBytes += chunk.length;
+    if (pendingBytes >= COALESCE_BYTES) {
+      flush();
+      return;
+    }
+    if (timer === null) {
+      timer = setTimeout(flush, COALESCE_MS);
+    }
+  };
+
+  return { send, flush };
+}
+
 export function attachTerminalWebSocket(server: HttpServer, container: Container): void {
   const { terminalService, executionWorkspaceRepo, logger } = container;
   const wss = new WebSocketServer({ noServer: true });
@@ -131,24 +177,26 @@ export function attachTerminalWebSocket(server: HttpServer, container: Container
     // reach the PTY in order.
     let inputChain: Promise<void> = Promise.resolve();
 
+    // P1-27: Coalesce PTY output before sending to reduce per-frame WS overhead.
+    const coalescer = makeCoalescer((buf) => {
+      if (closed || ws.readyState !== ws.OPEN) return;
+      if (ws.bufferedAmount > BUFFERED_AMOUNT_CIRCUIT_BREAKER && !paused) {
+        paused = true;
+        terminalService.pause(sessionId);
+      }
+      try { ws.send(buf, { binary: true }); } catch { /* connection closing */ }
+    });
+
     const detachData = terminalService.subscribeOutput(sessionId, (chunk) => {
       if (closed || ws.readyState !== ws.OPEN) return;
-      try {
-        ws.send(chunk, { binary: true });
-        unackedBytes += chunk.length;
-        // Watermark pause.
-        if (!paused && unackedBytes >= HIGH_WATERMARK_BYTES) {
-          paused = true;
-          terminalService.pause(sessionId);
-        }
-        // Defensive backpressure via WS buffered amount.
-        if (ws.bufferedAmount > BUFFERED_AMOUNT_CIRCUIT_BREAKER && !paused) {
-          paused = true;
-          terminalService.pause(sessionId);
-        }
-      } catch {
-        // Ignore send failures — close will fire and clean up.
+      unackedBytes += chunk.length;
+      // Watermark pause — checked before queuing so the coalescer doesn't
+      // accumulate unbounded data while the PTY is paused.
+      if (!paused && unackedBytes >= HIGH_WATERMARK_BYTES) {
+        paused = true;
+        terminalService.pause(sessionId);
       }
+      coalescer.send(chunk);
     });
 
     const detachExit = terminalService.subscribeExit(sessionId, (info) => {
@@ -222,6 +270,7 @@ export function attachTerminalWebSocket(server: HttpServer, container: Container
     ws.on('close', () => {
       if (closed) return;
       closed = true;
+      coalescer.flush(); // Drain any buffered bytes before tearing down.
       try { detachData(); } catch { /* ignore */ }
       try { detachExit(); } catch { /* ignore */ }
       terminalService.onWsDetach(sessionId);
