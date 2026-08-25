@@ -21,8 +21,8 @@ was checked with `git diff` plus a grep of the specific symbol.
 | **2** | Provider port & contracts | ✅ Complete · 3 review rounds · W34/W35/W13/W42/W44/W45/W41/W46/W37/W38/W39/W10 all done · 17 adversarial findings fixed (6 CRITICAL, 7 MAJOR, 4 MINOR) |
 | **3** | Process split & admission | ✅ Complete · W33/W12/W36/W18/W19/W20/W21 all done · adversarial review fixed 4 BLOCKERS + 5 MAJOR + 4 MINOR |
 | **4** | Native hosts | ✅ Complete · W25/W14/W15/W16/W17 done · 26/26 build green |
-| **5** | Client rebuild | 🔄 Implemented (no phase review yet) · W26/W27/W28/W29/W30/W30-b/W30-d/W09-b committed · P0-47 IncrementalMarkdown fix applied |
-| **6** | Durability & orchestration | 🔄 Implemented (no phase review yet) · W22/W23/W24/W47 committed · DurableExecutionEngine + migrations v35-v38 |
+| **5** | Client rebuild | ✅ Complete · adversarial review done · M1 (nested scroll) fixed · P0-47 IncrementalMarkdown done |
+| **6** | Durability & orchestration | ✅ Complete · adversarial review done · M2 (non-atomic iteration init) fixed · DurableExecutionEngine crash recovery verified |
 | **7** | Guardrails | ⬜ Not started |
 
 ### Test baseline (established 2026-08-20, identical on clean and dirty trees)
@@ -795,7 +795,13 @@ Build: 26/26 green. P0-47 (IncrementalMarkdown) fix applied 2026-08-25.
 | Single SSE connection per browser tab | ✅ |
 | StreamPanel renders segments in temporal order | ✅ |
 | P0-47: streaming answer uses block-level memoised IncrementalMarkdown | ✅ |
-| Independent adversarial review | ⬜ **Pending** |
+| Independent adversarial review | ✅ Done — 1 MAJOR finding fixed |
+
+### Phase 5 review findings
+
+| # | Sev | Finding | Resolution |
+|---|---|---|---|
+| M1 | MAJOR | `VirtualChatList` nested scroll: inner `max-h-[60vh] overflow-y-auto` container inside ChatPage's `useStickToBottom` scroll ref — dual scrollbars + message area capped at 60vh | Added `scrollElementRef` prop; virtualizer attaches to the outer scroll element when supplied; ChatPage passes `scrollRef` down to `ChatMessageList` |
 
 ---
 
@@ -817,9 +823,16 @@ Build: 26/26 green.
 
 | Criterion | State |
 |---|---|
-| DurableExecutionEngine replay-safe under crash/restart | ✅ code present |
-| Stream cursors persisted; replay picks up from cursor | ✅ code present |
-| Independent adversarial review | ⬜ **Pending** |
+| DurableExecutionEngine replay-safe under crash/restart | ✅ confirmed |
+| Stream cursors persisted; replay picks up from cursor | ✅ confirmed |
+| initializeIterations atomic (no partial iteration state on crash) | ✅ |
+| Independent adversarial review | ✅ Done — 1 MAJOR finding fixed |
+
+### Phase 6 review findings
+
+| # | Sev | Finding | Resolution |
+|---|---|---|---|
+| M2 | MAJOR | `initializeIterations` iteration-slot writes in a bare for-loop — crash mid-loop leaves partial iteration state; replay on restart sees inconsistent entry count | Added `EntryRepository.createBatch()` using `client.transaction()`; `initializeIterations` pre-filters existing slots then calls `createBatch()` once atomically |
 
 ---
 
