@@ -20,6 +20,14 @@ interface ChatMessageListProps {
   messages: ChatMessage[];
   /** Opens a plan from a persisted card in the right-pane Plan tab. */
   onOpenPlan?: (planId: string) => void;
+  /**
+   * External scroll container ref. When provided, the virtualizer uses this
+   * element as its scroll root instead of creating a nested scroll div.
+   * Pass the page-level scroll ref (e.g. from useStickToBottom) so there is
+   * only ONE scroll container in the hierarchy — two nested scroll areas
+   * creates a confusing UX where the inner box fills before the outer page.
+   */
+  scrollElementRef?: React.RefObject<HTMLElement | null>;
 }
 
 /** Threshold above which virtualization turns on.
@@ -74,7 +82,7 @@ function renderMessage(
   }
 }
 
-export function ChatMessageList({ messages, onOpenPlan }: ChatMessageListProps) {
+export function ChatMessageList({ messages, onOpenPlan, scrollElementRef }: ChatMessageListProps) {
   if (messages.length <= VIRTUAL_THRESHOLD) {
     return (
       <div className="space-y-5">
@@ -87,22 +95,36 @@ export function ChatMessageList({ messages, onOpenPlan }: ChatMessageListProps) 
     );
   }
 
-  return <VirtualChatList messages={messages} {...(onOpenPlan ? { onOpenPlan } : {})} />;
+  return (
+    <VirtualChatList
+      messages={messages}
+      scrollElementRef={scrollElementRef}
+      {...(onOpenPlan ? { onOpenPlan } : {})}
+    />
+  );
 }
 
 /** Dynamic-height virtualized list for large chat histories. */
 function VirtualChatList({
   messages,
   onOpenPlan,
+  scrollElementRef,
 }: {
   messages: ChatMessage[];
   onOpenPlan?: (planId: string) => void;
+  /**
+   * External scroll container. When provided the virtualizer attaches to it
+   * directly (no nested scroll box). When absent a self-contained scroll div
+   * is created as fallback (e.g. when ChatMessageList is used outside ChatPage).
+   */
+  scrollElementRef?: React.RefObject<HTMLElement | null>;
 }) {
-  const parentRef = useRef<HTMLDivElement>(null);
+  // Fallback inner scroll ref — only used when no outer ref is provided.
+  const innerRef = useRef<HTMLDivElement>(null);
 
   const virtualizer = useVirtualizer({
     count: messages.length,
-    getScrollElement: () => parentRef.current,
+    getScrollElement: () => scrollElementRef?.current ?? innerRef.current,
     // Rough initial height — re-measured when each row mounts via
     // measureElement below. Keeping this generous avoids a visible reflow
     // on first paint when many rows compute to <200px.
@@ -116,37 +138,52 @@ function VirtualChatList({
   const items = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
 
+  // When using an external scroll container (scrollElementRef provided) we
+  // render a plain wrapper — no overflow, no height cap — and let the parent
+  // page handle scrolling. When no external ref is provided we fall back to a
+  // self-contained scroll div so the component is usable in isolation.
+  const inner = (
+    <div style={{ height: totalSize, position: 'relative', width: '100%' }}>
+      {items.map((item) => {
+        const message = messages[item.index];
+        if (!message) return null;
+        const node = renderMessage(message, onOpenPlan);
+        if (!node) return null;
+        return (
+          <div
+            key={item.key}
+            data-index={item.index}
+            ref={virtualizer.measureElement}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              transform: `translateY(${item.start}px)`,
+              paddingBottom: '1.25rem',
+            }}
+          >
+            {node}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // External scroll container: no wrapper needed — the total-height div is
+  // placed directly in the flow, and the parent div handles overflow.
+  if (scrollElementRef) {
+    return inner;
+  }
+
+  // Fallback: own scroll container so the component is self-contained.
   return (
     <div
-      ref={parentRef}
-      className="max-h-[60vh] overflow-y-auto"
+      ref={innerRef}
+      className="h-[70vh] overflow-y-auto"
       style={{ contain: 'strict' }}
     >
-      <div style={{ height: totalSize, position: 'relative', width: '100%' }}>
-        {items.map((item) => {
-          const message = messages[item.index];
-          if (!message) return null;
-          const node = renderMessage(message, onOpenPlan);
-          if (!node) return null;
-          return (
-            <div
-              key={item.key}
-              data-index={item.index}
-              ref={virtualizer.measureElement}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${item.start}px)`,
-                paddingBottom: '1.25rem',
-              }}
-            >
-              {node}
-            </div>
-          );
-        })}
-      </div>
+      {inner}
     </div>
   );
 }

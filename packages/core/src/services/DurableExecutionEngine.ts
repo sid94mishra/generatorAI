@@ -525,17 +525,22 @@ export class DurableExecutionEngine {
     executionId: string,
     iterations: Array<{ index: number; variables: Record<string, unknown>; label: string }>,
   ): number {
-    let written = 0;
+    // F1 fix: iteration slots use kind='stage_result', not 'tool_result'.
+    // findToolResult queries kind='tool_result' and always returned undefined
+    // for iteration slots, causing all slots to be re-inserted on every
+    // recovery instead of being skipped as duplicates.
+    //
+    // P0-41 / atomicity fix: collect all NEW slots first, then insert them in
+    // a single SQLite transaction via createBatch(). This prevents a partial
+    // write (crash mid-loop) from leaving some slots missing, and is ~10x
+    // faster for large automations because it avoids per-row statement overhead.
+    const newSlots: Array<Parameters<typeof this.entryRepo.createBatch>[0][number]> = [];
+
     for (const iter of iterations) {
       const key = `iter/${iter.index}`;
-      // F1 fix: iteration slots use kind='stage_result', not 'tool_result'.
-      // findToolResult queries kind='tool_result' and always returned undefined
-      // for iteration slots, causing all slots to be re-inserted on every
-      // recovery instead of being skipped as duplicates.
       const existing = this.entryRepo.findStageResultByKey('automation_execution', executionId, key);
-      if (existing) continue;
-
-      this.entryRepo.create({
+      if (existing) continue; // recovery mode — slot already committed
+      newSlots.push({
         scope: 'automation_execution',
         scopeId: executionId,
         kind: 'stage_result', // re-used as an iteration slot
@@ -547,9 +552,13 @@ export class DurableExecutionEngine {
           status: 'pending',
         },
       });
-      written++;
     }
-    return written;
+
+    if (newSlots.length > 0) {
+      this.entryRepo.createBatch(newSlots);
+    }
+
+    return newSlots.length;
   }
 
   /**

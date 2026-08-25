@@ -164,6 +164,73 @@ export class EntryRepository {
   }
 
   /**
+   * Insert many entries atomically in a single SQLite transaction.
+   *
+   * Items that cannot be inserted (e.g., due to a unique constraint) abort
+   * the entire batch — callers should filter out pre-existing rows before
+   * calling (see `initializeIterations` in DurableExecutionEngine which uses
+   * `findStageResultByKey` to identify new slots first).
+   *
+   * Returns the created records in the same order as `items`.
+   */
+  createBatch(
+    items: Array<{
+      scope: EntryScope;
+      scopeId: string;
+      kind: EntryKind;
+      artifactId?: string;
+      key?: string;
+      payload: unknown;
+    }>,
+  ): EntryRecord[] {
+    if (items.length === 0) return [];
+    const client = rawClient(this.db);
+    const results: EntryRecord[] = [];
+
+    const stmt = client.prepare(
+      `INSERT INTO entries (id, scope, scope_id, kind, artifact_id, key, payload, resolved, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+    );
+
+    const insertAll = client.transaction(() => {
+      for (const params of items) {
+        const id = generateId();
+        const now = Date.now();
+        const serialized = JSON.stringify(params.payload);
+        try {
+          stmt.run(
+            id,
+            params.scope,
+            params.scopeId,
+            params.kind,
+            params.artifactId ?? null,
+            params.key ?? null,
+            serialized,
+            now,
+          );
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new StorageError(`entries.createBatch failed (${params.kind}): ${msg}`, err instanceof Error ? err : undefined);
+        }
+        results.push({
+          id,
+          scope: params.scope,
+          scopeId: params.scopeId,
+          kind: params.kind,
+          artifactId: params.artifactId,
+          key: params.key,
+          payload: params.payload,
+          resolved: false,
+          createdAt: now,
+        });
+      }
+    });
+
+    insertAll();
+    return results;
+  }
+
+  /**
    * Resolve an entry — atomic UPDATE that stamps `resolved = 1` and
    * `resolved_at = now()`. Returns the updated record, or null if the entry
    * does not exist or is already resolved.

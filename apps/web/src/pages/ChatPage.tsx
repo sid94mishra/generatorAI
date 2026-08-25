@@ -776,7 +776,14 @@ export function ChatPage() {
           </div>
         )}
         {displayMessages.length > 0 && (
-          <ChatMessageList messages={displayMessages} onOpenPlan={openPlanTab} />
+          <ChatMessageList
+            messages={displayMessages}
+            onOpenPlan={openPlanTab}
+            // Thread the page-level scroll ref so VirtualChatList can attach
+            // to the outer scroll container rather than creating a nested one.
+            // This avoids dual scroll bars and the 60-vh height cap (W30 fix).
+            scrollElementRef={scrollRef}
+          />
         )}
         {/* Optimistic user message — right-aligned bubble (matches UserMessage
             + workflow stage prompt for a consistent stream layout). */}
