@@ -528,6 +528,17 @@ export class ServerPlaywrightHost implements IBrowserBridge {
     const entry = this.entries.get(handle.workspaceId);
     if (!entry || entry.disposed) return;
     entry.disposed = true;
+
+    // P0-24: Wake any screencast generators that are blocked inside
+    // `await new Promise<void>((resolve) => { waiter = resolve; })`.
+    // Setting disposed=true alone is not enough — the while loop condition
+    // is only evaluated AFTER the awaited promise resolves, so generators
+    // stay stuck until the next frame arrives. Since we're about to close
+    // the context (no more frames), we must unblock them explicitly.
+    for (const sub of entry.screencastSubscribers) {
+      try { sub({ jpeg: Buffer.alloc(0), ts: Date.now() }); } catch { /* ignore */ }
+    }
+
     // Drop the deferred-result bookkeeping before tearing the context down.
     // Each record owns a 5-minute expiry timer; without this they stay armed
     // on a session nobody can reach any more, holding the whole entry (page,
@@ -647,7 +658,13 @@ export class ServerPlaywrightHost implements IBrowserBridge {
     const absPath = path.join(entry.workspaceRoot, relPath);
     try {
       await fs.mkdir(path.dirname(absPath), { recursive: true });
-      const buffer = await entry.page.screenshot({ type: 'png', fullPage: false });
+      // X-14: Use CSS-pixel scale so HiDPI displays capture at logical (not
+      // physical) resolution. On a 1920×1080 HiDPI screen with devicePixelRatio=2
+      // this halves the image from 3840×2160 to 1920×1080 before storage,
+      // cutting the base64 blob sent to the model roughly 4×.
+      // TODO X-14: Add a configurable downscale factor (e.g. 0.5× for 540p)
+      // once a lightweight image-resize library is approved for this package.
+      const buffer = await entry.page.screenshot({ type: 'png', fullPage: false, scale: 'css' });
       await fs.writeFile(absPath, buffer);
       return {
         ok: true,
@@ -740,12 +757,17 @@ export class ServerPlaywrightHost implements IBrowserBridge {
             button: event.button ?? 'left',
             clickCount: event.clickCount ?? 1,
           });
-          // Let async UI (lazy-loaded modals, autocomplete, focus
-          // transitions) settle before the next event is dispatched.
-          // Without this, a fast click-then-type sequence loses the
-          // first few chars because the target input isn't mounted /
-          // focused yet. 120 ms matches typical human reaction time.
-          await new Promise((r) => setTimeout(r, 120));
+          // P1-32: Replace hardcoded 120 ms sleep with a readiness check.
+          // waitForLoadState('domcontentloaded') returns as soon as the DOM
+          // is interactive — typically <10 ms on SPAs — while still
+          // covering the common "click opens a modal" case.  Cap at 300 ms
+          // so a page stuck mid-navigation doesn't stall the input queue.
+          try {
+            await entry.page.waitForLoadState('domcontentloaded', { timeout: 300 });
+          } catch {
+            // Timeout or navigation — swallow; the next dispatch will simply
+            // race against the ongoing transition, same as before the fix.
+          }
           return;
         case 'mouse.down':
           await entry.page.mouse.move(event.x, event.y);

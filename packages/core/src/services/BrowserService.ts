@@ -80,6 +80,14 @@ interface SessionRecord {
    */
   lastActivityAt: number;
   /**
+   * P0-25: Epoch-ms of the last screencast or frame() call routed to a WS
+   * client. The idle sweeper checks this in addition to `lastActivityAt` so
+   * a session the human is actively *watching* (but not clicking on) is not
+   * reaped. Set by `bumpFrameActivity()` which is called from `screencast()`
+   * and `frame()`.
+   */
+  lastFrameSentAt: number;
+  /**
    * VSCode-parity "share with agent" state. When `true` (default), the
    * agent's built-in browser tools can drive this session. When `false`
    * (user pressed the Share toggle to detach), agent tool handlers
@@ -157,8 +165,14 @@ export class BrowserService {
         if (record.config.visibility === 'visible') continue;
         if (record.fsm.status !== 'active' && record.fsm.status !== 'idle') continue;
         const idleMinutes = record.config.idlePauseMinutes ?? 5;
-        const idleMs = now - record.lastActivityAt;
-        if (idleMs < idleMinutes * 60_000) continue;
+        const idleLimitMs = idleMinutes * 60_000;
+        // P0-25: Check both agent/user action activity AND frame-send activity.
+        // A session the human is watching (screencasting to a live view) should
+        // NOT be reaped even if no clicks are happening — that was the original
+        // bug: the sweeper killed the browser under a user who was just reading.
+        const lastActive = Math.max(record.lastActivityAt, record.lastFrameSentAt);
+        const idleMs = now - lastActive;
+        if (idleMs < idleLimitMs) continue;
         this.logger.info?.(
           `[BrowserService] Idle-pausing workspace ${workspaceId} after ${Math.round(idleMs / 60_000)}m idle (limit ${idleMinutes}m)`,
         );
@@ -297,6 +311,7 @@ export class BrowserService {
       skillWatcher: null,
       skillSeen: new Set(),
       lastActivityAt: Date.now(),
+      lastFrameSentAt: Date.now(),
       attachedToChat: true,
     };
     this.sessions.set(workspace.id, record);
@@ -504,7 +519,28 @@ export class BrowserService {
 
   screencast(workspaceId: string, opts: { fps: number; quality: number }): AsyncIterable<ScreencastFrame> {
     const record = this.mustRecord(workspaceId);
-    return record.bridge.screencast(record.handle, opts);
+    // P0-25: Wrap the bridge's async iterable so every yielded frame bumps
+    // `lastFrameSentAt`, keeping the idle sweeper from reaping a watched session.
+    const bridge = record.bridge;
+    const handle = record.handle;
+    const service = this;
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<ScreencastFrame> {
+        const iter = bridge.screencast(handle, opts)[Symbol.asyncIterator]();
+        return {
+          async next() {
+            const result = await iter.next();
+            if (!result.done) {
+              const rec = service['sessions'].get(workspaceId);
+              if (rec) rec.lastFrameSentAt = Date.now();
+            }
+            return result;
+          },
+          return: iter.return?.bind(iter),
+          throw: iter.throw?.bind(iter),
+        };
+      },
+    };
   }
 
   /**
@@ -515,6 +551,9 @@ export class BrowserService {
    */
   async frame(workspaceId: string, opts?: { quality?: number }): Promise<Buffer> {
     const record = this.mustRecord(workspaceId);
+    // P0-25: Bump frame-send activity so the idle sweeper doesn't reap a session
+    // the human is actively watching through the single-frame polling path.
+    record.lastFrameSentAt = Date.now();
     return record.bridge.frame(record.handle, opts);
   }
 
@@ -547,6 +586,19 @@ export class BrowserService {
     await this.updateWorkspaceRow(workspaceId, {
       browserLastActivityAt: new Date(),
     });
+  }
+
+  /**
+   * P0-25: Bump lastActivityAt when a WebSocket viewer connects.
+   * Called by browser-ws.ts on every new WS connection so the idle sweeper
+   * never reaps a session the moment a client opens the live view.
+   */
+  bumpActivity(workspaceId: string): void {
+    const record = this.sessions.get(workspaceId);
+    if (record) {
+      record.lastActivityAt = Date.now();
+      record.lastFrameSentAt = Date.now();
+    }
   }
 
   /**

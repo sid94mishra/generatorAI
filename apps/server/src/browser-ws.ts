@@ -76,6 +76,11 @@ export function attachBrowserWebSocket(server: HttpServer, container: Container)
   function handleConnection(ws: WebSocket, workspaceId: string): void {
     let stopped = false;
     logger.info?.(`[browser-ws v3-framepoll] client connected workspace=${workspaceId}`);
+    // P0-25: Bump activity so the idle sweeper doesn't reap a session the moment
+    // a viewer connects. The sweeper now checks lastFrameSentAt in addition to
+    // lastActivityAt, so frame delivery keeps the session alive, but connecting
+    // is itself a signal of user presence worth recording immediately.
+    browserService.bumpActivity(workspaceId);
 
     // Serialize input dispatch so a rapid click-then-type sequence
     // reaches Chromium in the right order. Without this the click
