@@ -36,6 +36,7 @@ import type { DataSourceResolver } from './DataSourceResolver.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import { planIterations } from './IterationPlanner.js';
+import type { DurableExecutionEngine } from './DurableExecutionEngine.js';
 
 /** Interface for automation repository */
 export interface IAutomationRepository {
@@ -130,6 +131,13 @@ export class AutomationService {
      * (or vice-versa).
      */
     private withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>,
+    /**
+     * W22 — durable execution engine. When supplied, iteration slots are
+     * written to the `entries` table up front and claimed atomically, so a
+     * 1000-row batch that dies at row 40 resumes at row 41 on restart
+     * (P0-41 fix). When absent, the legacy in-memory iteration loop runs.
+     */
+    private durableEngine?: DurableExecutionEngine,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════
@@ -659,6 +667,25 @@ export class AutomationService {
 
       const maxConcurrency = Math.max(1, automation.maxConcurrency);
 
+      // ── W22 — Durable iteration claiming (P0-41 fix) ──────────
+      // When the durable engine is available, write all iteration slots up
+      // front so a restart can claim and resume any still-pending rows
+      // without losing work.
+      if (this.durableEngine) {
+        const slots = iterations.map((iter, idx) => ({
+          index: idx,
+          variables: iter.variables,
+          label: iter.label,
+        }));
+        const written = this.durableEngine.initializeIterations(execution.id, slots);
+        if (written > 0) {
+          this.logger.debug(`[AutomationService] Durable: initialized ${written} iteration slots for execution ${execution.id}`);
+        } else {
+          this.logger.debug(`[AutomationService] Durable: recovery mode — slots already exist for execution ${execution.id}`);
+        }
+      }
+      // ──────────────────────────────────────────────────────────
+
       // In batch/loop mode, maxConcurrency controls how many iterations run in parallel.
       // Within each iteration, workflows still run sequentially (they share context).
       for (let batchStart = 0; batchStart < iterations.length; batchStart += maxConcurrency) {
@@ -669,7 +696,21 @@ export class AutomationService {
           return; // Exit early — cancelExecution already set terminal status
         }
 
-        const iterBatch = iterations.slice(batchStart, batchStart + maxConcurrency);
+        // W22: when the durable engine is active, use atomic claim instead of
+        // slicing the in-memory array. This prevents duplicate iteration on
+        // restart (the claim is idempotent — already-claimed rows return null).
+        let iterBatch: typeof iterations;
+        if (this.durableEngine) {
+          iterBatch = [];
+          for (let i = 0; i < maxConcurrency; i++) {
+            const claimed = this.durableEngine.claimNextIteration(execution.id);
+            if (!claimed) break;
+            iterBatch.push({ variables: claimed.variables, label: claimed.label });
+          }
+          if (iterBatch.length === 0) break; // No more pending iterations.
+        } else {
+          iterBatch = iterations.slice(batchStart, batchStart + maxConcurrency);
+        }
 
         const iterResults = await Promise.allSettled(
           iterBatch.map(async (iter, offsetInBatch) => {

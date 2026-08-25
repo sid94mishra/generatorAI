@@ -64,6 +64,9 @@ import {
   DrizzleWidgetInstanceRepository,
   // W34 / P1-42 — conversation ownership store (migration v33)
   SqliteConversationOwnershipRepository,
+  // W22 / W47 — durable execution engine storage (migration v36–v37)
+  RegisterRepository,
+  EntryRepository,
 } from '@generatorai/db';
 import {
   // Bootstrap — shared core services factory
@@ -493,6 +496,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const automationExecutionRepo = new DrizzleAutomationExecutionRepository(db);
   // Track A3 — idempotency-key store.
   const idempotencyKeyRepo = new DrizzleIdempotencyKeyRepository(db);
+  // W22 / W47 — durable execution engine storage (migration v36–v37).
+  const registerRepo = new RegisterRepository(db);
+  const entryRepo = new EntryRepository(db);
 
   // ── Project & Codebase Management Repositories ──
   const projectRepo = new DrizzleProjectRepository(db);
@@ -557,6 +563,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automationRepo,
     automationExecutionRepo,
     idempotencyKeyRepo,
+    // W22 / W47 — durable execution engine storage.
+    registerRepo,
+    entryRepo,
     sessionAllocationRepo,
     // Wire the sandbox lifecycle manager as the orphan reaper so
     // StartupRecoveryService can call `cleanupOrphans()` on boot to

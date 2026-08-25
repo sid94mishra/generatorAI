@@ -64,6 +64,8 @@ import { DataSourceResolver } from '../services/DataSourceResolver.js';
 import { HitlService } from '../services/HitlService.js';
 import { AgentInteractionService } from '../services/AgentInteractionService.js';
 import { PlanService } from '../services/PlanService.js';
+import { DurableExecutionEngine } from '../services/DurableExecutionEngine.js';
+import type { RegisterRepository, EntryRepository } from '@generatorai/db';
 import type { AgentService } from '../services/AgentService.js';
 import type { AgentResolver } from '../services/AgentResolver.js';
 import type { AgentStagingService } from '../services/AgentStagingService.js';
@@ -123,6 +125,15 @@ export interface CoreServicesInputs {
      */
     maxConcurrentStages?: number;
     webhooks: { enabled?: boolean; githubSecret?: string; webhookToken?: string };    projectRoot?: string;  };
+
+  /**
+   * W22 / W47 — Durable execution engine repositories. Optional so that
+   * existing test embedders that haven't migrated to v36–v38 keep working.
+   * When omitted, `DurableExecutionEngine` is unavailable and
+   * `AutomationService` falls back to its legacy in-memory iteration loop.
+   */
+  registerRepo?: RegisterRepository;
+  entryRepo?: EntryRepository;
 
   /** Optional transactional wrapper for multi-row writes. */
   withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>;
@@ -189,6 +200,11 @@ export interface CoreServices {
 
   /** HITL — human-in-the-loop interrupt/resume primitive. */
   hitlService: HitlService;
+  /**
+   * W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix).
+   * Present only when `registerRepo` and `entryRepo` were supplied.
+   */
+  durableExecutionEngine?: DurableExecutionEngine;
   /** PLN-01 — present only when the plan repositories were supplied. */
   planService?: PlanService;
   agentInteractionService?: AgentInteractionService;
@@ -224,6 +240,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     sandboxCleaner,
     config,
     withTransaction,
+    registerRepo,
+    entryRepo,
   } = inputs;
 
   // ── Events ──
@@ -447,6 +465,15 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     stageSemaphore,
   );
 
+  // W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix).
+  // Only constructed when the caller supplied both durable storage repos
+  // (migration v36–v37). Existing embedders that haven't migrated keep
+  // receiving undefined and use the legacy in-memory iteration loop.
+  const durableExecutionEngine =
+    registerRepo && entryRepo
+      ? new DurableExecutionEngine(registerRepo, entryRepo, logger)
+      : undefined;
+
   // ── Automation ──
   const dataSourceResolver = new DataSourceResolver(scriptRunner, httpClient, logger, config.projectRoot);
   const automationService = new AutomationService(
@@ -460,6 +487,9 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     config.artifactsDir,
     dataSourceResolver,
     withTransaction,
+    // W22: durable iteration claiming (P0-41 fix). Passed through only when
+    // both durable-storage repos are available (migration v36–v37 applied).
+    durableExecutionEngine,
   );
 
   // Track A1 — boot-time reconciler + idempotency sweeper. Only wired
@@ -516,6 +546,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     automationService,
     automationRecoveryService,
     hitlService,
+    ...(durableExecutionEngine ? { durableExecutionEngine } : {}),
     ...(planService ? { planService } : {}),
     ...(agentInteractionService ? { agentInteractionService } : {}),
     ...(inputs.agentService ? { agentService: inputs.agentService } : {}),

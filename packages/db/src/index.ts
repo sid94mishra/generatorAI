@@ -106,6 +106,12 @@ export type { ComputerUseGrantRow } from './repositories/ComputerUseRepository.j
 export { DrizzleWidgetInstanceRepository } from './repositories/WidgetInstanceRepository.js';
 export type { IWidgetInstanceRepository } from './repositories/WidgetInstanceRepository.js';
 
+// W47 / W22 — Durable execution engine storage (migration v36–v38)
+export { RegisterRepository } from './repositories/RegisterRepository.js';
+export type { RegisterEntry } from './repositories/RegisterRepository.js';
+export { EntryRepository } from './repositories/EntryRepository.js';
+export type { EntryRecord, EntryKind, EntryScope } from './repositories/EntryRepository.js';
+
 
 
 export type AppDatabase = ReturnType<typeof createSqliteDB>;

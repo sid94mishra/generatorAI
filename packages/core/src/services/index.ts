@@ -194,3 +194,12 @@ export * from './push/index.js';
 
 // W12 — Agent Host client (gateway-side IAgentHarness proxy)
 export { AgentHostClient } from './AgentHostClient.js';
+
+// W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix)
+export { DurableExecutionEngine } from './DurableExecutionEngine.js';
+export type {
+  ReplayPolicy,
+  JournalCorruption,
+  EffectSpec,
+  DurableContext,
+} from './DurableExecutionEngine.js';

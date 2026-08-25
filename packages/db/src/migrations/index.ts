@@ -1902,6 +1902,107 @@ export function migrateDB(db: AppDatabase): void {
         `CREATE INDEX IF NOT EXISTS idx_workflow_runs_ancestor ON workflow_runs(ancestor_run_id) WHERE ancestor_run_id IS NOT NULL;`,
       ],
     },
+
+    // ── W47 / §3.4 — Durable execution engine storage ────────────────────
+    //
+    // Three new tables that back the DurableExecutionEngine (W22):
+    //
+    //   registers   — per-scope key-value store; serves as the "durable program
+    //                 counter". After every step, one register is overwritten
+    //                 with the complete current state so recovery can resume at
+    //                 exactly the right place by reading it back.
+    //
+    //   entries     — durable items stored separately from the message stream
+    //                 (W23 §X-25). Covers: artifacts (stable artifactId survives
+    //                 retry), signals (named, resolvable repeatedly),
+    //                 awakeables (one-time wake-up tokens), tool results and
+    //                 stage results that need a durable home.
+    //
+    //   usage_ledger — per-turn cost accounting stored alongside the scope
+    //                  that incurred it. Gives a queryable audit trail for
+    //                  billing without coupling the hot event path.
+    //
+    // All three are append-only by design; settlement is a flag update, never
+    // a row delete.
+    {
+      version: 36,
+      name: 'w47_registers',
+      sql: [
+        `
+        CREATE TABLE IF NOT EXISTS registers (
+          scope      TEXT    NOT NULL,
+          scope_id   TEXT    NOT NULL,
+          key        TEXT    NOT NULL,
+          value      TEXT    NOT NULL,
+          version    INTEGER NOT NULL DEFAULT 0,
+          written_at INTEGER NOT NULL,
+          PRIMARY KEY (scope, scope_id, key)
+        );
+        `,
+        // Hot lookup by scope+id (enumerate all registers for a resuming stage).
+        `CREATE INDEX IF NOT EXISTS idx_registers_scope_id ON registers(scope, scope_id);`,
+      ],
+    },
+    {
+      version: 37,
+      name: 'w47_entries',
+      sql: [
+        `
+        CREATE TABLE IF NOT EXISTS entries (
+          id          TEXT    PRIMARY KEY,
+          scope       TEXT    NOT NULL
+            CHECK(scope IN ('session', 'stage_run', 'workflow_run', 'automation_execution')),
+          scope_id    TEXT    NOT NULL,
+          kind        TEXT    NOT NULL
+            CHECK(kind IN ('artifact', 'signal', 'awakeable', 'tool_result', 'stage_result')),
+          artifact_id TEXT,
+          key         TEXT,
+          payload     TEXT    NOT NULL,
+          resolved    INTEGER NOT NULL DEFAULT 0,
+          resolved_at INTEGER,
+          created_at  INTEGER NOT NULL
+        );
+        `,
+        // Enumerate all entries for a scope (recovery, reconnect snapshot).
+        `CREATE INDEX IF NOT EXISTS idx_entries_scope_id ON entries(scope, scope_id);`,
+        // Signal lookup by name within a scope (Signal.resolve / Signal.await).
+        `CREATE INDEX IF NOT EXISTS idx_entries_scope_key ON entries(scope, scope_id, key)
+           WHERE key IS NOT NULL;`,
+        // Awakeable lookup by token (resolveAwakeable endpoint).
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_awakeable_key ON entries(key)
+           WHERE kind = 'awakeable' AND key IS NOT NULL;`,
+        // Artifact dedup: same artifactId within a scope maps to one entry.
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_artifact_id ON entries(scope, scope_id, artifact_id)
+           WHERE artifact_id IS NOT NULL;`,
+      ],
+    },
+    {
+      version: 38,
+      name: 'w47_usage_ledger',
+      sql: [
+        `
+        CREATE TABLE IF NOT EXISTS usage_ledger (
+          id                 TEXT    PRIMARY KEY,
+          scope              TEXT    NOT NULL
+            CHECK(scope IN ('chat', 'stage_run', 'workflow_run', 'automation_execution')),
+          scope_id           TEXT    NOT NULL,
+          session_id         TEXT,
+          provider           TEXT    NOT NULL,
+          model              TEXT    NOT NULL,
+          input_tokens       INTEGER NOT NULL DEFAULT 0,
+          output_tokens      INTEGER NOT NULL DEFAULT 0,
+          cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+          cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+          cost_usd           REAL,
+          recorded_at        INTEGER NOT NULL
+        );
+        `,
+        `CREATE INDEX IF NOT EXISTS idx_usage_ledger_scope ON usage_ledger(scope, scope_id);`,
+        `CREATE INDEX IF NOT EXISTS idx_usage_ledger_session ON usage_ledger(session_id)
+           WHERE session_id IS NOT NULL;`,
+        `CREATE INDEX IF NOT EXISTS idx_usage_ledger_recorded_at ON usage_ledger(recorded_at);`,
+      ],
+    },
   ];
 
 
