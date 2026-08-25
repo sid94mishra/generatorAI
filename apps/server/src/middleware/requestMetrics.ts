@@ -36,6 +36,18 @@ export function requestMetricsMiddleware(req: Request, res: Response, next: Next
     span.setAttribute('http.request_id', req.requestId);
   }
 
+  // P3-b — SSE and WebSocket streams may never emit 'finish' when the client
+  // disconnects mid-stream. Without a 'close' guard the active-request gauge
+  // leaks +1 for every open stream, eventually making the metric meaningless.
+  // Use a once-only decrement so a connection that fires both 'finish' and
+  // 'close' (normal HTTP) decrements exactly once.
+  let decremented = false;
+  const decrementActive = () => {
+    if (decremented) return;
+    decremented = true;
+    httpActiveRequests.add(-1);
+  };
+
   res.on('finish', () => {
     const duration = performance.now() - start;
     const route = req.route?.path ?? req.path;
@@ -47,8 +59,12 @@ export function requestMetricsMiddleware(req: Request, res: Response, next: Next
 
     httpRequestDuration.record(duration, attrs);
     httpRequestTotal.add(1, attrs);
-    httpActiveRequests.add(-1);
+    decrementActive();
   });
+
+  // Fires when the underlying socket closes — covers aborted streams and
+  // client disconnects that never trigger 'finish'.
+  res.on('close', decrementActive);
 
   next();
 }
