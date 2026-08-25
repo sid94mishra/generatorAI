@@ -3,9 +3,10 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { Server } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { homedir, hostname, networkInterfaces } from 'node:os';
 import { resolve, dirname } from 'node:path';
-import { mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // ── Load .env file (if present) before reading process.env ──────────────────
@@ -235,7 +236,34 @@ async function startServer(): Promise<void> {
     mkdirSync(dir, { recursive: true });
   }
   // Ensure the parent directory of the DB file exists
-  mkdirSync(resolve(dbPath, '..'), { recursive: true });
+  const dbDataDir = resolve(dbPath, '..');
+  mkdirSync(dbDataDir, { recursive: true });
+
+  // W20 / X-18 — server.lock: identity file written on startup and removed on
+  // clean shutdown. If a lock from a previous process (different PID) exists we
+  // log a warning — the previous server may not have exited cleanly (e.g. SIGKILL).
+  // We do NOT refuse to start; StartupRecoveryService handles in-flight state.
+  const lockPath = resolve(dbDataDir, 'server.lock');
+  const instanceId = randomUUID();
+  const lockPort = parseInt(process.env['PORT'] ?? '3100', 10);
+  const lockPayload = JSON.stringify({ instanceId, pid: process.pid, port: lockPort, startedAt: new Date().toISOString() });
+  try {
+    if (existsSync(lockPath)) {
+      const prev = JSON.parse(readFileSync(lockPath, 'utf8')) as {
+        instanceId?: string; pid?: number; port?: number; startedAt?: string;
+      };
+      if (prev.pid && prev.pid !== process.pid) {
+        console.warn(
+          `[Server] server.lock (pid=${prev.pid}, id=${prev.instanceId ?? '?'}) found from a prior instance — ` +
+          'it may not have exited cleanly. Proceeding; StartupRecoveryService will reconcile in-flight state.',
+        );
+      }
+    }
+    writeFileSync(lockPath, lockPayload, 'utf8');
+  } catch (err) {
+    // Lock file is advisory only — a failure here must not block startup.
+    console.warn('[Server] Could not write server.lock:', err instanceof Error ? err.message : String(err));
+  }
 
   const rawConfig = {
     port: parseInt(process.env['PORT'] ?? '3100', 10),
@@ -377,6 +405,38 @@ async function startServer(): Promise<void> {
     });
   }
   startChildReaperHeartbeat();
+
+  // W21 — Start the event-loop wedge detector (L6: runs in a worker_thread
+  // that is NOT downstream of a frozen main loop). Alert threshold is tunable
+  // via env; defaults are conservative (5s alert, 1s tick) to tolerate
+  // normal GC pauses without false positives.
+  //
+  // Imported here to keep the feature behind a single env flag that lets
+  // operators disable it if the worker_threads overhead is undesirable.
+  let wedgeDetector: import('@generatorai/core').WedgeDetector | undefined;
+  if (process.env['GENERATORAI_WEDGE_DETECT'] !== '0') {
+    const { WedgeDetector } = await import('@generatorai/core');
+    const alertThresholdMs = parseInt(process.env['GENERATORAI_WEDGE_ALERT_MS'] ?? '5000', 10);
+    const tickIntervalMs = parseInt(process.env['GENERATORAI_WEDGE_TICK_MS'] ?? '1000', 10);
+    const killOnWedge = process.env['GENERATORAI_WEDGE_KILL'] === '1';
+    wedgeDetector = new WedgeDetector({
+      alertThresholdMs,
+      tickIntervalMs,
+      killOnWedge,
+      onWedge: (overdueMsApprox) => {
+        console.error(
+          `[Server] EVENT LOOP WEDGE DETECTED — main loop has not ticked for ~${overdueMsApprox}ms ` +
+          `(threshold: ${alertThresholdMs}ms). The process may be unresponsive.`,
+        );
+        // Attempt graceful shutdown via the normal path so in-flight state
+        // is persisted. Only do this if the loop is actually alive enough to
+        // receive the signal — if it is truly frozen, killOnWedge:true will
+        // have already sent SIGTERM from the worker.
+        if (requestShutdown) requestShutdown('wedge-detected');
+      },
+    });
+    wedgeDetector.start();
+  }
 
   // 3. Initialize services (load templates, start Copilot, recover sessions)
   await container.initialize();
@@ -583,6 +643,14 @@ async function startServer(): Promise<void> {
 
         timings.totalMs = Date.now() - shutdownStart;
 
+        // W20 — remove the server.lock so the next boot knows this one
+        // exited cleanly (no stale-lock warning on restart).
+        try { unlinkSync(lockPath); } catch { /* non-fatal */ }
+
+        // W21 — stop the wedge detector worker so it doesn't fire after
+        // we've already begun shutting down.
+        try { wedgeDetector?.stop(); } catch { /* non-fatal */ }
+
         // SEC-09 — single structured summary for ops dashboards.
         container.logger.info('[Server] shutdown complete', { signal, timings });
         clearTimeout(forceExit);
@@ -590,6 +658,8 @@ async function startServer(): Promise<void> {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         timings.totalMs = Date.now() - shutdownStart;
+        // W20 — best-effort remove lock even on failed shutdown.
+        try { unlinkSync(lockPath); } catch { /* non-fatal */ }
         container.logger.error('[Server] shutdown failed', { signal, error: msg, timings });
         clearTimeout(forceExit);
         process.exit(1);

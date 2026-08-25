@@ -735,6 +735,16 @@ export class StageExecutionService {
     variables?: Record<string, unknown>,
     predecessorSummaries?: Array<{ stageName: string; summary: string; outputData?: Record<string, unknown>; fullOutput?: string }>,
     resumeContext?: { resumeFromPause: true; continuationNeeded: boolean },
+    /**
+     * W18 / P1-16 — stage-semaphore HITL callbacks. When supplied (by
+     * `WorkflowRunService.launchStage`), `pause()` releases the semaphore
+     * permit before each `hitl.interrupt()` call so other stages can run
+     * while the human is thinking, and `resume()` re-acquires it afterwards
+     * before the agent processes any feedback. Without this the permit is
+     * held for the entire human-review wait (potentially hours), starving
+     * other concurrent stages.
+     */
+    semaphoreCallbacks?: { pause: () => void; resume: () => Promise<void> },
   ): Promise<void> {
     const start = Date.now();
     return withSpan('core.stage', 'workflow.stage.execute', async (span) => {
@@ -1744,14 +1754,25 @@ export class StageExecutionService {
               reviewRound,
               ...(stagePlanId ? { planId: stagePlanId } : {}),
             };
-            const resolution = await hitl.interrupt(
-              stageRun.id,
-              workflowRunId,
-              interruptPayload,
-              {
-                prompt: interruptPayload.reason,
-              },
-            );
+            // W18 / P1-16 — release the stage-semaphore permit while parked
+            // waiting for human approval. The wait can be arbitrarily long, and
+            // holding the permit starves other concurrent stages. Re-acquire it
+            // once the reviewer has decided so subsequent harness work (e.g.
+            // the feedback sendPromptAndWait) runs under the correct bound.
+            semaphoreCallbacks?.pause();
+            let resolution: Awaited<ReturnType<typeof hitl.interrupt>>;
+            try {
+              resolution = await hitl.interrupt(
+                stageRun.id,
+                workflowRunId,
+                interruptPayload,
+                {
+                  prompt: interruptPayload.reason,
+                },
+              );
+            } finally {
+              await semaphoreCallbacks?.resume();
+            }
 
             const outcome = resolutionOutcome(resolution);
 

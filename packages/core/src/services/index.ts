@@ -22,6 +22,10 @@ export { DAGScheduler } from './DAGScheduler.js';
 export { StageExecutionService } from './StageExecutionService.js';
 export { WorkflowRunService } from './WorkflowRunService.js';
 
+// W18 — Admission control + concurrency management
+export { AdmissionController } from './AdmissionController.js';
+export type { AdmissionLane, AdmissionControllerConfig, LaneSnapshot } from './AdmissionController.js';
+
 // Orchestrator mode (background-agent orchestration for Chat)
 export { OrchestratorService, DEFAULT_ORCHESTRATOR_CONFIG } from './orchestrator/OrchestratorService.js';
 export type { OrchestratorConfig, SpawnResult } from './orchestrator/OrchestratorService.js';
@@ -187,3 +191,6 @@ export {
 } from './agentModePolicy.js';
 
 export * from './push/index.js';
+
+// W12 — Agent Host client (gateway-side IAgentHarness proxy)
+export { AgentHostClient } from './AgentHostClient.js';

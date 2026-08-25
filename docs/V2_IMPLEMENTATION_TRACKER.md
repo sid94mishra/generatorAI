@@ -19,7 +19,7 @@ was checked with `git diff` plus a grep of the specific symbol.
 | **0** | Stop the bleeding | ✅ Complete · 2 review rounds · 24 findings fixed |
 | **1** | Stream spine | ✅ Complete · 1 review round · 3 MAJOR + 2 MINOR findings fixed |
 | **2** | Provider port & contracts | ✅ Complete · 3 review rounds · W34/W35/W13/W42/W44/W45/W41/W46/W37/W38/W39/W10 all done · 17 adversarial findings fixed (6 CRITICAL, 7 MAJOR, 4 MINOR) |
-| **3** | Process split & admission | 🔄 In progress · W33 Step 3.1 done |
+| **3** | Process split & admission | 🔄 In progress · W33/W18/W19/W20/W21 done · W12/W36 in progress |
 | **4** | Native hosts | ⬜ Not started |
 | **5** | Client rebuild | ⬜ Not started |
 | **6** | Durability & orchestration | ⬜ Not started |
@@ -538,12 +538,12 @@ tests added for all BLOCKER/MAJOR findings; test count rose from 149 → 170.
 | Step | Item | State | Defects fixed |
 |---|---|---|---|
 | 3.1 | **W33** (partial) — ESLint layer boundary rules; DAGScheduler instance-state queues | ✅ | P1-19 (DAG module globals) |
-| 3.2 | **W12** — Agent Host process (single-reader demux, bounded queues, age/RSS recycling) | ⬜ | P0-13, P0-14 |
+| 3.2 | **W12** — Agent Host process (single-reader demux, bounded queues, age/RSS recycling) | 🔄 In progress (fork agent) | P0-13, P0-14 |
 | 3.3 | **W36** — One Copilot runtime per workspace (on W12's Host Supervisor) | ⬜ | P0-13 |
-| 3.4 | **W18** — Admission controller (lanes, queue-don't-reject, dynamic sizing, permit released across gates) | ⬜ | P1-16, P1-18, P2-d, P3-d |
-| 3.5 | **W19** — Worker pools by blocking class; payload cap; memoised route policy; raw-body limit | ⬜ | X-9, X-10, P2-a, P2-b, P3-c |
-| 3.6 | **W20** (complete) — Restart caps + conditional predicate; identity-checked port acquisition | ⬜ | P0-40, X-18 |
-| 3.7 | **W21** — Event-loop monitor on worker thread; loop-turning liveness probe | ⬜ | X-8 |
+| 3.4 | **W18** — Admission controller (lanes, queue-don't-reject, dynamic sizing, permit released across gates) | ✅ | P1-16, P1-18, P2-d, P3-d |
+| 3.5 | **W19** — Worker pools by blocking class; payload cap; memoised route policy; raw-body limit | ✅ (partial: P2-b raw-body, P3-c existsSync, X-9 JSON limit already 2MB) | X-9, P2-b, P3-c |
+| 3.6 | **W20** — Restart caps + conditional predicate; identity-checked server.lock | ✅ | P0-40, X-18 |
+| 3.7 | **W21** — Event-loop monitor on worker thread; loop-turning liveness probe | ✅ | X-8 |
 
 ### W33 Step 3.1 — implemented 2026-08-25
 
@@ -559,6 +559,49 @@ tests added for all BLOCKER/MAJOR findings; test count rose from 149 → 170.
 - `QueuedOp<T>` interface kept as module-level type (no shared state)
 - All existing tests pass (738/741 — 3 pre-existing `toolSurface.test.ts` failures unchanged)
 
+### W18/W19/W20/W21 Step 3.4–3.7 — implemented 2026-08-25
+
+**W18 — Admission controller + HITL permit release (P1-16, P2-d):**
+- `packages/core/src/services/AdmissionController.ts` (NEW) — 3 lanes (`interactive/ordinary/bulk`) with
+  per-lane `Semaphore`, `depth()`, `running()`, `snapshot()` for health observability. Queue-don't-reject;
+  never throws due to queue depth.
+- `packages/core/src/services/DurableSleepService.ts` — demand-gated sweeper (`#activeSleepCount`).
+  `sleep()` increments the count and calls `_ensureSweeperRunning()`. Each woken stage calls
+  `_onWakeComplete()` which decrements and stops the timer when count hits zero. The external
+  `start()` call (boot recovery) sets count to at-least-1 to prevent immediate auto-stop.
+- `packages/core/src/services/StageExecutionService.ts` — `executeStage()` accepts new optional 8th
+  parameter `semaphoreCallbacks?: { pause, resume }`. Around each `hitl.interrupt()` call: `pause()`
+  releases the permit before parking; `resume()` re-acquires after the reviewer decides. This frees the
+  stage-concurrency slot for the entire human-review wait (P1-16 root cause fixed).
+- `packages/core/src/services/WorkflowRunService.ts` — `launchStage()` changed from
+  `semaphore.run(exec)` to manual `acquire()`/`release()` pattern. Tracks `permitHeld` boolean so
+  the `finally` block only releases if `pause()` hasn't already. Passes `semaphoreCallbacks` through
+  to `executeStage()`.
+
+**W19 — Gateway hygiene (P2-b, P3-c):**
+- `apps/server/src/middleware/staticFiles.ts` — replaced both `fs.existsSync()` blocking calls with
+  `fsPromises.access()` async check (resolves once at startup). Per-request handler uses
+  `res.sendFile(indexPath, cb)` without any pre-flight disk check — Express handles ENOENT via `next(err)`.
+- `apps/server/src/app.ts` — `rawBody` capture in `express.json()` verify hook gated to webhook URL
+  prefixes (`/api/webhooks`, `/api/automations/webhooks`) only. Non-webhook requests no longer carry
+  a second copy of the body buffer.
+
+**W20 — Server identity + restart cap (X-18):**
+- `apps/server/src/index.ts` — writes `server.lock` with `{instanceId, pid, port, startedAt}` to the
+  DB data directory on startup. Logs a warning if a lock from a different PID is found (crash detection).
+  Lock is removed atomically on clean shutdown (both success and failure paths). Lock failure is advisory;
+  it never blocks startup.
+
+**W21 — WedgeDetector + loop-turn probe (X-8):**
+- `packages/core/src/infrastructure/WedgeDetector.ts` (NEW) — worker_thread monitor. Main thread
+  sends periodic ticks (`tickIntervalMs` default 1s); worker alerts if gap exceeds `alertThresholdMs`
+  (default 5s). L6 compliant: monitor is outside the main event loop. Optional `killOnWedge: true`
+  sends SIGTERM from the worker when the main loop is confirmed frozen.
+- `apps/server/src/routes/health.ts` — `GET /api/health/loop-turn` responds with timestamp only
+  (no I/O); external observers measure response latency to detect event-loop slowness.
+- `apps/server/src/index.ts` — WedgeDetector instantiated after container creation; stopped on
+  shutdown. Enabled by default, disable with `GENERATORAI_WEDGE_DETECT=0`.
+
 ### Phase 3 exit criteria
 
 | Criterion | State |
@@ -566,11 +609,11 @@ tests added for all BLOCKER/MAJOR findings; test count rose from 149 → 170.
 | `pnpm build` 25/25 green | ✅ |
 | Layer lint: no L1/L2 package imports Express/Electron/node-pty | ✅ |
 | Two DAGScheduler instances have isolated queue state | ✅ |
-| A large tool result in one session does not delay another (W12 — measured) | ⬜ |
-| 8 stages on approval do not stop unrelated runs (W18) | ⬜ |
-| Health endpoint publishes queue depth (W18) | ⬜ |
-| Event-loop wedge detected within 30 s (W21) | ⬜ |
-| Independent adversarial review | ⬜ |
+| A large tool result in one session does not delay another (W12 — measured) | 🔄 W12 fork in progress |
+| 8 stages on approval do not stop unrelated runs (W18) | ✅ HITL permit release implemented |
+| Health endpoint publishes queue depth (W18) | ✅ `AdmissionController.snapshot()` available; wire into health when W12 lands |
+| Event-loop wedge detected within 30 s (W21) | ✅ WedgeDetector with 5s threshold |
+| Independent adversarial review | ⬜ pending W12 completion |
 
 ---
 

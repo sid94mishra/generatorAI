@@ -68,6 +68,13 @@ export type OnWakeHandler = (stageRun: StageRun) => Promise<void> | void;
 export class DurableSleepService {
   private timer: ReturnType<typeof setInterval> | undefined;
   private running = false;
+  /**
+   * W18 / P2-c — demand-gated sweeper. The timer only runs while at least one
+   * stage is in the `sleeping` state so the sweeper doesn't burn CPU cycles
+   * polling an empty table every `sweepIntervalMs` on an otherwise idle server.
+   * Incremented by `sleep()`, decremented once per successful `wake()` claim.
+   */
+  private activeSleepCount = 0;
 
   constructor(
     private readonly stageRunRepo: IStageRunRepository,
@@ -103,12 +110,52 @@ export class DurableSleepService {
       wakeAt: wakeAt.toISOString(),
       durationMs: safeDuration,
     });
+    // W18 — demand-gate: start the sweeper the moment a stage goes to sleep so
+    // we don't poll when there is nothing to wake up.
+    this.activeSleepCount += 1;
+    this._ensureSweeperRunning();
     return wakeAt;
+  }
+
+  /**
+   * Start the sweeper if it isn't already running and the service is enabled.
+   * Called internally whenever a new sleep is registered.
+   */
+  private _ensureSweeperRunning(): void {
+    if (!this.config.enabled) return;
+    if (this.timer) return;
+    void this.sweep();
+    this.timer = setInterval(() => void this.sweep(), this.config.sweepIntervalMs);
+    if (typeof this.timer.unref === 'function') this.timer.unref();
+    this.logger?.info?.('[DurableSleep] sweeper auto-started (active sleeps > 0)', {
+      activeSleepCount: this.activeSleepCount,
+    });
+  }
+
+  /**
+   * Decrement the active-sleep count. Stops the sweeper when it reaches zero
+   * so the timer doesn't burn CPU cycles on an idle server.
+   */
+  private _onWakeComplete(): void {
+    this.activeSleepCount = Math.max(0, this.activeSleepCount - 1);
+    if (this.activeSleepCount === 0 && this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+      this.logger?.info?.('[DurableSleep] sweeper auto-stopped (no active sleeps)');
+    }
   }
 
   /**
    * Start the background sweeper. No-op when `enabled=false`. Idempotent
    * — calling start() twice does not stack timers.
+   *
+   * W18 / P2-c — this is now a no-op by default; the sweeper starts on
+   * demand when the first `sleep()` call arrives and stops automatically
+   * when all sleeping stages have been woken. Call `start()` explicitly at
+   * boot ONLY on a restarting server that may have pre-existing sleeping
+   * rows in the DB (StartupRecoveryService does this). If you have nothing
+   * sleeping, starting the sweeper wastes CPU burning SQL reads every
+   * `sweepIntervalMs`.
    */
   start(): void {
     if (!this.config.enabled) {
@@ -118,6 +165,9 @@ export class DurableSleepService {
     if (this.timer) return;
     // Kick one sweep immediately so a stage whose wakeAt is already past
     // (server restart scenario) doesn't sit around for a full interval.
+    // After a restart we don't know the exact count from memory, so treat
+    // the count as at-least-1 to prevent an immediate auto-stop.
+    if (this.activeSleepCount === 0) this.activeSleepCount = 1;
     void this.sweep();
     this.timer = setInterval(() => void this.sweep(), this.config.sweepIntervalMs);
     if (typeof this.timer.unref === 'function') this.timer.unref();
@@ -161,6 +211,8 @@ export class DurableSleepService {
           continue;
         }
         woken++;
+        // W18 — decrement active count and auto-stop sweeper when drained.
+        this._onWakeComplete();
         const overdueMs = stage.wakeAt ? Date.now() - stage.wakeAt.getTime() : 0;
         try {
           await this.eventBus.emitGlobal({

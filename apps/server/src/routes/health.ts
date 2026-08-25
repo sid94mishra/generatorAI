@@ -70,6 +70,22 @@ export function createHealthRoutes(container: Container): Router {
     });
   });
 
+  // GET /loop-turn — W21 event-loop liveness probe.
+  //
+  // Responds immediately with the current timestamp. Clients (monitoring,
+  // WedgeDetector's external-probe mode, integration tests) measure how long
+  // the request takes to resolve: a slow response indicates the event loop is
+  // under load or wedged. This endpoint is deliberately as cheap as possible
+  // (no DB, no I/O) so the response latency reflects only the event loop.
+  //
+  // Mounted under /api/health/loop-turn; the WedgeDetector uses worker_threads
+  // internally and does NOT call this endpoint — it is purely for external
+  // observers that cannot use the in-process worker approach.
+  router.get('/loop-turn', (_req, res) => {
+    const respondedAt = Date.now();
+    res.json({ ok: true, respondedAt, uptimeMs: respondedAt - startTime });
+  });
+
   // GET /config — Public (non-sensitive) configuration
   router.get('/config', (_req, res) => {
     res.json({

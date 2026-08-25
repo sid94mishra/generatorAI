@@ -182,16 +182,47 @@ export class WorkflowRunService {
     variables?: Record<string, unknown>,
     predecessorSummaries?: Array<{ stageName: string; summary: string; outputData?: Record<string, unknown> }>,
   ): void {
-    const exec = (): Promise<void> =>
-      this.stageExecutionService.executeStage(
-        stageRun,
-        runId,
-        sessionMode,
-        harnessConfig,
-        variables,
-        predecessorSummaries,
-      );
-    const settled = this.stageSemaphore ? this.stageSemaphore.run(exec) : exec();
+    // W18 / P1-16 — use acquire/release directly instead of semaphore.run() so
+    // we can yield the permit across HITL approval waits (which can last hours).
+    // semaphoreCallbacks are forwarded to executeStage; it calls pause() before
+    // each hitl.interrupt() and resume() once the reviewer has decided.
+    const settled = (async () => {
+      if (this.stageSemaphore) await this.stageSemaphore.acquire();
+      let permitHeld = !!this.stageSemaphore;
+      const semaphoreCallbacks = this.stageSemaphore
+        ? {
+            pause: () => {
+              if (permitHeld) {
+                this.stageSemaphore!.release();
+                permitHeld = false;
+              }
+            },
+            resume: async () => {
+              if (!permitHeld) {
+                await this.stageSemaphore!.acquire();
+                permitHeld = true;
+              }
+            },
+          }
+        : undefined;
+      try {
+        await this.stageExecutionService.executeStage(
+          stageRun,
+          runId,
+          sessionMode,
+          harnessConfig,
+          variables,
+          predecessorSummaries,
+          undefined, // resumeContext — not used from launchStage
+          semaphoreCallbacks,
+        );
+      } finally {
+        // Only release if the HITL callbacks didn't already release (i.e.
+        // executeStage threw before reaching a pause+resume pair, or the stage
+        // had no HITL block at all).
+        if (permitHeld && this.stageSemaphore) this.stageSemaphore.release();
+      }
+    })();
     settled.catch((err) => {
       this.onStageFailed(runId, stageRun.id, err).catch(() => {/* swallow */});
     });

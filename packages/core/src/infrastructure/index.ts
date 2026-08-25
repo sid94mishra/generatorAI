@@ -1,4 +1,9 @@
 // @generatorai/core infrastructure exports
+
+// W21 — Event-loop wedge detector (L6: monitor is outside the main loop)
+export { WedgeDetector } from './WedgeDetector.js';
+export type { WedgeDetectorConfig } from './WedgeDetector.js';
+
 export { SandboxedScriptRunner } from './SandboxedScriptRunner.js';
 export type { SandboxedScriptRunnerOptions } from './SandboxedScriptRunner.js';
 export { GitManager } from './GitManager.js';
@@ -145,3 +150,7 @@ export { NodePtyHost, resolveDefaultShell } from './terminal/NodePtyHost.js';
 export type { NodePtyHostOptions } from './terminal/NodePtyHost.js';
 export { FallbackChildProcessHost } from './terminal/FallbackChildProcessHost.js';
 export { SandboxPtyHost } from './terminal/SandboxPtyHost.js';
+
+// W12 — Agent Host process supervision
+export { HostSupervisor } from './HostSupervisor.js';
+export type { HostSupervisorOptions, HostEventHandler } from './HostSupervisor.js';

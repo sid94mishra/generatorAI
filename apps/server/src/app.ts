@@ -77,12 +77,20 @@ export function createApp(container: Container): Express {
   // signature verification — preserved exactly so SEC-12 still works.
   const jsonBodyLimit = process.env['GENERATORAI_JSON_BODY_LIMIT'] ?? '2mb';
   const urlencodedBodyLimit = process.env['GENERATORAI_URLENCODED_LIMIT'] ?? '1mb';
+  // Webhook paths that need raw-body for HMAC signature verification (SEC-12).
+  // Capture is scoped to only these prefixes so non-webhook requests do NOT
+  // buffer a second copy of the body in addition to the parsed JSON object.
+  const WEBHOOK_RAW_BODY_PREFIXES = ['/api/webhooks', '/api/automations/webhooks'];
   app.use(express.json({
     limit: jsonBodyLimit,
     verify: (req: IncomingMessage, _res, buf) => {
       // Express's Request extends IncomingMessage; the augmented `rawBody`
       // field (see types/express.d.ts) is consumed by webhook HMAC verification.
-      (req as Request).rawBody = buf;
+      // Limit to webhook paths to avoid retaining a second copy of every request body.
+      const url = req.url ?? '';
+      if (WEBHOOK_RAW_BODY_PREFIXES.some((prefix) => url.startsWith(prefix))) {
+        (req as Request).rawBody = buf;
+      }
     },
   }));
   app.use(express.urlencoded({
