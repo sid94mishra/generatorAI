@@ -1073,13 +1073,29 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
           if (lastUrl) URL.revokeObjectURL(lastUrl);
           lastUrl = url;
           setFrameSrc(url);
+          // P3-e fix: refresh the placeholder background every 20 frames so the
+          // "disconnected" view shows a recent freeze-frame. Previously this
+          // rebuilt the base64 string BYTE-BY-BYTE (a character per iteration),
+          // producing ~100 KB of string garbage every 2 s per tab. Now we use
+          // String.fromCharCode in a single call via apply (fast path) with a
+          // fallback chunk loop for very large frames that exceed the call-stack
+          // limit of some JS engines (~65536 args).
           placeholderCounterRef.current = (placeholderCounterRef.current + 1) % 20;
           if (placeholderCounterRef.current === 0) {
             void blob.arrayBuffer().then((buf) => {
               if (cancelled) return;
               const bytes = new Uint8Array(buf);
-              let bin = '';
-              for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]!);
+              let bin: string;
+              if (bytes.length <= 65536) {
+                bin = String.fromCharCode.apply(null, bytes as unknown as number[]);
+              } else {
+                // Chunk to stay within call-stack limits.
+                const parts: string[] = [];
+                for (let i = 0; i < bytes.length; i += 65536) {
+                  parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + 65536) as unknown as number[]));
+                }
+                bin = parts.join('');
+              }
               try { setPlaceholderBg(`data:image/jpeg;base64,${btoa(bin)}`); } catch { /* ignore */ }
             }).catch(() => undefined);
           }

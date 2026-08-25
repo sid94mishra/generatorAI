@@ -9,3 +9,5 @@ export * from './telemetry/index.js';
 export * from './builders/index.js';
 // W12 — IPC protocol for inter-process communication
 export * from './ipc/AgentHostIpc.js';
+// W29 — Transport capability ledger per surface
+export * from './transport/TransportCapabilities.js';

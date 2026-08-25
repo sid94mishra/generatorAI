@@ -385,8 +385,14 @@ export function useChat(chatId: string | undefined) {
  * chats. The server returns the most recent page when no offset is given; live
  * messages continue to arrive via SSE. `limit` is overridable for callers that
  * want a larger window.
+ *
+ * P0-48 fix: default raised from 50 → 100. The old default of 50 was lower
+ * than the virtualization threshold (80), making messages 51-80 permanently
+ * unreachable through the UI — a correctness bug disguised as a performance
+ * optimization. Callers that call with a `limit` prop (e.g. ChatPage's
+ * "Load more" pagination) still override the default.
  */
-export function useChatMessages(chatId: string | undefined, limit = 50) {
+export function useChatMessages(chatId: string | undefined, limit = 100) {
   const platform = usePlatform();
   return useQuery({
     queryKey: [...queryKeys.chatMessages(chatId ?? ''), limit],

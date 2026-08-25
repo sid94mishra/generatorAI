@@ -131,6 +131,38 @@ interface ConnectionState {
 const connections = new Map<string, ConnectionState>();
 const FLUSH_INTERVAL = 100; // ms — 10 flushes/sec, matches prior behaviour
 
+// ── P1-51: Per-tick invalidation de-duplication ─────────────────────────────
+// A 20-stage run can fire ~160 full refetches per second: each stage event
+// calls invalidateQueries for its own chat-history key, the run key, and the
+// runs list — all synchronously inside processEvent. Many events share the
+// same keys so the work is wasted.
+//
+// Fix: buffer keys into a Set; a queueMicrotask fires the batch once per
+// event-loop turn. Same-tick duplicates collapse to one invalidation.
+const _pendingInvalidations = new Set<string>();
+let _invalidationQueued = false;
+
+function flushInvalidations(): void {
+  _invalidationQueued = false;
+  for (const key of _pendingInvalidations) {
+    queryClient.invalidateQueries({ queryKey: JSON.parse(key) as unknown[] });
+  }
+  _pendingInvalidations.clear();
+}
+
+/**
+ * Schedule a query invalidation, de-duplicated within the current
+ * microtask tick. Multiple calls with identical `queryKey` arrays collapse
+ * to a single `invalidateQueries` call.
+ */
+function scheduleInvalidation(queryKey: unknown[]): void {
+  _pendingInvalidations.add(JSON.stringify(queryKey));
+  if (!_invalidationQueued) {
+    _invalidationQueued = true;
+    queueMicrotask(flushInvalidations);
+  }
+}
+
 /** Kinds that carry no state and must not count as proof of life. */
 const IGNORED_FOR_LIVENESS = new Set<string>(['harness.session_info', 'harness.unknown']);
 
@@ -185,7 +217,8 @@ function invalidateChatMessagesBySession(sessionId: string): void {
   const { chatSessionMap } = useChatStore.getState();
   for (const [chatId, sid] of Object.entries(chatSessionMap)) {
     if (sid === sessionId) {
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
+      // P1-51: batched — de-duplicated within the current microtask tick.
+      scheduleInvalidation(queryKeys.chatMessages(chatId));
     }
   }
 }
@@ -199,7 +232,7 @@ function invalidateChatMessagesBySession(sessionId: string): void {
  */
 function invalidatePendingInteractions(chatId: unknown): void {
   if (typeof chatId !== 'string' || !chatId) return;
-  queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'interactions'] });
+  scheduleInvalidation(['chat', chatId, 'interactions']);
 }
 
 /**
@@ -212,9 +245,9 @@ function invalidatePendingInteractions(chatId: unknown): void {
  */
 function invalidatePlanDocument(chatId: unknown, planId: unknown): void {
   if (typeof chatId !== 'string' || !chatId) return;
-  queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'plans'] });
+  scheduleInvalidation(['chat', chatId, 'plans']);
   if (typeof planId === 'string' && planId) {
-    queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'plan', planId] });
+    scheduleInvalidation(['chat', chatId, 'plan', planId]);
   }
 }
 
@@ -353,10 +386,10 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
           }
         }
       }
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatHistory(sessionId) });
+      scheduleInvalidation(queryKeys.chatHistory(sessionId));
       invalidateChatMessagesBySession(sessionId);
       setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: queryKeys.chatHistory(sessionId) });
+        scheduleInvalidation(queryKeys.chatHistory(sessionId));
         invalidateChatMessagesBySession(sessionId);
       }, 1000);
       break;
@@ -364,7 +397,7 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
     case 'harness.user_message':
       flushNow(sessionId, conn);
       if (data['__isInternalTurn']) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.chatHistory(sessionId) });
+        scheduleInvalidation(queryKeys.chatHistory(sessionId));
         invalidateChatMessagesBySession(sessionId);
         break;
       }
@@ -388,7 +421,7 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
           freshStore.startPending(sk, userText ?? undefined);
         }
       }
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatHistory(sessionId) });
+      scheduleInvalidation(queryKeys.chatHistory(sessionId));
       invalidateChatMessagesBySession(sessionId);
       break;
 
@@ -413,8 +446,8 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
       const s = useStreamStore.getState();
       s.errorStream(sk);
       s.addSystemMessage(sk, `Error: ${data['message']}`, 'error');
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatHistory(sessionId) });
+      scheduleInvalidation(queryKeys.session(sessionId));
+      scheduleInvalidation(queryKeys.chatHistory(sessionId));
       break;
     }
 
@@ -616,15 +649,15 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
     case 'harness.idle':
       flushNow(sessionId, conn);
       if (data['__isInternalTurn']) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.chatHistory(sessionId) });
+        scheduleInvalidation(queryKeys.chatHistory(sessionId));
         invalidateChatMessagesBySession(sessionId);
         break;
       }
       useStreamStore.getState().completeStream(sk);
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatHistory(sessionId) });
+      scheduleInvalidation(queryKeys.chatHistory(sessionId));
       invalidateChatMessagesBySession(sessionId);
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+      scheduleInvalidation(queryKeys.session(sessionId));
+      scheduleInvalidation(queryKeys.sessions);
       if (conn.idleTimer) { clearTimeout(conn.idleTimer); conn.idleTimer = null; }
       if (!sk.startsWith('stageRun:')) {
         const capturedKey = sk;
@@ -1299,15 +1332,15 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
           // stage_run.completed event — this ensures the query stays fresh.
           const stageSession = stageRunStore.stageSessionMap[stageRunId];
           if (stageSession) {
-            queryClient.invalidateQueries({ queryKey: queryKeys.chatHistory(stageSession) });
+            scheduleInvalidation(queryKeys.chatHistory(stageSession));
           }
         }
       }
       const parentRunId = data['workflowRunId'] as string | undefined;
       if (parentRunId) {
-        queryClient.invalidateQueries({ queryKey: workflowKeys.run(parentRunId) });
+        scheduleInvalidation(workflowKeys.run(parentRunId));
       }
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
+      scheduleInvalidation(workflowKeys.runs);
       break;
     }
 

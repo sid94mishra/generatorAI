@@ -67,7 +67,13 @@ export function ChatPage() {
   const platform = usePlatform();
 
   const { data: chat, isLoading: chatLoading, error: chatError } = useChat(chatId);
-  const { data: messages, isLoading: messagesLoading } = useChatMessages(chatId);
+  // P0-48 fix: pagination — start with the most recent PAGE_SIZE messages.
+  // The "Load more" button increases the limit incrementally so the user can
+  // page back through history without fetching the entire corpus at once.
+  const PAGE_SIZE = 100;
+  const [msgLimit, setMsgLimit] = useState(PAGE_SIZE);
+  const { data: messages, isLoading: messagesLoading } = useChatMessages(chatId, msgLimit);
+  const hasMoreMessages = (messages?.length ?? 0) >= msgLimit;
 
   // The stream store is keyed by sessionId (not chatId)
   const sessionId = chat?.sessionId;
@@ -727,6 +733,20 @@ export function ChatPage() {
       >
         <div className="mx-auto max-w-3xl">
         {messagesLoading && <ChatMessageSkeleton />}
+        {/* P0-48 fix: "Load more" — lets the user page back through history beyond
+            the initial PAGE_SIZE. Shown only when the current fetch returned a full
+            page (meaning older messages exist server-side). */}
+        {hasMoreMessages && !messagesLoading && (
+          <div className="mb-4 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setMsgLimit((prev) => prev + PAGE_SIZE)}
+              className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-xs text-[var(--color-muted-foreground)] transition hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]"
+            >
+              Load earlier messages
+            </button>
+          </div>
+        )}
         {displayMessages.length > 0 && (
           <ChatMessageList messages={displayMessages} onOpenPlan={openPlanTab} />
         )}

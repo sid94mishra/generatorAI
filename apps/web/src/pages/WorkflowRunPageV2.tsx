@@ -20,6 +20,7 @@ import { Modal, EmptyState } from '@/components/ui/index.js';
 
 import { useWorkflowRunStore } from '@/stores/workflowRunStore.js';
 import { useStreamStore } from '@/stores/streamStore.js';
+import { useShallow } from 'zustand/react/shallow';
 import {
   useWorkflowRun, useWorkflowDefinition,
   usePauseWorkflowRun, useResumeWorkflowRun, useCancelWorkflowRun, useRetryWorkflowRun,
@@ -81,16 +82,22 @@ export function WorkflowRunPageV2() {
   const setRun = useWorkflowRunStore((s) => s.setRun);
   const clearRun = useWorkflowRunStore((s) => s.clearRun);
 
-  // Subscribe to only the stage stream keys for this run. Using a
-  // subset selector keeps re-renders scoped to real changes.
+  // P0-49 fix: Subscribe ONLY to the stage streams for this run — not the
+  // whole `streams` record. Without this, ANY change to ANY chat's stream
+  // (a live chat in a different tab, background SSE events, etc.) triggers a
+  // full re-render of this page and 20 × 500 × 3 block visits per frame.
+  //
+  // Implementation: `useShallow` compares the selector result shallowly so
+  // the component only re-renders when a stream value for *this run* changes.
+  // Capturing `stageRunIds` in the selector closure is intentional — the
+  // selector is cheap to re-create and Zustand uses the equality function on
+  // the RESULT, not the selector reference.
   const stageRunIds = useMemo(
     () => (storeRun?.stageRuns.map((s) => s.id)) ?? [],
     [storeRun?.stageRuns],
   );
-  const streamsAll = useStreamStore((s) => s.streams);
-  const streams = useMemo<Record<string, StreamState | undefined>>(
-    () => pickStageStreams(streamsAll, stageRunIds),
-    [streamsAll, stageRunIds],
+  const streams = useStreamStore(
+    useShallow((s) => pickStageStreams(s.streams, stageRunIds)),
   );
 
   // ── Mutations ────────────────────────────────────────────────
