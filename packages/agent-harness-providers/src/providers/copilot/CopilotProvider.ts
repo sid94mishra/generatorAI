@@ -1441,6 +1441,9 @@ export class CopilotProvider implements IAgentHarness {
       fullToolGating: true,
       sessionPersistence: true,
       budgetTracking: false,
+      // MINOR-4 fix: computerUse must be explicitly declared (L9 fail-closed).
+      // Copilot SDK does not expose the computer_use tool natively.
+      computerUse: false,
     };
   }
 

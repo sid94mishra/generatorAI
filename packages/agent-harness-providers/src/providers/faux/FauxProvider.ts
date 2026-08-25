@@ -164,6 +164,7 @@ export class FauxProvider implements IAgentHarness {
       fullToolGating: true,
       sessionPersistence: false,
       budgetTracking: false,
+      computerUse: false, // MINOR-4: explicit fail-closed default (L9)
       ...this.capabilitiesOverride,
     };
   }

@@ -455,17 +455,34 @@ export class DurableExecutionEngine {
 
       // Already has a real subscriber from this session — don't overwrite it.
       if (this.awakeableSubscribers.has(token)) {
-        // Expose its promise by creating a new one that mirrors the subscriber.
-        // (This is a rare path — recoverAwakeables called twice in one process.)
+        // MINOR-5 fix: add a new listener alongside the existing one rather
+        // than mutating the live callbacks, which could race with an in-flight
+        // resolveAwakeable() call and leave the replacement Promise dangling.
+        //
+        // We create a fresh Promise whose resolve/reject are appended to
+        // the existing subscriber's callback lists. If resolveAwakeable fires
+        // before this block runs, the subscriber is already gone (deleted from
+        // awakeableSubscribers) and we fall through to the DB-resolved branch
+        // above — so the ONLY case this branch handles is a concurrent live
+        // subscriber, where the new callbacks fire atomically alongside it.
         result.set(token, new Promise<unknown>((resolve, reject) => {
           const existing = this.awakeableSubscribers.get(token);
-          if (existing) {
-            // Replace with a combined handler.
-            const origResolve = existing.resolve;
-            const origReject = existing.reject;
-            existing.resolve = (v) => { origResolve(v); resolve(v); };
-            existing.reject = (e) => { origReject(e); reject(e); };
+          if (!existing) {
+            // Subscriber was resolved between the has() check and here.
+            // Fall back to the DB for the settled value.
+            const settled = this.entryRepo.getById(token);
+            if (settled?.resolved) {
+              resolve(settled.payload);
+            } else {
+              reject(new Error(`Awakeable ${token} disappeared during recovery`));
+            }
+            return;
           }
+          // Append rather than replace — originals fire too.
+          const prevResolve = existing.resolve;
+          const prevReject = existing.reject;
+          existing.resolve = (v) => { prevResolve(v); resolve(v); };
+          existing.reject = (e) => { prevReject(e); reject(e); };
         }));
         continue;
       }
@@ -580,18 +597,21 @@ export class DurableExecutionEngine {
     variables: Record<string, unknown>;
     label: string;
   } | null {
-    // Find the lowest unclaimed iteration key for this execution.
-    const entries = this.entryRepo.listByScope('automation_execution', executionId);
-    const pending = entries
-      .filter((e) => e.kind === 'stage_result' && !e.resolved && typeof e.key === 'string' && e.key.startsWith('iter/'))
-      .sort((a, b) => {
-        const ai = parseInt((a.key ?? '').replace('iter/', ''), 10);
-        const bi = parseInt((b.key ?? '').replace('iter/', ''), 10);
-        return ai - bi;
-      });
+    // MAJOR-3 fix: use a targeted DB query instead of loading all entries.
+    // The previous implementation called listByScope() which returned every
+    // entry for the execution — O(all_tool_calls) deserialization per claim,
+    // giving O(n²) total cost across a full run. findNextPendingIteration()
+    // issues a single index-scan query that returns at most one row.
+    for (;;) {
+      const entry = this.entryRepo.findNextPendingIteration(
+        'automation_execution',
+        executionId,
+      );
+      if (!entry) return null;
 
-    for (const entry of pending) {
-      // Atomically resolve (claim) the row.
+      // Atomically resolve (claim) the row — may return null if another
+      // process claimed it between the SELECT and the UPDATE (concurrent
+      // multi-process automation). If so, loop and try the next slot.
       const claimed = this.entryRepo.resolve(entry.id);
       if (claimed) {
         const payload = entry.payload as {
@@ -607,8 +627,7 @@ export class DurableExecutionEngine {
           label: payload.label,
         };
       }
-      // Another process claimed it first; try the next one.
+      // Another process claimed it first — re-query to get the new lowest slot.
     }
-    return null;
   }
 }

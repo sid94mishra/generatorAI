@@ -278,6 +278,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // W12 / P0-14 — process-wide supervisor bounding concurrent Claude turns.
   // maxConcurrentExecutions defaults to 16 (env: GENERATORAI_MAX_CONCURRENT_AGENT_TURNS).
   // maxConcurrentColdStarts defaults to 4 (env: GENERATORAI_MAX_CONCURRENT_COLD_STARTS).
+  //
+  // TODO(W12-wiring): AgentHostSupervisor is an in-process concurrency semaphore.
+  // The full W12 goal is an OUT-OF-PROCESS agent-host that isolates provider
+  // runtimes (Claude CLI, Copilot) from the gateway event loop (arch law L5).
+  // Files exist: apps/agent-host/src/, HostSupervisor.ts, AgentHostClient.ts.
+  // To complete W12: build apps/agent-host, wire HostSupervisor in place of
+  // AgentHostSupervisor, route provider harnesses through AgentHostClient IPC.
+  // Until then, L5 is not fully satisfied for provider-runtime process isolation.
   const agentHostSupervisor = new AgentHostSupervisor();
 
   /** Per-provider construction options, resolved lazily by the registry. */

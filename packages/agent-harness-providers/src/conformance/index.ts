@@ -234,6 +234,8 @@ export async function runTruncationConformance(faux: FauxProvider): Promise<void
  */
 export function runCapabilityDeclarationConformance(harness: IAgentHarness): void {
   const caps = harness.capabilities();
+  // MINOR-4 fix: computerUse added to required fields. All capability flags
+  // must be explicitly declared so consumers can apply L9 fail-closed defaults.
   const required: Array<keyof typeof caps> = [
     'vision',
     'reasoning',
@@ -244,6 +246,7 @@ export function runCapabilityDeclarationConformance(harness: IAgentHarness): voi
     'fullToolGating',
     'sessionPersistence',
     'budgetTracking',
+    'computerUse',
   ];
   for (const field of required) {
     if (caps[field as keyof typeof caps] === undefined) {

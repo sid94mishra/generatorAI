@@ -96,20 +96,34 @@ export class HostSupervisor {
         reject(new Error('[HostSupervisor] Agent host is not connected'));
         return;
       }
-      this.pendingRequests.set(reqId, { resolve, reject });
-      this.child.send(fullReq, (err) => {
-        if (err) {
-          this.pendingRequests.delete(reqId);
-          reject(new Error(`[HostSupervisor] IPC send error: ${String(err)}`));
-        }
-      });
-      // Timeout: 30 s per request
-      setTimeout(() => {
+      // MINOR-6 fix: capture the timer handle so it can be cleared on success.
+      // Without clearTimeout() the timer closure kept a reference to `this` and
+      // `reqId` for 30 seconds after every successful request.
+      const timeoutHandle = setTimeout(() => {
         if (this.pendingRequests.has(reqId)) {
           this.pendingRequests.delete(reqId);
           reject(new Error(`[HostSupervisor] Request ${reqId} timed out`));
         }
-      }, 30_000).unref();
+      }, 30_000);
+      timeoutHandle.unref();
+
+      // Wrap resolve/reject so the timer is cancelled when the request settles.
+      const clearingResolve = (val: AgentHostResponse) => {
+        clearTimeout(timeoutHandle);
+        resolve(val);
+      };
+      const clearingReject = (err: unknown) => {
+        clearTimeout(timeoutHandle);
+        reject(err);
+      };
+
+      this.pendingRequests.set(reqId, { resolve: clearingResolve, reject: clearingReject });
+      this.child.send(fullReq, (err) => {
+        if (err) {
+          this.pendingRequests.delete(reqId);
+          clearingReject(new Error(`[HostSupervisor] IPC send error: ${String(err)}`));
+        }
+      });
     });
   }
 

@@ -19,7 +19,7 @@ was checked with `git diff` plus a grep of the specific symbol.
 | **0** | Stop the bleeding | ✅ Complete · 2 review rounds · 24 findings fixed |
 | **1** | Stream spine | ✅ Complete · 1 review round · 3 MAJOR + 2 MINOR findings fixed |
 | **2** | Provider port & contracts | ✅ Complete · 3 review rounds · W34/W35/W13/W42/W44/W45/W41/W46/W37/W38/W39/W10 all done · 17 adversarial findings fixed (6 CRITICAL, 7 MAJOR, 4 MINOR) |
-| **3** | Process split & admission | ✅ Complete · W33/W12/W36/W18/W19/W20/W21 all done · adversarial review fixed 4 BLOCKERS + 5 MAJOR + 4 MINOR |
+| **3** | Process split & admission | ⚠️ Partial · W12 (agent-host cross-process wiring) **not** connected to composition root — files exist (`apps/agent-host/`, `HostSupervisor`, `AgentHostClient`) but `composition-root.ts` still wires `AgentHostSupervisor` (in-process semaphore). L5 not fully satisfied. All other items (W36/W18/W19/W20/W21/W33) done. |
 | **4** | Native hosts | ✅ Complete · W25/W14/W15/W16/W17 done · 26/26 build green |
 | **5** | Client rebuild | ✅ Complete · adversarial review done · M1 (nested scroll) fixed · P0-47 IncrementalMarkdown done |
 | **6** | Durability & orchestration | ✅ Complete · adversarial review done · M2 (non-atomic iteration init) fixed · DurableExecutionEngine crash recovery verified |

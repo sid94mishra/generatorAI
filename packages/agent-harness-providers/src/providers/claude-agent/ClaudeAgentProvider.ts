@@ -420,6 +420,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
       sessionPersistence: true,
       budgetTracking: true,
       maxContextTokens: 200_000,
+      // MINOR-4 fix: computerUse must be explicitly declared (L9 fail-closed).
+      // Claude supports the native computer_use tool via its SDK.
+      computerUse: true,
     };
   }
 
