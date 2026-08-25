@@ -23,7 +23,7 @@ was checked with `git diff` plus a grep of the specific symbol.
 | **4** | Native hosts | ✅ Complete · W25/W14/W15/W16/W17 done · 26/26 build green |
 | **5** | Client rebuild | ✅ Complete · adversarial review done · M1 (nested scroll) fixed · P0-47 IncrementalMarkdown done |
 | **6** | Durability & orchestration | ✅ Complete · adversarial review done · M2 (non-atomic iteration init) fixed · DurableExecutionEngine crash recovery verified |
-| **7** | Guardrails | ✅ Complete · W31/W32/W33 done |
+| **7** | Guardrails | ✅ Complete · W31/W32/W33/W48 done · End-to-end adversarial review done · 3 MAJOR + 3 MINOR findings fixed |
 
 ### Test baseline (established 2026-08-20, identical on clean and dirty trees)
 
