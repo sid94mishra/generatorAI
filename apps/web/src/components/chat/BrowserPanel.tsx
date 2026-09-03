@@ -33,6 +33,7 @@ import {
   Smartphone, RotateCcw, MessageSquare, Trash2, Send, Globe,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { countFallback } from '@/lib/clientMetrics.js';
 import { isRestorableBrowserUrl, readBrowserTabUrl, writeBrowserTabUrl } from '@/lib/browserTabUrls.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import { buildAuthenticatedSocketUrl } from '@/platform/authTransport.js';
@@ -85,6 +86,17 @@ interface BrowserPanelProps {
    * disable URL memory entirely.
    */
   urlScopeKey?: string;
+  /**
+   * False while this panel is mounted but not the selected tab (P1-50).
+   *
+   * The RightPane mounts every tab and hides the inactive ones, which is what
+   * keeps a page alive across tab switches — and what made five browser tabs
+   * hold five live screencast sockets, decoding every frame into an object
+   * URL nothing painted. When false the live-view socket is closed entirely;
+   * it reopens on the next frame after the tab is selected. Defaults to true
+   * so non-RightPane callers are unaffected.
+   */
+  visible?: boolean;
 }
 
 interface DescriptorState {
@@ -300,7 +312,7 @@ interface AnnotationSummary {
 
 // ── Component ────────────────────────────────────────────────
 
-export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, embedded = false, agentBusy = false, onTabStateChange, urlScopeKey }: BrowserPanelProps): React.JSX.Element | null {
+export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, embedded = false, agentBusy = false, onTabStateChange, urlScopeKey, visible = true }: BrowserPanelProps): React.JSX.Element | null {
   const { resolvedTheme } = useTheme();
   // Chrome-like tab state surfaced to the host tab strip.
   const [tabLoading, setTabLoading] = useState(false);
@@ -328,12 +340,20 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
   const [captureMode, setCaptureMode] = useState(false);
   const [nowKey, setNowKey] = useState(0);
   const [urlInputFocused, setUrlInputFocused] = useState(false);
-  const [frameSrc, setFrameSrc] = useState<string | null>(null);
+  /**
+   * True once at least one frame has been painted onto the live canvas.
+   *
+   * Was an object-URL string for an `<img>`. The live view is a `<canvas>`
+   * now because WebCodecs hands back `VideoFrame`s, not images — and the
+   * canvas keeps the last frame on screen by itself, which is what the
+   * hand-rolled `placeholderBg` freeze-frame (a per-byte base64 re-encode of
+   * every twentieth JPEG) was there to fake.
+   */
+  const [hasFrame, setHasFrame] = useState(false);
   /** Live-stream WS health, screencast mode only — surfaced next to the
    *  header status pill so a dropped connection is visible instead of
    *  silently retrying behind a frozen frame. */
   const [streamState, setStreamState] = useState<'connecting' | 'live' | 'reconnecting' | 'degraded' | 'stopped'>('connecting');
-  const [placeholderBg, setPlaceholderBg] = useState<string | null>(null);
   const [nativeAvailable, setNativeAvailable] = useState<boolean>(false);
   const [nativeUrl, setNativeUrl] = useState<string | null>(null);
   // In-page annotation (comment pins) mode + live list (native desktop).
@@ -349,13 +369,12 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
   const [emuMobile, setEmuMobile] = useState<boolean>(false);
   const [emuZoom, setEmuZoom] = useState<number>(1);
   const [scrollState, setScrollState] = useState<{ scrollY: number; scrollHeight: number; clientHeight: number } | null>(null);
-  /** Rectangle currently being drawn in capture mode (CSS px, relative to <img>). */
+  /** Rectangle currently being drawn in capture mode (CSS px, relative to the live <canvas>). */
   const [captureRect, setCaptureRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   const liveWsRef = useRef<WebSocket | null>(null);
   const liveContainerRef = useRef<HTMLDivElement | null>(null);
-  const liveImgRef = useRef<HTMLImageElement | null>(null);
-  const placeholderCounterRef = useRef(0);
+  const liveCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const captureStartRef = useRef<{ x: number; y: number } | null>(null);
   /** Guards native-browser auto-start so it fires once per open workspace. */
   const autoStartRef = useRef<string | null>(null);
@@ -856,44 +875,48 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
     } catch { /* silent */ }
   }, [workspaceId]);
 
-  const eventToPageCoords = useCallback((e: { clientX: number; clientY: number; currentTarget: HTMLElement | null } | React.MouseEvent<HTMLImageElement> | React.WheelEvent<HTMLImageElement>) => {
-    const img = liveImgRef.current;
-    if (!img || !img.naturalWidth || !img.naturalHeight) return null;
-    const rect = img.getBoundingClientRect();
-    const scale = Math.min(rect.width / img.naturalWidth, rect.height / img.naturalHeight);
-    const displayedW = img.naturalWidth * scale;
-    const displayedH = img.naturalHeight * scale;
+  const eventToPageCoords = useCallback((e: { clientX: number; clientY: number; currentTarget: HTMLElement | null } | React.MouseEvent<HTMLCanvasElement> | React.WheelEvent<HTMLCanvasElement>) => {
+    // `canvas.width/height` replaces `img.naturalWidth/naturalHeight`: on a
+    // canvas the attribute size IS the intrinsic size, and `object-contain`
+    // letterboxes it exactly the way it letterboxed the <img>, so the mapping
+    // below is unchanged apart from where the numbers come from.
+    const canvas = liveCanvasRef.current;
+    if (!canvas || !canvas.width || !canvas.height) return null;
+    const rect = canvas.getBoundingClientRect();
+    const scale = Math.min(rect.width / canvas.width, rect.height / canvas.height);
+    const displayedW = canvas.width * scale;
+    const displayedH = canvas.height * scale;
     const offX = (rect.width - displayedW) / 2;
     const offY = (rect.height - displayedH) / 2;
     const cssX = e.clientX - rect.left - offX;
     const cssY = e.clientY - rect.top - offY;
     if (cssX < 0 || cssY < 0 || cssX > displayedW || cssY > displayedH) return null;
     return {
-      x: Math.round((cssX / displayedW) * img.naturalWidth),
-      y: Math.round((cssY / displayedH) * img.naturalHeight),
+      x: Math.round((cssX / displayedW) * canvas.width),
+      y: Math.round((cssY / displayedH) * canvas.height),
     };
   }, []);
 
   // ── Live-view mouse / keyboard handlers ───────────────
-  const handleLiveClick = useCallback((e: React.MouseEvent<HTMLImageElement>) => {
+  const handleLiveClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     // Inspect mode: allow click regardless of interactivity — this is
     // the only way to attach elements when interactivity is off.
     if (!inspectorOn && !fullInteractivity) return;
     const p = eventToPageCoords(e);
     if (!p) return;
-    try { (e.currentTarget as HTMLImageElement).focus(); } catch { /* ignore */ }
+    try { (e.currentTarget as HTMLCanvasElement).focus(); } catch { /* ignore */ }
     const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
     void sendInput({ type: 'mouse.click', x: p.x, y: p.y, button, clickCount: e.detail || 1 });
   }, [eventToPageCoords, sendInput, inspectorOn, fullInteractivity]);
 
-  const handleLiveWheel = useCallback((e: React.WheelEvent<HTMLImageElement>) => {
+  const handleLiveWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     // Scroll is always allowed — even under restricted interactivity, the
     // user needs to see below the fold to guide the agent.
     const p = eventToPageCoords(e);
     void sendInput({ type: 'mouse.wheel', x: p?.x, y: p?.y, deltaX: e.deltaX, deltaY: e.deltaY });
   }, [eventToPageCoords, sendInput]);
 
-  const handleLiveMouseMove = useCallback((e: React.MouseEvent<HTMLImageElement>) => {
+  const handleLiveMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     // Skip mouse.move throttle if interactivity is off (no click follow-up
     // will happen anyway). We still send hover-only moves when inspect is
     // on so the highlighter overlay tracks correctly.
@@ -907,7 +930,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
     void sendInput({ type: 'mouse.move', x: p.x, y: p.y });
   }, [eventToPageCoords, sendInput, fullInteractivity, inspectorOn]);
 
-  const handleLiveKeyDown = useCallback((e: React.KeyboardEvent<HTMLImageElement>) => {
+  const handleLiveKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
     if (!fullInteractivity) return;
     if (e.key === 'F5' || e.key === 'F12') return;
     e.preventDefault();
@@ -924,17 +947,17 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
   }, [sendInput, fullInteractivity]);
 
   // ── Capture-drag on the live view ─────────────────────
-  const handleCaptureMouseDown = useCallback((e: React.MouseEvent<HTMLImageElement>) => {
+  const handleCaptureMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!captureMode) return;
     e.preventDefault();
-    const rect = (e.currentTarget as HTMLImageElement).getBoundingClientRect();
+    const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
     captureStartRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     setCaptureRect({ x: captureStartRef.current.x, y: captureStartRef.current.y, w: 0, h: 0 });
   }, [captureMode]);
 
-  const handleCaptureMouseMove = useCallback((e: React.MouseEvent<HTMLImageElement>) => {
+  const handleCaptureMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!captureMode || !captureStartRef.current) return;
-    const rect = (e.currentTarget as HTMLImageElement).getBoundingClientRect();
+    const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const s = captureStartRef.current;
@@ -956,19 +979,19 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
     setCaptureRect(null);
     setCaptureMode(false);
     if (!rect || rect.w < 8 || rect.h < 8) return; // ignore stray clicks
-    const img = liveImgRef.current;
-    if (!img || !img.naturalWidth || !img.naturalHeight) return;
-    // Map CSS-px rect on the letterboxed <img> to page coords.
-    const box = img.getBoundingClientRect();
-    const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
-    const displayedW = img.naturalWidth * scale;
-    const displayedH = img.naturalHeight * scale;
+    const canvas = liveCanvasRef.current;
+    if (!canvas || !canvas.width || !canvas.height) return;
+    // Map CSS-px rect on the letterboxed <canvas> to page coords.
+    const box = canvas.getBoundingClientRect();
+    const scale = Math.min(box.width / canvas.width, box.height / canvas.height);
+    const displayedW = canvas.width * scale;
+    const displayedH = canvas.height * scale;
     const offX = (box.width - displayedW) / 2;
     const offY = (box.height - displayedH) / 2;
-    const x = ((rect.x - offX) / displayedW) * img.naturalWidth;
-    const y = ((rect.y - offY) / displayedH) * img.naturalHeight;
-    const w = (rect.w / displayedW) * img.naturalWidth;
-    const h = (rect.h / displayedH) * img.naturalHeight;
+    const x = ((rect.x - offX) / displayedW) * canvas.width;
+    const y = ((rect.y - offY) / displayedH) * canvas.height;
+    const w = (rect.w / displayedW) * canvas.width;
+    const h = (rect.h / displayedH) * canvas.height;
     try {
       const res = await fetch(`/api/workspaces/${workspaceId}/browser/capture`, {
         method: 'POST',
@@ -1016,21 +1039,239 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
   }, [scrollState, sendInput]);
 
   // ── Live-view streaming ───────────────────────────────
+  //
+  // D5 chose WebCodecs over the existing socket. The server sends encoded VP8
+  // chunks behind a 16-byte header (see `apps/server/src/browser-ws.ts`) when
+  // this client says it can decode them, and JPEG when it cannot. Every frame
+  // states its own codec, so the two are interleavable: the seed frame and the
+  // paint-silence keepalive are JPEG on a socket whose steady state is VP8, and
+  // nothing here has to be told when that changes.
+  //
+  // ── Why the decode is not in a Worker ───────────────────────────────────
+  //
+  // The heavy work already happens off the main thread: `VideoDecoder` and
+  // `createImageBitmap` both decode on browser-internal threads and only their
+  // *callbacks* land here, where all that remains is one `drawImage` — a GPU
+  // blit of an already-decoded frame. Moving the callback to a Worker would
+  // require creating one from a `blob:` URL (this component cannot add a file
+  // to the bundle without a second entry point), and the app's CSP is
+  // `default-src 'self'` with no `worker-src blob:`, so such a Worker is
+  // blocked outright. Detecting that by catching the failure is precisely the
+  // pattern P1-33 exists to forbid, so we do not attempt it.
   useEffect(() => {
-    if (!open || !workspaceId || !descriptor?.ready || descriptor.mode !== 'screencast') {
-      setFrameSrc(null);
+    // P1-50 — `visible` sits alongside `open` deliberately: an invisible tab
+    // is exactly as uninteresting as a closed pane. The RightPane keeps every
+    // tab mounted, so without this each open Browser tab held its own live
+    // screencast socket and decoded every frame that was painted nowhere.
+    if (!open || !visible || !workspaceId || !descriptor?.ready || descriptor.mode !== 'screencast') {
+      setHasFrame(false);
       liveWsRef.current?.close();
       liveWsRef.current = null;
       return;
     }
     let cancelled = false;
-    let lastUrl: string | null = null;
     let ws: WebSocket | null = null;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempts = 0;
     const maxReconnects = 6;
     const pollController = new AbortController();
+
+    // ── Frame sink ───────────────────────────────────────
+    /** Header layout is documented once, on the server, in `browser-ws.ts`. */
+    const HEADER_BYTES = 16;
+    const MAGIC = 0x47;
+    const CODEC_JPEG = 0;
+    const CODEC_VP8 = 1;
+
+    type Decoded = ImageBitmap | VideoFrame;
+    let decoder: VideoDecoder | null = null;
+    let decoderSize = { width: 0, height: 0 };
+    /** VP8 delta frames before the first key frame decode to nothing. */
+    let sawKeyframe = false;
+    /** Wall-clock of the last `request_keyframe`, for the rate limit below. */
+    let lastKeyframeRequestAt = 0;
+    const KEYFRAME_REQUEST_MIN_INTERVAL_MS = 500;
+
+    const isHidden = (): boolean =>
+      typeof document !== 'undefined' && document.visibilityState === 'hidden';
+
+    /**
+     * Ask the server for a fresh key frame.
+     *
+     * A VP8 delta decodes only against the frame before it, so the moment this
+     * client drops or fails to decode one chunk, every chunk after it is
+     * undecodable — and the encoder, running in `realtime` mode, has no reason
+     * of its own to ever emit another key frame. This used to be missing
+     * entirely: the panel simply froze on its last good frame, with a healthy
+     * socket, no error state and nothing logged.
+     *
+     * Rate-limited because the triggers fire per frame and each answer is a
+     * full key frame. Silent while the document is hidden: asking for an
+     * expensive frame nobody is looking at would defeat the drop it is
+     * recovering from — the `visibilitychange` handler asks on the way back.
+     */
+    function requestKeyframe(): void {
+      if (cancelled || isHidden()) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const now = Date.now();
+      if (now - lastKeyframeRequestAt < KEYFRAME_REQUEST_MIN_INTERVAL_MS) return;
+      lastKeyframeRequestAt = now;
+      try { ws.send(JSON.stringify({ type: 'request_keyframe' })); } catch { /* closing */ }
+    }
+
+    // Coming back to a tab whose reference chain was dropped while it was
+    // hidden. Without this the panel waits for the next delta to notice, and
+    // on a settled page that is "until something on the page moves".
+    const onVisibility = (): void => {
+      if (cancelled || isHidden() || sawKeyframe) return;
+      requestKeyframe();
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibility);
+    }
+
+    function paint(source: Decoded, width: number, height: number): void {
+      const canvas = liveCanvasRef.current;
+      if (!canvas || cancelled) return;
+      if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(source as CanvasImageSource, 0, 0, canvas.width, canvas.height);
+      setHasFrame(true);
+    }
+
+    function closeDecoder(): void {
+      const d = decoder;
+      decoder = null;
+      sawKeyframe = false;
+      decoderSize = { width: 0, height: 0 };
+      if (d && d.state !== 'closed') {
+        try { d.close(); } catch { /* already gone */ }
+      }
+    }
+
+    function ensureDecoder(width: number, height: number): VideoDecoder | null {
+      if (typeof VideoDecoder === 'undefined') return null;
+      if (decoder && decoder.state !== 'closed'
+        && decoderSize.width === width && decoderSize.height === height) return decoder;
+      // A resize changes the coded size, and a decoder configured for the old
+      // one silently produces stretched frames rather than erroring.
+      closeDecoder();
+      const created = new VideoDecoder({
+        output: (frame) => {
+          try { paint(frame, frame.displayWidth, frame.displayHeight); } finally { frame.close(); }
+        },
+        error: () => {
+          // The stream is not lost: the server keeps sending, and JPEG frames
+          // still paint. Drop the decoder — but "wait for the next key frame"
+          // was a wish, not a plan: nothing was going to produce one. Ask.
+          closeDecoder();
+          requestKeyframe();
+        },
+      });
+      created.configure({ codec: 'vp8', codedWidth: width, codedHeight: height });
+      decoder = created;
+      decoderSize = { width, height };
+      sawKeyframe = false;
+      return created;
+    }
+
+    function onBinaryFrame(buffer: ArrayBuffer): void {
+      if (cancelled || buffer.byteLength <= HEADER_BYTES) return;
+      const view = new DataView(buffer);
+      // A framing mismatch means the peer is not the endpoint we think it is
+      // (an old server, a proxy rewriting frames). Dropping is right; feeding
+      // it to a decoder as if it were video is not.
+      if (view.getUint8(0) !== MAGIC || view.getUint8(1) !== 1) return;
+      const codec = view.getUint8(2);
+      const keyframe = (view.getUint8(3) & 1) === 1;
+      const width = view.getUint16(4);
+      const height = view.getUint16(6);
+      const timestamp = view.getFloat64(8);
+      const payload = new Uint8Array(buffer, HEADER_BYTES);
+
+      // The socket stays open across a browser-tab switch (closing it would
+      // drop the agent's view of the page), but decoding a frame for a
+      // document nobody is looking at is pure waste.
+      //
+      // This check used to run BEFORE the header was read, so it dropped key
+      // frames along with the deltas — and a dropped key frame is not a
+      // dropped frame, it is the end of the stream: every delta after it is
+      // undecodable and nothing ever asked for another. The saving this exists
+      // for is the delta stream anyway; a key frame arrives at open, on resize
+      // and on request, so decoding one costs almost nothing and is what makes
+      // coming back to the tab possible at all.
+      const hidden = isHidden();
+
+      if (codec === CODEC_VP8) {
+        if (hidden && !keyframe) {
+          countFallback('browserFramesDroppedHidden');
+          // Say out loud that the chain is broken, so the deltas that follow
+          // are not fed to a decoder whose reference frame never arrived.
+          sawKeyframe = false;
+          return;
+        }
+        const active = ensureDecoder(width, height);
+        if (!active) return;              // no VideoDecoder: nothing to do
+        if (!keyframe && !sawKeyframe) {
+          // Either we joined mid-stream or something upstream dropped a chunk.
+          // Either way this frame is undecodable and so is every one behind it
+          // until a key frame arrives — which only happens if we ask.
+          requestKeyframe();
+          return;
+        }
+        if (keyframe) sawKeyframe = true;
+        try {
+          active.decode(new EncodedVideoChunk({
+            type: keyframe ? 'key' : 'delta',
+            timestamp,
+            data: payload,
+          }));
+        } catch {
+          closeDecoder();
+          requestKeyframe();
+        }
+        return;
+      }
+
+      if (codec === CODEC_JPEG) {
+        // Self-contained: dropping one strands nothing behind it, so the
+        // hidden-tab saving is free here.
+        if (hidden) {
+          countFallback('browserFramesDroppedHidden');
+          return;
+        }
+        // `createImageBitmap` decodes off the main thread and yields a bitmap
+        // the compositor can upload directly — no object URL, no <img> load
+        // event, and nothing to revoke.
+        void createImageBitmap(new Blob([payload], { type: 'image/jpeg' }))
+          .then((bitmap) => {
+            if (cancelled) { bitmap.close(); return; }
+            try { paint(bitmap, bitmap.width, bitmap.height); } finally { bitmap.close(); }
+          })
+          .catch(() => undefined);
+      }
+    }
+
+    /**
+     * What this client can decode, most-preferred first — asked of the browser
+     * rather than assumed, and resolved once per stream. `VideoDecoder`
+     * existing is not the same as VP8 being supported (Safari's WebCodecs, for
+     * one, ships a different codec set), so the config is actually probed.
+     */
+    const acceptedCodecs: Promise<string[]> = (async () => {
+      if (typeof VideoDecoder === 'undefined') return ['jpeg'];
+      try {
+        const support = await VideoDecoder.isConfigSupported({ codec: 'vp8' });
+        return support.supported ? ['vp8', 'jpeg'] : ['jpeg'];
+      } catch {
+        return ['jpeg'];
+      }
+    })();
 
     function tryOpenWs(): void {
       // Ticket-minting is async, so the socket is created inside the promise.
@@ -1047,7 +1288,10 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
           );
           if (cancelled) return;
           ws = new WebSocket(url);
-          ws.binaryType = 'blob';
+          // `arraybuffer`, not `blob`: the header has to be read synchronously
+          // to know which decoder the payload belongs to, and a Blob would put
+          // an extra async hop in front of every single frame.
+          ws.binaryType = 'arraybuffer';
           liveWsRef.current = ws;
           attachWsHandlers(ws);
         } catch {
@@ -1065,51 +1309,36 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
           // later drop gets its own full set of retry attempts.
           reconnectAttempts = 0;
           setStreamState('live');
+          // The codec is DECLARED by both ends before a byte of video moves:
+          // this is the client half of P1-33's negotiation.
+          void acceptedCodecs.then((accept) => {
+            if (cancelled || ws.readyState !== WebSocket.OPEN) return;
+            try { ws.send(JSON.stringify({ type: 'hello', accept })); } catch { /* closing */ }
+          });
         };
         ws.onmessage = (e) => {
           if (cancelled) return;
-          const blob = e.data instanceof Blob ? e.data : new Blob([e.data as ArrayBuffer], { type: 'image/jpeg' });
-          const url = URL.createObjectURL(blob);
-          if (lastUrl) URL.revokeObjectURL(lastUrl);
-          lastUrl = url;
-          setFrameSrc(url);
-          // P3-e fix: refresh the placeholder background every 20 frames so the
-          // "disconnected" view shows a recent freeze-frame. Previously this
-          // rebuilt the base64 string BYTE-BY-BYTE (a character per iteration),
-          // producing ~100 KB of string garbage every 2 s per tab. Now we use
-          // String.fromCharCode in a single call via apply (fast path) with a
-          // fallback chunk loop for very large frames that exceed the call-stack
-          // limit of some JS engines (~65536 args).
-          placeholderCounterRef.current = (placeholderCounterRef.current + 1) % 20;
-          if (placeholderCounterRef.current === 0) {
-            void blob.arrayBuffer().then((buf) => {
-              if (cancelled) return;
-              const bytes = new Uint8Array(buf);
-              let bin: string;
-              if (bytes.length <= 65536) {
-                bin = String.fromCharCode.apply(null, bytes as unknown as number[]);
-              } else {
-                // Chunk to stay within call-stack limits.
-                const parts: string[] = [];
-                for (let i = 0; i < bytes.length; i += 65536) {
-                  parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + 65536) as unknown as number[]));
-                }
-                bin = parts.join('');
-              }
-              try { setPlaceholderBg(`data:image/jpeg;base64,${btoa(bin)}`); } catch { /* ignore */ }
-            }).catch(() => undefined);
+          if (typeof e.data === 'string') {
+            try {
+              const msg = JSON.parse(e.data) as { type?: string };
+              // The server telling us it cannot stream is an answer, not a
+              // failure: stop, and do not start a second transport behind it.
+              if (msg.type === 'stream_unavailable') setStreamState('stopped');
+              else if (msg.type === 'stream_error') setStreamState('reconnecting');
+            } catch { /* ignore malformed control frames */ }
+            return;
           }
+          onBinaryFrame(e.data as ArrayBuffer);
         };
         ws.onerror = () => { /* fallthrough to reconnect on close */ };
         ws.onclose = () => {
           if (cancelled) return;
           liveWsRef.current = null;
+          closeDecoder();
           // A dropped stream must NOT freeze the live view on its last
           // frame — the agent keeps driving the page after any transient
           // WS/close. Reconnect with a short backoff; only after repeated
-          // failures fall back to HTTP frame polling. Previously this only
-          // started polling when *no* frame had ever arrived, so any
-          // mid-session drop left the view stuck out-of-sync with the chat.
+          // failures fall back to HTTP frame polling.
           if (reconnectAttempts < maxReconnects) {
             reconnectAttempts += 1;
             setStreamState('reconnecting');
@@ -1137,10 +1366,9 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
         if (!res.ok) throw new Error(String(res.status));
         const blob = await res.blob();
         if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        if (lastUrl) URL.revokeObjectURL(lastUrl);
-        lastUrl = url;
-        setFrameSrc(url);
+        const bitmap = await createImageBitmap(blob);
+        if (cancelled) { bitmap.close(); return; }
+        try { paint(bitmap, bitmap.width, bitmap.height); } finally { bitmap.close(); }
       } catch { /* silent */ }
       if (cancelled) return;
       const elapsed = Date.now() - started;
@@ -1148,6 +1376,14 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
     }
     function startPolling(): void {
       if (pollTimer || cancelled) return;
+      // N5 — the expensive fallback, and now the ONLY thing this path is for:
+      // the socket could not be opened at all (no `exec:browser` grant, or six
+      // failed reconnects). It is never a concurrent second capture path — the
+      // codec fallback for a client that cannot decode VP8 happens on the
+      // socket itself. Counted so a test (and `system doctor`) can tell "the
+      // screencast is fine" from "the screencast has been on the slow path for
+      // an hour".
+      countFallback('browserScreencastHttpFallback');
       setStreamState('degraded');
       void pollTick();
     }
@@ -1157,14 +1393,17 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
     return () => {
       cancelled = true;
       pollController.abort();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibility);
+      }
       if (pollTimer) clearTimeout(pollTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      closeDecoder();
       try { ws?.close(); } catch { /* ignore */ }
       liveWsRef.current = null;
-      if (lastUrl) URL.revokeObjectURL(lastUrl);
       setStreamState('stopped');
     };
-  }, [open, workspaceId, descriptor?.ready, descriptor?.mode, nowKey]);
+  }, [open, visible, workspaceId, descriptor?.ready, descriptor?.mode, nowKey]);
 
   // ── URL sync ──────────────────────────────────────────
   useEffect(() => {
@@ -1667,23 +1906,23 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
         <div
           ref={liveContainerRef}
           className="relative flex flex-1 min-h-0 items-center justify-center bg-[var(--color-subtle)]"
-          style={placeholderBg ? {
-            backgroundImage: `url(${placeholderBg})`,
-            backgroundSize: 'contain',
-            backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'center',
-          } : undefined}
         >
-          {isOn && frameSrc ? (
-            <img
-              ref={liveImgRef}
-              src={frameSrc}
-              alt="Browser live view"
+          {/*
+            Mounted for the whole time the browser is on, not only once a frame
+            has arrived: the decoder needs somewhere to draw before there is
+            anything to show, and the canvas is also what holds the last frame
+            on screen while the socket reconnects.
+          */}
+          {isOn && (
+            <canvas
+              ref={liveCanvasRef}
+              role="img"
+              aria-label="Browser live view"
               className={cn(
                 'h-full w-full object-contain select-none focus:outline-none',
+                !hasFrame && 'opacity-0',
                 captureMode ? 'cursor-crosshair' : inspectorOn ? 'cursor-copy' : fullInteractivity ? 'cursor-pointer' : 'cursor-default',
               )}
-              draggable={false}
               tabIndex={0}
               onClick={captureMode ? undefined : handleLiveClick}
               onContextMenu={(e) => { e.preventDefault(); if (!captureMode) handleLiveClick(e); }}
@@ -1693,11 +1932,12 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
               onMouseUp={captureMode ? handleCaptureMouseUp : undefined}
               onKeyDown={handleLiveKeyDown}
             />
-          ) : (
-            <div className="flex h-full items-center justify-center text-center text-sm text-[var(--color-muted-foreground)]">
+          )}
+          {!(isOn && hasFrame) && (
+            <div className="absolute inset-0 flex h-full items-center justify-center text-center text-sm text-[var(--color-muted-foreground)]">
               <div>
                 {status === 'starting' && (<><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /><div>Starting Chromium…</div></>)}
-                {isOn && !frameSrc && (<><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /><div>Loading live view…</div></>)}
+                {isOn && !hasFrame && (<><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /><div>Loading live view…</div></>)}
                 {(status === 'off' || status === 'terminated') && (
                   <div>
                     <div className="mb-1">Browser is not running.</div>
@@ -1742,7 +1982,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
           )}
 
           {/* Overlay scrollbar — draggable */}
-          {isOn && frameSrc && scrollState && scrollState.scrollHeight > scrollState.clientHeight + 4 && (() => {
+          {isOn && hasFrame && scrollState && scrollState.scrollHeight > scrollState.clientHeight + 4 && (() => {
             const { scrollY, scrollHeight, clientHeight } = scrollState;
             const trackRatio = clientHeight / scrollHeight;
             const scrollRatio = scrollY / (scrollHeight - clientHeight);

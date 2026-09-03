@@ -405,11 +405,25 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     withTransaction, // P0#4 — atomic template/JSON import
   );
 
+  // W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix).
+  // Only constructed when the caller supplied both durable storage repos
+  // (migration v36–v37). Existing embedders that haven't migrated keep
+  // receiving undefined and use the legacy in-memory iteration loop / a
+  // plain (non-durable) HITL wait — see HitlService's constructor.
+  //
+  // Constructed here (moved up from its previous spot below
+  // WorkflowRunService) so HitlService can take it as its durable
+  // Awakeable backend — HitlService is built next, immediately below.
+  const durableExecutionEngine =
+    registerRepo && entryRepo
+      ? new DurableExecutionEngine(registerRepo, entryRepo, logger)
+      : undefined;
+
   // HITL — one service instance per process. Stateless across runs
   // (waiters are per-stageRunId); safe to share.
   // Created before StageExecutionService so it can be injected as the
   // permission bridge (HITL-06).
-  const hitlService = new HitlService(stageRunRepo, eventBus, logger);
+  const hitlService = new HitlService(stageRunRepo, eventBus, logger, durableExecutionEngine);
 
   const stageExecutionService = new StageExecutionService(
     stageRunRepo,
@@ -424,6 +438,15 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     workflowRunRepo,        // HITL-06: read run's permissionMode per request
     hitlService,            // HITL-06: bridge harness prompts to HITL waiter
   );
+
+  // W22 — put the effect sandwich on the real turn path. Without this line
+  // `withEffect()` has no production caller and an interrupted stage re-runs
+  // every prompt and every tool call from scratch on the next boot. Late-wired
+  // rather than added to an already-11-argument constructor, and a no-op for
+  // embedders that supplied no durable storage.
+  if (durableExecutionEngine) {
+    stageExecutionService.setDurableEngine(durableExecutionEngine);
+  }
 
   // P1#7 — bound concurrent stage execution (and therefore harness subprocess
   // fan-out). Default 8; configurable, 0 = unlimited.
@@ -465,14 +488,18 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     stageSemaphore,
   );
 
-  // W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix).
-  // Only constructed when the caller supplied both durable storage repos
-  // (migration v36–v37). Existing embedders that haven't migrated keep
-  // receiving undefined and use the legacy in-memory iteration loop.
-  const durableExecutionEngine =
-    registerRepo && entryRepo
-      ? new DurableExecutionEngine(registerRepo, entryRepo, logger)
-      : undefined;
+  // X-25 — read side of the durable artifact channel, so a successor's
+  // context comes from the predecessor's durable result rather than a column
+  // that an interrupted stage may never have written.
+  if (durableExecutionEngine) {
+    workflowRunService.setDurableEngine(durableExecutionEngine);
+  }
+
+  // P0-a — an approval that arrives after a restart has no live `interrupt()`
+  // frame to resume, so HitlService returns the stage to `pending` and needs
+  // this to actually relaunch it. Late-bound: WorkflowRunService is built
+  // after HitlService (via StageExecutionService).
+  hitlService.setRedriveRun((runId: string) => workflowRunService.redriveRun(runId));
 
   // ── Automation ──
   const dataSourceResolver = new DataSourceResolver(scriptRunner, httpClient, logger, config.projectRoot);
@@ -503,6 +530,10 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
         eventBus,
         idempotencyKeyRepo,
         logger,
+        // P0-b — the post-restart caller for the durable iteration machinery.
+        // Without it the reconciler only finalises, so an interrupted batch
+        // reports success for iterations that never ran.
+        (executionId, opts) => automationService.resumeExecution(executionId, opts),
       )
     : null;
 
@@ -523,6 +554,12 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     // WITH tools on the next prompt (see StartupRecoveryService.rehydrateSessions).
     chatEntityRepo,
   );
+
+  // X-13 — record which session an interrupted stage lost, and why. Without
+  // this the discarded conversation leaves no trace at all.
+  if (durableExecutionEngine) {
+    recoveryService.setDurableEngine(durableExecutionEngine);
+  }
 
   return {
     eventBus,

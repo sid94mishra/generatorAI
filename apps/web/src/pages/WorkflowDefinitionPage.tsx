@@ -157,9 +157,25 @@ export function WorkflowDefinitionPage() {
           setVariableModalOpen(false);
           navigate(`/workflows/${id}/runs/${context.workflowRunId}`);
         } else {
+          // Stage overrides used to be forwarded only on the orchestrated
+          // path, so a plain definition rendered the "SKIP" toggles and then
+          // ignored every one of them. `WorkflowRunService.findStageOverride`
+          // reads them from the run's own `__stageOverrides` variable, which
+          // is also how the script-run route passes them through.
+          const activeOverrides = (stageOverrides ?? [])
+            .filter((o) => o.skip || Object.keys(o.variables).length > 0)
+            .map((o) => ({
+              stageName: o.stageName,
+              stageIndex: o.stageIndex,
+              ...(o.skip ? { skip: true } : {}),
+              ...(Object.keys(o.variables).length > 0 ? { variables: o.variables } : {}),
+            }));
+
           const params: CreateWorkflowRunParams = {
             workflowDefinitionId: id,
-            variables,
+            variables: activeOverrides.length > 0
+              ? { ...variables, __stageOverrides: activeOverrides }
+              : variables,
           };
           const run = await createRun.mutateAsync(params);
 

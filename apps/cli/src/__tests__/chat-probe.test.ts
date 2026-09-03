@@ -2,19 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import xterm from '@xterm/headless';
+import type { Terminal as XtermTerminal } from '@xterm/headless';
 import { buildRegistry, detectTerminal, loadConfig } from '@generatorai/cli-core';
 import { Renderer } from '../render/Renderer.js';
 import { createLogger } from '../logger.js';
 import { launchTui } from '../tui/launch.js';
 import type { Session } from '../session.js';
+import { probeLiveServer } from './helpers/liveServerProbe.js';
 
-const Terminal = (xterm as unknown as { Terminal: typeof import('@xterm/headless').Terminal }).Terminal;
+const Terminal = (xterm as unknown as { Terminal: typeof XtermTerminal }).Terminal;
+const SERVER = process.env['GENERATORAI_TEST_SERVER'] ?? 'http://127.0.0.1:3100';
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const CTRL = (l: string) => String.fromCharCode(l.toUpperCase().charCodeAt(0) - 64);
 const OUT = 'chat-probe.txt';
 
 describe('chat surface', () => {
-  it('shows history, slash menu and model picker', async () => {
+  // A developer probe against a real, already-running server with real chat
+  // history and a real model catalog — not a hermetic CI test. Skips
+  // cleanly (rather than failing on a raw "fetch failed") when nothing is
+  // listening at SERVER. See helpers/liveServerProbe.ts.
+  it('shows history, slash menu and model picker', async (ctx) => {
+    if (!(await probeLiveServer(SERVER))) return ctx.skip();
     const columns = 130, rows = 34;
     const term = new Terminal({ cols: columns, rows, allowProposedApi: true });
     const out = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -33,7 +41,7 @@ describe('chat surface', () => {
       overrides: { isTTY: true, columns, rows, colorDepth: 'truecolor', unicode: true },
     });
     const session: Session = {
-      config: { ...base, server: { ...base.server, url: 'http://127.0.0.1:3100' }, tui: { ...base.tui, refreshMs: 0, restoreLayout: false } },
+      config: { ...base, server: { ...base.server, url: SERVER }, tui: { ...base.tui, refreshMs: 0, restoreLayout: false } },
       capabilities,
       renderer: new Renderer({ mode: 'auto', color: false, unicode: true, stdout: out }),
       logger: createLogger({ verbose: false, capabilities, silentStderr: true }),

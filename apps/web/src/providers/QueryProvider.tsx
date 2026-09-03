@@ -6,6 +6,7 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { ApiError } from '@/platform/apiFetch.js';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 /**
  * Retry transport failures, never the server's considered answer.
@@ -28,23 +29,34 @@ function retryUnlessClientError(failureCount: number, error: unknown): boolean {
   return failureCount < 1;
 }
 
-// Phase 1, 1.22 — staleTime defaults split by query nature.
+// P1-51 — the global defaults, revisited.
 //
-// Before: every query had `staleTime: 30_000`. That caused brief flashes
-// of stale data after SSE-driven invalidations (invalidation marked the
-// entry stale, but the 30s bucket meant the next refetch might not fire
-// immediately). Going to `staleTime: 0` across the board works, but
-// costs refetches on pure-static data (templates, definitions).
+// `staleTime: 0` meant EVERY query in the app was permanently stale. That is
+// not a freshness policy, it is a licence to refetch: every remount refetched,
+// and `refetchOnWindowFocus` turned a single alt-tab back into the app into a
+// simultaneous refetch of every mounted query. Combined with the 21 polling
+// `refetchInterval`s in `hooks/*` and the SSE invalidation path, the client
+// asked the server for the same data several times per second.
 //
-// Per-hook overrides are the real solution; the default here is 0 so
-// forgetting an override is safe (fresh data > stale flash). Static
-// resources override with a 5-minute staleTime at their hook site.
-const queryClient = new QueryClient({
+// The window is short (5 s) and it does NOT delay live data: `invalidateQueries`
+// marks an entry stale and refetches it regardless of `staleTime`, so the SSE
+// path — which is how anything that actually changes reaches the client — is
+// exactly as immediate as before. What the window suppresses is the duplicate
+// refetch nobody asked for: a remount seconds after the last fetch, and the
+// focus storm. Static resources still override with a 5-minute staleTime at
+// their hook site; anything needing sub-5-second freshness without an event
+// behind it must say so at its own call site, where the cost is visible.
+const DEFAULT_STALE_TIME_MS = 5_000;
+
+const queryClientImpl = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 0,
+      staleTime: DEFAULT_STALE_TIME_MS,
       gcTime: 5 * 60 * 1000,
       retry: retryUnlessClientError,
+      // Kept on: it is the recovery path when the SSE connection died while
+      // the tab was backgrounded. It is now bounded by `staleTime` instead of
+      // firing for every query unconditionally.
       refetchOnWindowFocus: true,
     },
     mutations: {
@@ -52,6 +64,13 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+export { DEFAULT_STALE_TIME_MS };
+
+// HMR-split-proof: sseManager invalidates queries on this client, and the
+// component tree reads from it. If Vite serves this module under two URLs
+// they MUST still share one cache — see lib/globalSingleton.ts.
+const queryClient = globalSingleton('web.queryClient', () => queryClientImpl);
 
 export { queryClient };
 

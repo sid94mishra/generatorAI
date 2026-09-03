@@ -6,6 +6,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 interface UiState {
   /** Whether the app sidebar is expanded. Persisted. */
@@ -17,7 +18,7 @@ interface UiState {
   setCommandPaletteOpen: (open: boolean) => void;
 }
 
-export const useUiStore = create<UiState>()(
+const useUiStoreImpl = create<UiState>()(
   persist(
     (set) => ({
       sidebarOpen: true,
@@ -32,3 +33,8 @@ export const useUiStore = create<UiState>()(
     },
   ),
 );
+
+
+// HMR-split-proof: every module instance shares the first-created store.
+// See lib/globalSingleton.ts for why this is load-bearing in dev.
+export const useUiStore = globalSingleton('web.uiStore', () => useUiStoreImpl);

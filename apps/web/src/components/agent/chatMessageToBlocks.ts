@@ -78,6 +78,8 @@ export function chatMessageToBlocks(message: ChatMessage): StreamBlock[] {
         args: tc.args,
         result: tc.result,
         status: 'complete',
+        ...(tc.fileOp ? { fileOp: tc.fileOp } : {}),
+        ...(tc.parentId ? { parentCallId: tc.parentId } : {}),
       }),
     });
   }
@@ -99,7 +101,15 @@ export function chatMessageToBlocks(message: ChatMessage): StreamBlock[] {
         title: card.title,
         fileName: card.fileName,
         summary: card.summary,
-        status: card.status,
+        // Mirror the question-card rule below: a card persisted while still
+        // awaiting review is not actionable from history — the gate it was
+        // blocking has since been resolved or expired (turns only persist
+        // after they settle). Rendering it as "Needs review" produced an
+        // approvable-looking card whose click 409s (seen after a mid-review
+        // server restart).
+        status: card.status === 'awaiting_review' || card.status === 'drafting'
+          ? 'expired'
+          : card.status,
         actions: [],
       }),
     });

@@ -1,263 +1,282 @@
 // ────────────────────────────────────────────────────────────────
-// Voice input — hold to dictate.
+// Voice input — LIVE dictation on mobile.
 //
-// The mic button in the composer used to render enabled and do nothing:
-// `voiceAvailable` was computed from the scope, but no handler was ever
-// passed. This is the handler.
+// WHAT CHANGED, AND WHY THE OLD DESIGN EXISTED
+// --------------------------------------------
+// This hook used to record to a WAV FILE, then send the whole file once on
+// release, because — as its own header said — "`expo-audio` records to a
+// FILE and exposes no sample callback". That was true when it was written.
+// It is not true of `expo-audio` 57, which ships `useAudioStream`: a native
+// PCM capture stream with an `onBuffer` callback and a `'float32'` encoding
+// (see AudioStream.types.d.ts). The premise the batch design rested on is
+// gone, so the design goes with it.
 //
-// The server's STT endpoint (`ws /api/stt/stream`) wants raw 16 kHz mono
-// Float32 PCM. The web client can produce that live from an AudioWorklet;
-// React Native cannot — `expo-audio` records to a FILE and exposes no sample
-// callback. So the shape of the interaction changes rather than being faked:
+// Mobile now behaves like the web composer:
 //
-//   web     hold, watch the words appear, release
-//   mobile  hold, release, the utterance is transcribed
+//   before   hold, release, wait, the whole utterance appears at once
+//   now      hold, watch words appear live, segments commit as you pause
 //
-// That is the honest mapping, it uses the same local Whisper on the same
-// machine, and it needs no server change. What we record is uncompressed
-// 16 kHz mono PCM in a WAV container, which is exactly what the endpoint
-// wants once the 44-byte header is stripped and the samples are scaled.
+// and it gains the pause/resume protocol (Part C.3), so tapping into the
+// draft to fix a word suspends dictation instead of racing it.
+//
+// TWO THINGS THE NATIVE STREAM MAKES OUR PROBLEM
+// ----------------------------------------------
+// `useAudioStream` documents that the delivered `sampleRate` "may differ if
+// the hardware cannot deliver it", and reports `channels` per buffer. The
+// STT endpoint accepts only 16 kHz mono Float32. Sending a 48 kHz buffer
+// unconverted does not error — it transcribes to nothing — so every buffer
+// goes through `toMono16k` (see pcm.ts) before it is sent.
+//
+// Everything still runs on the user's own server: audio goes to the loopback
+// / paired host, Parakeet or Whisper transcribes on-device, no cloud.
 // ────────────────────────────────────────────────────────────────
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import {
-  AudioModule,
-  RecordingPresets,
-  setAudioModeAsync,
-  useAudioRecorder,
-  type RecordingOptions,
-} from 'expo-audio';
-import * as FileSystem from 'expo-file-system';
+import { AudioModule, setAudioModeAsync, useAudioStream } from 'expo-audio';
 
 import { useAuth } from '../auth/AuthProvider';
+import { TARGET_SAMPLE_RATE, rms, toMono16k } from './pcm';
 
-/** Whisper's native rate. Anything else has to be resampled server-side. */
-const SAMPLE_RATE = 16_000;
+/**
+ * Mirrors the web hook's states (useSpeechToText.ts) so the two composers
+ * can be reasoned about together. 'paused' is the genuinely new one —
+ * VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part C.4.
+ */
+export type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'paused' | 'transcribing' | 'error';
 
-// Channel count and bit rate are only accepted at the top level; the platform
-// sub-objects reject them.
-const WAV_16K_MONO: RecordingOptions = {
-  ...RecordingPresets.HIGH_QUALITY,
-  extension: '.wav',
-  sampleRate: SAMPLE_RATE,
-  numberOfChannels: 1,
-  bitRate: SAMPLE_RATE * 16,
-  android: {
-    extension: '.wav',
-    outputFormat: 'default',
-    audioEncoder: 'default',
-    sampleRate: SAMPLE_RATE,
-  },
-  ios: {
-    extension: '.wav',
-    // Linear PCM is the point: a compressed container would have to be
-    // decoded before the samples could be sent.
-    audioQuality: 0x7f,
-    outputFormat: 'lpcm',
-    sampleRate: SAMPLE_RATE,
-    linearPCMBitDepth: 16,
-    linearPCMIsBigEndian: false,
-    linearPCMIsFloat: false,
-  },
-};
-
-export type VoiceStatus = 'idle' | 'recording' | 'transcribing' | 'error';
+export interface UseVoiceInputOptions {
+  /** Live preview of the open segment. Never committed to the draft (Part C.2). */
+  onInterim?: (text: string) => void;
+  /** A segment reached end-of-utterance mid-session; insert it at the caret. */
+  onSegment?: (text: string) => void;
+  /** Fired once after stop(), with whatever was still open. */
+  onFinal?: (text: string) => void;
+  onError?: (message: string) => void;
+}
 
 export interface VoiceInput {
   status: VoiceStatus;
   error: string | null;
-  /** True when the platform can record at all — false in the web preview. */
+  /** True when the platform can capture audio at all. */
   supported: boolean;
+  /** 0..1 loudness, for the recording indicator. */
+  amplitude: number;
   start: () => Promise<void>;
-  /** Resolves with the transcript, or null if nothing was said. */
-  stop: () => Promise<string | null>;
-  cancel: () => Promise<void>;
+  /** Suspend audio without tearing the stream or socket down (Part C.3). */
+  pause: () => void;
+  /** Continue the SAME session — no re-permission, no model reload. */
+  resume: () => void;
+  stop: () => void;
+  cancel: () => void;
 }
 
-export function useVoiceInput(): VoiceInput {
+export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
   const { socketUrl } = useAuth();
-  const recorder = useAudioRecorder(WAV_16K_MONO);
   const [status, setStatus] = useState<VoiceStatus>('idle');
   const [error, setError] = useState<string | null>(null);
-  const cancelled = useRef(false);
+  const [amplitude, setAmplitude] = useState(0);
+
+  // Callbacks are read through a ref so a caller that passes inline closures
+  // (every caller) doesn't re-create the audio stream on every render.
+  const cbRef = useRef(options);
+  cbRef.current = options;
+
+  const socketRef = useRef<WebSocket | null>(null);
+  /** Gate for outgoing audio — flipped by pause()/resume() without teardown. */
+  const sendingRef = useRef(false);
+  /** Set by cancel(), so a late `final` frame is not applied to the draft. */
+  const cancelledRef = useRef(false);
 
   const supported = Platform.OS === 'ios' || Platform.OS === 'android';
 
+  /**
+   * Native capture. Declared at hook level (not inside start()) because
+   * `useAudioStream` is a hook; `stream.start()`/`stop()` are what actually
+   * open and close the microphone.
+   */
+  const { stream } = useAudioStream({
+    sampleRate: TARGET_SAMPLE_RATE,
+    channels: 1,
+    encoding: 'float32',
+    onBuffer: (buffer) => {
+      if (!sendingRef.current) return;
+      const socket = socketRef.current;
+      if (!socket || socket.readyState !== 1) return;
+      const pcm = toMono16k(buffer.data, buffer.sampleRate, buffer.channels);
+      if (pcm.length === 0) return;
+      setAmplitude(rms(pcm));
+      try {
+        socket.send(pcm.buffer as ArrayBuffer);
+      } catch {
+        /* socket closed under us; the close handler resets state */
+      }
+    },
+  });
+
+  const teardown = useCallback(() => {
+    sendingRef.current = false;
+    try {
+      stream.stop();
+    } catch {
+      /* not streaming */
+    }
+    const socket = socketRef.current;
+    socketRef.current = null;
+    if (socket && (socket.readyState === 0 || socket.readyState === 1)) {
+      try {
+        socket.close();
+      } catch {
+        /* already closing */
+      }
+    }
+    setAmplitude(0);
+  }, [stream]);
+
+  const fail = useCallback(
+    (message: string) => {
+      teardown();
+      setStatus('error');
+      setError(message);
+      cbRef.current.onError?.(message);
+    },
+    [teardown],
+  );
+
   const start = useCallback(async () => {
+    if (!supported) {
+      fail('Dictation needs a device microphone.');
+      return;
+    }
     setError(null);
-    cancelled.current = false;
+    cancelledRef.current = false;
+    setStatus('connecting');
+
     try {
       const permission = await AudioModule.requestRecordingPermissionsAsync();
       if (!permission.granted) {
-        setStatus('error');
-        setError('Microphone access is off for GeneratorAI. Turn it on in Settings.');
+        fail('Microphone access is off for GeneratorAI. Turn it on in Settings.');
         return;
       }
-      // Without this the recording is silent on iOS when the device is in
-      // silent mode, which is the single most common "the mic is broken"
-      // report for any RN app.
+      // Without this the capture is silent on iOS when the device is in
+      // silent mode — the single most common "the mic is broken" report for
+      // any RN app.
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      await recorder.prepareToRecordAsync();
-      recorder.record();
-      setStatus('recording');
-    } catch (err) {
-      setStatus('error');
-      setError((err as Error).message);
-    }
-  }, [recorder]);
-
-  const cancel = useCallback(async () => {
-    cancelled.current = true;
-    try {
-      await recorder.stop();
-    } catch {
-      /* already stopped */
-    }
-    setStatus('idle');
-  }, [recorder]);
-
-  const stop = useCallback(async (): Promise<string | null> => {
-    if (status !== 'recording') return null;
-    setStatus('transcribing');
-    try {
-      await recorder.stop();
-      const uri = recorder.uri;
-      if (!uri || cancelled.current) {
-        setStatus('idle');
-        return null;
-      }
-
-      const pcm = await readWavAsFloat32(uri);
-      if (pcm.byteLength === 0) {
-        setStatus('idle');
-        return null;
-      }
 
       const url = await socketUrl('/api/stt/stream', 'stt', null);
-      const text = await transcribe(url, pcm);
-      setStatus('idle');
-      return text.trim() || null;
+      const socket = new WebSocket(url);
+      socket.binaryType = 'arraybuffer';
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ t: 'start' }));
+      };
+
+      socket.onmessage = (event) => {
+        if (typeof event.data !== 'string') return;
+        let frame: { t?: string; text?: string; message?: string };
+        try {
+          frame = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        switch (frame.t) {
+          case 'ready':
+            // The server, not our own start() call, is what moves us to
+            // listening — same rule as the web hook.
+            sendingRef.current = true;
+            setStatus('listening');
+            void stream.start().catch((err: unknown) => fail((err as Error).message));
+            break;
+          case 'interim':
+            cbRef.current.onInterim?.(frame.text ?? '');
+            break;
+          case 'segment':
+            // Committed mid-session text. The OLD batch implementation
+            // ignored these and read only `final`, which silently dropped
+            // everything before the last pause in a long dictation.
+            if (!cancelledRef.current && frame.text) cbRef.current.onSegment?.(frame.text);
+            break;
+          case 'final':
+            if (!cancelledRef.current && frame.text) cbRef.current.onFinal?.(frame.text);
+            teardown();
+            setStatus('idle');
+            break;
+          case 'paused':
+            setStatus('paused');
+            break;
+          case 'resumed':
+            setStatus('listening');
+            break;
+          case 'error':
+            fail(frame.message ?? 'Transcription failed.');
+            break;
+          default:
+            break;
+        }
+      };
+
+      socket.onerror = () => fail('Could not reach the transcription service.');
+      socket.onclose = () => {
+        // Only a close we did not initiate is interesting; teardown() has
+        // already cleared the ref in the paths we drive.
+        if (socketRef.current === socket) {
+          teardown();
+          setStatus('idle');
+        }
+      };
     } catch (err) {
-      setStatus('error');
-      setError((err as Error).message);
-      return null;
+      fail((err as Error).message);
     }
-  }, [recorder, socketUrl, status]);
+  }, [supported, fail, socketUrl, stream, teardown]);
 
-  return { status, error, supported, start, stop, cancel };
-}
+  const pause = useCallback(() => {
+    if (status !== 'listening') return;
+    // Stop sending immediately rather than waiting for the ack: the point of
+    // pausing is that words spoken while the user is editing must not land.
+    sendingRef.current = false;
+    setAmplitude(0);
+    const socket = socketRef.current;
+    if (socket?.readyState === 1) socket.send(JSON.stringify({ t: 'pause' }));
+  }, [status]);
 
-/**
- * Read a 16-bit PCM WAV file and return little-endian Float32 samples.
- *
- * The header is walked rather than assumed to be 44 bytes: iOS writes a
- * `LIST`/`INFO` chunk ahead of `data` often enough that a fixed offset ships
- * a few hundred milliseconds of metadata as audio.
- */
-async function readWavAsFloat32(uri: string): Promise<ArrayBuffer> {
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  const bytes = base64ToBytes(base64);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const resume = useCallback(() => {
+    if (status !== 'paused') return;
+    sendingRef.current = true;
+    const socket = socketRef.current;
+    if (socket?.readyState === 1) socket.send(JSON.stringify({ t: 'resume' }));
+  }, [status]);
 
-  let offset = 12; // past "RIFF" + size + "WAVE"
-  let dataStart = -1;
-  let dataLength = 0;
-  while (offset + 8 <= bytes.byteLength) {
-    const id = String.fromCharCode(
-      bytes[offset]!,
-      bytes[offset + 1]!,
-      bytes[offset + 2]!,
-      bytes[offset + 3]!,
-    );
-    const size = view.getUint32(offset + 4, true);
-    if (id === 'data') {
-      dataStart = offset + 8;
-      dataLength = Math.min(size, bytes.byteLength - dataStart);
-      break;
+  const stop = useCallback(() => {
+    if (status === 'idle' || status === 'error') return;
+    // Stop the mic now, but keep the socket open: the server still owes us a
+    // `final` for whatever segment is still open.
+    sendingRef.current = false;
+    try {
+      stream.stop();
+    } catch {
+      /* not streaming */
     }
-    offset += 8 + size + (size % 2);
-  }
-  if (dataStart < 0) return new ArrayBuffer(0);
-
-  const sampleCount = Math.floor(dataLength / 2);
-  const out = new Float32Array(sampleCount);
-  for (let i = 0; i < sampleCount; i += 1) {
-    out[i] = view.getInt16(dataStart + i * 2, true) / 32768;
-  }
-  return out.buffer;
-}
-
-/** One request/response over the STT socket. */
-function transcribe(url: string, pcm: ArrayBuffer): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    socket.binaryType = 'arraybuffer';
-
-    // A transcription that never answers must not leave the composer stuck in
-    // "transcribing" for the rest of the session.
-    const timer = setTimeout(() => {
-      socket.close();
-      reject(new Error('Transcription timed out.'));
-    }, 60_000);
-
-    const finish = (result: string | Error): void => {
-      clearTimeout(timer);
-      socket.close();
-      if (result instanceof Error) reject(result);
-      else resolve(result);
-    };
-
-    socket.onopen = () => {
-      socket.send(JSON.stringify({ t: 'start' }));
-      socket.send(pcm);
-      socket.send(JSON.stringify({ t: 'stop' }));
-    };
-
-    socket.onmessage = (event) => {
-      if (typeof event.data !== 'string') return;
-      try {
-        const frame = JSON.parse(event.data) as { t?: string; text?: string; message?: string };
-        if (frame.t === 'final') finish(frame.text ?? '');
-        else if (frame.t === 'error') finish(new Error(frame.message ?? 'Transcription failed.'));
-      } catch {
-        /* ignore malformed frames */
-      }
-    };
-
-    socket.onerror = () => finish(new Error('Could not reach the transcription service.'));
-    socket.onclose = () => clearTimeout(timer);
-  });
-}
-
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-/**
- * Decode base64 without `atob`.
- *
- * Hermes has no `atob`, and the per-character `String.fromCharCode` loop used
- * elsewhere in this app is what makes the browser-preview frame decode
- * expensive. This writes straight into a typed array.
- */
-function base64ToBytes(input: string): Uint8Array {
-  const clean = input.replace(/[^A-Za-z0-9+/]/g, '');
-  const length = Math.floor((clean.length * 3) / 4);
-  const out = new Uint8Array(length);
-
-  let byte = 0;
-  let bits = 0;
-  let written = 0;
-  for (let i = 0; i < clean.length; i += 1) {
-    const value = B64.indexOf(clean[i]!);
-    if (value < 0) continue;
-    byte = (byte << 6) | value;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      out[written++] = (byte >> bits) & 0xff;
+    setAmplitude(0);
+    setStatus('transcribing');
+    const socket = socketRef.current;
+    if (socket?.readyState === 1) socket.send(JSON.stringify({ t: 'stop' }));
+    else {
+      teardown();
+      setStatus('idle');
     }
-  }
-  return out.subarray(0, written);
+  }, [status, stream, teardown]);
+
+  const cancel = useCallback(() => {
+    cancelledRef.current = true;
+    const socket = socketRef.current;
+    if (socket?.readyState === 1) socket.send(JSON.stringify({ t: 'cancel' }));
+    teardown();
+    setStatus('idle');
+  }, [teardown]);
+
+  // A screen that unmounts mid-dictation must not leave the microphone hot.
+  useEffect(() => () => teardown(), [teardown]);
+
+  return { status, error, supported, amplitude, start, pause, resume, stop, cancel };
 }

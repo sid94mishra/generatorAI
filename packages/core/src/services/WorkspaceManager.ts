@@ -21,6 +21,7 @@ import type {
 import type { IExecutionWorkspaceRepository } from '../domain/ports/IExecutionWorkspaceRepository.js';
 import type { IWorkspaceWorktreeRepository } from '../domain/ports/IWorkspaceWorktreeRepository.js';
 import type { IWorkspaceArtifactRepository } from '../domain/ports/IWorkspaceArtifactRepository.js';
+import type { IWorktreeRepository } from '../domain/ports/IWorktreeRepository.js';
 import { PathResolver } from './PathResolver.js';
 import type { IGitClient } from '@generatorai/git';
 
@@ -30,17 +31,79 @@ export interface WorkspaceManagerConfig {
 }
 
 /**
+ * Ordered teardown phases (W25).
+ *
+ * `native` listeners own OS-level handles that hold the workspace tree open —
+ * Chromium profiles, PTYs, a CUA driver session. They must all be released
+ * before anything starts deleting files, or the delete either fails outright
+ * (Windows EBUSY) or succeeds out from under a live process.
+ *
+ * `storage` listeners only own rows and files derived from the workspace
+ * (review threads, checkpoints, staged skill bodies) and run afterwards.
+ *
+ * The phase is what fixes the ordering, not the registration order: teardown
+ * ran in push order before, so a listener registered early (`agentStaging`,
+ * which `fs.rm`s a directory) ran ahead of the browser/CUA/terminal teardown
+ * registered later in the composition root.
+ */
+export type WorkspaceTeardownPhase = 'native' | 'storage';
+
+/** Phase execution order. `deleteWorkspace` walks this array. */
+const TEARDOWN_PHASES: readonly WorkspaceTeardownPhase[] = ['native', 'storage'];
+
+/**
+ * Thrown when a workspace directory could not be removed and its DB rows were
+ * therefore deliberately kept.
+ *
+ * The workspace row is the ONLY record of `rootPath` — nothing scans
+ * `workspacesDir` looking for strays. Deleting the row while the directory
+ * survives (which is what a bare `fs.rm` + warn did) orphans that tree
+ * permanently. Keeping the row leaves the workspace listable and re-deletable
+ * once whatever held the handle exits, and lets the retention sweep pick it up
+ * again on its next pass.
+ */
+export class WorkspaceTreeBusyError extends Error {
+  constructor(
+    public readonly workspaceId: string,
+    public readonly rootPath: string,
+    public readonly cause: unknown,
+  ) {
+    super(
+      `Workspace ${workspaceId} directory could not be removed (${rootPath}): ` +
+        `${cause instanceof Error ? cause.message : String(cause)}. ` +
+        'Database rows were kept so the directory remains findable — retry the delete.',
+    );
+    this.name = 'WorkspaceTreeBusyError';
+  }
+}
+
+interface BeforeDeleteListener {
+  phase: WorkspaceTeardownPhase;
+  cb: (workspaceId: string) => Promise<void> | void;
+}
+
+/** One worktree directory that must be unregistered from its parent clone. */
+interface WorktreeTarget {
+  /** Absolute path of the linked worktree. */
+  worktreePath: string;
+  /** Row id in the authoritative `worktrees` table, when it came from there. */
+  runWorktreeId?: string;
+}
+
+/**
  * Central service for workspace lifecycle management.
  * This is the ONLY entry point for workspace creation.
  */
 export class WorkspaceManager {
   private readonly pathResolver: PathResolver;
   /**
-   * Listeners invoked before `deleteWorkspace` tears down a workspace.
-   * Used by TerminalService (and potentially other future workspace-scoped
-   * resources) to release native handles before the row disappears.
+   * Listeners invoked before `deleteWorkspace` tears down a workspace, and —
+   * for the `native` phase only — before `archiveWorkspace` parks one.
+   * Used by TerminalService / BrowserService / ComputerService (and other
+   * workspace-scoped resources) to release native handles before the row
+   * disappears.
    */
-  private readonly beforeDeleteListeners: Array<(workspaceId: string) => Promise<void> | void> = [];
+  private readonly beforeDeleteListeners: BeforeDeleteListener[] = [];
   /**
    * F3-fix: Per-ownerId in-flight create promises.
    * Guards against two concurrent callers for the same owner racing through the
@@ -58,21 +121,61 @@ export class WorkspaceManager {
     private readonly logger: ILogger,
     /** Optional git client — when provided, commits go through it. */
     private readonly gitClient?: IGitClient,
+    /**
+     * The AUTHORITATIVE worktree table (`worktrees`), keyed by runId.
+     *
+     * P0-e: `deleteWorkspace` used to consult only `workspace_worktrees`, the
+     * table `trackWorktree` writes — and `trackWorktree` has no callers, so
+     * that table is always empty and the whole removal path was dead. Real
+     * worktrees are written here by `WorktreeService.createWorktree` under
+     * `runId = workspace.ownerId`. Optional so embedders that never create
+     * worktrees can omit it.
+     */
+    private readonly runWorktreeRepo?: IWorktreeRepository,
   ) {
     this.pathResolver = new PathResolver();
   }
 
   /**
-   * Register a listener that fires just before a workspace is deleted.
+   * Register a listener that fires just before a workspace is torn down.
    * Returns an unregister function. Errors thrown by listeners are logged
    * and swallowed so a hostile listener can't block deletion.
+   *
+   * `phase` defaults to `'native'` — the conservative choice, since a native
+   * listener only releases handles. Anything that deletes files or rows MUST
+   * declare `'storage'` so it cannot run ahead of handle release.
    */
-  registerBeforeDelete(cb: (workspaceId: string) => Promise<void> | void): () => void {
-    this.beforeDeleteListeners.push(cb);
+  registerBeforeDelete(
+    cb: (workspaceId: string) => Promise<void> | void,
+    phase: WorkspaceTeardownPhase = 'native',
+  ): () => void {
+    const entry: BeforeDeleteListener = { phase, cb };
+    this.beforeDeleteListeners.push(entry);
     return () => {
-      const idx = this.beforeDeleteListeners.indexOf(cb);
+      const idx = this.beforeDeleteListeners.indexOf(entry);
       if (idx >= 0) this.beforeDeleteListeners.splice(idx, 1);
     };
+  }
+
+  /**
+   * Run every listener registered for `phase`, in registration order within
+   * the phase. Listener failures are warned and swallowed — one broken
+   * consumer must not wedge teardown for the rest.
+   */
+  private async runTeardownPhase(
+    workspaceId: string,
+    phase: WorkspaceTeardownPhase,
+  ): Promise<void> {
+    for (const listener of this.beforeDeleteListeners) {
+      if (listener.phase !== phase) continue;
+      try {
+        await listener.cb(workspaceId);
+      } catch (err) {
+        this.logger.warn(
+          `[WorkspaceManager] beforeDelete(${phase}) listener failed for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
   }
 
   /**
@@ -84,7 +187,27 @@ export class WorkspaceManager {
     // racing through the `forceCleanup → create` path don't produce duplicate rows.
     const ownerKey = `${params.ownerType}:${params.ownerId}`;
     const inflight = this.createInFlight.get(ownerKey);
-    if (inflight) return inflight;
+    if (inflight) {
+      // The key is deliberately owner-only: one workspace row per owner is the
+      // invariant this guard exists to protect, and widening the key would
+      // simply produce two rows instead of one.
+      //
+      // But collapsing onto the first caller silently handed the second caller
+      // a workspace rooted at a DIFFERENT tree than the one it asked for — it
+      // would then run the agent against someone else's code root. Fail loudly
+      // instead: a second, conflicting request for the same owner is a caller
+      // bug, not something to paper over.
+      const shared = await inflight;
+      const requested = params.codeRootOverride?.trim() || undefined;
+      if (requested && shared.codeRoot !== requested) {
+        throw new Error(
+          `[WorkspaceManager] Concurrent createWorkspace for ${ownerKey} requested codeRoot ` +
+            `"${requested}" but an in-flight create is using "${shared.codeRoot ?? shared.rootPath}". ` +
+            'One owner has exactly one workspace; resolve the code root before creating.',
+        );
+      }
+      return shared;
+    }
 
     const doCreate = this._doCreateWorkspace(params);
     this.createInFlight.set(ownerKey, doCreate);
@@ -271,10 +394,23 @@ export class WorkspaceManager {
 
   /**
    * Archive a workspace (marks as archived; physical archival is optional).
+   *
+   * INV-7 ("a session dies when the workspace is deleted **or archived** —
+   * never orphans a Chromium process") makes native teardown part of the
+   * archive contract, not just the delete contract: an archived workspace is
+   * by definition no longer being worked in, so its Chromium, its PTYs and its
+   * CUA session must go. Flipping the status column alone left all three
+   * running against a tree nobody was looking at.
+   *
+   * The `storage` phase deliberately does NOT run — archiving keeps the files,
+   * the review threads and the checkpoints; that is the whole difference
+   * between archive and delete.
    */
   async archiveWorkspace(workspaceId: string): Promise<string | null> {
     const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
+
+    await this.runTeardownPhase(workspaceId, 'native');
 
     await this.workspaceRepo.updateStatus(workspaceId, 'archived', {
       archivedAt: new Date(),
@@ -288,121 +424,274 @@ export class WorkspaceManager {
   /**
    * Delete a workspace and all its contents.
    *
-   * Ordering is critical (P0-35, P0-36):
-   *  1. beforeDeleteListeners  — release native handles (Terminals, etc.)
-   *  2. Browser teardown       — registered as a beforeDelete listener by
-   *                              composition-root (must run before filesystem)
-   *  3. git worktree remove    — while the worktree dirs still exist, tell the
-   *                              codebase clone about the removal so it doesn't
-   *                              permanently accumulate orphaned worktree refs.
-   *  4. git worktree prune     — sweep stale metadata from the clone's git dir.
-   *  5. fs.rm                  — destroy the physical tree.
-   *  6. DB rows                — only after git cleanup so orphans can still be
-   *                              found if step 3 threw.
+   * Ordering is critical (P0-35, P0-36, W25):
+   *  1. `native` teardown phase  — release OS handles: PTYs, Chromium, CUA.
+   *  2. `storage` teardown phase — drop derived rows/files (review threads,
+   *                                checkpoints, staged skills). Ordered by
+   *                                PHASE, not by registration order.
+   *  3. git worktree remove      — while the worktree dirs still exist, tell
+   *                                the codebase clone about the removal so it
+   *                                doesn't permanently accumulate orphaned
+   *                                worktree refs.
+   *  4. git worktree prune       — sweep stale metadata from the clone's git dir.
+   *  5. fs.rm                    — destroy the physical tree (with retries).
+   *  6. DB rows                  — ONLY if step 5 actually succeeded; the row
+   *                                is the sole record of `rootPath`.
+   *
+   * Throws {@link WorkspaceTreeBusyError} when step 5 fails, leaving every row
+   * intact so the directory stays findable and the delete can be retried.
    */
   async deleteWorkspace(workspaceId: string): Promise<void> {
     const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace) return;
 
     // Step 1 & 2: Give registered listeners a chance to release native handles
-    // before we blow the row away.
-    for (const cb of this.beforeDeleteListeners) {
+    // before anything starts deleting, then let storage consumers clean up.
+    for (const phase of TEARDOWN_PHASES) {
+      await this.runTeardownPhase(workspaceId, phase);
+    }
+
+    // Step 3 & 4: Remove git worktrees BEFORE touching the filesystem or DB,
+    // so git can follow each worktree's `.git` file back to the parent clone
+    // and unregister the entry while the directory still exists.
+    const targets = await this.collectWorktreeTargets(workspace);
+    for (const target of targets) {
+      await this.unregisterWorktree(target.worktreePath);
+    }
+
+    // Step 5: Remove from filesystem.
+    try {
+      await this.rmTree(workspace.rootPath);
+    } catch (err) {
+      // Step 6 is deliberately skipped: see WorkspaceTreeBusyError.
+      this.logger.error(
+        `[WorkspaceManager] Failed to remove workspace directory ${workspace.rootPath}; ` +
+          `keeping DB rows for ${workspaceId} so it is not orphaned: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new WorkspaceTreeBusyError(workspaceId, workspace.rootPath, err);
+    }
+
+    // Step 6: Remove DB records — after git + filesystem cleanup succeeded.
+    //
+    // Worktree rows are dropped one at a time and only when their directory is
+    // really gone. A worktree living OUTSIDE the workspace root (the legacy
+    // project-worktrees layout) is not covered by the `rmTree` above, so if
+    // `git worktree remove` failed for it the directory is still there — and
+    // its row is the only thing that will ever lead anyone back to it.
+    for (const target of targets) {
+      if (!target.runWorktreeId) continue;
+      if (await this.pathExists(target.worktreePath)) {
+        this.logger.warn(
+          `[WorkspaceManager] Keeping worktree row ${target.runWorktreeId}: ` +
+            `${target.worktreePath} still exists after teardown`,
+        );
+        continue;
+      }
       try {
-        await cb(workspaceId);
+        await this.runWorktreeRepo?.delete(target.runWorktreeId);
       } catch (err) {
         this.logger.warn(
-          `[WorkspaceManager] beforeDelete listener failed for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`,
+          `[WorkspaceManager] Failed to delete worktree row ${target.runWorktreeId}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
-
-    // Step 3 & 4: Remove git worktrees BEFORE touching the filesystem or DB.
-    // Each record's relativePath points to a linked worktree from a codebase
-    // clone. We run `git worktree remove` while the directory still exists so
-    // git can follow the .git file to the parent repo and unregister the entry.
-    const worktreeRecords = await this.worktreeRepo.findByWorkspace(workspaceId);
-    if (worktreeRecords.length > 0) {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-
-      for (const record of worktreeRecords) {
-        const worktreePath = path.join(workspace.rootPath, record.relativePath);
-
-        // F4-fix: Read the .git file BEFORE removing the worktree so we can
-        // resolve the parent clone path. After `git worktree remove` the
-        // directory no longer exists and `-C <worktreePath>` in `git worktree
-        // prune` would fail (or silently operate on the wrong repo).
-        let parentClonePath: string | undefined;
-        try {
-          const gitFileContent = await fs.readFile(
-            path.join(worktreePath, '.git'),
-            'utf-8',
-          );
-          // Linked worktrees have a `.git` *file* containing:
-          //   gitdir: /path/to/parent/.git/worktrees/<name>
-          // The parent clone root is three levels up from that gitdir.
-          const match = /gitdir:\s*(.+)/.exec(gitFileContent.trim());
-          const matchedGroup = match?.[1];
-          if (matchedGroup) {
-            const gitdirPath = path.resolve(worktreePath, matchedGroup.trim());
-            // gitdirPath = <clone>/.git/worktrees/<name>  → go up 3 levels
-            parentClonePath = path.resolve(gitdirPath, '..', '..', '..');
-          }
-        } catch {
-          // .git file may not exist (workspace without worktrees, or already
-          // partially cleaned up) — skip prune gracefully.
-        }
-
-        try {
-          // -C <worktreePath> makes git start inside the linked worktree;
-          // git follows the .git file back to the parent clone and removes
-          // this entry from its worktree list.
-          await execFileAsync(
-            'git',
-            ['-C', worktreePath, 'worktree', 'remove', '--force', worktreePath],
-            { timeout: 15_000 },
-          );
-          this.logger.debug?.(
-            `[WorkspaceManager] git worktree remove: ${worktreePath}`,
-          );
-        } catch (err) {
-          this.logger.warn(
-            `[WorkspaceManager] git worktree remove failed for ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-
-        if (parentClonePath) {
-          try {
-            // Sweep any remaining stale refs from the parent clone's git dir.
-            // Must run from the parent clone — not from the now-deleted
-            // worktree path (F4 fix).
-            await execFileAsync(
-              'git',
-              ['-C', parentClonePath, 'worktree', 'prune'],
-              { timeout: 15_000 },
-            );
-          } catch {
-            // Best effort.
-          }
-        }
-      }
-    }
-
-    // Step 5: Remove from filesystem
-    try {
-      await fs.rm(workspace.rootPath, { recursive: true, force: true });
-    } catch (err) {
-      this.logger.warn(`[WorkspaceManager] Failed to remove workspace directory: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    // Step 6: Remove DB records — after git cleanup so orphans are findable
-    // if the cleanup threw partway through.
     await this.artifactRepo.deleteByWorkspace(workspaceId);
     await this.worktreeRepo.deleteByWorkspace(workspaceId);
     await this.workspaceRepo.delete(workspaceId);
 
     this.logger.info(`[WorkspaceManager] Workspace ${workspaceId} deleted`);
+  }
+
+  /**
+   * Every worktree directory that has to be unregistered before this
+   * workspace's tree is destroyed, de-duplicated by resolved path.
+   *
+   * Two sources, deliberately both:
+   *
+   *  - `runWorktreeRepo` (the `worktrees` table) is the AUTHORITATIVE record.
+   *    It is what `WorktreeService.createWorktree` actually writes, keyed by
+   *    `runId` — which for every workspace-backed run *is* `workspace.ownerId`
+   *    (chats pass `chatId`, workflow runs pass `runId`). It stores absolute
+   *    paths, so it also covers legacy worktrees placed outside the workspace
+   *    root in the project worktrees dir.
+   *  - `worktreeRepo` (the `workspace_worktrees` tracking table) is what
+   *    `trackWorktree` writes. It has no production writers today, but it is
+   *    kept in the union so that any caller which does populate it still gets
+   *    its worktrees cleaned up.
+   *
+   * P0-e: consulting only the tracking table made this whole path dead code —
+   * the table was always empty while real worktrees accumulated in the parent
+   * clone forever.
+   */
+  private async collectWorktreeTargets(
+    workspace: ExecutionWorkspace,
+  ): Promise<WorktreeTarget[]> {
+    const byPath = new Map<string, WorktreeTarget>();
+
+    if (this.runWorktreeRepo) {
+      try {
+        const rows = await this.runWorktreeRepo.getByRunId(workspace.ownerId);
+        for (const row of rows) {
+          const abs = row.worktreePath?.trim();
+          if (!abs) continue;
+          byPath.set(path.resolve(abs), {
+            worktreePath: path.resolve(abs),
+            runWorktreeId: row.id,
+          });
+        }
+      } catch (err) {
+        this.logger.warn(
+          `[WorkspaceManager] Could not list worktrees for run ${workspace.ownerId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    const tracked = await this.worktreeRepo.findByWorkspace(workspace.id);
+    for (const record of tracked) {
+      // `relativePath` comes from a DB column and is interpolated straight into
+      // `git worktree remove --force`. Force it through the workspace boundary
+      // check first: a row carrying `../../..` (or an absolute path) would
+      // otherwise aim a forced removal at an arbitrary directory.
+      let resolved: string;
+      try {
+        resolved = await this.pathResolver.resolveWithinWorkspace(
+          workspace.rootPath,
+          record.relativePath,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[WorkspaceManager] Skipping worktree record ${record.id}: relativePath ` +
+            `"${record.relativePath}" escapes workspace ${workspace.id} ` +
+            `(${err instanceof Error ? err.message : String(err)})`,
+        );
+        continue;
+      }
+      if (!byPath.has(resolved)) byPath.set(resolved, { worktreePath: resolved });
+    }
+
+    return [...byPath.values()];
+  }
+
+  /**
+   * Unregister one linked worktree from its parent clone and delete its
+   * directory.
+   *
+   * Best effort by design — a worktree whose parent clone has already been
+   * deleted, or which was never a real git worktree (`local-dir` codebases are
+   * plain copies), simply falls through to the caller's `fs.rm`. The caller
+   * decides what to do about a directory that survives, by re-checking it once
+   * the workspace tree itself has been removed.
+   */
+  private async unregisterWorktree(worktreePath: string): Promise<void> {
+    // Read the `.git` file BEFORE removing anything: afterwards the directory
+    // is gone and there is no way left to find the parent clone (F4-fix).
+    const parentClonePath = await this.resolveParentClone(worktreePath);
+
+    if (parentClonePath && this.gitClient) {
+      try {
+        await this.gitClient.removeWorktree(parentClonePath, worktreePath);
+        // Sweeping the parent clone is what stops `git worktree list` growing
+        // without bound across thousands of runs. `pruneWorktrees` existed
+        // with zero callers before this (P0-e).
+        await this.gitClient.pruneWorktrees(parentClonePath);
+        return;
+      } catch (err) {
+        this.logger.warn(
+          `[WorkspaceManager] git worktree remove failed for ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // No git client (or the client path failed): drive git directly. `-C
+    // <worktreePath>` makes git start inside the linked worktree and follow
+    // the .git file back to the parent clone.
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+
+    try {
+      await execFileAsync(
+        'git',
+        ['-C', worktreePath, 'worktree', 'remove', '--force', worktreePath],
+        { timeout: 15_000 },
+      );
+      this.logger.debug?.(`[WorkspaceManager] git worktree remove: ${worktreePath}`);
+    } catch (err) {
+      this.logger.warn(
+        `[WorkspaceManager] git worktree remove failed for ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    if (parentClonePath) {
+      try {
+        // Must run from the parent clone — not from the now-deleted worktree
+        // path (F4-fix).
+        await execFileAsync('git', ['-C', parentClonePath, 'worktree', 'prune'], {
+          timeout: 15_000,
+        });
+      } catch {
+        // Best effort.
+      }
+    }
+  }
+
+  /**
+   * Resolve the parent clone of a linked worktree from its `.git` file.
+   *
+   * Linked worktrees have a `.git` *file* containing
+   * `gitdir: /path/to/parent/.git/worktrees/<name>`; the clone root is three
+   * levels up. Returns `undefined` when the file is missing or unreadable
+   * (already cleaned up, or not a linked worktree at all).
+   */
+  private async resolveParentClone(worktreePath: string): Promise<string | undefined> {
+    try {
+      const gitFileContent = await fs.readFile(path.join(worktreePath, '.git'), 'utf-8');
+      const match = /gitdir:\s*(.+)/.exec(gitFileContent.trim());
+      const matchedGroup = match?.[1];
+      if (!matchedGroup) return undefined;
+      const gitdirPath = path.resolve(worktreePath, matchedGroup.trim());
+      return path.resolve(gitdirPath, '..', '..', '..');
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async pathExists(target: string): Promise<boolean> {
+    try {
+      await fs.stat(target);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * `fs.rm` with a short retry ladder.
+   *
+   * On Windows a directory is undeletable (EBUSY / EPERM / ENOTEMPTY) while
+   * ANY handle into it is open, and handles close asynchronously — the
+   * Chromium we just stopped, the PTY we just killed and the indexer that
+   * walked the tree all release theirs some milliseconds later. A single
+   * attempt therefore fails routinely on a workspace that is perfectly safe to
+   * remove. Retrying converts nearly all of those into a clean removal; the
+   * caller decides what to do with the ones that survive, and the answer is
+   * never "delete the row anyway".
+   */
+  private async rmTree(target: string, attempts = 4): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        await fs.rm(target, { recursive: true, force: true });
+        return;
+      } catch (err) {
+        lastError = err;
+        if (attempt < attempts - 1) {
+          await new Promise((r) => setTimeout(r, 100 * 2 ** attempt));
+        }
+      }
+    }
+    throw lastError;
   }
 
   /**
@@ -506,8 +795,18 @@ export class WorkspaceManager {
             continue;
           }
         }
-        await this.deleteWorkspace(ws.id);
-        deleted++;
+        try {
+          await this.deleteWorkspace(ws.id);
+          deleted++;
+        } catch (err) {
+          // A workspace whose tree is still held open (WorkspaceTreeBusyError)
+          // keeps its rows, so it stays `completed` and past the cutoff — the
+          // next sweep retries it. Never let one stuck workspace abort the
+          // whole retention pass.
+          this.logger.warn(
+            `[WorkspaceManager] Retention delete failed for ${ws.id}, will retry next sweep: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
     }
 
@@ -568,15 +867,25 @@ export class WorkspaceManager {
 
   /**
    * Force-cleanup a workspace (for failed/orphaned state). Idempotent.
+   *
+   * Unlike the old best-effort version this refuses to drop the rows when the
+   * directory survives. `rootPath` is derived from `ownerId`, so a recreate for
+   * the same owner lands on the SAME directory: forgetting a tree we could not
+   * delete would silently graft the previous attempt's files into the new
+   * workspace, on top of orphaning them.
    */
   private async forceCleanup(workspaceId: string): Promise<void> {
     const ws = await this.workspaceRepo.findById(workspaceId);
     if (!ws) return;
 
     try {
-      await fs.rm(ws.rootPath, { recursive: true, force: true });
-    } catch {
-      // Best effort
+      await this.rmTree(ws.rootPath);
+    } catch (err) {
+      this.logger.error(
+        `[WorkspaceManager] forceCleanup could not remove ${ws.rootPath}; keeping rows for ${workspaceId}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new WorkspaceTreeBusyError(workspaceId, ws.rootPath, err);
     }
 
     try {
@@ -708,6 +1017,11 @@ export class WorkspaceManager {
         '.workspace.json',
         'scratchpad.json',
         'stream-log.jsonl',
+        '',
+        '# Integrated browser: persistent Chromium profile (cache, cookies,',
+        '# service-worker state). Hundreds of binary files that churn on every',
+        '# page load and drowned the Changes tab in "binary A" rows.',
+        'browser/',
         '',
         '# Standard vendored / build output',
         'node_modules/',

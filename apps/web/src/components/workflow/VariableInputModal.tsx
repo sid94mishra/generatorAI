@@ -3,7 +3,7 @@
 // Renders type-appropriate inputs based on WorkflowDefinition.variables
 // ────────────────────────────────────────────────────────────────
 
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Play, AlertCircle, Upload, FileText, Trash2, FolderGit2, ChevronDown, ChevronRight, Settings2 } from 'lucide-react';
 import type { VariableDefinition } from '@generatorai/shared';
 import { Select, Modal, Button, Input, Textarea, Badge } from '@/components/ui/index.js';
@@ -68,9 +68,10 @@ export function VariableInputModal({
     );
   }, [variables, hasLinkedCodebases]);
 
-  const [values, setValues] = useState<Record<string, unknown>>(() => {
-    const initial: Record<string, unknown> = {};
-    for (const v of variables) {
+  // Seed one field from its definition. Shared by the initial state and the
+  // re-seed on open so both paths apply defaults identically.
+  const seedValue = useCallback(
+    (v: VariableDefinition): unknown => {
       let def = v.defaultValue ?? (v.type === 'boolean' ? false : '');
       // Auto-fill git variables from linked codebases
       if (hasLinkedCodebases) {
@@ -84,10 +85,44 @@ export function VariableInputModal({
       if (v.type === 'boolean') {
         def = def === true || def === 'true' || def === '1';
       }
-      initial[v.name] = def;
-    }
+      return def;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hasLinkedCodebases, linkedCodebases],
+  );
+
+  const [values, setValues] = useState<Record<string, unknown>>(() => {
+    const initial: Record<string, unknown> = {};
+    for (const v of variables) initial[v.name] = seedValue(v);
     return initial;
   });
+
+  // Re-seed every time the dialog opens.
+  //
+  // The dialog is mounted for the whole page lifetime and toggled with `open`,
+  // so its useState initialiser ran while `variables` was still the empty
+  // array the builder store starts with — every default (including required
+  // ones) came up blank, and choice fields read "Select…". Re-seeding on open
+  // also discards a half-filled abandoned run, which is the expected
+  // behaviour for a dialog that reopens from scratch.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      const fresh: Record<string, unknown> = {};
+      for (const v of variables) fresh[v.name] = seedValue(v);
+      setValues(fresh);
+      setErrors({});
+      setStageOverrides(
+        (stageNames ?? []).map((name, index) => ({
+          stageName: name,
+          stageIndex: index,
+          skip: false,
+          variables: {},
+        })),
+      );
+    }
+    wasOpen.current = open;
+  }, [open, variables, stageNames, seedValue]);
 
   // Update git variable values when linkedCodebases loads asynchronously
   React.useEffect(() => {

@@ -233,6 +233,14 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'terminal.session_closed': 'item',
   'terminal.session_resized': 'item',
 
+  // voice
+  'voice.stt_session_started': 'item',
+  'voice.stt_session_ended': 'item',
+  'voice.stt_paused': 'item',
+  'voice.stt_resumed': 'item',
+  'voice.tts_session_started': 'item',
+  'voice.tts_session_ended': 'item',
+
   // extension
   'extension.installed': 'item',
   'extension.uninstalled': 'item',

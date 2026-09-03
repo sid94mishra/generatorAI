@@ -6,10 +6,17 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
+import type { HookDefinition } from '@generatorai/shared';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
-import { CliError } from '../errors/CliError.js';
+import { CliError, EXIT_CODES } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
 import type { CliContext } from '../context/CliContext.js';
+import { watchRun } from './run.js';
+import {
+  degradeWidget,
+  degradeWidgets,
+  type WidgetRenderPayload,
+} from '../viewmodels/widgetDegradation.js';
 import {
   compact,
   createdColumn,
@@ -19,8 +26,11 @@ import {
   nameColumn,
   ok,
   projectFlag,
+  readTextFile,
   record,
   statusColumn,
+  verbosityFlag,
+  watchFlag,
 } from './_shared.js';
 
 export const GROUPS = [
@@ -59,7 +69,7 @@ async function findWorkspace(ctx: CliContext, ref: string) {
 export function agentCommands(): CommandSpec[] {
   const find = async (ctx: CliContext, ref: string) => {
     const agents = await ctx.api.agents.list();
-    return resolveRef(ref, { kind: 'agent', candidates: agents as never });
+    return resolveRef(ref, { kind: 'agent', candidates: agents });
   };
 
   return [
@@ -151,7 +161,7 @@ export function agentCommands(): CommandSpec[] {
       ),
       output: { kind: 'record', successMessage: 'Imported agent {id}' },
       async handler(ctx, { args, flags }) {
-        const markdown = await fs.readFile(path.resolve(args.file), 'utf8');
+        const markdown = await readTextFile(path.resolve(args.file), 'agent markdown file');
         let projectId: string | undefined;
         if (flags.project) {
           const projects = await ctx.api.projects.list();
@@ -211,14 +221,10 @@ export function agentCommands(): CommandSpec[] {
           projectId = resolveRef(flags.project, { kind: 'project', candidates: projects }).id;
         }
         return record(
-          await ctx.api.agents.resolvePreview(
-            compact({
-              agentRef: args.agent,
-              scope: flags.scope,
-              projectId,
-              harnessType: flags.harness,
-            }) as never,
-          ),
+          await ctx.api.agents.resolvePreview({
+            scope: flags.scope,
+            ...compact({ agentRef: args.agent, projectId, harnessType: flags.harness }),
+          }),
         );
       },
     }),
@@ -249,7 +255,7 @@ export function agentCommands(): CommandSpec[] {
 export function scriptCommands(): CommandSpec[] {
   const find = async (ctx: CliContext, ref: string) => {
     const scripts = await ctx.api.scripts.list();
-    return resolveRef(ref, { kind: 'script', candidates: scripts as never });
+    return resolveRef(ref, { kind: 'script', candidates: scripts });
   };
 
   return [
@@ -337,21 +343,27 @@ export function scriptCommands(): CommandSpec[] {
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [{ name: 'script', description: 'Script reference', required: true, completes: 'script' }],
-      flags: [
-        { name: 'profile', description: 'Profile name', type: 'string' },
-        { name: 'watch', short: 'w', description: 'Stream until finished', type: 'boolean' },
-      ],
+      flags: [{ name: 'profile', description: 'Profile name', type: 'string' }, watchFlag, verbosityFlag],
       schema: inputSchema(
         { script: z.string() },
-        { profile: z.string().optional(), watch: z.boolean().optional() },
+        {
+          profile: z.string().optional(),
+          watch: z.boolean().optional(),
+          verbosity: z.enum(['minimal', 'normal', 'verbose']).default('normal'),
+        },
       ),
       output: { kind: 'record', successMessage: 'Started run {id}' },
       async handler(ctx, { args, flags }) {
         const target = await find(ctx, args.script);
         const run = await ctx.api.scripts.run(target.id, compact({ profile: flags.profile }));
-        if (!flags.watch) return record(run);
-        // Delegating to `run watch` keeps one implementation of "follow a run".
-        return record(run, `Started run ${run.id} — \`generatorai run watch ${run.id}\``);
+        if (!flags.watch) {
+          return record(run, `Started run ${run.id} — \`generatorai run watch ${run.id}\``);
+        }
+        // Reuses `run start`'s watcher so there is one implementation of
+        // "follow a run" — previously this printed a suggestion to watch
+        // instead of actually doing it.
+        await watchRun(ctx, run.id, flags.verbosity);
+        return record(await ctx.api.runs.get(run.id));
       },
     }),
 
@@ -367,7 +379,7 @@ export function scriptCommands(): CommandSpec[] {
       schema: inputSchema({ file: z.string() }, {}),
       output: { kind: 'record' },
       async handler(ctx, { args }) {
-        const source = await fs.readFile(path.resolve(args.file), 'utf8');
+        const source = await readTextFile(path.resolve(args.file), 'script file');
         const result = await ctx.api.scripts.validate({ source, name: path.basename(args.file) });
         if (!result.valid) {
           throw new CliError('VALIDATION', `Script is not valid:\n${(result.errors ?? []).map((e) => `  ${e}`).join('\n')}`);
@@ -495,7 +507,7 @@ export function orchestratorCommands(): CommandSpec[] {
 export function extensionCommands(): CommandSpec[] {
   const find = async (ctx: CliContext, ref: string) => {
     const extensions = await ctx.api.extensions.list();
-    return resolveRef(ref, { kind: 'extension', candidates: extensions as never });
+    return resolveRef(ref, { kind: 'extension', candidates: extensions });
   };
 
   return [
@@ -608,23 +620,53 @@ export function widgetCommands(): CommandSpec[] {
       group: 'widget',
       verb: 'list',
       aliases: ['ls'],
-      summary: 'Open widget surfaces',
+      summary: 'Open widget surfaces for a chat, run or session',
+      description:
+        'Widgets are scoped: the server returns nothing unless one of --chat, --run or --session ' +
+        'is given. `renderable` is always false in a terminal — see `widget read` for what that ' +
+        'means and what is shown instead.',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [],
-      flags: [],
-      schema: inputSchema({}, {}),
+      flags: [
+        { name: 'chat', description: 'Widgets opened in this chat', type: 'string', completes: 'chat' },
+        { name: 'run', description: 'Widgets opened in this workflow run', type: 'string', completes: 'run' },
+        { name: 'session', description: 'Widgets opened in this session', type: 'string' },
+      ],
+      schema: inputSchema(
+        {},
+        { chat: z.string().optional(), run: z.string().optional(), session: z.string().optional() },
+      ),
       output: {
         kind: 'list',
         columns: [
-          idColumn,
+          { key: 'instanceId', header: 'ID', format: 'id', priority: 0 },
           { key: 'title', header: 'Title', priority: 0 },
           { key: 'surface', header: 'Surface', priority: 1 },
-          statusColumn,
+          { key: 'status', header: 'Status', format: 'status', priority: 0 },
+          { key: 'extensionId', header: 'Extension', priority: 2 },
+          { key: 'orphaned', header: 'Orphaned', format: 'boolean', priority: 1 },
         ],
       },
-      async handler(ctx) {
-        return list(await ctx.api.widgets.list());
+      async handler(ctx, { flags }): Promise<CommandResult<unknown>> {
+        // The route starts from an empty list and only fills it inside the
+        // chat/run/session branches, so a scopeless call can only ever
+        // return nothing — say so rather than printing an empty table that
+        // reads as "there are no widgets".
+        if (!flags.chat && !flags.run && !flags.session) {
+          throw CliError.usage('Pass one of --chat, --run or --session — widgets are scoped to one of those.');
+        }
+        const scope = compact({
+          chatId: flags.chat,
+          workflowRunId: flags.run,
+          sessionId: flags.session,
+        });
+        const { instances, render } = await ctx.api.widgets.listWithRender(scope);
+        return list(
+          degradeWidgets(instances, render as WidgetRenderPayload[]) as unknown as Array<
+            Record<string, unknown>
+          >,
+        );
       },
     }),
 
@@ -633,15 +675,76 @@ export function widgetCommands(): CommandSpec[] {
       group: 'widget',
       verb: 'read',
       aliases: ['show'],
-      summary: 'Read a widget and its state',
+      summary: 'Read a widget as text, with what a terminal cannot show',
+      description:
+        'A widget\'s interface is JavaScript and is never executed here. This prints its real ' +
+        'data (props and state) plus an explicit list of what is being left out — see the ' +
+        'textual widget degradation contract in viewmodels/widgetDegradation.ts.',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [{ name: 'widget', description: 'Widget id', required: true, completes: 'widget' }],
-      flags: [],
-      schema: inputSchema({ widget: z.string() }, {}),
+      flags: [
+        { name: 'chat', description: 'Chat the widget belongs to — needed to resolve its descriptor', type: 'string', completes: 'chat' },
+        { name: 'run', description: 'Run the widget belongs to', type: 'string', completes: 'run' },
+        { name: 'session', description: 'Session the widget belongs to', type: 'string' },
+      ],
+      schema: inputSchema(
+        { widget: z.string() },
+        { chat: z.string().optional(), run: z.string().optional(), session: z.string().optional() },
+      ),
       output: { kind: 'record' },
+      async handler(ctx, { args, flags }) {
+        const instance = await ctx.api.widgets.get(args.widget);
+        // The render payload only comes from the LIST route, and only within
+        // a scope. Without one the descriptor cannot be resolved, so the
+        // widget reads as orphaned — which is exactly what `degradeWidget`
+        // reports, rather than pretending the descriptor is missing.
+        let payload: WidgetRenderPayload | undefined;
+        if (flags.chat || flags.run || flags.session) {
+          const { render } = await ctx.api.widgets.listWithRender(
+            compact({ chatId: flags.chat, workflowRunId: flags.run, sessionId: flags.session }),
+          );
+          payload = (render as WidgetRenderPayload[]).find((p) => p.instanceId === args.widget);
+        }
+        // `scoped` says whether a descriptor was even looked for — without
+        // it the widget would be reported as orphaned (extension gone) when
+        // the real story is that this call never looked.
+        return record(degradeWidget(instance, payload, { scoped: Boolean(flags.chat || flags.run || flags.session) }));
+      },
+    }),
+
+    defineCommand({
+      id: 'widget.setState',
+      group: 'widget',
+      verb: 'set-state',
+      summary: "Write a widget's state — the degraded way to drive one",
+      description:
+        'The state route takes a FULL snapshot, not a patch: whatever JSON is passed replaces ' +
+        'the widget\'s state entirely. This is how a terminal interacts with a widget whose ' +
+        'controls it cannot draw.',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [
+        { name: 'widget', description: 'Widget id', required: true, completes: 'widget' },
+        { name: 'state', description: 'Full state as a JSON object', required: true },
+      ],
+      flags: [],
+      schema: inputSchema({ widget: z.string(), state: z.string() }, {}),
+      output: { kind: 'record', successMessage: 'State written.' },
       async handler(ctx, { args }) {
-        return record(await ctx.api.widgets.get(args.widget));
+        let state: Record<string, unknown>;
+        try {
+          const parsed: unknown = JSON.parse(args.state);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('not a JSON object');
+          }
+          state = parsed as Record<string, unknown>;
+        } catch (error) {
+          throw new CliError('VALIDATION', 'state must be a JSON object.', {
+            hint: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return record(await ctx.api.widgets.setState(args.widget, state));
       },
     }),
 
@@ -712,7 +815,12 @@ export function reviewCommands(): CommandSpec[] {
       id: 'review.create',
       group: 'review',
       verb: 'create',
-      summary: 'Start a review thread on a line',
+      summary: 'Start a review thread on a line range',
+      description:
+        'Scope and scopeId default from the workspace\'s owner when it is a chat. For a workflow ' +
+        'run\'s workspace, or to review under a different entity than the workspace default, pass ' +
+        'both explicitly — the server has no other way to know which chat/run/automation owns the ' +
+        'comment.',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [
@@ -721,21 +829,76 @@ export function reviewCommands(): CommandSpec[] {
         { name: 'body', description: 'Comment text', required: true },
       ],
       flags: [
-        { name: 'line', description: 'Line number', type: 'number' },
-        { name: 'side', description: 'Diff side', type: 'string', choices: ['old', 'new'] as const },
+        { name: 'startLine', description: 'First line of the range (1-based)', type: 'number', required: true },
+        { name: 'endLine', description: 'Last line of the range; defaults to startLine', type: 'number' },
+        { name: 'side', description: 'Diff side', type: 'string', choices: ['additions', 'deletions'] as const, default: 'additions' },
+        { name: 'anchorText', description: 'Exact text at the anchored line, for drift detection', type: 'string' },
+        { name: 'alias', description: 'Worktree alias', type: 'string' },
+        {
+          name: 'scope',
+          description: "What owns this comment; defaults to the workspace's owner when it is a chat",
+          type: 'string',
+          choices: ['chat', 'run', 'automation'] as const,
+        },
+        { name: 'scopeId', description: 'Id of the chat/run/automation named by --scope', type: 'string' },
+        { name: 'baseCheckpoint', description: 'Base checkpoint id; omit for none', type: 'string' },
+        { name: 'headCheckpoint', description: 'Head checkpoint id; omit for none', type: 'string' },
+        { name: 'intent', description: 'Comment intent', type: 'string', choices: ['fix', 'question', 'note', 'refactor', 'test'] as const },
       ],
       schema: inputSchema(
         { workspace: z.string(), path: z.string(), body: z.string() },
-        { line: z.coerce.number().int().positive().optional(), side: z.string().optional() },
+        {
+          startLine: z.coerce.number().int().positive(),
+          endLine: z.coerce.number().int().positive().optional(),
+          side: z.enum(['additions', 'deletions']).default('additions'),
+          anchorText: z.string().optional(),
+          alias: z.string().optional(),
+          scope: z.enum(['chat', 'run', 'automation']).optional(),
+          scopeId: z.string().optional(),
+          baseCheckpoint: z.string().optional(),
+          headCheckpoint: z.string().optional(),
+          intent: z.enum(['fix', 'question', 'note', 'refactor', 'test']).optional(),
+        },
       ),
       output: { kind: 'record', successMessage: 'Created thread {id}' },
       async handler(ctx, { args, flags }) {
         const target = await findWorkspace(ctx, args.workspace);
+
+        let scope = flags.scope;
+        let scopeId = flags.scopeId;
+        if (!scope || !scopeId) {
+          // The workspace record — not the trimmed reference from
+          // `findWorkspace` — is the only place `ownerType`/`ownerId` live.
+          const full = await ctx.api.workspaces.get(target.id);
+          if (full.ownerType === 'chat' && !scope && !scopeId) {
+            scope = 'chat';
+            scopeId = full.ownerId;
+          } else if (!scope || !scopeId) {
+            throw new CliError(
+              'USAGE',
+              `This workspace's owner ("${full.ownerType}") cannot be turned into a review scope automatically.`,
+              {
+                hint: 'Pass both --scope and --scopeId — for a workflow run\'s workspace that is usually `--scope run --scopeId <workflowRunId>`.',
+              },
+            );
+          }
+        }
+
         return record(
-          await ctx.api.review.createThread(
-            target.id,
-            compact({ path: args.path, body: args.body, line: flags.line, side: flags.side }) as never,
-          ),
+          await ctx.api.review.createThread(target.id, {
+            path: args.path,
+            body: args.body,
+            anchorText: flags.anchorText ?? '',
+            scopeId,
+            baseCheckpointId: flags.baseCheckpoint ?? '',
+            headCheckpointId: flags.headCheckpoint ?? '',
+            side: flags.side,
+            startLine: flags.startLine,
+            endLine: flags.endLine ?? flags.startLine,
+            ...(flags.alias ? { alias: flags.alias } : {}),
+            ...(flags.intent ? { intent: flags.intent } : {}),
+            scope,
+          }),
         );
       },
     }),
@@ -758,7 +921,7 @@ export function reviewCommands(): CommandSpec[] {
       async handler(ctx, { args }) {
         const target = await findWorkspace(ctx, args.workspace);
         return record(
-          await ctx.api.review.addComment(target.id, args.thread, { body: args.body } as never),
+          await ctx.api.review.addComment(target.id, args.thread, { body: args.body }),
         );
       },
     }),
@@ -821,10 +984,10 @@ export function reviewCommands(): CommandSpec[] {
           throw new CliError('CONFLICT', 'There are no open review threads to submit.');
         }
         return record(
-          await ctx.api.review.submit(
-            target.id,
-            compact({ threadIds, note: flags.note, preview: flags.preview }) as never,
-          ),
+          await ctx.api.review.submit(target.id, {
+            threadIds,
+            ...compact({ note: flags.note, preview: flags.preview }),
+          }),
         );
       },
     }),
@@ -920,39 +1083,102 @@ export function browserCommands(): CommandSpec[] {
       }),
     ),
 
+    // Phase 8 item 1 — the semantic inspectors, before any image rendering.
+    //
+    // `BrowserService.readPage()` (the accessibility tree) and the DOM
+    // snapshot action were both real and both unreachable from any client:
+    // `readPage` had no HTTP route at all until this phase, and `snapshot`
+    // was an action nothing outside the SPA ever posted. For a terminal
+    // these are the PRIMARY representations of a page — an image is the
+    // fallback, not the other way round.
+    defineCommand({
+      id: 'browser.read',
+      group: 'browser',
+      verb: 'read',
+      aliases: ['inspect'],
+      summary: "The page's accessibility tree as text",
+      description:
+        'The interactive shape of the page — roughly a tenth the size of the DOM snapshot, and ' +
+        'readable in a terminal as-is. Element refs ([ref=e1]) are re-issued on every call.',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [wsArg],
+      flags: [{ name: 'out', short: 'o', description: 'Write the tree to a file', type: 'string' }],
+      schema: inputSchema({ workspace: z.string() }, { out: z.string().optional() }),
+      output: { kind: 'raw' },
+      async handler(ctx, { args, flags }) {
+        const target = await findWorkspace(ctx, args.workspace);
+        const page = await ctx.api.browser.readPage(target.id);
+        const text = `${page.title}\n${page.url}\n\n${page.snapshot}\n`;
+        if (!flags.out) return record(text);
+        const file = path.resolve(flags.out);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, text, 'utf8');
+        return record(text, `Wrote ${file}`);
+      },
+    }),
+
+    defineCommand({
+      id: 'browser.dom',
+      group: 'browser',
+      verb: 'dom',
+      summary: 'Capture a full DOM snapshot as a workspace artifact',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [wsArg],
+      flags: [{ name: 'out', short: 'o', description: 'Also write the snapshot here', type: 'string' }],
+      schema: inputSchema({ workspace: z.string() }, { out: z.string().optional() }),
+      output: { kind: 'record' },
+      async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
+        const target = await findWorkspace(ctx, args.workspace);
+        const outcome = await ctx.api.browser.actions(target.id, { kind: 'snapshot' });
+        const artifactPath = typeof outcome['artifactPath'] === 'string' ? outcome['artifactPath'] : '';
+        if (!flags.out || !artifactPath) return record(outcome);
+        const bytes = await ctx.api.browser.file(target.id, artifactPath);
+        const file = path.resolve(flags.out);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, bytes);
+        return record({ ...outcome, path: file }, `Wrote ${file}`);
+      },
+    }),
+
     defineCommand({
       id: 'browser.screenshot',
       group: 'browser',
       verb: 'screenshot',
-      summary: 'Capture the page',
+      summary: 'Capture the page as a PNG',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [wsArg],
-      flags: [
-        { name: 'out', short: 'o', description: 'Write the PNG here', type: 'string' },
-        { name: 'fullPage', description: 'Capture beyond the viewport', type: 'boolean' },
-      ],
-      schema: inputSchema(
-        { workspace: z.string() },
-        { out: z.string().optional(), fullPage: z.boolean().optional() },
-      ),
+      flags: [{ name: 'out', short: 'o', description: 'Write the PNG here', type: 'string' }],
+      schema: inputSchema({ workspace: z.string() }, { out: z.string().optional() }),
       output: { kind: 'record' },
-      async handler(ctx, { args, flags }) {
+      async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
         const target = await findWorkspace(ctx, args.workspace);
-        const result = await ctx.api.browser.capture(
-          target.id,
-          compact({ fullPage: flags.fullPage }),
-        );
-
-        if (flags.out && typeof result['data'] === 'string') {
-          const file = path.resolve(flags.out);
-          await fs.mkdir(path.dirname(file), { recursive: true });
-          // The server returns base64 rather than binary so the payload can
-          // ride in the same JSON envelope as its metadata.
-          await fs.writeFile(file, Buffer.from(result['data'], 'base64'));
-          return record({ ...result, data: undefined, path: file }, `Wrote ${file}`);
+        // This command was broken outright before: it posted to
+        // `/browser/capture`, whose schema REQUIRES a `clip` rectangle (it
+        // is the SPA's region-capture endpoint) and which answers with raw
+        // `image/png` bytes, not JSON — so `--full-page` 400'd on the
+        // missing clip, and a valid call would have thrown inside
+        // `request()`'s `res.json()`. `--full-page` is gone with it: the
+        // real screenshot action takes no such option.
+        //
+        // The real path is the `screenshot` ACTION, which writes a
+        // `browser_screenshot` artifact and returns its relative path.
+        const outcome = await ctx.api.browser.actions(target.id, { kind: 'screenshot' });
+        const artifactPath = typeof outcome['artifactPath'] === 'string' ? outcome['artifactPath'] : '';
+        if (!artifactPath) {
+          throw new CliError('CONFLICT', 'The browser did not produce a screenshot.', {
+            hint: typeof outcome['error'] === 'string' ? outcome['error'] : 'Is a browser session running?',
+          });
         }
-        return record(result);
+        if (!flags.out) return record({ ...outcome, artifactPath });
+
+        const bytes = await ctx.api.browser.file(target.id, artifactPath);
+        const file = path.resolve(flags.out);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, bytes);
+        return record({ ...outcome, path: file }, `Wrote ${file}`);
       },
     }),
 
@@ -1025,6 +1251,123 @@ export function computerCommands(): CommandSpec[] {
           ctx.api.computer.consent(target.id),
         ]);
         return record({ runtime, consent });
+      },
+    }),
+
+    // Phase 8 item 3 — the consent half of the security boundary.
+    //
+    // `computer status` could REPORT a pending consent prompt; nothing could
+    // answer one. The store's `resolve()` and the POST route behind it have
+    // always existed, with no client outside the desktop app calling them —
+    // so a terminal user watching an agent block on a consent prompt had no
+    // way to unblock it without switching to a GUI.
+    defineCommand({
+      id: 'computer.pending',
+      group: 'computer',
+      verb: 'pending',
+      summary: 'Consent prompts waiting for an answer',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [wsArg],
+      flags: [],
+      schema: inputSchema({ workspace: z.string() }, {}),
+      output: {
+        kind: 'list',
+        columns: [
+          { key: 'requestId', header: 'Request', format: 'id', priority: 0 },
+          { key: 'appIdentity', header: 'App', priority: 0 },
+          { key: 'reason', header: 'Reason', priority: 1 },
+          { key: 'requestedAt', header: 'Asked', format: 'relative', priority: 2 },
+        ],
+      },
+      async handler(ctx, { args }) {
+        const target = await findWorkspace(ctx, args.workspace);
+        const consent = await ctx.api.computer.consent(target.id);
+        // `{ pending: [...] }` — an envelope, like every other list route in
+        // this namespace.
+        const pending = (consent as { pending?: Array<Record<string, unknown>> }).pending;
+        return list(pending ?? []);
+      },
+    }),
+
+    defineCommand({
+      id: 'computer.answer',
+      group: 'computer',
+      verb: 'answer',
+      summary: 'Answer a pending consent prompt',
+      description:
+        'allow_once permits this action only; allow_run permits it for the rest of the run; ' +
+        'always_allow records a standing grant for the app (see `computer grants`); deny refuses.',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [
+        wsArg,
+        { name: 'request', description: 'Request id from `computer pending`', required: true },
+        {
+          name: 'decision',
+          description: 'What to answer',
+          required: true,
+          choices: ['allow_once', 'allow_run', 'always_allow', 'deny'] as const,
+        },
+      ],
+      flags: [
+        {
+          name: 'app',
+          description: 'Application identity the prompt names — the server checks it matches',
+          type: 'string',
+          required: true,
+        },
+      ],
+      schema: inputSchema(
+        {
+          workspace: z.string(),
+          request: z.string(),
+          decision: z.enum(['allow_once', 'allow_run', 'always_allow', 'deny']),
+        },
+        { app: z.string() },
+      ),
+      output: { kind: 'record', successMessage: 'Answered.' },
+      async handler(ctx, { args, flags }) {
+        const target = await findWorkspace(ctx, args.workspace);
+        return record(
+          await ctx.api.computer.setConsent(target.id, {
+            requestId: args.request,
+            appIdentity: flags.app,
+            decision: args.decision,
+          }),
+        );
+      },
+    }),
+
+    defineCommand({
+      id: 'computer.runtime',
+      group: 'computer',
+      verb: 'runtime',
+      summary: 'Start, restart or stop the Computer Use driver',
+      requiresServer: true,
+      // Stopping the driver ends a live desktop-control session; starting one
+      // hands an agent control of a real desktop. Both deserve the same gate
+      // `terminal kill` and `browser stop` already have.
+      destructive: true,
+      sinceVersion: '0.2.0',
+      args: [
+        wsArg,
+        {
+          name: 'action',
+          description: 'What to do',
+          required: true,
+          choices: ['start', 'restart', 'stop'] as const,
+        },
+      ],
+      flags: [],
+      schema: inputSchema(
+        { workspace: z.string(), action: z.enum(['start', 'restart', 'stop']) },
+        {},
+      ),
+      output: { kind: 'record' },
+      async handler(ctx, { args }) {
+        const target = await findWorkspace(ctx, args.workspace);
+        return record(await ctx.api.computer.setRuntime(target.id, { action: args.action }));
       },
     }),
 
@@ -1150,31 +1493,79 @@ export function platformCommands(): CommandSpec[] {
       id: 'hook.test',
       group: 'hook',
       verb: 'test',
-      summary: 'Fire one hook phase against a session',
+      summary: 'Dry-run one hook against a session',
+      description:
+        '--config is the hook-type-specific config object: {"command":"...","args":[...]} for ' +
+        'script, {"url":"...","method":"POST"} for http, {"modulePath":"..."} or ' +
+        '{"handlerName":"..."} for function.',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [
         { name: 'session', description: 'Session id', required: true },
         { name: 'phase', description: 'Hook phase', required: true },
       ],
-      flags: [{ name: 'payload', description: 'JSON payload', type: 'string' }],
+      flags: [
+        { name: 'type', description: 'Hook type', type: 'string', choices: ['script', 'http', 'function'] as const, required: true },
+        { name: 'config', description: 'JSON config object for --type', type: 'string', required: true },
+        { name: 'priority', description: 'Execution order among hooks on this phase', type: 'number' },
+        { name: 'timeout', description: 'Timeout in milliseconds', type: 'number' },
+        { name: 'retries', description: 'Retry attempts after the first try', type: 'number' },
+        { name: 'failurePolicy', description: 'What a failure does to the phase', type: 'string', choices: ['abort', 'skip', 'continue'] as const },
+      ],
       schema: inputSchema(
         { session: z.string(), phase: z.string() },
-        { payload: z.string().optional() },
+        {
+          type: z.enum(['script', 'http', 'function']),
+          config: z.string(),
+          priority: z.coerce.number().int().optional(),
+          timeout: z.coerce.number().int().positive().optional(),
+          retries: z.coerce.number().int().nonnegative().optional(),
+          failurePolicy: z.enum(['abort', 'skip', 'continue']).optional(),
+        },
       ),
       output: { kind: 'record' },
       async handler(ctx, { args, flags }) {
-        let payload: Record<string, unknown> | undefined;
-        if (flags.payload) {
-          try {
-            payload = JSON.parse(flags.payload) as Record<string, unknown>;
-          } catch (error) {
-            throw new CliError('VALIDATION', '--payload is not valid JSON.', {
-              hint: error instanceof Error ? error.message : String(error),
-            });
-          }
+        let config: Record<string, unknown>;
+        try {
+          config = JSON.parse(flags.config) as Record<string, unknown>;
+        } catch (error) {
+          throw new CliError('VALIDATION', '--config is not valid JSON.', {
+            hint: error instanceof Error ? error.message : String(error),
+          });
         }
-        return record(await ctx.api.hooks.test(args.session, args.phase, payload));
+
+        // The executor dispatches on `config.type`, not the outer `type` —
+        // if `--config` names one that disagrees with `--type`, silently
+        // preferring either one would run a different hook than at least
+        // one of the two flags asked for. Refuse rather than guess.
+        if (typeof config['type'] === 'string' && config['type'] !== flags.type) {
+          throw new CliError(
+            'VALIDATION',
+            `--config's "type" ("${config['type']}") does not match --type ("${flags.type}").`,
+            { hint: 'Drop "type" from --config\'s JSON, or make it match --type.' },
+          );
+        }
+
+        const result = await ctx.api.hooks.test(args.session, args.phase, {
+          type: flags.type,
+          // Cast, not `as never`: the shape genuinely cannot be proven
+          // statically from arbitrary `--config` JSON, so this names the
+          // exact type trusted rather than erasing checking entirely.
+          config: { ...config, type: flags.type } as HookDefinition['config'],
+          ...(flags.priority !== undefined ? { priority: flags.priority } : {}),
+          ...(flags.timeout !== undefined ? { timeoutMs: flags.timeout } : {}),
+          ...(flags.retries !== undefined ? { retries: flags.retries } : {}),
+          ...(flags.failurePolicy ? { failurePolicy: flags.failurePolicy } : {}),
+        });
+
+        // The route always answers 200; a failed dry run is reported in the
+        // body, not the status code. Surfacing it as ours to fail is the
+        // only way `--json`/exit-code consumers see it as a failure at all.
+        return {
+          data: result,
+          ...(result.success ? {} : { exitCode: EXIT_CODES.RESULT_FAILED }),
+          message: result.message,
+        };
       },
     }),
 
@@ -1182,7 +1573,7 @@ export function platformCommands(): CommandSpec[] {
       id: 'hook.list',
       group: 'hook',
       verb: 'list',
-      summary: 'Hooks registered on a session',
+      summary: 'Hooks registered on a session — global definitions plus per-workflow overrides',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [{ name: 'session', description: 'Session id', required: true }],
@@ -1191,14 +1582,57 @@ export function platformCommands(): CommandSpec[] {
       output: {
         kind: 'list',
         columns: [
+          { key: 'scope', header: 'Scope', priority: 0 },
+          { key: 'workflowName', header: 'Workflow', priority: 2 },
+          { key: 'name', header: 'Name', priority: 0 },
           { key: 'phase', header: 'Phase', priority: 0 },
-          { key: 'type', header: 'Type', priority: 0 },
+          { key: 'type', header: 'Type', priority: 1 },
           { key: 'failurePolicy', header: 'On failure', priority: 2 },
           { key: 'priority', header: 'Priority', format: 'number', priority: 3 },
         ],
       },
       async handler(ctx, { args }) {
-        return list(await ctx.api.hooks.sessionHooks(args.session));
+        const response = await ctx.api.hooks.sessionHooks(args.session);
+        const rows: Array<Record<string, unknown>> = [];
+        const globalById = new Map((response.globalHooks ?? []).map((hook) => [hook.id, hook]));
+
+        for (const hook of response.globalHooks ?? []) {
+          rows.push({
+            scope: 'global',
+            workflowId: null,
+            workflowName: null,
+            hookId: hook.id,
+            name: hook.name,
+            phase: hook.phase,
+            type: hook.type,
+            priority: hook.priority,
+            failurePolicy: hook.failurePolicy,
+            enabled: hook.enabled,
+          });
+        }
+        for (const wf of response.workflowHooks ?? []) {
+          for (const [hookId, override] of Object.entries(wf.hooks ?? {})) {
+            // `hookOverrides` is a PARTIAL patch keyed by hook id — a field
+            // the override doesn't set falls back to the base definition in
+            // `globalHooks`. Without this fallback, a row that overrides only
+            // e.g. `priority` rendered every other column as undefined even
+            // though the real value was sitting right there in `globalHooks`.
+            const base = globalById.get(hookId);
+            rows.push({
+              scope: 'workflow',
+              workflowId: wf.workflowId,
+              workflowName: wf.workflowName,
+              hookId,
+              name: override.name ?? base?.name,
+              phase: override.phase ?? base?.phase,
+              type: override.type ?? base?.type,
+              priority: override.priority ?? base?.priority,
+              failurePolicy: override.failurePolicy ?? base?.failurePolicy,
+              enabled: override.enabled ?? base?.enabled,
+            });
+          }
+        }
+        return list(rows);
       },
     }),
 
@@ -1300,6 +1734,7 @@ export function platformCommands(): CommandSpec[] {
           name: 'provider',
           description: 'Provider to switch to',
           required: true,
+          choices: ['copilot', 'claude-agent'] as const,
         },
       ],
       flags: [],

@@ -75,13 +75,14 @@ generatorai
 ├── workflow (wf)         # Workflow definitions: stages, edges, variables and validation
 │     clone · create · delete · edge add · edge delete · edge list ·
 │     export · from-template · import-json · list · show · stage add ·
-│     stage delete · stage list · stage update · update · validate
+│     stage delete · stage hook add · stage hook list · stage hook remove
+│     · stage list · stage update · stage variables · update · validate
 ├── run                   # Workflow run lifecycle, stage controls and human-in-the-loop gates
-│     cancel · delete · diff · hitl approve · hitl mode · hitl pending ·
-│     hitl reject · list · messages · pause · profile generate · profile
-│     list · profile validate · resume · retry · show · stage cancel ·
-│     stage list · stage pause · stage resume · stage retry · start ·
-│     watch · workspace
+│     cancel · delete · diff · hitl approve · hitl changes-request · hitl
+│     mode · hitl pending · hitl reject · list · messages · pause ·
+│     profile generate · profile list · profile validate · resume · retry
+│     · show · stage cancel · stage list · stage pause · stage resume ·
+│     stage retry · start · watch · workspace
 ├── automation (auto)     # Scheduled, webhook and manual triggers that fan out into runs
 │     create · datasource test · delete · disable · enable · execution
 │     cancel · execution list · execution show · list ·
@@ -94,7 +95,7 @@ generatorai
 │     · worktree remove
 ├── workspace (ws)        # Per-run filesystems, their files, changes and checkpoints
 │     archive · cat · changes · checkpoints · cleanup · commit · delete ·
-│     list · pr · restore · show · tree · worktree list
+│     list · pr · put · restore · show · tree · worktree list
 ├── terminal (term)       # PTYs attached to a workspace
 │     attach · create · kill · list · scrollback · signal
 ├── script (sc)           # Programmatic workflow scripts (.workflow.mjs)
@@ -106,14 +107,15 @@ generatorai
 ├── extension (ext)       # Hot-loadable extensions
 │     disable · enable · list · reload · show · uninstall
 ├── widget                # Agent-rendered widget surfaces
-│     close · list · read
+│     close · list · read · set-state
 ├── review                # Review threads on workspace files
 │     create · list · reply · resolve · submit · unresolve
 ├── browser               # Workspace-scoped Chromium
-│     back · forward · navigate · reload · screenshot · snapshots · start
-│     · status · stop
+│     back · dom · forward · navigate · read · reload · screenshot ·
+│     snapshots · start · status · stop
 ├── computer              # Computer Use: desktop windows and audit
-│     activity · frames · grants · revoke · status
+│     activity · answer · frames · grants · pending · revoke · runtime ·
+│     status
 ├── hook                  # Lifecycle hooks
 │     list · phases · test
 ├── webhook               # Incoming and outgoing webhooks
@@ -155,7 +157,7 @@ Pairing, this installation's credential, and the device registry
 |---|---|---|
 | `device audit [options]` | Authentication events | `--limit` |
 | `device forget [connection]` | Delete this installation's credential for a server | — |
-| `device invite [options]` | Mint a pairing code for a new device | `--scopes` `--ttl` |
+| `device invite [options]` | Mint a pairing code for a new device | `--scopes` `--ttl` `--data-dir` |
 | `device invites` | Pairing codes that have not been redeemed yet | — |
 | `device list [options]` | Devices paired with the server | `--all` |
 | `device pair <code> [options]` | Pair this CLI with a server using a pairing code | `--name` |
@@ -181,7 +183,7 @@ Conversations against a provider, optionally scoped to a project
 | `chat send <chat> <prompt> [options]` | Send a prompt and stream the reply | `--verbosity` `--no-stream` `--model` `--agent` `--attach` |
 | `chat show <chat>` | Show one chat | — |
 | `chat tasks <chat>` | Background tasks spawned by an orchestrator chat | — |
-| `chat update <chat> [options]` | Rename or retag a chat | `--name` `--description` `--tags` `--model` |
+| `chat update <chat> [options]` | Rename or retag a chat | `--name` `--description` `--tags` `--model` `--agent` |
 | `chat watch <chat> [options]` | Attach to a chat and stream events as they arrive | `--verbosity` |
 
 ### `agent`
@@ -207,7 +209,7 @@ Workflow definitions: stages, edges, variables and validation
 | `workflow clone <workflow> [name]` | Copy a definition, stages and edges included | — |
 | `workflow create <name> [options]` | Create an empty workflow definition | `--description` `--session-mode` `--project` `--tags` |
 | `workflow delete <workflow>` | Delete a definition | — |
-| `workflow edge add <workflow> [options]` | Connect two stages | `--from` `--to` `--on` `--condition` |
+| `workflow edge add <workflow> [options]` | Connect two stages | `--from` `--to` `--on` |
 | `workflow edge delete <workflow> <edge>` | Delete an edge | — |
 | `workflow edge list <workflow>` | Edges in a definition | — |
 | `workflow export <workflow> [options]` | Export a definition as JSON | `--out` |
@@ -215,10 +217,14 @@ Workflow definitions: stages, edges, variables and validation
 | `workflow import-json <file> [options]` | Import a definition from a JSON file | `--name` |
 | `workflow list [options]` | List workflow definitions | `--project` `--tag` |
 | `workflow show <workflow>` | Show a definition with its stages and edges | — |
-| `workflow stage add <workflow> [options]` | Add a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--order` `--timeout` `--retries` |
+| `workflow stage add <workflow> [options]` | Add a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--order` `--timeout` `--retries` `--var` `--condition` `--condition-expression` |
 | `workflow stage delete <workflow> <stage>` | Delete a stage and its edges | — |
+| `workflow stage hook add <workflow> <stage> [options]` | Attach a lifecycle hook to a stage | `--name` `--phase` `--type` `--config` `--priority` `--timeout` `--retries` `--failure-policy` `--disabled` |
+| `workflow stage hook list <workflow> <stage>` | A stage's lifecycle hooks | — |
+| `workflow stage hook remove <workflow> <stage> <hook>` | Detach a lifecycle hook from a stage | — |
 | `workflow stage list <workflow>` | Stages in a definition | — |
-| `workflow stage update <workflow> <stage> [options]` | Patch a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--timeout` `--retries` |
+| `workflow stage update <workflow> <stage> [options]` | Patch a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--timeout` `--retries` `--var` `--clear-vars` `--condition` `--condition-expression` |
+| `workflow stage variables <workflow> <stage>` | A stage's variables | — |
 | `workflow update <workflow> [options]` | Patch a definition | `--name` `--description` `--session-mode` `--tags` |
 | `workflow validate <workflow>` | Check a definition for cycles, orphans and bad references | — |
 
@@ -231,10 +237,11 @@ Workflow run lifecycle, stage controls and human-in-the-loop gates
 | `run cancel <run>` | Cancel a run | — |
 | `run delete <run>` | Delete a run record | — |
 | `run diff <run>` | Unified diff of everything a run changed | — |
-| `run hitl approve <run> <stage> [options]` | Approve a waiting stage | `--value` `--reason` |
+| `run hitl approve <run> <stage> [options]` | Approve a waiting stage | `--value` `--reason` `--follow-up` |
+| `run hitl changes-request <run> <stage> [options]` | Send a waiting stage back for changes | `--value` `--reason` `--follow-up` |
 | `run hitl mode <run> [mode]` | Show or set the run permission mode | — |
 | `run hitl pending <run>` | Gates waiting for a human decision | — |
-| `run hitl reject <run> <stage> [options]` | Reject a waiting stage | `--value` `--reason` |
+| `run hitl reject <run> <stage> [options]` | Reject a waiting stage and fail the run | `--value` `--reason` `--follow-up` |
 | `run list [options]` | List workflow runs | `--status` `--definition` `--limit` |
 | `run messages <run> [options]` | Messages recorded for a run, optionally one stage | `--stage` |
 | `run pause <run>` | Pause a run | — |
@@ -249,7 +256,7 @@ Workflow run lifecycle, stage controls and human-in-the-loop gates
 | `run stage pause <run> <stage>` | Pause one stage | — |
 | `run stage resume <run> <stage>` | Resume one stage | — |
 | `run stage retry <run> <stage>` | Retry one stage | — |
-| `run start <workflow> [options]` | Create and start a run | `--name` `--var` `--profile` `--project` `--permission-mode` `--watch` `--verbosity` `--no-start` |
+| `run start <workflow> [options]` | Create and start a run<br>⚠️ `--name` — The server has no route that names a run, so this value is accepted and discarded. | `--name` ⚠️ `--var` `--profile` `--project` `--permission-mode` `--watch` `--verbosity` `--no-start` |
 | `run watch <run> [options]` | Stream a run until it reaches a terminal state | `--verbosity` |
 | `run workspace <run>` | Workspace a run executed in | — |
 
@@ -259,7 +266,7 @@ Scheduled, webhook and manual triggers that fan out into runs
 
 | Command | What | Flags |
 |---|---|---|
-| `automation create [options]` | Create an automation | `--name` `--workflow` `--trigger` `--schedule` `--input-mode` `--loop-variable` `--batch-format` `--var` `--max-concurrency` `--on-error` `--data-source` `--project` `--enabled` |
+| `automation create [options]` | Create an automation | `--name` `--workflow` `--trigger` `--schedule` `--input-mode` `--loop-variable` `--loop-items` `--batch-format` `--batch-data` `--batch-data-file` `--var` `--max-concurrency` `--on-error` `--data-source` `--project` `--enabled` |
 | `automation datasource test <config>` | Dry-run a data-source config and print what it would yield | — |
 | `automation delete <automation>` | Delete an automation | — |
 | `automation disable <automation>` | Disable an automation | — |
@@ -316,6 +323,7 @@ Per-run filesystems, their files, changes and checkpoints
 | `workspace delete <workspace>` | Delete a workspace and everything in it | — |
 | `workspace list [options]` | List execution workspaces | `--status` `--project` `--limit` |
 | `workspace pr <workspace> [options]` | Open a pull request from a workspace, or list existing ones | `--title` `--body` `--base` `--draft` |
+| `workspace put <workspace> <path> [options]` | Write a local file into a workspace | `--file` `--source` `--alias` `--no-create-dirs` |
 | `workspace restore <workspace> <checkpoint> [options]` | Restore a workspace to a checkpoint | `--path` |
 | `workspace show <workspace>` | Show a workspace with its worktrees | — |
 | `workspace tree <workspace> [path] [options]` | List files in a workspace | `--alias` |
@@ -344,7 +352,7 @@ Programmatic workflow scripts (.workflow.mjs)
 | `script materialize <script> [options]` | Turn a script into a concrete workflow definition | `--profile` |
 | `script profiles <script>` | Profiles a script exposes | — |
 | `script reload [script]` | Re-read scripts from disk without restarting the server | — |
-| `script run <script> [options]` | Materialize and start a script | `--profile` `--watch` |
+| `script run <script> [options]` | Materialize and start a script | `--profile` `--watch` `--verbosity` |
 | `script show <script>` | Show a script | — |
 | `script validate <file>` | Validate a script file without registering it | — |
 
@@ -387,8 +395,9 @@ Agent-rendered widget surfaces
 | Command | What | Flags |
 |---|---|---|
 | `widget close <widget>` | Tear down a widget | — |
-| `widget list` | Open widget surfaces | — |
-| `widget read <widget>` | Read a widget and its state | — |
+| `widget list [options]` | Open widget surfaces for a chat, run or session | `--chat` `--run` `--session` |
+| `widget read <widget> [options]` | Read a widget as text, with what a terminal cannot show | `--chat` `--run` `--session` |
+| `widget set-state <widget> <state>` | Write a widget's state — the degraded way to drive one | — |
 
 ### `review`
 
@@ -396,7 +405,7 @@ Review threads on workspace files
 
 | Command | What | Flags |
 |---|---|---|
-| `review create <workspace> <path> <body> [options]` | Start a review thread on a line | `--line` `--side` |
+| `review create <workspace> <path> <body> [options]` | Start a review thread on a line range | `--start-line` `--end-line` `--side` `--anchor-text` `--alias` `--scope` `--scope-id` `--base-checkpoint` `--head-checkpoint` `--intent` |
 | `review list <workspace> [options]` | Review threads in a workspace | `--path` `--status` |
 | `review reply <workspace> <thread> <body>` | Reply on a thread | — |
 | `review resolve <workspace> <thread>` | Mark a thread resolved | — |
@@ -410,10 +419,12 @@ Workspace-scoped Chromium
 | Command | What | Flags |
 |---|---|---|
 | `browser back <workspace>` | Go back | — |
+| `browser dom <workspace> [options]` | Capture a full DOM snapshot as a workspace artifact | `--out` |
 | `browser forward <workspace>` | Go forward | — |
 | `browser navigate <workspace> <url>` | Navigate to a URL | — |
+| `browser read <workspace> [options]` | The page's accessibility tree as text | `--out` |
 | `browser reload <workspace>` | Reload the page | — |
-| `browser screenshot <workspace> [options]` | Capture the page | `--out` `--full-page` |
+| `browser screenshot <workspace> [options]` | Capture the page as a PNG | `--out` |
 | `browser snapshots <workspace>` | Captures taken in this workspace | — |
 | `browser start <workspace> [options]` | Start a Chromium session in a workspace | `--url` `--width` `--height` |
 | `browser status <workspace>` | Current browser descriptor | — |
@@ -426,9 +437,12 @@ Computer Use: desktop windows and audit
 | Command | What | Flags |
 |---|---|---|
 | `computer activity <workspace>` | Audit trail of computer-use actions | — |
+| `computer answer <workspace> <request> <decision> [options]` | Answer a pending consent prompt | `--app` |
 | `computer frames <workspace>` | Captured window frames | — |
 | `computer grants <workspace>` | Per-application grants | — |
+| `computer pending <workspace>` | Consent prompts waiting for an answer | — |
 | `computer revoke <workspace> <app>` | Revoke an application grant | — |
+| `computer runtime <workspace> <action>` | Start, restart or stop the Computer Use driver | — |
 | `computer status <workspace>` | Computer Use runtime and consent state | — |
 
 ### `hook`
@@ -437,9 +451,9 @@ Lifecycle hooks
 
 | Command | What | Flags |
 |---|---|---|
-| `hook list <session>` | Hooks registered on a session | — |
+| `hook list <session>` | Hooks registered on a session — global definitions plus per-workflow overrides | — |
 | `hook phases` | Hook phases the server can invoke | — |
-| `hook test <session> <phase> [options]` | Fire one hook phase against a session | `--payload` |
+| `hook test <session> <phase> [options]` | Dry-run one hook against a session | `--type` `--config` `--priority` `--timeout` `--retries` `--failure-policy` |
 
 ### `webhook`
 
@@ -500,7 +514,7 @@ Configuration, profiles and key bindings
 
 | Command | What | Flags |
 |---|---|---|
-| `config get <key>` | Read one setting | — |
+| `config get <key> [options]` | Read one setting | `--reveal` |
 | `config keymap list [options]` | Every key binding and its id | `--context` |
 | `config keymap set <action> <keys>` | Remap a key binding | — |
 | `config path` | Print the user config file path | — |
@@ -510,7 +524,7 @@ Configuration, profiles and key bindings
 | `config profile use <name>` | Make a profile active | — |
 | `config reset` | Reset the user config to defaults | — |
 | `config set <key> <value>` | Write one setting to the user config | — |
-| `config show [options]` | Resolved configuration after all five layers | `--sources` |
+| `config show [options]` | Resolved configuration after all five layers | `--sources` `--reveal` |
 | `config unset <key>` | Restore one setting to its default | — |
 
 <!-- @generated-commands:end -->
@@ -587,21 +601,285 @@ Config schema (Zod-validated, see [apps/cli/src/config/schema.ts](../../apps/cli
 generatorai tui
 ```
 
-Launches the Ink-rendered terminal UI with 5 views: **Dashboard**, **Chats**, **Workflows**, **Runs**, **Settings**.
+Launches the workbench: a tabbed, splittable terminal UI over the same command
+registry the binary uses. Panes hold chats, workflow runs, workflow authoring,
+workspace diffs and files, terminals, browsers, computer-use consent, and
+administration views.
 
-Keyboard shortcuts:
+The key table below is GENERATED from the keymap the app actually resolves
+keystrokes through (`packages/cli-core/src/keymap/Keymap.ts`), so it cannot
+drift from the code and a remap under `keymap` in your config is reflected in
+the app, the help overlay and here alike.
+
+<!-- @generated-keymap:start — regenerate with `pnpm cli:docs`; do not edit by hand -->
+
+#### Anywhere
+
+Active in every pane.
 
 | Key | Action |
 |---|---|
-| `1`–`5` | Jump to view |
-| `Ctrl+D` | Dashboard |
-| `?` / `Ctrl+H` | Toggle help overlay |
-| `Esc` / `Ctrl+B` | Go back |
-| Arrow keys | Move selection |
-| `Enter` | Open detail |
-| `n` | New (in lists) |
+| `ctrl+k` / `ctrl+p` | Command palette |
+| `ctrl+c` | Quit |
+| `ctrl+r` | Refresh current view |
+| `escape` | Back / close overlay |
+| `tab` | Focus next region |
+| `shift+tab` | Focus previous region |
+| `ctrl+g` | Toggle right pane |
+| `ctrl+t` | Cycle theme |
+| `g d` | Dashboard |
+| `g c` | Chats |
+| `g w` | Workflows |
+| `g r` | Runs |
+| `g a` | Automations |
+| `g p` | Projects |
+| `g o` | Workspaces |
+| `g e` | Agents |
+| `g s` | Scripts |
+| `g x` | Extensions |
+| `g ,` | Settings |
+| `g m` | Administration views… |
+| `alt+l` | Leader prefix (panes & tabs) |
 
-Data refreshes every 5s by default.
+#### Leader (after the prefix)
+
+Press the leader prefix first; the next key is resolved here. tmux grammar, so muscle memory transfers.
+
+| Key | Action |
+|---|---|
+| `c` | New tab |
+| `n` | Next tab |
+| `p` | Previous tab |
+| `%` | Split vertically |
+| `"` | Split horizontally |
+| `left` / `h` | Focus pane left |
+| `right` / `l` | Focus pane right |
+| `up` / `k` | Focus pane up |
+| `down` / `j` | Focus pane down |
+| `z` | Zoom / unzoom pane |
+| `x` | Close pane |
+| `,` | Rename tab |
+| `d` | Detach stream (run keeps going) |
+| `[` | Scrollback mode |
+| `?` | Leader key help |
+| `}` | Grow focused pane |
+| `{` | Shrink focused pane |
+| `<` | Move tab left |
+| `>` | Move tab right |
+| `t` | Jump to tab… |
+| ``` | Toggle last tab |
+| `b` | Blocked work / notifications… |
+| `i` | Client diagnostics (stream health) |
+
+#### Lists
+
+Any pane with rows, and the fallback for several others.
+
+| Key | Action |
+|---|---|
+| `?` | Toggle help |
+| `/` | Search in view |
+| `down` / `j` | Move down |
+| `up` / `k` | Move up |
+| `pagedown` / `ctrl+f` | Page down |
+| `pageup` | Page up |
+| `home` / `g g` | First item |
+| `end` / `G` | Last item |
+| `return` | Open |
+| `n` | New |
+| `e` | Edit |
+| `d` | Delete |
+| `space` | Toggle selection |
+| `f` | Filter |
+| `s` | Sort |
+| `y` | Copy id |
+
+#### Chat
+
+A chat pane, outside the prompt.
+
+| Key | Action |
+|---|---|
+| `ctrl+x` | Stop generating |
+| `ctrl+l` | Clear view |
+| `alt+r` | Toggle reasoning blocks |
+| `alt+g` | Answer pending question / plan review |
+| `pageup` | Scroll transcript back |
+| `pagedown` | Scroll transcript forward |
+| `alt+s` | Search transcript |
+
+#### The prompt
+
+Executed by the composer itself, so an edit reads the caret the previous keystroke wrote.
+
+| Key | Action |
+|---|---|
+| `return` | Send |
+| `shift+return` | New line |
+| `alt+e` | Compose in $EDITOR |
+| `ctrl+o` | Change model |
+| `alt+a` | Change agent |
+| `ctrl+p` | Cycle permission mode |
+| `up` | Previous prompt |
+| `down` | Next prompt |
+| `@` | Mention agent / file / codebase |
+| `/` | Slash command |
+| `ctrl+a` | Start of line |
+| `ctrl+e` | End of line |
+| `ctrl+b` | Back one character |
+| `ctrl+f` | Forward one character |
+| `alt+b` | Back one word |
+| `alt+f` | Forward one word |
+| `ctrl+k` | Kill to end of line |
+| `ctrl+u` | Kill to start of line |
+| `ctrl+w` | Kill word before caret |
+| `alt+d` | Kill word after caret |
+| `ctrl+y` | Paste last kill |
+| `ctrl+d` | Delete character ahead |
+| `ctrl+j` | New line (works everywhere) |
+| `ctrl+_` | Undo edit |
+
+#### Runs
+
+Watching a workflow run.
+
+| Key | Action |
+|---|---|
+| `p` | Pause run |
+| `r` | Resume run |
+| `c` | Cancel run |
+| `R` | Retry run |
+| `a` | Approve pending gate |
+| `x` | Reject pending gate |
+| `s` | Stage detail |
+| `v` | Cycle log verbosity |
+
+#### Workflow authoring
+
+Editing a workflow definition.
+
+| Key | Action |
+|---|---|
+| `ctrl+n` / `]` / `j` | Next stage |
+| `ctrl+p` / `[` / `k` | Previous stage |
+| `n` | Add a stage |
+| `e` | Edit the selected stage |
+| `d` | Delete the selected stage |
+| `E` | Connect this stage to another |
+| `D` | Delete an edge on this stage |
+| `v` | Edit the stage's variables |
+| `h` | Manage the stage's hooks |
+| `V` | Validate — jump from a finding to its stage |
+| `r` | Start a run of this workflow |
+| `R` | Reload the definition |
+
+#### Changes and review
+
+A workspace diff, its checkpoints and its review threads.
+
+| Key | Action |
+|---|---|
+| `ctrl+n` / `]` | Next file |
+| `ctrl+p` / `[` | Previous file |
+| `n` | Next hunk |
+| `N` | Previous hunk |
+| `down` / `j` | Next line |
+| `up` / `k` | Previous line |
+| `w` | Unified / side-by-side |
+| `c` | Comment on line |
+| `o` | Resolve thread |
+| `t` | Terminal for this workspace |
+| `b` | Browser for this workspace |
+| `p` | Checkpoints — restore one |
+| `C` | Commit the worktrees |
+| `P` | Pull requests — list or open one |
+| `T` | Review threads — read and reply |
+| `S` | Hand the open threads to the agent |
+| `R` | Re-fetch the changed-file list |
+
+#### Workspace files
+
+The workspace file browser.
+
+| Key | Action |
+|---|---|
+| `e` | Edit in $EDITOR |
+| `d` | Download to a local path |
+| `u` | Upload a local file here |
+| `t` | Tree / flat list |
+| `left` / `h` | Collapse directory |
+| `right` / `l` | Expand directory |
+| `R` | Re-read the workspace |
+
+#### Terminal
+
+An embedded terminal pane.
+
+| Key | Action |
+|---|---|
+| `return` | Attach (raw takeover, Ctrl+] detaches) |
+| `n` | New terminal |
+| `d` | Kill terminal |
+| `l` | List / switch terminal |
+| `pageup` | Scroll back |
+| `pagedown` | Scroll forward |
+| `end` | Jump to the live tail |
+| `alt+s` | Search scrollback |
+| `y` | Copy the visible screen |
+
+#### Browser
+
+An integrated-browser pane.
+
+| Key | Action |
+|---|---|
+| `o` | Open URL |
+| `H` | Back |
+| `L` | Forward |
+| `r` | Reload |
+| `s` | Screenshot |
+| `i` | Session info |
+| `k` | Stop browser session |
+| `a` | Read the page (accessibility tree) |
+| `c` | Computer-use consent, grants and activity |
+
+#### Computer use
+
+Consent, grants and the audit trail.
+
+| Key | Action |
+|---|---|
+| `r` | Refresh runtime, consent and activity |
+| `a` | Answer the selected consent prompt |
+| `x` | Revoke the selected standing grant |
+| `R` | Start / restart / stop the driver |
+| `s` | Next section (prompts / grants / activity) |
+
+#### Automations
+
+An automation and its executions.
+
+| Key | Action |
+|---|---|
+| `ctrl+n` / `]` | Next execution |
+| `ctrl+p` / `[` | Previous execution |
+| `return` | Open the selected execution's run |
+| `c` | Cancel the selected execution |
+
+#### Administration views
+
+A registry-command-backed admin pane.
+
+| Key | Action |
+|---|---|
+| `return` | Inspect the selected row |
+| `R` | Re-run the view's command |
+| `v` | Switch to another administration view |
+
+<!-- @generated-keymap:end -->
+
+Lists refresh from the event stream; the poll timer is a slow backstop for
+entities with no events and repair after a missed reconnect.
 
 ---
 

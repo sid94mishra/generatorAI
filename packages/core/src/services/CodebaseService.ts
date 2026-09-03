@@ -210,7 +210,7 @@ export class CodebaseService {
   }
 
   async updateCodebase(codebaseId: string, updates: UpdateCodebaseParams): Promise<ProjectCodebase> {
-    const values: Partial<ProjectCodebase> = {};
+    const values: Omit<Partial<ProjectCodebase>, 'lastError'> & { lastError?: string | null } = {};
     if (updates.alias !== undefined) {
       // Re-validate alias uniqueness on rename so callers get a clean
       // ValidationError instead of a raw DB UNIQUE-constraint failure (the
@@ -226,11 +226,40 @@ export class CodebaseService {
     }
     if (updates.defaultBranch !== undefined) values.defaultBranch = updates.defaultBranch;
     if (updates.subdirectory !== undefined) values.subdirectory = updates.subdirectory;
+    // Correcting the location clears the previous failure, so the next fetch
+    // reports the new location's outcome rather than the stale error.
+    if (updates.url !== undefined) {
+      values.url = updates.url;
+      values.status = 'pending';
+      values.lastError = null;
+    }
+    if (updates.localPath !== undefined) {
+      values.localPath = updates.localPath;
+      values.status = 'pending';
+      values.lastError = null;
+    }
     if (updates.settings !== undefined) {
       const existing = await this.codebaseRepo.getById(codebaseId);
       values.settings = { ...existing.settings, ...updates.settings };
     }
-    return this.codebaseRepo.update(codebaseId, values);
+    const saved = await this.codebaseRepo.update(codebaseId, values);
+    if (updates.url === undefined && updates.localPath === undefined) return saved;
+
+    // Re-run the link/clone step. `clonePath` is only pointed at the real
+    // repository by a *successful* link, so a codebase whose first link failed
+    // keeps the placeholder `<repos>/<alias>` path that nothing ever created —
+    // every later fetch then ran git in a directory that does not exist and
+    // failed with a baffling "spawn git ENOENT". Correcting the location has to
+    // re-link, or the correction has no effect.
+    try {
+      if (saved.type === 'git-remote') await this.cloneRemoteRepo(saved);
+      else if (saved.type === 'git-local') await this.linkLocalRepo(saved);
+      else if (saved.type === 'local-dir') await this.linkLocalDir(saved);
+    } catch (err) {
+      // linkLocalRepo / linkLocalDir already recorded the failure on the row.
+      this.logger.warn(`[Codebase] Re-link after update failed for "${saved.alias}": ${err}`);
+    }
+    return this.codebaseRepo.getById(codebaseId);
   }
 
   async getByProjectId(projectId: string): Promise<ProjectCodebase[]> {

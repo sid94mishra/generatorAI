@@ -25,7 +25,7 @@ import { DAGCanvas } from '@/components/workflow/DAGCanvas.js';
 import { StagePropertiesPanel } from '@/components/workflow/StagePropertiesPanel.js';
 import { WorkflowConfigPanel } from '@/components/workflow/WorkflowConfigPanel.js';
 import { VariableInputModal } from '@/components/workflow/VariableInputModal.js';
-import type { UploadedFileSet, LinkedCodebaseInfo } from '@/components/workflow/VariableInputModal.js';
+import type { UploadedFileSet, LinkedCodebaseInfo, StageOverrideEntry } from '@/components/workflow/VariableInputModal.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import {
@@ -47,6 +47,39 @@ import { Button, Spinner } from '@/components/ui/index.js';
 import { useResizable } from '@/hooks/useResizable.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import type { StageDefinition, VariableDefinition, CreateWorkflowRunParams, GitRepositoryConfig } from '@generatorai/shared';
+
+/**
+ * The stage payload sent to the server, from the builder's own stage object.
+ *
+ * Both save paths — creating a definition for the first time, and updating an
+ * existing one — go through this. They used to carry two hand-written copies
+ * of the mapping, and they had drifted: the create path silently dropped
+ * `resultValidation`, `contextFilter` and `approvalRequired`, so a validation
+ * rule or an approval gate configured before the very first Save vanished
+ * while the same edit on a saved workflow persisted fine. Anything the
+ * properties panel can edit belongs here, once.
+ */
+function toStageParams(stage: StageDefinition) {
+  return {
+    name: stage.name,
+    description: stage.description,
+    templateId: stage.templateId,
+    order: stage.order,
+    prompts: stage.prompts,
+    harnessConfigOverrides: stage.harnessConfigOverrides,
+    // Nullable, not optional: clearing the picker must actually unbind the
+    // agent rather than leave the previous ref in place.
+    agentRef: stage.agentRef ?? null,
+    variables: stage.variables,
+    hooks: stage.hooks,
+    retryPolicy: stage.retryPolicy,
+    timeoutMs: stage.timeoutMs,
+    condition: stage.condition,
+    resultValidation: stage.resultValidation,
+    contextFilter: stage.contextFilter,
+    approvalRequired: stage.approvalRequired ?? false,
+  };
+}
 
 export function WorkflowBuilderPage() {
   const { id } = useParams<{ id: string }>();
@@ -77,6 +110,10 @@ export function WorkflowBuilderPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // A passing validation used to render nothing at all, so the button was
+  // indistinguishable from a broken one. Errors already surface in their own
+  // banner; this is the "it passed" half.
+  const [validateOk, setValidateOk] = useState(false);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
 
   // ── Project codebases (for auto-filling git variables in run dialog) ──
@@ -143,10 +180,16 @@ export function WorkflowBuilderPage() {
   }, [store]);
 
   // ── Validate ──
-  const handleValidate = useCallback(() => {
+  const handleValidate = useCallback((announce = false) => {
     const errors = store.validate();
     if (errors.length === 0) {
       setSaveSuccess(false);
+      if (announce) {
+        setValidateOk(true);
+        setTimeout(() => setValidateOk(false), 3000);
+      }
+    } else if (announce) {
+      setValidateOk(false);
     }
     return errors;
   }, [store]);
@@ -158,6 +201,14 @@ export function WorkflowBuilderPage() {
     if (!hasCodebases && !hasGitRepos) return undefined;
     return {
       category: 'custom' as const,
+      // `codebaseAliases` is the project/codebase field the server schema
+      // accepts and the run path reads. The builder used to send the picked
+      // codebases only as `gitRepositories` (the legacy clone-a-URL field),
+      // which OrchestratorConfigSchema does not declare — so zod stripped it
+      // and the codebase selection silently vanished on every save, leaving
+      // project-linked workflows with `requiresCodebase: true` and no repo to
+      // build a worktree from.
+      codebaseAliases: store.selectedCodebases,
       gitRepositories: store.gitRepositories,
       // No preprocessingSteps needed — worktree creation is handled by the orchestrator
       // when projectId + selectedCodebases are present
@@ -201,20 +252,7 @@ export function WorkflowBuilderPage() {
           const stage = node.data.stage;
           const serverStage = await addStageMutation.mutateAsync({
             definitionId: created.id,
-            params: {
-              name: stage.name,
-              description: stage.description,
-              templateId: stage.templateId,
-              order: stage.order,
-              prompts: stage.prompts,
-              harnessConfigOverrides: stage.harnessConfigOverrides,
-              agentRef: stage.agentRef ?? null,
-              variables: stage.variables,
-              hooks: stage.hooks,
-              retryPolicy: stage.retryPolicy,
-              timeoutMs: stage.timeoutMs,
-              condition: stage.condition,
-            },
+            params: toStageParams(stage),
           });
           localToServerId.set(node.id, serverStage.id);
         }
@@ -272,24 +310,7 @@ export function WorkflowBuilderPage() {
           // Add new stages / update existing
           for (const node of store.nodes) {
             const stage = node.data.stage;
-            const stageParams = {
-              name: stage.name,
-              description: stage.description,
-              templateId: stage.templateId,
-              order: stage.order,
-              prompts: stage.prompts,
-              harnessConfigOverrides: stage.harnessConfigOverrides,
-              // Nullable, not optional: clearing the picker must actually
-              // unbind the agent rather than leave the previous ref in place.
-              agentRef: stage.agentRef ?? null,
-              variables: stage.variables,
-              hooks: stage.hooks,
-              retryPolicy: stage.retryPolicy,
-              timeoutMs: stage.timeoutMs,
-              condition: stage.condition,
-              resultValidation: stage.resultValidation,
-              contextFilter: stage.contextFilter,
-            };
+            const stageParams = toStageParams(stage);
             if (serverStageIds.has(node.id)) {
               await updateStageMutation.mutateAsync({
                 definitionId: store.definitionId!,
@@ -305,19 +326,30 @@ export function WorkflowBuilderPage() {
           }
 
           // Diff edges
-          const serverEdgeIds = new Set(definition.edges.map((e) => e.id));
+          const serverEdges = new Map(definition.edges.map((e) => [e.id, e]));
           const localEdgeIds = new Set(store.edges.map((e) => e.id));
 
-          // Delete removed edges
-          for (const eid of serverEdgeIds) {
-            if (!localEdgeIds.has(eid)) {
+          // An edge whose condition changed has to be re-created: the API
+          // exposes add/delete only, and edge identity is not user-visible.
+          const retypedEdgeIds = new Set(
+            store.edges
+              .filter((e) => {
+                const server = serverEdges.get(e.id);
+                return Boolean(server && e.data && server.edgeType !== e.data.edgeType);
+              })
+              .map((e) => e.id),
+          );
+
+          // Delete removed edges — and the ones being re-typed.
+          for (const eid of serverEdges.keys()) {
+            if (!localEdgeIds.has(eid) || retypedEdgeIds.has(eid)) {
               await deleteEdgeMutation.mutateAsync({ definitionId: store.definitionId!, edgeId: eid });
             }
           }
 
-          // Add new edges
+          // Add new edges — and re-add the re-typed ones.
           for (const edge of store.edges) {
-            if (!serverEdgeIds.has(edge.id) && edge.data) {
+            if ((!serverEdges.has(edge.id) || retypedEdgeIds.has(edge.id)) && edge.data) {
               await addEdgeMutation.mutateAsync({
                 definitionId: store.definitionId!,
                 params: {
@@ -371,7 +403,11 @@ export function WorkflowBuilderPage() {
   }, [handleValidate, store.definitionId]);
 
   const executeRun = useCallback(
-    async (variables: Record<string, unknown>, uploads?: UploadedFileSet) => {
+    async (
+      variables: Record<string, unknown>,
+      uploads?: UploadedFileSet,
+      stageOverrides?: StageOverrideEntry[],
+    ) => {
       if (!store.definitionId) return;
       setIsRunning(true);
 
@@ -401,9 +437,20 @@ export function WorkflowBuilderPage() {
           setVariableModalOpen(false);
           navigate(`/workflows/${store.definitionId}/runs/${context.workflowRunId}`);
         } else {
+          const activeOverrides = (stageOverrides ?? [])
+            .filter((o) => o.skip || Object.keys(o.variables).length > 0)
+            .map((o) => ({
+              stageName: o.stageName,
+              stageIndex: o.stageIndex,
+              ...(o.skip ? { skip: true } : {}),
+              ...(Object.keys(o.variables).length > 0 ? { variables: o.variables } : {}),
+            }));
+
           const params: CreateWorkflowRunParams = {
             workflowDefinitionId: store.definitionId,
-            variables,
+            variables: activeOverrides.length > 0
+              ? { ...variables, __stageOverrides: activeOverrides }
+              : variables,
           };
           const run = await createRun.mutateAsync(params);
 
@@ -411,7 +458,10 @@ export function WorkflowBuilderPage() {
 
           await startRun.mutateAsync(run.id);
           setVariableModalOpen(false);
-          navigate(`/workflows/${store.definitionId}`);
+          // Land on the run that was just started, the way every other run
+          // entry point does — this used to drop the user on the definition
+          // page with no indication that anything had begun.
+          navigate(`/workflows/${store.definitionId}/runs/${run.id}`);
         }
       } catch (err) {
         console.error('Run failed:', err);
@@ -496,6 +546,11 @@ export function WorkflowBuilderPage() {
               <CheckCircle2 className="h-3.5 w-3.5" /> Saved
             </span>
           )}
+          {validateOk && (
+            <span role="status" className="flex items-center gap-1 text-xs text-success">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Workflow is valid
+            </span>
+          )}
           {saveError && (
             <span className="flex items-center gap-1 text-xs text-danger">
               <AlertTriangle className="h-3.5 w-3.5" /> {saveError}
@@ -539,7 +594,7 @@ export function WorkflowBuilderPage() {
           {/* Validate */}
           <Button
             variant="ghost"
-            onClick={() => handleValidate()}
+            onClick={() => handleValidate(true)}
             title="Validate DAG"
             leftIcon={<AlertTriangle className="h-4 w-4" />}
           >
@@ -686,6 +741,7 @@ export function WorkflowBuilderPage() {
         workflowName={store.name || 'Untitled Workflow'}
         isSubmitting={isRunning}
         linkedCodebases={linkedCodebases}
+        stageNames={store.nodes.map((n) => n.data.stage.name)}
       />
     </div>
   );

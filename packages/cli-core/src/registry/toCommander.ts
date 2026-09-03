@@ -108,14 +108,21 @@ export function attachCommands(
 
     for (const flag of spec.flags) {
       const signature = flagSignature(flag);
+      // Phase 0 item 1 — an option that is accepted but does nothing says so
+      // in its own help text. A flag that parses, validates and then silently
+      // discards its value hands back a success exit code for work that never
+      // happened, which is worse than the flag not existing at all.
+      const description = flag.unsupported
+        ? `${flag.description} [UNSUPPORTED: ${flag.unsupported}]`
+        : flag.description;
       if (flag.variadic) {
-        command.option(signature, flag.description, collectRepeatable, []);
+        command.option(signature, description, collectRepeatable, []);
       } else if (flag.default !== undefined) {
-        command.option(signature, flag.description, flag.default as string);
+        command.option(signature, description, flag.default as string);
       } else if (flag.required) {
-        command.requiredOption(signature, flag.description);
+        command.requiredOption(signature, description);
       } else {
-        command.option(signature, flag.description);
+        command.option(signature, description);
       }
     }
 

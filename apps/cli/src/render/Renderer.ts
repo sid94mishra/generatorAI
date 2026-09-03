@@ -32,6 +32,22 @@ export interface JsonEnvelope {
   message?: string;
 }
 
+/**
+ * One versioned NDJSON line. Every frame carries `v`/`frame`/`kind` so a
+ * consumer can dispatch on shape alone without guessing from field
+ * presence — the previous NDJSON output was the raw internal `CliEvent`
+ * dumped as-is, unversioned, with no marker for "the command is done".
+ */
+export interface NdjsonFrame {
+  v: 1;
+  frame: 'lifecycle' | 'data' | 'warning' | 'error' | 'completion';
+  /** Command id for a `completion` frame; the underlying event's own kind otherwise. */
+  kind: string;
+  data?: unknown;
+  message?: string;
+  warnings?: string[];
+}
+
 export interface RendererOptions {
   mode: OutputMode;
   capabilities: TerminalCapabilities;
@@ -94,20 +110,41 @@ export class Renderer {
   }
 
   /**
-   * One JSON object per line.
+   * One versioned frame per line.
    *
-   * A list emits one line per ROW rather than one line holding the array,
-   * because the entire point of NDJSON is that a consumer can process it
-   * without buffering the whole response.
+   * A list emits one `data` frame per ROW rather than one line holding the
+   * array, because the entire point of NDJSON is that a consumer can
+   * process it without buffering the whole response. Either way this ends
+   * with exactly one `completion` frame, so a consumer reading the stream
+   * live knows when the command itself is actually done — as opposed to
+   * merely having emitted its most recent data row.
    */
   private renderNdjson(spec: CommandSpec, result: CommandResult): void {
     if (Array.isArray(result.data)) {
       for (const row of result.data) {
-        this.options.write(`${JSON.stringify({ kind: spec.id, data: row })}\n`);
+        this.writeFrame({ v: 1, frame: 'data', kind: spec.id, data: row });
       }
+      this.writeFrame({
+        v: 1,
+        frame: 'completion',
+        kind: spec.id,
+        ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+        ...(result.message ? { message: result.message } : {}),
+      });
       return;
     }
-    this.options.write(`${JSON.stringify(this.envelope(spec, result))}\n`);
+    this.writeFrame({
+      v: 1,
+      frame: 'completion',
+      kind: spec.id,
+      data: result.data,
+      ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+      ...(result.message ? { message: result.message } : {}),
+    });
+  }
+
+  private writeFrame(frame: NdjsonFrame): void {
+    this.options.write(`${JSON.stringify(frame)}\n`);
   }
 
   private renderWarnings(warnings: string[] | undefined): void {
@@ -307,11 +344,24 @@ export class Renderer {
     message?: string;
     level?: string;
     channel?: string;
+    kind?: string;
+    data?: unknown;
+    row?: unknown;
   }): void {
     if (this.options.mode === 'quiet') return;
 
-    if (this.options.mode === 'ndjson' || this.options.mode === 'json') {
-      this.options.write(`${JSON.stringify(event)}\n`);
+    if (this.options.mode === 'ndjson') {
+      this.writeFrame(this.eventToFrame(event));
+      return;
+    }
+
+    if (this.options.mode === 'json' || this.options.mode === 'yaml') {
+      // `--json`/`--yaml` promise exactly one bounded document. Writing
+      // each event here as it arrived is what previously interleaved raw
+      // stream frames with the final envelope — a `--json` consumer got
+      // several concatenated JSON values, not the one document promised.
+      // The command's own return value is the single source of truth for
+      // what gets printed; nothing streams ahead of it in these modes.
       return;
     }
 
@@ -344,6 +394,38 @@ export class Renderer {
       case 'progress':
         this.options.writeError(`${this.colour(event.message ?? '', pc.dim)}\n`);
         return;
+    }
+  }
+
+  /** Maps a live `CliEvent` onto a versioned NDJSON frame. */
+  private eventToFrame(event: {
+    type: string;
+    text?: string;
+    message?: string;
+    level?: string;
+    channel?: string;
+    kind?: string;
+    data?: unknown;
+    row?: unknown;
+  }): NdjsonFrame {
+    switch (event.type) {
+      case 'chunk':
+        return { v: 1, frame: 'data', kind: 'chunk', data: { text: event.text, channel: event.channel } };
+      case 'row':
+        return { v: 1, frame: 'data', kind: 'row', data: event.row };
+      case 'stream':
+        return { v: 1, frame: 'data', kind: event.kind ?? 'stream', data: event.data };
+      case 'log':
+        return {
+          v: 1,
+          frame: event.level === 'error' ? 'error' : event.level === 'warn' ? 'warning' : 'lifecycle',
+          kind: 'log',
+          message: event.message,
+        };
+      case 'progress':
+        return { v: 1, frame: 'lifecycle', kind: 'progress', message: event.message };
+      default:
+        return { v: 1, frame: 'data', kind: event.type, data: event };
     }
   }
 }

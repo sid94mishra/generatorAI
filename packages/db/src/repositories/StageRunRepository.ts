@@ -182,16 +182,29 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
   }
 
   /**
-   * HITL-01 — atomic resume: `awaiting_input → running`, clears
+   * HITL-01 — atomic resume: `awaiting_input → nextStatus`, clears
    * `interrupt_data`, bumps `version`. Returns true iff the row was
    * actually `awaiting_input` when this call ran — protects against two
    * approvers racing on the same stage.
+   *
+   * P0-a — `nextStatus` exists because the correct destination depends on
+   * whether the stage's execution frame is still alive. `running` is right
+   * only when an in-process `interrupt()` awaiter is about to be resolved and
+   * will carry on executing. After a restart that frame is gone, and
+   * `running` is a permanent zombie: `DAGScheduler.getReadyStages` only
+   * considers `pending` stages, so nothing ever relaunches it and the run
+   * never finishes. `HitlService.resume` picks `pending` in that case so the
+   * scheduler re-drives the stage. Both transitions stay one conditional
+   * write, so two approvers still cannot both win.
    */
-  async resumeFromInterrupt(id: string): Promise<boolean> {
+  async resumeFromInterrupt(
+    id: string,
+    nextStatus: 'running' | 'pending' = 'running',
+  ): Promise<boolean> {
     const result = await this.db
       .update(stageRuns)
       .set({
-        status: 'running',
+        status: nextStatus,
         interruptData: null,
         version: sql`${stageRuns.version} + 1`,
       })

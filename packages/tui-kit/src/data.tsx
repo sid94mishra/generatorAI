@@ -49,7 +49,11 @@ export function Spinner({ label }: { label?: string }): React.JSX.Element {
   const theme = useTheme();
   // Animation is suppressed where it would be noise or waste: CI logs and
   // screen readers both get a static marker instead.
-  const animate = !/^(ascii)$/.test(theme.glyphs.spinner[0] ?? '') && theme.ladder !== 'none';
+  const animate =
+    !/^(ascii)$/.test(theme.glyphs.spinner[0] ?? '') &&
+    theme.ladder !== 'none' &&
+    !theme.screenReader &&
+    !theme.reducedMotion;
   const frame = useSpinnerFrame(80, animate);
   const glyph = animate
     ? theme.glyphs.spinner[frame % theme.glyphs.spinner.length]
@@ -383,9 +387,16 @@ export function ProgressBar({
 }): React.JSX.Element {
   const theme = useTheme();
   const ratio = max === 0 ? 0 : Math.max(0, Math.min(1, value / max));
-  const filled = Math.round(ratio * width);
   const { color } = statusStyle(theme, tone);
 
+  // A glyph bar reads aloud as noise — twenty repeated "hash"/"dot"
+  // characters convey nothing a screen reader user can act on. The actual
+  // number they want ("42%") is the same information, spoken once.
+  if (theme.screenReader) {
+    return <Text color={color}>{Math.round(ratio * 100)}%</Text>;
+  }
+
+  const filled = Math.round(ratio * width);
   return (
     <Text>
       <Text color={color}>{theme.glyphs.progressFull.repeat(filled)}</Text>
@@ -394,19 +405,48 @@ export function ProgressBar({
   );
 }
 
+/**
+ * Which tone the gauge should draw in.
+ *
+ * Pulled out as a pure function so the "which number actually matters"
+ * decision (`compactionThreshold`, when known, over the raw `total`) is
+ * directly testable without rendering — Ink's color output depends on
+ * chalk's own env-based level detection, which is decided once at module
+ * load and cannot be forced from inside an already-running test.
+ */
+export function contextGaugeTone(
+  used: number,
+  total: number,
+  compactionThreshold?: number,
+): 'running' | 'warning' | 'failure' {
+  const ratio = total === 0 ? 0 : used / total;
+  // A compaction threshold, when known, is the number that actually
+  // matters — the provider auto-compacts before the raw window fills, so
+  // coloring against the fixed window edges alone can stay "safe" green
+  // right up to the point compaction is about to kick in.
+  const warnRatio = compactionThreshold && compactionThreshold > 0 ? used / compactionThreshold : ratio;
+  return warnRatio > 0.9 ? 'failure' : warnRatio > 0.75 ? 'warning' : 'running';
+}
+
 /** Context-window usage; turns amber then red as the window fills. */
 export function ContextGauge({
   used,
   total,
+  compactionThreshold,
   width = 12,
 }: {
   used: number;
   total: number;
+  /**
+   * The provider's real auto-compaction point (`harness.context_usage`'s
+   * `compactionThreshold`), when known. See `contextGaugeTone`.
+   */
+  compactionThreshold?: number;
   width?: number;
 }): React.JSX.Element {
   const theme = useTheme();
   const ratio = total === 0 ? 0 : used / total;
-  const tone = ratio > 0.9 ? 'failure' : ratio > 0.75 ? 'warning' : 'running';
+  const tone = contextGaugeTone(used, total, compactionThreshold);
 
   return (
     <Text color={theme.c('muted')}>

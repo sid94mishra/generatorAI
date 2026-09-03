@@ -31,6 +31,42 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * `request`, but a listed status is treated as a normal, parseable response
+ * rather than an error.
+ *
+ * Needed for routes that answer a legitimate question with a non-2xx status
+ * and a meaningful JSON body — `POST /api/workflow-definitions/:id/validate`
+ * answers 422 with `{valid:false, errors, warnings, issues}`, which is the
+ * ANSWER, not a failure to deliver one. Routed through plain `request` it
+ * threw `ApiError("422 Unprocessable Entity")` and the findings were
+ * discarded entirely, so `generatorai workflow validate` on a genuinely
+ * invalid definition reported the status line and nothing else — its own
+ * `if (!result.valid)` branch was unreachable.
+ *
+ * Deliberately narrow: only the exact statuses a caller names are tolerated,
+ * so a 500 or a 401 on the same route still throws like everywhere else.
+ */
+export async function requestAllowing<T>(
+  fetchImpl: ApiFetch,
+  path: string,
+  allowedStatuses: readonly number[],
+  init?: RequestInit,
+): Promise<T> {
+  const res = await fetchImpl(path, init);
+  if (!res.ok && !allowedStatuses.includes(res.status)) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      detail = describeErrorBody(await res.json()) ?? detail;
+    } catch {
+      // Non-JSON error body; the status line is all we have.
+    }
+    throw new ApiError(res.status, path, detail);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
 export async function request<T>(fetchImpl: ApiFetch, path: string, init?: RequestInit): Promise<T> {
   const res = await fetchImpl(path, init);
   if (!res.ok) {
@@ -588,6 +624,14 @@ export interface TerminalDescriptor {
   exitCode: number | null;
   cols?: number;
   rows?: number;
+  /**
+   * ms since epoch — last observed activity (input/output/resize/ack). The
+   * route (`terminalService.describe()`) always sends this; added here for
+   * Phase 5 item 6's idle-state display, which was the first caller to need
+   * it — additive only, so it does not disturb `apps/mobile`'s existing use
+   * of this same type.
+   */
+  lastActivityAt?: number;
 }
 
 // ── Providers / health ──────────────────────────────────────────
@@ -802,6 +846,42 @@ export function createApiClient(fetchImpl: ApiFetch) {
           }),
         ),
 
+      /**
+       * Same route as {@link send}, multipart instead of JSON — the only way
+       * to carry files. `multer.array('attachments', 10)` on the server names
+       * both the field (`attachments`) and the 10-file cap; anything past
+       * that the server rejects, so callers should not silently truncate.
+       */
+      sendWithAttachments: (
+        id: string,
+        input: SendMessageInput,
+        attachments: Array<{ name: string; data: Uint8Array; mimeType?: string }>,
+      ) => {
+        const form = new FormData();
+        form.set('prompt', input.message);
+        if (input.mode) form.set('mode', input.mode);
+        for (const file of attachments) {
+          form.append(
+            'attachments',
+            // `Uint8Array<ArrayBufferLike>` (what `fs.readFile` returns) vs.
+            // Node's `Blob` constructor wanting `ArrayBufferView<ArrayBuffer>`
+            // is a real, harmless typings mismatch — any Buffer/Uint8Array is
+            // a valid Blob source at runtime regardless of its backing buffer.
+            new Blob([file.data as unknown as ArrayBuffer], {
+              type: file.mimeType || 'application/octet-stream',
+            }),
+            file.name,
+          );
+        }
+        // No `content-type` header: the fetch implementation sets the
+        // multipart boundary itself from the `FormData` body. Setting one by
+        // hand here would omit the boundary and the server could not parse it.
+        return request<{ sessionId: string }>(fetchImpl, `/api/chats/${id}/prompt`, {
+          method: 'POST',
+          body: form,
+        });
+      },
+
       cancel: (id: string) => request<void>(fetchImpl, `/api/chats/${id}/cancel`, json({})),
 
       /**
@@ -827,6 +907,12 @@ export function createApiClient(fetchImpl: ApiFetch) {
           projectId?: string;
           tags?: string[];
           status?: string;
+          /**
+           * Portable `scope:slug` ref of the agent driving this chat from now
+           * on. `''`/`null` unbinds it. Distinct from `defaultAgentMode`,
+           * which is the plan/auto/HITL permission posture, not an identity.
+           */
+          agentRef?: string | null;
         },
       ) =>
         request<ChatSummary>(fetchImpl, `/api/chats/${id}`, {

@@ -61,13 +61,36 @@ function shortenTarget(raw: string, key: string): string {
 }
 
 /** Produce a compact right-aligned "meta" string from tool args. */
+/**
+ * Display name for a tool.
+ *
+ * MCP tools arrive as `mcp__<server>__<tool>`; rendering that raw produced
+ * rows like "mcp__generatorai-tools__click_element mcp__generatorai-tools__click_element"
+ * (the same string as verb AND fallback target). The last segment is what the
+ * user recognises; the server name is still visible in the expanded args.
+ */
+export function humanizeToolName(tool: string): string {
+  if (tool.startsWith('mcp__')) {
+    const parts = tool.split('__');
+    return parts[parts.length - 1] || tool;
+  }
+  return tool;
+}
+
+/** The harness's built-in shell tools — the ones whose output is a real
+ *  command console (and so get the "open in terminal" affordance). */
+export function isShellTool(tool: string): boolean {
+  return /^(bash|powershell|shell)$/i.test(tool);
+}
+
 function summarizeArgs(toolName: string, args: unknown): { target: string; meta?: string } {
-  if (args == null || typeof args !== 'object') return { target: toolName };
+  // No target beats repeating the tool name next to itself ("Write Write").
+  if (args == null || typeof args !== 'object') return { target: '' };
   const a = args as Record<string, unknown>;
   // Common named args across the SDKs. Order matters: prefer specific over generic.
   let targetKey = '';
   let targetRaw = '';
-  for (const key of ['file_path', 'filePath', 'path', 'uri', 'pattern', 'query', 'command', 'description'] as const) {
+  for (const key of ['file_path', 'filePath', 'path', 'uri', 'url', 'pattern', 'query', 'command', 'description'] as const) {
     const v = a[key];
     if (typeof v === 'string' && v.trim()) {
       targetKey = key;
@@ -75,7 +98,7 @@ function summarizeArgs(toolName: string, args: unknown): { target: string; meta?
       break;
     }
   }
-  const target = targetRaw ? shortenTarget(targetRaw, targetKey) : toolName;
+  const target = targetRaw ? shortenTarget(targetRaw, targetKey) : '';
   let meta: string | undefined;
   if (typeof a.startLine === 'number' && typeof a.endLine === 'number') {
     meta = `lines ${a.startLine}–${a.endLine}`;
@@ -157,6 +180,16 @@ export function deriveTimeline(
 
   const steps: TimelineStep[] = [];
   let subagentEmitted = false;
+  /**
+   * SDK-subagent nesting: a tool block whose `parentCallId` names an earlier
+   * `Agent` call renders as that step's CHILD, not as a sibling — otherwise a
+   * subagent's Read/Grep storm is indistinguishable from the main agent's own
+   * activity. The parent `tool_use` always streams before its children, so a
+   * single forward pass with this map suffices; a child whose parent is
+   * missing (clipped replay window) falls back to the top level rather than
+   * disappearing.
+   */
+  const stepByCallId = new Map<string, TimelineStep>();
 
   for (const b of blocks) {
     switch (b.type) {
@@ -211,16 +244,29 @@ export function deriveTimeline(
             }
             return parts.join('\n\n');
           };
-        steps.push({
+        const fileOp = b.fileOp;
+        const step: TimelineStep = {
           id: `tool-${b.blockId}`,
           kind,
-          verb: b.tool,
+          verb: humanizeToolName(b.tool),
           target,
           mono: true,
           status,
-          meta,
+          // Per-op line stats trump the generic arg-derived meta: "+27 −3"
+          // says more about a Write than "27 matches" ever could.
+          meta: fileOp ? `+${fileOp.additions} −${fileOp.deletions}` : meta,
           detail,
-        });
+          callId: b.callId,
+          ...(fileOp ? { fileOp } : {}),
+          ...(isShellTool(b.tool) ? { isShell: true } : {}),
+        };
+        stepByCallId.set(b.callId, step);
+        const parent = b.parentCallId ? stepByCallId.get(b.parentCallId) : undefined;
+        if (parent) {
+          (parent.children ??= []).push(step);
+        } else {
+          steps.push(step);
+        }
         break;
       }
 

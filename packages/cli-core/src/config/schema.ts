@@ -73,8 +73,6 @@ export const TuiConfigSchema = z.object({
    * at the frame rates a TUI runs at.
    */
   incrementalRendering: z.boolean().default(false),
-  /** tmux-compatible prefix for pane and tab operations. */
-  leaderKey: z.string().default('ctrl+b'),
   /** Restore the previous pane layout on launch. */
   restoreLayout: z.boolean().default(true),
   /** Poll interval for entities with no SSE coverage. 0 disables polling. */

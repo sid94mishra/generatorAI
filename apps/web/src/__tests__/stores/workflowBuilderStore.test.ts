@@ -335,6 +335,75 @@ describe('workflowBuilderStore', () => {
     expect(useWorkflowBuilderStore.getState().canRedo()).toBe(true);
   });
 
+  it('the first stage added to a NEW (unsaved) workflow is undoable', () => {
+    // resetBuilder must seed the empty canvas as history[0]; when it left
+    // history empty the first addStage landed at index 0 and canUndo()
+    // (index > 0) stayed false — the stage could never be undone.
+    useWorkflowBuilderStore.getState().resetBuilder();
+    expect(useWorkflowBuilderStore.getState().canUndo()).toBe(false);
+
+    useWorkflowBuilderStore.getState().addStage(makeStage({ id: 's1' }));
+    expect(useWorkflowBuilderStore.getState().canUndo()).toBe(true);
+
+    useWorkflowBuilderStore.getState().undo();
+    expect(useWorkflowBuilderStore.getState().nodes).toHaveLength(0);
+  });
+
+  it('a stage property edit survives an undo/redo round trip', () => {
+    // updateStage used not to record history, so redo replayed a snapshot
+    // taken before the edit and silently discarded it.
+    useWorkflowBuilderStore.getState().loadDefinition(makeDefinition());
+    useWorkflowBuilderStore.getState().addStage(makeStage({ id: 's1', name: 'Original' }));
+    useWorkflowBuilderStore.getState().updateStage('s1', { name: 'Renamed' });
+    expect(useWorkflowBuilderStore.getState().nodes[0]!.data.stage.name).toBe('Renamed');
+
+    useWorkflowBuilderStore.getState().undo();
+    expect(useWorkflowBuilderStore.getState().nodes[0]!.data.stage.name).toBe('Original');
+
+    useWorkflowBuilderStore.getState().redo();
+    expect(useWorkflowBuilderStore.getState().nodes[0]!.data.stage.name).toBe('Renamed');
+  });
+
+  it('coalesces a burst of edits to one field into a single undo step', () => {
+    useWorkflowBuilderStore.getState().loadDefinition(makeDefinition());
+    useWorkflowBuilderStore.getState().addStage(makeStage({ id: 's1', name: '' }));
+    const before = useWorkflowBuilderStore.getState().history.length;
+
+    // Simulates typing — one updateStage per keystroke.
+    for (const name of ['R', 'Re', 'Ren', 'Rena', 'Renam', 'Rename']) {
+      useWorkflowBuilderStore.getState().updateStage('s1', { name });
+    }
+    expect(useWorkflowBuilderStore.getState().history.length).toBe(before + 1);
+
+    // ...and one undo takes the whole burst back out.
+    useWorkflowBuilderStore.getState().undo();
+    expect(useWorkflowBuilderStore.getState().nodes[0]!.data.stage.name).toBe('');
+  });
+
+  it('an edge type change is undoable', () => {
+    const s1 = makeStage({ id: 's1' });
+    const s2 = makeStage({ id: 's2', order: 1 });
+    useWorkflowBuilderStore.getState().loadDefinition(
+      makeDefinition({
+        stages: [s1, s2],
+        edges: [
+          {
+            id: 'e1',
+            workflowDefinitionId: 'def-1',
+            fromStageId: 's1',
+            toStageId: 's2',
+            edgeType: 'on_success',
+          } as StageEdge,
+        ],
+      }),
+    );
+    useWorkflowBuilderStore.getState().updateEdgeType('e1', 'on_failure');
+    expect(useWorkflowBuilderStore.getState().edges[0]!.data!.edgeType).toBe('on_failure');
+
+    useWorkflowBuilderStore.getState().undo();
+    expect(useWorkflowBuilderStore.getState().edges[0]!.data!.edgeType).toBe('on_success');
+  });
+
   // ── State tracking ──
 
   it('markSaving / markSaved cycle', () => {

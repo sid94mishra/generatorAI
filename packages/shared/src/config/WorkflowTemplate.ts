@@ -28,6 +28,12 @@ export const HookDefinitionSchema = z.object({
     'on_session_start',
     'on_session_idle',
     'on_session_error',
+    // W13 / Finding-7 named this phase in the `HookPhase` TYPE and documented
+    // that authors must opt into it separately from `on_session_error` — but
+    // it was never added to this enum, so any hook declaring it was rejected
+    // at the route boundary and could not be persisted at all. The type and
+    // the validator must list the same phases or one of them is a lie.
+    'on_session_cancelled',
     'on_client_start',
     'on_client_stop',
     'on_client_error',
@@ -287,6 +293,43 @@ export const WorkflowTemplateStageSchema = z.object({
     type: z.enum(['always', 'on_success', 'on_failure', 'expression']),
     expression: z.string().optional(),
   }).optional(),
+  /**
+   * Execution settings carried through export/import.
+   *
+   * These are all optional and were previously absent, which meant
+   * `GET /workflow-definitions/:id/export` produced JSON that dropped every
+   * stage's run condition, context filter, validation rules and approval
+   * gate — `import-json` has always read them, only the exporter never wrote
+   * them, so a round-trip silently returned a different workflow.
+   */
+  contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
+  contextSources: z.array(z.string().min(1).max(200)).max(50).optional(),
+  outputFormat: z.enum(['text', 'json']).optional(),
+  resultValidation: z
+    .array(
+      z.object({
+        type: z.enum([
+          'contains',
+          'not_contains',
+          'min_length',
+          'max_length',
+          'regex',
+          'custom_script',
+          'json_schema',
+          'llm_validation',
+        ]),
+        value: z.union([z.string(), z.number(), z.record(z.unknown())]).optional(),
+        message: z.string(),
+      }),
+    )
+    .max(20)
+    .optional(),
+  expectedOutput: z.string().max(5000).optional(),
+  outputSchema: z.record(z.unknown()).optional(),
+  approvalRequired: z.boolean().optional(),
+  agentName: z.string().optional(),
+  agentRef: z.string().max(128).optional(),
+
   /** Whether the user can modify this stage's prompts */
   isLocked: z.boolean().default(false),
 });
@@ -373,3 +416,51 @@ export const WorkflowRunProfileSchema = z.object({
 
 export type WorkflowRunProfile = z.infer<typeof WorkflowRunProfileSchema>;
 
+
+// ── Template stage → CreateStageParams ─────────────────────────
+
+export type WorkflowTemplateStage = z.infer<typeof WorkflowTemplateStageSchema>;
+
+/**
+ * Map one template stage onto the params `addStage` takes.
+ *
+ * Both entry points that materialise a template into a real workflow —
+ * `WorkflowDefinitionService.importFromJSON` (import JSON / round-trip an
+ * export) and `WorkflowOrchestrator.createFromTemplate` (Settings → Templates
+ * → Create workflow) — must use this. They previously each hand-wrote the
+ * mapping and had drifted apart: the importer ignored `contextSources`,
+ * `outputFormat` and `agentRef` that the exporter writes, and
+ * `createFromTemplate` passed only name/description/order/prompts, silently
+ * discarding every retry policy, timeout, condition, validation rule,
+ * approval gate, hook and model override the template declared.
+ */
+export function templateStageToCreateParams(
+  stage: WorkflowTemplateStage,
+  workflowDefinitionId: string,
+  order?: number,
+): Record<string, unknown> {
+  return {
+    workflowDefinitionId,
+    name: stage.name,
+    description: stage.description,
+    templateId: (stage as { templateId?: string }).templateId,
+    order: order ?? stage.order,
+    prompts: stage.prompts,
+    harnessConfigOverrides: stage.harnessConfigOverrides,
+    variables: stage.variables,
+    hooks: stage.hooks,
+    retryPolicy: stage.retryPolicy ?? undefined,
+    timeoutMs: stage.timeoutMs ?? undefined,
+    condition: stage.condition ?? undefined,
+    contextFilter: stage.contextFilter ?? undefined,
+    contextSources: stage.contextSources ?? undefined,
+    outputFormat: stage.outputFormat ?? undefined,
+    agentName: stage.agentName ?? undefined,
+    agentRef: stage.agentRef ?? undefined,
+    resultValidation: stage.resultValidation ?? undefined,
+    expectedOutput: stage.expectedOutput ?? undefined,
+    outputSchema: stage.outputSchema ?? undefined,
+    iterationConfig: (stage as { iterationConfig?: unknown }).iterationConfig ?? undefined,
+    approvalRequired: stage.approvalRequired ?? false,
+  };
+}

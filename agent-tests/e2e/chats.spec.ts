@@ -10,8 +10,12 @@ test.describe('Chats list', () => {
     await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible();
     await expect(page.getByRole('button', { name: /New Chat/i })).toBeVisible();
     await expect(page.getByPlaceholder(/Search chats/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Active', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Archived', exact: true })).toBeVisible();
+    // The status filter is a `role="tablist"` of `role="tab"` buttons
+    // (`components/data/FilterTabs.tsx`). An explicit `role` overrides the
+    // implicit one, so `getByRole('button', …)` matches nothing here — these
+    // assertions were querying a role the component has never exposed.
+    await expect(page.getByRole('tab', { name: 'Active', exact: true })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Archived', exact: true })).toBeVisible();
   });
 
   test('seeded chat appears and is searchable', async ({ page, gotoApp, seed }) => {
@@ -29,7 +33,7 @@ test.describe('Chats list', () => {
     const name = `W2 Active ${Date.now()}`;
     await seed.chat({ name });
     await gotoApp('/chats');
-    await page.getByRole('button', { name: 'Active', exact: true }).click();
+    await page.getByRole('tab', { name: 'Active', exact: true }).click();
     await page.waitForTimeout(300);
     await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 10_000 });
   });
@@ -71,7 +75,7 @@ test.describe('Chat detail', () => {
     expect(res.ok).toBeTruthy();
 
     await gotoApp('/chats');
-    await page.getByRole('button', { name: 'Active', exact: true }).click();
+    await page.getByRole('tab', { name: 'Active', exact: true }).click();
     await page.waitForTimeout(300);
     await expect(page.getByText(name, { exact: false })).toHaveCount(0, { timeout: 10_000 });
   });

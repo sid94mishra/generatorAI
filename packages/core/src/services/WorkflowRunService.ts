@@ -12,7 +12,7 @@ import type {
   ILogger,
 } from '@generatorai/shared';
 import type { Semaphore } from '../utils/Semaphore.js';
-import type { AdmissionController } from './AdmissionController.js';
+import type { AdmissionController, AdmissionTicket } from './AdmissionController.js';
 import { generateId, withSpan, getMeter, ValidationError } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -37,6 +37,8 @@ import type { IWorkflowDefinitionRepository } from '../domain/ports/IWorkflowDef
 import type { EventBus } from '../events/EventBus.js';
 import type { DAGScheduler } from './DAGScheduler.js';
 import type { StageExecutionService } from './StageExecutionService.js';
+import { STAGE_OUTPUT_ARTIFACT } from './StageExecutionService.js';
+import type { DurableExecutionEngine } from './DurableExecutionEngine.js';
 import type { SessionAllocator } from './SessionAllocator.js';
 import type { WorkspaceManager } from './WorkspaceManager.js';
 import type { ResultValidator } from './ResultValidator.js';
@@ -149,6 +151,18 @@ export class WorkflowRunService {
   private resultValidator?: ResultValidator;
 
   /**
+   * W22/X-25 — read side of the durable artifact channel. Used to build a
+   * successor's context from the predecessor's DURABLE result rather than
+   * from the `outputText` column, which is written once at the end and is
+   * therefore missing or stale for any stage that was interrupted.
+   */
+  private durableEngine?: DurableExecutionEngine;
+
+  setDurableEngine(engine: DurableExecutionEngine): void {
+    this.durableEngine = engine;
+  }
+
+  /**
    * Execute workflow-level hooks for a given phase. Non-fatal.
    */
   private async executeWorkflowHooks(
@@ -207,25 +221,38 @@ export class WorkflowRunService {
     // M8-fix: gate each launch through the `ordinary` admission lane so a wide
     // DAG fan-out queues (never rejects) rather than running unbounded and
     // saturating the event loop. Falls through without gating when no controller.
-    const runFn = async () => {
+    //
+    // W18 acceptance ("with 8 stages on approval, unrelated runs still
+    // progress") needs BOTH permits yielded across the wait, not just the
+    // stage one: the admission permit is held for the whole of `runFn`, so
+    // parking only the stage semaphore still let N approvals consume the
+    // entire `ordinary` lane and stall unrelated runs. `ticket` is the
+    // admission-side equivalent of the stage semaphore's pause/resume.
+    const runFn = async (ticket?: AdmissionTicket) => {
       if (this.stageSemaphore) await this.stageSemaphore.acquire();
       let permitHeld = !!this.stageSemaphore;
-      const semaphoreCallbacks = this.stageSemaphore
-        ? {
-            pause: () => {
-              if (permitHeld) {
-                this.stageSemaphore!.release();
-                permitHeld = false;
-              }
-            },
-            resume: async () => {
-              if (!permitHeld) {
-                await this.stageSemaphore!.acquire();
-                permitHeld = true;
-              }
-            },
-          }
-        : undefined;
+      const semaphoreCallbacks =
+        this.stageSemaphore || ticket
+          ? {
+              pause: () => {
+                if (permitHeld) {
+                  this.stageSemaphore!.release();
+                  permitHeld = false;
+                }
+                ticket?.pause();
+              },
+              resume: async () => {
+                // Re-acquire in the same order every launch takes them
+                // (admission lane, then stage slot) so two parked stages
+                // resuming concurrently cannot deadlock against each other.
+                await ticket?.resume();
+                if (!permitHeld && this.stageSemaphore) {
+                  await this.stageSemaphore.acquire();
+                  permitHeld = true;
+                }
+              },
+            }
+          : undefined;
       try {
         await this.stageExecutionService.executeStage(
           stageRun,
@@ -246,7 +273,7 @@ export class WorkflowRunService {
     };
 
     const settled = this.admissionController
-      ? this.admissionController.admit('ordinary', runFn)
+      ? this.admissionController.admit('ordinary', (ticket) => runFn(ticket))
       : runFn();
 
     settled.catch((err) => {
@@ -421,6 +448,30 @@ export class WorkflowRunService {
     }
     if (params.projectId) {
       runVars['__projectId'] = params.projectId;
+    }
+
+    // ── X-21 — a scheduled run starts from a clean slate ──────────
+    //
+    // W24 requires "fresh agent with no history for scheduled runs". Sessions
+    // and conversations are already per-run, so the surviving leak is the
+    // EXECUTION CONTEXT: `startRun` skips workspace creation entirely when the
+    // caller pre-seeds `__workingDirectory` + `__artifactsDirectory`, and an
+    // automation whose `variables` carry those keys hands every nightly run
+    // the same directory — the same scratchpad, the same half-finished files,
+    // the same artifacts — which is precisely the history a scheduled run must
+    // not inherit. A manual run keeps the pinned directory, because a human
+    // who typed one meant it.
+    if (runVars['__triggeredBy'] === 'schedule') {
+      const inherited = ['__workingDirectory', '__artifactsDirectory', '__workspaceId'].filter(
+        (k) => runVars[k] !== undefined,
+      );
+      for (const key of inherited) delete runVars[key];
+      if (inherited.length > 0) {
+        this.logger?.info(
+          `[WorkflowRunService] Scheduled run of definition ${definition.id}: dropped ` +
+          `inherited execution context (${inherited.join(', ')}) so it provisions a fresh workspace`,
+        );
+      }
     }
     const run: WorkflowRun = {
       id: generateId(),
@@ -1183,7 +1234,13 @@ export class WorkflowRunService {
     // stage status away from 'completed' *before* its backoff and resets the
     // dedup key itself, closing the window where an overlapping poll tick
     // could re-process the same completion.
-    if (this.resultValidator) {
+    //
+    // A stage that never ran has nothing to validate. `skipStageByOverride`
+    // routes through here to advance the DAG, and without this guard the
+    // rules were evaluated against a stage with no output at all: they
+    // failed, the failure triggered a retry, and the retry EXECUTED the very
+    // stage the operator had asked to skip — which then failed the run.
+    if (this.resultValidator && stageRun.status !== 'skipped' && stageRun.status !== 'cancelled') {
       const stageDef = await this.stageDefRepo.getById(stageRun.stageDefinitionId);
       const definition = await this.definitionRepo.getById(run.workflowDefinitionId);
       const workflowRules = (definition.orchestratorConfig?.resultValidations ?? [])
@@ -1236,6 +1293,17 @@ export class WorkflowRunService {
             `[WorkflowRunService] Result validation threw for stage "${stageRun.name}": ` +
             `${err instanceof Error ? err.message : String(err)}`,
           );
+        }
+        // Validation is done with this stage (it passed, or it threw and we
+        // carried on). `StageExecutionService` deliberately holds the session
+        // open until here so an in-session retry has a conversation to talk
+        // to — release it now, or a per-stage session lingers until the run
+        // ends. Both the retry paths above return before reaching this line
+        // and manage the session themselves.
+        if (run.sessionMode === 'per-stage' || run.sessionMode === 'auto') {
+          await this.sessionAllocator.releaseSession(stageRunId).catch(() => {
+            /* non-fatal: run teardown releases whatever is left */
+          });
         }
       }
     }
@@ -1323,6 +1391,15 @@ export class WorkflowRunService {
         status: 'failed',
         error: errorMsg,
         completedAt: new Date(),
+      });
+    }
+
+    // A stage whose session was held open for a possible in-session
+    // validation retry has now failed terminally — nothing else will use that
+    // conversation, so release it here rather than leaving it to run teardown.
+    if (run.sessionMode === 'per-stage' || run.sessionMode === 'auto') {
+      await this.sessionAllocator.releaseSession(stageRunId).catch(() => {
+        /* non-fatal: run teardown releases whatever is left */
       });
     }
 
@@ -1439,6 +1516,7 @@ export class WorkflowRunService {
         if (sr && sr.status === 'pending') {
           await this.stageRunRepo.update(sr.id, {
             status: 'skipped',
+            error: 'Skipped — no incoming edge or run condition was satisfied',
             completedAt: new Date(),
           });
           skippedDefIds.push(defId);
@@ -1699,15 +1777,31 @@ export class WorkflowRunService {
     }
 
     for (const predRun of sourceStageRuns) {
+      // X-25 — prefer the DURABLE result channel over the `outputText` column.
+      //
+      // `entries.kind='artifact'` was created for exactly this and had zero
+      // readers; the successor's context came from a column written once at
+      // the end of the predecessor. The artifact is appended per turn inside
+      // the effect sandwich, so it holds every turn's contribution even when
+      // the predecessor was interrupted and resumed — which is precisely the
+      // case where the single final column write is missing or stale. Falls
+      // back to the column when no artifact exists (no durable engine wired,
+      // or a stage that ran before this change).
+      const durableOutput = this.durableEngine
+        ?.getArtifact({ scope: 'stage_run', scopeId: predRun.id }, STAGE_OUTPUT_ARTIFACT)
+        ?.text;
+      const fullOutput =
+        durableOutput && durableOutput.trim().length > 0 ? durableOutput : predRun.outputText;
+
       // Include a predecessor when it has EITHER a summary or captured full
       // output (HANDOFF-1) — a contextFilter='full' successor needs the output
       // even if summary generation produced nothing.
-      if (predRun.summary || predRun.outputText) {
+      if (predRun.summary || fullOutput) {
         summaries.push({
           stageName: predRun.name,
           summary: predRun.summary ?? '',
           outputData: predRun.outputData,
-          fullOutput: predRun.outputText,
+          fullOutput,
         });
       }
     }
@@ -1746,6 +1840,11 @@ export class WorkflowRunService {
   private async skipStageByOverride(stageRun: StageRun, runId: string): Promise<void> {
     await this.stageRunRepo.update(stageRun.id, {
       status: 'skipped',
+      // The reason rode only on the SSE event, so the run page had nothing to
+      // read afterwards and labelled every skip "Condition not met" — wrong,
+      // and misleading, for a stage an operator deliberately skipped.
+      // `error` is only surfaced for failed stages, so it is free here.
+      error: 'Skipped by run-time stage override',
       completedAt: new Date(),
     });
 

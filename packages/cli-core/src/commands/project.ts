@@ -1,6 +1,5 @@
 // `generatorai project …` — projects, codebases, configs, MCP servers, worktrees.
 
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import { defineCommand, type CommandSpec } from '../registry/CommandSpec.js';
@@ -16,6 +15,7 @@ import {
   list,
   nameColumn,
   ok,
+  readTextFile,
   record,
   requireSomeUpdate,
   statusColumn,
@@ -32,7 +32,7 @@ const CODEBASE_TYPES = ['git-remote', 'git-local', 'local-dir'] as const;
 
 async function findProject(ctx: CliContext, ref: string) {
   const projects = await ctx.api.projects.list();
-  return resolveRef(ref, { kind: 'project', candidates: projects as never });
+  return resolveRef(ref, { kind: 'project', candidates: projects });
 }
 
 async function findCodebase(ctx: CliContext, projectId: string, ref: string) {
@@ -406,7 +406,7 @@ export function projectCommands(): CommandSpec[] {
       async handler(ctx, { args }) {
         const target = await findProject(ctx, args.project);
         const file = path.resolve(args.file);
-        const content = await fs.readFile(file, 'utf8');
+        const content = await readTextFile(file, 'config file');
         return record(
           await ctx.api.projects.configs.create(target.id, {
             type: args.type,

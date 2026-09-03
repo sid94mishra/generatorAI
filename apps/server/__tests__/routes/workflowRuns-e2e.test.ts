@@ -104,6 +104,29 @@ describe('E2E: Workflow Run API Flow', () => {
     });
   });
 
+  describe('POST /api/workflow-runs/:id/retry — Retry Run', () => {
+    it('starts the NEW run that retryRun created, not the failed ancestor', async () => {
+      // The route used to call startRun(runId) — the already-failed ancestor —
+      // so Retry was a no-op that orphaned a `created` run on every press.
+      const res = await request(app).post('/api/workflow-runs/run-1/retry');
+
+      expect(res.status).toBe(202);
+      expect(container.workflowRunService.retryRun).toHaveBeenCalledWith('run-1');
+      expect(container.workflowRunService.startRun).toHaveBeenCalledWith('run-retry-1');
+      expect(container.workflowRunService.startRun).not.toHaveBeenCalledWith('run-1');
+    });
+
+    it('returns the new run id and the ancestor so the UI can follow it', async () => {
+      const res = await request(app).post('/api/workflow-runs/run-1/retry');
+
+      expect(res.body).toMatchObject({
+        runId: 'run-retry-1',
+        ancestorRunId: 'run-1',
+        status: 'created',
+      });
+    });
+  });
+
   describe('DELETE /api/workflow-runs/:id — Delete Run', () => {
     it('should delete the run', async () => {
       const res = await request(app)

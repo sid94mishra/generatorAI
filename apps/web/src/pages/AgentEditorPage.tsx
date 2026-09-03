@@ -305,6 +305,12 @@ export function AgentEditorPage() {
       out.push('Description must be at least 10 characters — both SDKs use it to route delegation.');
     if (!AGENT_SLUG_PATTERN.test(effectiveSlug))
       out.push('Slug must be 2–64 characters: lowercase letters, digits and hyphens.');
+    // Required by the create contract (`AgentSchemas.ts`: instructions is
+    // `z.string().min(1)`). Without this the form let Save through, the POST
+    // came back 400, and the only feedback was a generic
+    // "Request body validation failed" toast that never named the field.
+    if (!form.instructions.trim())
+      out.push('Instructions are required — they become the agent’s system prompt.');
     if (instructionBytes > AGENT_INSTRUCTIONS_MAX_BYTES)
       out.push(
         `Instructions are ${instructionBytes} bytes; the limit is ${AGENT_INSTRUCTIONS_MAX_BYTES}.`,
@@ -626,7 +632,7 @@ export function AgentEditorPage() {
 
           <SectionCard
             icon={Sparkles}
-            title="Instructions"
+            title="Instructions*"
             subtitle="Who this agent is and how it should work. Added to the system prompt on every turn."
           >
             <div className="space-y-3">

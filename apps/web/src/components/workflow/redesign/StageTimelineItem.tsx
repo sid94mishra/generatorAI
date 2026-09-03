@@ -338,7 +338,9 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
       {/* Skipped / cancelled inline note */}
       {isSkippedOrCancelled && (
         <div className="pl-[34px] py-1 text-[10.5px] text-[var(--color-muted-foreground)]/70">
-          {stage.status === 'skipped' ? 'Condition not met' : 'Cancelled'}
+          {stage.status === 'skipped'
+            ? (stage.error ?? 'Condition not met')
+            : 'Cancelled'}
         </div>
       )}
     </div>

@@ -247,7 +247,18 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
     const stepsDone = steps.filter((s) => s.status === 'done' || s.status === 'failed').length;
     const stepsTotal = Math.max(sr.totalSteps ?? 0, steps.length);
 
-    const answer = deriveAnswer(stream?.blocks);
+    // The stream store only holds blocks THIS browser session actually
+    // received. After a reload it is empty, so a completed stage derived an
+    // empty answer and the timeline rendered nothing — even though the text
+    // was sitting in the database the whole time, reachable only by digging
+    // through Details → Inspector → Output. Fall back to the persisted output
+    // once the stage is terminal so a finished run replays inline.
+    //
+    // Deliberately NOT applied while the stage is still active: there the live
+    // blocks are the source of truth, and `outputText` is not written until
+    // the stage settles.
+    const streamedAnswer = deriveAnswer(stream?.blocks);
+    const answer = streamedAnswer || (isTerminal ? (sr.outputText ?? '') : '');
     const segments = deriveSegments(stream?.blocks, { active: !isTerminal });
     const parallelIds = parallelPeers.get(sr.id) ?? [];
 

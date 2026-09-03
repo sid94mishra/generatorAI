@@ -73,12 +73,17 @@ export interface IStageRunRepository {
    */
   interrupt(id: string, interruptData: unknown): Promise<void>;
   /**
-   * Atomically transition `awaiting_input → running`, clearing
-   * `interrupt_data` and bumping the optimistic-lock version. Returns
-   * true iff the row was actually `awaiting_input` when this call ran —
-   * second concurrent approver sees `false` and bails.
+   * Atomically transition `awaiting_input → nextStatus` (default `running`),
+   * clearing `interrupt_data` and bumping the optimistic-lock version.
+   * Returns true iff the row was actually `awaiting_input` when this call
+   * ran — a second concurrent approver sees `false` and bails.
+   *
+   * P0-a — callers pass `pending` when no in-process `interrupt()` awaiter
+   * survives (i.e. the approval arrived after a restart), so the DAG
+   * scheduler re-drives the stage instead of leaving it wedged in `running`
+   * with nothing left to run it.
    */
-  resumeFromInterrupt(id: string): Promise<boolean>;
+  resumeFromInterrupt(id: string, nextStatus?: 'running' | 'pending'): Promise<boolean>;
   /** All stages in the run currently `awaiting_input`. */
   findAwaitingInputByRun(workflowRunId: string): Promise<StageRun[]>;
 }

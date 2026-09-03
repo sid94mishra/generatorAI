@@ -9,6 +9,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 /** `${projectId}:${artifactId}` → present means DISABLED for that project. */
 type DisabledKey = string;
@@ -21,7 +22,7 @@ interface ProjectCatalogPrefsState {
 
 const key = (projectId: string, artifactId: string): DisabledKey => `${projectId}:${artifactId}`;
 
-export const useProjectCatalogPrefsStore = create<ProjectCatalogPrefsState>()(
+const useProjectCatalogPrefsStoreImpl = create<ProjectCatalogPrefsState>()(
   persist(
     (set, get) => ({
       disabled: [],
@@ -41,3 +42,8 @@ export const useProjectCatalogPrefsStore = create<ProjectCatalogPrefsState>()(
     { name: 'generatorai:projectCatalogPrefs' },
   ),
 );
+
+
+// HMR-split-proof: every module instance shares the first-created store.
+// See lib/globalSingleton.ts for why this is load-bearing in dev.
+export const useProjectCatalogPrefsStore = globalSingleton('web.projectCatalogPrefsStore', () => useProjectCatalogPrefsStoreImpl);

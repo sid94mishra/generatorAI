@@ -2,6 +2,13 @@
 
 export * from './pairingCode.js';
 
+// Composer caret insertion — shared by the web and mobile dictation
+// composers (VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part C.2). Pure
+// data-in/data-out, no DOM and no React, which is exactly why it can live
+// here and be used from React Native as-is.
+export { insertTextAtCaret, CaretInsertionSequencer } from './insertAtCaret.js';
+export type { CaretInsertResult } from './insertAtCaret.js';
+
 export {
   evaluateBlocklist,
   buildBlocklist,

@@ -42,6 +42,7 @@ import {
   ChevronDown,
   CheckCircle2,
 } from 'lucide-react';
+import { liveViewTransport } from '@/platform/surfaceCapabilities.js';
 import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -266,6 +267,14 @@ export function TerminalPanel({
   // ── Session lookup / create + WS attach ─────────────────
   useEffect(() => {
     if (!workspaceId || !xtermRef.current) return;
+    // W29 — a surface that declares no WebSocket streaming must not open one.
+    // Checked here rather than at the `new WebSocket` call so the PTY is never
+    // created either: a session spawned server-side for a socket that will
+    // never attach is a leaked process, not a graceful degradation.
+    if (liveViewTransport() !== 'websocket') {
+      setError('This surface does not support live terminal streaming.');
+      return;
+    }
     // React StrictMode fires effects twice in dev — a second invocation
     // for the same (workspaceId, tabId) tuple would spawn a duplicate PTY.
     if (sessionInitStarted.current) return;

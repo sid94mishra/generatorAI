@@ -20,10 +20,12 @@ import {
   type PromptPort,
   type ResolvedCliConfig,
   type StreamPort,
+  type TerminalAttachPort,
   type TerminalCapabilities,
 } from '@generatorai/cli-core';
 import { Renderer, type OutputMode } from './render/Renderer.js';
 import { createLogger } from './logger.js';
+import { attachToTerminal } from './terminal/attachLoop.js';
 
 export interface GlobalFlags {
   json?: boolean;
@@ -197,6 +199,22 @@ export async function createContextFor(
   options: ContextFactoryOptions,
 ): Promise<CliContext> {
   const { session, flags, signal } = options;
+
+  // `--json`/`--yaml` promise exactly one bounded document; a command that
+  // follows a conversation forever (`chat watch`) can never produce one.
+  // Refusing here, before any request goes out, beats hanging with no
+  // output until the process is killed.
+  if (
+    spec.output.kind === 'stream' &&
+    spec.output.unbounded &&
+    (session.outputMode === 'json' || session.outputMode === 'yaml')
+  ) {
+    throw CliError.unsupported(
+      `\`${spec.id}\` streams indefinitely and cannot produce a single ${session.outputMode.toUpperCase()} document.`,
+      { hint: 'Use --ndjson, which is designed for unbounded output, one versioned frame per line.' },
+    );
+  }
+
   const interactive =
     session.capabilities.interactive && session.outputMode === 'auto' && !flags.yes;
 
@@ -220,6 +238,13 @@ export async function createContextFor(
         throw new CliError('USAGE', 'This command cannot stream.');
       },
     };
+    const offlineTerminalAttach: TerminalAttachPort = {
+      attach() {
+        throw new CliError('USAGE', `\`${spec.id}\` does not use the server.`, {
+          hint: 'This is a bug in the command definition, not in your invocation.',
+        });
+      },
+    };
 
     return new CliContext({
       api: offlineApi,
@@ -229,6 +254,7 @@ export async function createContextFor(
       logger: session.logger,
       prompt: createPrompt(interactive),
       stream: offlineStream,
+      terminalAttach: offlineTerminalAttach,
       emit,
       signal,
       interactive,
@@ -249,6 +275,31 @@ export async function createContextFor(
     signal,
   });
 
+  // Non-fatal: the server is ahead of what this CLI build understands.
+  // `createCliClient` already refuses outright (VERSION_MISMATCH) when the
+  // server is too OLD to talk to — this is the other, survivable direction.
+  if (client.protocolWarning) {
+    emit({ type: 'log', level: 'warn', message: client.protocolWarning });
+  }
+
+  // Real raw takeover for the binary surface's `terminal.attach` — plain
+  // `process.stdin`/`process.stdout`, since there is no Ink frame to fight
+  // for them here (contrast the TUI's own attach keybinding, which instead
+  // goes through `useTerminalSuspension` and never touches this port).
+  const terminalAttach: TerminalAttachPort = {
+    attach(request) {
+      return attachToTerminal({
+        workspaceId: request.workspaceId,
+        ...(request.terminalId ? { terminalId: request.terminalId } : {}),
+        api: client.api.terminals,
+        socketUrl: client.socketUrl,
+        stdin: process.stdin,
+        stdout: process.stdout,
+        signal,
+      });
+    },
+  };
+
   const context = new CliContext({
     api: client.api,
     config: session.config,
@@ -259,6 +310,7 @@ export async function createContextFor(
     logger: session.logger,
     prompt: createPrompt(interactive),
     stream: client.stream,
+    terminalAttach,
     emit,
     signal,
     interactive,

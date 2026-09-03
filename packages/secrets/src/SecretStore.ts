@@ -64,6 +64,13 @@ export const SecretNamespace = {
   relay: 'relay',
   /** SSH private keys + known-hosts material. */
   ssh: (targetId: string) => `ssh/${targetId}`,
+  /**
+   * Voice Module BYOK credentials (e.g. the optional LLM text-formatter API
+   * key — VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part E Phase 2). Kept
+   * separate from `harness/<instanceId>` because this key is unrelated to
+   * — and may use a different provider than — the main agent harness.
+   */
+  voice: 'voice',
 } as const;
 
 export class SecretStoreError extends Error {

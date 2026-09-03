@@ -5,9 +5,19 @@
 //  POST   /api/workspaces/:id/browser/stop            — terminate session
 //  POST   /api/workspaces/:id/browser/actions         — user actions (URL bar, back/forward, screenshot, dom, inspector on/off, navigate)
 //  POST   /api/workspaces/:id/browser/selection       — INTERNAL: inspector script posts a selection
+//  POST   /api/workspaces/:id/browser/read-page       — serialised accessibility tree (text; for non-graphical clients)
 //  GET    /api/workspaces/:id/browser/snapshots       — list browser artifacts
 //  GET    /api/workspaces/:id/browser/descriptor      — current mode/status/url for the SPA
-//  GET    /api/workspaces/:id/browser/screencast.mjpg — long-lived MJPEG binary stream
+//  GET    /api/workspaces/:id/browser/screencast.jpg  — ONE JPEG frame (poll)
+//
+// △ W15 — `GET …/screencast.mjpg` (multipart/x-mixed-replace) is DELETED. It
+// was a second, concurrent capture path: an `<img>` on it drove its own CDP
+// screencast subscription alongside the WebSocket live view, so a workspace
+// with the panel open captured and JPEG-encoded every frame twice. The live
+// view is the WebSocket (`browser-ws.ts`), which now negotiates its codec on
+// the same socket. `screencast.jpg` stays because it is a genuinely different
+// thing — one frame, on request — and is what the mobile client and
+// `client-core`'s admin surface use.
 //
 // The route lives under /api/workspaces/:id/browser (owned by the workspace
 // resource) rather than a peer entity because a browser session is a
@@ -282,6 +292,32 @@ export function createBrowserRoutes(container: Container): Router {
     }
   });
 
+  // POST /workspaces/:id/browser/read-page
+  //
+  // The serialised accessibility tree — `BrowserService.readPage()`, which
+  // existed only as an agent tool and had no HTTP surface at all, so no
+  // client could ask for it. It is the single most useful representation of
+  // a page for a NON-GRAPHICAL client: a text tree of the page's interactive
+  // shape, roughly a tenth the size of the DOM snapshot, and readable in a
+  // terminal as-is. `POST` rather than `GET` because it drives the live page
+  // (it re-issues element refs on the host, invalidating the previous set) —
+  // it is not a cacheable read.
+  router.post('/read-page', async (req, res, next) => {
+    try {
+      const workspaceId = idOf(req as BrowserRequest);
+      res.json(await browserService.readPage(workspaceId));
+    } catch (err) {
+      // `mustRecord` throws when no session is running — a 409 the way
+      // `/capture` already reports the same condition, rather than a 500.
+      const message = (err as Error).message ?? '';
+      if (/no .*session|not (started|active|running)/i.test(message)) {
+        res.status(409).json({ error: { code: 'NOT_ACTIVE', message } });
+        return;
+      }
+      next(err);
+    }
+  });
+
   // GET /workspaces/:id/browser/descriptor
   router.get('/descriptor', async (req, res, next) => {
     try {
@@ -481,51 +517,6 @@ export function createBrowserRoutes(container: Container): Router {
         res.status(200).json(state);
       } catch (err) {
         res.status(409).json({ error: { code: 'NOT_ACTIVE', message: (err as Error).message } });
-      }
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // GET /workspaces/:id/browser/screencast.mjpg — multipart/x-mixed-replace
-  //
-  // Long-lived binary stream of JPEG frames. Client is a plain <img
-  // src="…/screencast.mjpg">. Auto-closes when the client disconnects.
-  router.get('/screencast.mjpg', async (req, res, next) => {
-    try {
-      const workspaceId = idOf(req as BrowserRequest);
-      const fps = Math.max(1, Math.min(15, Number(req.query['fps'] ?? '5')));
-      const quality = Math.max(20, Math.min(95, Number(req.query['quality'] ?? '60')));
-
-      const boundary = 'genai-browser-mjpeg';
-      res.status(200).setHeader('Content-Type', `multipart/x-mixed-replace; boundary=${boundary}`);
-      res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('X-Accel-Buffering', 'no');
-      res.flushHeaders();
-
-      // Break out if the client goes away.
-      let closed = false;
-      req.on('close', () => {
-        closed = true;
-      });
-
-      try {
-        for await (const frame of browserService.screencast(workspaceId, { fps, quality })) {
-          if (closed) break;
-          if (!res.writable) break;
-          res.write(`--${boundary}\r\n`);
-          res.write('Content-Type: image/jpeg\r\n');
-          res.write(`Content-Length: ${frame.jpeg.length}\r\n\r\n`);
-          res.write(frame.jpeg);
-          res.write('\r\n');
-        }
-      } catch (err) {
-        logger.warn?.(`[BrowserRoutes] screencast stream ended: ${(err as Error).message}`);
-      } finally {
-        if (!closed && res.writable) {
-          try { res.end(); } catch { /* best effort */ }
-        }
       }
     } catch (err) {
       next(err);

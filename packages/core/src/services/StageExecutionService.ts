@@ -32,6 +32,16 @@ const stageDuration = meter.createHistogram('workflow.stage.duration_ms', {
 });
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+
+/**
+ * Short, stable digest used to key a durable operation on the CONTENT of a
+ * human-supplied prompt, not just its position. Not security-relevant — it
+ * only has to distinguish two different reviewer messages.
+ */
+function digest(text: string): string {
+  return createHash('sha1').update(text).digest('hex').slice(0, 12);
+}
 import { resolveWithinBase, isSymlink } from '../utils/safePath.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import type { IStageDefinitionRepository } from '../domain/ports/IStageDefinitionRepository.js';
@@ -60,6 +70,42 @@ import type { PermissionRequest, PermissionResponse } from '../domain/ports/IAge
 import { buildBrowserToolSet } from '../tools/browser/index.js';
 import { resolveStageHooks } from './resolveStageHooks.js';
 import { StageRunStateMachine } from '../domain/state-machines/StageRunStateMachine.js';
+import type { DurableContext, DurableExecutionEngine } from './DurableExecutionEngine.js';
+import { isSyntheticEffectResult, replayPolicyForToolGroups } from './DurableExecutionEngine.js';
+
+/**
+ * W22 — everything one agent turn produces that later code in `executeStage`
+ * reads back. This is what the effect sandwich journals, so a turn replayed
+ * from the journal is indistinguishable to the rest of the method from a turn
+ * that just ran.
+ *
+ * `conversationId` is load-bearing, not diagnostic: a restart allocates a
+ * FRESH session, so a replayed turn's content is not in the conversation the
+ * remaining turns will be sent to. Comparing it is how we detect that and
+ * re-seed the new conversation once (see `replayedTurns` below) instead of
+ * silently sending prompt N to a model that never saw prompts 1..N-1.
+ */
+interface DurableTurnRecord {
+  /**
+   * The turn's best-known assistant text — the event-accumulated content when
+   * the provider emitted events, otherwise what `sendPromptAndWait` returned.
+   * Used for the restart recap and as `runTurn`'s return value.
+   */
+  content: string;
+  /**
+   * What the `turnContent` accumulator actually held. Restored VERBATIM on
+   * replay, separately from `content`, so a replayed turn leaves the method's
+   * local state byte-identical to a live one — including the case where the
+   * provider emits no message events and the accumulator legitimately stays
+   * empty. Collapsing the two fields would make a replayed stage produce
+   * output that the same stage running live does not.
+   */
+  accumulated?: string;
+  conversationId?: string;
+  thinkingText?: string;
+  toolCalls?: Array<{ id: string; tool: string; args: unknown; result?: unknown; status: 'running' | 'complete' }>;
+  systemMessages?: string[];
+}
 
 /**
  * Wrap an SDK `AgentEvent` with stage/run identifiers the frontend needs for
@@ -82,8 +128,94 @@ function createEnrichedAgentEvent(
   return { kind: event.kind, data: enrichedData } as AgentEvent;
 }
 
+/**
+ * X-25 / W23 — the stable artifact id under which a stage's result is written
+ * to the durable `entries` channel, scoped to the stage run.
+ *
+ * Stable across a retry chain by construction: the scope is the stage-run id,
+ * and a retried stage run keeps its id (only the operation-id epoch changes),
+ * so an aborted attempt's output and its successor's output land on the same
+ * artifact rather than forking two competing "results" for one stage.
+ */
+export const STAGE_OUTPUT_ARTIFACT = 'stage-output';
+
+/**
+ * X-13 — the artifact id under which a stage run's SESSION LINEAGE is
+ * appended, scoped to the stage run.
+ *
+ * "Why did it forget X?" was unanswerable: a stage's conversation can be
+ * replaced (a restart nulls `stage_runs.session_id` so the relaunch allocates
+ * a fresh one; a per-stage release destroys the conversation outright), and
+ * the ONLY trace left behind was `sessions.status = 'closed'` on a row nothing
+ * pointed at any more — no back-pointer, no reason, no time. The lineage is an
+ * append-only chain of `{ event, sessionId, conversationId, reason, at }`
+ * lines, so the answer is a single read.
+ *
+ * It lives on the durable artifact channel rather than a new column
+ * deliberately: `releaseJournal` keeps artifacts, so the lineage survives the
+ * stage it explains, and no shared type or table has to change to carry it.
+ */
+export const SESSION_LINEAGE_ARTIFACT = 'session-lineage';
+
+/** One link in a stage run's session chain (X-13). */
+export interface SessionLineageEvent {
+  event: 'allocated' | 'lost';
+  sessionId?: string;
+  conversationId?: string;
+  /** Why the previous session stopped being usable. */
+  reason?: string;
+  at: number;
+}
+
+/**
+ * Append one link to a stage run's session lineage. Shared by
+ * `StageExecutionService` (which records allocations) and
+ * `StartupRecoveryService` (which records losses), so both halves of the
+ * chain use one format.
+ */
+export function recordSessionLineage(
+  engine: { appendArtifact: DurableExecutionEngine['appendArtifact'] } | undefined,
+  stageRunId: string,
+  event: SessionLineageEvent,
+): void {
+  if (!engine) return;
+  engine.appendArtifact(
+    { scope: 'stage_run', scopeId: stageRunId },
+    SESSION_LINEAGE_ARTIFACT,
+    `${JSON.stringify(event)}\n`,
+    { meta: { stageRunId } },
+  );
+}
+
 /** Default retry policy applied when a stage has no explicit retryPolicy */
 const DEFAULT_RETRY_POLICY = { maxRetries: 1, backoffMs: 3000, backoffMultiplier: 1 };
+
+/**
+ * Cap on the stage-output excerpt used when the summary turn could not run.
+ * Sized against real generated summaries (~2–3k chars) so downstream stages
+ * receive a comparable amount of context rather than nothing.
+ */
+const SUMMARY_FALLBACK_MAX_CHARS = 3000;
+
+/**
+ * Whether a completed stage could still be asked to retry *in its own
+ * session* because of result validation.
+ *
+ * Mirrors `WorkflowRunService.retryStageAfterValidation`: validation only
+ * retries at all while `retryCount < retryPolicy.maxRetries`, and it uses the
+ * in-session strategy for every attempt below the final one. Kept in step
+ * with that method — if the strategy there changes, change it here too.
+ */
+function mayRetryInSession(
+  stageDef: { resultValidation?: unknown[]; retryPolicy?: { maxRetries: number } },
+  stageRun: { retryCount: number },
+): boolean {
+  if (!stageDef.resultValidation?.length) return false;
+  const maxRetries = stageDef.retryPolicy?.maxRetries ?? 0;
+  if (stageRun.retryCount >= maxRetries) return false;
+  const inSessionThreshold = Math.max(1, (stageDef.retryPolicy?.maxRetries ?? 1) - 1);
+  return stageRun.retryCount < inSessionThreshold;
+}
 
 /**
  * Thrown when a reviewer rejects a stage at its completion gate.
@@ -184,6 +316,21 @@ export class StageExecutionService {
   }
 
   /**
+   * W22 — the durable execution engine backing the effect sandwich on the
+   * turn path, and the durable artifact channel that carries the stage result
+   * (X-25). Late-wired like every other cross-cutting service.
+   *
+   * When absent (an embedder that has not migrated to v36–v37, and every
+   * existing unit test) `executeStage` behaves exactly as it did before: each
+   * turn runs unconditionally and the result lives only in `messages`.
+   */
+  private durableEngine?: DurableExecutionEngine;
+
+  setDurableEngine(engine: DurableExecutionEngine): void {
+    this.durableEngine = engine;
+  }
+
+  /**
    * Fold the stage's agent into `sessionConfig`.
    *
    * `harnessConfigOverrides` has already been applied, so it acts as the
@@ -202,8 +349,8 @@ export class StageExecutionService {
       // Fail loudly: silently running a stage without its agent's skills and
       // tool policy is worse than not running it.
       throw new StageExecutionError(
-        stageDef.id,
         'Stage is bound to an agent but no AgentResolver is wired into StageExecutionService',
+        stageDef.id,
       );
     }
 
@@ -984,8 +1131,8 @@ export class StageExecutionService {
       const preResult = await this.hookExecutor.executePhase('pre_run', stageDef.hooks, preRunHookContext);
       if (!preResult.shouldContinue) {
         throw new StageExecutionError(
-          stageRun.id,
           preResult.mergedResult.abortReason ?? `pre_run hook aborted stage "${stageRun.name}"`,
+          stageRun.id,
         );
       }
       // Merge hook-returned variables into the stage variables
@@ -1033,6 +1180,21 @@ export class StageExecutionService {
         ),
       },
     );
+
+    // X-13 — record which session this stage is now speaking through. The
+    // chain's head makes the "lost" links `StartupRecoveryService` writes
+    // interpretable, and a stage that shows two `allocated` entries is a stage
+    // whose conversation was replaced — which is the answer to "why did it
+    // forget what I told it earlier?".
+    recordSessionLineage(this.durableEngine, stageRun.id, {
+      event: 'allocated',
+      sessionId: session.id,
+      ...(session.conversationId ? { conversationId: session.conversationId } : {}),
+      ...(stageRun.sessionId && stageRun.sessionId !== session.id
+        ? { reason: `replaces session ${stageRun.sessionId}` }
+        : {}),
+      at: Date.now(),
+    });
 
     // Update stage run with session info
     // Only true when explicitly resuming from a pause — not when reusing
@@ -1165,6 +1327,191 @@ export class StageExecutionService {
       );
     }
 
+    // ── W22 — the effect sandwich, on the real turn path ──────────
+    //
+    // `withEffect()` shipped with ZERO production callers. The mechanism
+    // existed, was unit-tested in isolation, and was reachable from nothing —
+    // which had a concrete cost: `StartupRecoveryService` resets an
+    // interrupted stage to `pending`, `executeStage` re-enters from the top,
+    // and so EVERY prompt of a half-finished stage was re-sent to the model
+    // and every tool call it had already made ran a second time.
+    //
+    // A TURN is the granularity we journal. That is coarser than §3.4's
+    // per-tool ideal, deliberately: a turn's individual tool calls happen
+    // inside the provider SDK and never cross this process, so there is no
+    // seam to wrap them at. What the turn boundary does buy is the plan's
+    // exit criterion — re-entering `executeStage()` after a restart replays
+    // each already-settled turn out of the journal instead of re-prompting.
+    //
+    // The operation-id EPOCH is what keeps a deliberate retry honest. A retry
+    // must redo the work, so it gets a fresh epoch and memoises nothing; a
+    // crash-recovery re-entry keeps the same epoch (`resetForRetry` preserves
+    // `retryCount`) and therefore replays. Without the epoch, `retryStage`
+    // would "retry" a stage by replaying the exact turns that just failed.
+    const durable = this.durableEngine;
+    const durableCtx: DurableContext = { scope: 'stage_run', scopeId: stageRun.id };
+    const validationAttempt = Number(variables?.['__validationRetryAttempt'] ?? 0) || 0;
+    const opEpoch = `a${stageRun.retryCount ?? 0}v${validationAttempt}`;
+    // Derived from the stage's own tool surface — see `replayPolicyForToolGroups`.
+    // A read-only stage's interrupted turn simply re-runs; a stage that could
+    // have written a file or run a command does not silently redo that work.
+    const turnReplayPolicy = replayPolicyForToolGroups(agentProjection.toolPolicy.groups);
+
+    // X-25 — this attempt is running, so the stage's durable result is not
+    // final. A previous attempt on the SAME stage run (the scope is the stage
+    // run id) may have sealed it on its way to a terminal status; every append
+    // below would then return null and the artifact would keep serving
+    // successors the output of an attempt that has since been superseded —
+    // including, for a post-validation retry, the very output validation
+    // rejected. No-op when the artifact does not exist or is already open.
+    durable?.reopenArtifact(durableCtx, STAGE_OUTPUT_ARTIFACT);
+
+    /**
+     * Turns replayed out of the journal onto a conversation that never ran
+     * them. Injected ONCE as a single recap message before the first turn
+     * that actually reaches the model — one cheap prompt instead of re-running
+     * N expensive ones, and the difference between "the agent resumed" and
+     * "the agent was handed step 4 with no memory of steps 1–3".
+     */
+    const replayedTurns: Array<{ prompt: string; content: string }> = [];
+    let replayedTurnsInjected = false;
+
+    const injectReplayedTurns = async (): Promise<void> => {
+      if (replayedTurnsInjected || replayedTurns.length === 0) return;
+      if (!session.conversationId) return;
+      replayedTurnsInjected = true;
+
+      const recap = replayedTurns
+        .map(
+          (t, idx) =>
+            `## Turn ${idx + 1}\n**Instruction given:**\n${t.prompt}\n\n**Your response:**\n${t.content}`,
+        )
+        .join('\n\n---\n\n');
+      const recapMessage =
+        `This stage was interrupted by a restart and has resumed on a new session. ` +
+        `The turns below ALREADY COMPLETED — do not redo their work. They are ` +
+        `reproduced here only so you have their context:\n\n${recap}`;
+
+      await this.messageRepo.create({
+        id: generateId(),
+        sessionId: session.id,
+        role: 'user',
+        content: recapMessage,
+        // Flagged as context (not a real stage prompt) so the client renders
+        // it the way it renders predecessor context rather than as work.
+        metadata: { stageRunId: stageRun.id, isContextMessage: true },
+        timestamp: new Date(),
+      });
+
+      assistantPersisted = false;
+      turnThinkingText = '';
+      turnToolCalls.length = 0;
+      turnSystemMessages.length = 0;
+      turnContent = '';
+
+      isInternalTurn = true;
+      // durability-ok: the recap exists ONLY because turns were replayed.
+      // Journalling it would memoise a message whose whole purpose is to
+      // describe one particular restart; and it already runs inside the next
+      // turn's `perform`, so it is covered by that turn's settlement.
+      await this.harness.sendPromptAndWait(session.conversationId, recapMessage); // durability-ok: see above
+      isInternalTurn = false;
+      replayedTurns.length = 0;
+    };
+
+    /**
+     * Run one agent turn under the effect sandwich.
+     *
+     * `perform` must contain EVERYTHING the turn does that must not happen
+     * twice — persisting the user message, resetting the accumulators, the
+     * `sendPrompt*` call and any post-turn persistence — because on replay it
+     * is not called at all.
+     *
+     * `promptForReplay` is the instruction text used to rebuild context for a
+     * fresh conversation; it is never sent on the live path.
+     */
+    const runTurn = async (
+      opId: string,
+      promptForReplay: string,
+      perform: () => Promise<string>,
+      opts: { contributesOutput?: boolean } = {},
+    ): Promise<string> => {
+      if (!durable) return perform();
+
+      let ranLive = false;
+      const outcome = await durable.withEffect<DurableTurnRecord>(durableCtx, {
+        operationId: `${opEpoch}/${opId}`,
+        replayPolicy: turnReplayPolicy,
+        perform: async () => {
+          ranLive = true;
+          await injectReplayedTurns();
+          const content = await perform();
+          // X-25 — the stage result goes onto the durable artifact channel as
+          // it is produced, INSIDE the sandwich: a replayed turn does not
+          // re-append, so the artifact cannot double-count after a restart.
+          if (opts.contributesOutput && content.trim().length > 0) {
+            durable.appendArtifact(durableCtx, STAGE_OUTPUT_ARTIFACT, `${content}\n`, {
+              meta: { stageRunId: stageRun.id, workflowRunId, stageName: stageRun.name },
+            });
+          }
+          return {
+            content,
+            accumulated: turnContent,
+            ...(session.conversationId ? { conversationId: session.conversationId } : {}),
+            ...(turnThinkingText ? { thinkingText: turnThinkingText } : {}),
+            ...(turnToolCalls.length > 0 ? { toolCalls: [...turnToolCalls] } : {}),
+            ...(turnSystemMessages.length > 0 ? { systemMessages: [...turnSystemMessages] } : {}),
+          } satisfies DurableTurnRecord;
+        },
+      });
+
+      if (ranLive) return outcome.content;
+
+      // ── Replay paths ──────────────────────────────────────────
+      if (isSyntheticEffectResult(outcome)) {
+        // `replay: never` + intent committed + no settlement: the process
+        // died with this turn in flight. §3.4 forbids re-running it, because
+        // whatever it had already done to the workspace cannot be undone and
+        // must not be done twice. The turn is therefore SKIPPED — but loudly.
+        // Continuing silently is exactly how a stage "completes" having done
+        // nothing, which is worse than either alternative.
+        const notice =
+          `Turn "${opId}" was in flight when the process restarted. Its replay ` +
+          `policy is 'never' (this stage can write files or run commands), so it ` +
+          `was not re-run. Any work it had already done is preserved; anything it ` +
+          `had not finished was not attempted.`;
+        turnSystemMessages.push(notice);
+        await this.eventBus.emit(session.id, {
+          kind: 'harness.session_info',
+          data: {
+            infoType: 'durable_turn_skipped',
+            message: notice,
+            stageRunId: stageRun.id,
+            workflowRunId,
+          },
+        });
+        return '';
+      }
+
+      // A settled turn — restore the accumulators so every downstream reader
+      // (`stageOutputContent`, the validation loop, the summary) sees exactly
+      // what it would have seen had the turn just run.
+      turnContent = outcome.accumulated ?? outcome.content;
+      turnThinkingText = outcome.thinkingText ?? '';
+      turnToolCalls.length = 0;
+      if (outcome.toolCalls) turnToolCalls.push(...outcome.toolCalls);
+      turnSystemMessages.length = 0;
+      if (outcome.systemMessages) turnSystemMessages.push(...outcome.systemMessages);
+      // The settled turn already wrote its assistant message; re-persisting
+      // would duplicate the row in the chat history on every restart.
+      assistantPersisted = true;
+
+      if (outcome.conversationId !== session.conversationId && outcome.content) {
+        replayedTurns.push({ prompt: promptForReplay, content: outcome.content });
+      }
+      return outcome.content;
+    };
+
     try {
       // Inject predecessor stage summaries as context before executing prompts.
       // Controlled by stageDef.contextFilter: 'summary-only' (default), 'full', 'structured', or 'none'.
@@ -1206,27 +1553,34 @@ export class StageExecutionService {
             contextLines.join('\n\n---\n\n');
         }
 
-        // Send as a user message so the agent receives the context
-        await this.messageRepo.create({
-          id: generateId(),
-          sessionId: session.id,
-          role: 'user',
-          content: contextMessage,
-          metadata: { stageRunId: stageRun.id, isContextMessage: true },
-          timestamp: new Date(),
+        // W22 — journalled turn. On a post-restart re-entry the predecessor
+        // context has already been delivered once; re-sending it costs a full
+        // model turn and tells the agent things it was told before.
+        const contextConversationId = session.conversationId;
+        await runTurn('context', contextMessage, async () => {
+          // Send as a user message so the agent receives the context
+          await this.messageRepo.create({
+            id: generateId(),
+            sessionId: session.id,
+            role: 'user',
+            content: contextMessage,
+            metadata: { stageRunId: stageRun.id, isContextMessage: true },
+            timestamp: new Date(),
+          });
+
+          // Reset accumulators before this context turn
+          assistantPersisted = false;
+          turnThinkingText = '';
+          turnToolCalls.length = 0;
+          turnSystemMessages.length = 0;
+          turnContent = '';
+
+          // Mark as internal turn so the client doesn't reset stream blocks
+          isInternalTurn = true;
+          await this.harness.sendPromptAndWait(contextConversationId, contextMessage);
+          isInternalTurn = false;
+          return turnContent;
         });
-
-        // Reset accumulators before this context turn
-        assistantPersisted = false;
-        turnThinkingText = '';
-        turnToolCalls.length = 0;
-        turnSystemMessages.length = 0;
-        turnContent = '';
-
-        // Mark as internal turn so the client doesn't reset stream blocks
-        isInternalTurn = true;
-        await this.harness.sendPromptAndWait(session.conversationId, contextMessage);
-        isInternalTurn = false;
       }
 
       // ── Validation feedback on retry ──
@@ -1242,36 +1596,14 @@ export class StageExecutionService {
           `${validationFeedback}\n\n` +
           `Please address these issues in your response this time.`;
 
-        await this.messageRepo.create({
-          id: generateId(),
-          sessionId: session.id,
-          role: 'user',
-          content: feedbackMessage,
-          metadata: { stageRunId: stageRun.id, isValidationFeedback: true },
-          timestamp: new Date(),
-        });
-
-        assistantPersisted = false;
-        turnThinkingText = '';
-        turnToolCalls.length = 0;
-        turnSystemMessages.length = 0;
-        turnContent = '';
-
-        isInternalTurn = true;
-        await this.harness.sendPromptAndWait(session.conversationId, feedbackMessage);
-        isInternalTurn = false;
-      }
-
-      // ── Hook context messages — inject messages returned by pre_run hooks ──
-      // Skip on resume — the reused conversation already has hook context from the first attempt.
-      if (!isResuming && hookContextMessages.length > 0 && session.conversationId) {
-        for (const msg of hookContextMessages) {
+        const feedbackConversationId = session.conversationId;
+        await runTurn('validation-feedback', feedbackMessage, async () => {
           await this.messageRepo.create({
             id: generateId(),
             sessionId: session.id,
             role: 'user',
-            content: msg.content,
-            metadata: { stageRunId: stageRun.id, isHookContext: true, ...msg.metadata },
+            content: feedbackMessage,
+            metadata: { stageRunId: stageRun.id, isValidationFeedback: true },
             timestamp: new Date(),
           });
 
@@ -1282,8 +1614,38 @@ export class StageExecutionService {
           turnContent = '';
 
           isInternalTurn = true;
-          await this.harness.sendPromptAndWait(session.conversationId, msg.content);
+          await this.harness.sendPromptAndWait(feedbackConversationId, feedbackMessage);
           isInternalTurn = false;
+          return turnContent;
+        });
+      }
+
+      // ── Hook context messages — inject messages returned by pre_run hooks ──
+      // Skip on resume — the reused conversation already has hook context from the first attempt.
+      if (!isResuming && hookContextMessages.length > 0 && session.conversationId) {
+        const hookConversationId = session.conversationId;
+        for (const [hookIdx, msg] of hookContextMessages.entries()) {
+          await runTurn(`hook-context/${hookIdx}`, msg.content, async () => {
+            await this.messageRepo.create({
+              id: generateId(),
+              sessionId: session.id,
+              role: 'user',
+              content: msg.content,
+              metadata: { stageRunId: stageRun.id, isHookContext: true, ...msg.metadata },
+              timestamp: new Date(),
+            });
+
+            assistantPersisted = false;
+            turnThinkingText = '';
+            turnToolCalls.length = 0;
+            turnSystemMessages.length = 0;
+            turnContent = '';
+
+            isInternalTurn = true;
+            await this.harness.sendPromptAndWait(hookConversationId, msg.content);
+            isInternalTurn = false;
+            return turnContent;
+          });
         }
       }
 
@@ -1416,84 +1778,112 @@ export class StageExecutionService {
           promptText = `${stageInstructions}\n\n---\n\n${promptText}`;
         }
 
-        // Save user prompt as chat message
-        await this.messageRepo.create({
-          id: generateId(),
-          sessionId: session.id,
-          role: 'user',
-          content: promptText,
-          metadata: { stageRunId: stageRun.id },
-          timestamp: new Date(),
-        });
+        // W22 — a RESUMED step is a retraction, not a replay.
+        //
+        // The paused turn committed intent and never settled. Left alone,
+        // `withEffect` sees that register, finds no settlement, and — on any
+        // mutating stage, i.e. `replay: never` — writes a synthetic settlement
+        // and reports the turn as skipped. The stage then "completes" on the
+        // truncated response the pause interrupted, and because the synthetic
+        // settlement is itself durable, every later resume replays the skip.
+        //
+        // The pause path is the one place where the incompleteness is KNOWN
+        // (the operator aborted it, the partial answer was persisted, and the
+        // instruction below is deliberately a *different* one — "continue from
+        // where you left off"). So the operation is retracted and re-run under
+        // its own id, which also means the continuation's answer settles where
+        // a later crash-recovery re-entry will find and replay it.
+        if (isResumingThisStep) {
+          durable?.discardOperation(durableCtx, `${opEpoch}/prompt/${i}`);
+        }
 
-        // Reset idempotency guard and accumulators so this turn's data gets persisted
-        assistantPersisted = false;
-        turnThinkingText = '';
-        turnToolCalls.length = 0;
-        turnSystemMessages.length = 0;
-        turnContent = '';
+        // W22 — the stage's own prompt is the turn that matters most: it is
+        // the one that spends money and writes to the workspace, and the one
+        // that used to run again in full every time the process restarted.
+        await runTurn(`prompt/${i}`, promptText, async () => {
+          // Save user prompt as chat message
+          await this.messageRepo.create({
+            id: generateId(),
+            sessionId: session.id,
+            role: 'user',
+            content: promptText,
+            metadata: { stageRunId: stageRun.id },
+            timestamp: new Date(),
+          });
 
-        // Send prompt with optional timeout
-        // Send prompt and capture response for persistence.
-        // The event-based idle handler may also persist the assistant message
-        // (via harness.message_complete → turnContent → harness.idle), but some
-        // SDK versions don't emit assistant.message events. Capturing the return
-        // value here ensures the message is always persisted reliably.
-        let promptResponse: { content: string } | undefined;
-        if (session.conversationId) {
-          // PLN-01 — a stage's agent mode drives tool availability and the
-          // permission policy exactly as a chat's per-turn mode does. Resolved
-          // through the shared registry so a new mode needs no change here.
-          const stageTurnOptions = this.resolveStageTurnOptions(stageDef);
-          if (stageDef.timeoutMs) {
-            const effectiveTimeout = Math.max(stageDef.timeoutMs, MIN_TIMEOUT_MS);
-            promptResponse = await Promise.race([
-              this.harness.sendPromptAndWait(
+          // Reset idempotency guard and accumulators so this turn's data gets persisted
+          assistantPersisted = false;
+          turnThinkingText = '';
+          turnToolCalls.length = 0;
+          turnSystemMessages.length = 0;
+          turnContent = '';
+
+          // Send prompt with optional timeout
+          // Send prompt and capture response for persistence.
+          // The event-based idle handler may also persist the assistant message
+          // (via harness.message_complete → turnContent → harness.idle), but some
+          // SDK versions don't emit assistant.message events. Capturing the return
+          // value here ensures the message is always persisted reliably.
+          let promptResponse: { content: string } | undefined;
+          if (session.conversationId) {
+            // PLN-01 — a stage's agent mode drives tool availability and the
+            // permission policy exactly as a chat's per-turn mode does. Resolved
+            // through the shared registry so a new mode needs no change here.
+            const stageTurnOptions = this.resolveStageTurnOptions(stageDef);
+            if (stageDef.timeoutMs) {
+              const effectiveTimeout = Math.max(stageDef.timeoutMs, MIN_TIMEOUT_MS);
+              promptResponse = await Promise.race([
+                this.harness.sendPromptAndWait(
+                  session.conversationId,
+                  promptText,
+                  undefined,
+                  undefined,
+                  stageTurnOptions,
+                ),
+                this.createTimeout(effectiveTimeout, stageRun.id),
+              ]) as { content: string } | undefined;
+            } else if (prompt.waitForCompletion) {
+              promptResponse = await this.harness.sendPromptAndWait(
                 session.conversationId,
                 promptText,
                 undefined,
                 undefined,
                 stageTurnOptions,
-              ),
-              this.createTimeout(effectiveTimeout, stageRun.id),
-            ]) as { content: string } | undefined;
-          } else if (prompt.waitForCompletion) {
-            promptResponse = await this.harness.sendPromptAndWait(
-              session.conversationId,
-              promptText,
-              undefined,
-              undefined,
-              stageTurnOptions,
-            );
-          } else {
-            await this.harness.sendPrompt(
-              session.conversationId,
-              promptText,
-              undefined,
-              stageTurnOptions,
-            );
+              );
+            } else {
+              await this.harness.sendPrompt(
+                session.conversationId,
+                promptText,
+                undefined,
+                stageTurnOptions,
+              );
+            }
           }
-        }
 
-        // Persist assistant response if the idle handler didn't already
-        if (promptResponse?.content && !assistantPersisted) {
-          assistantPersisted = true;
-          // Use the captured content if turnContent wasn't populated by events
-          const content = turnContent.trim().length > 0 ? turnContent : promptResponse.content;
-          await this.messageRepo.create({
-            id: generateId(),
-            sessionId: session.id,
-            role: 'assistant',
-            content,
-            metadata: {
-              stageRunId: stageRun.id,
-              thinkingText: turnThinkingText || undefined,
-              toolCalls: turnToolCalls.length > 0 ? [...turnToolCalls] : undefined,
-              systemMessages: turnSystemMessages.length > 0 ? [...turnSystemMessages] : undefined,
-            },
-            timestamp: new Date(),
-          });
-        }
+          // Persist assistant response if the idle handler didn't already
+          if (promptResponse?.content && !assistantPersisted) {
+            assistantPersisted = true;
+            // Use the captured content if turnContent wasn't populated by events
+            const content = turnContent.trim().length > 0 ? turnContent : promptResponse.content;
+            await this.messageRepo.create({
+              id: generateId(),
+              sessionId: session.id,
+              role: 'assistant',
+              content,
+              metadata: {
+                stageRunId: stageRun.id,
+                thinkingText: turnThinkingText || undefined,
+                toolCalls: turnToolCalls.length > 0 ? [...turnToolCalls] : undefined,
+                systemMessages: turnSystemMessages.length > 0 ? [...turnSystemMessages] : undefined,
+              },
+              timestamp: new Date(),
+            });
+          }
+          // Prefer the accumulator, falling back to what the call returned —
+          // the same precedence the persistence block above uses. This is the
+          // record's `content`; `accumulated` keeps the raw accumulator.
+          return turnContent.trim().length > 0 ? turnContent : (promptResponse?.content ?? '');
+        }, { contributesOutput: true });
 
         // ── POST_PROMPT hook — fire after each prompt turn completes ──
         if (stageDef.hooks && stageDef.hooks.length > 0) {
@@ -1559,25 +1949,29 @@ export class StageExecutionService {
               'Please produce ONLY the output.json block now.'
             : `Your response did not include a clear summary of your work. Please provide a concise summary of the actions taken, decisions made, and outputs produced.`;
 
-          await this.messageRepo.create({
-            id: generateId(),
-            sessionId: session.id,
-            role: 'user',
-            content: retryPrompt,
-            metadata: { stageRunId: stageRun.id, isOutputRetry: true },
-            timestamp: new Date(),
-          });
+          const outputRetryConversationId = session.conversationId;
+          await runTurn(`output-retry/${retryAttempt}`, retryPrompt, async () => {
+            await this.messageRepo.create({
+              id: generateId(),
+              sessionId: session.id,
+              role: 'user',
+              content: retryPrompt,
+              metadata: { stageRunId: stageRun.id, isOutputRetry: true },
+              timestamp: new Date(),
+            });
 
-          // Reset accumulators for the retry turn
-          assistantPersisted = false;
-          turnThinkingText = '';
-          turnToolCalls.length = 0;
-          turnSystemMessages.length = 0;
-          turnContent = '';
+            // Reset accumulators for the retry turn
+            assistantPersisted = false;
+            turnThinkingText = '';
+            turnToolCalls.length = 0;
+            turnSystemMessages.length = 0;
+            turnContent = '';
 
-          isInternalTurn = true;
-          await this.harness.sendPromptAndWait(session.conversationId, retryPrompt);
-          isInternalTurn = false;
+            isInternalTurn = true;
+            await this.harness.sendPromptAndWait(outputRetryConversationId, retryPrompt);
+            isInternalTurn = false;
+            return turnContent;
+          }, { contributesOutput: true });
 
           // Update stageOutputContent with accumulated retry response
           if (turnContent.length > 0) {
@@ -1611,34 +2005,61 @@ export class StageExecutionService {
             `Include: key actions taken, files created or modified, important decisions made, and any outputs produced. ` +
             `This summary will be provided to subsequent workflow stages as context. Be specific and factual.`;
 
-          // Persist the summary prompt as a user message so
-          // the chat history matches what the user sees during streaming
-          await this.messageRepo.create({
-            id: generateId(),
-            sessionId: session.id,
-            role: 'user',
-            content: summaryPrompt,
-            metadata: { stageRunId: stageRun.id, isSummaryPrompt: true },
-            timestamp: new Date(),
+          const summaryConversationId = session.conversationId;
+          stageSummary = await runTurn('summary', summaryPrompt, async () => {
+            // Persist the summary prompt as a user message so
+            // the chat history matches what the user sees during streaming
+            await this.messageRepo.create({
+              id: generateId(),
+              sessionId: session.id,
+              role: 'user',
+              content: summaryPrompt,
+              metadata: { stageRunId: stageRun.id, isSummaryPrompt: true },
+              timestamp: new Date(),
+            });
+
+            // Reset accumulators for the summary turn
+            assistantPersisted = false;
+            turnThinkingText = '';
+            turnToolCalls.length = 0;
+            turnSystemMessages.length = 0;
+            turnContent = '';
+
+            // Mark as internal turn so the client doesn't reset stream blocks
+            isInternalTurn = true;
+            const summaryResponse = await this.harness.sendPromptAndWait(
+              summaryConversationId,
+              summaryPrompt,
+            );
+            isInternalTurn = false;
+            return summaryResponse.content;
           });
-
-          // Reset accumulators for the summary turn
-          assistantPersisted = false;
-          turnThinkingText = '';
-          turnToolCalls.length = 0;
-          turnSystemMessages.length = 0;
-          turnContent = '';
-
-          // Mark as internal turn so the client doesn't reset stream blocks
-          isInternalTurn = true;
-          const summaryResponse = await this.harness.sendPromptAndWait(
-            session.conversationId,
-            summaryPrompt,
-          );
-          isInternalTurn = false;
-          stageSummary = summaryResponse.content;
         } catch {
-          // Non-fatal — if summary generation fails, we still complete the stage
+          // Non-fatal — the stage still completes. But it must NOT complete
+          // with no summary at all: `contextFilter: 'summary-only'` (the
+          // default) feeds this text to every downstream stage, so a dropped
+          // summary silently starves the rest of the DAG of context.
+          //
+          // The common cause is a pause or cancel landing between the last
+          // prompt turn and this one: `pauseStage` aborts the conversation,
+          // `sendPromptAndWait` throws, and the stage completes anyway. Fall
+          // back to an excerpt of what the stage actually produced, which is
+          // the same material the summary was condensing.
+          stageSummary = undefined;
+        }
+        if (!stageSummary || stageSummary.trim().length === 0) {
+          const excerpt = stageOutputContent.trim();
+          if (excerpt.length > 0) {
+            stageSummary =
+              `Stage "${stageRun.name}" completed. A generated summary was unavailable ` +
+              `(the summary turn did not finish), so this is the stage's own output:
+
+` +
+              (excerpt.length > SUMMARY_FALLBACK_MAX_CHARS
+                ? `${excerpt.slice(0, SUMMARY_FALLBACK_MAX_CHARS)}
+… (truncated)`
+                : excerpt);
+          }
         }
       }
 
@@ -1776,7 +2197,31 @@ export class StageExecutionService {
             semaphoreCallbacks?.pause();
             let resolution: Awaited<ReturnType<typeof hitl.interrupt>>;
             try {
-              resolution = await hitl.interrupt(
+              // durability-ok: KNOWN GAP, held deliberately and named here.
+              //
+              // This IS the `while (invalid) { await gate() }` shape W22 bans,
+              // and it is the reason a parked approval still holds resources:
+              // the awaited `interrupt()` pins this `executeStage` frame, the
+              // allocated agent session, an entry in `stageAwakeableTokens`
+              // and a chained timer, where the spec says a pending gate must
+              // hold ZERO resources. Suspension proper means returning from
+              // `executeStage` at the gate and re-entering on approval.
+              //
+              // The effect sandwich above is the prerequisite for that (a
+              // re-entry has to be cheap and side-effect-free before it can be
+              // made routine) and is now in place, but the re-entry itself is
+              // NOT implemented: `HitlService.resume`, `pendingFollowUps`, the
+              // admission ticket and the per-stage session release all assume
+              // a live frame. Turning that inside out is a larger change than
+              // this pass can land safely, and a half-suspended gate — one
+              // that releases the session but keeps the frame — loses the
+              // conversation without gaining anything.
+              //
+              // The pre-gate side effects this loop repeats ARE now journalled
+              // (each review round is its own operation, keyed on the round
+              // and a digest of the feedback), so the exponential replay X-23
+              // describes cannot occur; what remains is resource retention.
+              resolution = await hitl.interrupt( // durability-ok: see above
                 stageRun.id,
                 workflowRunId,
                 interruptPayload,
@@ -1853,41 +2298,57 @@ export class StageExecutionService {
             // same session. Persist it as a message, stream the assistant
             // response (existing subscription handles emission + persistence),
             // then update the aggregated output before the next review round.
-            await this.messageRepo.create({
-              id: generateId(),
-              sessionId: session.id,
-              role: 'user',
-              content: feedback,
-              metadata: {
-                stageRunId: stageRun.id,
-                isFollowUpPrompt: true,
-                isApprovalFeedback: true,
-                reviewRound,
+            // W22 — journalled like every other turn, but keyed on a digest of
+            // the feedback as well as the round. A restart re-parks the gate
+            // and restarts `reviewRound` at 1, so keying on the round alone
+            // would replay the FIRST round's answer at a reviewer who has
+            // since asked for something different. Same round + same feedback
+            // is the only case that is genuinely the same operation.
+            const feedbackText = feedback;
+            const reviewConversationId = session.conversationId;
+            await runTurn(
+              `review/${reviewRound}/${digest(feedbackText)}`,
+              feedbackText,
+              async () => {
+                await this.messageRepo.create({
+                  id: generateId(),
+                  sessionId: session.id,
+                  role: 'user',
+                  content: feedbackText,
+                  metadata: {
+                    stageRunId: stageRun.id,
+                    isFollowUpPrompt: true,
+                    isApprovalFeedback: true,
+                    reviewRound,
+                  },
+                  timestamp: new Date(),
+                });
+
+                // Flip status to running so the UI shows a live stream again.
+                await this.stageRunRepo.update(stageRun.id, { status: 'running' });
+                await this.eventBus.emit(session.id, {
+                  kind: 'stage_run.running',
+                  data: { stageRunId: stageRun.id, workflowRunId, sessionId: session.id, name: stageRun.name },
+                });
+
+                // Reset per-turn accumulators so the existing subscription can
+                // capture the follow-up's assistant message.
+                assistantPersisted = false;
+                turnThinkingText = '';
+                turnToolCalls.length = 0;
+                turnSystemMessages.length = 0;
+                turnContent = '';
+
+                await this.harness.sendPromptAndWait(
+                  reviewConversationId,
+                  feedbackText,
+                  undefined,
+                  undefined,
+                  this.resolveStageTurnOptions(stageDef),
+                );
+                return turnContent;
               },
-              timestamp: new Date(),
-            });
-
-            // Flip status to running so the UI shows a live stream again.
-            await this.stageRunRepo.update(stageRun.id, { status: 'running' });
-            await this.eventBus.emit(session.id, {
-              kind: 'stage_run.running',
-              data: { stageRunId: stageRun.id, workflowRunId, sessionId: session.id, name: stageRun.name },
-            });
-
-            // Reset per-turn accumulators so the existing subscription can
-            // capture the follow-up's assistant message.
-            assistantPersisted = false;
-            turnThinkingText = '';
-            turnToolCalls.length = 0;
-            turnSystemMessages.length = 0;
-            turnContent = '';
-
-            await this.harness.sendPromptAndWait(
-              session.conversationId,
-              feedback,
-              undefined,
-              undefined,
-              this.resolveStageTurnOptions(stageDef),
+              { contributesOutput: true },
             );
 
             // Merge the follow-up turn into the stage output so the next
@@ -1909,6 +2370,22 @@ export class StageExecutionService {
         }
       }
 
+      // ── X-25 / §3.4 — seal the durable result, reclaim the journal ──
+      //
+      // The artifact is the stage's authoritative output and outlives the
+      // stage; the step journal (one register + one `tool_result` per turn)
+      // exists only to make an interrupted stage resumable, so once the stage
+      // is terminal it is pure growth. `deleteByScope` had zero callers on
+      // either repository — this is the retention §3.4 asked for.
+      if (durable) {
+        durable.appendArtifact(
+          durableCtx,
+          STAGE_OUTPUT_ARTIFACT,
+          stageSummary ? `\n---\n${stageSummary}\n` : '',
+          { last: true, meta: { stageRunId: stageRun.id, workflowRunId, stageName: stageRun.name } },
+        );
+      }
+
       // Mark complete — set currentStep to totalSteps so progress shows 100%
       await this.stageRunRepo.update(stageRun.id, {
         status: 'completed',
@@ -1922,6 +2399,15 @@ export class StageExecutionService {
         outputData,
         artifactManifest,
       });
+
+      // △ The journal is reclaimed AFTER the terminal status write, never
+      // before. Reversed, a crash in that window leaves the row still
+      // `running` — so `StartupRecoveryService` relaunches the stage — with
+      // the journal that would have replayed its settled turns already
+      // deleted, and the final prompt plus every tool call it made runs a
+      // second time. The journal is what makes re-entry idempotent, so it has
+      // to outlive the write that makes re-entry impossible.
+      if (durable) durable.releaseJournal(durableCtx);
 
       await this.eventBus.emit(session.id, {
         kind: 'stage_run.completed',
@@ -1940,7 +2426,20 @@ export class StageExecutionService {
       // HITL follow-up: skip release if an operator's follow-up injection is
       // pending; `sendStageFollowUp` will release the session itself after it
       // finishes streaming the follow-up turn.
-      if ((sessionMode === 'per-stage' || sessionMode === 'auto') && !this.pendingFollowUps.has(stageRun.id)) {
+      //
+      // Result validation runs AFTER this point (WorkflowRunService reacts to
+      // the `stage_run.completed` above), and an in-session retry is defined
+      // as "keep the session alive and send the failure back as a follow-up".
+      // Releasing here destroyed that conversation first, so the retry landed
+      // on MultiHarness's primary-provider fallback and died with
+      // `no conversation "stage-…"` — naming a provider the stage never used.
+      // Hold the session until validation has had its say; the run's own
+      // teardown releases every session, so nothing leaks if it never does.
+      if (
+        (sessionMode === 'per-stage' || sessionMode === 'auto') &&
+        !this.pendingFollowUps.has(stageRun.id) &&
+        !mayRetryInSession(stageDef, stageRun)
+      ) {
         this.releaseSessionSafe(stageRun.id);
       }
     } catch (error) {
@@ -2013,11 +2512,30 @@ export class StageExecutionService {
           predecessorSummaries,
         );
       } else {
+        // Terminal failure — same retention as the success path. The artifact
+        // keeps whatever the stage did produce (a failed stage's partial
+        // output is often the only evidence of why it failed); the journal
+        // goes, because nothing will resume this stage run again.
+        if (this.durableEngine) {
+          this.durableEngine.appendArtifact(
+            { scope: 'stage_run', scopeId: stageRun.id },
+            STAGE_OUTPUT_ARTIFACT,
+            `\n---\nStage failed: ${errorMsg}\n`,
+            { last: true, meta: { stageRunId: stageRun.id, workflowRunId, stageName: stageRun.name } },
+          );
+        }
+
         await this.stageRunRepo.update(stageRun.id, {
           status: 'failed',
           error: errorMsg,
           completedAt: new Date(),
         });
+
+        // Same ordering rule as the success path: the journal is only safe to
+        // drop once the row can no longer be relaunched by recovery.
+        if (this.durableEngine) {
+          this.durableEngine.releaseJournal({ scope: 'stage_run', scopeId: stageRun.id });
+        }
 
         await this.eventBus.emit(session.id, {
           kind: 'stage_run.failed',
@@ -2052,13 +2570,13 @@ export class StageExecutionService {
 
     // The stage must already have a session assigned from the original execution
     if (!stageRun.sessionId) {
-      throw new StageExecutionError(stageRun.id, 'Cannot retry in-session: no session assigned');
+      throw new StageExecutionError('Cannot retry in-session: no session assigned', stageRun.id);
     }
 
     // Look up the session's conversation ID from the allocator
     const session = await this.sessionAllocator.getSessionById(stageRun.sessionId);
     if (!session?.conversationId) {
-      throw new StageExecutionError(stageRun.id, 'Cannot retry in-session: no conversation found');
+      throw new StageExecutionError('Cannot retry in-session: no conversation found', stageRun.id);
     }
 
     await this.eventBus.emit(session.id, {
@@ -2153,7 +2671,11 @@ export class StageExecutionService {
 
     try {
       // Send the follow-up prompt in the existing conversation
-      await this.harness.sendPromptAndWait(session.conversationId, feedbackMessage);
+      // durability-ok: `retryInSession` is a separate entry point, driven by an
+      // operator decision on an already-completed stage. It has no journalled
+      // sequence to be part of, and a restart mid-way must NOT silently replay
+      // it — the operator re-issues the retry.
+      await this.harness.sendPromptAndWait(session.conversationId, feedbackMessage); // durability-ok: see above
 
       unsubscribe?.();
 
@@ -2165,7 +2687,10 @@ export class StageExecutionService {
           `Include: key actions taken, files created or modified, important decisions made, and any outputs produced. ` +
           `This summary will be provided to subsequent workflow stages as context. Be specific and factual.`;
 
-        const summaryResponse = await this.harness.sendPromptAndWait(
+        // durability-ok: `retryInSession`'s own summary turn — same separate
+        // entry point as the follow-up above, with no journalled sequence to
+        // belong to.
+        const summaryResponse = await this.harness.sendPromptAndWait( // durability-ok: see above
           session.conversationId,
           summaryPrompt,
         );
@@ -2248,7 +2773,7 @@ export class StageExecutionService {
   ): Promise<void> {
     const stageRun = await this.stageRunRepo.getById(stageRunId);
     if (!stageRun.sessionId) {
-      throw new StageExecutionError(stageRunId, 'Cannot send follow-up: no session assigned to this stage');
+      throw new StageExecutionError('Cannot send follow-up: no session assigned to this stage', stageRunId);
     }
 
     // ── Wait for the natural stage flow to finish its current in-flight
@@ -2371,7 +2896,11 @@ export class StageExecutionService {
     );
 
     try {
-      await this.harness.sendPromptAndWait(session.conversationId, prompt);
+      // durability-ok: `sendStageFollowUp` is an operator-initiated turn on a
+      // stage that has already left `executeStage`. Same reasoning as
+      // `retryInSession` — there is no epoch to key it on, and replaying an
+      // operator's follow-up without them asking is worse than not replaying.
+      await this.harness.sendPromptAndWait(session.conversationId, prompt); // durability-ok: see above
       unsubscribe?.();
       await this.stageRunRepo.update(stageRunId, { status: 'completed', completedAt: new Date() });
       await this.eventBus.emit(session.id, {

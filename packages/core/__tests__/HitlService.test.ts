@@ -75,10 +75,10 @@ function createMemoryRepo(initial: StageRun[] = []): IStageRunRepository & {
       r.status = 'awaiting_input';
       r.interruptData = data;
     },
-    async resumeFromInterrupt(id) {
+    async resumeFromInterrupt(id, nextStatus = 'running') {
       const r = rows.get(id);
       if (!r || r.status !== 'awaiting_input') return false;
-      r.status = 'running';
+      r.status = nextStatus;
       r.interruptData = undefined;
       r.version = r.version + 1;
       return true;

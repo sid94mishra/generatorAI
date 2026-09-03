@@ -11,12 +11,14 @@
 // preserved from the previous implementation.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import type { StreamState } from '@/stores/streamStore.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
 import { StreamPanel } from '@/components/agent/StreamPanel.js';
 import { deriveStreamView } from '@/components/agent/deriveTimeline.js';
-import { Loader2 } from 'lucide-react';
+import { useTextToSpeech } from '@/hooks/useTextToSpeech.js';
+import { toast } from '@/components/Toast.js';
+import { AudioLines, Loader2, Square } from 'lucide-react';
 
 interface StreamingMessageProps {
   stream: StreamState;
@@ -44,6 +46,9 @@ interface StreamingMessageProps {
     freeformResponse?: string,
   ) => void;
   planBusy?: boolean;
+  /** Click-throughs for per-op diff icons / shell console / summary card. */
+  onOpenChanges?: (filePath?: string) => void;
+  onOpenShell?: (callId: string) => void;
 }
 
 export function StreamingMessage({
@@ -52,6 +57,8 @@ export function StreamingMessage({
   prevUsage,
   prevCompletedAt,
   onOpenPlan,
+  onOpenChanges,
+  onOpenShell,
   onApprovePlan,
   onRequestPlanChanges,
   onAnswerQuestion,
@@ -81,6 +88,29 @@ export function StreamingMessage({
     };
   }, [stream.usage, stream.status]);
 
+  // Phase 4 (VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part E) — "the agent
+  // talks while it works." Unlike AssistantMessage's Phase 3 button, which
+  // reads a FINISHED message, this streams the turn's `harness.token` events
+  // straight into synthesis, so speech starts on the first complete sentence
+  // instead of after the last one. `sessionId` (not the chat id) is the
+  // EventBus channel — see useTextToSpeech's `speakStream` doc.
+  const {
+    isSupported: ttsSupported,
+    status: ttsStatus,
+    speakStream,
+    stop: stopSpeaking,
+  } = useTextToSpeech({
+    onError: (msg) => toast({ variant: 'error', title: 'Speak live', description: msg }),
+  });
+  const isSpeakingOrConnecting = ttsStatus === 'speaking' || ttsStatus === 'connecting';
+  const handleSpeakLive = useCallback(() => {
+    if (isSpeakingOrConnecting) {
+      stopSpeaking();
+      return;
+    }
+    if (sessionId) void speakStream(sessionId);
+  }, [isSpeakingOrConnecting, stopSpeaking, speakStream, sessionId]);
+
   if (!hasContent && !isActive) return null;
 
   return (
@@ -99,11 +129,35 @@ export function StreamingMessage({
           prevUsage={prevUsage}
           prevCompletedAt={prevCompletedAt}
           {...(onOpenPlan ? { onOpenPlan } : {})}
+          {...(onOpenChanges ? { onOpenChanges } : {})}
+          {...(onOpenShell ? { onOpenShell } : {})}
           {...(onApprovePlan ? { onApprovePlan } : {})}
           {...(onRequestPlanChanges ? { onRequestPlanChanges } : {})}
           {...(onAnswerQuestion ? { onAnswerQuestion } : {})}
           planBusy={planBusy ?? false}
         />
+      )}
+
+      {/* Speak this turn aloud AS IT GENERATES (Phase 4). Only offered while
+          the turn is actually live — once it completes, AssistantMessage's
+          "Read aloud" is the right control for the finished text. */}
+      {isActive && ttsSupported && sessionId && (
+        <button
+          type="button"
+          onClick={handleSpeakLive}
+          className="mt-1.5 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] transition-colors"
+          title={isSpeakingOrConnecting ? 'Stop speaking' : 'Speak this response aloud as it is written'}
+          aria-label={isSpeakingOrConnecting ? 'Stop speaking' : 'Speak this response aloud as it is written'}
+        >
+          {ttsStatus === 'connecting' ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : ttsStatus === 'speaking' ? (
+            <Square className="h-3.5 w-3.5" />
+          ) : (
+            <AudioLines className="h-3.5 w-3.5" />
+          )}
+          {isSpeakingOrConnecting ? 'Stop' : 'Speak live'}
+        </button>
       )}
 
       {/* Initial loading state — spinner + shimmer skeleton with contextual text */}

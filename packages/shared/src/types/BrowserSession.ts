@@ -146,8 +146,11 @@ export interface BrowserConfig {
  * Descriptor returned to clients when they ask "how do I attach to this
  * workspace's browser?". Callers use this to render the right widget:
  * `mode === 'native'` → attach a `WebContentsView` at `bounds` via desktop
- * IPC. `mode === 'screencast'` → open the MJPEG endpoint at
- * `<baseUrl>/api/workspaces/:id/browser/screencast.mjpg`.
+ * IPC. `mode === 'screencast'` → open the live-view WebSocket at
+ * `<baseUrl>/api/workspaces/:id/browser/stream`, which negotiates its codec
+ * (VP8 via WebCodecs, JPEG otherwise) on the socket itself. The MJPEG endpoint
+ * this used to name was deleted in W15 — it was a second, concurrent capture
+ * path running alongside that socket.
  */
 export interface BrowserSessionDescriptor {
   workspaceId: string;

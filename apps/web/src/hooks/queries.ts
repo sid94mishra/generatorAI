@@ -7,6 +7,7 @@ import { usePlatform } from '../providers/PlatformProvider.js';
 import type { CreateSessionParams, CreateChatParams } from '@generatorai/shared';
 import type { AgentMode, PlanAction } from '@generatorai/shared';
 import type { HttpPlatformClient, ChatModel } from '../platform/HttpPlatformClient.js';
+import { toast } from '../components/Toast.js';
 
 // ── Query Keys ──
 export const queryKeys = {
@@ -114,12 +115,28 @@ export function useArtifacts(sessionId: string | undefined) {
  * meant two round trips (and two cold probes) every time a chat opened.
  * One cache entry, one request, both consumers stay in sync.
  */
+/**
+ * How often to re-ask while the server is still probing in the background.
+ *
+ * The server now answers instantly from its disk cache after a restart rather
+ * than blocking for the length of a cold probe, which is what kept the
+ * composer behind a skeleton for ~22 s. The trade is that the first answer can
+ * be last-known-good, so we poll at a low rate until `stale` clears and the
+ * catalog converges on the live one. Polling STOPS as soon as it does.
+ */
+const HARNESS_PROVIDERS_STALE_POLL_MS = 3_000;
+
 export function useModels() {
   return useQuery({
     queryKey: ['harness-providers'] as const,
     queryFn: fetchHarnessProviders,
     staleTime: 60_000 * 5,
     refetchOnWindowFocus: false,
+    // Same key as `useHarnessProviders`, so keep the same convergence
+    // behaviour: while the server reports a background re-probe, poll until it
+    // lands. Without this the composer would render from the disk-cached
+    // catalog and then hold it for the full 5-minute staleTime.
+    refetchInterval: (query) => (query.state.data?.stale ? HARNESS_PROVIDERS_STALE_POLL_MS : false),
     select: (data): ChatModel[] =>
       data.providers
         .filter((p) => p.ready)
@@ -159,10 +176,20 @@ export interface HarnessProviderInfo {
  * never refetched on window focus; the picker exposes an explicit refresh.
  * `useModels` reads the same cache entry so a chat open costs one request.
  */
-async function fetchHarnessProviders(): Promise<{ primary: string; providers: HarnessProviderInfo[] }> {
+export interface HarnessProvidersResponse {
+  primary: string;
+  providers: HarnessProviderInfo[];
+  /**
+   * The server served a cached snapshot and is re-probing in the background.
+   * Absent on older servers, which always answered from a blocking probe.
+   */
+  stale?: boolean;
+}
+
+async function fetchHarnessProviders(): Promise<HarnessProvidersResponse> {
   const res = await fetch('/api/harness/providers');
   if (!res.ok) throw new Error(`Failed to load providers (${res.status})`);
-  return res.json() as Promise<{ primary: string; providers: HarnessProviderInfo[] }>;
+  return res.json() as Promise<HarnessProvidersResponse>;
 }
 
 export function useHarnessProviders() {
@@ -171,6 +198,7 @@ export function useHarnessProviders() {
     queryFn: fetchHarnessProviders,
     staleTime: 60_000 * 5,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) => (query.state.data?.stale ? HARNESS_PROVIDERS_STALE_POLL_MS : false),
   });
 }
 
@@ -841,6 +869,25 @@ export function useDecidePlan(chatId: string) {
       return platform.decideChatPlan(chatId, planId, decision);
     },
     onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'plans'] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'plan', variables.planId] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'interactions'] });
+    },
+    onError: (error, variables) => {
+      // A 409 means the gate is gone — expired by a restart, resolved from
+      // another tab, or timed out. Clicking used to fail silently and leave
+      // an approvable-looking card (observed live after a mid-review server
+      // crash). Tell the user, and refetch so the stale card reconciles.
+      toast({
+        variant: 'error',
+        title: 'Plan decision failed',
+        description:
+          error instanceof Error && /409|conflict/i.test(error.message)
+            ? 'This plan is no longer awaiting review — it may have expired or been decided elsewhere.'
+            : error instanceof Error
+              ? error.message
+              : 'The plan decision could not be recorded.',
+      });
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'plans'] });
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'plan', variables.planId] });
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'interactions'] });

@@ -12,6 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { buildChildEnv } from '@generatorai/shared';
 import type { ILogger, TerminalHostKind } from '@generatorai/shared';
 import type {
   ITerminalHandle,
@@ -34,11 +35,17 @@ export class FallbackChildProcessHost implements ITerminalHost {
     // Spawn an interactive shell. `-i` on POSIX; on Windows we rely on the
     // default of PowerShell / cmd's interactive behaviour.
     const args = options.shellArgs ?? (process.platform === 'win32' ? [] : ['-i']);
-    const env = { ...process.env, ...(options.env ?? {}) } as NodeJS.ProcessEnv;
-    // Sanitize sensitive env vars — same conservative default as NodePtyHost.
-    delete env['NODE_OPTIONS'];
-    delete env['LD_PRELOAD'];
-    delete env['ELECTRON_RUN_AS_NODE'];
+    // Allowlist, not a clone-then-delete. The previous version cloned
+    // `process.env` and removed three names while claiming parity with
+    // `NodePtyHost` — it leaked GENERATORAI_SECRET_KEY, the desktop admin
+    // token, DATABASE_URL and every provider credential into a shell that
+    // runs model-authored commands. Both hosts now build from the same
+    // shared allowlist, so the comment and the behaviour cannot drift apart
+    // again.
+    const env = buildChildEnv({
+      passthrough: ['EDITOR', 'VISUAL', 'PAGER', 'LESS'],
+      ...(options.env ? { extra: options.env } : {}),
+    }) as NodeJS.ProcessEnv;
     env['TERM'] = 'dumb';
     env['GENERATORAI_WORKSPACE_ID'] = options.workspaceId;
 

@@ -138,7 +138,12 @@ export interface IPlatformClient {
   pauseRun(id: string): Promise<void>;
   resumeRun(id: string): Promise<void>;
   cancelRun(id: string): Promise<void>;
-  retryRun(id: string): Promise<void>; // PARITY-1: run-level retry (was CLI-only)
+  /**
+   * PARITY-1: run-level retry. Creates and starts a NEW run that inherits
+   * the failed run's definition, variables and already-successful stages,
+   * and resolves with that new run's id — the ancestor stays terminal.
+   */
+  retryRun(id: string): Promise<{ runId: string }>;
   deleteRun(id: string): Promise<void>;
 
   // ── PARITY-2: per-stage controls (dedicated /stages/:id/* endpoints) ──

@@ -28,6 +28,24 @@ export function createOpenApiRoutes(): Router {
   });
 
   router.get('/docs', (_req, res) => {
+    // Overrides `app.ts`'s default CSP for this one response — Swagger UI
+    // loads its bundle and stylesheet from a CDN by design (see the header
+    // comment above) and runs its own inline bootstrap script. This is a
+    // deliberately-scoped exception to a read-only reference page, not
+    // model-authored content, so `script-src`/`style-src 'unsafe-inline'`
+    // here does not reintroduce the risk the default CSP guards against.
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        "font-src 'self' https://cdn.jsdelivr.net",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+      ].join('; '),
+    );
     res.type('text/html').send(DOCS_HTML);
   });
 

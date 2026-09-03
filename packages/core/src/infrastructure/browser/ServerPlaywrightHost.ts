@@ -24,7 +24,7 @@ import type {
 import { chromium } from 'playwright';
 import type { ILogger } from '@generatorai/shared';
 import type { ImportedCookie } from '@generatorai/shared';
-import { matchesAnyHostPattern, isLoopbackHost } from '@generatorai/shared';
+import { matchesAnyHostPattern, isLoopbackHost, readBoundedInt } from '@generatorai/shared';
 import type {
   BrowserHandle,
   BrowserHostObserver,
@@ -33,11 +33,48 @@ import type {
   IBrowserBridge,
   InvokeFunctionResult,
   PageOutcome,
+  ScreencastCapabilities,
+  ScreencastCodec,
   ScreencastFrame,
 } from '../../domain/ports/IBrowserBridge.js';
 import { INSPECTOR_SCRIPT } from './InspectorScript.js';
 import { ANTI_DETECTION_SCRIPT } from './AntiDetectionScript.js';
 import { compileSandboxedPageFunction } from './SandboxedEval.js';
+import { clampScreencastOptions, negotiateScreencastCodec } from './screencastOptions.js';
+import { readJpegSize } from './jpegSize.js';
+import { ScreencastEncoder, type ScreencastEncoderStream } from './ScreencastEncoder.js';
+
+/**
+ * How long the capture side waits for every subscriber to take a frame before
+ * acking it anyway. Without this, one wedged consumer stalls Chromium's capture
+ * for every viewer of that page, permanently.
+ */
+const SCREENCAST_ACK_TIMEOUT_MS = 1_000;
+
+/**
+ * How many encoded chunks may wait for the socket writer.
+ *
+ * Small on purpose: a viewer wants the present, not a replay of the last
+ * second. What matters more than the depth is WHICH chunk is evicted when it
+ * overflows — see the eviction rule in `screencast()`.
+ */
+const MAX_ENCODED_BACKLOG = 4;
+
+/**
+ * A frame as CDP delivered it — still base64, not yet decoded or re-encoded.
+ *
+ * It stays base64 all the way to the encoder: the VP8 path hands this exact
+ * string to Chromium, so decoding it into a Buffer on the JPEG path only (and
+ * never on the VP8 path) keeps the pixel bytes out of the gateway entirely
+ * when WebCodecs is in use.
+ */
+interface RawScreencastFrame {
+  base64: string;
+  /** Epoch ms. */
+  ts: number;
+  /** Idempotent. Tells the capture side this frame no longer occupies a slot. */
+  release: () => void;
+}
 
 interface HostEntry {
   handle: BrowserHandle;
@@ -51,7 +88,7 @@ interface HostEntry {
    * every frame Chromium emits. Ref-counted: when the last subscriber
    * detaches, the CDP screencast is stopped.
    */
-  screencastSubscribers: Set<(frame: ScreencastFrame) => void>;
+  screencastSubscribers: Set<(frame: RawScreencastFrame) => void>;
   observer?: BrowserHostObserver;
   cdpHttpPort: number;
   workspaceRoot: string;
@@ -181,19 +218,82 @@ export interface ServerPlaywrightHostOptions {
    * (milliseconds). Defaults to 20 000.
    */
   startupTimeoutMs?: number;
+  /**
+   * WebCodecs encoder for the live view. Defaults to the process-wide shared
+   * instance; tests inject a stub so the VP8 negotiation path can be exercised
+   * without launching a second Chromium.
+   */
+  screencastEncoder?: ScreencastEncoder;
+}
+
+/**
+ * Chromium launch flags for `launchPersistentContext`. Extracted as a pure
+ * function so the flag set is unit-testable without mocking Playwright's
+ * whole launch → CDP-ready → page-setup sequence.
+ *
+ * Chosen for faster cold-start and to avoid leaving anything running behind:
+ *   • --no-first-run / --no-default-browser-check — skip welcome UI
+ *   • --disable-background-networking / --disable-sync — no spurious
+ *     network calls to Google backends on launch
+ *   • --disable-features=Translate,MediaRouter,OptimizationHints,... —
+ *     subsystems that spin up their own I/O we never need
+ *   • --disable-component-update — skip Widevine / other blocking
+ *     component updates during first launch
+ *   • --disable-extensions — no built-in extension loading
+ *   • --disable-crash-reporter — Chromium's crashpad handler is a detached
+ *     watchdog process that does NOT die with the browser it is watching;
+ *     that is the whole point of it (it survives to report the crash).
+ *     Without this flag, every launched context leaves one
+ *     crashpad_handler[.exe] behind after `context.close()` resolves —
+ *     confirmed via §1.Q's concurrent-load test, which caught
+ *     `killOwnDescendants()` reaping orphaned processes at shutdown even
+ *     though `BrowserService.stop()` had already, correctly, awaited every
+ *     session's `context.close()` to completion. We have no use for local
+ *     crash dumps on a headless automation browser, so we simply never
+ *     spawn the handler.
+ */
+export function buildChromiumLaunchArgs(cdpHttpPort: number, headless: boolean): string[] {
+  return [
+    `--remote-debugging-port=${cdpHttpPort}`,
+    '--remote-debugging-address=127.0.0.1',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-background-networking',
+    '--disable-sync',
+    '--disable-component-update',
+    '--disable-extensions',
+    '--disable-crash-reporter',
+    '--disable-features=Translate,MediaRouter,OptimizationHints,InterestFeedContentSuggestions,CalculateNativeWinOcclusion',
+    '--disable-ipc-flooding-protection',
+    '--metrics-recording-only',
+    '--mute-audio',
+    ...(headless ? ['--disable-dev-shm-usage'] : []),
+  ];
 }
 
 export class ServerPlaywrightHost implements IBrowserBridge {
   private entries = new Map<string, HostEntry>(); // key: workspaceId
-  private readonly opts: Required<ServerPlaywrightHostOptions>;
+  private readonly opts: Required<Omit<ServerPlaywrightHostOptions, 'screencastEncoder'>>;
+  /**
+   * The WebCodecs encoder is process-wide, not per-host: it is one OS process
+   * shared by every live view, launched only when a client that can decode VP8
+   * actually connects. Injectable so tests can drive the codec negotiation
+   * without launching a browser.
+   */
+  private readonly screencastEncoder: ScreencastEncoder;
 
   constructor(
     private readonly logger: ILogger,
     opts?: ServerPlaywrightHostOptions,
   ) {
+    this.screencastEncoder = opts?.screencastEncoder ?? ScreencastEncoder.shared(logger);
     this.opts = {
       cdpBasePort: opts?.cdpBasePort ?? 9333,
-      maxConcurrent: opts?.maxConcurrent ?? Number(process.env['GENERATORAI_BROWSER_MAX_CONCURRENT'] ?? '5'),
+      // Bounded read: `NaN` from a typo makes every `>=` comparison false, so
+      // the cap this variable exists to provide silently stops existing.
+      maxConcurrent:
+        opts?.maxConcurrent ??
+        readBoundedInt('GENERATORAI_BROWSER_MAX_CONCURRENT', { defaultValue: 5, min: 1, max: 100 }),
       startupTimeoutMs: opts?.startupTimeoutMs ?? 20_000,
     };
   }
@@ -232,8 +332,26 @@ export class ServerPlaywrightHost implements IBrowserBridge {
     const headless = config.headless ?? true;
 
     this.logger.info(
-      `[ServerPlaywrightHost] Starting Chromium: workspace=${opts.workspaceId} port=${cdpHttpPort} headless=${headless}`,
+      `[ServerPlaywrightHost] Starting Chromium: workspace=${opts.workspaceId} port=${cdpHttpPort} headless=${headless}` +
+        (process.env['GENERATORAI_BROWSER_EXECUTABLE_PATH']
+          ? ` executable=${process.env['GENERATORAI_BROWSER_EXECUTABLE_PATH']} (override)`
+          : ''),
     );
+
+    // Escape hatch for a broken, partial or absent pinned download.
+    //
+    // Playwright refuses to start unless the exact Chromium revision it was
+    // built against is present, and a half-extracted download presents
+    // identically to "Chromium does not work here" — the launch error names a
+    // missing executable, and `playwright install` can fail silently on a full
+    // disk or a flaky network and leave the directory in that state. Rather
+    // than making the integrated browser unusable until a re-download
+    // succeeds, allow an operator to point at any working Chromium build
+    // (another Playwright revision, or the system browser).
+    //
+    // Deliberately env-only: this is an operational recovery lever, not a
+    // per-workspace setting, and a wrong value fails loudly at launch.
+    const executableOverride = process.env['GENERATORAI_BROWSER_EXECUTABLE_PATH'];
 
     let context: BrowserContext;
     const launchStart = Date.now();
@@ -241,6 +359,7 @@ export class ServerPlaywrightHost implements IBrowserBridge {
       context = await chromium.launchPersistentContext(profileDir, {
         headless,
         viewport,
+        ...(executableOverride ? { executablePath: executableOverride } : {}),
         ...(config.recordVideo ? { recordVideo: { dir: path.join(opts.workspaceRoot, 'browser', 'videos'), size: viewport } } : {}),
         // Opt-in only (see BrowserConfig.allowLocalhostSelfSigned). This
         // switch is context-wide with no per-origin form, so
@@ -248,31 +367,7 @@ export class ServerPlaywrightHost implements IBrowserBridge {
         // on loopback while it is on.
         ignoreHTTPSErrors: config.allowLocalhostSelfSigned === true,
         // Enable CDP over HTTP so `playwright-cli --cdp-endpoint=` can attach.
-        // Extra flags chosen for faster cold-start:
-        //   • --no-first-run / --no-default-browser-check — skip welcome UI
-        //   • --disable-background-networking / --disable-sync — no
-        //     spurious network calls to Google backend on launch
-        //   • --disable-features=Translate,MediaRouter,OptimizationHints
-        //     — subsystems that spin up their own I/O we never need
-        //   • --disable-component-update — skip Widevine / other blocking
-        //     component updates during first launch
-        //   • --disable-extensions — no built-in extension loading
-        // These together shave several seconds off the launch on Windows.
-        args: [
-          `--remote-debugging-port=${cdpHttpPort}`,
-          '--remote-debugging-address=127.0.0.1',
-          '--no-first-run',
-          '--no-default-browser-check',
-          '--disable-background-networking',
-          '--disable-sync',
-          '--disable-component-update',
-          '--disable-extensions',
-          '--disable-features=Translate,MediaRouter,OptimizationHints,InterestFeedContentSuggestions,CalculateNativeWinOcclusion',
-          '--disable-ipc-flooding-protection',
-          '--metrics-recording-only',
-          '--mute-audio',
-          ...(headless ? ['--disable-dev-shm-usage'] : []),
-        ],
+        args: buildChromiumLaunchArgs(cdpHttpPort, headless),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -535,8 +630,11 @@ export class ServerPlaywrightHost implements IBrowserBridge {
     // is only evaluated AFTER the awaited promise resolves, so generators
     // stay stuck until the next frame arrives. Since we're about to close
     // the context (no more frames), we must unblock them explicitly.
+    // `release` is a no-op here rather than an ack: there is no CDP frame
+    // behind this wake-up, so there is nothing to acknowledge — the generator
+    // just needs its promise resolved so it can observe `disposed` and unwind.
     for (const sub of entry.screencastSubscribers) {
-      try { sub({ jpeg: Buffer.alloc(0), ts: Date.now() }); } catch { /* ignore */ }
+      try { sub({ base64: '', ts: Date.now(), release: () => undefined }); } catch { /* ignore */ }
     }
 
     // Drop the deferred-result bookkeeping before tearing the context down.
@@ -834,25 +932,76 @@ export class ServerPlaywrightHost implements IBrowserBridge {
     }
   }
 
-  async *screencast(handle: BrowserHandle, opts: { fps: number; quality: number }): AsyncIterable<ScreencastFrame> {
+  /**
+   * P1-33. Declared, not discovered — see {@link ScreencastCapabilities}.
+   * `vp8` is listed ahead of `jpeg` because it is the better stream when the
+   * client can decode it; whether the encoder is actually reachable is decided
+   * per stream (it may not be), and every frame states its own codec, so
+   * listing it here is a statement about this bridge's design, not a promise
+   * about one process's health.
+   */
+  screencastCapabilities(): ScreencastCapabilities {
+    return { supportsScreencast: true, codecs: ['vp8', 'jpeg'] };
+  }
+
+  async *screencast(
+    handle: BrowserHandle,
+    opts: {
+      fps: number;
+      quality: number;
+      codecs?: readonly ScreencastCodec[];
+      signal?: AbortSignal;
+      onRequestKeyframe?: (request: () => void) => void;
+    },
+  ): AsyncIterable<ScreencastFrame> {
     const entry = this.mustEntry(handle);
-    const fps = Math.max(1, Math.min(15, Math.floor(opts.fps || 5)));
-    const quality = Math.max(20, Math.min(95, Math.floor(opts.quality || 60)));
+    // ONE clamp — see screencastOptions.ts. This function used to hold the
+    // second of three, with bounds that silently disagreed with the other two.
+    const { fps, quality } = clampScreencastOptions(opts);
+    const codec = negotiateScreencastCodec(opts.codecs, this.screencastCapabilities().codecs);
 
     // First subscriber starts the shared CDP screencast; subsequent
     // subscribers piggy-back on the same frame stream. Ref-counted.
     if (!entry.screencastActive) {
       entry.screencastActive = true;
       const onFrame = (params: { data: string; sessionId: number; metadata?: { timestamp?: number } }) => {
-        const frame: ScreencastFrame = {
-          jpeg: Buffer.from(params.data, 'base64'),
-          ts: (params.metadata?.timestamp ?? Date.now() / 1000) * 1000,
+        const ack = (): void => {
+          entry.cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => undefined);
         };
-        for (const sub of entry.screencastSubscribers) {
-          try { sub(frame); } catch { /* subscriber errors are isolated */ }
+        const subs = [...entry.screencastSubscribers];
+        if (subs.length === 0) { ack(); return; }
+
+        // P1-34, the half that is not about clamps: CDP will not send frame
+        // N+1 until frame N is acked, so WHEN we ack decides the capture rate.
+        // Acking on arrival (the old behaviour) meant Chromium captured and
+        // JPEG-encoded flat out no matter how far behind the consumer was —
+        // burning host CPU to produce frames that were then dropped. Acking
+        // when the consumer TAKES the frame makes a slow client cost less, not
+        // more. A DISCARDED frame is acked immediately: it is no longer
+        // anybody's turn to wait for it.
+        let remaining = subs.length;
+        let acked = false;
+        const settle = (): void => {
+          if (acked) return;
+          acked = true;
+          clearTimeout(watchdog);
+          ack();
+        };
+        const release = (): void => { if (--remaining <= 0) settle(); };
+        // A consumer that stops consuming without unsubscribing (a wedged
+        // socket that has not closed yet) must not stall capture for everyone
+        // else, and must not stall it forever for itself.
+        const watchdog = setTimeout(settle, SCREENCAST_ACK_TIMEOUT_MS);
+        watchdog.unref?.();
+
+        const raw: RawScreencastFrame = {
+          base64: params.data,
+          ts: (params.metadata?.timestamp ?? Date.now() / 1000) * 1000,
+          release,
+        };
+        for (const sub of subs) {
+          try { sub(raw); } catch { release(); /* subscriber errors are isolated */ }
         }
-        // Ack — CDP requires this to receive the next frame.
-        entry.cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => undefined);
       };
       entry.cdp.on('Page.screencastFrame', onFrame);
       // Stash the handler so we can remove it on last-unsubscribe.
@@ -870,28 +1019,164 @@ export class ServerPlaywrightHost implements IBrowserBridge {
       }
     }
 
-    // Local queue for this subscriber only.
-    const queue: ScreencastFrame[] = [];
+    // ── ONE pending slot, latest wins ────────────────────────────────────
+    // Was a three-deep queue with drop-OLDEST, which is the worst of both: it
+    // held two frames the viewer would never see (they were already stale by
+    // the time the third arrived) and still dropped under load. One slot is
+    // the whole of the useful state — the newest frame — and everything else
+    // is discarded the moment it is superseded.
+    // Held in a box rather than a bare `let` so that reads inside the generator
+    // are not narrowed away by the compiler's flow analysis, which cannot see
+    // that `subscriber` refills it from outside.
+    const pending: { slot: RawScreencastFrame | null } = { slot: null };
     let waiter: (() => void) | null = null;
-    const subscriber = (frame: ScreencastFrame): void => {
-      // Drop-oldest to bound memory when consumer is slow.
-      if (queue.length >= 3) queue.shift();
-      queue.push(frame);
-      if (waiter) { const w = waiter; waiter = null; w(); }
+    const wake = (): void => { if (waiter) { const w = waiter; waiter = null; w(); } };
+    // Parked-on-an-await is not parked-on-a-yield: `iterator.return()` cannot
+    // reach a generator that is waiting for the next paint, so the consumer
+    // needs a way to wake it. Registered with `once` and removed in `finally`,
+    // because one long-lived AbortSignal per socket would otherwise accumulate
+    // a listener per reconnect.
+    const onAbort = (): void => wake();
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    const subscriber = (raw: RawScreencastFrame): void => {
+      if (pending.slot) pending.slot.release();  // the discarded frame is acked immediately
+      pending.slot = raw;
+      wake();
+    };
+    const takeSlot = (): RawScreencastFrame | null => {
+      const raw = pending.slot;
+      pending.slot = null;
+      // Released on TAKE, not on yield: the capacity the ack represents is
+      // free as soon as the frame has left the slot.
+      raw?.release();
+      return raw;
     };
     entry.screencastSubscribers.add(subscriber);
 
+    // ── Optional WebCodecs stage ─────────────────────────────────────────
+    const startedAt = Date.now();
+    let lastTimestampUs = -1;
+    const nextTimestampUs = (): number => {
+      // Strictly increasing microseconds. `EncodedVideoChunk` timestamps that
+      // repeat (two frames inside the same millisecond) make the client's
+      // decoder stall silently rather than error.
+      const us = Math.max(Math.round((Date.now() - startedAt) * 1000), lastTimestampUs + 1);
+      lastTimestampUs = us;
+      return us;
+    };
+    const encoded: ScreencastFrame[] = [];
+    let encoderStream: ScreencastEncoderStream | null = null;
+    /**
+     * Ask the encoder for a fresh key frame.
+     *
+     * Registered with the caller (`opts.onRequestKeyframe`) as well as called
+     * from the drop path below, because two of the three places a chunk can be
+     * lost are downstream of here and invisible to this generator: the socket
+     * writer dropping under backpressure, and the browser dropping frames for a
+     * tab nobody is looking at. Both need a way back, and only the encoder has
+     * one — a VP8 delta is meaningless without the frame it references.
+     */
+    const requestKeyframe = (): void => {
+      // A stream that has already fallen back to JPEG needs nothing: every
+      // JPEG frame is self-contained, so there is no chain to restart.
+      encoderStream?.requestKeyframe();
+    };
+    opts.onRequestKeyframe?.(requestKeyframe);
+    if (codec === 'vp8') {
+      const viewport = entry.page.viewportSize();
+      encoderStream = await this.screencastEncoder.openStream({
+        width: viewport?.width ?? 1280,
+        height: viewport?.height ?? 720,
+        fps,
+        onChunk: (chunk) => {
+          // Bounded: the encoder is already limited to a couple of outstanding
+          // frames, so this only fills if the socket writer itself stalls.
+          //
+          // WHICH chunk goes is not a detail. Every VP8 delta decodes only
+          // against the frame before it, so evicting ANY entry strands every
+          // entry behind it — and the previous `encoded.shift()` evicted the
+          // OLDEST, which is precisely the key frame. The result was a backlog
+          // of frames the client could not decode at all, forever, with no
+          // error and no log line: the classic frozen live view.
+          //
+          // So: keep the key frame, evict the oldest delta, and re-key,
+          // because the deltas that were dropped have broken the chain anyway.
+          if (encoded.length >= MAX_ENCODED_BACKLOG) {
+            const oldestDelta = encoded.findIndex((f) => !f.keyframe);
+            if (oldestDelta >= 0) encoded.splice(oldestDelta, 1);
+            // Nothing but key frames queued: the newest supersedes them all,
+            // and each one can start the stream on its own.
+            else encoded.length = 0;
+            requestKeyframe();
+          }
+          encoded.push({
+            codec: 'vp8',
+            data: chunk.data,
+            keyframe: chunk.keyframe,
+            width: chunk.width,
+            height: chunk.height,
+            timestampUs: chunk.timestampUs,
+            ts: Date.now(),
+          });
+          wake();
+        },
+        onFailure: (reason) => {
+          // Not fatal to the stream: from here on we emit JPEG, and because
+          // every frame carries its codec the client follows without being
+          // told anything out of band.
+          this.logger.warn?.(`[ServerPlaywrightHost] VP8 encoder lost, falling back to JPEG: ${reason}`);
+          encoderStream = null;
+          wake();
+        },
+      });
+      if (!encoderStream) {
+        this.logger.debug?.('[ServerPlaywrightHost] VP8 encoder unavailable; streaming JPEG');
+      }
+    }
+
     try {
-      while (!entry.disposed) {
-        if (queue.length === 0) {
-          await new Promise<void>((resolve) => { waiter = resolve; });
+      while (!entry.disposed && opts.signal?.aborted !== true) {
+        const ready = encoded.shift();
+        if (ready) { yield ready; continue; }
+        if (pending.slot) {
+          const raw = takeSlot();
+          if (!raw) continue;
+          if (encoderStream) {
+            // `push` returning false is the documented backpressure drop, not
+            // a failure — the frame is simply superseded before it is encoded.
+            //
+            // This is the one drop on this path that needs NO recovery, and
+            // the distinction is worth stating: it happens BEFORE the encoder
+            // sees the frame, so no chunk is missing from the stream and no
+            // reference chain is broken. The next chunk is a delta against the
+            // last frame the encoder actually encoded, which the client has.
+            // The three drops that DO break the chain are downstream of here.
+            encoderStream.push(raw.base64, nextTimestampUs());
+            continue;
+          }
+          const data = Buffer.from(raw.base64, 'base64');
+          const size = readJpegSize(data);
+          yield {
+            codec: 'jpeg',
+            data,
+            keyframe: true,
+            width: size?.width ?? 0,
+            height: size?.height ?? 0,
+            timestampUs: nextTimestampUs(),
+            ts: raw.ts,
+          };
           continue;
         }
-        const frame = queue.shift()!;
-        yield frame;
+        await new Promise<void>((resolve) => { waiter = resolve; });
       }
     } finally {
+      opts.signal?.removeEventListener('abort', onAbort);
       entry.screencastSubscribers.delete(subscriber);
+      // Whatever is still in the slot was never consumed; ack it so the capture
+      // side is not left waiting on a subscriber that has gone.
+      pending.slot?.release();
+      pending.slot = null;
+      await encoderStream?.close().catch(() => undefined);
       if (entry.screencastSubscribers.size === 0 && entry.screencastActive) {
         const handler = (entry as unknown as { _screencastHandler?: (p: unknown) => void })._screencastHandler;
         if (handler) entry.cdp.off('Page.screencastFrame', handler as never);

@@ -7,7 +7,7 @@
 import { useStreamStore } from '../stores/streamStore.js';
 import type { PersistedEvent } from '@generatorai/shared';
 import type { SystemCategory, QuestionBlock } from '../stores/streamStore.js';
-import type { ContextUsageSnapshot } from '@generatorai/client-core';
+import type { ContextUsageSnapshot, ToolFileOp } from '@generatorai/client-core';
 
 /** Apply a persisted `harness.context_usage` payload to the stream store. */
 function applyContextUsage(
@@ -335,6 +335,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           data['tool'] as string,
           data['args'],
           (data['callId'] as string) ?? undefined,
+          typeof data['parentToolCallId'] === 'string' ? data['parentToolCallId'] : undefined,
         );
         break;
 
@@ -345,6 +346,9 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           streamKey,
           (data['callId'] as string) ?? (data['tool'] as string),
           data['result'],
+          data['fileOp'] && typeof data['fileOp'] === 'object'
+            ? (data['fileOp'] as ToolFileOp)
+            : undefined,
         );
         break;
 

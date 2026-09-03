@@ -15,6 +15,7 @@
     "acp:dev": "tsx --env-file-if-exists=.env --import ./src/instrumentation.ts src/acp-entry.ts"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@generatorai/agent-harness-providers": "workspace:*",
     "@generatorai/auth": "workspace:*",
     "@generatorai/core": "workspace:*",
@@ -22,7 +23,6 @@
     "@generatorai/relay-protocol": "workspace:*",
     "@generatorai/secrets": "workspace:*",
     "@generatorai/shared": "workspace:*",
-    "@huggingface/transformers": "^3.7.6",
     "@opentelemetry/exporter-metrics-otlp-proto": "^0.214.0",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.214.0",
     "@opentelemetry/instrumentation-express": "^0.62.0",

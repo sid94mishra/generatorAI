@@ -30,6 +30,7 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@generatorai/client-transport": "workspace:*",
     "@generatorai/shared": "workspace:*"
   }
 }

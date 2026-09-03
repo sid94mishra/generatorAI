@@ -20,7 +20,7 @@
 //     is killed and reaped.
 // ────────────────────────────────────────────────────────────────
 
-import { randomUUID } from 'node:crypto';
+import { readBoundedInt, recordFallback } from '@generatorai/shared';
 import type { ILogger, TerminalHostKind, TerminalSessionDescriptor } from '@generatorai/shared';
 import type { AgentEvent } from '@generatorai/shared';
 import type { EventBus } from '../events/EventBus.js';
@@ -46,6 +46,19 @@ export interface TerminalServiceConfig {
    * `${prefix}:${workspaceId}` — SPA subscribes to that channel.
    */
   eventBusScopePrefix?: string;
+  /**
+   * P1-28 session watermark — pause the PTY once this many bytes are emitted
+   * but unacknowledged by the slowest attached viewer. Default 256 KiB.
+   */
+  highWatermarkBytes?: number;
+  /**
+   * Resume once outstanding bytes fall to this. Default 64 KiB.
+   *
+   * MUST be >= the client's ack batch size, or the last partial batch of a
+   * flood is never acked and the session stays paused forever. `apps/web`
+   * batches at 64 KiB.
+   */
+  lowWatermarkBytes?: number;
 }
 
 /**
@@ -83,6 +96,138 @@ class ChunkArray {
   }
 }
 
+/**
+ * P1-28 — the terminal watermark, owned by the SESSION rather than by a
+ * WebSocket connection.
+ *
+ * `terminal-ws.ts` used to keep `unackedBytes`/`paused` per socket and act on
+ * the SHARED PTY through `terminalService.pause/resume(sessionId)`. With two
+ * viewers attached that is not a watermark at all: viewer A crossing its high
+ * mark paused the PTY for everyone, viewer B's next ack — accounting for a
+ * completely different byte range — resumed it, and the two oscillated against
+ * each other while neither one's bound was actually enforced.
+ *
+ * The session tracks one monotonic `emitted` cursor and one acknowledged
+ * cursor per viewer. Outstanding work is `emitted - min(acked)`: the SLOWEST
+ * attached viewer governs, which is the only answer that bounds every viewer's
+ * backlog with one shared producer. A viewer that attaches mid-stream starts
+ * caught up (it is not responsible for bytes sent before it arrived), and a
+ * viewer that leaves stops holding the session back.
+ *
+ * Acks are counted at PARSE completion, not on receipt: the client calls back
+ * from inside `term.write(bytes, cb)`, so credit reflects what the terminal has
+ * actually rendered rather than what TCP happened to deliver (W14).
+ *
+ * Separately from this, `TerminalService` credits the pty-host for every chunk
+ * the moment it takes it — see `creditHost` in `spawn()`. That is a different
+ * loop with a different question ("has the gateway taken these bytes off the
+ * host's hands"), and it deliberately does NOT wait for a viewer: the host's
+ * low watermark (5 000 chars) is far below the client's ack batch size (64 KiB),
+ * so chaining the two would wedge a terminal on the residual bytes of the last
+ * partial ack batch — the same permanent freeze P0-23 is about, just relocated.
+ */
+class SessionFlowControl {
+  /** Total bytes the session has produced since spawn. Monotonic. */
+  private emitted = 0;
+  /** Per-viewer acknowledged cursor, in the same units as `emitted`. */
+  private readonly viewers = new Map<object, { acked: number; stalled: boolean }>();
+  private paused = false;
+
+  constructor(
+    private readonly high: number,
+    private readonly low: number,
+    private readonly onPause: () => void,
+    private readonly onResume: () => void,
+  ) {}
+
+  attach(token: object): void {
+    // Start at `emitted`, not 0 — a viewer that joins a session which has
+    // already printed a gigabyte must not instantly pin it at the high mark.
+    this.viewers.set(token, { acked: this.emitted, stalled: false });
+  }
+
+  detach(token: object): void {
+    this.viewers.delete(token);
+    this.reconcile();
+  }
+
+  onOutput(byteLength: number): void {
+    this.emitted += byteLength;
+    this.reconcile();
+  }
+
+  ack(token: object, bytes: number): void {
+    const v = this.viewers.get(token);
+    if (!v || bytes <= 0) return;
+    // Clamped at `emitted`: a buggy or hostile client cannot ack its way past
+    // what was actually sent and thereby disable the watermark.
+    v.acked = Math.min(this.emitted, v.acked + bytes);
+    this.reconcile();
+  }
+
+  /**
+   * A viewer whose socket send buffer has blown past the circuit breaker is
+   * not making progress even if it is still acking older bytes. Pin the
+   * session paused until it drains.
+   */
+  setStalled(token: object, stalled: boolean): void {
+    const v = this.viewers.get(token);
+    if (!v || v.stalled === stalled) return;
+    v.stalled = stalled;
+    this.reconcile();
+  }
+
+  /** Bytes emitted but not yet acknowledged by the slowest attached viewer. */
+  get outstanding(): number {
+    if (this.viewers.size === 0) return 0; // Nobody to wait for.
+    let min = this.emitted;
+    for (const v of this.viewers.values()) if (v.acked < min) min = v.acked;
+    return this.emitted - min;
+  }
+
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  get viewerCount(): number {
+    return this.viewers.size;
+  }
+
+  /** Release any pause and forget every viewer — used when the PTY exits. */
+  reset(): void {
+    this.viewers.clear();
+    this.paused = false;
+  }
+
+  private reconcile(): void {
+    const stalled = [...this.viewers.values()].some((v) => v.stalled);
+    const outstanding = this.outstanding;
+    if (!this.paused && (stalled || outstanding >= this.high)) {
+      this.paused = true;
+      this.onPause();
+      return;
+    }
+    if (this.paused && !stalled && outstanding <= this.low) {
+      this.paused = false;
+      this.onResume();
+    }
+  }
+}
+
+/**
+ * Handle a WebSocket connection holds for the lifetime of its attachment.
+ * Everything a viewer can do to the shared session's flow control goes
+ * through this object, so the transport never needs its own counters.
+ */
+export interface TerminalViewer {
+  /** Credit bytes the client has finished PARSING (not merely received). */
+  ack(bytes: number): void;
+  /** Declare the viewer's own send buffer over/under its circuit breaker. */
+  setStalled(stalled: boolean): void;
+  /** Detach; releases whatever backpressure this viewer was contributing. */
+  detach(): void;
+}
+
 /** Per-session in-memory record. */
 interface TerminalRecord {
   workspaceId: string;
@@ -105,6 +250,8 @@ interface TerminalRecord {
   exited: boolean;
   /** Reason string kept for `terminal.session_closed.reason`. */
   closeReason?: string;
+  /** P1-28: session-owned watermark, shared by every attached viewer. */
+  flow: SessionFlowControl;
 }
 
 export class TerminalService {
@@ -129,14 +276,68 @@ export class TerminalService {
       throw new Error('[TerminalService] Requires at least one ITerminalHost');
     }
     this.hosts = hosts;
+    // Read through `readBoundedInt`, not a bare `Number()`. A typo'd value
+    // produced `NaN`, and NaN is dangerous differently in each of these
+    // fields: as a cap it makes every `>=` comparison false (the bound
+    // silently disappears), and as an interval Node coerces it to 1 ms, so
+    // `GENERATORAI_TERMINAL_IDLE_REAPER_MS=6O000` (letter O) turns the idle
+    // reaper into a busy loop. Neither logs anything.
     this.cfg = {
-      maxPerWorkspace: config?.maxPerWorkspace ?? Number(process.env['GENERATORAI_TERMINAL_MAX_PER_WORKSPACE'] ?? '5'),
-      maxGlobal: config?.maxGlobal ?? Number(process.env['GENERATORAI_TERMINAL_MAX_GLOBAL'] ?? '20'),
-      idleTtlMs: config?.idleTtlMs ?? Number(process.env['GENERATORAI_TERMINAL_IDLE_TTL_MS'] ?? String(30 * 60 * 1000)),
-      idleReaperMs: config?.idleReaperMs ?? Number(process.env['GENERATORAI_TERMINAL_IDLE_REAPER_MS'] ?? '60000'),
-      scrollbackBytes: config?.scrollbackBytes ?? Number(process.env['GENERATORAI_TERMINAL_SCROLLBACK_BYTES'] ?? String(4 * 1024 * 1024)),
+      maxPerWorkspace:
+        config?.maxPerWorkspace ??
+        readBoundedInt('GENERATORAI_TERMINAL_MAX_PER_WORKSPACE', { defaultValue: 5, min: 1, max: 100 }),
+      maxGlobal:
+        config?.maxGlobal ??
+        readBoundedInt('GENERATORAI_TERMINAL_MAX_GLOBAL', { defaultValue: 20, min: 1, max: 500 }),
+      idleTtlMs:
+        config?.idleTtlMs ??
+        readBoundedInt('GENERATORAI_TERMINAL_IDLE_TTL_MS', {
+          defaultValue: 30 * 60 * 1000,
+          min: 10_000,
+          max: 24 * 60 * 60 * 1000,
+        }),
+      idleReaperMs:
+        config?.idleReaperMs ??
+        readBoundedInt('GENERATORAI_TERMINAL_IDLE_REAPER_MS', {
+          defaultValue: 60_000,
+          // A floor well above 1 ms is the actual protection here.
+          min: 1_000,
+          max: 60 * 60 * 1000,
+        }),
+      scrollbackBytes:
+        config?.scrollbackBytes ??
+        readBoundedInt('GENERATORAI_TERMINAL_SCROLLBACK_BYTES', {
+          defaultValue: 4 * 1024 * 1024,
+          min: 64 * 1024,
+          max: 64 * 1024 * 1024,
+        }),
       eventBusScopePrefix: config?.eventBusScopePrefix ?? 'terminal',
+      highWatermarkBytes:
+        config?.highWatermarkBytes ??
+        readBoundedInt('GENERATORAI_TERMINAL_HIGH_WATERMARK_BYTES', {
+          defaultValue: 256 * 1024,
+          min: 16 * 1024,
+          max: 16 * 1024 * 1024,
+        }),
+      lowWatermarkBytes:
+        config?.lowWatermarkBytes ??
+        readBoundedInt('GENERATORAI_TERMINAL_LOW_WATERMARK_BYTES', {
+          defaultValue: 64 * 1024,
+          min: 4 * 1024,
+          max: 8 * 1024 * 1024,
+        }),
     };
+    // An inverted pair silently disables the watermark — the pause would fire
+    // and the resume condition would already hold — so clamp rather than trust
+    // two independently-configured envs.
+    if (this.cfg.lowWatermarkBytes >= this.cfg.highWatermarkBytes) {
+      const low = Math.max(1, Math.floor(this.cfg.highWatermarkBytes / 4));
+      this.logger.warn?.(
+        `[TerminalService] lowWatermarkBytes (${this.cfg.lowWatermarkBytes}) >= highWatermarkBytes ` +
+          `(${this.cfg.highWatermarkBytes}) — clamping low to ${low}`,
+      );
+      this.cfg.lowWatermarkBytes = low;
+    }
   }
 
   /** Boot the idle reaper. Idempotent. */
@@ -188,13 +389,22 @@ export class TerminalService {
     attachToSandbox?: boolean;
     runId?: string;
   }): Promise<TerminalSessionDescriptor> {
-    // Cap enforcement.
-    if (this.sessions.size >= this.cfg.maxGlobal) {
-      throw new Error(`Terminal spawn refused — server cap (${this.cfg.maxGlobal}) reached`);
-    }
+    // Cap enforcement. Both caps count LIVE sessions only.
+    //
+    // P1-38: the global cap used `this.sessions.size`, which includes exited
+    // records — those are retained for 5 minutes so a late reconnect can still
+    // replay `terminal.session_closed`. Twenty corpses therefore refused every
+    // spawn on the whole server for five minutes, while the per-workspace cap
+    // right below already filtered them correctly.
+    let liveGlobal = 0;
     let wsCount = 0;
     for (const r of this.sessions.values()) {
-      if (r.workspaceId === params.workspaceId && !r.exited) wsCount++;
+      if (r.exited) continue;
+      liveGlobal++;
+      if (r.workspaceId === params.workspaceId) wsCount++;
+    }
+    if (liveGlobal >= this.cfg.maxGlobal) {
+      throw new Error(`Terminal spawn refused — server cap (${this.cfg.maxGlobal}) reached`);
     }
     if (wsCount >= this.cfg.maxPerWorkspace) {
       throw new Error(
@@ -204,10 +414,6 @@ export class TerminalService {
 
     const cwd = await this.resolveCwd(params.workspaceId);
     if (!cwd) throw new Error(`Workspace not found or has no rootPath: ${params.workspaceId}`);
-
-    // Host selection: try in order, first available wins.
-    const host = this.hosts.find((h) => h.isAvailable());
-    if (!host) throw new Error('[TerminalService] No available terminal host on this platform');
 
     const cols = Math.max(1, Math.min(500, Math.floor(params.cols ?? 80)));
     const rows = Math.max(1, Math.min(200, Math.floor(params.rows ?? 24)));
@@ -221,6 +427,22 @@ export class TerminalService {
       ...(params.attachToSandbox ? { attachToSandbox: true } : {}),
       ...(params.runId ? { runId: params.runId } : {}),
     };
+
+    const host = await this.selectHost(spawnOpts);
+    if (!host) throw new Error('[TerminalService] No available terminal host on this platform');
+
+    // §11.1 — landing on a degraded host is silent otherwise: the terminal
+    // opens and works, it just has no TTY (so no vim, no colour, no cursor
+    // addressing) or has lost the process isolation the pty host provides.
+    // Counting it is the difference between "users report flaky terminals"
+    // and "node-pty failed to load on this box".
+    if (host.kind === 'fallback-child-process') {
+      recordFallback('terminal_child_process_host');
+    } else if (host.kind === 'node-pty' && this.hosts.some((h) => h.kind === 'pty-host')) {
+      // A pty-host was configured but was not the one chosen.
+      recordFallback('terminal_in_process_host');
+    }
+
     const handle = await host.spawn(spawnOpts);
 
     const rec: TerminalRecord = {
@@ -233,17 +455,43 @@ export class TerminalService {
       wsCount: 0,
       lastActivityAt: Date.now(),
       exited: false,
+      flow: new SessionFlowControl(
+        this.cfg.highWatermarkBytes,
+        this.cfg.lowWatermarkBytes,
+        () => {
+          this.logger.debug?.(`[TerminalService] watermark pause sid=${handle.id}`);
+          try { handle.pause(); } catch { /* PTY already gone */ }
+        },
+        () => {
+          this.logger.debug?.(`[TerminalService] watermark resume sid=${handle.id}`);
+          try { handle.resume(); } catch { /* PTY already gone */ }
+        },
+      ),
     };
 
     rec.detachData = handle.onData((chunk) => {
       // P1-38: Do NOT bump lastActivityAt on PTY output — idle reaper should
       // fire when no client is attached, not when the process is printing.
       rec.scrollback.append(chunk);
+      rec.flow.onOutput(chunk.length);
+      // P0-23 (rebuilt): return credit to an out-of-process host the moment
+      // the gateway has taken the bytes. `PtyHostClient.ack()` had no caller
+      // at all, so `PtySession`'s credit counter only ever climbed and any
+      // command printing past its 100 000-char high watermark froze that
+      // terminal permanently. Crediting here — rather than waiting on a
+      // viewer — is deliberate: see `SessionFlowControl`'s header for why
+      // chaining the two loops re-creates the freeze on the tail of the last
+      // partial ack batch. Client backpressure is carried by the session
+      // watermark above, which reaches the shell as a real `pause`.
+      rec.handle.ack?.(chunk.length);
     });
 
     rec.detachExit = handle.onExit((info) => {
       rec.exited = true;
       rec.lastActivityAt = Date.now();
+      // A dead PTY cannot be resumed, and a session left `paused` would hold
+      // a stale flag that the idle reaper's corpse-drop path never clears.
+      rec.flow.reset();
       void this.emit(params.workspaceId, {
         kind: 'terminal.session_closed',
         data: {
@@ -396,23 +644,68 @@ export class TerminalService {
     return buf.subarray(buf.length - tailBytes);
   }
 
+  /**
+   * Rendered scrollback from the host's headless VT model, when the host has
+   * one (W14 — only the out-of-process pty-host does). Bounded at
+   * O(lines × columns), unlike `scrollback()`'s raw byte ring.
+   *
+   * Returns `null` when the session is unknown or its host keeps no VT model,
+   * so callers can tell "no such thing here" from "an empty terminal".
+   */
+  async scrollbackText(sessionId: string, tailLines = 0): Promise<string[] | null> {
+    const rec = this.sessions.get(sessionId);
+    if (!rec?.handle.scrollbackLines) return null;
+    try {
+      return await rec.handle.scrollbackLines(tailLines);
+    } catch (err) {
+      this.logger.warn?.(
+        `[TerminalService] scrollbackText failed sid=${sessionId}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
   // ── WS attach hooks (called from terminal-ws.ts) ──────────────
 
-  /** Register a WS client. Increments wsCount for idle-reaper accounting. */
-  onWsAttach(sessionId: string): TerminalRecord | null {
+  /**
+   * Register a WS client and hand it back the only flow-control surface it
+   * needs (P1-28). Replaces the old `onWsAttach`/`onWsDetach` +
+   * `pause`/`resume` quartet: the transport used to own the counters and act
+   * on the shared PTY, which is exactly what made two viewers fight.
+   *
+   * Returns `null` for an unknown session.
+   */
+  attachViewer(sessionId: string): TerminalViewer | null {
     const rec = this.sessions.get(sessionId);
     if (!rec) return null;
     rec.wsCount += 1;
     rec.lastActivityAt = Date.now();
-    return rec;
-  }
 
-  /** Detach a WS client. */
-  onWsDetach(sessionId: string): void {
-    const rec = this.sessions.get(sessionId);
-    if (!rec) return;
-    rec.wsCount = Math.max(0, rec.wsCount - 1);
-    rec.lastActivityAt = Date.now();
+    // Identity token — the viewer's own key into the session's ack table. An
+    // object reference, not the session id, because several viewers share one
+    // session and each needs its own cursor.
+    const token = {};
+    rec.flow.attach(token);
+    let detached = false;
+
+    return {
+      ack: (bytes: number) => {
+        if (detached) return;
+        rec.lastActivityAt = Date.now();
+        rec.flow.ack(token, bytes);
+      },
+      setStalled: (stalled: boolean) => {
+        if (detached) return;
+        rec.flow.setStalled(token, stalled);
+      },
+      detach: () => {
+        if (detached) return;
+        detached = true;
+        rec.wsCount = Math.max(0, rec.wsCount - 1);
+        rec.lastActivityAt = Date.now();
+        rec.flow.detach(token);
+      },
+    };
   }
 
   /**
@@ -437,15 +730,50 @@ export class TerminalService {
     return rec.handle.onExit(cb);
   }
 
-  /** OS-level flow control — plumbed through from the WS watermark logic. */
-  pause(sessionId: string): void {
-    this.sessions.get(sessionId)?.handle.pause();
-  }
-  resume(sessionId: string): void {
-    this.sessions.get(sessionId)?.handle.resume();
+  /**
+   * Flow-control state for a session — diagnostics and tests. There is no
+   * public `pause`/`resume` any more: the session's own watermark is the only
+   * thing allowed to stop and start the shared PTY (P1-28).
+   */
+  flowState(sessionId: string): { paused: boolean; outstanding: number; viewers: number } | null {
+    const rec = this.sessions.get(sessionId);
+    if (!rec) return null;
+    return { paused: rec.flow.isPaused, outstanding: rec.flow.outstanding, viewers: rec.flow.viewerCount };
   }
 
   // ── Internal ──────────────────────────────────────────────────
+
+  /**
+   * Pick the host for this spawn.
+   *
+   * Two defects lived in the one-line `this.hosts.find(h => h.isAvailable())`
+   * this replaces:
+   *
+   *   • `SandboxPtyHost` sits first and reports available whenever docker is
+   *     on PATH, but throws from `spawn()` unless `attachToSandbox` was asked
+   *     for — so on a developer machine with docker installed, every ordinary
+   *     terminal was routed to it and failed. `canServe()` is the per-spawn
+   *     gate that was missing.
+   *   • Hosts that start asynchronously (the out-of-process pty-host) report
+   *     unavailable until their child process answers, and boot kicks that off
+   *     fire-and-forget. Terminals opened in the first few hundred ms therefore
+   *     silently landed on the in-process `NodePtyHost` while later ones landed
+   *     on the pty host — one pool, two hosts, decided by timing. Awaiting an
+   *     in-flight start before dropping to a lower-priority host removes the
+   *     race; `whenReady()` never rejects, so a genuinely failed start still
+   *     falls through instead of failing the spawn.
+   */
+  private async selectHost(opts: TerminalSpawnOptions): Promise<ITerminalHost | undefined> {
+    for (const host of this.hosts) {
+      if (host.canServe && !host.canServe(opts)) continue;
+      if (host.isAvailable()) return host;
+      if (host.whenReady) {
+        await host.whenReady();
+        if (host.isAvailable()) return host;
+      }
+    }
+    return undefined;
+  }
 
   private reapIdle(): void {
     const now = Date.now();

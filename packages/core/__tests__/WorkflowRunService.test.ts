@@ -528,4 +528,56 @@ describe('WorkflowRunService', () => {
       expect(updated.status).toBe('completed');
     });
   });
+
+  // ── Result validation gating ──
+
+  describe('result validation only applies to stages that actually ran', () => {
+    /**
+     * A stage skipped by a run-time override routes through `onStageCompleted`
+     * to advance the DAG. Validating it there evaluated the stage's rules
+     * against an empty output: they failed, the failure triggered a retry, and
+     * the retry EXECUTED the stage the operator had explicitly asked to skip —
+     * which then failed the whole run.
+     */
+    it('does not validate a stage whose status is skipped', async () => {
+      const validateStageResult = vi.fn(async () => ({ passed: true, failures: [] as string[] }));
+      service.setResultValidator({ validateStageResult } as never);
+
+      await stageDefRepo.update('s-a', {
+        resultValidation: [{ type: 'contains', value: 'MARKER', message: 'needs MARKER' }],
+      } as never);
+
+      const run = await service.createRun({ workflowDefinitionId: DEF_ID });
+      await runRepo.updateStatus(run.id, 'running');
+      const stageRuns = await stageRunRepo.getByRunId(run.id);
+      const srA = stageRuns.find((sr) => sr.stageDefinitionId === 's-a')!;
+      await stageRunRepo.update(srA.id, { status: 'skipped' });
+
+      await service.onStageCompleted(run.id, srA.id);
+
+      expect(validateStageResult).not.toHaveBeenCalled();
+      const after = await stageRunRepo.getById(srA.id);
+      expect(after.status).toBe('skipped');
+      expect(after.retryCount).toBe(0);
+    });
+
+    it('still validates a stage that completed normally', async () => {
+      const validateStageResult = vi.fn(async () => ({ passed: true, failures: [] as string[] }));
+      service.setResultValidator({ validateStageResult } as never);
+
+      await stageDefRepo.update('s-a', {
+        resultValidation: [{ type: 'contains', value: 'MARKER', message: 'needs MARKER' }],
+      } as never);
+
+      const run = await service.createRun({ workflowDefinitionId: DEF_ID });
+      await runRepo.updateStatus(run.id, 'running');
+      const stageRuns = await stageRunRepo.getByRunId(run.id);
+      const srA = stageRuns.find((sr) => sr.stageDefinitionId === 's-a')!;
+      await stageRunRepo.update(srA.id, { status: 'completed' });
+
+      await service.onStageCompleted(run.id, srA.id);
+
+      expect(validateStageResult).toHaveBeenCalledTimes(1);
+    });
+  });
 });

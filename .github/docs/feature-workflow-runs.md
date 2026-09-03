@@ -177,7 +177,7 @@ Hash-based. Any mutation to stages/edges (via `WorkflowDefinitionService.addStag
 |---|---|
 | `single` | One session for the whole run. First `allocateSession()` creates it (`harness.createConversation`); subsequent calls return the same `conversationId`. Stored in `workflow_runs.masterSessionId`. |
 | `per-stage` | Each `allocateSession()` returns a fresh session. Stage runs in their own conversation. |
-| `auto` | Independent stages (different execution layers, no path between them) get fresh sessions; chains share. Heuristic. |
+| `auto` | Not a per-stage heuristic: `startRun` resolves it once for the whole run to `per-stage` (any parallelism in the DAG) or `single`, and persists the answer. |
 
 ### Persistence (1.6)
 - `session_allocations` table — one row per (workflowRunId), records `mode`, `sharedSessionId`, `sharedRefCount`.
@@ -238,7 +238,7 @@ API:
 - `POST /api/workflow-runs/:id/pause` — `WorkflowRunStateMachine.transition('user:pause')`. The polling loop stops scheduling new stages; running stages complete their current prompt then exit. Mid-prompt pause **waits for the in-flight SDK call** to finish (cannot abort mid-prompt without `cancel`).
 - `POST /api/workflow-runs/:id/resume` — `transition('user:resume')`. Polling resumes; pending stages start.
 - `POST /api/workflow-runs/:id/cancel` — `transition('user:cancel')`. `harness.abortConversation` called on every active session; subprocesses killed.
-- `POST /api/workflow-runs/:id/retry` — only valid from `failed`. Resets every `failed` stage to `queued`, clears errors, and resumes. Successful stages are not re-run.
+- `POST /api/workflow-runs/:id/retry` — valid from `failed` or `cancelled`. Creates and starts a **new** run carrying `ancestorRunId`; the ancestor stays terminal. Stages that were `completed` or `skipped` in the ancestor are promoted to that state in the new run, so successful work is not re-run. The response's `runId` is the NEW run.
 
 Stage-level controls (subset of run-level):
 

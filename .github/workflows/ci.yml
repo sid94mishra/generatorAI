@@ -62,7 +62,13 @@ jobs:
 
       - run: pnpm turbo build
 
-      - run: pnpm turbo lint
+      # `pnpm lint` (not `pnpm turbo lint`) — the root script is
+      # `turbo lint && check:security && check:tokens`. CI called the turbo
+      # task directly, which runs each package's own `eslint src/` and skips
+      # the two composite steps entirely, so `check-security-invariants.mjs`
+      # (8 rules) and `check-no-app-wide-cdp.mjs` had never once run in CI
+      # despite being written specifically to be CI guards.
+      - run: pnpm lint
 
       - run: pnpm turbo typecheck
 
@@ -74,3 +80,180 @@ jobs:
       - name: Check web bundle size
         if: matrix.os == 'ubuntu-latest'
         run: pnpm --filter @generatorai/web check:bundle
+
+      # CLI_TUI_POST_OVERHAUL_PARITY_AUDIT_2026.md §5.6 — the CLI's declared
+      # `bin` was never actually produced or exercised by CI: `pnpm turbo
+      # build` above only emits `dist/`, and release automation packages the
+      # desktop app, never this. Bundle it, pack it exactly the way `npm
+      # install` would consume it, install that tarball into a directory
+      # with no workspace symlinks, and run the resulting binary — the same
+      # sequence that caught (a) two native deps missing from `dependencies`
+      # entirely and (b) `files` shipping the whole `src/` tree while
+      # omitting the actual `bin` target, both fixed in the same change that
+      # added this job. All three platforms: ConPTY/pathing differences are
+      # exactly what a Linux-only check would miss.
+      # ── Parity audit Phase 0 items 2/3 ────────────────────────────────
+      #
+      # Three drift checks, all of the same shape: an artifact that is
+      # DERIVED from the code and committed, regenerated here and diffed. The
+      # failure they exist to catch is documentation and parity claims that
+      # quietly stop matching the code — which is what the whole audit was
+      # written in response to.
+      #
+      # Ubuntu-only: generation reads the registry and writes markdown, and
+      # neither varies by platform. The bin-build check below is the one that
+      # genuinely needs all three.
+      - name: Check generated docs and the surface snapshot for drift
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          pnpm --filter @generatorai/cli docs:check
+          pnpm --filter @generatorai/cli surface:check
+
+      # Clean-generation: regenerating from scratch must produce byte-identical
+      # output. A generator that is not idempotent makes every diff noisy and
+      # trains reviewers to ignore it — and hides a real change among the
+      # churn.
+      - name: Check generated output is idempotent
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          pnpm --filter @generatorai/cli docs
+          pnpm --filter @generatorai/cli surface
+          git diff --exit-code -- .github/docs/usage-cli.md docs/CLI_SURFACE_SNAPSHOT.md
+
+      # W45 — protocol schemas are generated from a pinned upstream artifact
+      # and diffed here, so an upstream schema change surfaces as a failing
+      # diff rather than a runtime decode error.
+      #
+      # The deliberate shape is "delete, regenerate, diff". A plain
+      # `generate && git diff --exit-code` passes vacuously when the generator
+      # emits nothing — which is exactly what the previous generator did: it
+      # rewrote one `// Schema version:` comment and left the "generated" types
+      # hand-written, so this gate would have stayed green through any amount
+      # of upstream drift. Deleting the outputs first means a generator that
+      # writes nothing leaves a deletion in the working tree and fails the
+      # diff. The gate cannot certify nothing.
+      #
+      # Ubuntu-only, like the docs-drift checks above: the generator reads JSON
+      # and writes LF-terminated TypeScript, neither of which varies by
+      # platform, and a Windows checkout's CRLF translation would make the
+      # diff noisy for no signal.
+      - name: Check generated protocol schemas for drift
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          protocol_dir=packages/agent-harness-providers/src/protocol
+          # Every protocol is generated now — ACP from the pinned SDK's own
+          # schema, Codex and OpenCode from the artifacts committed under
+          # schemas/. There are no hand-written stand-ins left to preserve.
+          generated=(
+            "$protocol_dir/acp.generated.ts"
+            "$protocol_dir/codex.generated.ts"
+            "$protocol_dir/opencode.generated.ts"
+          )
+
+          rm -f "${generated[@]}"
+          # No --allow-missing: with every protocol pinned, a non-zero exit here
+          # is a real regression rather than a known gap. (The generator's
+          # refuse-loudly path is covered by generate-schemas.test.ts, which
+          # drives runGenerator against a fixture manifest — it does not need a
+          # synthetic failure staged here.)
+          pnpm generate:schemas
+
+          for f in "${generated[@]}"; do
+            test -s "$f" || { echo "::error::generator did not write $f"; exit 1; }
+            grep -q '^// Artifact sha256: [0-9a-f]\{64\}$' "$f" \
+              || { echo "::error::$f carries no upstream artifact hash — it was not derived from a pinned artifact"; exit 1; }
+          done
+
+          # The real gate: regenerated output must match what is committed, and
+          # the artifacts it was derived from must be unchanged.
+          git diff --exit-code -- "$protocol_dir" schemas/
+
+          # No protocol may quietly regress to a hand-written stand-in. That is
+          # how the previous state arose: two files labelled "generated from
+          # upstream spec. Do not hand-edit" describing vocabularies neither
+          # upstream binary has ever spoken, with a diff gate that stayed green
+          # because nothing generated them.
+          unpinned=$(node -e "const m=require('./schemas/versions.json').protocols;console.log(Object.values(m).filter(p=>p.status!=='generated').length)")
+          if [ "$unpinned" != "0" ]; then
+            echo "::error::schemas/versions.json declares $unpinned protocol(s) without a pinned upstream artifact. Every protocol must be generated from one."
+            exit 1
+          fi
+          if compgen -G "$protocol_dir/*.handwritten.ts" > /dev/null; then
+            echo "::error::a hand-written protocol stand-in reappeared in $protocol_dir"
+            exit 1
+          fi
+
+      # Targeted coverage. `packages/cli-core/vitest.config.ts` carries per-area
+      # thresholds for the four areas the audit names by name — command
+      # contracts, input routing, pane state and timeline reduction — set at
+      # what the suite achieves today, so this fails only when behaviour lands
+      # with no test behind it.
+      - name: Coverage report (command contracts, input routing, pane state)
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm --filter @generatorai/cli-core exec vitest run --coverage
+
+      - name: Bundle and smoke-test the packaged CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @generatorai/cli run bundle
+          pnpm --filter @generatorai/cli pack --pack-destination "$RUNNER_TEMP"
+          tgz=$(ls "$RUNNER_TEMP"/generatorai-cli-*.tgz)
+          install_dir="$RUNNER_TEMP/cli-install-smoke"
+          rm -rf "$install_dir" && mkdir -p "$install_dir"
+          cd "$install_dir"
+          npm init -y >/dev/null
+          npm install --ignore-scripts "$tgz"
+          bin="node_modules/@generatorai/cli/dist-bundle/generatorai.mjs"
+          test -f "$bin" || { echo "::error::packed tarball is missing dist-bundle/generatorai.mjs"; exit 1; }
+          version_out=$(node "$bin" --version)
+          echo "version: $version_out"
+          node "$bin" system doctor
+          # `system doctor` is requiresServer:false and reports one failing
+          # check ("connection: none configured") by design in a fresh
+          # environment — a nonzero exit here would mean the binary itself
+          # failed to run, not that it found something to warn about.
+
+  # ── §1.Q concurrent-load test ────────────────────────────────────────────
+  # ARCHITECTURE_V2_MASTER_PLAN_FINAL.md §11.3's own "single most important
+  # addition in Phase 7": nothing else in the suite exercises concurrency,
+  # memory, or clean-shutdown/orphan-process behaviour together against a
+  # real booted server. Deliberately its own job, separate from
+  # `build-and-test`: it boots a whole extra server process and a headless
+  # Chromium, needs `playwright install`, and is new enough (unlike the
+  # unit/integration suite above) that a flake here should be visible without
+  # blocking every other PR — hence `continue-on-error`. Ubuntu-only: the
+  # assertions (latency, memory, zero orphans) are not platform-specific
+  # claims the way the CLI smoke test's ConPTY/pathing checks are, and one
+  # platform is enough to keep it fast.
+  concurrent-load-test:
+    name: Concurrent-load test (§1.Q)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # `playwright` is a dependency of @generatorai/core (ServerPlaywrightHost),
+      # not of @generatorai/server directly — install browsers from there so
+      # pnpm's strict node_modules actually resolves the `playwright` binary.
+      - run: pnpm --filter @generatorai/core exec playwright install --with-deps chromium
+
+      # The test boots the real production artifact — the esbuild bundle,
+      # not `tsc`'s `dist/` (see the comment at the top of
+      # `bootServerPortable` in the script itself for why) — build it first.
+      - run: pnpm --filter @generatorai/server bundle
+
+      - run: node agent-tests/concurrent-load-1q.mjs

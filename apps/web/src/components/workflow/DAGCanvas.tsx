@@ -22,6 +22,7 @@ import '@xyflow/react/dist/style.css';
 import { StageNode } from './StageNode.js';
 import { StageEdge } from './StageEdge.js';
 import { EDGE_TYPE_ORDER, EDGE_TYPE_COLORS, EDGE_TYPE_LABELS, DEFAULT_EDGE_TYPE, type StageEdgeType } from './edgeTypeStyles.js';
+import { CanvasReadonlyContext } from './canvasContext.js';
 import { useWorkflowBuilderStore, type StageNodeData, type StageEdgeData } from '@/stores/workflowBuilderStore.js';
 import { getLayoutedElements } from '@/utils/dagLayout.js';
 import { AlignHorizontalDistributeCenter, Plus, GitBranch } from 'lucide-react';
@@ -173,6 +174,7 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
   }, [edges]);
 
   return (
+    <CanvasReadonlyContext.Provider value={readonly === true}>
     <div ref={containerRef} className="h-full w-full">
       <ReactFlow
         nodes={nodes}
@@ -309,5 +311,6 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
         )}
       </ReactFlow>
     </div>
+    </CanvasReadonlyContext.Provider>
   );
 }

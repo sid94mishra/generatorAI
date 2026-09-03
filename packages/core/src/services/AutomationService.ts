@@ -90,6 +90,20 @@ interface CronJobHandle {
   stop: () => void;
 }
 
+/**
+ * One unit of work in the iteration loop. `index` is authoritative: in durable
+ * mode it comes from the claimed slot, never from the loop counter, because
+ * after a resume the slot the engine hands back is not the one the counter
+ * would have named.
+ */
+interface IterationWorkItem {
+  index: number;
+  variables: Record<string, unknown>;
+  label: string;
+  /** `entries.id` of the durable slot backing this iteration, when claimed. */
+  slotId?: string;
+}
+
 export class AutomationService {
   private cronJobs = new Map<string, CronJobHandle>();
   private cronModule: typeof NodeCron | null = null;
@@ -590,17 +604,26 @@ export class AutomationService {
       data: { executionId: execution.id, automationId: automation.id },
     });
 
-    // Phase 2, 2.9 — register AbortController so cancelExecution can abort
-    // in-flight awaits. Cleared in a `finally` below.
-    const abortController = new AbortController();
-    this.executionAborts.set(execution.id, abortController);
+    await this.driveIterations(automation, execution, { completed: 0, failed: 0 }, () =>
+      this.buildIterationList(automation, extraVariables, resolvedDataSource, plannedIterations),
+    );
+  }
 
-    let completedCount = 0;
-    let failedCount = 0;
-
-    try {
-      // Build iteration list based on input mode
-      let iterations: { variables: Record<string, unknown>; label: string }[];
+  /**
+   * Expand the automation's input configuration into the concrete iteration
+   * list. Pure — every branch is a function of the arguments, which is why it
+   * can be handed to `driveIterations` as a thunk and evaluated inside its
+   * error handling (a malformed batch payload must fail the execution, not
+   * escape as an unhandled rejection).
+   */
+  private buildIterationList(
+    automation: Automation,
+    extraVariables?: Record<string, unknown>,
+    resolvedDataSource?: ParsedBatchData | null,
+    plannedIterations?: ReturnType<typeof planIterations> | null,
+  ): { variables: Record<string, unknown>; label: string }[] {
+    // Build iteration list based on input mode
+    let iterations: { variables: Record<string, unknown>; label: string }[];
 
       if (plannedIterations) {
         // Track C: schema-driven pipeline. IterationPlanner already
@@ -665,13 +688,47 @@ export class AutomationService {
         }];
       }
 
+    return iterations;
+  }
+
+  /**
+   * Run an execution's iterations to completion and write its terminal status.
+   *
+   * Shared by the initial run (`runExecution`) and the post-restart resume
+   * (`resumeExecution`), which differ only in where the work comes from: a
+   * fresh run expands `buildIterations()` and seeds the durable slots, a
+   * resume finds the slots already there and simply claims what is left.
+   * `seed` carries the counts already recorded on the execution row so a
+   * resumed batch reports its true totals rather than only what this process
+   * did.
+   */
+  private async driveIterations(
+    automation: Automation,
+    execution: AutomationExecution,
+    seed: { completed: number; failed: number },
+    buildIterations: () => { variables: Record<string, unknown>; label: string }[],
+  ): Promise<void> {
+    // Phase 2, 2.9 — register AbortController so cancelExecution can abort
+    // in-flight awaits. Cleared in a `finally` below. Doubles as the
+    // "this process is already driving this execution" guard `resumeExecution`
+    // checks before starting a second loop over the same slots.
+    const abortController = new AbortController();
+    this.executionAborts.set(execution.id, abortController);
+
+    let completedCount = seed.completed;
+    let failedCount = seed.failed;
+
+    try {
+      const iterations = buildIterations();
+
       const maxConcurrency = Math.max(1, automation.maxConcurrency);
 
       // ── W22 — Durable iteration claiming (P0-41 fix) ──────────
       // When the durable engine is available, write all iteration slots up
       // front so a restart can claim and resume any still-pending rows
-      // without losing work.
-      if (this.durableEngine) {
+      // without losing work. On a resume `iterations` is empty and every slot
+      // already exists, so this is a no-op.
+      if (this.durableEngine && iterations.length > 0) {
         const slots = iterations.map((iter, idx) => ({
           index: idx,
           variables: iter.variables,
@@ -688,7 +745,7 @@ export class AutomationService {
 
       // In batch/loop mode, maxConcurrency controls how many iterations run in parallel.
       // Within each iteration, workflows still run sequentially (they share context).
-      for (let batchStart = 0; batchStart < iterations.length; batchStart += maxConcurrency) {
+      for (let batchStart = 0; ; batchStart += maxConcurrency) {
         // Check if this execution has been cancelled before starting a new batch
         if (this.cancelledExecutions.has(execution.id)) {
           this.logger.info(`[AutomationService] Execution ${execution.id} cancelled — stopping iteration loop`);
@@ -699,53 +756,86 @@ export class AutomationService {
         // W22: when the durable engine is active, use atomic claim instead of
         // slicing the in-memory array. This prevents duplicate iteration on
         // restart (the claim is idempotent — already-claimed rows return null).
-        let iterBatch: typeof iterations;
+        let iterBatch: IterationWorkItem[];
         if (this.durableEngine) {
           iterBatch = [];
           for (let i = 0; i < maxConcurrency; i++) {
             const claimed = this.durableEngine.claimNextIteration(execution.id);
             if (!claimed) break;
-            iterBatch.push({ variables: claimed.variables, label: claimed.label });
+            // △ `claimed.index` — NOT a recomputed loop counter. The claim
+            // returns whichever slot is lowest-pending, which after a resume
+            // (or any concurrent claimer) is not `batchStart + offset`:
+            // deriving it from the loop counter labelled recovered rows with
+            // the wrong `iterationIndex`, so the execution-run rows no longer
+            // matched the data the iteration actually ran on.
+            iterBatch.push({
+              index: claimed.index,
+              variables: claimed.variables,
+              label: claimed.label,
+              slotId: claimed.id,
+            });
           }
           if (iterBatch.length === 0) break; // No more pending iterations.
         } else {
-          iterBatch = iterations.slice(batchStart, batchStart + maxConcurrency);
+          if (batchStart >= iterations.length) break;
+          iterBatch = iterations
+            .slice(batchStart, batchStart + maxConcurrency)
+            .map((iter, offset) => ({ index: batchStart + offset, ...iter }));
         }
 
         const iterResults = await Promise.allSettled(
-          iterBatch.map(async (iter, offsetInBatch) => {
-            const iterIdx = batchStart + offsetInBatch;
-            const { variables: iterationVariables, label: iterationLabel } = iter;
+          iterBatch.map(async (iter) => {
+            const { index: iterIdx, variables: iterationVariables, label: iterationLabel } = iter;
+            // P0-c — every claimed slot MUST get a completion write, on every
+            // exit path, or recovery cannot tell it apart from one whose owner
+            // died and will either lose it or re-run finished work.
+            let slotError: string | undefined;
+            try {
+              // Run all workflows sequentially within this iteration
+              for (const workflowDefId of automation.workflowIds) {
+                // Check cancellation before each workflow run within an iteration
+                if (this.cancelledExecutions.has(execution.id)) {
+                  slotError = 'execution cancelled';
+                  return;
+                }
 
-            // Run all workflows sequentially within this iteration
-            for (const workflowDefId of automation.workflowIds) {
-              // Check cancellation before each workflow run within an iteration
-              if (this.cancelledExecutions.has(execution.id)) return;
-
-              try {
-                const success = await this.runSingleWorkflow(
-                  execution.id,
-                  workflowDefId,
-                  iterationVariables,
-                  iterIdx,
-                  iterationLabel,
-                  automation.projectId,
-                  automation.retryPolicy,
-                );
-                if (success) {
-                  completedCount++;
-                } else {
+                try {
+                  const success = await this.runSingleWorkflow(
+                    execution.id,
+                    workflowDefId,
+                    iterationVariables,
+                    iterIdx,
+                    iterationLabel,
+                    automation.projectId,
+                    automation.retryPolicy,
+                    execution.triggeredBy,
+                  );
+                  if (success) {
+                    completedCount++;
+                  } else {
+                    failedCount++;
+                    slotError ??= `workflow ${workflowDefId} did not complete`;
+                    if (automation.onError === 'stop') {
+                      throw new Error('Workflow run failed');
+                    }
+                  }
+                } catch (err) {
                   failedCount++;
+                  const message = err instanceof Error ? err.message : String(err);
+                  slotError ??= message;
+                  this.logger.error(`[AutomationService] Workflow run error (iter ${iterIdx}, def ${workflowDefId}): ${message}`);
                   if (automation.onError === 'stop') {
-                    throw new Error('Workflow run failed');
+                    throw err;
                   }
                 }
-              } catch (err) {
-                failedCount++;
-                this.logger.error(`[AutomationService] Workflow run error (iter ${iterIdx}, def ${workflowDefId}): ${err instanceof Error ? err.message : String(err)}`);
-                if (automation.onError === 'stop') {
-                  throw err;
-                }
+              }
+            } finally {
+              if (iter.slotId && this.durableEngine) {
+                this.durableEngine.completeIteration(
+                  iter.slotId,
+                  slotError ? 'failed' : 'completed',
+                  slotError,
+                );
               }
             }
           }),
@@ -827,6 +917,76 @@ export class AutomationService {
   }
 
   /**
+   * P0-b — resume an execution whose iteration loop died with the process.
+   *
+   * This is the post-restart caller the durable iteration machinery never had.
+   * Without it, `initializeIterations` / `claimNextIteration` were only ever
+   * exercised by the process that opened the batch, so P0-41 reproduced in
+   * full: a 1000-row batch that died at row 40 was reported **completed** with
+   * 40 iterations and the other 960 were never run.
+   *
+   * Called by `AutomationRecoveryService` on boot, BEFORE it decides whether
+   * the execution has finished. Returns `resumed: false` when there is nothing
+   * left to claim, which is the reconciler's signal to finalise as before.
+   *
+   * `activeIterationIndexes` are iterations whose workflow run is still live
+   * (StartupRecoveryService re-drives those); their leases are left alone so
+   * the work is not started twice. Everything else is handed back immediately
+   * — a process that has restarted cannot still be running them.
+   *
+   * The returned `completion` settles when the resumed drive finishes; boot
+   * recovery voids it (a batch can run for hours and must not block startup),
+   * tests await it.
+   */
+  async resumeExecution(
+    executionId: string,
+    opts: { activeIterationIndexes?: number[] } = {},
+  ): Promise<{ resumed: boolean; reclaimed: number[]; remaining: number; completion: Promise<void> }> {
+    const idle = { reclaimed: [] as number[], remaining: 0, completion: Promise.resolve() };
+    if (!this.durableEngine) return { resumed: false, ...idle };
+    // Already being driven in this process — a second loop over the same slots
+    // would claim nothing but would double-write the terminal status.
+    if (this.executionAborts.has(executionId)) return { resumed: false, ...idle };
+
+    const reclaimed = this.durableEngine.reclaimExpiredIterations(executionId, {
+      leaseMs: 0,
+      ...(opts.activeIterationIndexes ? { skipIndexes: opts.activeIterationIndexes } : {}),
+    });
+    const remaining = this.durableEngine.countPendingIterations(executionId);
+    if (remaining === 0) {
+      return { resumed: false, reclaimed, remaining, completion: Promise.resolve() };
+    }
+
+    const execution = await this.executionRepo.getExecutionById(executionId);
+    const automation = await this.automationRepo.getById(execution.automationId);
+
+    await this.executionRepo.updateExecution(executionId, { status: 'running' });
+    this.eventBus.emitGlobal({
+      kind: 'automation_execution.started',
+      data: { executionId, automationId: automation.id },
+    });
+    this.logger.info(
+      `[AutomationService] Resuming execution ${executionId}: ${remaining} iteration(s) left ` +
+      `(${reclaimed.length} reclaimed from an expired lease)`,
+    );
+
+    // Seed from the row so the resumed drive reports the whole batch's totals,
+    // not just what this process managed to finish.
+    const completion = this.driveIterations(
+      automation,
+      execution,
+      { completed: execution.completedIterations, failed: execution.failedIterations },
+      () => [], // slots already exist — nothing to expand or seed
+    ).catch((err) => {
+      this.logger.error(
+        `[AutomationService] Resumed execution ${executionId} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+
+    return { resumed: true, reclaimed, remaining, completion };
+  }
+
+  /**
    * Run a single workflow within an execution, honouring the automation's
    * retry policy. Returns true if any attempt completed successfully.
    *
@@ -844,7 +1004,16 @@ export class AutomationService {
     iterationIndex: number,
     iterationLabel: string | undefined,
     projectId: string | undefined,
-    retryPolicy?: AutomationRetryPolicy,
+    retryPolicy: AutomationRetryPolicy | undefined,
+    /**
+     * X-21 — how this execution was triggered. Threaded down to the run so a
+     * SCHEDULED run can be given a fresh execution context. Before this,
+     * `triggeredBy` was written onto the execution row and read in exactly one
+     * place (the default-dataset fallback); it reached neither `createRun` nor
+     * the harness, so "fresh agent with no history for scheduled runs" had no
+     * mechanism behind it at all.
+     */
+    triggeredBy: AutomationTriggerType,
   ): Promise<boolean> {
     const maxAttempts = Math.max(1, retryPolicy?.maxAttempts ?? 1);
     const retryOn = new Set(retryPolicy?.retryOn ?? []);
@@ -861,7 +1030,12 @@ export class AutomationService {
       // state from the previous failed attempt.
       const run = await this.workflowRunService.createRun({
         workflowDefinitionId: workflowDefId,
-        variables,
+        // X-21 — `__triggeredBy` is how the trigger reaches the run. The
+        // shared `CreateWorkflowRunParams` has no field for it, and the
+        // `__`-prefixed internal-variable convention is the established
+        // channel for exactly this (`__workingDirectory`, `__workspaceId`,
+        // `__projectId`, `__validationFeedback` all travel the same way).
+        variables: { ...variables, __triggeredBy: triggeredBy },
         ...(projectId ? { projectId } : {}),
       });
 

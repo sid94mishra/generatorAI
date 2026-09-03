@@ -10,8 +10,10 @@
 import {
   CliError,
   commandPath,
+  formFieldsForSpec,
+  formValuesToInput,
+  specNeedsForm,
   toCliError,
-  usageLine,
   validate,
   type CliContext,
   type CommandRegistry,
@@ -27,6 +29,22 @@ export interface CommandRunner {
     flags?: Record<string, unknown>,
   ): Promise<unknown>;
   runFromPalette(entry: PaletteEntry): Promise<void>;
+  /**
+   * Opens the spec's own schema-driven form (Phase 7 item 4), prefilled with
+   * whatever the caller already knows (`presets`, keyed by arg/flag name),
+   * and runs the command when it is submitted. Resolves with the command's
+   * data, or `undefined` if the form was cancelled or the command failed
+   * (which has already been reported to the user by then).
+   *
+   * This is how every authoring surface in the TUI invokes a command that
+   * needs more than one value — there is exactly one form implementation,
+   * and it is generated from the same spec the binary and the docs use.
+   */
+  runWithForm(
+    id: string,
+    presets?: Record<string, unknown>,
+    options?: { title?: string },
+  ): Promise<unknown>;
 }
 
 export interface CommandRunnerOptions {
@@ -97,45 +115,49 @@ export function createCommandRunner(options: CommandRunnerOptions): CommandRunne
       return execute(spec, args, flags);
     },
 
+    async runWithForm(id, presets = {}, options = {}) {
+      const spec = registry.get(id);
+      if (!spec) {
+        actions.toast(`Unknown command: ${id}`, 'error');
+        return undefined;
+      }
+
+      const fields = formFieldsForSpec(spec, presets);
+      if (fields.length === 0) return this.run(id, {}, {});
+
+      return new Promise((resolve) => {
+        actions.showOverlay({
+          kind: 'form',
+          title: options.title ?? commandPath(spec),
+          description: spec.summary,
+          fields,
+          onSubmit: (values) => {
+            const { args, flags } = formValuesToInput(fields, values);
+            void this.run(id, args, flags).then(resolve);
+          },
+          // A dismissed form resolves `undefined`, the same value a declined
+          // confirm and a reported failure already resolve to — so every
+          // caller's "did anything happen?" check is one comparison. Without
+          // it the promise would never settle and every cancelled form would
+          // strand its closure for the life of the process.
+          onCancel: () => resolve(undefined),
+        });
+      });
+    },
+
     async runFromPalette(entry) {
       const spec = registry.get(entry.id);
       if (!spec) return;
 
-      // A command with required arguments cannot be fired blind from a
-      // palette; collect them one at a time rather than failing validation
-      // and showing the user a schema error they did not cause.
-      if (entry.needsInput) {
-        const collected: Record<string, unknown> = {};
-        const required = spec.args.filter((a) => a.required);
-
-        const askNext = (index: number): void => {
-          const arg = required[index];
-          if (!arg) {
-            void this.run(spec.id, collected, {});
-            return;
-          }
-          actions.showOverlay({
-            kind: 'input',
-            message: `${commandPath(spec)} — ${arg.name}: ${arg.description}`,
-            initial: '',
-            onSubmit: (value) => {
-              collected[arg.name] = value;
-              askNext(index + 1);
-            },
-          });
-        };
-
-        if (spec.flags.some((f) => f.required)) {
-          actions.showOverlay({
-            kind: 'error',
-            title: commandPath(spec),
-            message: 'This command needs options the palette cannot collect yet.',
-            hint: `Run it from a shell: generatorai ${usageLine(spec)}`,
-          });
-          return;
-        }
-
-        askNext(0);
+      // A command that takes input cannot be fired blind from a palette.
+      // This used to collect required ARGUMENTS through chained single-line
+      // prompts and refuse outright ("needs options the palette cannot
+      // collect yet") the moment a spec had a required FLAG — which covered
+      // every authoring command in the registry. The schema-driven form
+      // handles both halves, so the refusal is gone and optional flags are
+      // reachable from the palette for the first time.
+      if (entry.needsInput || specNeedsForm(spec)) {
+        await this.runWithForm(spec.id);
         return;
       }
 

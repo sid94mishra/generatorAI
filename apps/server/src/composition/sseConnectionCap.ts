@@ -20,7 +20,7 @@
 // fire close twice for some transports).
 // ────────────────────────────────────────────────────────────────
 
-export type SseScope = 'session' | 'run' | 'chat' | 'global' | 'automation' | 'computer';
+export type SseScope = 'session' | 'run' | 'chat' | 'global' | 'automation' | 'computer' | 'workspace';
 
 /**
  * Default per-(scope,id) cap. 6 matches the browser per-origin connection
@@ -42,6 +42,7 @@ const DEFAULT_CAPS_BY_SCOPE: Record<SseScope, number> = {
   // rather than a transient error. The 250 ms poll's own back-off is what
   // bounds the cost here.
   computer: DEFAULT_CAP,
+  workspace: DEFAULT_CAP,
   // Global fan-out: intentionally higher — every connected tab shares one.
   global: 32,
 };

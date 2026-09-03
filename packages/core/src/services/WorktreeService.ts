@@ -51,14 +51,23 @@ export class WorktreeService {
       : path.join(this.projectService.getProjectWorktreesDir(codebase.projectId), runId, codebase.alias);
     const branchName = `generatorai/run-${shortRunId}-${codebase.alias}`;
 
-    // Determine base branch
-    // For bare clones (git-remote type), branches are stored directly (e.g., "main")
-    // For regular repos (git-local type), use "origin/{branch}"
+    // Determine base branch.
+    // For bare clones (git-remote type) branches are stored directly ("main").
+    // For a regular checkout (git-local) the remote-tracking ref is preferred so
+    // the worktree starts from the last fetched upstream state — but a repo
+    // linked straight off disk often has NO remote at all, and hard-coding
+    // `origin/{branch}` made every worktree fail with
+    // "fatal: invalid reference: origin/main". Resolve the ref and fall back to
+    // the local branch when it isn't there.
     let baseBranch = options?.baseBranch;
     if (!baseBranch && codebase.defaultBranch) {
-      baseBranch = codebase.type === 'git-remote'
-        ? codebase.defaultBranch
-        : `origin/${codebase.defaultBranch}`;
+      if (codebase.type === 'git-remote') {
+        baseBranch = codebase.defaultBranch;
+      } else {
+        const remoteRef = `origin/${codebase.defaultBranch}`;
+        const hasRemoteRef = await this.gitManager.revParse(codebase.clonePath, remoteRef);
+        baseBranch = hasRemoteRef ? remoteRef : codebase.defaultBranch;
+      }
     }
 
     // For local-dir type, just copy the directory
@@ -133,30 +142,74 @@ export class WorktreeService {
   }
 
   /**
-   * Remove a specific worktree.
+   * Remove a specific worktree: unregister it from the parent clone, delete
+   * the directory, then drop the row.
+   *
+   * Throws if the directory survives. The row is the only record of
+   * `worktreePath`, so deleting it after a failed `fs.rm` (what the old
+   * best-effort version did) orphans the directory AND leaves the parent clone
+   * with a worktree entry nothing will ever prune.
    */
   async removeWorktree(worktreeId: string): Promise<void> {
     const worktree = await this.worktreeRepo.getById(worktreeId);
-    const codebase = await this.codebaseRepo.getById(worktree.codebaseId);
+    // The codebase may already be gone — a stale row outliving its codebase is
+    // precisely what `cleanupOrphanedWorktrees` sweeps, and that must not be
+    // the thing that stops the sweep. No codebase simply means there is no
+    // parent clone left to unregister from.
+    let codebase: ProjectCodebase | undefined;
+    try {
+      codebase = await this.codebaseRepo.getById(worktree.codebaseId);
+    } catch {
+      codebase = undefined;
+    }
 
-    if (codebase.type !== 'local-dir' && codebase.clonePath) {
+    if (codebase && codebase.type !== 'local-dir' && codebase.clonePath) {
       try {
         await this.gitManager.removeWorktree(codebase.clonePath, worktree.worktreePath);
+        // Sweep the parent clone's stale metadata. `git worktree remove` on a
+        // directory that is already gone leaves the entry behind otherwise,
+        // and those entries accumulate for the life of the clone.
+        await this.gitManager.pruneWorktrees(codebase.clonePath);
       } catch (err) {
         this.logger.warn(`[Worktree] Git worktree remove failed: ${err}`);
       }
     }
 
-    // Clean up filesystem
-    try {
-      await fs.rm(worktree.worktreePath, { recursive: true, force: true });
-    } catch {
-      // Best effort
-    }
+    // Clean up filesystem (the git path above may already have done it).
+    await this.rmWorktreeTree(worktree.worktreePath);
 
     // Delete the DB record so the worktree no longer appears in listings
     await this.worktreeRepo.delete(worktreeId);
     this.logger.info(`[Worktree] Removed worktree ${worktreeId}`);
+  }
+
+  /**
+   * `fs.rm` with a short retry ladder.
+   *
+   * On Windows a directory stays undeletable (EBUSY / EPERM / ENOTEMPTY) for a
+   * few milliseconds after the last handle into it is closed — a watcher, an
+   * indexer, or the git process we just ran. Retrying turns nearly all of those
+   * into a clean removal; anything that survives is a real leak and is raised
+   * rather than warned away.
+   */
+  private async rmWorktreeTree(target: string, attempts = 4): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        await fs.rm(target, { recursive: true, force: true });
+        return;
+      } catch (err) {
+        lastError = err;
+        if (attempt < attempts - 1) {
+          await new Promise((r) => setTimeout(r, 100 * 2 ** attempt));
+        }
+      }
+    }
+    throw new Error(
+      `Worktree directory could not be removed (${target}): ` +
+        `${lastError instanceof Error ? lastError.message : String(lastError)}. ` +
+        'The tracking row was kept so the directory remains findable.',
+    );
   }
 
   async listWorktrees(projectId?: string, runId?: string): Promise<WorktreeInfo[]> {
@@ -175,27 +228,24 @@ export class WorktreeService {
     let cleaned = 0;
 
     for (const wt of worktrees) {
-      // Clean up worktrees with non-active status (stale DB records from prior removals)
-      if (wt.status === 'completed' || wt.status === 'orphaned' || wt.status === 'cleanup-pending') {
-        try {
-          // Also clean up filesystem if somehow still present
-          try { await fs.rm(wt.worktreePath, { recursive: true, force: true }); } catch { /* best effort */ }
-          await this.worktreeRepo.delete(wt.id);
-          cleaned++;
-        } catch (err) {
-          this.logger.warn(`[Worktree] Failed to delete stale worktree record ${wt.id}: ${err}`);
-        }
-        continue;
-      }
+      // Clean up worktrees with non-active status (stale DB records from prior
+      // removals) AND active worktrees with no runId (true orphans).
+      //
+      // Both go through `removeWorktree`. The stale branch used to do a bare
+      // `fs.rm` and then delete the row, which never told the parent clone the
+      // worktree was gone — so this "cleanup" was itself an orphan generator:
+      // every sweep added another dangling entry to `git worktree list` that
+      // nothing would ever prune.
+      const isStale =
+        wt.status === 'completed' || wt.status === 'orphaned' || wt.status === 'cleanup-pending';
+      const isOrphan = wt.status === 'active' && !wt.runId;
+      if (!isStale && !isOrphan) continue;
 
-      // Active worktrees without a runId are orphans — remove them
-      if (wt.status === 'active' && !wt.runId) {
-        try {
-          await this.removeWorktree(wt.id);
-          cleaned++;
-        } catch (err) {
-          this.logger.warn(`[Worktree] Failed to clean up orphaned worktree ${wt.id}: ${err}`);
-        }
+      try {
+        await this.removeWorktree(wt.id);
+        cleaned++;
+      } catch (err) {
+        this.logger.warn(`[Worktree] Failed to clean up worktree ${wt.id}: ${err}`);
       }
     }
 

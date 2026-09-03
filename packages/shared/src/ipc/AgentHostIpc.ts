@@ -90,6 +90,28 @@ export interface AgentEventNotification {
   type: 'agent_event';
   sessionId: string;
   event: AgentEvent;
+  /**
+   * W12 — per-session monotonic sequence number, assigned by the host's
+   * `SessionQueue` at enqueue time and never reused. The gateway uses it to
+   * detect loss: a jump means the host's bounded queue overflowed.
+   *
+   * Optional on the wire so a message produced by an older host still decodes;
+   * the gateway treats `undefined` as "this host does not sequence" and skips
+   * the gap check rather than reporting a false gap on every event.
+   */
+  seq?: number;
+  /**
+   * W12 — how many events for this session were dropped immediately before
+   * this one because the per-session queue was at capacity. Present (and > 0)
+   * only on the first event delivered after an overflow.
+   *
+   * This is the gap marker. It is carried as transport metadata rather than a
+   * synthetic `AgentEvent` because a dropped-events notice is a property of the
+   * IPC channel, not something a provider ever emitted — inventing a
+   * `harness.gap` event kind would put a transport concern into the domain
+   * event union that every consumer switches over.
+   */
+  droppedBefore?: number;
 }
 
 /** Session reached a terminal state. */
@@ -124,20 +146,56 @@ export type AgentHostResponse =
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-/** Type-guard for any AgentHostRequest. */
+/**
+ * The exhaustive discriminator sets. Declared as `Set<AgentHostRequest['type']>`
+ * so adding a member to either union without listing it here is a compile error
+ * — the guards below are the only thing standing between the IPC channel and
+ * `handleRequest`'s `default:` branch.
+ */
+const REQUEST_TYPES: ReadonlySet<AgentHostRequest['type']> = new Set([
+  'spawn_session',
+  'send_turn',
+  'abort_session',
+  'delete_session',
+  'get_stats',
+  'ping',
+] satisfies AgentHostRequest['type'][]);
+
+const RESPONSE_TYPES: ReadonlySet<AgentHostResponse['type']> = new Set([
+  'ack',
+  'error',
+  'agent_event',
+  'session_ended',
+  'stats',
+  'pong',
+] satisfies AgentHostResponse['type'][]);
+
+/**
+ * Type-guard for any AgentHostRequest.
+ *
+ * △ These used to accept ANY object with a string `type`, which made them
+ * assertions rather than guards: an unrelated message (or a response echoed
+ * onto the wrong channel) passed the check and fell through to the `default:`
+ * branch, so the "unrecognised IPC message" warning was unreachable and the
+ * mismatch surfaced later as a missing `reqId` instead.
+ */
 export function isAgentHostRequest(msg: unknown): msg is AgentHostRequest {
-  return (
-    typeof msg === 'object' &&
-    msg !== null &&
-    typeof (msg as Record<string, unknown>)['type'] === 'string'
-  );
+  if (typeof msg !== 'object' || msg === null) return false;
+  const type = (msg as Record<string, unknown>)['type'];
+  if (typeof type !== 'string' || !REQUEST_TYPES.has(type as AgentHostRequest['type'])) return false;
+  // Every request carries a correlation id; without one the host cannot reply.
+  return typeof (msg as Record<string, unknown>)['reqId'] === 'string';
 }
 
 /** Type-guard for any AgentHostResponse. */
 export function isAgentHostResponse(msg: unknown): msg is AgentHostResponse {
-  return (
-    typeof msg === 'object' &&
-    msg !== null &&
-    typeof (msg as Record<string, unknown>)['type'] === 'string'
-  );
+  if (typeof msg !== 'object' || msg === null) return false;
+  const type = (msg as Record<string, unknown>)['type'];
+  if (typeof type !== 'string' || !RESPONSE_TYPES.has(type as AgentHostResponse['type'])) return false;
+  // Notifications are keyed by sessionId; everything else by reqId.
+  const record = msg as Record<string, unknown>;
+  if (type === 'agent_event' || type === 'session_ended') {
+    return typeof record['sessionId'] === 'string';
+  }
+  return typeof record['reqId'] === 'string';
 }

@@ -17,7 +17,7 @@
 // moment they are reaching for it, which is how you get accidental cancels.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, Text, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import {
@@ -58,6 +58,13 @@ export interface ComposerProps {
   onSend: () => void;
   onStop: () => void;
   isStreaming: boolean;
+  /**
+   * W30-b — what the Stop control should say and whether it accepts a press.
+   *
+   * Owned by the screen, which is the only thing that can see whether the
+   * BACKEND still considers the turn live. Absent means "behave as before".
+   */
+  stopState?: { label: string; enabled: boolean; forceAvailable: boolean };
   disabled?: boolean;
   disabledReason?: string | undefined;
 
@@ -86,10 +93,36 @@ export interface ComposerProps {
 
   voiceAvailable: boolean;
   onVoice?: (() => void) | undefined;
-  /** Recording right now — the button becomes a stop control. */
+  /** Listening right now — the button becomes a stop control. */
   voiceActive?: boolean | undefined;
   /** Transcribing — disabled with a spinner. */
   voiceBusy?: boolean | undefined;
+  /**
+   * Live, not-yet-committed dictation text (Part C.2). Rendered as a
+   * separate dimmed line, deliberately NOT merged into `draft`: nothing
+   * uncommitted is ever put in the editable buffer, which is what removes
+   * the whole class of "manual edit collides with in-flight speech" bugs.
+   */
+  voiceInterim?: string | undefined;
+  /**
+   * Fired on any manual interaction with the field while dictation is live
+   * — typing or moving the caret (Part C.3). The act of editing IS the
+   * pause signal; the user never has to press anything to say "wait".
+   */
+  onComposerInteraction?: (() => void) | undefined;
+  /**
+   * Caret position, lifted so the screen can insert dictated segments at it
+   * (Part C.2, insert-at-caret). Uncontrolled if omitted.
+   */
+  caret?: number | undefined;
+  onCaretChange?: ((caret: number) => void) | undefined;
+  /**
+   * One-shot selection to apply after a programmatic insertion, then clear.
+   * Held only for a single render: leaving `selection` permanently
+   * controlled fights the user's own typing on Android.
+   */
+  pendingSelection?: number | null | undefined;
+  onPendingSelectionApplied?: (() => void) | undefined;
   attachAvailable: boolean;
   onAttach?: (() => void) | undefined;
   /** Shown when the attach button is unavailable, instead of a dead control. */
@@ -102,8 +135,19 @@ export interface ComposerProps {
 export function Composer(props: ComposerProps): React.ReactElement {
   const { colors } = useTheme();
   const [sheet, setSheet] = useState<'none' | 'model' | 'options'>('none');
-  const [caret, setCaret] = useState(0);
+  const [internalCaret, setInternalCaret] = useState(0);
   const [focused, setFocused] = useState(false);
+  // Controlled when the screen supplies one (it needs the caret to insert
+  // dictated text there); self-managed otherwise.
+  const caret = props.caret ?? internalCaret;
+  const { onCaretChange } = props;
+  const setCaret = useCallback(
+    (next: number) => {
+      setInternalCaret(next);
+      onCaretChange?.(next);
+    },
+    [onCaretChange],
+  );
 
   const {
     draft,
@@ -111,6 +155,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
     onSend,
     onStop,
     isStreaming,
+    stopState,
     disabled = false,
     disabledReason,
     models,
@@ -168,6 +213,13 @@ export function Composer(props: ComposerProps): React.ReactElement {
     },
     [menu, draft, onDraftChange, onOpenSection],
   );
+
+  // Release the one-shot selection on the render after it was applied, so
+  // the field goes back to being uncontrolled for selection.
+  const { pendingSelection, onPendingSelectionApplied } = props;
+  useEffect(() => {
+    if (pendingSelection != null) onPendingSelectionApplied?.();
+  }, [pendingSelection, onPendingSelectionApplied]);
 
   const canSend = draft.trim().length > 0 && !disabled;
 
@@ -234,14 +286,37 @@ export function Composer(props: ComposerProps): React.ReactElement {
         layout={LinearTransition.duration(160)}
         className={`m-3 rounded-3xl border bg-card ${focused ? 'border-primary' : 'border-border'}`}
       >
+        {props.voiceInterim ? (
+          <View className="px-3 pt-2.5">
+            <Text
+              accessibilityLabel={`Hearing: ${props.voiceInterim}`}
+              className="text-md italic leading-relaxed text-muted-foreground"
+            >
+              {props.voiceInterim}
+            </Text>
+          </View>
+        ) : null}
+
         <View className="flex-row items-end gap-1 px-3 pt-2.5">
           <TextInput
             accessibilityLabel="Message"
             multiline
             editable={!disabled}
             value={draft}
-            onChangeText={onDraftChange}
-            onSelectionChange={(e) => setCaret(e.nativeEvent.selection.start)}
+            onChangeText={(text) => {
+              props.onComposerInteraction?.();
+              onDraftChange(text);
+            }}
+            onSelectionChange={(e) => {
+              const next = e.nativeEvent.selection.start;
+              // A programmatic insertion moves the caret too and would
+              // otherwise look like the user reaching in and editing.
+              if (props.pendingSelection == null) props.onComposerInteraction?.();
+              setCaret(next);
+            }}
+            {...(props.pendingSelection != null
+              ? { selection: { start: props.pendingSelection, end: props.pendingSelection } }
+              : {})}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder={disabled ? 'Waiting…' : 'Ask anything · / actions · @ files'}
@@ -350,7 +425,13 @@ export function Composer(props: ComposerProps): React.ReactElement {
               </Touchable>
             ) : null}
 
-            <SendButton streaming={isStreaming} enabled={canSend} onSend={onSend} onStop={onStop} />
+            <SendButton
+              streaming={isStreaming}
+              enabled={canSend}
+              onSend={onSend}
+              onStop={onStop}
+              {...(stopState ? { stopState } : {})}
+            />
           </View>
         </View>
       </Animated.View>
@@ -386,18 +467,25 @@ function SendButton({
   enabled,
   onSend,
   onStop,
+  stopState,
 }: {
   streaming: boolean;
   enabled: boolean;
   onSend: () => void;
   onStop: () => void;
+  stopState?: { label: string; enabled: boolean; forceAvailable: boolean };
 }): React.ReactElement {
   const { colors } = useTheme();
-  const active = streaming || enabled;
+  // W30-b — during the 400 ms arming window the control is genuinely
+  // unpressable, not merely dimmed: a disabled-looking button that still fires
+  // its handler is not an arming window, and Stop is the control people
+  // double-tap hardest.
+  const stopPressable = streaming ? (stopState?.enabled ?? true) : false;
+  const active = stopPressable || (!streaming && enabled);
 
   return (
     <Touchable
-      accessibilityLabel={streaming ? 'Stop' : 'Send'}
+      accessibilityLabel={streaming ? (stopState?.label ?? 'Stop') : 'Send'}
       disabled={!active}
       haptic="commit"
       onPress={streaming ? onStop : onSend}

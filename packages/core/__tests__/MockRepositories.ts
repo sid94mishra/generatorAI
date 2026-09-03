@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type {
-  Chat, ChatStatus,
+  Chat, ChatStatus, BackgroundTaskStatus,
   WorkflowDefinition,
   StageDefinition,
   StageEdge,
@@ -65,6 +65,36 @@ export class MockChatRepository implements IChatRepository {
 
   clear(): void {
     this.store.clear();
+  }
+
+  async getByProjectId(projectId: string): Promise<Chat[]> {
+    return [...this.store.values()].filter((c) => c.projectId === projectId).map((c) => ({ ...c }));
+  }
+
+  async listBackgroundTasks(parentChatId: string): Promise<Chat[]> {
+    return [...this.store.values()].filter((c) => c.parentChatId === parentChatId).map((c) => ({ ...c }));
+  }
+
+  async updateBackgroundTaskStatus(id: string, status: BackgroundTaskStatus): Promise<void> {
+    const existing = this.store.get(id);
+    if (existing) {
+      existing.backgroundTask = { ...(existing.backgroundTask ?? { orchestratorChatId: existing.parentChatId ?? '', taskName: existing.name }), status };
+    }
+  }
+
+  // ── W24 — orchestrator wave-state persistence (added alongside OrchestratorService tests) ──
+  private waveState = new Map<string, { waveCount: number; startedAt: number }>();
+
+  async getOrchestratorWaveState(chatId: string): Promise<{ waveCount: number; startedAt: number } | null> {
+    return this.waveState.get(chatId) ?? null;
+  }
+
+  async setOrchestratorWaveState(chatId: string, state: { waveCount: number; startedAt: number }): Promise<void> {
+    this.waveState.set(chatId, { ...state });
+  }
+
+  async clearOrchestratorWaveState(chatId: string): Promise<void> {
+    this.waveState.delete(chatId);
   }
 }
 

@@ -1,4 +1,24 @@
 // Shared config barrel
+
+// W18 — bounded/audited numeric env reading. Replaces bare `parseInt(env)`,
+// which turns a typo into a NaN that deadlocks Semaphore-gated call paths.
+export {
+  readBoundedInt,
+  getConfigAudit,
+  getConfigCorrections,
+  resetConfigAudit,
+} from './numericEnv.js';
+export type { ConfigReadAction, ConfigReadRecord, ReadBoundedIntOptions } from './numericEnv.js';
+
+// §11.1 "no capability granted by negation" — allowlist-built environments for
+// any child that runs model-authored commands (harness, terminal, sandbox).
+export {
+  buildChildEnv,
+  isBlockedChildEnvVar,
+  BASE_CHILD_ENV_ALLOWLIST,
+} from './childEnv.js';
+export type { ChildEnvOptions } from './childEnv.js';
+
 export { AppConfigSchema } from './AppConfig.js';
 export type { AppConfig } from './AppConfig.js';
 export {
@@ -15,9 +35,10 @@ export {
   ResultValidationSchema,
   WorkflowTemplateStageSchema,
   WorkflowTemplateEdgeSchema,
+  templateStageToCreateParams,
   StageTemplatePromptSchema,
 } from './WorkflowTemplate.js';
-export type { WorkflowTemplate, StageTemplate, WorkflowRunProfile } from './WorkflowTemplate.js';
+export type { WorkflowTemplate, WorkflowTemplateStage, StageTemplate, WorkflowRunProfile } from './WorkflowTemplate.js';
 
 export {
   CreateWorkflowDefinitionSchema,

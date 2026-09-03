@@ -29,10 +29,13 @@ const { version: APP_VERSION } = JSON.parse(
 ) as { version: string };
 
 // WEB-03: rollup-plugin-visualizer emits `dist/stats.html` on every
-// production build. CI reads the companion `dist/stats.json` to enforce
-// the 800 KB gzipped total-bundle budget (see scripts/check-bundle-size.mjs).
-// The visualizer is cheap (writes after bundle finalization) so it's
-// always on rather than gated by an env flag.
+// production build, for humans investigating a size regression. The
+// 800 KB gzipped budget itself is enforced by scripts/check-bundle-size.mjs,
+// which reads `dist/index.html`'s own entry script + modulepreload list
+// directly rather than this file — that list IS the initial-load payload,
+// so it doesn't need a separate stats artifact. The visualizer is cheap
+// (writes after bundle finalization) so it's always on rather than gated
+// by an env flag.
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
@@ -162,9 +165,36 @@ export default defineConfig({
             return 'vendor-workflow';
           }
           // ── Diff / code display (lazy — only loaded on diff views) ───────
+          //
+          // W28 — `src/components/diff/` used to be pinned into this bucket
+          // too, alongside these two workspace packages. That was the actual
+          // cause of the "4x over budget" bundle regression, and it had
+          // nothing to do with WHERE <DiffProviders> was mounted: DiffCodeView,
+          // DiffProviders, ChangesSurface, etc. import ordinary app
+          // foundation — `useTheme()` from providers/ThemeProvider.tsx,
+          // lucide-react icons, design-tokens theme data, PlatformProvider,
+          // client-runtime — that the always-eager App.tsx ALSO needs. Pinning
+          // our own source files into a named manual chunk stops Rollup from
+          // running its normal "this module is needed by the entry too, so
+          // bundle it there" heuristic; instead it bundled ~550 shared modules
+          // (including ThemeProvider itself) INTO 'lazy-diff', and the entry
+          // then had to statically import them back out — dragging the whole
+          // pinned chunk, and everything IT statically imports (including
+          // @pierre/diffs and the entire Shiki grammar set below), into the
+          // eager bundle regardless of where any component was mounted.
+          //
+          // `packages/changes/`/`packages/review/` are real workspace
+          // packages, not app source under this app's own module graph, so
+          // they don't share that entanglement risk — a future consumer of
+          // either would pull in its own copy of shared app foundation, not
+          // reach back into this app's `src/providers/`. Left pinned for the
+          // cache-stability this bucket exists for. Our own diff components
+          // are deliberately NOT listed here: leaving them unassigned lets
+          // Rollup's default algorithm split them correctly, which is exactly
+          // what already works correctly for every other lazy page in this
+          // app (see the DashboardPage/ChatPage/etc. chunks below).
           if (id.includes('packages/changes/') ||
-              id.includes('packages/review/') ||
-              id.includes('src/components/diff/')) {
+              id.includes('packages/review/')) {
             return 'lazy-diff';
           }
           // ── Syntax highlighting (CodeMirror + Shiki grammars) ────────────

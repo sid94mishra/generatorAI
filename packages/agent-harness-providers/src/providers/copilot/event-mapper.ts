@@ -56,7 +56,14 @@ const SDK_EVENT_TO_KIND: Record<string, AgentEventKind> = {
   'permission.requested': 'harness.session_info',
   'permission.completed': 'harness.session_info',
   'assistant.intent': 'harness.session_info',
-  'abort': 'harness.session_info',
+  // △ Fixed during end-to-end review — this used to map to the generic
+  // 'harness.session_info', so an aborted Copilot turn was invisible to
+  // every W13/X-4 cancellation-semantics fix (sseManager's settled predicate,
+  // OrchestratorService's cancelled-subagent tracking, HookInterceptor's
+  // on_session_cancelled phase all key off 'harness.cancelled' specifically).
+  // Only Claude-agent- and Codex-routed cancellations were getting that
+  // treatment; Copilot ones surfaced as an ordinary info blip.
+  'abort': 'harness.cancelled',
   // PLN-01 — plan-mode passthrough (telemetry/observability only; the blocking
   // decision is owned by `SessionConfig.onExitPlanModeRequest`, so these must
   // NOT drive UI state or the gate would be double-prompted).
@@ -160,6 +167,12 @@ function populatePayload(
 
     case 'harness.session_info':
       return populateSessionInfoPayload(sdkEventType, eventData);
+
+    case 'harness.cancelled':
+      // W13 / X-4 — cancellation is a semantic success value, not an error.
+      // `reason` is a closed union (AgentEvent.ts); the SDK's own free-text
+      // reason, if any, still reaches the UI via the preceding info line.
+      return { reason: 'user_abort', provider: 'copilot' };
 
     // PLN-01 — plan-mode passthrough.
     case 'harness.plan_changed':
@@ -306,8 +319,8 @@ function populateSessionInfoPayload(
     case 'session.task_complete':
       return { infoType: 'task_complete', message: eventData.summary ?? 'Task completed' };
 
-    case 'abort':
-      return { infoType: 'abort', message: `Turn aborted: ${eventData.reason ?? 'user initiated'}` };
+    // 'abort' used to be handled here (it mapped to 'harness.session_info');
+    // it is now its own 'harness.cancelled' kind — see SDK_EVENT_TO_KIND above.
 
     case 'assistant.intent':
       return { infoType: 'intent', message: eventData.intent ?? '' };

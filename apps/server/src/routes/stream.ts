@@ -45,7 +45,7 @@ import {
   type MuxSub,
 } from '../streaming/streamConnectionRegistry.js';
 
-const VALID_SCOPES = new Set<StreamScope>(['session', 'run', 'chat', 'global', 'automation']);
+const VALID_SCOPES = new Set<StreamScope>(['session', 'run', 'chat', 'global', 'automation', 'workspace']);
 
 /**
  * Ticket scope for a multiplexed connection (N-12).
@@ -97,13 +97,17 @@ function parseSub(raw: unknown): MuxSub | { error: string } {
 }
 
 /** Ticket scopes redeemable by a WebSocket upgrade rather than SSE. */
-const SOCKET_TICKET_SCOPES = new Set<string>(['terminal', 'browser', 'stt']);
+const SOCKET_TICKET_SCOPES = new Set<string>(['terminal', 'browser', 'stt', 'tts']);
 
 /** The API scope a caller must already hold to mint each socket ticket. */
 const SOCKET_TICKET_SCOPE_REQUIREMENTS: Record<string, Scope | undefined> = {
   terminal: 'exec:terminal',
   browser: 'exec:browser',
   stt: 'write:chats',
+  // Reading a message aloud carries the same authority as reading that
+  // chat — the mirror image of stt's write:chats (speech input becomes a
+  // chat message).
+  tts: 'read:chats',
 };
 
 /** Max kind prefixes accepted in `?filter=` (STR-06). */
@@ -193,8 +197,8 @@ export function createUnifiedStreamRoutes(container: Container): Router {
       const rawId = req.body?.id ?? req.query['id'];
       const providedId = typeof rawId === 'string' && rawId.length > 0 ? rawId : null;
       const scopeId =
-        scope === 'global' ? 'all' : scope === 'stt' ? null : providedId;
-      if (scope !== 'global' && scope !== 'stt' && !scopeId) {
+        scope === 'global' ? 'all' : scope === 'stt' || scope === 'tts' ? null : providedId;
+      if (scope !== 'global' && scope !== 'stt' && scope !== 'tts' && !scopeId) {
         res.status(400).json({
           error: { code: 'MISSING_ID', message: '`id` is required for this scope' },
         });

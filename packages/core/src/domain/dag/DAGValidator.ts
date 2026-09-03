@@ -6,7 +6,7 @@
 
 import type { StageDefinition, StageEdge } from '@generatorai/shared';
 import { DAGValidationError } from '@generatorai/shared';
-import type { DAG, DAGValidationResult, StageNode } from './types.js';
+import type { DAG, DAGValidationIssue, DAGValidationResult, StageNode } from './types.js';
 
 /**
  * Validate a DAG defined by stages and edges.
@@ -25,10 +25,23 @@ export function validateDAG(
 ): DAGValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const issues: DAGValidationIssue[] = [];
+
+  // One helper for both outputs, so an issue can never drift from its string
+  // (or be forgotten on a new check) — the two arrays are built from the same
+  // call, never independently.
+  const fail = (issue: Omit<DAGValidationIssue, 'severity'>): void => {
+    errors.push(issue.message);
+    issues.push({ severity: 'error', ...issue });
+  };
+  const warn = (issue: Omit<DAGValidationIssue, 'severity'>): void => {
+    warnings.push(issue.message);
+    issues.push({ severity: 'warning', ...issue });
+  };
 
   if (stages.length === 0) {
-    warnings.push('DAG has no stages');
-    return { valid: true, errors, warnings };
+    warn({ code: 'empty-graph', message: 'DAG has no stages', stageIds: [] });
+    return { valid: true, errors, warnings, issues };
   }
 
   // ── Empty-prompts check ──
@@ -42,7 +55,12 @@ export function validateDAG(
   for (const stage of stages) {
     const hasAgent = !!stage.agentRef || !!stage.agentName;
     if ((!stage.prompts || stage.prompts.length === 0) && !hasAgent) {
-      warnings.push(`Stage '${stage.name}' has no prompts \u2014 it will not produce any output`);
+      warn({
+        code: 'stage-without-prompts',
+        message: `Stage '${stage.name}' has no prompts \u2014 it will not produce any output`,
+        stageIds: [stage.id],
+        field: 'prompts',
+      });
     }
   }
 
@@ -51,17 +69,34 @@ export function validateDAG(
   // ── Self-edge check ──
   for (const edge of edges) {
     if (edge.fromStageId === edge.toStageId) {
-      errors.push(`Self-edge detected on stage '${edge.fromStageId}'`);
+      fail({
+        code: 'self-edge',
+        message: `Self-edge detected on stage '${edge.fromStageId}'`,
+        stageIds: [edge.fromStageId],
+        edge: edgeRef(edge),
+      });
     }
   }
 
   // ── Reference check ──
   for (const edge of edges) {
     if (!stageIds.has(edge.fromStageId)) {
-      errors.push(`Edge references non-existent source stage '${edge.fromStageId}'`);
+      fail({
+        code: 'unknown-source-stage',
+        message: `Edge references non-existent source stage '${edge.fromStageId}'`,
+        // Deliberately the surviving END of the edge, not the dangling id:
+        // the missing stage cannot be selected or scrolled to by a client.
+        stageIds: stageIds.has(edge.toStageId) ? [edge.toStageId] : [],
+        edge: edgeRef(edge),
+      });
     }
     if (!stageIds.has(edge.toStageId)) {
-      errors.push(`Edge references non-existent target stage '${edge.toStageId}'`);
+      fail({
+        code: 'unknown-target-stage',
+        message: `Edge references non-existent target stage '${edge.toStageId}'`,
+        stageIds: stageIds.has(edge.fromStageId) ? [edge.fromStageId] : [],
+        edge: edgeRef(edge),
+      });
     }
   }
 
@@ -70,14 +105,19 @@ export function validateDAG(
   for (const edge of edges) {
     const key = `${edge.fromStageId}→${edge.toStageId}:${edge.edgeType}`;
     if (edgeSet.has(key)) {
-      errors.push(`Duplicate edge from '${edge.fromStageId}' to '${edge.toStageId}' with type '${edge.edgeType}'`);
+      fail({
+        code: 'duplicate-edge',
+        message: `Duplicate edge from '${edge.fromStageId}' to '${edge.toStageId}' with type '${edge.edgeType}'`,
+        stageIds: [edge.fromStageId, edge.toStageId].filter((id) => stageIds.has(id)),
+        edge: edgeRef(edge),
+      });
     }
     edgeSet.add(key);
   }
 
   // If basic validation already failed, don't run cycle detection
   if (errors.length > 0) {
-    return { valid: false, errors, warnings };
+    return { valid: false, errors, warnings, issues };
   }
 
   // ── Cycle detection via Kahn's algorithm ──
@@ -116,16 +156,24 @@ export function validateDAG(
 
   if (sorted.length !== stageIds.size) {
     const cycleNodes = [...stageIds].filter((id) => !sorted.includes(id));
-    errors.push(`Cycle detected involving stages: ${cycleNodes.join(', ')}`);
-    return { valid: false, errors, warnings };
+    fail({
+      code: 'cycle',
+      message: `Cycle detected involving stages: ${cycleNodes.join(', ')}`,
+      stageIds: cycleNodes,
+    });
+    return { valid: false, errors, warnings, issues };
   }
 
   // ── Disconnected node check ──
   // All nodes should be reachable from roots OR have a path to a leaf
   const roots = [...stageIds].filter((id) => (inDegree.get(id) ?? 0) === 0 || !edges.some((e) => e.toStageId === id));
   if (roots.length === 0 && stages.length > 0) {
-    errors.push('No root stages found — all stages have incoming edges');
-    return { valid: false, errors, warnings };
+    fail({
+      code: 'no-root-stages',
+      message: 'No root stages found — all stages have incoming edges',
+      stageIds: [...stageIds],
+    });
+    return { valid: false, errors, warnings, issues };
   }
 
   // BFS from all roots
@@ -144,10 +192,23 @@ export function validateDAG(
 
   const unreachable = [...stageIds].filter((id) => !reachable.has(id));
   if (unreachable.length > 0) {
-    warnings.push(`Disconnected stages detected: ${unreachable.join(', ')}`);
+    warn({
+      code: 'disconnected-stages',
+      message: `Disconnected stages detected: ${unreachable.join(', ')}`,
+      stageIds: unreachable,
+    });
   }
 
-  return { valid: errors.length === 0, errors, warnings };
+  return { valid: errors.length === 0, errors, warnings, issues };
+}
+
+/** The edge fields an issue carries — `edgeType` omitted rather than `undefined` under `exactOptionalPropertyTypes`. */
+function edgeRef(edge: StageEdge): NonNullable<DAGValidationIssue['edge']> {
+  return {
+    fromStageId: edge.fromStageId,
+    toStageId: edge.toStageId,
+    ...(edge.edgeType ? { edgeType: String(edge.edgeType) } : {}),
+  };
 }
 
 /**

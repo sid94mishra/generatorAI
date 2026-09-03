@@ -46,16 +46,25 @@ import { useConnectionStore } from './connectionStore.js';
 import { useChatStore } from './chatStore.js';
 import { useWorkflowRunStore } from './workflowRunStore.js';
 import { queryClient } from '../providers/QueryProvider.js';
-import { queryKeys } from '../hooks/queries.js';
+import { backgroundTasksKeys, queryKeys } from '../hooks/queries.js';
 import { workflowKeys } from '../hooks/workflowQueries.js';
 import { replayEventsIntoStore } from '../utils/replayEvents.js';
 import { widgetBridge } from '../lib/widgetBridge.js';
+import { countFallback } from '../lib/clientMetrics.js';
 import type { PersistedEvent } from '@generatorai/shared';
 import type { WorkflowRunStatus, StageRunStatus } from '@generatorai/shared';
-import type { SystemCategory, QuestionBlock, PlanBlock } from './streamStore.js';
-import type { ContextUsageSnapshot } from '@generatorai/client-core';
+import {
+  cancelFrame,
+  partitionEffects,
+  scheduleFrame,
+  StreamEventRouter,
+  type FrameHandle,
+  type StreamEffect,
+} from '@generatorai/client-core';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
 import { openMultiplexedStream } from '../platform/muxStream.js';
+import { globalSingleton } from '../lib/globalSingleton.js';
+import { blockDeliveryEntry } from '../platform/surfaceCapabilities.js';
 
 // ── Connection scope ──
 
@@ -81,6 +90,13 @@ interface ConnectionState {
    *  frames are buffered into `pendingSSEEvents` so replay output and
    *  live events don't interleave out of order. */
   replayed: boolean;
+  /**
+   * W26 — the hydration re-entrancy guard. A reconnect fires `onOpen` again,
+   * and a second concurrent snapshot would double every event it fetched.
+   */
+  hydrating: boolean;
+  /** Fires the hydration anyway when `hello` never arrives. */
+  hydrateFallback: ReturnType<typeof setTimeout> | null;
   /** True while the pending-event flush loop is executing, preventing
    *  closeConnection from clearing the buffer mid-drain. */
   draining: boolean;
@@ -90,13 +106,25 @@ interface ConnectionState {
   maxSeenSequence: number;
   seenSequenceIds: Set<number>;
 
-  // Buffer state used by processEvent — per-stream-key buffers to prevent
-  // token interleaving when parallel stages stream simultaneously.
-  // Each stream key (e.g. `stageRun:<id>`) gets its own token/thinking buffer.
-  stageBuffers: Map<string, { tokenBuf: string; thinkingBuf: string }>;
-  flushTimer: ReturnType<typeof setInterval> | null;
-  idleTimer: ReturnType<typeof setTimeout> | null;
-  currentStageRunId: string | null;
+  /**
+   * W26 — the ONE event router, shared with mobile and available to the CLI.
+   *
+   * One instance PER CONNECTION, not per tab: it owns this connection's
+   * per-stream-key token buffers (which is what stops parallel stages
+   * interleaving) and its stage attribution. Two connections must not share
+   * either.
+   */
+  router: StreamEventRouter;
+  /** Pending frame-aligned drain, if one is scheduled. */
+  drainHandle: FrameHandle | null;
+  /**
+   * Armed settle-and-clear timers, keyed by stream key.
+   *
+   * A map rather than the single `idleTimer` this replaced: a run-scope
+   * connection settles many stage keys, and one shared handle meant the
+   * second stage to settle silently cancelled the first one's timer.
+   */
+  cleanupTimers: Map<string, ReturnType<typeof setTimeout>>;
 
   // ── Stall watchdog (self-healing for missed terminal events) ──
   // Native EventSource silently drops a connection when a proxy/browser idle
@@ -128,8 +156,20 @@ interface ConnectionState {
 
 // ── Module singleton state ──
 
-const connections = new Map<string, ConnectionState>();
-const FLUSH_INTERVAL = 100; // ms — 10 flushes/sec, matches prior behaviour
+const connections = globalSingleton(
+  'web.sseManager.connections',
+  () => new Map<string, ConnectionState>(),
+);
+
+/**
+ * How far below the tip `seenSequenceIds` is retained.
+ *
+ * Two things depend on it and must agree: pruning the dedup set, and how far
+ * back a gap fill may resume. A hole older than this window cannot be
+ * recovered without re-processing events we can no longer recognise as
+ * duplicates — see `gapFill`, which reports what it had to skip.
+ */
+const DEDUP_WINDOW = 2000;
 
 // ── P1-51: Per-tick invalidation de-duplication ─────────────────────────────
 // A 20-stage run can fire ~160 full refetches per second: each stage event
@@ -137,55 +177,138 @@ const FLUSH_INTERVAL = 100; // ms — 10 flushes/sec, matches prior behaviour
 // runs list — all synchronously inside processEvent. Many events share the
 // same keys so the work is wasted.
 //
-// Fix: buffer keys into a Set; a queueMicrotask fires the batch once per
-// event-loop turn. Same-tick duplicates collapse to one invalidation.
+// Fix: buffer keys into a Set and flush once per FRAME (16 ms), matching
+// mobile's `useChatStream` coalescing window.
+//
+// A microtask was not enough. SSE frames arrive one macrotask apart, so a
+// microtask flush collapses only the keys produced by a single frame — with
+// twenty stages streaming that is still ~60 invalidation batches a second,
+// each a full refetch. `scheduleFrame` (W26) is the shared frame boundary: a
+// burst becomes one refetch, and it still lands on the frame the user sees.
+// Deliberately the SAME primitive the token drain uses, so the two cannot
+// drift into different notions of "a tick".
 const _pendingInvalidations = new Set<string>();
-let _invalidationQueued = false;
+let _invalidationFrame: FrameHandle | null = null;
 
 function flushInvalidations(): void {
   // F7 fix: snapshot the set before clearing so that any synchronous
   // `invalidateQueries` subscriber that calls `scheduleInvalidation` during
-  // iteration queues a NEW microtask rather than having its key silently eaten
-  // by `.clear()` on the live set. Setting `_invalidationQueued = false` after
-  // `.clear()` also ensures the re-entry path schedules a proper microtask.
+  // iteration queues a NEW tick rather than having its key silently eaten
+  // by `.clear()` on the live set. Clearing the timer handle after `.clear()`
+  // also ensures the re-entry path schedules a proper tick.
   const keys = [..._pendingInvalidations];
   _pendingInvalidations.clear();
-  _invalidationQueued = false;
+  _invalidationFrame = null;
   for (const key of keys) {
     queryClient.invalidateQueries({ queryKey: JSON.parse(key) as unknown[] });
   }
 }
 
 /**
- * Schedule a query invalidation, de-duplicated within the current
- * microtask tick. Multiple calls with identical `queryKey` arrays collapse
- * to a single `invalidateQueries` call.
+ * Schedule a query invalidation, de-duplicated within a 16 ms tick.
+ * Multiple calls with identical `queryKey` arrays — and calls from separate
+ * SSE frames landing inside the same frame — collapse to a single
+ * `invalidateQueries` call.
  */
-function scheduleInvalidation(queryKey: unknown[]): void {
+export function scheduleInvalidation(queryKey: readonly unknown[]): void {
   _pendingInvalidations.add(JSON.stringify(queryKey));
-  if (!_invalidationQueued) {
-    _invalidationQueued = true;
-    queueMicrotask(flushInvalidations);
+  if (_invalidationFrame === null) {
+    _invalidationFrame = scheduleFrame(flushInvalidations);
   }
 }
+
+/** Flush any buffered invalidations immediately (unit tests only). */
+export function _flushInvalidationsNow(): void {
+  if (import.meta.env.PROD) return;
+  if (_invalidationFrame !== null) {
+    cancelFrame(_invalidationFrame);
+    _invalidationFrame = null;
+  }
+  flushInvalidations();
+}
+
+/**
+ * Where a gap fill may resume from — and what it has to give up to get there.
+ *
+ * Resuming from the contiguous frontier is what makes a dropped frame
+ * recoverable. But `seenSequenceIds` only retains `DEDUP_WINDOW` entries below
+ * the tip, so a hole older than that cannot be refetched without re-processing
+ * events we can no longer recognise as duplicates (duplicated tool calls,
+ * duplicated text). The clamp past it is therefore permanent data loss for
+ * this tab.
+ *
+ * N4: it used to happen in complete silence — the comment acknowledged it and
+ * nothing surfaced it. This function is where that stops: it counts the lost
+ * sequences and records them against the connection, which is what puts a
+ * "some events could not be recovered" badge in front of the user instead of
+ * leaving a transcript quietly missing a tool result. Exported so the branch
+ * has a test rather than a comment.
+ */
+export function resolveGapResume(
+  contiguousSequence: number,
+  maxSeenSequence: number,
+  sessionId: string,
+): number {
+  const windowFloor = maxSeenSequence - DEDUP_WINDOW;
+  if (windowFloor <= contiguousSequence) return contiguousSequence;
+  const skipped = windowFloor - contiguousSequence;
+  countFallback('streamGapSkippedEvents', skipped);
+  useConnectionStore.getState().recordGap(sessionId, skipped);
+  return windowFloor;
+}
+
+// ── Event processing ──
+//
+// W26 — this used to be a ~1000-line `switch` over every event kind, a second
+// copy of the one in `packages/client-core/src/stream/eventRouter.ts` that
+// mobile already used and a third of the one in the CLI's TUI store. Three
+// copies meant every fix landed in one of them: web had the parallel-stage
+// stream keys and the workflow timeline, mobile had the `message_complete`
+// fallback and the replay-safe turn guard, and neither had the other's.
+//
+// The switch is gone. `conn.router` decides WHAT should happen; the two
+// functions below decide HOW on this surface — folding transcript ops into
+// the Zustand store, mapping `invalidate` resources onto web's query keys,
+// driving the workflow-run store and the widget bridge, and owning the two
+// timers (settle-and-clear, delayed history refetch) that need a clock.
+//
+// The load-bearing part CLAUDE.md flags — the thinking ↔ token cross-buffer
+// flush that preserves temporal order — moved WITH the routing and is tested
+// in `packages/client-core/src/__tests__/eventRouter.test.ts`, which is
+// strictly better than the comment that used to guard it here.
 
 /** Kinds that carry no state and must not count as proof of life. */
 const IGNORED_FOR_LIVENESS = new Set<string>(['harness.session_info', 'harness.unknown']);
 
-const PLAN_STATUSES = new Set([
-  'drafting', 'recorded', 'awaiting_review', 'changes_requested',
-  'approved', 'rejected', 'superseded', 'expired',
-]);
+/**
+ * How long a settled chat transcript stays on screen before it is swapped for
+ * the persisted messages.
+ *
+ * Long enough that the refetch has landed, short enough that the user does not
+ * see the two representations disagree.
+ */
+const TRANSCRIPT_CLEANUP_MS = 5_000;
 
 /**
- * A plan filed by the non-blocking `record_plan` tool is born `recorded` and
- * gets no follow-up status event, so pinning `drafting` left its card spinning
- * forever.
+ * How long to wait for `hello` before hydrating anyway.
+ *
+ * Hydrating after `hello` is what closes the snapshot/stream gap, but making
+ * it a precondition would mean a connection that never opens leaves the view
+ * permanently blank. One second is far longer than a healthy handshake and
+ * short enough that the user reads it as loading rather than as broken.
  */
-function planStatusOf(data: Record<string, unknown>): PlanBlock['status'] {
-  const s = data['status'];
-  return typeof s === 'string' && PLAN_STATUSES.has(s) ? (s as PlanBlock['status']) : 'drafting';
-}
+const HYDRATE_FALLBACK_MS = 1_000;
+
+/**
+ * A second history refetch, a second after `harness.message_complete`.
+ *
+ * The event fires when the model finished, which is not when the row is
+ * readable: the write is still settling, so a refetch issued on the event
+ * itself frequently returns the transcript WITHOUT the message that just
+ * completed. Kept deliberately — it is the difference between a turn that
+ * lands and one that appears only on the next navigation.
+ */
+const MESSAGE_SETTLE_REFETCH_MS = 1_000;
 
 /**
  * Record a sequence as delivered and push the contiguous frontier forward.
@@ -207,14 +330,6 @@ function connKey(scope: StreamScope, scopeId: string): string {
 
 // ── Helpers ──
 
-function detectCategory(message: string): SystemCategory {
-  const lower = message.toLowerCase();
-  if (lower.includes('subagent') || lower.includes('sub-agent') || lower.includes('sub agent')) {
-    return 'subagent';
-  }
-  return 'system';
-}
-
 /**
  * Invalidate chat messages queries for any v2 Chat that owns this session.
  * Resolves chatId from the chatStore's sessionId → chatId reverse lookup.
@@ -223,83 +338,304 @@ function invalidateChatMessagesBySession(sessionId: string): void {
   const { chatSessionMap } = useChatStore.getState();
   for (const [chatId, sid] of Object.entries(chatSessionMap)) {
     if (sid === sessionId) {
-      // P1-51: batched — de-duplicated within the current microtask tick.
+      // P1-51: batched — de-duplicated within the current frame.
       scheduleInvalidation(queryKeys.chatMessages(chatId));
     }
   }
 }
 
 /**
- * PLN-01 — refresh the polled pending-interaction list for a chat.
+ * Map one `invalidate` effect onto web's query keys.
  *
- * ChatPage reconciles plan/question card state against that list, so a gate
- * opening or closing has to refresh it immediately rather than waiting out the
- * 5s poll interval.
+ * The router names a RESOURCE because it has no query library and the
+ * surfaces do not agree on key shapes. This is web's half of that contract;
+ * mobile's is in `useChatStream`.
+ *
+ * Everything goes through `scheduleInvalidation`, which de-duplicates within
+ * a frame — a twenty-stage run fires the same three keys dozens of times a
+ * second, and each one is a full refetch.
  */
-function invalidatePendingInteractions(chatId: unknown): void {
-  if (typeof chatId !== 'string' || !chatId) return;
-  scheduleInvalidation(['chat', chatId, 'interactions']);
+function invalidateResource(
+  sessionId: string,
+  effect: Extract<StreamEffect, { op: 'invalidate' }>,
+): void {
+  switch (effect.resource) {
+    case 'messages':
+      if (effect.id) {
+        // Carried a chat id of its own (`chat.prompt_sent`), so no reverse
+        // lookup is needed.
+        scheduleInvalidation(queryKeys.chatMessages(effect.id));
+        break;
+      }
+      scheduleInvalidation(queryKeys.chatHistory(sessionId));
+      invalidateChatMessagesBySession(sessionId);
+      break;
+    case 'chat':
+      if (effect.id) scheduleInvalidation(queryKeys.chat(effect.id));
+      break;
+    case 'chats':
+      scheduleInvalidation(queryKeys.chats);
+      break;
+    case 'session':
+      scheduleInvalidation(queryKeys.session(sessionId));
+      break;
+    case 'sessions':
+      scheduleInvalidation(queryKeys.sessions);
+      break;
+    case 'run':
+      if (effect.id) scheduleInvalidation(workflowKeys.run(effect.id));
+      break;
+    case 'runs':
+      scheduleInvalidation(workflowKeys.runs);
+      break;
+    case 'plans':
+      if (!effect.id) break;
+      scheduleInvalidation(['chat', effect.id, 'plans']);
+      // The inline card carries its own summary from the event, but the Plan
+      // tab renders the REST document — without this a revision published
+      // mid-turn leaves the tab showing the previous markdown, which is the
+      // text the user would then approve.
+      if (effect.subId) scheduleInvalidation(['chat', effect.id, 'plan', effect.subId]);
+      break;
+    case 'interactions':
+      // Polled, and what ChatPage reconciles card state against; refreshing it
+      // here keeps the two views from disagreeing for a whole poll period.
+      if (effect.id) scheduleInvalidation(['chat', effect.id, 'interactions']);
+      break;
+    case 'workspace': {
+      if (!effect.id) break;
+      const id = effect.id;
+      // The summary alone only drives the tree and the +/- counts. Without the
+      // per-file bodies the file list updates while the rendered diff keeps
+      // showing the previous revision's content; without the tree queries a
+      // newly created file never appears at all; without the review threads a
+      // thread sits on "Sent to agent" long after the agent addressed it.
+      for (const prefix of [
+        'workspace-change-summary',
+        'workspace-change-file',
+        'workspace-change-patch',
+        'workspace-files',
+        'workspace-tree',
+        'workspace-tree-file',
+        'workspace-checkpoints',
+        'review-threads',
+        'workspace-changes',
+      ]) {
+        scheduleInvalidation([prefix, id]);
+      }
+      break;
+    }
+    case 'tasks':
+      if (effect.id) scheduleInvalidation(backgroundTasksKeys.list(effect.id));
+      break;
+    case 'artifacts':
+      scheduleInvalidation(queryKeys.artifacts(sessionId));
+      break;
+    case 'agents':
+      scheduleInvalidation(['agents']);
+      break;
+    default:
+      break;
+  }
 }
 
 /**
- * PLN-01 — refetch the full plan document behind the Plan tab.
+ * Substitute a stage's display name into a timeline message.
  *
- * The inline card carries its own summary from the event, but the tab renders
- * the REST document. Without this, a revision the agent publishes mid-turn
- * leaves the tab showing the previous revision's markdown — which is the text
- * the user would then approve.
+ * The router emits `{stage}` because only the run store knows the name; it
+ * falls back to the id so a timeline entry for a stage the store has not seen
+ * yet is still readable rather than blank.
  */
-function invalidatePlanDocument(chatId: unknown, planId: unknown): void {
-  if (typeof chatId !== 'string' || !chatId) return;
-  scheduleInvalidation(['chat', chatId, 'plans']);
-  if (typeof planId === 'string' && planId) {
-    scheduleInvalidation(['chat', chatId, 'plan', planId]);
-  }
+function withStageName(message: string, stageRunId: string): string {
+  const run = useWorkflowRunStore.getState().run;
+  const stageRun = run?.stageRuns.find((sr) => sr.id === stageRunId);
+  return message.replace('{stage}', stageRun?.name ?? stageRunId);
 }
 
-function flushBuffers(sessionId: string, conn: ConnectionState): void {
-  const store = useStreamStore.getState();
-  for (const [sk, buf] of conn.stageBuffers) {
-    if (buf.thinkingBuf) {
-      store.appendThinking(sk, buf.thinkingBuf);
-      buf.thinkingBuf = '';
+/** Apply the effects only this surface knows how to perform. */
+function applyHostEffect(
+  sessionId: string,
+  conn: ConnectionState,
+  effect: StreamEffect,
+): void {
+  switch (effect.op) {
+    case 'invalidate':
+      invalidateResource(sessionId, effect);
+      return;
+
+    case 'scheduleTranscriptCleanup': {
+      const key = effect.key;
+      const existing = conn.cleanupTimers.get(key);
+      if (existing) clearTimeout(existing);
+      conn.cleanupTimers.set(
+        key,
+        setTimeout(() => {
+          conn.cleanupTimers.delete(key);
+          const store = useStreamStore.getState();
+          if (store.streams[key]?.status !== 'complete') return;
+          // `clearStream` intentionally preserves widget blocks (see
+          // streamStore.ts) — extension-rendered iframes live only in the
+          // event stream and must survive the swap to persisted history.
+          store.clearStream(key);
+          const remaining = useStreamStore.getState().streams[key]?.blocks.length ?? 0;
+          // `clearStream` drops the status to `idle`; restore `complete` so a
+          // surviving widget surface keeps rendering.
+          if (remaining > 0) store.completeStream(key);
+        }, TRANSCRIPT_CLEANUP_MS),
+      );
+      return;
     }
-    if (buf.tokenBuf) {
-      store.appendToken(sk, buf.tokenBuf);
-      buf.tokenBuf = '';
+
+    case 'cancelTranscriptCleanup': {
+      const timer = conn.cleanupTimers.get(effect.key);
+      if (timer) {
+        clearTimeout(timer);
+        conn.cleanupTimers.delete(effect.key);
+      }
+      return;
     }
+
+    case 'runStatus': {
+      const store = useWorkflowRunStore.getState();
+      // An event for a DIFFERENT run must not rewrite the one on screen. An
+      // absent runId means "the run this connection is watching", which is
+      // the only run the store holds.
+      if (!store.run) return;
+      if (effect.runId !== undefined && effect.runId !== store.run.id) return;
+      store.updateRunStatus(effect.status as WorkflowRunStatus, effect.data);
+      return;
+    }
+
+    case 'runTimeline': {
+      const store = useWorkflowRunStore.getState();
+      if (!store.run) return;
+      if (effect.runId !== undefined && effect.runId !== store.run.id) return;
+      store.addTimelineEvent({
+        timestamp: new Date(),
+        type: 'run',
+        runId: store.run.id,
+        status: effect.status as WorkflowRunStatus,
+        message: effect.message,
+        data: effect.data,
+      });
+      return;
+    }
+
+    case 'stageStatus': {
+      const store = useWorkflowRunStore.getState();
+      if (!store.run) return;
+      store.updateStageRunStatus(effect.stageRunId, effect.status as StageRunStatus, effect.data);
+      return;
+    }
+
+    case 'stageTimeline': {
+      const store = useWorkflowRunStore.getState();
+      if (!store.run) return;
+      const stageRun = store.run.stageRuns.find((sr) => sr.id === effect.stageRunId);
+      store.addTimelineEvent({
+        timestamp: new Date(),
+        type: 'stage',
+        runId: store.run.id,
+        stageRunId: effect.stageRunId,
+        stageName: stageRun?.name ?? effect.stageRunId,
+        status: effect.status as StageRunStatus,
+        message: withStageName(effect.message, effect.stageRunId),
+        data: effect.data,
+      });
+      return;
+    }
+
+    case 'registerStageSession':
+      useWorkflowRunStore.getState().registerStageSession(effect.stageRunId, effect.sessionId);
+      return;
+
+    case 'stageAwaitingInput': {
+      const store = useWorkflowRunStore.getState();
+      if (!store.run) return;
+      if (effect.data) store.setAwaitingInput(effect.stageRunId, effect.data);
+      else store.clearAwaitingInput(effect.stageRunId);
+      return;
+    }
+
+    case 'selectStageRun':
+      useWorkflowRunStore.getState().selectStageRun(effect.stageRunId);
+      return;
+
+    case 'stageSettled': {
+      const streamKey = `stageRun:${effect.stageRunId}`;
+      const store = useStreamStore.getState();
+      const state = store.streams[streamKey];
+      if (state && state.status !== 'complete' && state.status !== 'error') {
+        store.completeStream(streamKey);
+      }
+      // Safety net: `harness.idle` also invalidates, but it may arrive before
+      // the terminal stage event, and the run page swaps stream blocks for
+      // full history off this query.
+      const stageSession = useWorkflowRunStore.getState().stageSessionMap[effect.stageRunId];
+      if (stageSession) scheduleInvalidation(queryKeys.chatHistory(stageSession));
+      return;
+    }
+
+    case 'widgetInvoke':
+      // Forward to the iframe over the postMessage bridge; the widget replies
+      // with a result the bridge POSTs back to resolve the server-side promise.
+      widgetBridge.invoke(effect.instanceId, effect.invokeId, effect.action, effect.args);
+      return;
+
+    case 'widgetTeardown':
+      // Ask the live widget to commit its final state so the server-side
+      // `close()` resolves with something current rather than a stale copy.
+      widgetBridge.teardown(effect.instanceId, effect.teardownId);
+      return;
+
+    default:
+      return;
   }
 }
 
-function flushNow(sessionId: string, conn: ConnectionState): void {
-  stopFlushTimer(conn);
-  flushBuffers(sessionId, conn);
+/** Fold one batch of router effects into this surface. */
+function applyEffects(
+  sessionId: string,
+  conn: ConnectionState,
+  effects: readonly StreamEffect[],
+): void {
+  if (effects.length === 0) return;
+  const { store, host } = partitionEffects(effects);
+  // One Zustand notification for the whole batch, not one per effect.
+  if (store.length > 0) useStreamStore.getState().applyEffects(store);
+  for (const effect of host) applyHostEffect(sessionId, conn, effect);
 }
 
-function ensureFlushTimer(sessionId: string, conn: ConnectionState): void {
-  if (!conn.flushTimer) {
-    conn.flushTimer = setInterval(() => flushBuffers(sessionId, conn), FLUSH_INTERVAL);
-  }
+/**
+ * Drain the router's text buffers at the next frame boundary.
+ *
+ * W26 — the drain used to be a 100 ms `setInterval` per connection, which is
+ * both slower than a frame and unsynchronised with paint, so a burst could
+ * land halfway through one. A frame-aligned drain collapses everything that
+ * arrived since the last paint into a single store write and lands it on the
+ * frame the user actually sees.
+ *
+ * Idempotent: an already-scheduled drain is left alone rather than cancelled
+ * and re-armed, so a fast token stream schedules once per frame regardless of
+ * how many events arrive inside it.
+ */
+function scheduleDrain(sessionId: string, conn: ConnectionState): void {
+  if (conn.drainHandle) return;
+  conn.drainHandle = scheduleFrame(() => {
+    conn.drainHandle = null;
+    if (conn.refCount <= 0) return;
+    applyEffects(sessionId, conn, conn.router.drain());
+    // Block delivery (W30-d) can hold text back past a drain, so the next
+    // frame has to be scheduled or the hold would only be released by the
+    // next incoming event.
+    if (conn.router.hasPending) scheduleDrain(sessionId, conn);
+  });
 }
-
-function stopFlushTimer(conn: ConnectionState): void {
-  if (conn.flushTimer) {
-    clearInterval(conn.flushTimer);
-    conn.flushTimer = null;
-  }
-}
-
-// ── Event processing (verbatim from legacy impl) ──
 
 /**
  * Process a streaming/state event for a specific session.
- * This is the core handler that updates the stream store.
  *
- * IMPORTANT: This function is preserved from the pre-STR-04 sseManager.
- * The switch-case order and the cross-buffer flush in copilot.token /
- * copilot.reasoning_delta cases are load-bearing for UI temporal ordering
- * (see CLAUDE.md known-gotchas section). Do not reshape without reading
- * that file first.
+ * Routing lives in `conn.router`; this is the surface's half.
  */
 function processEvent(sessionId: string, conn: ConnectionState, event: PersistedEvent): void {
   if (!event?.kind || !event?.sessionId) return;
@@ -312,1080 +648,29 @@ function processEvent(sessionId: string, conn: ConnectionState, event: Persisted
     conn.lastEventAt = Date.now();
   }
 
-  const { recordEvent } = useConnectionStore.getState();
-  recordEvent(sessionId);
+  useConnectionStore.getState().recordEvent(sessionId);
 
-  const kind = event.kind;
-  const data = (event.data ?? {}) as Record<string, unknown>;
+  applyEffects(
+    sessionId,
+    conn,
+    conn.router.handle(sessionId, {
+      kind: event.kind,
+      data: (event.data ?? {}) as Record<string, unknown>,
+    }),
+  );
+  if (conn.router.hasPending) scheduleDrain(sessionId, conn);
 
-  // Per-event stream key routing: each event's stageRunId determines which
-  // stream key it writes to. This is critical for parallel stages — without
-  // per-event routing, a shared mutable `currentStageRunId` causes events
-  // from stage A to land in stage B's stream when B starts first.
-  const eventStageRunId = data['stageRunId'] as string | undefined;
-  if (eventStageRunId) conn.currentStageRunId = eventStageRunId;
-  // Use the event's own stageRunId if present; fall back to connection-level
-  // tracking only for harness events that don't carry stageRunId themselves
-  // (tokens, reasoning deltas, tool events emitted under the stage's session).
-  const sk = eventStageRunId
-    ? `stageRun:${eventStageRunId}`
-    : (conn.currentStageRunId ? `stageRun:${conn.currentStageRunId}` : sessionId);
-
-  switch (kind) {
-    case 'harness.token': {
-      if (data['__isInternalTurn']) break;
-      const tokenText = data['text'] as string;
-      if (tokenText) {
-        let buf = conn.stageBuffers.get(sk);
-        if (!buf) { buf = { tokenBuf: '', thinkingBuf: '' }; conn.stageBuffers.set(sk, buf); }
-        if (buf.thinkingBuf) {
-          useStreamStore.getState().appendThinking(sk, buf.thinkingBuf);
-          buf.thinkingBuf = '';
-        }
-        buf.tokenBuf += tokenText;
-        ensureFlushTimer(sessionId, conn);
-      }
-      break;
-    }
-
-    case 'harness.reasoning_delta': {
-      if (data['__isInternalTurn']) break;
-      const thinkText = data['text'] as string;
-      if (thinkText) {
-        let buf = conn.stageBuffers.get(sk);
-        if (!buf) { buf = { tokenBuf: '', thinkingBuf: '' }; conn.stageBuffers.set(sk, buf); }
-        if (buf.tokenBuf) {
-          useStreamStore.getState().appendToken(sk, buf.tokenBuf);
-          buf.tokenBuf = '';
-        }
-        buf.thinkingBuf += thinkText;
-        ensureFlushTimer(sessionId, conn);
-      }
-      break;
-    }
-
-    case 'harness.reasoning_complete':
-      flushNow(sessionId, conn);
-      if (data['__isInternalTurn']) break;
-      useStreamStore.getState().completeThinking(sk);
-      break;
-
-    case 'harness.message_complete':
-      flushNow(sessionId, conn);
-      if (data['__isInternalTurn']) break;
-      {
-        const msgContent = data['content'] as string | undefined;
-        if (msgContent && (/<function_calls>/.test(msgContent) || /<tool_calls>/.test(msgContent))) {
-          useStreamStore.getState().processInlineToolCalls(sk, msgContent);
-        } else if (msgContent) {
-          // When the SDK delivers content only via message_complete (no token
-          // streaming — e.g. assistant.streaming_delta mode), inject the full
-          // response into stream blocks so the UI has something to display
-          // during active runs rather than showing "Waiting for model response".
-          const ss = useStreamStore.getState();
-          const existingStream = ss.streams[sk];
-          const hasNoTextBlocks = !existingStream || existingStream.blocks.every(
-            (b) => b.type !== 'text',
-          );
-          if (hasNoTextBlocks) {
-            ss.appendToken(sk, msgContent);
-          }
-        }
-      }
+  // See `MESSAGE_SETTLE_REFETCH_MS`. Host-side because it needs a clock, and
+  // kind-specific because only this event races the write it describes.
+  if (
+    event.kind === 'harness.message_complete' &&
+    !(event.data as Record<string, unknown> | undefined)?.['__isInternalTurn']
+  ) {
+    setTimeout(() => {
+      if (conn.refCount <= 0) return;
       scheduleInvalidation(queryKeys.chatHistory(sessionId));
       invalidateChatMessagesBySession(sessionId);
-      setTimeout(() => {
-        scheduleInvalidation(queryKeys.chatHistory(sessionId));
-        invalidateChatMessagesBySession(sessionId);
-      }, 1000);
-      break;
-
-    case 'harness.user_message':
-      flushNow(sessionId, conn);
-      if (data['__isInternalTurn']) {
-        scheduleInvalidation(queryKeys.chatHistory(sessionId));
-        invalidateChatMessagesBySession(sessionId);
-        break;
-      }
-      if (conn.idleTimer) { clearTimeout(conn.idleTimer); conn.idleTimer = null; }
-      {
-        const skBuf = conn.stageBuffers.get(sk);
-        if (skBuf) { skBuf.tokenBuf = ''; skBuf.thinkingBuf = ''; }
-      }
-      {
-        const freshStore = useStreamStore.getState();
-        const existing = freshStore.streams[sk];
-        const isAlreadyInTurn = existing && (
-          existing.status === 'pending' ||
-          ((existing.status === 'streaming' || existing.status === 'thinking') && existing.blocks.length > 0)
-        );
-        const incomingContent = ((data['content'] as string) ?? '').trim();
-        const currentContent = (existing?.turnUserMessage ?? '').trim();
-        const isDifferentPrompt = isAlreadyInTurn && incomingContent && currentContent && incomingContent !== currentContent;
-        if (!isAlreadyInTurn || isDifferentPrompt) {
-          const userText = (data['content'] as string) || existing?.pendingUserMessage || null;
-          freshStore.startPending(sk, userText ?? undefined);
-        }
-      }
-      scheduleInvalidation(queryKeys.chatHistory(sessionId));
-      invalidateChatMessagesBySession(sessionId);
-      break;
-
-    case 'harness.tool_start': {
-      flushNow(sessionId, conn);
-      if (data['__isInternalTurn']) break;
-      const callId = (data['callId'] as string) ?? undefined;
-      useStreamStore.getState().addToolCall(sk, data['tool'] as string, data['args'], callId);
-      break;
-    }
-
-    case 'harness.tool_complete': {
-      flushNow(sessionId, conn);
-      if (data['__isInternalTurn']) break;
-      const matchKey = (data['callId'] as string) ?? (data['tool'] as string);
-      useStreamStore.getState().completeToolCall(sk, matchKey, data['result']);
-      break;
-    }
-
-    case 'harness.error': {
-      flushNow(sessionId, conn);
-      const s = useStreamStore.getState();
-      s.errorStream(sk);
-      s.addSystemMessage(sk, `Error: ${data['message']}`, 'error');
-      scheduleInvalidation(queryKeys.session(sessionId));
-      scheduleInvalidation(queryKeys.chatHistory(sessionId));
-      break;
-    }
-
-    // ── Widget events ──
-    case 'harness.widget.render': {
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addWidget(sk, {
-        instanceId: String(data['instanceId'] ?? ''),
-        descriptorId: String(data['descriptorId'] ?? ''),
-        extensionId: String(data['extensionId'] ?? ''),
-        component: String(data['component'] ?? ''),
-        title: typeof data['title'] === 'string' ? data['title'] : undefined,
-        surface: typeof data['surface'] === 'string' ? data['surface'] : 'widget',
-        assetsBase: typeof data['assetsBase'] === 'string' ? data['assetsBase'] : '',
-        entry: String(data['entry'] ?? ''),
-        props: data['props'],
-        state: data['state'],
-        status: 'active',
-      });
-      break;
-    }
-    case 'harness.widget.state': {
-      flushNow(sessionId, conn);
-      useStreamStore
-        .getState()
-        .updateWidgetState(sk, String(data['instanceId'] ?? ''), data['state']);
-      break;
-    }
-    case 'harness.widget.action': {
-      // Actions are informational — surfaces already show them through the
-      // widget UI. We just flush to preserve ordering with subsequent
-      // tool_start/token events.
-      flushNow(sessionId, conn);
-      break;
-    }
-    case 'harness.widget.invoke': {
-      // Agent → widget imperative action dispatch. Forward to the iframe
-      // over the postMessage bridge; the widget replies with a result that
-      // the bridge POSTs back to /api/widgets/:id/invoke-result to resolve
-      // the server-side pending promise.
-      flushNow(sessionId, conn);
-      widgetBridge.invoke(
-        String(data['instanceId'] ?? ''),
-        String(data['invokeId'] ?? ''),
-        String(data['action'] ?? ''),
-        data['args'],
-      );
-      break;
-    }
-    case 'harness.widget.teardown': {
-      // Host → widget teardown request. Ask the live widget to commit its
-      // final state, then the bridge POSTs /teardown-ack so the server-side
-      // close() resolves with fresh state.
-      flushNow(sessionId, conn);
-      widgetBridge.teardown(
-        String(data['instanceId'] ?? ''),
-        String(data['teardownId'] ?? ''),
-      );
-      break;
-    }
-    case 'harness.widget.closed': {
-      flushNow(sessionId, conn);
-      useStreamStore.getState().setWidgetStatus(sk, String(data['instanceId'] ?? ''), 'closed');
-      break;
-    }
-    case 'harness.widget.error': {
-      flushNow(sessionId, conn);
-      useStreamStore.getState().setWidgetStatus(
-        sk,
-        String(data['instanceId'] ?? ''),
-        'error',
-        typeof data['error'] === 'string' ? data['error'] : undefined,
-      );
-      break;
-    }
-
-    // ── PLN-01: plan mode ──
-    //
-    // Cards are pushed into the stream so they interleave with the rest of the
-    // turn. They are ALSO persisted into the assistant message metadata, which
-    // is what rebuilds them for completed chats (event replay is skipped by the
-    // fast path in replayEvents.ts).
-    //
-    // Every gate-lifecycle event also invalidates the pending-interaction list.
-    // That list is polled on a 5s interval and is what ChatPage reconciles card
-    // state against, so refreshing it here keeps the two views from disagreeing
-    // for up to a full poll period.
-    case 'chat.plan.created': {
-      flushNow(sessionId, conn);
-      useStreamStore.getState().upsertPlan(sk, {
-        planId: String(data['planId'] ?? ''),
-        revision: Number(data['revision'] ?? 1),
-        title: String(data['title'] ?? 'Plan'),
-        fileName: String(data['fileName'] ?? 'plan.md'),
-        summary: String(data['summary'] ?? ''),
-        status: planStatusOf(data),
-        actions: [],
-      });
-      invalidatePlanDocument(data['chatId'], data['planId']);
-      break;
-    }
-    case 'chat.plan.updated': {
-      flushNow(sessionId, conn);
-      useStreamStore.getState().setPlanStatus(sk, String(data['planId'] ?? ''), planStatusOf(data), {
-        revision: Number(data['revision'] ?? 1),
-      });
-      invalidatePlanDocument(data['chatId'], data['planId']);
-      break;
-    }
-    case 'chat.plan.review_requested': {
-      flushNow(sessionId, conn);
-      const actions = Array.isArray(data['actions']) ? (data['actions'] as string[]) : [];
-      // `upsertPlan` merges onto the card created by `chat.plan.created`, so
-      // omit title/fileName when absent rather than overwriting good values
-      // with the raw summary or an empty string.
-      useStreamStore.getState().upsertPlan(sk, {
-        planId: String(data['planId'] ?? ''),
-        revision: Number(data['revision'] ?? 1),
-        ...(typeof data['title'] === 'string' && data['title']
-          ? { title: data['title'] }
-          : { title: String(data['summary'] ?? 'Plan') }),
-        ...(typeof data['fileName'] === 'string' && data['fileName']
-          ? { fileName: data['fileName'] }
-          : {}),
-        summary: String(data['summary'] ?? ''),
-        status: 'awaiting_review',
-        actions,
-        ...(typeof data['recommendedAction'] === 'string'
-          ? { recommendedAction: data['recommendedAction'] }
-          : {}),
-        interactionId: String(data['interactionId'] ?? ''),
-      });
-      invalidatePendingInteractions(data['chatId']);
-      invalidatePlanDocument(data['chatId'], data['planId']);
-      break;
-    }
-    case 'chat.plan.decided': {
-      flushNow(sessionId, conn);
-      const approved = data['approved'] === true;
-      const action = typeof data['action'] === 'string' ? data['action'] : undefined;
-      useStreamStore.getState().setPlanStatus(
-        sk,
-        String(data['planId'] ?? ''),
-        approved ? (action === 'exit_only' ? 'rejected' : 'approved') : 'changes_requested',
-      );
-      invalidatePendingInteractions(data['chatId']);
-      invalidatePlanDocument(data['chatId'], data['planId']);
-      break;
-    }
-    case 'chat.plan.expired': {
-      flushNow(sessionId, conn);
-      useStreamStore.getState().setPlanStatus(sk, String(data['planId'] ?? ''), 'expired');
-      invalidatePendingInteractions(data['chatId']);
-      invalidatePlanDocument(data['chatId'], data['planId']);
-      break;
-    }
-    case 'chat.plan.extraction_failed': {
-      flushNow(sessionId, conn);
-      useStreamStore
-        .getState()
-        .addSystemMessage(
-          sk,
-          `Plan mode: ${String(data['reason'] ?? 'the plan could not be captured')}`,
-          'error',
-        );
-      break;
-    }
-    case 'chat.question.asked': {
-      flushNow(sessionId, conn);
-      const questions = Array.isArray(data['questions'])
-        ? (data['questions'] as QuestionBlock['questions'])
-        : [];
-      useStreamStore.getState().upsertQuestion(sk, {
-        interactionId: String(data['interactionId'] ?? ''),
-        questions,
-        status: 'pending',
-      });
-      invalidatePendingInteractions(data['chatId']);
-      break;
-    }
-    case 'chat.question.answered': {
-      flushNow(sessionId, conn);
-      useStreamStore.getState().answerQuestion(
-        sk,
-        String(data['interactionId'] ?? ''),
-        (data['answers'] as Record<string, string[]>) ?? {},
-        typeof data['freeformResponse'] === 'string' ? data['freeformResponse'] : undefined,
-      );
-      invalidatePendingInteractions(data['chatId']);
-      break;
-    }
-    case 'chat.question.expired': {
-      flushNow(sessionId, conn);
-      useStreamStore.getState().expireQuestion(sk, String(data['interactionId'] ?? ''));
-      invalidatePendingInteractions(data['chatId']);
-      break;
-    }
-
-    case 'harness.idle':
-      flushNow(sessionId, conn);
-      if (data['__isInternalTurn']) {
-        scheduleInvalidation(queryKeys.chatHistory(sessionId));
-        invalidateChatMessagesBySession(sessionId);
-        break;
-      }
-      useStreamStore.getState().completeStream(sk);
-      scheduleInvalidation(queryKeys.chatHistory(sessionId));
-      invalidateChatMessagesBySession(sessionId);
-      scheduleInvalidation(queryKeys.session(sessionId));
-      scheduleInvalidation(queryKeys.sessions);
-      if (conn.idleTimer) { clearTimeout(conn.idleTimer); conn.idleTimer = null; }
-      if (!sk.startsWith('stageRun:')) {
-        const capturedKey = sk;
-        conn.idleTimer = setTimeout(() => {
-          const s = useStreamStore.getState();
-          const st = s.streams[capturedKey];
-          if (st?.status === 'complete') {
-            // `clearStream` intentionally preserves widget blocks (see
-            // streamStore.ts) — extension-rendered iframes live only in
-            // the event stream and must survive the idle cleanup.
-            s.clearStream(capturedKey);
-            // If widgets remain, restore 'complete' status so the UI keeps
-            // rendering the widget surface (clearStream drops to 'idle').
-            const stillHasWidgets = useStreamStore.getState().streams[capturedKey]?.blocks.length ?? 0;
-            if (stillHasWidgets > 0) {
-              s.completeStream(capturedKey);
-            }
-          }
-          conn.idleTimer = null;
-        }, 5_000);
-      }
-      break;
-
-    // ── Git events ──
-    case 'git.clone_start':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Cloning repository: ${data['repoUrl']}`, detectCategory(`Cloning: ${data['repoUrl']}`));
-      break;
-    case 'git.clone_complete':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Repository cloned to: ${data['localPath']}`);
-      break;
-    case 'git.commit':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Git commit: ${data['message']} (${data['sha']})`);
-      break;
-    case 'git.push':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Pushed to branch: ${data['branch']}`);
-      break;
-    case 'git.pr_created':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `PR created: ${data['url']}`);
-      break;
-
-    // ── Workspace / checkpoint events ──
-    //
-    // These replace the Changes panel's polling loop. Invalidation is keyed
-    // by workspaceId (a prefix of every change query key), so whichever
-    // base/head the panel currently shows gets refreshed.
-    case 'workspace.changed': {
-      const workspaceId = typeof data['workspaceId'] === 'string' ? data['workspaceId'] : null;
-      if (workspaceId) {
-        void queryClient.invalidateQueries({
-          queryKey: ['workspace-change-summary', workspaceId],
-        });
-        // The per-file bodies must go too. The summary alone only drives the
-        // tree and the +/- counts; without this the file list updates while
-        // the rendered diff keeps showing the previous revision's content.
-        void queryClient.invalidateQueries({ queryKey: ['workspace-change-file', workspaceId] });
-        void queryClient.invalidateQueries({ queryKey: ['workspace-change-patch', workspaceId] });
-        void queryClient.invalidateQueries({ queryKey: ['workspace-files', workspaceId] });
-        // The Files view browses paths the diff never mentions, so it has
-        // its own queries — a new file appears in the tree only if these go.
-        void queryClient.invalidateQueries({ queryKey: ['workspace-tree', workspaceId] });
-        void queryClient.invalidateQueries({ queryKey: ['workspace-tree-file', workspaceId] });
-        // Legacy panel — remove once the renderer swap is everywhere.
-        void queryClient.invalidateQueries({ queryKey: ['workspace-changes', workspaceId] });
-      }
-      break;
-    }
-    case 'checkpoint.created': {
-      const workspaceId = typeof data['workspaceId'] === 'string' ? data['workspaceId'] : null;
-      if (workspaceId) {
-        void queryClient.invalidateQueries({
-          queryKey: ['workspace-checkpoints', workspaceId],
-        });
-        // A checkpoint is also when the server re-anchors review threads and
-        // flips submitted → addressed. Without this the reviewer watches a
-        // thread sit on "Sent to agent" long after the agent has finished,
-        // and only a manual reload reveals it was addressed.
-        void queryClient.invalidateQueries({ queryKey: ['review-threads', workspaceId] });
-      }
-      break;
-    }
-    case 'checkpoint.restored': {
-      const workspaceId = typeof data['workspaceId'] === 'string' ? data['workspaceId'] : null;
-      if (workspaceId) {
-        // The working tree moved underneath every open view.
-        void queryClient.invalidateQueries({
-          queryKey: ['workspace-change-summary', workspaceId],
-        });
-        void queryClient.invalidateQueries({ queryKey: ['workspace-change-file', workspaceId] });
-        void queryClient.invalidateQueries({ queryKey: ['workspace-change-patch', workspaceId] });
-        void queryClient.invalidateQueries({ queryKey: ['workspace-checkpoints', workspaceId] });
-        void queryClient.invalidateQueries({ queryKey: ['workspace-files', workspaceId] });
-        void queryClient.invalidateQueries({ queryKey: ['workspace-tree', workspaceId] });
-        void queryClient.invalidateQueries({ queryKey: ['workspace-tree-file', workspaceId] });
-        // Rewinding moves the code out from under every anchored comment.
-        void queryClient.invalidateQueries({ queryKey: ['review-threads', workspaceId] });
-      }
-      const skipped = Array.isArray(data['skipped']) ? data['skipped'].length : 0;
-      const restored = typeof data['restoredCount'] === 'number' ? data['restoredCount'] : 0;
-      const deleted = typeof data['deletedCount'] === 'number' ? data['deletedCount'] : 0;
-      flushNow(sessionId, conn);
-      useStreamStore
-        .getState()
-        .addSystemMessage(
-          sessionId,
-          `Restored checkpoint — ${restored} file(s) restored, ${deleted} removed` +
-            (skipped > 0 ? `, ${skipped} skipped` : ''),
-        );
-      break;
-    }
-
-    // ── Script events ──
-    case 'script.stdout':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `[stdout] ${data['line']}`);
-      break;
-    case 'script.stderr':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `[stderr] ${data['line']}`);
-      break;
-    case 'script.exit':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Script exited with code: ${data['code']}`);
-      break;
-
-    // ── Hook events ──
-    case 'hook.started':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Hook "${data['hookName']}" started (phase: ${data['phase']})`);
-      break;
-    case 'hook.completed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Hook "${data['hookName']}" completed`);
-      break;
-    case 'hook.failed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Hook "${data['hookName']}" failed: ${data['error']}`, 'error');
-      break;
-
-    // ── Artifact events ──
-    case 'artifact.created':
-    case 'artifact.available':
-      queryClient.invalidateQueries({ queryKey: queryKeys.artifacts(sessionId) });
-      if (kind === 'artifact.created') {
-        flushNow(sessionId, conn);
-        useStreamStore.getState().addSystemMessage(sessionId, `Artifact created: ${data['name']}`);
-      }
-      break;
-
-    // ── Copilot client lifecycle ──
-    case 'harness.client_error':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Copilot client error: ${data['message'] ?? 'Unknown error'}`, 'error');
-      break;
-    case 'harness.client_restarting':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Copilot client restarting...');
-      break;
-    case 'harness.client_started':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Copilot client started');
-      break;
-    case 'harness.client_stopped':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Copilot client stopped');
-      break;
-
-    // ── Permission events ──
-    case 'permission.requested':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Permission requested: ${data['permission']}`);
-      break;
-    case 'permission.granted':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Permission granted: ${data['permission']}`);
-      break;
-    case 'permission.denied':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Permission denied: ${data['permission']}`);
-      break;
-
-    // ── Orchestration & preprocessing events — provide timeline + system messages ──
-    case 'workflow_run.orchestration_started':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Orchestration started — preparing workflow execution');
-      break;
-    case 'workflow_run.orchestration_completed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Orchestration completed');
-      break;
-    case 'workflow_run.orchestration_failed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Orchestration failed: ${data['error'] ?? 'Unknown error'}`, 'error');
-      break;
-    case 'workflow_run.worktree_creating':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Creating worktree...');
-      break;
-    case 'workflow_run.worktree_created':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Worktree created: ${data['path'] ?? ''}`);
-      break;
-    case 'workflow_run.preprocessing_started':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Preprocessing started');
-      break;
-    case 'workflow_run.preprocessing_completed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Preprocessing completed');
-      break;
-    case 'workflow_run.preprocessing_step_started':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Preprocessing: ${data['stepName'] ?? data['step'] ?? 'step'} started`);
-      break;
-    case 'workflow_run.preprocessing_step_completed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Preprocessing: ${data['stepName'] ?? data['step'] ?? 'step'} completed`);
-      break;
-    case 'workflow_run.preprocessing_step_failed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Preprocessing step failed: ${data['error'] ?? 'Unknown'}`, 'error');
-      break;
-    case 'workflow_run.postprocessing_started':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Post-processing started');
-      break;
-    case 'workflow_run.postprocessing_completed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Post-processing completed');
-      break;
-    case 'workflow_run.postprocessing_step_started':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Post-processing: ${data['stepName'] ?? data['step'] ?? 'step'} started`);
-      break;
-    case 'workflow_run.postprocessing_step_completed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Post-processing: ${data['stepName'] ?? data['step'] ?? 'step'} completed`);
-      break;
-    case 'workflow_run.postprocessing_step_failed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Post-processing step failed: ${data['error'] ?? 'Unknown'}`, 'error');
-      break;
-    case 'workflow_run.sandbox_created':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Sandbox created: ${data['sandboxId'] ?? ''}`);
-      break;
-    case 'workflow_run.sandbox_destroyed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, 'Sandbox destroyed');
-      break;
-    case 'workflow_run.stage_validation':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Stage validation: ${data['message'] ?? 'validating stages'}`);
-      break;
-    case 'workflow_run.cancelling': {
-      const runStore = useWorkflowRunStore.getState();
-      const runId = data['runId'] as string | undefined ?? data['workflowRunId'] as string | undefined;
-      if (runStore.run && (runId === runStore.run.id || runId === undefined)) {
-        runStore.updateRunStatus('cancelling' as WorkflowRunStatus, data);
-        runStore.addTimelineEvent({
-          timestamp: new Date(),
-          type: 'run',
-          runId: runStore.run.id,
-          status: 'cancelling' as WorkflowRunStatus,
-          message: 'Workflow run cancelling...',
-          data,
-        });
-      }
-      if (runId) {
-        queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
-      }
-      break;
-    }
-    case 'workflow_run.permission_mode_changed':
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Permission mode changed to: ${data['mode'] ?? 'unknown'}`);
-      break;
-
-    // ── Stage durability events (HITL, sleep, retry) ──
-    case 'stage_run.awaiting_input': {
-      flushNow(sessionId, conn);
-      const stageRunId = data['stageRunId'] as string | undefined;
-      const stageRunStore = useWorkflowRunStore.getState();
-      if (stageRunStore.run && stageRunId) {
-        stageRunStore.updateStageRunStatus(stageRunId, 'awaiting_input' as StageRunStatus, data);
-        const stageRun = stageRunStore.run.stageRuns.find((sr) => sr.id === stageRunId);
-        stageRunStore.addTimelineEvent({
-          timestamp: new Date(),
-          type: 'stage',
-          runId: stageRunStore.run.id,
-          stageRunId,
-          stageName: stageRun?.name ?? stageRunId,
-          status: 'awaiting_input' as StageRunStatus,
-          message: `Stage "${stageRun?.name ?? stageRunId}" awaiting input`,
-          data,
-        });
-        // Notify the store that HITL approval is needed
-        stageRunStore.setAwaitingInput(stageRunId, data);
-      }
-      const stageStreamKey = stageRunId ? `stageRun:${stageRunId}` : sk;
-      useStreamStore.getState().addSystemMessage(stageStreamKey, `⏸ Awaiting human input — check the HITL panel to approve or reject`);
-      break;
-    }
-    case 'stage_run.input_received': {
-      flushNow(sessionId, conn);
-      const stageRunId = data['stageRunId'] as string | undefined;
-      const stageRunStore = useWorkflowRunStore.getState();
-      if (stageRunStore.run && stageRunId) {
-        stageRunStore.updateStageRunStatus(stageRunId, 'running' as StageRunStatus, data);
-        const stageRun = stageRunStore.run.stageRuns.find((sr) => sr.id === stageRunId);
-        stageRunStore.addTimelineEvent({
-          timestamp: new Date(),
-          type: 'stage',
-          runId: stageRunStore.run.id,
-          stageRunId,
-          stageName: stageRun?.name ?? stageRunId,
-          status: 'running' as StageRunStatus,
-          message: `Stage "${stageRun?.name ?? stageRunId}" input received — resuming`,
-          data,
-        });
-        // Clear the HITL notification
-        stageRunStore.clearAwaitingInput(stageRunId);
-      }
-      const stageStreamKey = stageRunId ? `stageRun:${stageRunId}` : sk;
-      useStreamStore.getState().addSystemMessage(stageStreamKey, '▶ Input received — stage resuming');
-      break;
-    }
-    case 'stage_run.sleeping': {
-      flushNow(sessionId, conn);
-      const stageRunId = data['stageRunId'] as string | undefined;
-      const stageRunStore = useWorkflowRunStore.getState();
-      if (stageRunStore.run && stageRunId) {
-        stageRunStore.updateStageRunStatus(stageRunId, 'sleeping' as StageRunStatus, data);
-        const stageRun = stageRunStore.run.stageRuns.find((sr) => sr.id === stageRunId);
-        stageRunStore.addTimelineEvent({
-          timestamp: new Date(),
-          type: 'stage',
-          runId: stageRunStore.run.id,
-          stageRunId,
-          stageName: stageRun?.name ?? stageRunId,
-          status: 'sleeping' as StageRunStatus,
-          message: `Stage "${stageRun?.name ?? stageRunId}" sleeping${data['wakeAt'] ? ` until ${new Date(data['wakeAt'] as number).toLocaleTimeString()}` : ''}`,
-          data,
-        });
-      }
-      const stageStreamKey = stageRunId ? `stageRun:${stageRunId}` : sk;
-      useStreamStore.getState().addSystemMessage(stageStreamKey, `💤 Stage sleeping${data['wakeAt'] ? ` — wake at ${new Date(data['wakeAt'] as number).toLocaleTimeString()}` : ''}`);
-      break;
-    }
-    case 'stage_run.woken': {
-      flushNow(sessionId, conn);
-      const stageRunId = data['stageRunId'] as string | undefined;
-      const stageRunStore = useWorkflowRunStore.getState();
-      if (stageRunStore.run && stageRunId) {
-        stageRunStore.updateStageRunStatus(stageRunId, 'running' as StageRunStatus, data);
-        const stageRun = stageRunStore.run.stageRuns.find((sr) => sr.id === stageRunId);
-        stageRunStore.addTimelineEvent({
-          timestamp: new Date(),
-          type: 'stage',
-          runId: stageRunStore.run.id,
-          stageRunId,
-          stageName: stageRun?.name ?? stageRunId,
-          status: 'running' as StageRunStatus,
-          message: `Stage "${stageRun?.name ?? stageRunId}" woken — resuming`,
-          data,
-        });
-      }
-      const stageStreamKey = stageRunId ? `stageRun:${stageRunId}` : sk;
-      useStreamStore.getState().addSystemMessage(stageStreamKey, '⏰ Stage woken — resuming execution');
-      break;
-    }
-    case 'stage_run.retrying': {
-      flushNow(sessionId, conn);
-      const stageRunId = data['stageRunId'] as string | undefined;
-      const stageRunStore = useWorkflowRunStore.getState();
-      if (stageRunStore.run && stageRunId) {
-        const stageRun = stageRunStore.run.stageRuns.find((sr) => sr.id === stageRunId);
-        stageRunStore.addTimelineEvent({
-          timestamp: new Date(),
-          type: 'stage',
-          runId: stageRunStore.run.id,
-          stageRunId,
-          stageName: stageRun?.name ?? stageRunId,
-          status: 'running' as StageRunStatus,
-          message: `Stage "${stageRun?.name ?? stageRunId}" retrying (attempt ${data['attempt'] ?? '?'})`,
-          data,
-        });
-      }
-      const stageStreamKey = stageRunId ? `stageRun:${stageRunId}` : sk;
-      useStreamStore.getState().addSystemMessage(stageStreamKey, `🔄 Retrying (attempt ${data['attempt'] ?? '?'})`);
-      break;
-    }
-
-    // ── Session lifecycle events ──
-    case 'session.created':
-    case 'session.active':
-    case 'session.closing':
-    case 'session.closed':
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      break;
-    case 'session.paused':
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      break;
-    case 'session.error':
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      flushNow(sessionId, conn);
-      useStreamStore.getState().addSystemMessage(sessionId, `Session error: ${data['message'] ?? 'Unknown error'}`, 'error');
-      break;
-
-    // ── harness.turn_end — mark turn boundary for proper state tracking ──
-    case 'harness.turn_end':
-      // Flush any remaining buffers at turn boundary to ensure all
-      // content from this turn is rendered before the next turn starts.
-      flushNow(sessionId, conn);
-      break;
-
-    case 'git.clone_progress':
-    case 'harness.session_start':
-    case 'harness.unknown':
-    case 'hook.skipped':
-    case 'subscriber.error':
-      break;
-
-    // Suppress most session_info events but handle sub-agent & abort events
-    case 'harness.session_info': {
-      if (data['__isInternalTurn']) break;
-      const infoType = data['infoType'] as string | undefined;
-      if (infoType === 'subagent_started') {
-        flushNow(sessionId, conn);
-        useStreamStore.getState().addSystemMessage(
-          sk,
-          (data['message'] as string) ?? 'Sub-agent started',
-          'subagent',
-        );
-      } else if (infoType === 'subagent_completed') {
-        flushNow(sessionId, conn);
-        useStreamStore.getState().addSystemMessage(
-          sk,
-          (data['message'] as string) ?? 'Sub-agent completed',
-          'subagent',
-        );
-      } else if (infoType === 'subagent_failed') {
-        flushNow(sessionId, conn);
-        useStreamStore.getState().addSystemMessage(
-          sk,
-          (data['message'] as string) ?? 'Sub-agent failed',
-          'error',
-        );
-      } else if (infoType === 'abort') {
-        flushNow(sessionId, conn);
-        useStreamStore.getState().addSystemMessage(
-          sk,
-          (data['message'] as string) ?? 'Turn aborted',
-          'error',
-        );
-      }
-      // All other session_info types (pending_messages, etc.) are silent
-      break;
-    }
-
-    // ── harness.context_usage — the provider's view of context-window fill ──
-    // Drives the single ContextUsageGauge. Sub-agent snapshots carry an
-    // agentId and are ignored here: a sub-agent runs its own window, and
-    // letting it overwrite the main gauge made the number jump around.
-    //
-    // Deliberately NOT gated on `__isInternalTurn`. That flag exists to stop
-    // the client resetting stream BLOCKS for framework-issued turns (context
-    // injection, summarisation); those turns still consume the real context
-    // window, so skipping their telemetry left every workflow stage gauge
-    // empty and under-reported the window in chats.
-    case 'harness.context_usage': {
-      if (typeof data['agentId'] === 'string' && data['agentId']) break;
-      const current = data['currentTokens'];
-      if (typeof current !== 'number' || !Number.isFinite(current)) break;
-      const numOrUndef = (v: unknown): number | undefined =>
-        typeof v === 'number' && Number.isFinite(v) ? v : undefined;
-      useStreamStore.getState().setContextUsage(sk, {
-        source: data['source'] === 'provider' ? 'provider' : 'derived',
-        currentTokens: current,
-        promptTokenLimit: numOrUndef(data['promptTokenLimit']),
-        totalContextWindow: numOrUndef(data['totalContextWindow']),
-        compactionThreshold: numOrUndef(data['compactionThreshold']),
-        messagesLength: numOrUndef(data['messagesLength']),
-        model: typeof data['model'] === 'string' ? data['model'] : undefined,
-        provider: typeof data['provider'] === 'string' ? data['provider'] : undefined,
-        breakdown: (data['breakdown'] as ContextUsageSnapshot['breakdown']) ?? undefined,
-        apiUsage: (data['apiUsage'] as ContextUsageSnapshot['apiUsage']) ?? undefined,
-      });
-      break;
-    }
-
-    // WEB-02: latch the server-generated turnId so ChatView can dedup
-    // chatHistory entries by metadata.turnId instead of content.
-    case 'harness.turn_start': {
-      const tId = data['turnId'];
-      if (typeof tId === 'string' && tId.length > 0) {
-        useStreamStore.getState().setServerTurnId(sk, tId);
-      }
-      break;
-    }
-
-    case 'harness.usage': {
-      // Same rationale as harness.context_usage: an internal (framework)
-      // turn still spends real tokens, so its usage belongs in the totals.
-      // Sub-agent turns report their own usage; attributing it to the main
-      // conversation made the gauge and cost chip jump around mid-turn.
-      if (typeof data['agentId'] === 'string' && data['agentId']) break;
-      const usage = {
-        model: (data['model'] as string) ?? 'unknown',
-        inputTokens: (data['inputTokens'] as number) ?? 0,
-        outputTokens: (data['outputTokens'] as number) ?? 0,
-        durationMs: (data['durationMs'] as number) ?? undefined,
-        cacheReadTokens: (data['cacheReadTokens'] as number) ?? undefined,
-        cacheWriteTokens: (data['cacheWriteTokens'] as number) ?? undefined,
-        cost: (data['cost'] as number) ?? undefined,
-        provider: (data['provider'] as string) ?? undefined,
-      };
-      useStreamStore.getState().setUsage(sk, usage);
-      break;
-    }
-
-    // ── v2 Chat events ──
-    case 'chat.created':
-    case 'chat.archived':
-    case 'chat.deleted':
-      queryClient.invalidateQueries({ queryKey: queryKeys.chats });
-      break;
-
-    // ── Agent catalog events ──
-    // The catalog is cached for 30s, so without this a newly created agent
-    // would not show up in an already-open picker.
-    case 'agent.created':
-    case 'agent.updated':
-    case 'agent.deleted':
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
-      break;
-    case 'chat.agent_changed': {
-      const chatId = data['chatId'] as string;
-      if (chatId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
-      }
-      queryClient.invalidateQueries({ queryKey: queryKeys.chats });
-      break;
-    }
-    case 'chat.prompt_sent': {
-      const chatId = data['chatId'] as string;
-      if (chatId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
-      }
-      break;
-    }
-    case 'chat.prompt_failed': {
-      const chatId = data['chatId'] as string;
-      if (chatId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
-        // Reset stream state so the ChatPage "Processing..." spinner clears
-        const sessionId = useChatStore.getState().getSessionId(chatId);
-        if (sessionId) {
-          useStreamStore.getState().errorStream(sessionId);
-        }
-      }
-      break;
-    }
-
-    // ── v2 Workflow Run events ──
-    case 'workflow_run.created':
-    case 'workflow_run.starting':
-    case 'workflow_run.running':
-    case 'workflow_run.paused':
-    case 'workflow_run.completed':
-    case 'workflow_run.failed':
-    case 'workflow_run.cancelled':
-    case 'workflow_run.resumed': {
-      // 'resumed' is not a valid WorkflowRunStatus — map it to 'running'
-      // since the server sets the DB status to 'running' before emitting this event.
-      const runStatus = kind === 'workflow_run.resumed'
-        ? 'running' as WorkflowRunStatus
-        : kind.replace('workflow_run.', '') as WorkflowRunStatus;
-      const runStore = useWorkflowRunStore.getState();
-      const runId = data['runId'] as string | undefined ?? data['workflowRunId'] as string | undefined;
-      if (runStore.run && (runId === runStore.run.id || runId === undefined)) {
-        runStore.updateRunStatus(runStatus, data);
-        runStore.addTimelineEvent({
-          timestamp: new Date(),
-          type: 'run',
-          runId: runStore.run.id,
-          status: runStatus,
-          message: `Workflow run ${kind === 'workflow_run.resumed' ? 'resumed' : runStatus}${data['error'] ? `: ${data['error']}` : ''}`,
-          data,
-        });
-      }
-      if (runId) {
-        queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
-      }
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      break;
-    }
-
-    case 'stage_run.pending':
-    case 'stage_run.queued':
-    case 'stage_run.running':
-    case 'stage_run.paused':
-    case 'stage_run.completed':
-    case 'stage_run.failed':
-    case 'stage_run.cancelled':
-    case 'stage_run.skipped':
-    case 'stage_run.resumed': {
-      // 'resumed' is not a valid StageRunStatus — map it to 'running'
-      const stageStatus = kind === 'stage_run.resumed'
-        ? 'running' as StageRunStatus
-        : kind.replace('stage_run.', '') as StageRunStatus;
-      const stageRunId = data['stageRunId'] as string | undefined;
-      const stageRunStore = useWorkflowRunStore.getState();
-      if (stageRunStore.run && stageRunId) {
-        stageRunStore.updateStageRunStatus(stageRunId, stageStatus, data);
-        const stageSessionId = data['sessionId'] as string | undefined;
-        if (stageSessionId) {
-          stageRunStore.registerStageSession(stageRunId, stageSessionId);
-        }
-        const stageRun = stageRunStore.run.stageRuns.find((sr) => sr.id === stageRunId);
-        stageRunStore.addTimelineEvent({
-          timestamp: new Date(),
-          type: 'stage',
-          runId: stageRunStore.run.id,
-          stageRunId,
-          stageName: stageRun?.name ?? stageRunId,
-          status: stageStatus,
-          message: `Stage "${stageRun?.name ?? stageRunId}" ${stageStatus}${data['error'] ? `: ${data['error']}` : ''}`,
-          data,
-        });
-        if (stageStatus === 'running') {
-          stageRunStore.selectStageRun(stageRunId);
-          // Only initialize the stream if it's not already populated.
-          // After page refresh, replay fills stream with prior tokens;
-          // calling startPending here would wipe that data.
-          // Similarly, after pause→resume the existing stream blocks
-          // should persist — the model continues from where it left off.
-          const stageStreamKey = `stageRun:${stageRunId}`;
-          const existingStageStream = useStreamStore.getState().streams[stageStreamKey];
-          const alreadyHasContent = existingStageStream && (
-            existingStageStream.blocks.length > 0 ||
-            existingStageStream.status === 'streaming' ||
-            existingStageStream.status === 'thinking'
-          );
-          if (!alreadyHasContent) {
-            useStreamStore.getState().startPending(stageStreamKey);
-          }
-        }
-        // When a stage reaches a terminal state, ensure its stream is marked
-        // complete so the UI does not remain stuck showing "Generating..."
-        // This is necessary for parallel stages where `copilot.idle` may arrive
-        // while conn.currentStageRunId has been overwritten by the sibling stage,
-        // causing the idle handler to complete the wrong stream key.
-        if (stageStatus === 'completed' || stageStatus === 'failed' || stageStatus === 'cancelled' || stageStatus === 'skipped') {
-          const stageStreamKey = `stageRun:${stageRunId}`;
-          flushNow(sessionId, conn);
-          const ss = useStreamStore.getState();
-          const stageStreamState = ss.streams[stageStreamKey];
-          if (stageStreamState && stageStreamState.status !== 'complete' && stageStreamState.status !== 'error') {
-            ss.completeStream(stageStreamKey);
-          }
-          // Safety-net: ensure chatHistory for this stage's session is invalidated
-          // so WorkflowMessages can transition from stream blocks to full history.
-          // The harness.idle handler also invalidates, but it may fire before the
-          // stage_run.completed event — this ensures the query stays fresh.
-          const stageSession = stageRunStore.stageSessionMap[stageRunId];
-          if (stageSession) {
-            scheduleInvalidation(queryKeys.chatHistory(stageSession));
-          }
-        }
-      }
-      const parentRunId = data['workflowRunId'] as string | undefined;
-      if (parentRunId) {
-        scheduleInvalidation(workflowKeys.run(parentRunId));
-      }
-      scheduleInvalidation(workflowKeys.runs);
-      break;
-    }
-
-    case 'stage_run.step_started':
-    case 'stage_run.step_completed': {
-      // Flush any buffered tokens/thinking BEFORE recording the step
-      // transition to preserve temporal ordering between step boundaries.
-      flushNow(sessionId, conn);
-      const stageRunId = data['stageRunId'] as string | undefined;
-      const stageRunStore = useWorkflowRunStore.getState();
-      if (stageRunStore.run && stageRunId) {
-        const stageRun = stageRunStore.run.stageRuns.find((sr) => sr.id === stageRunId);
-        const stepLabel = (data['label'] as string) ?? `Step ${data['step']}`;
-        const isStarted = kind === 'stage_run.step_started';
-        stageRunStore.addTimelineEvent({
-          timestamp: new Date(),
-          type: 'stage',
-          runId: stageRunStore.run.id,
-          stageRunId,
-          stageName: stageRun?.name ?? stageRunId,
-          status: isStarted ? 'running' : 'completed',
-          message: `${stageRun?.name ?? stageRunId}: ${stepLabel} ${isStarted ? 'started' : 'completed'}`,
-          data,
-        });
-        if (isStarted && data['step'] !== undefined) {
-          stageRunStore.updateStageRunStatus(stageRunId, 'running', {
-            currentStep: data['step'],
-            totalSteps: data['totalSteps'],
-          });
-        }
-      }
-      break;
-    }
-
-    default:
-      if (import.meta.env?.DEV) {
-        console.debug('[sseManager] unhandled event kind:', kind);
-      }
-      break;
+    }, MESSAGE_SETTLE_REFETCH_MS);
   }
 }
 
@@ -1460,6 +745,8 @@ function openConnection(
     refCount: 1,
     eventSource: null,
     replayed: false,
+    hydrating: false,
+    hydrateFallback: null,
     draining: false,
     replayPromise: null,
     pendingSSEEvents: [],
@@ -1468,10 +755,9 @@ function openConnection(
     seenSequenceIds: new Set(),
     contiguousSequence: 0,
     emptyGapFills: 0,
-    stageBuffers: new Map(),
-    flushTimer: null,
-    idleTimer: null,
-    currentStageRunId: null,
+    router: new StreamEventRouter({ blockDelivery: blockDeliveryEntry() }),
+    drainHandle: null,
+    cleanupTimers: new Map(),
     lastEventAt: Date.now(),
     watchdogTimer: null,
     gapFilling: false,
@@ -1484,8 +770,34 @@ function openConnection(
   const connStore = useConnectionStore.getState();
   connStore.setConnectionState(primarySessionId, 'reconnecting');
 
-  // ── 1. Kick off REST replay (returns a PersistedEvent[]-shaped response) ──
-  conn.replayPromise = (async () => {
+  // ── 1. Hydrate, AFTER the stream says our subscription is live ──
+  //
+  // W26's snapshot/stream boundary. The replay used to start here, in
+  // parallel with the connection POST, which leaves a real hole: a snapshot
+  // that completes before the socket attaches misses every event in between,
+  // and nothing notices — the transcript is simply short by whatever happened
+  // during the gap. `onOpen` fires from `hello`/`subs`, i.e. once the server
+  // has confirmed this scope is active and is buffering from our cursor, so
+  // anything the snapshot misses is redelivered rather than lost.
+  //
+  // Two guards, both load-bearing:
+  //   * `hydrating` — a reconnect fires `onOpen` again, and a second
+  //     concurrent replay would double every event it fetched.
+  //   * the 1 s fallback — a `hello` that never arrives (a proxy that
+  //     buffers the first frames, a server mid-restart) must not mean a
+  //     permanently blank transcript. Late history is recoverable; a view
+  //     that never hydrates is not.
+  const hydrate = (): void => {
+    if (conn.hydrating || conn.refCount <= 0) return;
+    conn.hydrating = true;
+    if (conn.hydrateFallback) {
+      clearTimeout(conn.hydrateFallback);
+      conn.hydrateFallback = null;
+    }
+    conn.replayPromise = startHydration();
+  };
+
+  const startHydration = (): Promise<void> => (async () => {
     try {
       // Paginate through all persisted events. A single page (500) may miss
       // later stages in multi-stage workflow runs that produce thousands of
@@ -1682,6 +994,8 @@ function openConnection(
     useConnectionStore.getState().setConnectionState(primarySessionId, 'connected');
   })();
 
+  conn.hydrateFallback = setTimeout(hydrate, HYDRATE_FALLBACK_MS);
+
   // ── 2. Join the shared multiplexed stream (W09-a) ──
   // One `EventSource` per tab, not one per scope. Reconnection, the cursor
   // map and cross-scope dedup all live in `muxStream`; from here it behaves
@@ -1692,6 +1006,9 @@ function openConnection(
     {
       onOpen: () => {
         useConnectionStore.getState().setConnectionState(primarySessionId, 'connected');
+        // `hello`/`subs` confirmed this scope is active server-side. Safe to
+        // take the snapshot now — see `hydrate`.
+        hydrate();
       },
       onMessage: (msg) => {
         const event = parseFrame(conn, msg.lastEventId, msg.data);
@@ -1717,8 +1034,8 @@ function openConnection(
           // IDs based on the maximum seen, pruning entries well below the window.
           // A wider window (maxSeenSequence - 500) prevents legitimate late arrivals
           // from being dropped on high-latency networks while keeping memory bounded.
-          if (conn.seenSequenceIds.size > 2500) {
-            const threshold = conn.maxSeenSequence - 2000;
+          if (conn.seenSequenceIds.size > DEDUP_WINDOW + 500) {
+            const threshold = conn.maxSeenSequence - DEDUP_WINDOW;
             for (const id of conn.seenSequenceIds) {
               if (id < threshold) conn.seenSequenceIds.delete(id);
             }
@@ -1782,7 +1099,12 @@ function openConnection(
       // leaves a hole BELOW `maxSeenSequence`, and replaying from the tip can
       // never fetch it back. Bounded by the dedup window — anything older has
       // been pruned from `seenSequenceIds` and would re-process.
-      let afterSeq = Math.max(conn.contiguousSequence, conn.maxSeenSequence - 2000);
+      let afterSeq = resolveGapResume(
+        conn.contiguousSequence,
+        conn.maxSeenSequence,
+        primarySessionId,
+      );
+      countFallback('streamGapFills');
       while (conn.refCount > 0) {
         let page: Awaited<ReturnType<typeof platform.streamReplay>>;
         try {
@@ -1822,10 +1144,21 @@ function openConnection(
       // surface nothing new mean the turn really is over and its terminal
       // event is unrecoverable — settle the stream rather than spin forever.
       if (applied > 0) {
+        countFallback('streamGapFilledEvents', applied);
         conn.emptyGapFills = 0;
       } else if (++conn.emptyGapFills >= 3 && connHasActiveStream()) {
         conn.emptyGapFills = 0;
-        useStreamStore.getState().completeStream(primarySessionId);
+        // Say WHY the stream is settling: this path fires when a turn died
+        // without its terminal event (server crash mid-turn, killed provider
+        // process). Silently completing left the user staring at a response
+        // that just... stopped, with no indication anything went wrong.
+        const store = useStreamStore.getState();
+        store.addSystemMessage(
+          primarySessionId,
+          'The stream went quiet and its completion could not be recovered — the turn may have been interrupted. The transcript above is everything that was received.',
+          'error',
+        );
+        store.completeStream(primarySessionId);
       }
       // Push the clock forward so we re-poll at most once per STALL window
       // even if the turn is genuinely still running (no new events found).
@@ -1854,10 +1187,20 @@ function closeConnection(scope: StreamScope, scopeId: string): void {
     // The drain loop is synchronous so this only guards against concurrent
     // event-loop interleaving of closeConnection during microtask yields.
     if (conn.draining) return;
-    stopFlushTimer(conn);
-    if (conn.idleTimer) { clearTimeout(conn.idleTimer); conn.idleTimer = null; }
+    if (conn.hydrateFallback) {
+      clearTimeout(conn.hydrateFallback);
+      conn.hydrateFallback = null;
+    }
+    // Release anything the router is still holding — W30-d's block delivery
+    // can be mid-hold, and a closing connection is the last chance to commit
+    // it. `drainFinal`, not `drain`: a partial block still belongs to the user.
+    applyEffects(conn.primarySessionId, conn, conn.router.drainFinal());
+    cancelFrame(conn.drainHandle);
+    conn.drainHandle = null;
+    for (const timer of conn.cleanupTimers.values()) clearTimeout(timer);
+    conn.cleanupTimers.clear();
     if (conn.watchdogTimer) { clearInterval(conn.watchdogTimer); conn.watchdogTimer = null; }
-    conn.stageBuffers.clear();
+    conn.router.reset();
     conn.pendingSSEEvents = [];
     conn.seenSequenceIds.clear();
     conn.eventSource?.close();
@@ -1937,8 +1280,12 @@ export function disconnectAutomationExecution(executionId: string): void {
 /** Disconnect every live subscription. Used by tests + page unmount edge cases. */
 export function disconnectAll(): void {
   for (const [, conn] of connections) {
-    stopFlushTimer(conn);
-    if (conn.idleTimer) clearTimeout(conn.idleTimer);
+    cancelFrame(conn.drainHandle);
+    conn.drainHandle = null;
+    for (const timer of conn.cleanupTimers.values()) clearTimeout(timer);
+    conn.cleanupTimers.clear();
+    if (conn.watchdogTimer) { clearInterval(conn.watchdogTimer); conn.watchdogTimer = null; }
+    conn.router.reset();
     conn.eventSource?.close();
     useConnectionStore.getState().removeConnection(conn.primarySessionId);
   }

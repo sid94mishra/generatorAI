@@ -31,13 +31,76 @@ import type {
 import type { HarnessRegistry } from './HarnessRegistry.js';
 import { ALL_HARNESS_TYPES } from './HarnessRegistry.js';
 import type { HarnessType } from './types.js';
-import type { ProviderInstanceId } from '@generatorai/core';
+import type { IProviderInstanceRegistry, ProviderInstanceId } from '@generatorai/core';
 
 /** Persists conversation→provider ownership so it survives a restart. */
 export interface ConversationOwnershipStore {
   load(): Promise<Array<{ conversationId: string; harnessType: string }>>;
   save(conversationId: string, harnessType: string): Promise<void>;
   remove(conversationId: string): Promise<void>;
+}
+
+/**
+ * W34 — the binding queries `IProviderInstanceRegistry` (in `@generatorai/core`)
+ * does not expose.
+ *
+ * Duck-typed rather than added to the core port because the port lives in a
+ * package this change may not edit. `ProviderInstanceRegistry` implements it;
+ * a registry that does not simply keeps the pre-W34 behaviour.
+ */
+interface BindingAwareInstanceRegistry {
+  orphanedBindingFor(conversationId: string): { missingInstanceId: ProviderInstanceId } | null;
+  clearBinding(conversationId: string): void;
+}
+
+function asBindingAware(
+  registry: IProviderInstanceRegistry | undefined,
+): BindingAwareInstanceRegistry | undefined {
+  const candidate = registry as unknown as Partial<BindingAwareInstanceRegistry> | undefined;
+  return typeof candidate?.orphanedBindingFor === 'function' &&
+    typeof candidate?.clearBinding === 'function'
+    ? (candidate as BindingAwareInstanceRegistry)
+    : undefined;
+}
+
+/**
+ * W34 — a thread bound to a provider instance that no longer exists.
+ *
+ * Thrown instead of falling back to another account. The acceptance criterion
+ * is explicit that this must NOT degrade quietly: *"a thread whose configured
+ * instance has been deleted refuses to resume and starts a new provider
+ * session, rather than resuming against a different account."* Resuming a
+ * cursor issued by account A against account B is a cross-account data leak,
+ * not a graceful degradation.
+ */
+export class ProviderInstanceUnavailableError extends Error {
+  readonly code = 'PROVIDER_INSTANCE_UNAVAILABLE';
+  constructor(
+    readonly conversationId: string,
+    readonly missingInstanceId: ProviderInstanceId,
+  ) {
+    super(
+      `[MultiHarness] Conversation '${conversationId}' is bound to provider instance ` +
+        `'${missingInstanceId}', which is no longer configured. Refusing to route it to a ` +
+        `different account — start a new provider session for this thread instead.`,
+    );
+    this.name = 'ProviderInstanceUnavailableError';
+  }
+}
+
+/**
+ * Model ids that mean "let the provider pick" rather than naming a model.
+ *
+ * Every vendor spells this differently — Copilot publishes `auto` in its
+ * catalog, claude-agent publishes `default` — so a sentinel looked up in the
+ * shared catalog resolves to whichever provider happens to use that spelling.
+ * That is an accident of vocabulary, not a routing decision, so sentinels are
+ * excluded from provider resolution entirely.
+ */
+const ROUTING_SENTINEL_MODELS: ReadonlySet<string> = new Set(['auto', 'default', 'inherit', '']);
+
+function isRoutingSentinel(model: string | undefined): boolean {
+  return model === undefined || ROUTING_SENTINEL_MODELS.has(model.trim().toLowerCase());
 }
 
 export class MultiHarness implements IAgentHarness {
@@ -58,11 +121,43 @@ export class MultiHarness implements IAgentHarness {
    */
   private instanceTypeMap?: ReadonlyMap<ProviderInstanceId, HarnessType>;
 
+  /**
+   * W34 — when set, conversation routing prefers a SPECIFIC provider
+   * instance (an account/credential set — see `HarnessRegistry.getInstance`)
+   * over the driver-type-only path above. This is what actually closes the
+   * L17 gap: `instanceTypeMap` alone can only ever resolve a `providerInstanceId`
+   * down to a driver family and reuse the ONE shared adapter for that family
+   * (the pre-fix ceiling); this registry is consulted for ownership so two
+   * conversations can be pinned to two DIFFERENT accounts of the same driver
+   * and never collide.
+   *
+   * Optional and additive: every method below still falls back to the
+   * existing type-based `owners` map when this is undefined, when a
+   * conversation has no assigned instance, or when the resolved instance was
+   * never registered with `HarnessRegistry.registerInstance()` — so a
+   * deployment that never configures multiple accounts behaves exactly as
+   * it did before this field existed.
+   */
+  private instanceRegistry?: IProviderInstanceRegistry;
+
   constructor(
     private readonly registry: HarnessRegistry,
     private readonly store?: ConversationOwnershipStore,
     private readonly logger?: { info: (m: string) => void; warn: (m: string) => void },
-  ) {}
+    instanceRegistry?: IProviderInstanceRegistry,
+  ) {
+    this.instanceRegistry = instanceRegistry;
+  }
+
+  /**
+   * Wire (or replace) the instance registry after construction — composition-root
+   * builds `MultiHarness` before the instance registry finishes hydrating from
+   * `harness_instances`, so this lets it attach the registry once ready rather
+   * than threading a not-yet-populated one through the constructor.
+   */
+  setInstanceRegistry(instanceRegistry: IProviderInstanceRegistry): void {
+    this.instanceRegistry = instanceRegistry;
+  }
 
   /**
    * Provide a ProviderInstanceId → HarnessType lookup table so that
@@ -103,13 +198,75 @@ export class MultiHarness implements IAgentHarness {
   }
 
   /**
-   * Decide which provider should run a new conversation.
+   * Drop a model the target provider does not offer, so it can fall back to
+   * its own default instead of rejecting a name it has never heard of.
+   *
+   * This is the second half of the sentinel problem, and it bites in two ways:
+   *
+   *  1. **Sentinels.** `resolveTarget` correctly refuses to *route* on `auto`,
+   *     but the literal string still travelled to the provider as a model
+   *     name. claude-agent then answered "There's an issue with the selected
+   *     model (auto). It may not exist or you may not have access to it." —
+   *     zero tokens, no answer, the same "no output at all" symptom as the
+   *     routing bug it sits behind.
+   *
+   *  2. **Foreign real models.** Because an established binding now outranks a
+   *     model-name inference, a chat bound to claude-agent carrying a stale
+   *     Copilot-only id (`gpt-5.5`) stays on claude-agent — and would hand it
+   *     that id and fail identically. Keeping the binding is right; passing
+   *     the foreign name along with it is not.
+   *
+   * Dropping rather than translating is deliberate: a sentinel *means* "you
+   * choose", and omitting the field is exactly the path a brand-new chat with
+   * no model already takes, so it is known-good rather than a mapping table
+   * that has to be kept in step with five vendors' vocabularies.
+   *
+   * Only strips when the target's catalog is actually KNOWN and lacks the
+   * model. An unprobed provider reports an empty catalog, and treating that as
+   * "offers nothing" would strip every legitimate model during the boot
+   * window.
+   */
+  private withModelSupportedBy(
+    target: HarnessType,
+    params: CreateConversationParams | undefined,
+  ): CreateConversationParams | undefined {
+    const model = params?.model;
+    if (!params || !model) return params;
+
+    const offered = this.registry.statusSnapshot?.[target]?.models ?? [];
+    if (offered.length === 0) return params; // catalog unknown — do not guess
+    if (offered.some((m) => m.id === model)) return params;
+
+    this.logger?.info(
+      `[MultiHarness] '${target}' does not offer model '${model}'` +
+        `${isRoutingSentinel(model) ? " (a provider-agnostic sentinel — it spells its own differently)" : ''}` +
+        ' — letting the provider choose its default instead of passing a name it will reject',
+    );
+    const { model: _dropped, ...rest } = params;
+    return rest as CreateConversationParams;
+  }
+
+  /**
+   * The provider already bound to `conversationId`, or `undefined` for a
+   * genuinely new conversation. Unlike `ownerOf` this does NOT fall back to
+   * the primary — routing has to be able to tell "bound to the primary" apart
+   * from "not bound to anything yet", because only the former may veto a
+   * model-driven provider change.
+   */
+  private existingOwnerFor(conversationId: string | undefined): HarnessType | undefined {
+    return conversationId ? this.owners.get(conversationId) : undefined;
+  }
+
+  /**
+   * Decide which provider should run a conversation.
    *
    * Priority order (L17 — providerInstanceId is the authoritative routing key):
    *  1. `params.providerInstanceId` → look up in instanceTypeMap (when populated).
    *  2. Explicit `params.harnessType`.
-   *  3. Model-catalog lookup.
-   *  4. Primary provider.
+   *  3. Model-catalog lookup — but never for a provider-agnostic sentinel, and
+   *     never against an established binding the current provider can serve.
+   *  4. The conversation's current owner, when it has one.
+   *  5. Primary provider.
    *
    * Finding-1 fix: `providerInstanceId` is now checked FIRST. The `instanceTypeMap`
    * is populated by callers that wire a ProviderInstanceRegistry (deferred: not yet
@@ -117,8 +274,17 @@ export class MultiHarness implements IAgentHarness {
    * Until that wiring is complete, a supplied providerInstanceId falls through to
    * harnessType/model resolution, which is safe — it just loses the L17 guarantee
    * that the specific instance is used, not just the correct provider family.
+   *
+   * `current` is the provider that already owns this conversation, when there is
+   * one. It matters because moving an ESTABLISHED conversation between providers
+   * is destructive — `resumeConversation` destroys the provider-side session and
+   * starts a fresh one, discarding the agent context — so a move must never be
+   * *inferred*. See `isRoutingSentinel` for the specific way that used to happen.
    */
-  private async resolveTarget(params: CreateConversationParams): Promise<HarnessType> {
+  private async resolveTarget(
+    params: CreateConversationParams,
+    current?: HarnessType,
+  ): Promise<HarnessType> {
     // L17: ProviderInstanceId takes priority over all other routing hints.
     /* W34-M3 */
     if (params.providerInstanceId) {
@@ -149,24 +315,122 @@ export class MultiHarness implements IAgentHarness {
     }
     const explicit = params.harnessType as HarnessType | undefined;
     if (explicit) return explicit;
-    if (params.model) {
+
+    // A sentinel means "provider, you choose a model" — it is not a routing
+    // instruction, and it is spelled differently by each vendor ('auto' for
+    // Copilot, 'default' for claude-agent). Resolving it through the shared
+    // catalog therefore answers "which provider happens to spell its sentinel
+    // this way", which is not the question. That is a live defect, not a
+    // hypothetical: the web composer's default model is 'auto', only Copilot
+    // lists 'auto', so EVERY claude-agent chat resolved to Copilot on its
+    // first prompt and had its Claude session destroyed underneath it.
+    if (params.model && !isRoutingSentinel(params.model)) {
       const byModel = await this.registry.resolveProviderForModel(params.model);
-      if (byModel) return byModel;
+      // For an established conversation, a model lookup may only CONFIRM the
+      // current provider, never override it. Overriding is destructive (the
+      // session is torn down and restarted elsewhere), so it takes an explicit
+      // harnessType or providerInstanceId above — never an inference from a
+      // string that may be a stale stored default or another vendor's alias.
+      if (byModel && (!current || byModel === current)) return byModel;
+      if (byModel && current) {
+        this.logger?.info(
+          `[MultiHarness] model '${params.model}' maps to '${byModel}' but conversation is bound to ` +
+            `'${current}' — keeping the established binding. Pass an explicit harnessType to move it.`,
+        );
+      }
     }
-    return this.registry.primary;
+
+    return current ?? this.registry.primary;
+  }
+
+  /**
+   * W34 — the SPECIFIC provider instance that owns `conversationId`, when
+   * one was actually assigned AND that instance is registered with the
+   * registry (i.e. `HarnessRegistry.registerInstance()` was called for it).
+   * Returns `undefined` for every conversation that predates instance-level
+   * routing, or when no instance registry is wired at all — the caller then
+   * falls back to the type-level `owners` map, unchanged from before W34.
+   */
+  private resolveInstance(conversationId: string): ProviderInstanceId | undefined {
+    const found = this.instanceRegistry?.resolveForConversation(conversationId);
+    if (!found) return undefined;
+    if (!this.registry.hasInstance(found.id)) return undefined;
+    return found.id;
+  }
+
+  /**
+   * W34 — the instance id a thread is bound to when that instance has been
+   * DELETED, or `null` when the thread is either unbound or bound to a live
+   * instance.
+   *
+   * `resolveInstance()` cannot express this: it returns `undefined` for both
+   * "never bound" (where falling back to the default account is correct) and
+   * "bound to a deleted account" (where falling back is the bug). Every caller
+   * that routes must check this first.
+   */
+  private orphanedInstanceFor(conversationId: string): ProviderInstanceId | null {
+    const bindingAware = asBindingAware(this.instanceRegistry);
+    const orphan = bindingAware?.orphanedBindingFor(conversationId);
+    return orphan ? orphan.missingInstanceId : null;
+  }
+
+  /**
+   * Throws when `conversationId` is bound to a deleted instance.
+   *
+   * Deliberately fails loudly rather than degrading: routing this thread
+   * anywhere else means replaying one account's session against another.
+   */
+  private assertInstanceAvailable(conversationId: string): void {
+    const missing = this.orphanedInstanceFor(conversationId);
+    if (missing) throw new ProviderInstanceUnavailableError(conversationId, missing);
   }
 
   /** Adapter that owns `conversationId`, brought up if necessary. */
   private adapterFor(conversationId: string): Promise<IAgentHarness> {
+    /* W34 — refuse before routing, never after. */
+    this.assertInstanceAvailable(conversationId);
+    const instanceId = this.resolveInstance(conversationId);
+    if (instanceId) return this.registry.getInstance(instanceId);
     return this.registry.get(this.ownerOf(conversationId));
   }
 
   // ── Conversation lifecycle ──
 
   async createConversation(params: CreateConversationParams): Promise<string> {
-    const target = await this.resolveTarget(params);
+    // W34/L17 — an explicit, REGISTERED instance takes priority over the
+    // driver-type path: it is the only way two accounts of the same driver
+    // stay distinguishable rather than collapsing onto one shared adapter.
+    if (params.providerInstanceId && this.registry.hasInstance(params.providerInstanceId)) {
+      const instanceId = params.providerInstanceId;
+      const adapter = await this.registry.getInstance(instanceId);
+      // for the legacy owners map / status displays
+      const target = await this.resolveTarget(params, this.existingOwnerFor(params.conversationId));
+      const id = await adapter.createConversation(
+        this.withModelSupportedBy(target, params) as CreateConversationParams,
+      );
+      this.owners.set(id, target);
+      if (params.conversationId && params.conversationId !== id) this.owners.set(params.conversationId, target);
+      await this.instanceRegistry?.assignConversation(id, instanceId).catch((e: unknown) =>
+        this.logger?.warn(`[MultiHarness] Failed to persist instance ownership for ${id} → ${instanceId}: ${e}`),
+      );
+      /* W34-N6 */ await this.store?.save(id, target).catch((e: unknown) =>
+        this.logger?.warn(`[MultiHarness] Failed to persist ownership for ${id} → ${target}: ${e}`),
+      );
+      this.logger?.info(`[MultiHarness] conversation ${id} → instance '${instanceId}' (model=${params.model ?? 'default'})`);
+      return id;
+    }
+
+    // `ChatManagementService.ensureConversation` re-enters here to rebuild a
+    // chat whose in-process session was lost (server restart, or a prior
+    // archive), reusing the SAME conversationId. That is a RECOVERY, not a new
+    // chat, and the binding for it survives in `owners` (rehydrated at boot) —
+    // so the established provider must win over a model-name inference here
+    // exactly as it does on the resume path.
+    const target = await this.resolveTarget(params, this.existingOwnerFor(params.conversationId));
     const adapter = await this.registry.get(target);
-    const id = await adapter.createConversation(params);
+    const id = await adapter.createConversation(
+      this.withModelSupportedBy(target, params) as CreateConversationParams,
+    );
     this.owners.set(id, target);
     // Also key by the requested id: some providers echo back a different id,
     // and callers may address the conversation by either.
@@ -182,7 +446,37 @@ export class MultiHarness implements IAgentHarness {
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
     const current = this.owners.get(conversationId);
-    const target = params ? await this.resolveTarget(params) : (current ?? this.registry.primary);
+    // `current` is passed so a model-name inference cannot silently move an
+    // established conversation to another provider — see `resolveTarget`.
+    const target = params ? await this.resolveTarget(params, current) : (current ?? this.registry.primary);
+
+    // W34 — the thread is bound to an account that has since been deleted.
+    //
+    // Acceptance criterion: refuse to RESUME (the provider-side cursor belongs
+    // to the deleted account and must never be replayed against another one)
+    // and start a FRESH provider session instead. Our own message history
+    // lives in the DB and is untouched; only the provider-side agent context
+    // restarts. Falling through to `adapter.resumeConversation` here is the
+    // exact bug — it hands account B a cursor account A issued.
+    const orphanedInstanceId = this.orphanedInstanceFor(conversationId);
+    if (orphanedInstanceId) {
+      this.logger?.warn(
+        `[MultiHarness] conversation ${conversationId} was bound to deleted provider instance ` +
+          `'${orphanedInstanceId}' — starting a NEW provider session on '${target}' rather than ` +
+          `resuming against a different account`,
+      );
+      asBindingAware(this.instanceRegistry)?.clearBinding(conversationId);
+      this.owners.set(conversationId, target);
+      await this.store?.save(conversationId, target).catch((e: unknown) =>
+        this.logger?.warn(`[MultiHarness] Failed to persist ownership for ${conversationId} → ${target}: ${e}`),
+      );
+      const freshAdapter = await this.registry.get(target);
+      await freshAdapter.createConversation({
+        ...(this.withModelSupportedBy(target, params) ?? {}),
+        conversationId,
+      } as CreateConversationParams);
+      return;
+    }
 
     // Provider changed (the user picked a model belonging to a different
     // provider, or named one explicitly). An SDK session can't move between
@@ -204,17 +498,29 @@ export class MultiHarness implements IAgentHarness {
         this.logger?.warn(`[MultiHarness] Failed to persist ownership for ${conversationId} → ${target}: ${e}`),
       );
       const adapter = await this.registry.get(target);
-      await adapter.createConversation({ ...(params as CreateConversationParams), conversationId });
+      await adapter.createConversation({
+        ...(this.withModelSupportedBy(target, params) as CreateConversationParams),
+        conversationId,
+      });
       return;
     }
 
     this.owners.set(conversationId, target);
     const adapter = await this.registry.get(target);
-    return adapter.resumeConversation(conversationId, params);
+    return adapter.resumeConversation(conversationId, this.withModelSupportedBy(target, params));
   }
 
   hasLiveConversation(conversationId: string): boolean {
-    const adapter = this.registry.peek(this.ownerOf(conversationId));
+    // W34 — a thread bound to a deleted account has no live session anywhere.
+    // Peeking the fallback adapter here would report another account's session
+    // as this thread's, which is the same cross-account confusion
+    // `adapterFor` refuses. This is a read, so it answers false rather than
+    // throwing.
+    if (this.orphanedInstanceFor(conversationId)) return false;
+    const instanceId = this.resolveInstance(conversationId);
+    const adapter = instanceId
+      ? this.registry.peekInstance(instanceId)
+      : this.registry.peek(this.ownerOf(conversationId));
     return adapter?.hasLiveConversation(conversationId) ?? false;
   }
 
@@ -233,25 +539,52 @@ export class MultiHarness implements IAgentHarness {
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
-    const adapter = await this.adapterFor(conversationId);
-    await adapter.deleteConversation(conversationId);
-    this.owners.delete(conversationId);
+    // W34 — teardown must still succeed for a thread whose account was
+    // deleted. There is no provider-side session left to delete (it went with
+    // the account), so skip the adapter call rather than letting
+    // `adapterFor()` throw and strand the row forever.
+    if (!this.orphanedInstanceFor(conversationId)) {
+      const adapter = await this.adapterFor(conversationId);
+      await adapter.deleteConversation(conversationId);
+    }
+    this.forgetConversation(conversationId);
     /* W34-N6 */ await this.store?.remove(conversationId).catch((e: unknown) =>
       this.logger?.warn(`[MultiHarness] Failed to remove ownership for ${conversationId}: ${e}`),
     );
   }
 
   async destroyConversation(conversationId: string): Promise<void> {
-    const adapter = await this.adapterFor(conversationId);
-    await adapter.destroyConversation(conversationId);
-    this.owners.delete(conversationId);
+    if (!this.orphanedInstanceFor(conversationId)) {
+      const adapter = await this.adapterFor(conversationId);
+      await adapter.destroyConversation(conversationId);
+    }
+    this.forgetConversation(conversationId);
     /* W34-N6 */ await this.store?.remove(conversationId).catch((e: unknown) =>
       this.logger?.warn(`[MultiHarness] Failed to remove ownership for ${conversationId}: ${e}`),
     );
   }
 
+  /**
+   * Drop every trace of a conversation from the routing tables.
+   *
+   * W34 — the instance binding is cleared here too. Previously it was
+   * deliberately leaked ("a leak, not a correctness risk"), which was true
+   * only while a stale binding degraded silently. Now that a stale binding
+   * makes the thread refuse to route, leaving one behind after a delete would
+   * poison any future thread that reused the id.
+   */
+  private forgetConversation(conversationId: string): void {
+    this.owners.delete(conversationId);
+    asBindingAware(this.instanceRegistry)?.clearBinding(conversationId);
+  }
+
   getConversationWarnings(conversationId: string): ConversationWarning[] {
-    const adapter = this.registry.peek(this.ownerOf(conversationId));
+    // W34 — never read another account's warnings for an orphaned thread.
+    if (this.orphanedInstanceFor(conversationId)) return [];
+    const instanceId = this.resolveInstance(conversationId);
+    const adapter = instanceId
+      ? this.registry.peekInstance(instanceId)
+      : this.registry.peek(this.ownerOf(conversationId));
     return adapter?.getConversationWarnings(conversationId) ?? [];
   }
 

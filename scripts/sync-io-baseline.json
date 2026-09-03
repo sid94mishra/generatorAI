@@ -1,0 +1,11 @@
+{
+  "total": 25,
+  "byFile": {
+    "apps/server/src/composition/bootstrapPairing.ts": 3,
+    "apps/server/src/composition/localAdminToken.ts": 4,
+    "apps/server/src/computer/driverBinary.ts": 4,
+    "apps/server/src/computer/screenCast.ts": 8,
+    "apps/server/src/network/exposure.ts": 3,
+    "apps/server/src/settings/computerUse.ts": 3
+  }
+}

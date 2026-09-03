@@ -53,6 +53,62 @@ describe('evaluateCondition — expressions', () => {
     expect(evaluateCondition(expr('!variables.flag'), ctx('completed', { flag: false }))).toBe(true);
     expect(evaluateCondition(expr('!variables.flag'), ctx('completed', { flag: true }))).toBe(false);
   });
+  // The word forms are what the JSDoc, the docs and the builder's own
+  // placeholder advertise, and they are what a stage condition written by
+  // hand actually looks like. They were never covered, and they were broken:
+  // the tokeniser only recognised AND/OR/NOT when nothing had been
+  // accumulated into a leaf yet, so `a == 1 AND b == 2` collapsed into one
+  // leaf and always compared false — silently skipping the stage.
+  it('word operators AND / OR / NOT split the expression', () => {
+    expect(
+      evaluateCondition(
+        expr("status == 'completed' AND variables.guardMode == 'OK'"),
+        ctx('completed', { guardMode: 'OK' }),
+      ),
+    ).toBe(true);
+    expect(
+      evaluateCondition(
+        expr("status == 'completed' AND variables.guardMode == 'OK'"),
+        ctx('completed', { guardMode: 'FAIL' }),
+      ),
+    ).toBe(false);
+    expect(
+      evaluateCondition(
+        expr("status == 'failed' OR variables.force == true"),
+        ctx('completed', { force: true }),
+      ),
+    ).toBe(true);
+    expect(
+      evaluateCondition(expr('variables.a > 1 and variables.b < 10'), ctx('completed', { a: 5, b: 3 })),
+    ).toBe(true);
+    expect(
+      evaluateCondition(expr("NOT variables.skip AND status == 'completed'"), ctx('completed', { skip: false })),
+    ).toBe(true);
+    expect(
+      evaluateCondition(
+        expr("(status == 'completed' OR status == 'failed') AND variables.env == 'prod'"),
+        ctx('failed', { env: 'prod' }),
+      ),
+    ).toBe(true);
+  });
+
+  it('identifiers and literals containing AND/OR/NOT are not split', () => {
+    // `someOR` must stay one identifier, and a quoted value may contain
+    // anything at all.
+    expect(
+      evaluateCondition(expr('variables.someOR == 3'), ctx('completed', { someOR: 3 })),
+    ).toBe(true);
+    expect(
+      evaluateCondition(
+        expr("variables.note == 'red AND blue'"),
+        ctx('completed', { note: 'red AND blue' }),
+      ),
+    ).toBe(true);
+    expect(
+      evaluateCondition(expr('variables.ANDROID == 1'), ctx('completed', { ANDROID: 1 })),
+    ).toBe(true);
+  });
+
   it('dotted variable paths resolve', () => {
     expect(evaluateCondition(expr("variables.meta.stage == 'build'"), ctx('completed', { meta: { stage: 'build' } }))).toBe(true);
   });

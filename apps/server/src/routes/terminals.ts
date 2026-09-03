@@ -5,6 +5,9 @@
 //   GET    /workspaces/:id/terminals                     — list sessions
 //   GET    /workspaces/:id/terminals/:sid                — describe
 //   GET    /workspaces/:id/terminals/:sid/scrollback     — replay tail
+//            ?tailBytes=N                — raw PTY bytes (default)
+//            ?format=text&tailLines=N    — rendered lines from the host's
+//                                          headless VT model (W14)
 //   POST   /workspaces/:id/terminals/:sid/resize         — resize
 //   POST   /workspaces/:id/terminals/:sid/signal         — POSIX signal
 //   DELETE /workspaces/:id/terminals/:sid                — kill
@@ -130,6 +133,28 @@ export function createTerminalRoutes(container: Container): Router {
       const d = terminalService.describe(sid);
       if (!d || d.workspaceId !== workspaceId) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: `Terminal not found: ${sid}` } });
+        return;
+      }
+      // W14: `?format=text` serves the host's headless VT model — the parsed,
+      // rendered view, bounded at O(lines × columns) however much the command
+      // printed — instead of the gateway's raw byte ring. Only the
+      // out-of-process pty-host keeps one, so this 409s rather than silently
+      // handing back a different representation than the caller asked for.
+      if (String(req.query['format'] ?? '') === 'text') {
+        const tailLinesRaw = req.query['tailLines'];
+        const tailLines = tailLinesRaw ? Math.max(0, parseInt(String(tailLinesRaw), 10) || 0) : 0;
+        const lines = await terminalService.scrollbackText(sid, tailLines);
+        if (!lines) {
+          res.status(409).json({
+            error: {
+              code: 'UNSUPPORTED',
+              message: `Terminal ${sid} runs on a host with no VT model — omit ?format=text for raw bytes`,
+            },
+          });
+          return;
+        }
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ lines });
         return;
       }
       const tailRaw = req.query['tailBytes'];

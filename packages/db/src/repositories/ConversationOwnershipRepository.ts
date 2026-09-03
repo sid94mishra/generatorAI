@@ -54,9 +54,9 @@ export class SqliteConversationOwnershipRepository {
   // The `harness_type` column stores the HarnessType string (e.g. 'claude-agent').
   //
   // Note: ProviderInstanceRegistry.ProviderInstanceStore uses a SEPARATE interface
-  // with { conversationId, instanceId } fields. That store is NOT satisfied by
-  // this class — it needs its own DB table once ProviderInstanceId routing is
-  // activated (W34 / Finding-1 deferred work). See docs/V2_IMPLEMENTATION_TRACKER.md.
+  // with { conversationId, instanceId } fields. That store is satisfied by
+  // `SqliteConversationInstanceOwnershipRepository` (its own table,
+  // `conversation_instance_ownership`), not this class — see that file.
 
   async load(): Promise<Array<{ conversationId: string; harnessType: string }>> {
     const rows = this.loadStmt.all() as Array<{ conversation_id: string; harness_type: string }>;

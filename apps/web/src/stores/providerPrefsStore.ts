@@ -9,6 +9,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 interface ProviderPrefsState {
   /** Provider ids (harness types) the user has enabled. */
@@ -17,7 +18,7 @@ interface ProviderPrefsState {
   isEnabled: (id: string) => boolean;
 }
 
-export const useProviderPrefsStore = create<ProviderPrefsState>()(
+const useProviderPrefsStoreImpl = create<ProviderPrefsState>()(
   persist(
     (set, get) => ({
       enabledProviders: [],
@@ -34,3 +35,8 @@ export const useProviderPrefsStore = create<ProviderPrefsState>()(
     { name: 'generatorai:providerPrefs' },
   ),
 );
+
+
+// HMR-split-proof: every module instance shares the first-created store.
+// See lib/globalSingleton.ts for why this is load-bearing in dev.
+export const useProviderPrefsStore = globalSingleton('web.providerPrefsStore', () => useProviderPrefsStoreImpl);

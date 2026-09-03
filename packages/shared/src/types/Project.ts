@@ -88,6 +88,13 @@ export interface UpdateCodebaseParams {
   defaultBranch?: string;
   subdirectory?: string;
   settings?: Partial<CodebaseSettings>;
+  /**
+   * Where the code lives. These were previously not updatable, so a codebase
+   * linked with a typo'd URL or path was stuck in `status: 'error'` forever —
+   * the only remedy was to delete it and add it again, losing its worktrees.
+   */
+  url?: string;
+  localPath?: string;
 }
 
 // ── Project Config ──

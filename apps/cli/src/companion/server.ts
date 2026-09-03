@@ -35,6 +35,7 @@ import {
   validate,
   type CommandRegistry,
   type CommandSpec,
+  type TerminalAttachPort,
 } from '@generatorai/cli-core';
 import { createLogger } from '../logger.js';
 import type { GlobalFlags, Session } from '../session.js';
@@ -44,14 +45,14 @@ const PROTOCOL_VERSION = 1;
 /** Same allowlist the `script` hook uses. `cmd.exe` is absent by design. */
 const SPAWN_ALLOWLIST = new Set(['node', 'python', 'python3', 'bash', 'sh', 'git', 'echo', 'pwsh']);
 
-interface Request {
+export interface Request {
   v?: number;
   id?: string;
   method?: string;
   params?: Record<string, unknown>;
 }
 
-type Frame =
+export type Frame =
   | { v: number; id: string; ok: true; data: unknown }
   | { v: number; id: string; ok: false; error: Record<string, unknown> }
   | { v: number; id: string; event: Record<string, unknown> };
@@ -65,7 +66,7 @@ export interface CompanionOptions {
 }
 
 export async function startCompanion(options: CompanionOptions): Promise<void> {
-  const { session, registry, signal } = options;
+  const { session, signal } = options;
 
   let expectedNonce = process.env['GENERATORAI_COMPANION_NONCE'] ?? null;
   const logger = createLogger({
@@ -88,7 +89,7 @@ export async function startCompanion(options: CompanionOptions): Promise<void> {
 
   const audit = await openAudit();
 
-  const handler = createHandler({
+  const shared = createSharedState({
     ...options,
     logger,
     audit,
@@ -96,10 +97,10 @@ export async function startCompanion(options: CompanionOptions): Promise<void> {
   });
 
   if (options.socketPath) {
-    await serveSocket(options.socketPath, handler, signal);
+    await serveSocket(options.socketPath, shared, signal);
     return;
   }
-  await serveStdio(handler, signal);
+  await serveStdio(shared, signal);
 }
 
 // ── Transports ────────────────────────────────────────────────────
@@ -109,25 +110,46 @@ type Handler = (
   emit: (frame: Frame) => void,
 ) => Promise<Frame | null>;
 
-async function serveStdio(handler: Handler, signal: AbortSignal): Promise<void> {
-  const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-  const write = (frame: Frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
+export async function serveStdio(
+  shared: SharedCompanionState,
+  signal: AbortSignal,
+  io: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream } = {
+    input: process.stdin,
+    output: process.stdout,
+  },
+): Promise<void> {
+  const rl = readline.createInterface({ input: io.input, crlfDelay: Infinity });
+  const write = (frame: Frame) => io.output.write(`${JSON.stringify(frame)}\n`);
+
+  // Stdio has exactly one peer — the process that spawned this one — so a
+  // failed handshake ending the whole channel is correct here, unlike the
+  // socket transport below where other peers must be unaffected.
+  const { handle, abortAll } = createConnectionHandler(shared, () => {
+    setTimeout(() => process.exit(77), 10);
+  });
 
   const done = new Promise<void>((resolve) => {
-    rl.on('close', resolve);
+    // Same reasoning as the socket transport's `socket.on('close', abortAll)`
+    // — ordinary teardown (parent closed stdin, or SIGINT abort) must not
+    // leave this connection's in-flight requests/timers running with no way
+    // left to cancel them.
+    rl.on('close', () => {
+      abortAll();
+      resolve();
+    });
     signal.addEventListener('abort', () => rl.close(), { once: true });
   });
 
   for await (const line of rl) {
     if (!line.trim()) continue;
-    void handleLine(line, handler, write);
+    void handleLine(line, handle, write);
   }
   await done;
 }
 
 async function serveSocket(
   socketPath: string,
-  handler: Handler,
+  shared: SharedCompanionState,
   signal: AbortSignal,
 ): Promise<void> {
   // A stale socket file from a crashed run would make bind fail; removing it
@@ -137,11 +159,46 @@ async function serveSocket(
   }
 
   const server = net.createServer((socket) => {
-    const rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
-    const write = (frame: Frame) => socket.write(`${JSON.stringify(frame)}\n`);
-    rl.on('line', (line) => {
-      if (line.trim()) void handleLine(line, handler, write);
+    // Fresh handshake and in-flight state for THIS socket only. Without a
+    // per-connection handler, one client's successful `hello` — or one
+    // client's bad nonce — would leak onto every other socket this process
+    // ever accepts, since a single shared `authenticated`/`inFlight` closure
+    // has no notion of which peer it belongs to.
+    //
+    // `onAuthFailure` runs BEFORE `handle()` returns the NOAUTH frame, and
+    // `handleLine` only writes that frame once `handle()` resolves — so it
+    // cannot close the socket itself; it only sets a flag `write` checks
+    // after sending. Closing synchronously here (the original code) made
+    // `write`'s `!socket.destroyed` guard false by the time it ran, so the
+    // peer got an abrupt close with no explanation instead of the NOAUTH
+    // frame. `socket.end()` right after the write avoids that (it flushes
+    // pending writes before closing) but only half-closes the connection —
+    // the peer's `close` never fires unless it also ends its own side.
+    // Passing the destroy as `socket.write`'s own completion callback is
+    // the ordering that is both correct and simple: Node only invokes it
+    // once the data has been handed to the OS, and `destroy()` (not
+    // `end()`) still fully tears the connection down so `close` fires
+    // promptly on both ends.
+    let closeAfterWrite = false;
+    const { handle, abortAll } = createConnectionHandler(shared, () => {
+      closeAfterWrite = true;
     });
+
+    const rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
+    const write = (frame: Frame) => {
+      if (socket.destroyed) return;
+      if (closeAfterWrite) {
+        socket.write(`${JSON.stringify(frame)}\n`, () => socket.destroy());
+      } else {
+        socket.write(`${JSON.stringify(frame)}\n`);
+      }
+    };
+    rl.on('line', (line) => {
+      if (line.trim()) void handleLine(line, handle, write);
+    });
+    // A request left running after its socket disappears is a leaked
+    // process/timer with no way left to cancel it; abort them all on close.
+    socket.on('close', abortAll);
     socket.on('error', () => socket.destroy());
   });
 
@@ -204,16 +261,37 @@ async function handleLine(
 
 // ── Dispatch ──────────────────────────────────────────────────────
 
-interface HandlerOptions extends CompanionOptions {
+export interface HandlerOptions extends CompanionOptions {
   logger: ReturnType<typeof createLogger>;
   audit: fs.WriteStream | null;
   expectedNonce: string | null;
 }
 
-function createHandler(options: HandlerOptions): Handler {
+/**
+ * State that is legitimately process-wide: the command registry, the one
+ * underlying authenticated client used to talk to the real GeneratorAI
+ * server (expensive to build, and unrelated to which companion peer is
+ * asking), and the launch nonce every peer is checked against.
+ *
+ * Deliberately does NOT include `authenticated` or `inFlight` — those belong
+ * to one peer's connection, not to the companion process. See
+ * {@link createConnectionHandler}.
+ */
+export interface SharedCompanionState {
+  registry: CommandRegistry;
+  session: Session;
+  flags: GlobalFlags;
+  signal: AbortSignal;
+  logger: ReturnType<typeof createLogger>;
+  audit: fs.WriteStream | null;
+  expectedNonce: string | null;
+  methods: Map<string, ReturnType<typeof toRpcMethods>[number]>;
+  getClient: () => ReturnType<typeof createCliClient>;
+}
+
+export function createSharedState(options: HandlerOptions): SharedCompanionState {
   const { registry, session, flags, signal, logger, audit, expectedNonce } = options;
   const methods = new Map(toRpcMethods(registry).map((m) => [m.method, m]));
-  const inFlight = new Map<string, AbortController>();
 
   let clientPromise: ReturnType<typeof createCliClient> | null = null;
   const getClient = () => {
@@ -224,13 +302,44 @@ function createHandler(options: HandlerOptions): Handler {
         ...(flags.connection ? { connectionRef: flags.connection } : {}),
         signal,
       });
+      // Non-fatal: the server is ahead of what this CLI build understands.
+      // Logged once, here, rather than per-request — `clientPromise` is
+      // memoized, so this only ever runs on the connection's first command.
+      clientPromise.then((client) => {
+        if (client.protocolWarning) logger.warn(client.protocolWarning);
+      }, () => {});
     }
     return clientPromise;
   };
 
+  return { registry, session, flags, signal, logger, audit, expectedNonce, methods, getClient };
+}
+
+export interface ConnectionHandler {
+  handle: Handler;
+  /** Aborts every request still running on this connection. Call on disconnect. */
+  abortAll: () => void;
+}
+
+/**
+ * Builds a handler scoped to ONE peer — one socket, or (for stdio) the
+ * process's single lifetime. `authenticated` and `inFlight` live in this
+ * closure, created fresh per call, so one peer's handshake result and one
+ * peer's cancellations can never be observed or triggered by another.
+ *
+ * `onAuthFailure` is the only transport-specific policy left: stdio has one
+ * peer, so it can end the whole channel; a socket must only lose the one
+ * connection that sent the bad nonce.
+ */
+export function createConnectionHandler(
+  shared: SharedCompanionState,
+  onAuthFailure: () => void,
+): ConnectionHandler {
+  const { registry, session, signal, logger, audit, expectedNonce, methods, getClient } = shared;
+  const inFlight = new Map<string, AbortController>();
   let authenticated = expectedNonce === null;
 
-  return async (request, emit) => {
+  const handle: Handler = async (request, emit) => {
     const id = request.id ?? 'unknown';
     const method = request.method ?? '';
     const params = request.params ?? {};
@@ -251,9 +360,11 @@ function createHandler(options: HandlerOptions): Handler {
     if (method === 'hello') {
       if (expectedNonce && params['nonce'] !== expectedNonce) {
         logger.error('Companion handshake rejected: bad nonce');
-        // Exiting rather than replying-and-continuing: a wrong nonce means
-        // the peer is not who this process was launched for.
-        setTimeout(() => process.exit(77), 10);
+        // `onAuthFailure` decides the blast radius: stdio has one peer, so
+        // it ends the whole process; a socket loses only this connection.
+        // Either way, a wrong nonce means THIS peer is not who the channel
+        // was opened for — it never touches any other connection's state.
+        onAuthFailure();
         return fail('NOAUTH', 'Handshake rejected.');
       }
       authenticated = true;
@@ -354,6 +465,14 @@ function createHandler(options: HandlerOptions): Handler {
       await context?.dispose();
     }
   };
+
+  return {
+    handle,
+    abortAll: () => {
+      for (const controller of inFlight.values()) controller.abort();
+      inFlight.clear();
+    },
+  };
 }
 
 async function buildContext(
@@ -387,6 +506,15 @@ async function buildContext(
       },
     },
     stream: client.stream,
+    // `terminal.attach` is `inRpc: false` — no companion caller can ever
+    // dispatch it — but a `CliContext` still needs a real value here rather
+    // than `undefined`, and this machine gateway has no local terminal to
+    // hand over even in principle.
+    terminalAttach: {
+      attach() {
+        throw toCliError(new Error('Raw terminal attach has no meaning over the companion RPC.'));
+      },
+    } satisfies TerminalAttachPort,
     emit,
     signal,
     interactive: false,

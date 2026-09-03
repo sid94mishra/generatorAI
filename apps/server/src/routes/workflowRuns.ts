@@ -172,15 +172,27 @@ export function createWorkflowRunRoutes(container: Container): Router {
   router.post('/:id/retry', async (req, res, next) => {
     try {
       const runId = String(req.params['id']);
+      // `retryRun` creates a NEW run carrying `ancestorRunId` (W23 lineage) —
+      // the ancestor stays terminal. Starting `runId` here started the OLD,
+      // already-failed run (a no-op) and left the new one parked in `created`
+      // forever, so the button appeared to do nothing and every press
+      // orphaned another run.
       const retried = await workflowRunService.retryRun(runId);
       // Fire-and-forget the start so the retry endpoint returns quickly.
-      workflowRunService.startRun(runId).catch((err) => {
-        logger.error(`[WorkflowRunRoutes] Retry-start failed for ${runId}`, {
+      workflowRunService.startRun(retried.id).catch((err) => {
+        logger.error(`[WorkflowRunRoutes] Retry-start failed for ${retried.id}`, {
           error: err instanceof Error ? err.message : String(err),
         });
       });
-      logger.info(`[WorkflowRunRoutes] Retried run ${runId}`, { requestId: req.requestId });
-      res.status(202).json({ message: 'Workflow run retry initiated', runId, status: retried.status });
+      logger.info(`[WorkflowRunRoutes] Retried run ${runId} as ${retried.id}`, {
+        requestId: req.requestId,
+      });
+      res.status(202).json({
+        message: 'Workflow run retry initiated',
+        runId: retried.id,
+        ancestorRunId: runId,
+        status: retried.status,
+      });
     } catch (err) {
       next(err);
     }

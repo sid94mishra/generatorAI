@@ -12,7 +12,9 @@ const SESSION_MODE_INFO: Record<WorkflowSessionMode, { label: string; descriptio
   auto: {
     label: 'Automatic (Recommended)',
     description:
-      'Independent stages get their own sessions (parallel), dependent chains share sessions. Best balance of parallelism and context sharing.',
+      // Resolved once for the whole run at start, not per chain: if the DAG
+      // has ANY parallelism the run uses per-stage sessions throughout.
+      'Picks the mode for you when the run starts: per-stage sessions if the graph has any parallel branches, otherwise a single shared session.',
   },
   single: {
     label: 'Single Session',

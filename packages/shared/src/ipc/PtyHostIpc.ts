@@ -15,6 +15,10 @@ export interface PtyCreateSessionRequest {
   rows: number;
   cwd: string;
   env?: Record<string, string>;
+  /** Shell binary override; host picks a platform default (`powershell.exe` / `$SHELL`) when omitted. */
+  shell?: string;
+  /** Extra shell args. On Windows PowerShell/pwsh, the host also injects `-NoLogo -NoProfile` unless already present — same fast-start behavior as the in-process `NodePtyHost`. */
+  shellArgs?: string[];
 }
 
 export interface PtyWriteRequest {
@@ -38,12 +42,48 @@ export interface PtyDestroyRequest {
   sessionId: string;
 }
 
+/** Deliver a POSIX signal to the PTY's child process (best-effort on Windows — see `ITerminalHandle.signal`). */
+export interface PtySignalRequest {
+  type: 'signal';
+  reqId: string;
+  sessionId: string;
+  signal: string;
+}
+
+/** OS-level flow-control pause — stop reading from the PTY, backpressuring the child. */
+export interface PtyPauseRequest {
+  type: 'pause';
+  reqId: string;
+  sessionId: string;
+}
+
+/** Resume reading from a paused PTY. */
+export interface PtyResumeRequest {
+  type: 'resume';
+  reqId: string;
+  sessionId: string;
+}
+
 /** Credit acknowledgement — gateway notifies host that N chars were consumed. */
 export interface PtyAckRequest {
   type: 'ack';
   reqId: string;
   sessionId: string;
   bytesConsumed: number;
+}
+
+/**
+ * Read the session's rendered scrollback out of the host's headless VT model
+ * (W14). The gateway keeps raw bytes for byte-exact replay; this returns the
+ * *parsed* view — bounded at O(lines × columns) no matter how much output the
+ * command produced — for tail replay and cross-restart revive.
+ */
+export interface PtyScrollbackRequest {
+  type: 'scrollback';
+  reqId: string;
+  sessionId: string;
+  /** Most-recent N lines. `0`/omitted returns everything the model retains. */
+  tailLines?: number;
 }
 
 export interface PtyPingRequest {
@@ -56,7 +96,11 @@ export type PtyHostRequest =
   | PtyWriteRequest
   | PtyResizeRequest
   | PtyDestroyRequest
+  | PtySignalRequest
+  | PtyPauseRequest
+  | PtyResumeRequest
   | PtyAckRequest
+  | PtyScrollbackRequest
   | PtyPingRequest;
 
 // ─── Responses / notifications (pty-host → gateway) ─────────────────────────
@@ -95,6 +139,17 @@ export interface PtyRequestError {
   sessionId?: string;
 }
 
+export interface PtyScrollbackResponse {
+  type: 'scrollback';
+  reqId: string;
+  ok: true;
+  sessionId: string;
+  /** Rendered lines, oldest first. */
+  lines: string[];
+  /** False when the host fell back to the degraded line ring (see `HeadlessTerminalModel`). */
+  vt: boolean;
+}
+
 export interface PtyPongResponse {
   type: 'pong';
   reqId: string;
@@ -106,6 +161,7 @@ export type PtyHostResponse =
   | PtyExitNotification
   | PtyRequestAck
   | PtyRequestError
+  | PtyScrollbackResponse
   | PtyPongResponse;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

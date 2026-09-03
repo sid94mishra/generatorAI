@@ -135,6 +135,8 @@ export type {
   BrowserHostObserver,
   BrowserInputEvent,
   PageOutcome,
+  ScreencastCapabilities,
+  ScreencastCodec,
   ScreencastFrame,
 } from './IBrowserBridge.js';
 
@@ -144,6 +146,21 @@ export type {
   ITerminalHandle,
   TerminalSpawnOptions,
 } from './ITerminalHost.js';
+
+// ── Voice Module Ports ──
+export type {
+  ISpeechToTextEngine,
+  SttTranscribeOptions,
+  SttTranscribeResult,
+} from './ISpeechToTextEngine.js';
+export type {
+  ITextToSpeechEngine,
+  TtsSynthesizeOptions,
+} from './ITextToSpeechEngine.js';
+export type {
+  ITextFormatter,
+  TextFormatterOptions,
+} from './ITextFormatter.js';
 
 // ── Computer Use Port ──
 export type {

@@ -21,10 +21,14 @@ import type {
   AgentOverrides,
   Automation,
   AutomationExecution,
+  AutomationExecutionWithRuns,
   CreateAgentParams,
   CreateAutomationParams,
   CreateEdgeParams,
   CreateStageParams,
+  HookDefinition,
+  HookFailurePolicy,
+  HookType,
   McpServerEntry,
   Project,
   ProjectCodebase,
@@ -32,12 +36,38 @@ import type {
   StageDefinition,
   StageEdge,
   StageRun,
+  TerminalSessionDescriptor,
   UpdateAgentParams,
   UpdateAutomationParams,
   WorkflowDefinition,
+  WorktreeDetail,
   WorktreeInfo,
 } from '@generatorai/shared';
-import { json, jsonWith, qs, request, type ApiFetch } from './client.js';
+import { json, jsonWith, qs, request, requestAllowing, type ApiFetch } from './client.js';
+
+/**
+ * One finding from `definitions.validate`, carrying the graph element it is
+ * about — mirrors `DAGValidationIssue` in `@generatorai/core`'s DAG domain
+ * (`packages/core/src/domain/dag/types.ts`), redeclared here rather than
+ * imported because `client-core` must not depend on the server-side core
+ * package. Optional on the wire: an older server sends only the flat
+ * `errors`/`warnings` strings.
+ */
+export interface WorkflowValidationIssue {
+  severity: 'error' | 'warning';
+  code: string;
+  message: string;
+  stageIds: string[];
+  edge?: { fromStageId: string; toStageId: string; edgeType?: string };
+  field?: string;
+}
+
+export interface WorkflowValidationResult {
+  valid: boolean;
+  errors?: string[];
+  warnings?: string[];
+  issues?: WorkflowValidationIssue[];
+}
 
 /** A workflow run as the run routes serialise it. */
 export interface RunSummary {
@@ -60,9 +90,48 @@ export interface WorkspaceRecord {
   ownerId: string;
   status: string;
   rootPath: string;
+  /**
+   * The real working root a file operation actually reads/writes relative
+   * to — NOT always `rootPath` itself (a worktree-enabled workspace keeps
+   * `rootPath` as the outer container and does its real work inside a
+   * worktree under it). The server's `GET /:id` route returns the full
+   * `WorkspaceInfo` DTO (`packages/shared/src/types/Workspace.ts`) verbatim,
+   * which always includes this — it was simply never declared here before.
+   */
+  workingDirectory?: string;
+  /**
+   * Always `path.join(rootPath, 'artifacts')` (`WorkspaceManager.ts`) — a
+   * conventional subdirectory, not a separately-tracked entity. Already
+   * browsable through the ordinary file tree at that relative path; no
+   * dedicated "artifacts" endpoint exists or is needed.
+   */
+  artifactsPath?: string;
   projectId?: string | null;
   createdAt: string | number;
   sizeBytes?: number;
+}
+
+/**
+ * Real shape of `GET /:id/files` (`workspaces.ts`). Every array here is bare
+ * repo-relative path STRINGS — no `{name,type,size}` metadata; the server
+ * walks the filesystem directly (`fs.readdir`), it does not `stat()` each
+ * entry. `workspaceFiles` covers everything under the working directory
+ * except the reserved subdirectories (`.git`, `source`, `output`,
+ * `artifacts`, `scripts`, `config`, build/cache dirs); `artifactFiles`/
+ * `sourceFiles` are those two reserved subdirectories specifically;
+ * `worktrees[].files` mirrors the same walk for each worktree. Unlike
+ * `workspaces.tree()` (git-tracked only), this walk catches UNTRACKED files
+ * too — the only route that does, which is what makes it the real source
+ * for browsing generated artifacts (never git-tracked).
+ */
+export interface WorkspaceFilesResponse {
+  workspaceId: string;
+  rootPath: string;
+  codeRoot: string;
+  workspaceFiles: string[];
+  artifactFiles: string[];
+  sourceFiles: string[];
+  worktrees: Array<{ alias: string; worktreePath: string; files: string[] }>;
 }
 
 export interface FileEntryRecord {
@@ -105,6 +174,22 @@ export interface HookPhaseInfo {
   description?: string;
 }
 
+/**
+ * `GET /hooks/sessions/:id/hooks` — grouped by where the hook is defined, not
+ * a flat list. A workflow's entry is keyed by hook id and holds only the
+ * fields that workflow OVERRIDES (`hookOverrides` is `Record<string,
+ * Partial<HookDefinition>>`); the base definition lives in `globalHooks`.
+ */
+export interface SessionHooks {
+  sessionId: string;
+  workflowHooks: Array<{
+    workflowId: string;
+    workflowName: string;
+    hooks: Record<string, Partial<HookDefinition>>;
+  }>;
+  globalHooks: HookDefinition[];
+}
+
 export interface DeviceRecord {
   deviceId: string;
   name: string;
@@ -117,15 +202,11 @@ export interface DeviceRecord {
   jwkThumbprint: string;
 }
 
-export interface TerminalRecord {
-  id: string;
-  workspaceId: string;
-  cols: number;
-  rows: number;
-  cwd?: string;
-  shell?: string;
-  createdAt?: string | number;
-}
+// `TerminalSessionDescriptor` (imported above) is the real per-session
+// shape — a hand-written `TerminalRecord` interface used to live here
+// instead, missing `pid`/`exitCode`/`exitSignal`/`lastActivityAt`/`host`
+// entirely. Nothing had ever called `terminals.list()` to notice (Phase 5
+// item 6 is its first real consumer).
 
 /**
  * Builds the admin half of the API surface.
@@ -156,9 +237,15 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       remove: (id: string) =>
         req<void>(`/api/workflow-definitions/${id}`, { method: 'DELETE' }),
 
+      // 422 is this route's way of saying "not valid", with the findings in
+      // the body — not a transport failure. Plain `request` threw it away
+      // (see `requestAllowing`'s doc comment), so an invalid definition
+      // surfaced as "422 Unprocessable Entity" with no errors at all.
       validate: (id: string) =>
-        req<{ valid: boolean; errors?: string[]; warnings?: string[] }>(
+        requestAllowing<WorkflowValidationResult>(
+          fetchImpl,
           `/api/workflow-definitions/${id}/validate`,
+          [422],
           json({}),
         ),
 
@@ -181,7 +268,11 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       addStage: (id: string, body: Omit<CreateStageParams, 'workflowDefinitionId'>) =>
         req<StageDefinition>(`/api/workflow-definitions/${id}/stages`, json(body)),
 
-      updateStage: (id: string, stageId: string, body: Record<string, unknown>) =>
+      // Same schema as `addStage`, partial — `Record<string, unknown>` here
+      // let every call site send client-shaped field names (`prompt`,
+      // `timeoutSeconds`, `maxRetries`) that the route's schema silently
+      // dropped instead of a type error at the call site.
+      updateStage: (id: string, stageId: string, body: Partial<Omit<CreateStageParams, 'workflowDefinitionId'>>) =>
         req<StageDefinition>(
           `/api/workflow-definitions/${id}/stages/${stageId}`,
           jsonWith('PUT', body),
@@ -276,8 +367,21 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         req<Record<string, unknown>>('/api/automations/test-data-source', json(config)),
       executions: (id: string) =>
         req<AutomationExecution[]>(`/api/automations/${id}/executions`),
+      /**
+       * `GET .../executions/:execId` — "get execution with runs"
+       * (`apps/server/src/routes/automations.ts`, backed by
+       * `AutomationService.getExecutionWithRuns`, which returns
+       * `{ ...execution, runs: AutomationExecutionRun[] }`). Each run's
+       * `workflowRunId` is the ONLY way to navigate from an execution into
+       * the workflow run(s) it actually spawned — the `automation_execution.*`
+       * stream events never carry it (Phase 6 item 6: `AgentEvent.ts` also
+       * declares `iteration_completed`/`iteration_started`/`iteration_failed`
+       * kinds that carry `workflowRunId`, but grepping every real emitter in
+       * `packages/core/src/services/AutomationService.ts` turns up zero
+       * producers for any of the three — they are never actually sent).
+       */
       execution: (id: string, execId: string) =>
-        req<Record<string, unknown>>(`/api/automations/${id}/executions/${execId}`),
+        req<AutomationExecutionWithRuns>(`/api/automations/${id}/executions/${execId}`),
       cancelExecution: (id: string, execId: string) =>
         req<void>(`/api/automations/${id}/executions/${execId}/cancel`, json({})),
       /**
@@ -409,11 +513,60 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       remove: (id: string) => req<void>(`/api/workspaces/${id}`, { method: 'DELETE' }),
       cleanup: (body?: { retentionHours?: number; maxDiskMb?: number }) =>
         req<Record<string, unknown>>('/api/workspaces/cleanup', json(body ?? {})),
-      worktrees: (id: string) => req<WorktreeInfo[]>(`/api/workspaces/${id}/worktrees`),
+      // Real response: `GET /:id/worktrees` returns `info.worktrees` verbatim
+      // (`workspaces.ts`), which is `WorktreeDetail[]`
+      // (`{codebaseId, alias, branchName, baseBranch, worktreePath, status}`)
+      // — a workspace-scoped shape, NOT `WorktreeInfo`
+      // (`{id, projectId, codebaseId, runId?, runType?, worktreePath,
+      // branchName, status, createdAt, cleanedUpAt?}`), a DIFFERENT,
+      // project/codebase-scoped type that happens to share two field names.
+      // Was mistyped as `WorktreeInfo[]` before this fix.
+      worktrees: (id: string) => req<WorktreeDetail[]>(`/api/workspaces/${id}/worktrees`),
+      // Real response (`GET /:id/files`, `workspaces.ts`): NOT an array at
+      // all — was mistyped as `FileEntryRecord[]` before this fix. The route
+      // also silently ignores any `path` query param (ignores the second
+      // arg here) and always returns everything; there is no server-side
+      // path filter to request.
       files: (id: string, path?: string) =>
-        req<FileEntryRecord[]>(`/api/workspaces/${id}/files${qs({ path })}`),
-      fileContent: (id: string, path: string) =>
-        req<{ content: string }>(`/api/workspaces/${id}/files/content${qs({ path })}`),
+        req<WorkspaceFilesResponse>(`/api/workspaces/${id}/files${qs({ path })}`),
+      // `source`/`worktreeAlias` select which base directory `path` resolves
+      // under ('workspace' = the agent's working directory, the default;
+      // 'artifacts' | 'source' = the matching subdirectory; 'worktree' +
+      // `worktreeAlias` = that worktree's root) — real query params the
+      // route reads (`workspaces.ts`) that this method never exposed before.
+      // Response was also mistyped as bare `{content}`; the route always
+      // sends `path`/`truncated`/`size` alongside it too.
+      fileContent: (
+        id: string,
+        path: string,
+        opts?: { source?: 'workspace' | 'worktree' | 'artifacts' | 'source'; worktreeAlias?: string },
+      ) =>
+        req<{ path: string; content: string; truncated: boolean; size: number }>(
+          `/api/workspaces/${id}/files/content${qs({ path, source: opts?.source, worktreeAlias: opts?.worktreeAlias })}`,
+        ),
+      /**
+       * Writes a file into the workspace (open question #24).
+       *
+       * There was no write route at all until now: a client could read every
+       * file in a workspace and create none, so "add a file here" was
+       * reachable only by having the agent do it or by having filesystem
+       * access to the server. `content` is a FULL replacement, not a patch —
+       * the route takes what the read route returns.
+       */
+      writeFile: (
+        id: string,
+        body: {
+          path: string;
+          content: string;
+          source?: 'workspace' | 'worktree' | 'artifacts' | 'source';
+          worktreeAlias?: string;
+          createDirectories?: boolean;
+        },
+      ) =>
+        req<{ path: string; size: number; created: boolean }>(
+          `/api/workspaces/${id}/files/content`,
+          jsonWith('PUT', body),
+        ),
       createCheckpoint: (id: string, body?: Record<string, unknown>) =>
         req<Record<string, unknown>>(`/api/workspaces/${id}/checkpoints`, json(body ?? {})),
       changesContent: (id: string, params: { path: string; side?: string; alias?: string }) =>
@@ -426,8 +579,15 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── terminals.ts ────────────────────────────────────────────
     terminals: {
+      // The route wraps its response in a `{ terminals: [...] }` envelope
+      // (`apps/server/src/routes/terminals.ts`'s `GET /` handler,
+      // `res.json({ terminals: list })`) — unwrapped here so callers get
+      // the array their type says they get, not an object that happens to
+      // have a `.terminals` property.
       list: (workspaceId: string) =>
-        req<TerminalRecord[]>(`/api/workspaces/${workspaceId}/terminals`),
+        req<{ terminals: TerminalSessionDescriptor[] }>(
+          `/api/workspaces/${workspaceId}/terminals`,
+        ).then((body) => body.terminals),
       scrollback: (workspaceId: string, sid: string) =>
         req<{ data: string }>(`/api/workspaces/${workspaceId}/terminals/${sid}/scrollback`),
       resize: (workspaceId: string, sid: string, cols: number, rows: number) =>
@@ -458,8 +618,45 @@ export function createAdminApi(fetchImpl: ApiFetch) {
           `/api/workspaces/${workspaceId}/browser/capture`,
           json(body ?? {}),
         ),
+      // The route answers `{ artifacts: [...] }` (`browser.ts`'s `/snapshots`
+      // handler, `res.json({ artifacts: browserOnly })`) — unwrapped here so
+      // callers get the array their type promises rather than an object that
+      // happens to have an `.artifacts` property, the same treatment
+      // `terminals.list` already needed for the same reason.
       snapshots: (workspaceId: string) =>
-        req<Array<Record<string, unknown>>>(`/api/workspaces/${workspaceId}/browser/snapshots`),
+        req<{ artifacts: Array<Record<string, unknown>> }>(
+          `/api/workspaces/${workspaceId}/browser/snapshots`,
+        ).then((body) => body.artifacts ?? []),
+
+      /**
+       * The page's serialised accessibility tree — text, not pixels.
+       *
+       * The single most useful page representation for a terminal client:
+       * the interactive shape of the page with `[ref=e1]` tags, roughly a
+       * tenth the size of a DOM snapshot. `BrowserService.readPage()` has
+       * always existed as an agent tool; it had no HTTP route until now, so
+       * no client could ask for it.
+       */
+      readPage: (workspaceId: string) =>
+        req<{ url: string; title: string; snapshot: string }>(
+          `/api/workspaces/${workspaceId}/browser/read-page`,
+          json({}),
+        ),
+
+      /**
+       * Raw bytes of one browser artifact (a screenshot PNG, a DOM snapshot).
+       *
+       * `GET /browser/files/<relativePath>` streams the file with a real
+       * content type — it is NOT JSON, so it cannot go through `request()`.
+       */
+      async file(workspaceId: string, relativePath: string): Promise<Uint8Array> {
+        const encoded = relativePath.split('/').map(encodeURIComponent).join('/');
+        const res = await fetchImpl(`/api/workspaces/${workspaceId}/browser/files/${encoded}`);
+        if (!res.ok) {
+          throw new Error(`Could not read ${relativePath}: ${res.status} ${res.statusText}`);
+        }
+        return new Uint8Array(await res.arrayBuffer());
+      },
       selection: (workspaceId: string, body: Record<string, unknown>) =>
         req<Record<string, unknown>>(
           `/api/workspaces/${workspaceId}/browser/selection`,
@@ -490,8 +687,16 @@ export function createAdminApi(fetchImpl: ApiFetch) {
           `/api/workspaces/${workspaceId}/computer/consent`,
           json(body),
         ),
+      // Every list route in this namespace answers an ENVELOPE, not a bare
+      // array (`computer.ts`: `res.json({ grants })`, `res.json({ entries })`,
+      // `res.json({ enabled, frames })`). Typed as arrays, all three rendered
+      // as permanently empty for every caller — `computer grants`,
+      // `computer activity` and `computer frames` each printed "no rows"
+      // regardless of what the server held.
       grants: (workspaceId: string) =>
-        req<Array<Record<string, unknown>>>(`/api/workspaces/${workspaceId}/computer/grants`),
+        req<{ grants: Array<Record<string, unknown>> }>(
+          `/api/workspaces/${workspaceId}/computer/grants`,
+        ).then((body) => body.grants ?? []),
       revokeGrant: (workspaceId: string, appIdentity: string) =>
         req<void>(
           `/api/workspaces/${workspaceId}/computer/grants/${encodeURIComponent(appIdentity)}`,
@@ -505,9 +710,13 @@ export function createAdminApi(fetchImpl: ApiFetch) {
           json(body),
         ),
       activity: (workspaceId: string) =>
-        req<Array<Record<string, unknown>>>(`/api/workspaces/${workspaceId}/computer/activity`),
+        req<{ entries: Array<Record<string, unknown>> }>(
+          `/api/workspaces/${workspaceId}/computer/activity`,
+        ).then((body) => body.entries ?? []),
       frames: (workspaceId: string) =>
-        req<Array<Record<string, unknown>>>(`/api/workspaces/${workspaceId}/computer/frames`),
+        req<{ enabled: boolean; frames: Array<Record<string, unknown>> }>(
+          `/api/workspaces/${workspaceId}/computer/frames`,
+        ).then((body) => body.frames ?? []),
       recordingTurns: (workspaceId: string) =>
         req<Array<Record<string, unknown>>>(
           `/api/workspaces/${workspaceId}/computer/recording/turns`,
@@ -538,12 +747,34 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── widgets.ts ──────────────────────────────────────────────
     widgets: {
-      // The route answers `{ instances, render }`; the list is `instances`.
-      list: async () =>
-        (await req<{ instances: WidgetSummary[] }>('/api/widgets')).instances ?? [],
-      get: (id: string) => req<WidgetSummary>(`/api/widgets/${id}`),
-      setState: (id: string, state: Record<string, unknown>) =>
-        req<WidgetSummary>(`/api/widgets/${id}/state`, jsonWith('PATCH', state)),
+      /**
+       * The route answers `{ instances, render }` — and returns an EMPTY
+       * list unless one of `chatId`/`workflowRunId`/`sessionId` is given
+       * (its handler starts from `items = []` and only fills it inside those
+       * three branches). Calling it with no scope, as this used to, could
+       * therefore only ever produce nothing.
+       */
+      list: async (scope?: { chatId?: string; workflowRunId?: string; sessionId?: string }) =>
+        (await req<{ instances: WidgetSummary[] }>(`/api/widgets${qs({ ...scope })}`)).instances ?? [],
+
+      /**
+       * Instances plus their render payloads — the payload is what a
+       * non-graphical client degrades to text (see `widgetDegradation.ts`
+       * in cli-core for the contract).
+       */
+      listWithRender: (scope?: { chatId?: string; workflowRunId?: string; sessionId?: string }) =>
+        req<{ instances: WidgetSummary[]; render: Array<Record<string, unknown>> }>(
+          `/api/widgets${qs({ ...scope })}`,
+        ),
+
+      // `{ instance: ... }`, not the instance — mis-typed as the bare object,
+      // so `widget read` printed an envelope with one key and every field a
+      // caller looked for was `undefined`.
+      get: async (id: string) =>
+        (await req<{ instance: WidgetSummary }>(`/api/widgets/${id}`)).instance,
+      setState: async (id: string, state: Record<string, unknown>) =>
+        (await req<{ instance: WidgetSummary }>(`/api/widgets/${id}/state`, jsonWith('PATCH', state)))
+          .instance,
       close: (id: string) => req<void>(`/api/widgets/${id}`, { method: 'DELETE' }),
     },
 
@@ -628,11 +859,45 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         return out;
       },
       sessionHooks: (sessionId: string) =>
-        req<Array<Record<string, unknown>>>(`/api/hooks/sessions/${sessionId}/hooks`),
-      test: (sessionId: string, phase: string, payload?: Record<string, unknown>) =>
-        req<Record<string, unknown>>(
+        req<SessionHooks>(`/api/hooks/sessions/${sessionId}/hooks`),
+      /**
+       * Dry-runs one hook. The route reads the WHOLE body as a
+       * `HookDefinition` and dispatches on `config.type` — `phase` and
+       * `type` are the only fields it validates itself, but `enabled` must
+       * be `true` and `retries`/`timeoutMs` must be real numbers or the
+       * executor silently runs the hook zero times while the route still
+       * reports `{ success: true }`. Callers only choose `type`/`config`;
+       * everything else defaults to values that guarantee it actually runs.
+       */
+      test: (
+        sessionId: string,
+        // Loose on purpose: the route only checks that `phase`/`type` are
+        // present, not that `phase` is one of the known `HookPhase` values.
+        phase: string,
+        hook: {
+          type: HookType;
+          config: HookDefinition['config'];
+          name?: string;
+          priority?: number;
+          timeoutMs?: number;
+          retries?: number;
+          failurePolicy?: HookFailurePolicy;
+        },
+      ) =>
+        req<{ success: boolean; message: string; error?: string }>(
           `/api/hooks/sessions/${sessionId}/hooks/test`,
-          json({ phase, payload }),
+          json({
+            id: 'cli-test',
+            name: hook.name ?? 'cli-test',
+            phase,
+            type: hook.type,
+            priority: hook.priority ?? 0,
+            enabled: true,
+            failurePolicy: hook.failurePolicy ?? 'continue',
+            timeoutMs: hook.timeoutMs ?? 10_000,
+            retries: hook.retries ?? 0,
+            config: hook.config,
+          }),
         ),
     },
 

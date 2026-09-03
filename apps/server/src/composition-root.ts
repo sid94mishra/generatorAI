@@ -3,21 +3,23 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { AppConfig, ILogger, PersistedEvent } from '@generatorai/shared';
-import { createLogger } from '@generatorai/shared';
+import { createLogger, readBoundedInt } from '@generatorai/shared';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import * as path from 'node:path';
-import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor } from '@generatorai/agent-harness-providers';
+import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
 import { AgentHostClient, HostSupervisor } from '@generatorai/core';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
+import { registerHarnessInstances } from './composition/harnessInstances.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
 import { installAgentCursorTheme, resolveCuaDriverBinary } from './computer/driverBinary.js';
 import { ScreenCast } from './computer/screenCast.js';
 import { createPreviewProducer } from './computer/previewProducer.js';
 import { registerEphemeralProducer } from './streaming/ephemeralScopes.js';
 import { RelayHostBroker } from './relay/RelayHostBroker.js';
+import { deriveStreamScopes } from './composition/streamScopes.js';
 import {
   ExpoPushProvider,
   PushDispatcher,
@@ -66,6 +68,9 @@ import {
   DrizzleWidgetInstanceRepository,
   // W34 / P1-42 — conversation ownership store (migration v33)
   SqliteConversationOwnershipRepository,
+  // W34 — multi-instance provider registry (migrations v?, v40)
+  SqliteHarnessInstanceRepository,
+  SqliteConversationInstanceOwnershipRepository,
   // W22 / W47 — durable execution engine storage (migration v36–v37)
   RegisterRepository,
   EntryRepository,
@@ -134,6 +139,19 @@ import {
   NodePtyHost,
   FallbackChildProcessHost,
   SandboxPtyHost,
+  PtyHostAdapter,
+  // Voice Module (Phase 0-4)
+  VoiceService,
+  createSttEngine,
+  createSileroVadFactory,
+  EnergyVad,
+  createTtsEngine,
+  resolveSttEngineId,
+  type VoiceActivityDetector,
+  sharedVoiceWorkerPool,
+  disposeSharedVoiceWorkerPool,
+  RuleBasedTextFormatter,
+  LlmTextFormatter,
   // Widgets & Extensions
   WidgetRegistry,
   WidgetService,
@@ -281,10 +299,21 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // maxConcurrentExecutions defaults to 16 (env: GENERATORAI_MAX_CONCURRENT_AGENT_TURNS).
   // maxConcurrentColdStarts defaults to 4 (env: GENERATORAI_MAX_CONCURRENT_COLD_STARTS).
   //
-  // W12-wiring: AgentHostClient (out-of-process) is the default when the
-  // agent-host build exists (arch law L5 — native handles never in the gateway).
-  // Set GENERATORAI_AGENT_HOST=false to fall back to the in-process MultiHarness
-  // (useful for local dev without a prior `pnpm --filter @generatorai/agent-host build`).
+  // W12-wiring: AgentHostClient (out-of-process) is OPT-IN, not the default,
+  // even when the agent-host build exists. It requires GENERATORAI_AGENT_HOST=true.
+  //
+  // △ Fixed during end-to-end review — this used to default to ENABLED whenever
+  // the dist build was present, silently making it the live path for anyone who
+  // had ever run `pnpm --filter @generatorai/agent-host build` and never set the
+  // var. That is unsafe today: `AgentHostClient.sendPromptAndWait()` resolved
+  // every turn with a hardcoded `{content: ''}` (it listened for the wrong event
+  // kind — 'chat.message_complete', which nothing ever emits, instead of the
+  // real 'harness.message_complete') and `getMessages()` read from a map nothing
+  // ever populated. Both are fixed (see AgentHostClient.ts), but `getModels()`,
+  // `selectAgent()` and `listAgents()` are still explicit Phase-B stubs, and the
+  // host process's own resource-bounding (age/RSS recycling, bounded spawn
+  // concurrency — W12's other acceptance criteria) is unimplemented scaffolding,
+  // not merely untested. Opt-in until that Phase B work lands.
   //
   // The agent-host dist path is resolved relative to this package's location.
   // In a monorepo pnpm install the symlink structure ensures the built artifact
@@ -365,18 +394,61 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     );
     multiHarness.setInstanceTypeMap(defaultInstanceMap);
   }
+
+  // W34 — load any persisted `harness_instances` (multiple accounts of the
+  // same driver) and register them as genuinely independent, concurrently
+  // routable adapters. See composition/harnessInstances.ts for the full
+  // rationale. This is additive: with zero rows (every deployment today,
+  // since nothing has ever written to this table) it registers nothing, and
+  // `instanceRegistry.resolveForConversation()` always returns undefined, so
+  // every conversation continues to route through the single-adapter-per-type
+  // path exactly as it did before this block existed.
+  const harnessInstanceRepo = new SqliteHarnessInstanceRepository(db);
+  const conversationInstanceOwnershipStore = new SqliteConversationInstanceOwnershipRepository(db);
+  const providerInstanceRegistry = await registerHarnessInstances({
+    harnessRegistry,
+    instanceRepo: harnessInstanceRepo,
+    secretStore: security.secretStore,
+    artifactsDir: config.artifactsDir,
+    supervisor: agentHostSupervisor,
+    ownershipStore: conversationInstanceOwnershipStore,
+    logger: { info: (m) => logger.info(m), warn: (m) => logger.warn(m) },
+  });
+  multiHarness.setInstanceRegistry(providerInstanceRegistry);
+
   logger.info(`[Container] Harness registry created (primary=${primaryHarnessType})`);
 
-  // W12 — wire AgentHostClient (out-of-process) as the default harness when:
-  //   (a) GENERATORAI_AGENT_HOST is not 'false', AND
+  // W12 — wire AgentHostClient (out-of-process) when BOTH:
+  //   (a) GENERATORAI_AGENT_HOST is explicitly 'true' (opt-in — see the note above), AND
   //   (b) the agent-host dist build exists on disk.
-  // If the build is absent (e.g. first-time dev checkout), we fall back to
-  // MultiHarness with a warning so the server still starts.
-  const agentHostEnabled = process.env['GENERATORAI_AGENT_HOST'] !== 'false';
+  // If the build is absent, we fall back to MultiHarness with a warning so the
+  // server still starts.
+  const agentHostEnabled = process.env['GENERATORAI_AGENT_HOST'] === 'true';
+  // §1.Q — see the FauxProvider branch just below. Named so every place that
+  // must also avoid touching a real provider CLI (the model-catalog warm-up,
+  // in particular) can check the same flag rather than re-reading env.
+  const loadTestFauxHarness = process.env['GENERATORAI_LOAD_TEST_FAUX_HARNESS'] === 'true';
   let harness: IAgentHarness;
   let hostSupervisor: HostSupervisor | undefined;
 
-  if (agentHostEnabled) {
+  // §1.Q — the concurrent-load test (agent-tests/concurrent-load-1q.mjs)
+  // needs to drive real chat/workflow/automation traffic through the FULL
+  // event/streaming/DB pipeline in CI, where no real Copilot/Claude
+  // credentials exist. `FauxProvider` is a fully IAgentHarness-compliant,
+  // already-tested fake (used by W44's conformance suites) that completes a
+  // turn near-instantly when nothing is scripted — exactly "fast,
+  // deterministic, zero external dependency" load generation, without
+  // faking the pipeline itself: every chat still goes through the real
+  // ChatManagementService, EventBus, and DB writes end to end. Explicit,
+  // scary env var name so this is unmistakably a test-only escape hatch —
+  // off by default, never reachable in a normal deployment.
+  if (loadTestFauxHarness) {
+    harness = new FauxProvider();
+    logger.warn(
+      '[Container] GENERATORAI_LOAD_TEST_FAUX_HARNESS=true — using FauxProvider for ALL conversations. ' +
+      'This must never be set outside a load test.',
+    );
+  } else if (agentHostEnabled) {
     // Resolve the agent-host entry point. In the monorepo the package lives
     // two directories above the server package: <root>/apps/agent-host/dist/index.js.
     // `fileURLToPath` + `dirname` converts the ESM import.meta.url to a FS path.
@@ -403,6 +475,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         // per-conversation handler map. The callback is closed over
         // `agentHostClient`, which is assigned immediately below.
         onHostEvent: (msg) => agentHostClient?.handleHostEvent(msg),
+        // W12 — a restarted host boots with EMPTY session maps. Without this
+        // the client keeps a handler map the host knows nothing about and every
+        // later turn fails SESSION_NOT_FOUND forever while health stays green.
+        onHostRestart: () => agentHostClient?.reattachSessions() ?? Promise.resolve(),
+        // W20 — restart-cap exhaustion must be visible. This flips the client
+        // to 'error' and fails every live session loudly instead of leaving
+        // pending turns hanging in front of a process that no longer exists.
+        onFatal: (reason) => agentHostClient?.handleHostFatal(reason),
       });
       agentHostClient = new AgentHostClient(supervisor, logger);
       hostSupervisor = supervisor;
@@ -417,7 +497,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       harness = multiHarness;
     }
   } else {
-    logger.info('[Container] GENERATORAI_AGENT_HOST=false — using in-process MultiHarness');
+    logger.info('[Container] GENERATORAI_AGENT_HOST not set to "true" — using in-process MultiHarness (default)');
     harness = multiHarness;
   }
 
@@ -639,8 +719,18 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       maxConcurrentSessions: config.maxConcurrentSessions,
       // P1#7 — bound concurrent stage execution (harness subprocess fan-out).
       // Env-overridable; defaults to 8 inside createCoreServices when undefined.
+      //
+      // Bounded read: this value reaches `new Semaphore(...)`, and a bare
+      // `parseInt` of a typo'd value yielded NaN — which the semaphore
+      // accepted and then never granted a permit for, hanging every stage
+      // launch silently. `readBoundedInt` cannot produce a non-finite value.
       maxConcurrentStages: process.env['MAX_CONCURRENT_STAGES']
-        ? parseInt(process.env['MAX_CONCURRENT_STAGES'], 10)
+        ? readBoundedInt('MAX_CONCURRENT_STAGES', {
+            defaultValue: 8,
+            min: 1,
+            max: 64,
+            onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
+          })
         : undefined,
       webhooks: config.webhooks,
       projectRoot: config.projectRoot,
@@ -767,7 +857,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // directly on their own scopes once STR-04 migrates callers off the
   // EventBus; the bridge below is transitional.
   const publishToBroker = (
-    scope: 'session' | 'run' | 'chat' | 'global' | 'automation',
+    scope: 'session' | 'run' | 'chat' | 'global' | 'automation' | 'workspace',
     scopeId: string,
     kind: string,
     data: unknown,
@@ -781,40 +871,27 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     });
   };
 
-  // EVT-03 — defensive indexed reads instead of `as Record<string, unknown>`.
-  // We don't know the exact AgentEvent kind here (this is the universal
-  // bridge), but the two FK fields we need are well-known across the union.
-  const readString = (obj: unknown, key: string): string | undefined => {
-    if (obj && typeof obj === 'object' && key in obj) {
-      const val = (obj as { [k: string]: unknown })[key];
-      return typeof val === 'string' ? val : undefined;
-    }
-    return undefined;
-  };
-
   const bridgeEvent = (event: {
     sessionId: string;
     kind: string;
     data: unknown;
   }): void => {
-    const runId = readString(event.data, 'workflowRunId');
-    const chatId = readString(event.data, 'chatId');
-    // Track B — automation execution events also fan out to their own
-    // scope so `GET /api/stream?scope=automation&id=<executionId>` works.
-    const executionId = readString(event.data, 'executionId');
-
+    // Which secondary scopes this event reaches is decided by
+    // `deriveStreamScopes` (`composition/streamScopes.ts`) rather than by an
+    // inline chain here: it was an unexported closure inside this setup
+    // function, so the single piece of logic deciding who sees which event
+    // had no test, and each new scope was added on a read-it-and-hope basis.
+    //
     // The primary scope is NOT published here. `eventBus.setEventStore` above
     // already appended it — awaited, before this broadcast — which is what
     // makes commit-then-broadcast hold. Publishing it again from the bridge
     // would double every event on `scope=session` and `scope=global`.
-
-    // Secondary per-entity scopes — makes /api/stream?scope=run&id=X work.
-    // These stay fire-and-forget: they are additional views of an event that
-    // is already durable, so losing one costs a resume on that view alone.
-    if (runId) publishToBroker('run', runId, event.kind, event.data);
-    if (chatId) publishToBroker('chat', chatId, event.kind, event.data);
-    if (executionId && event.kind.startsWith('automation_execution.')) {
-      publishToBroker('automation', executionId, event.kind, event.data);
+    //
+    // Secondary scopes stay fire-and-forget: they are additional views of an
+    // event that is already durable, so losing one costs a resume on that
+    // view alone.
+    for (const target of deriveStreamScopes(event)) {
+      publishToBroker(target.scope, target.id, event.kind, event.data);
     }
   };
 
@@ -981,6 +1058,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     },
     logger,
     gitManager,
+    // P0-e: the authoritative worktree table. Without it `deleteWorkspace`
+    // reads only `workspace_worktrees` (which nothing writes) and every real
+    // worktree stays registered in its parent clone forever.
+    worktreeRepo,
   );
 
   // ── Checkpoints (workspace snapshots via private git refs) ──
@@ -1078,9 +1159,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   );
 
   // Review threads annotate workspace files, so they die with the workspace.
+  // `storage`: rows only, nothing native — must not run ahead of handle release.
   workspaceManager.registerBeforeDelete(async (workspaceId) => {
     await reviewThreadService.deleteWorkspace(workspaceId);
-  });
+  }, 'storage');
 
   // Re-anchor review comments whenever the workspace changes.
   //
@@ -1143,7 +1225,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // pending rolling capture) as part of workspace teardown.
   workspaceManager.registerBeforeDelete(async (workspaceId) => {
     await workspaceCheckpointService.forget(workspaceId);
-  });
+  }, 'storage');
 
   // ── Push notifications ─────────────────────────────────────────
   //
@@ -1244,10 +1326,38 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
   // M8-fix: W18 — wire the AdmissionController so stage launches are gated by
   // the `ordinary` lane. Interactive chat turns bypass this via ChatManagementService.
+  //
+  // W18 requires configuration to be clamped on load, logged, and audited.
+  // Reading these with a bare `parseInt` was a live hang: a typo'd value
+  // parsed to NaN, which `new Semaphore(NaN)` accepted and every `acquire()`
+  // then awaited forever — no error, no log, every workflow stage stuck.
+  // `readBoundedInt` cannot produce a non-finite value, and reports whatever
+  // it had to correct. `undefined` (variable unset) is passed through so the
+  // controller can size the lane from measured machine capacity instead.
+  const laneEnv = (name: string, min: number, max: number, dflt: number): number | undefined =>
+    process.env[name] === undefined
+      ? undefined
+      : readBoundedInt(name, {
+          defaultValue: dflt,
+          min,
+          max,
+          onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
+        });
+
   const admissionController = new AdmissionController({
-    interactiveConcurrency: parseInt(process.env['GENERATORAI_INTERACTIVE_CONCURRENCY'] ?? '4', 10),
-    ordinaryConcurrency: parseInt(process.env['GENERATORAI_ORDINARY_CONCURRENCY'] ?? '8', 10),
-    bulkConcurrency: parseInt(process.env['GENERATORAI_BULK_CONCURRENCY'] ?? '2', 10),
+    interactiveConcurrency: laneEnv('GENERATORAI_INTERACTIVE_CONCURRENCY', 1, 64, 4),
+    ordinaryConcurrency: laneEnv('GENERATORAI_ORDINARY_CONCURRENCY', 1, 64, 8),
+    bulkConcurrency: laneEnv('GENERATORAI_BULK_CONCURRENCY', 1, 64, 2),
+    queueWaitTimeoutMs: readBoundedInt('GENERATORAI_ADMISSION_QUEUE_WAIT_MS', {
+      defaultValue: 1_800_000,
+      min: 0,
+      max: 24 * 60 * 60 * 1000,
+      onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
+    }),
+    logger: {
+      info: (msg, meta) => logger.info(msg, meta),
+      warn: (msg, meta) => logger.warn(msg, meta),
+    },
   });
   workflowRunService.setAdmissionController(admissionController);
   stageExecutionService.setWorkspaceManager(workspaceManager);
@@ -1334,6 +1444,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   orchestratorService.setAgentService(agentService);
   // Staged skill files live under `<workspace>/.generatorai`, outside every
   // worktree; drop them with the workspace (invariant §5.14).
+  //
+  // `storage`: this is an `fs.rm`. Registered here (early), it used to run
+  // BEFORE the browser / CUA / terminal teardown registered further down —
+  // deleting files while native handles were still open. The phase, not the
+  // registration order, now decides.
   workspaceManager.registerBeforeDelete(async (workspaceId) => {
     try {
       const ws = await workspaceManager.getExecutionWorkspace(workspaceId);
@@ -1341,7 +1456,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     } catch {
       // Best effort — never block workspace deletion.
     }
-  });
+  }, 'storage');
   chatExtensions.codebaseRepo = projectCodebaseRepo;  // ── Integrated Browser (v13) ──
   // BrowserService owns the per-workspace Chromium lifecycle. The bridge
   // chain is tried in order: `ElectronBridgeAdapter` first (only available
@@ -1360,7 +1475,15 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
     [electronBridgeAdapter, serverPlaywrightHost],
     {
-      maxConcurrent: Number(process.env['GENERATORAI_BROWSER_MAX_CONCURRENT'] ?? '5'),
+      // §1.P lists this variable as a documented cap the code did not honour.
+      // Read it the same bounded way `ServerPlaywrightHost` does, so the two
+      // readers of the same variable cannot disagree.
+      maxConcurrent: readBoundedInt('GENERATORAI_BROWSER_MAX_CONCURRENT', {
+        defaultValue: 5,
+        min: 1,
+        max: 100,
+        onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
+      }),
     },
   );
 
@@ -1395,13 +1518,15 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // Without this hook, deleting a workspace would rm -rf the profile directory
   // while Chromium still had it open, leaving the process running against a
   // dead tree. The beforeDelete listener fires before fs.rm in deleteWorkspace().
+  // `native`: also fires on archive, per INV-7 ("a session dies when the
+  // workspace is deleted or archived — never orphans a Chromium process").
   workspaceManager.registerBeforeDelete(async (workspaceId) => {
     try {
       await browserService.stop(workspaceId, 'workspace-deleted');
     } catch {
       // Best effort — session may already be stopped.
     }
-  });
+  }, 'native');
 
   // Late-wire browserService into ChatManagementService so chats with
   // `browserConfig.enabled: true` auto-boot a shared Chromium and inject
@@ -1462,7 +1587,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // desktop — the session outlives the thing that authorised it otherwise.
   workspaceManager.registerBeforeDelete(async (workspaceId) => {
     await computerService.stop(workspaceId, 'workspace-deleted');
-  });
+  }, 'native');
 
   // W09 / P1-11 — the live preview is a live-only scope on the shared stream,
   // not a second SSE endpoint with a poll per connection. One producer per
@@ -1483,13 +1608,46 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // ── Integrated Terminal ──
   //
   // Host chain: `SandboxPtyHost` (only usable when the caller explicitly
-  // requests `attachToSandbox: true` — Phase 2) → `NodePtyHost` (real PTY
-  // via node-pty) → `FallbackChildProcessHost` (degraded child_process
-  // shell used when node-pty fails to load). `TerminalService` picks the
-  // first `isAvailable()` host by default, so opting into the sandbox
-  // requires a spawn-time flag.
+  // requests `attachToSandbox: true` — Phase 2) → `PtyHostAdapter` (opt-in,
+  // out-of-process — see below) → `NodePtyHost` (real PTY via node-pty,
+  // in-process) → `FallbackChildProcessHost` (degraded child_process shell
+  // used when node-pty fails to load). `TerminalService` picks the first
+  // `isAvailable()` host by default, so opting into the sandbox requires a
+  // spawn-time flag.
+  //
+  // `PtyHostAdapter` is opt-in — GENERATORAI_PTY_HOST=true AND the
+  // apps/pty-host dist build present — same pattern as GENERATORAI_AGENT_HOST
+  // above: L5 ("native handles never live in the control-plane process") is
+  // real for PTYs only once this is on, but the in-process `NodePtyHost` is
+  // a well-exercised, long-lived default and shouldn't silently change
+  // behavior for existing deployments just because a sibling package was
+  // built.
+  const ptyHostEnabled = process.env['GENERATORAI_PTY_HOST'] === 'true';
+  let ptyHostAdapter: PtyHostAdapter | undefined;
+  if (ptyHostEnabled) {
+    const __serverDirForPty = dirname(fileURLToPath(import.meta.url));
+    const ptyHostEntry = resolve(__serverDirForPty, '..', '..', 'pty-host', 'dist', 'index.js');
+    if (existsSync(ptyHostEntry)) {
+      ptyHostAdapter = new PtyHostAdapter({ logger, hostEntryPath: ptyHostEntry });
+      // Still fire-and-forget so boot is not blocked on a child process, but
+      // no longer a race: `TerminalService.selectHost` awaits this adapter's
+      // `whenReady()` before dropping to `NodePtyHost`, so a terminal opened
+      // in the first few hundred ms lands on the same host as one opened a
+      // second later. A genuinely failed start still degrades to NodePtyHost.
+      void ptyHostAdapter.start().catch((err: unknown) => {
+        logger.warn(`[Container] pty-host failed to start — falling back to in-process node-pty: ${String(err)}`);
+      });
+      logger.info('[Container] GENERATORAI_PTY_HOST=true — out-of-process pty-host enabled');
+    } else {
+      logger.warn(
+        `[Container] GENERATORAI_PTY_HOST is enabled but pty-host build not found at ${ptyHostEntry}. ` +
+          'Falling back to in-process node-pty. Run `pnpm --filter @generatorai/pty-host build` first.',
+      );
+    }
+  }
   const terminalHosts = [
     ...(sandboxLifecycleManager ? [new SandboxPtyHost(logger, sandboxLifecycleManager)] : []),
+    ...(ptyHostAdapter ? [ptyHostAdapter] : []),
     new NodePtyHost(logger),
     new FallbackChildProcessHost(logger),
   ];
@@ -1506,7 +1664,169 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // On workspace deletion, kill any orphaned PTYs first (see R-3).
   workspaceManager.registerBeforeDelete(async (workspaceId) => {
     await terminalService.killAllForWorkspace(workspaceId);
+  }, 'native');
+
+  // ── Voice Module ──
+  //
+  // Engines are built through `createSttEngine`/`createTtsEngine` rather than
+  // constructed here, so swapping the speech model is a configuration change
+  // and this file never names one. See VoiceEngineFactory.ts for the
+  // descriptor table (measured latency, download size, whether the engine
+  // emits capitals/punctuation) and for why voice mirrors HarnessFactory's
+  // shape rather than inventing a second convention.
+  //
+  // GENERATORAI_STT_ENGINE selects it:
+  //   'auto' (default) — preferred engine, falling back to Whisper if it
+  //                cannot load (offline first run, wiped cache, bad override,
+  //                OOM session).
+  //   'nemotron' | 'parakeet' | 'moonshine' | 'whisper' — that engine only,
+  //                no fallback. 'nemotron' additionally needs
+  //                GENERATORAI_NEMO_SPEECH_BIN — see NemotronSttEngine.ts.
+  //   'disabled' — same as GENERATORAI_STT=0.
+  // GENERATORAI_STT_PREFERRED overrides which engine 'auto' tries first
+  // (default: moonshine — it is the only one of the three that both
+  // punctuates and never drops a sentence; see VoiceEngineFactory.ts's
+  // measured head-to-head).
+  // Whisper is never removed, per VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md
+  // Part E Phase 1 ("Keep Whisper registered as a fallback engine").
+  //
+  // No `registerBeforeDelete` hook: STT sessions aren't workspace-scoped
+  // (see VoiceService's file header) and already die with their own
+  // WebSocket connection.
+  //
+  // GENERATORAI_STT=0 disables voice input entirely (stt-ws.ts checks the
+  // same flag and never attaches the route). Unlike `ttsEngine` below,
+  // `VoiceService`'s `sttEngine` constructor param isn't optional — so
+  // rather than construct a real Whisper/Parakeet/CascadingSttEngine and
+  // let `voiceService.start()` eagerly `load()` (and, on first run,
+  // download) it for a route nothing can ever reach, substitute a no-op
+  // `DisabledSttEngine` so the flag's "entirely" is actually true (final
+  // end-to-end review finding — TTS's equivalent flag already worked this
+  // way; STT's didn't).
+  const sttDisabled = process.env['GENERATORAI_STT'] === '0';
+
+  // Voice inference runs on a WORKER THREAD, not this one. `onnxruntime-node`
+  // executes `session.run()` synchronously on the calling thread despite its
+  // Promise-shaped API — measured, a 120s dictation segment blocks the event
+  // loop for ~14s and a single "read aloud" for ~10s, during which the server
+  // answers nothing at all and `WedgeDetector` (correctly) declares the
+  // process wedged and shuts it down. See VoiceWorkerPool.ts for the full
+  // measurements. Set GENERATORAI_VOICE_IN_PROCESS=1 to opt back into the
+  // old in-process behaviour for debugging; it is not safe for real use.
+  const voiceInProcess = process.env['GENERATORAI_VOICE_IN_PROCESS'] === '1';
+  // Lazy: the worker is not spawned until an engine actually loads a model,
+  // so this costs nothing when voice is unused or disabled.
+  const voiceWorkerPool = voiceInProcess ? undefined : sharedVoiceWorkerPool(logger);
+  if (voiceInProcess) {
+    logger.warn(
+      '[Container] GENERATORAI_VOICE_IN_PROCESS=1 — voice inference will run on the main event loop and can wedge the server. Debugging only.',
+    );
+  }
+  const voiceEngineOpts = { logger, ...(voiceWorkerPool ? { workerPool: voiceWorkerPool } : {}) };
+
+  const sttEngineId = sttDisabled
+    ? 'disabled'
+    : resolveSttEngineId(process.env['GENERATORAI_STT_ENGINE'], logger);
+  const preferred = process.env['GENERATORAI_STT_PREFERRED'];
+  const sttEngine = createSttEngine(sttEngineId, {
+    ...voiceEngineOpts,
+    ...(preferred === 'nemotron' || preferred === 'parakeet' || preferred === 'moonshine' || preferred === 'whisper'
+      ? { preferred }
+      : {}),
   });
+  logger.info(`[Container] Voice STT engine: ${sttEngineId} (${sttEngine.name})`);
+
+  // GENERATORAI_VOICE_TEXT_FORMATTER (Phase 2 — Part E):
+  //   'rule-based' (default) — local, free, deterministic filler-word +
+  //                 spoken-punctuation cleanup. Always safe, no network.
+  //   'llm'         — opt-in BYOK cleanup pass: grammar, spelling and
+  //                 inferred punctuation beyond what the ASR emits. The API
+  //                 key is resolved from the encrypted secrets vault
+  //                 (SecretNamespace.voice / textFormatterApiKey — see
+  //                 LlmTextFormatter.ts), NEVER a plaintext config value,
+  //                 per the security review's standing P0-2 finding. Falls
+  //                 back to passing text through unformatted (never breaks
+  //                 dictation) if the key is missing or the request fails —
+  //                 see LlmTextFormatter's resilience contract.
+  //   'none'        — no cleanup pass; raw engine output, same as Phase 1.
+  //
+  // It stays OPT-IN on purpose. It rewrites the user's own words, and it puts
+  // a network round-trip in front of every committed segment; both are
+  // choices a deployment should make deliberately, not inherit.
+  //
+  // ENDPOINT/MODEL are configurable here. LlmTextFormatter's header says "any
+  // OpenAI-compatible endpoint works by construction (self-hosted, Azure,
+  // OpenRouter, etc.) via `baseUrl`" — which was true of the class and false
+  // of the product, because this call site never passed one, hard-pinning
+  // every deployment to OpenAI + gpt-4o-mini. Anthropic publishes an
+  // OpenAI-compatible chat-completions endpoint, so an install that already
+  // has Claude credits can point at it and reuse them rather than buying a
+  // second vendor's key:
+  //
+  //   GENERATORAI_VOICE_TEXT_FORMATTER=llm
+  //   GENERATORAI_VOICE_TEXT_FORMATTER_BASE_URL=https://api.anthropic.com/v1/chat/completions
+  //   GENERATORAI_VOICE_TEXT_FORMATTER_MODEL=claude-haiku-4-5-20251001
+  const textFormatterMode = process.env['GENERATORAI_VOICE_TEXT_FORMATTER'] ?? 'rule-based';
+  const formatterBaseUrl = process.env['GENERATORAI_VOICE_TEXT_FORMATTER_BASE_URL'];
+  const formatterModel = process.env['GENERATORAI_VOICE_TEXT_FORMATTER_MODEL'];
+  const voiceTextFormatter =
+    textFormatterMode === 'none'
+      ? undefined
+      : textFormatterMode === 'llm'
+        ? new LlmTextFormatter(security.secretStore, {
+            logger,
+            ...(formatterBaseUrl ? { baseUrl: formatterBaseUrl } : {}),
+            ...(formatterModel ? { model: formatterModel } : {}),
+          })
+        : new RuleBasedTextFormatter();
+  if (textFormatterMode === 'llm') {
+    logger.info(`[Container] Voice text formatter: ${voiceTextFormatter?.name} @ ${formatterBaseUrl ?? 'api.openai.com (default)'}`);
+  }
+
+  // GENERATORAI_TTS=0 disables voice output entirely (attachTtsWebSocket
+  // checks the same flag) — no point constructing/warming an engine that
+  // no route will ever reach.
+  const ttsEngine = createTtsEngine(process.env['GENERATORAI_TTS'] === '0' ? 'disabled' : 'kokoro', voiceEngineOpts);
+
+  // GENERATORAI_STT_VAD picks how utterances are segmented:
+  //   'silero' (default) — neural VAD. Measured on the reference clip it
+  //             finds 6 real pauses where the RMS detector finds 2, because
+  //             RMS cannot tell quiet room tone from speech (78% agreement,
+  //             and the disagreements are all low-energy non-speech that RMS
+  //             calls speech). ~2MB, 0.325ms per 32ms window.
+  //   'energy'  — the original RMS detector. No download, no model.
+  //
+  // Silero is loaded lazily and asynchronously because it needs a one-time
+  // 2MB fetch; until it resolves, and forever if it fails, sessions fall back
+  // to the RMS detector rather than losing dictation. Segmentation degrading
+  // is survivable; not segmenting at all is not.
+  const vadMode = process.env['GENERATORAI_STT_VAD'] ?? 'silero';
+  let createVad: (() => VoiceActivityDetector) | undefined;
+  if (vadMode === 'silero' && !sttDisabled && voiceWorkerPool) {
+    void createSileroVadFactory(voiceWorkerPool, {}, logger)
+      .then((factory) => {
+        createVad = factory;
+      })
+      .catch((err: unknown) => {
+        logger.warn(
+          `[Container] Silero VAD unavailable (${(err as Error).message}); segmenting with the RMS detector instead.`,
+        );
+      });
+  }
+
+  const voiceService = new VoiceService(
+    sttEngine,
+    eventBus,
+    logger,
+    undefined,
+    voiceTextFormatter,
+    ttsEngine,
+    // Read through a closure, not captured by value: the neural detector
+    // becomes available a moment after boot, and sessions started before then
+    // simply use the fallback.
+    () => createVad?.() ?? new EnergyVad(),
+  );
+  voiceService.start();
 
   // ── Workflow Script Loader ──
   const scriptDirs = [
@@ -1654,6 +1974,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Integrated Terminal
     terminalService,
 
+    // Voice Module (Phase 0 — STT half)
+    voiceService,
+
     // v2 Repositories (exposed for route-level queries)
     workflowRepo,
     chatEntityRepo,
@@ -1665,9 +1988,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     harness,
     harnessRegistry,
     multiHarness,
+    // W34 — exposed so a future settings UI/API can list/create/enable
+    // harness_instances without composition-root growing another wiring path.
+    providerInstanceRegistry,
+    harnessInstanceRepo,
     // W12 — exposed so tests and health routes can check which path is active.
     // undefined = fell back to in-process MultiHarness.
     hostSupervisor,
+    admissionController,
     streamBroker,
     customToolRegistry,
     mcpHub,
@@ -1722,6 +2050,16 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         logger.warn(`[Container] MultiHarness hydration failed (ownership reset): ${msg}`);
       }
 
+      // W34 — rehydrate conversation→provider INSTANCE ownership. A no-op
+      // (empty rows) for every deployment that has never registered a
+      // harness_instances row, same as providerInstanceRegistry itself.
+      try {
+        await providerInstanceRegistry.hydrate();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(`[Container] Provider instance ownership hydration failed: ${msg}`);
+      }
+
       // Start harness provider — required for operation
       try {
         await harness.initialize();
@@ -1735,18 +2073,32 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // probe spawns the provider's CLI and can take ~10s; doing it here means
       // the model picker is already populated by the time a user opens it
       // instead of showing a long "Loading models…" state.
-      void harnessRegistry.refresh(true)
-        .then((statuses) => {
-          for (const s of statuses) {
-            logger.info(
-              `[Container] Provider '${s.type}': ready=${s.ready} models=${s.models.length}` +
-              (s.error ? ` error=${s.error}` : ''),
-            );
-          }
-        })
-        .catch((err: unknown) => {
-          logger.warn(`[Container] Provider catalog warm-up failed: ${String(err)}`);
-        });
+      //
+      // §1.Q — skipped under the FauxProvider load-test escape hatch. This
+      // warm-up is independent of `harness` (it walks `harnessRegistry`,
+      // which is constructed with real provider configs regardless of the
+      // Faux override above) and spawns the REAL provider CLI — e.g. a real
+      // `copilot` process — to probe it. On a machine with no configured
+      // credentials that probe can stall rather than exit, and the load
+      // test's own `killOwnDescendants()` shutdown assertion caught exactly
+      // that: a leftover `copilot.exe`/`conhost.exe` pair reaped at shutdown
+      // even though FauxProvider had handled every actual conversation.
+      if (loadTestFauxHarness) {
+        logger.warn('[Container] GENERATORAI_LOAD_TEST_FAUX_HARNESS=true — skipping real-provider model-catalog warm-up.');
+      } else {
+        void harnessRegistry.refresh(true)
+          .then((statuses) => {
+            for (const s of statuses) {
+              logger.info(
+                `[Container] Provider '${s.type}': ready=${s.ready} models=${s.models.length}` +
+                (s.error ? ` error=${s.error}` : ''),
+              );
+            }
+          })
+          .catch((err: unknown) => {
+            logger.warn(`[Container] Provider catalog warm-up failed: ${String(err)}`);
+          });
+      }
 
       // Register global harness lifecycle hooks
       const globalHooks = configResolver.resolveGlobalHooks();
@@ -1855,6 +2207,24 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // Kill any live terminal sessions (PTY handles hold FDs → must not
       // outlive the process on shutdown paths where OS reaping is unreliable).
       await terminalService.shutdown();
+      // …then tear down the out-of-process host itself. `stop()` had ZERO
+      // callers, so every server restart left a pty-host process — and the
+      // shells it owned — running. Ordered after `terminalService.shutdown()`
+      // so sessions get their normal kill path first; the host's SIGTERM
+      // handler is the backstop for anything that did not.
+      if (ptyHostAdapter) {
+        await ptyHostAdapter.stop().catch((err: unknown) => {
+          logger.warn(`[Container] pty-host stop failed: ${String(err)}`);
+        });
+      }
+      // Cancel any live dictation sessions + release the STT engine.
+      await voiceService.shutdown();
+      // Then terminate the inference worker the engines were delegating to.
+      // Ordered after voiceService.shutdown() so in-flight transcriptions get
+      // cancelled through the normal path first, rather than being rejected
+      // by a worker that vanished underneath them. It is `unref`'d, so this
+      // is tidiness rather than something the process would hang without.
+      await disposeSharedVoiceWorkerPool();
 
       // Deny every parked consent prompt before tearing the service down, so
       // no `act()` is left awaiting an answer that can never arrive, and end
@@ -1990,6 +2360,9 @@ export interface Container {
   /** Integrated Terminal service — ephemeral PTY sessions per workspace. */
   terminalService: TerminalService;
 
+  /** Voice Module service — ephemeral STT (+ TTS from Phase 3) sessions. */
+  voiceService: VoiceService;
+
   // v2 repositories (for route-level queries)
   workflowRepo: InstanceType<typeof DrizzleWorkflowRepository>;
   chatEntityRepo: InstanceType<typeof DrizzleChatRepository>;
@@ -2003,11 +2376,26 @@ export interface Container {
   /** Router that sends each conversation to the provider that owns it. */
   multiHarness: MultiHarness;
   /**
+   * W34 — metadata + conversation-ownership registry for `harness_instances`
+   * rows (multiple accounts of the same driver). Populated at boot by
+   * `registerHarnessInstances()`; empty in every deployment that has never
+   * written to `harness_instances`.
+   */
+  providerInstanceRegistry: ProviderInstanceRegistry;
+  /** Raw `harness_instances` CRUD — for a future settings UI/API. */
+  harnessInstanceRepo: SqliteHarnessInstanceRepository;
+  /**
    * W12 — Gateway-side supervisor for the agent-host child process.
-   * `undefined` when the agent-host build is absent or GENERATORAI_AGENT_HOST=false
+   * `undefined` unless the agent-host build exists AND GENERATORAI_AGENT_HOST=true
    * (i.e. when MultiHarness is the active harness instead of AgentHostClient).
    */
   hostSupervisor: HostSupervisor | undefined;
+  /**
+   * W18 — lane-based admission control. Exposed so `/api/health` can publish
+   * cap/running/queued/parked per lane, which the plan requires so throttling
+   * is observable rather than mysterious.
+   */
+  admissionController: AdmissionController;
   streamBroker: StreamBroker;
   /** TOL-01 — harness-agnostic custom tool catalog. Empty by default. */
   customToolRegistry: CustomToolRegistry;

@@ -13,7 +13,7 @@ import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import { streamCursors, streamSequences } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 
-export type StreamScope = 'session' | 'run' | 'chat' | 'global' | 'automation';
+export type StreamScope = 'session' | 'run' | 'chat' | 'global' | 'automation' | 'workspace';
 
 export interface StreamEventRow {
   id: number;

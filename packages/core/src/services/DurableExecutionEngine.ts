@@ -37,9 +37,14 @@
 //  Corruption closed enum (W22)
 //    'torn_tail'         — parse error on last entry only; recoverable.
 //    'unreachable_state' — a state the single-writer protocol cannot
-//                          produce (e.g. settled with no intent); fatal.
-//    'missing_settlement' — intent committed but no settlement + replay:never;
-//                           returns a synthetic error result.
+//                          produce (an unrecognised register state value);
+//                          fatal.
+//    'missing_settlement' — the register names an operation whose settlement
+//                           row is absent: either intent was committed and
+//                           the process died before settling, or the row was
+//                           settled and later pruned. Recoverable — replay
+//                           policy decides (safe → re-run, never → synthetic
+//                           error result).
 //
 //  Signal primitive
 //    Named, resolvable repeatedly. A running agent can await a Signal
@@ -56,8 +61,14 @@
 //  Iteration claiming (P0-41 fix)
 //    `initializeIterations` writes all iteration rows up front in a single
 //    transaction. `claimNextIteration` atomically transitions one row from
-//    `pending` → `running` (UPDATE ... WHERE ... RETURNING). On restart, a
-//    new process finds and claims any still-pending rows.
+//    `pending` → `running` (UPDATE ... WHERE ... RETURNING) and stamps a
+//    LEASE (owner + claimedAt) into its payload. `completeIteration` writes
+//    the outcome back. `reclaimExpiredIterations` hands back any slot still
+//    marked `running` whose lease has expired — the signature of a process
+//    that died mid-iteration. Without the lease and the completion write, a
+//    claimed row was indistinguishable from a finished one and its work was
+//    lost permanently and silently (P0-c), which defeated the whole point of
+//    the mechanism.
 //
 // ── Interrupt-hazard lint rules ────────────────────────────────────
 //
@@ -83,13 +94,128 @@
 
 import { randomBytes } from 'node:crypto';
 import type { RegisterRepository } from '@generatorai/db';
-import type { EntryRepository, EntryScope } from '@generatorai/db';
-import type { ILogger } from '@generatorai/shared';
+import type { ArtifactRecord, EntryRepository, EntryScope } from '@generatorai/db';
+import type { AgentToolPolicy, ILogger } from '@generatorai/shared';
 
 // ── Types ──────────────────────────────────────────────────────
 
 /** Per-tool replay policy (W22). */
 export type ReplayPolicy = 'never' | 'safe';
+
+// ── Per-tool replay policy declarations (W22 §3.4) ─────────────
+//
+// §3.4: "`never` = terminal commands, computer-use actions, file writes, git,
+// HTTP POST. `safe` = reads, greps, searches, window lists, page snapshots."
+//
+// The type existed from the start but NOTHING declared a policy, so the whole
+// mechanism was unreachable: `withEffect` could only ever be called with a
+// policy its caller invented on the spot. This table is the declaration the
+// plan asked for, and `replayPolicyForToolGroups` below is what folds it into
+// the one decision the stage turn path can actually make (see
+// `StageExecutionService.executeStage` — a turn is the coarsest unit we can
+// journal, because the individual tool calls happen inside the provider SDK
+// and never cross our process boundary).
+//
+// △ The default is `never`, not `safe`. A tool nobody has classified is a tool
+// whose side effects nobody has thought about; guessing `safe` for it would
+// re-run an unknown mutation after every crash. Fail closed.
+
+/**
+ * Tools that are genuinely idempotent — re-running one after a crash observes
+ * state, it does not change it. Everything absent from this set is `never`.
+ */
+const REPLAY_SAFE_TOOLS: ReadonlySet<string> = new Set([
+  // Integrated Browser — observation only.
+  'read_page',
+  'screenshot_page',
+  // Computer use — the reader half of the reader/writer split (W17).
+  'computer_snapshot',
+  'computer_capabilities',
+  'computer_list_apps',
+  'computer_list_windows',
+  'computer_verify',
+  // Widgets — inspection only.
+  'read_widget',
+  'describe_widget',
+  'search_widget',
+  'list_widgets',
+  // Orchestration — digest collection does not spawn or steer anything.
+  'check_background_agent',
+  'check_background_agents',
+  'list_background_agents',
+  'list_available_agents',
+  'list_models',
+  // Provider built-ins.
+  'Read',
+  'NotebookRead',
+  'Grep',
+  'Glob',
+  'LS',
+  'WebFetch',
+  'WebSearch',
+]);
+
+/**
+ * Replay policy for one tool, by the name the provider reports on
+ * `harness.tool_start`. Unknown tools are `never` (fail closed).
+ */
+export function replayPolicyForTool(toolName: string): ReplayPolicy {
+  return REPLAY_SAFE_TOOLS.has(toolName) ? 'safe' : 'never';
+}
+
+/**
+ * Which tool groups can only ever hand the model replay-safe tools.
+ *
+ * Keyed off `AgentToolPolicy` because that is the only tool-surface
+ * description available BEFORE a turn runs — and the replay policy has to be
+ * chosen before the effect, not after it. `fileRead` and `web` are the two
+ * groups whose entire membership is in `REPLAY_SAFE_TOOLS`; every other group
+ * contains at least one mutation (browser clicks, widget renders, extension
+ * writes, worker spawns, file writes, shell).
+ */
+const REPLAY_SAFE_TOOL_GROUPS: ReadonlySet<keyof AgentToolPolicy> = new Set<keyof AgentToolPolicy>([
+  'fileRead',
+  'web',
+]);
+
+/**
+ * Fold a stage's enabled tool groups into the replay policy for one agent
+ * turn: `safe` only when EVERY enabled group is replay-safe, otherwise
+ * `never`.
+ *
+ * This is what makes a read-only analysis stage cheap to resume — its
+ * interrupted turn simply re-runs — while a stage that could have written a
+ * file or run a command does not silently redo that work after a crash.
+ */
+export function replayPolicyForToolGroups(groups: Partial<AgentToolPolicy> | undefined): ReplayPolicy {
+  if (!groups) return 'never';
+  for (const [group, enabled] of Object.entries(groups) as Array<[keyof AgentToolPolicy, boolean]>) {
+    if (!enabled) continue;
+    if (!REPLAY_SAFE_TOOL_GROUPS.has(group)) return 'never';
+  }
+  return 'safe';
+}
+
+/**
+ * Shape `withEffect` writes when a `replay: never` effect had committed intent
+ * but no settlement — i.e. the process died while the effect was in flight.
+ * Exported so callers can recognise the stand-in rather than mistaking it for
+ * a real result.
+ */
+export interface SyntheticEffectResult {
+  __synthetic: true;
+  reason: 'missing_settlement';
+  operationId: string;
+}
+
+/** Type guard for the synthetic stand-in above. */
+export function isSyntheticEffectResult(value: unknown): value is SyntheticEffectResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { __synthetic?: unknown }).__synthetic === true
+  );
+}
 
 /** State of a step in the register. */
 type StepState = 'intent' | 'settled';
@@ -146,13 +272,114 @@ export interface DurableContext {
   readonly scopeId: string;
 }
 
+/**
+ * Zero-padded so the entries table's lexicographic `key` sort — the only
+ * order `findNextPendingIteration` has, since it's a plain `ORDER BY key ASC`
+ * against an indexed TEXT column — actually matches numeric iteration order.
+ *
+ * △ Fixed during end-to-end review — `iter/${index}` (unpadded) sorts
+ * `iter/10` before `iter/2` under SQLite's default TEXT collation, so any
+ * batch past 10 iterations claimed slots out of order: 0, 1, 10, 11, ..., 19,
+ * 2, 20, ... — silently breaking W22's "kill mid-batch at row 40, resume at
+ * row 41" acceptance guarantee for every batch large enough to matter. 10
+ * digits comfortably exceeds any realistic automation iteration count.
+ */
+function iterationKey(index: number): string {
+  return `iter/${String(index).padStart(10, '0')}`;
+}
+
 // ── Signal / Awakeable internals ───────────────────────────────
+
+/**
+ * Node's `setTimeout` delay is a 32-bit signed int internally — a delay
+ * above this silently CLAMPS TO 1ms rather than throwing (verified: Node
+ * logs a `TimeoutOverflowWarning` and fires almost immediately). LINT-HAZ-4
+ * explicitly tells callers needing a longer-than-24h gate to "explicitly
+ * pass a larger timeout," which is exactly the footgun this constant and
+ * `armTimer` below exist to close — an approval meant to stay open for 30
+ * days would otherwise fire (and reject the caller's promise) within the
+ * same tick it was created, with no error, no warning surfaced to the
+ * caller. Found via `HitlServiceDurable.test.ts` overriding the HITL
+ * default to 30 days.
+ */
+const MAX_TIMER_DELAY_MS = 2_147_483_647; // 2^31 - 1
+
+/**
+ * `setTimeout` that tolerates delays beyond `MAX_TIMER_DELAY_MS` by
+ * chaining timers instead of overflowing. Returns a handle exposing the
+ * same `unref()`/clear surface every call site here already needs.
+ */
+function armTimer(callback: () => void, delayMs: number): { clear: () => void; unref: () => void } {
+  let handle: ReturnType<typeof setTimeout>;
+  let shouldUnref = false;
+  const schedule = (remaining: number) => {
+    const step = Math.min(remaining, MAX_TIMER_DELAY_MS);
+    handle = setTimeout(() => {
+      const left = remaining - step;
+      if (left > 0) schedule(left);
+      else callback();
+    }, step);
+    if (shouldUnref) handle.unref?.();
+  };
+  schedule(Math.max(delayMs, 0));
+  return {
+    clear: () => clearTimeout(handle),
+    unref: () => {
+      shouldUnref = true;
+      handle?.unref?.();
+    },
+  };
+}
 
 interface SignalSubscriber {
   resolve: (payload: unknown) => void;
   reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof armTimer>;
 }
+
+// ── Iteration slots (P0-c) ─────────────────────────────────────
+
+/** Lifecycle of one durable automation-iteration slot. */
+export type IterationSlotStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+/** Payload stored on an iteration slot's `entries` row. */
+export interface IterationSlotPayload {
+  index: number;
+  variables: Record<string, unknown>;
+  label: string;
+  status: IterationSlotStatus;
+  /** epoch-ms the current claim was taken. Absent while pending. */
+  claimedAt?: number;
+  /** Which process holds the lease — operator triage only, never a guard. */
+  owner?: string;
+  /** epoch-ms the slot reached a terminal status. */
+  completedAt?: number;
+  /** How many times this slot has been handed back after a lease expiry. */
+  reclaimCount?: number;
+  /** Failure detail, when `status === 'failed'`. */
+  error?: string;
+}
+
+/** A claimed slot, as handed to the iteration loop. */
+export interface ClaimedIteration {
+  /** `entries.id` — the handle `completeIteration` needs. */
+  id: string;
+  index: number;
+  variables: Record<string, unknown>;
+  label: string;
+}
+
+/**
+ * How long a claim is honoured before a recovery pass may hand the slot back.
+ *
+ * Deliberately generous: `AutomationService` allows a single iteration's
+ * workflow run up to 2 h, so anything shorter would let a recovery pass steal
+ * a slot that is genuinely still running in another live process. Boot
+ * recovery does not depend on this value — it knows which iterations still
+ * have live workflow runs and passes `leaseMs: 0` for the rest, which is a
+ * far better liveness signal than any wall-clock guess.
+ */
+export const DEFAULT_ITERATION_LEASE_MS = 4 * 60 * 60 * 1000;
 
 // ── Engine ─────────────────────────────────────────────────────
 
@@ -162,8 +389,14 @@ export class DurableExecutionEngine {
   /** In-memory subscribers for Awakeables keyed by token. */
   private readonly awakeableSubscribers = new Map<
     string,
-    { resolve: (payload: unknown) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }
+    { resolve: (payload: unknown) => void; reject: (err: Error) => void; timer: ReturnType<typeof armTimer> }
   >();
+  /**
+   * Identifies this engine instance on iteration leases. Diagnostics only —
+   * reclaim decides on the lease deadline, never on the owner string, because
+   * a restarted process cannot tell which owners are still alive.
+   */
+  private readonly ownerId = `${process.pid}-${randomBytes(4).toString('hex')}`;
 
   constructor(
     private readonly registerRepo: RegisterRepository,
@@ -211,36 +444,59 @@ export class DurableExecutionEngine {
         return deserialize(priorEntry.payload as string);
       }
 
-      // ── Prior intent, no settlement ──
+      // ── The register names this operation but no settlement row exists ──
+      //
+      // △ This used to raise `unreachable_state` — a THROW — for
+      // `state === 'settled'`, on the reasoning that the single-writer
+      // protocol cannot produce it. It can: `entries` rows are prunable
+      // (`deleteByScope` on workspace teardown, and retention generally)
+      // while `registers` rows are not, so a settled operation whose
+      // settlement has been reclaimed lands here on the next replay. Throwing
+      // turned an ordinary retention outcome into a fatal stage failure. Both
+      // shapes — never-settled and settled-then-pruned — mean the same thing
+      // to the caller ("no stored result"), so both take the replay policy
+      // below.
       if (stored.state === 'settled') {
-        // Corrupt: the register says settled but no entries row exists.
         this.handleCorruption(
-          'unreachable_state',
-          `operationId=${operationId}: register.state=settled but no tool_result entry`,
+          'missing_settlement',
+          `operationId=${operationId}: register.state=settled but the tool_result entry is absent (pruned, or never written)`,
         );
       }
 
-      // state === 'intent', no entries row
+      // No stored result — replay policy decides.
       if (replayPolicy === 'never') {
         this.handleCorruption(
           'missing_settlement',
           `operationId=${operationId}: intent committed with replay:never but no settlement — returning synthetic error`,
         );
         // We treat missing_settlement as non-fatal: return a synthetic error payload.
-        const syntheticError = {
+        const syntheticError: SyntheticEffectResult = {
           __synthetic: true,
           reason: 'missing_settlement',
           operationId,
         };
         // Write a settlement entry so the next recovery doesn't repeat this.
+        //
+        // △ `payload` must be the SERIALIZED string, not the raw object —
+        // `EntryRepository.create()` itself does one level of
+        // `JSON.stringify(payload)` before writing, and `findToolResult()`
+        // does one level of `JSON.parse()` back on read. That round trip is
+        // transparent for a pre-serialized string (the settlement path's
+        // `serialize(result)` above), but passing a raw object here meant a
+        // THIRD call for the same operationId (the memoization path,
+        // `deserialize(priorEntry.payload as string)`) received the
+        // ALREADY-PARSED-BACK object instead of a string and threw
+        // `"[object Object]" is not valid JSON` — caught by
+        // `DurableExecutionEnginePrimitives.test.ts`.
+        const syntheticSerialized = JSON.stringify(syntheticError);
         this.entryRepo.create({
           scope: ctx.scope,
           scopeId: ctx.scopeId,
           kind: 'tool_result',
           key: operationId,
-          payload: syntheticError,
+          payload: syntheticSerialized,
         });
-        return deserialize(JSON.stringify(syntheticError));
+        return deserialize(syntheticSerialized);
       }
 
       // replay: safe — re-run the effect
@@ -268,25 +524,48 @@ export class DurableExecutionEngine {
     }
 
     // ── Step 3: Commit settlement ──
+    //
+    // §3.4 requires the two settlement writes — the `tool_result` entry and
+    // the register flip to `settled` — to be ONE atomic write. Un-transacted,
+    // a crash between them left the register in `intent` with a settlement
+    // row present: harmless for `replay: safe` but a permanent lie for
+    // `replay: never`, which reports `missing_settlement` for an effect that
+    // demonstrably completed. Both repositories share one better-sqlite3
+    // connection, so `entryRepo.transaction()` covers the register write too.
     const serialized = serialize(result);
-    this.entryRepo.create({
-      scope: ctx.scope,
-      scopeId: ctx.scopeId,
-      kind: 'tool_result',
-      key: operationId,
-      payload: serialized,
-    });
+    try {
+      this.entryRepo.transaction(() => {
+        this.entryRepo.create({
+          scope: ctx.scope,
+          scopeId: ctx.scopeId,
+          kind: 'tool_result',
+          key: operationId,
+          payload: serialized,
+        });
 
-    // Overwrite register to 'settled' (unconditional — we are the single writer
-    // within a stage run's scope, so no CAS needed here).
-    const existingAfterIntent = this.registerRepo.get(ctx.scope, ctx.scopeId, registerKey);
-    const settledValue: StepRegisterValue = {
-      state: 'settled',
-      outputId: (existingAfterIntent?.value as StepRegisterValue | undefined)?.outputId ?? 'unknown',
-      intentAt: (existingAfterIntent?.value as StepRegisterValue | undefined)?.intentAt ?? Date.now(),
-      settledAt: Date.now(),
-    };
-    this.registerRepo.set(ctx.scope, ctx.scopeId, registerKey, settledValue);
+        // Overwrite register to 'settled' (unconditional — we are the single
+        // writer within a stage run's scope, so no CAS needed here).
+        const existingAfterIntent = this.registerRepo.get(ctx.scope, ctx.scopeId, registerKey);
+        const settledValue: StepRegisterValue = {
+          state: 'settled',
+          outputId: (existingAfterIntent?.value as StepRegisterValue | undefined)?.outputId ?? 'unknown',
+          intentAt: (existingAfterIntent?.value as StepRegisterValue | undefined)?.intentAt ?? Date.now(),
+          settledAt: Date.now(),
+        };
+        this.registerRepo.set(ctx.scope, ctx.scopeId, registerKey, settledValue);
+      });
+    } catch (err) {
+      // Migration 42 makes (scope, scope_id, key) unique for `tool_result`, so
+      // a concurrent writer that settled the same operationId first turns this
+      // into a constraint failure. That writer's result IS the settlement —
+      // adopt it rather than failing the effect we already performed.
+      const settledByOther = this.entryRepo.findToolResult(ctx.scope, ctx.scopeId, operationId);
+      if (!settledByOther) throw err;
+      this.logger.warn(
+        `[DurableEngine] settlement for ${operationId} lost the race; adopting the stored result`,
+      );
+      return deserialize(settledByOther.payload as string);
+    }
 
     return result;
   }
@@ -316,7 +595,7 @@ export class DurableExecutionEngine {
     const subs = this.signalSubscribers.get(subKey);
     if (subs) {
       for (const sub of subs) {
-        clearTimeout(sub.timer);
+        sub.timer.clear();
         sub.resolve(payload);
       }
       subs.clear();
@@ -347,13 +626,13 @@ export class DurableExecutionEngine {
 
     return new Promise<unknown>((resolve, reject) => {
       const subKey = `${ctx.scope}/${ctx.scopeId}/${name}`;
-      const timer = setTimeout(() => {
+      const timer = armTimer(() => {
         const subs = this.signalSubscribers.get(subKey);
         if (subs) subs.delete(sub);
         reject(new Error(`Signal '${name}' timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       // Node.js: don't let the timer keep the process alive.
-      timer.unref?.();
+      timer.unref();
 
       const sub: SignalSubscriber = { resolve, reject, timer };
       let subs = this.signalSubscribers.get(subKey);
@@ -394,11 +673,11 @@ export class DurableExecutionEngine {
     });
 
     const promise = new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = armTimer(() => {
         this.awakeableSubscribers.delete(token);
         reject(new Error(`Awakeable ${token} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
-      timer.unref?.();
+      timer.unref();
 
       this.awakeableSubscribers.set(token, { resolve, reject, timer });
     });
@@ -419,7 +698,7 @@ export class DurableExecutionEngine {
 
     const sub = this.awakeableSubscribers.get(token);
     if (sub) {
-      clearTimeout(sub.timer);
+      sub.timer.clear();
       sub.resolve(payload);
       this.awakeableSubscribers.delete(token);
     }
@@ -489,17 +768,162 @@ export class DurableExecutionEngine {
 
       // Create a real Promise and subscribe so resolveAwakeable will unblock it.
       const promise = new Promise<unknown>((resolve, reject) => {
-        const timer = setTimeout(() => {
+        const timer = armTimer(() => {
           this.awakeableSubscribers.delete(token);
           reject(new Error(`Awakeable ${token} timed out after ${timeoutMs}ms`));
         }, timeoutMs);
-        timer.unref?.();
+        timer.unref();
         this.awakeableSubscribers.set(token, { resolve, reject, timer });
       });
       result.set(token, promise);
     }
 
     return result;
+  }
+
+  // ── Artifact channel (X-25 / W23) ─────────────────────────────
+
+  /**
+   * Append a chunk to a durable artifact in this scope, creating it on the
+   * first call and sealing it when `last` is set.
+   *
+   * §X-25: stage results used to live only in `messages` — the lossy chat
+   * stream — while `entries.kind='artifact'`, the store W23 designated for
+   * exactly this, had no writers at all. Routing results through here gives
+   * them a stable id that survives a retry, append semantics a streaming
+   * producer can actually use, and a lifetime that is not tied to the chat
+   * session.
+   *
+   * Returns null when the artifact was already sealed.
+   */
+  appendArtifact(
+    ctx: DurableContext,
+    artifactId: string,
+    chunk: string,
+    opts: { last?: boolean; meta?: Record<string, unknown> } = {},
+  ): ArtifactRecord | null {
+    const result = this.entryRepo.appendArtifact({
+      scope: ctx.scope,
+      scopeId: ctx.scopeId,
+      artifactId,
+      chunk,
+      ...(opts.last !== undefined ? { last: opts.last } : {}),
+      ...(opts.meta ? { meta: opts.meta } : {}),
+    });
+    if (!result && chunk.length > 0) {
+      // A dropped chunk is DATA LOSS on the channel successors read, and every
+      // call site discarded this null, so it happened invisibly. It is still
+      // not thrown — the append is best-effort by design — but it must never
+      // be silent again.
+      this.logger.warn(
+        `[DurableEngine] appendArtifact dropped ${chunk.length} char(s) for ` +
+        `${ctx.scope}/${ctx.scopeId}/${artifactId}: the artifact is sealed. ` +
+        `Reopen it with reopenArtifact() before a new attempt writes to it.`,
+      );
+    }
+    return result;
+  }
+
+  /**
+   * Take the seal off an artifact so a new attempt on the same scope can keep
+   * appending to it. Returns the reopened record, or null when there was
+   * nothing sealed to reopen.
+   *
+   * `last: true` marks "this attempt is finished", but the artifact's scope is
+   * the stage RUN, and a run executes again under the same id whenever a
+   * post-completion validation retry or a crash relaunch happens. Reopening at
+   * the top of each attempt is what keeps the sealed-and-then-resumed case
+   * from serving successors the output that was just rejected.
+   */
+  reopenArtifact(ctx: DurableContext, artifactId: string): ArtifactRecord | null {
+    return this.entryRepo.reopenArtifact(ctx.scope, ctx.scopeId, artifactId);
+  }
+
+  // ── Retraction ────────────────────────────────────────────────
+
+  /**
+   * Forget one operation's journal state so the next `withEffect` for the same
+   * id runs LIVE instead of replaying or short-circuiting.
+   *
+   * This is the deliberate counterpart to memoisation, and it exists for one
+   * situation: the caller KNOWS the operation did not complete and knows what
+   * to do about it. A pause aborts an in-flight turn mid-response; the resume
+   * path then sends a *different* instruction ("continue from where you left
+   * off"), which is a new effect that happens to occupy the same slot. Without
+   * a retraction the register still says `intent`, so `withEffect` on a
+   * `replay: never` stage writes a synthetic settlement, the continuation is
+   * skipped, and the stage completes on a truncated answer — durably, so every
+   * later resume replays the skip.
+   *
+   * △ Only ever call this when the incompleteness is KNOWN. Crash recovery
+   * does NOT know, which is exactly why it must keep going through the replay
+   * policy instead.
+   */
+  discardOperation(ctx: DurableContext, operationId: string): void {
+    this.entryRepo.transaction(() => {
+      this.entryRepo.deleteByKey(ctx.scope, ctx.scopeId, 'tool_result', operationId);
+      this.registerRepo.delete(ctx.scope, ctx.scopeId, `op.state/${operationId}`);
+    });
+  }
+
+  /** Read one durable artifact, or undefined when it was never opened. */
+  getArtifact(ctx: DurableContext, artifactId: string): ArtifactRecord | undefined {
+    return this.entryRepo.getArtifact(ctx.scope, ctx.scopeId, artifactId);
+  }
+
+  /** W23 `lastChunk` — the tail of an artifact without re-reading the whole. */
+  lastChunk(ctx: DurableContext, artifactId: string): string | undefined {
+    return this.entryRepo.lastChunk(ctx.scope, ctx.scopeId, artifactId);
+  }
+
+  /** Every artifact in a scope, in creation order. */
+  listArtifacts(ctx: DurableContext): ArtifactRecord[] {
+    return this.entryRepo.listArtifacts(ctx.scope, ctx.scopeId);
+  }
+
+  // ── Retention (§3.4 "retention that fires") ───────────────────
+
+  /**
+   * Drop the whole durable journal for one scope — every `entries` row and
+   * every `registers` row.
+   *
+   * §3.4 lists "retention that fires" as part of the persistence engine, but
+   * `deleteByScope` existed on both repositories with **zero production
+   * callers**: a journal was written for every stage run and every automation
+   * execution and then kept forever, so the two hottest tables in the file
+   * grew without bound for the lifetime of the deployment.
+   *
+   * Call this only once the scope is TERMINAL. While a scope is live its
+   * journal is the thing that makes re-entry cheap, and a retry gets a fresh
+   * operation-id epoch rather than reusing a released one.
+   *
+   * △ Both deletes run in ONE transaction. Dropping `entries` while leaving
+   * `registers` behind is precisely the `missing_settlement` shape
+   * `withEffect` has to tolerate above — recoverable, but it turns every
+   * subsequent read of that scope into a corruption warning for no reason.
+   */
+  releaseScope(ctx: DurableContext): void {
+    this.entryRepo.transaction(() => {
+      this.entryRepo.deleteByScope(ctx.scope, ctx.scopeId);
+      this.registerRepo.deleteByScope(ctx.scope, ctx.scopeId);
+    });
+  }
+
+  /**
+   * Retention for a scope that has FINISHED but whose result must outlive it:
+   * drops the step journal (one register + one `tool_result` per turn, which
+   * is what actually grows without bound) and keeps the artifacts, which are
+   * the stage's durable output (X-25) and are read after it completes.
+   *
+   * This is the variant `StageExecutionService` calls at every terminal stage
+   * transition. `releaseScope` above is the full teardown for a scope that is
+   * being deleted outright.
+   */
+  releaseJournal(ctx: DurableContext): void {
+    this.entryRepo.transaction(() => {
+      this.entryRepo.deleteJournalByScope(ctx.scope, ctx.scopeId);
+      this.registerRepo.deleteByScope(ctx.scope, ctx.scopeId);
+    });
   }
 
   // ── Corruption handling ───────────────────────────────────────
@@ -554,7 +978,7 @@ export class DurableExecutionEngine {
     const newSlots: Array<Parameters<typeof this.entryRepo.createBatch>[0][number]> = [];
 
     for (const iter of iterations) {
-      const key = `iter/${iter.index}`;
+      const key = iterationKey(iter.index);
       const existing = this.entryRepo.findStageResultByKey('automation_execution', executionId, key);
       if (existing) continue; // recovery mode — slot already committed
       newSlots.push({
@@ -580,23 +1004,25 @@ export class DurableExecutionEngine {
 
   /**
    * Atomically claim the next pending iteration slot for this execution.
-   * Returns the claimed iteration payload, or null if all iterations are
-   * claimed or completed.
+   * Returns the claimed iteration, or null if no slot is unclaimed.
    *
    * The "claim" is a RESOLVED flag on the entries row (resolved=1 means
-   * claimed-and-running or already-completed). This is the exact mechanism
-   * that prevents two concurrent processes from claiming the same iteration:
-   * `resolveByKey` uses `UPDATE ... WHERE resolved=0 RETURNING` which is
-   * atomic in SQLite WAL mode.
+   * claimed). This is the exact mechanism that prevents two concurrent
+   * processes from claiming the same iteration: `resolve` uses
+   * `UPDATE ... WHERE resolved=0 RETURNING`, which is atomic in SQLite WAL
+   * mode.
+   *
+   * P0-c — the same UPDATE now also stamps the LEASE (`status: 'running'`,
+   * `claimedAt`, `owner`) into the payload, so a slot that was claimed is
+   * distinguishable from one that finished. `completeIteration` writes the
+   * terminal status; `reclaimExpiredIterations` hands back anything left
+   * `running` by a process that died. Previously neither existed: a claim was
+   * a one-way door and an interrupted iteration was lost permanently and
+   * indistinguishably from a successful one.
    *
    * Called once per iteration in the loop, replacing the in-memory index.
    */
-  claimNextIteration(executionId: string): {
-    id: string;
-    index: number;
-    variables: Record<string, unknown>;
-    label: string;
-  } | null {
+  claimNextIteration(executionId: string): ClaimedIteration | null {
     // MAJOR-3 fix: use a targeted DB query instead of loading all entries.
     // The previous implementation called listByScope() which returned every
     // entry for the execution — O(all_tool_calls) deserialization per claim,
@@ -609,17 +1035,19 @@ export class DurableExecutionEngine {
       );
       if (!entry) return null;
 
-      // Atomically resolve (claim) the row — may return null if another
-      // process claimed it between the SELECT and the UPDATE (concurrent
-      // multi-process automation). If so, loop and try the next slot.
-      const claimed = this.entryRepo.resolve(entry.id);
+      const payload = entry.payload as IterationSlotPayload;
+      const leased: IterationSlotPayload = {
+        ...payload,
+        status: 'running',
+        claimedAt: Date.now(),
+        owner: this.ownerId,
+      };
+
+      // Atomically resolve (claim) the row — returns null if another process
+      // claimed it between the SELECT and the UPDATE (concurrent multi-process
+      // automation). If so, loop and try the next slot.
+      const claimed = this.entryRepo.resolve(entry.id, leased);
       if (claimed) {
-        const payload = entry.payload as {
-          index: number;
-          variables: Record<string, unknown>;
-          label: string;
-          status: string;
-        };
         return {
           id: entry.id,
           index: payload.index,
@@ -629,5 +1057,87 @@ export class DurableExecutionEngine {
       }
       // Another process claimed it first — re-query to get the new lowest slot.
     }
+  }
+
+  /**
+   * P0-c — record the outcome of a claimed iteration. Must be called for
+   * every slot `claimNextIteration` handed out, success or failure: it is the
+   * ONLY thing that distinguishes "this iteration finished" from "the process
+   * holding this slot died", and therefore the only thing that stops recovery
+   * re-running work that already completed.
+   */
+  completeIteration(
+    slotId: string,
+    status: 'completed' | 'failed',
+    error?: string,
+  ): void {
+    const entry = this.entryRepo.getById(slotId);
+    if (!entry) {
+      this.logger.warn(`[DurableEngine] completeIteration: slot ${slotId} no longer exists`);
+      return;
+    }
+    const payload = entry.payload as IterationSlotPayload;
+    this.entryRepo.updatePayload(slotId, {
+      ...payload,
+      status,
+      completedAt: Date.now(),
+      ...(error ? { error } : {}),
+    } satisfies IterationSlotPayload);
+  }
+
+  /** P0-c — iteration slots nobody has claimed yet. */
+  countPendingIterations(executionId: string): number {
+    return this.entryRepo.countPendingIterations('automation_execution', executionId);
+  }
+
+  /**
+   * P0-c — hand back every slot still marked `running` whose lease has
+   * expired, so a later `claimNextIteration` re-issues it. This is what makes
+   * an iteration that was in flight when the process died recoverable rather
+   * than silently lost.
+   *
+   * `skipIndexes` are iterations the caller knows are genuinely still live
+   * (boot recovery passes the ones whose workflow run has not reached a
+   * terminal state). Those keep their claim so the work is not started twice
+   * while it is still running.
+   *
+   * Returns the indexes actually handed back.
+   */
+  reclaimExpiredIterations(
+    executionId: string,
+    opts: { leaseMs?: number; skipIndexes?: Iterable<number> } = {},
+  ): number[] {
+    const leaseMs = opts.leaseMs ?? DEFAULT_ITERATION_LEASE_MS;
+    const skip = new Set(opts.skipIndexes ?? []);
+    const cutoff = Date.now() - leaseMs;
+    const reclaimed: number[] = [];
+
+    for (const entry of this.entryRepo.listClaimedIterations('automation_execution', executionId)) {
+      const payload = entry.payload as IterationSlotPayload;
+      // The row is claimed (that is what `listClaimedIterations` returns), so
+      // anything without a terminal status is in flight — including a slot
+      // claimed by a build that predates leases, whose payload still reads
+      // `pending`. Leaving those claimed forever is the exact permanent loss
+      // this pass exists to undo.
+      if (payload.status === 'completed' || payload.status === 'failed') continue;
+      if (skip.has(payload.index)) continue;
+      if (payload.claimedAt !== undefined && payload.claimedAt > cutoff) continue;
+
+      const handedBack = this.entryRepo.unresolve(entry.id, {
+        ...payload,
+        status: 'pending',
+        claimedAt: undefined,
+        owner: undefined,
+        reclaimCount: (payload.reclaimCount ?? 0) + 1,
+      } satisfies IterationSlotPayload);
+      if (handedBack) reclaimed.push(payload.index);
+    }
+
+    if (reclaimed.length > 0) {
+      this.logger.info(
+        `[DurableEngine] reclaimed ${reclaimed.length} expired iteration lease(s) for execution ${executionId}`,
+      );
+    }
+    return reclaimed;
   }
 }

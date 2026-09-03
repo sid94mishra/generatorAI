@@ -120,6 +120,93 @@ describe('validateDAG', () => {
   });
 });
 
+// ── Structured issues (Phase 7 item 6 — validation navigation) ──────
+//
+// `errors`/`warnings` alone are prose: a client cannot tell which stage or
+// edge a finding is about without re-parsing English. `issues` carries the
+// same findings with the responsible ids attached. The invariant these
+// tests hold is that `issues` NEVER diverges from the two string arrays —
+// one issue per string, same order, same text.
+
+describe('validateDAG issues', () => {
+  const errorIssues = (r: ReturnType<typeof validateDAG>) =>
+    r.issues.filter((i) => i.severity === 'error');
+  const warningIssues = (r: ReturnType<typeof validateDAG>) =>
+    r.issues.filter((i) => i.severity === 'warning');
+
+  it('emits exactly one issue per error/warning string, with matching text', () => {
+    // Every branch at once: a stage with no prompts (warning), a self-edge
+    // and an unknown target (errors).
+    const result = validateDAG([makeStage('A')], [makeEdge('A', 'A'), makeEdge('A', 'Z')]);
+    expect(errorIssues(result).map((i) => i.message)).toEqual(result.errors);
+    expect(warningIssues(result).map((i) => i.message)).toEqual(result.warnings);
+  });
+
+  it('names the stage for an empty-prompts warning, with the field', () => {
+    const result = validateDAG([makeStage('A')], []);
+    const issue = result.issues.find((i) => i.code === 'stage-without-prompts');
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe('warning');
+    expect(issue?.stageIds).toEqual(['A']);
+    expect(issue?.field).toBe('prompts');
+  });
+
+  it('names the stage and the edge for a self-edge', () => {
+    const result = validateDAG([makeStage('A')], [makeEdge('A', 'A')]);
+    const issue = result.issues.find((i) => i.code === 'self-edge');
+    expect(issue?.stageIds).toEqual(['A']);
+    expect(issue?.edge).toEqual({ fromStageId: 'A', toStageId: 'A', edgeType: 'on_success' });
+  });
+
+  it('names every stage in a cycle', () => {
+    const stages = [makeStage('A'), makeStage('B'), makeStage('C')];
+    const edges = [makeEdge('A', 'B'), makeEdge('B', 'C'), makeEdge('C', 'A')];
+    const issue = validateDAG(stages, edges).issues.find((i) => i.code === 'cycle');
+    expect(issue?.severity).toBe('error');
+    expect([...(issue?.stageIds ?? [])].sort()).toEqual(['A', 'B', 'C']);
+  });
+
+  it('omits a stage id that does not exist rather than pointing at nothing', () => {
+    // The whole point of `stageIds` is "what a UI can select" — a dangling
+    // reference is not selectable, so only the surviving end is listed.
+    const issue = validateDAG([makeStage('A')], [makeEdge('A', 'Z')]).issues.find(
+      (i) => i.code === 'unknown-target-stage',
+    );
+    expect(issue?.stageIds).toEqual(['A']);
+    expect(issue?.edge?.toStageId).toBe('Z');
+  });
+
+  it('names both ends of a duplicate edge', () => {
+    const stages = [makeStage('A'), makeStage('B')];
+    const issue = validateDAG(stages, [makeEdge('A', 'B'), makeEdge('A', 'B')]).issues.find(
+      (i) => i.code === 'duplicate-edge',
+    );
+    expect(issue?.stageIds).toEqual(['A', 'B']);
+  });
+
+  it('reports an empty graph as one warning issue', () => {
+    const result = validateDAG([], []);
+    expect(result.issues).toEqual([
+      { severity: 'warning', code: 'empty-graph', message: 'DAG has no stages', stageIds: [] },
+    ]);
+  });
+
+  it('names the disconnected stages', () => {
+    // B and C are unreachable from A: the only root is A, and nothing links
+    // to B or C from it.
+    const stages = [makeStage('A'), makeStage('B'), makeStage('C')].map((s) => ({
+      ...s,
+      prompts: [{ label: 'p', text: 'hello', waitForCompletion: true }],
+    }));
+    const edges = [makeEdge('B', 'C'), makeEdge('C', 'B')];
+    const result = validateDAG(stages, edges);
+    // B↔C is a cycle, so this exercises the cycle path's early return —
+    // the issues array must still be returned, not dropped.
+    expect(result.issues.some((i) => i.code === 'cycle')).toBe(true);
+    expect(result.errors.length).toBe(result.issues.filter((i) => i.severity === 'error').length);
+  });
+});
+
 describe('topologicalSort', () => {
   it('sorts a linear DAG', () => {
     const stages = [makeStage('C'), makeStage('A'), makeStage('B')];

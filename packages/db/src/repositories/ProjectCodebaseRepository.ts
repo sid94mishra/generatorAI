@@ -75,7 +75,10 @@ export class DrizzleProjectCodebaseRepository implements IProjectCodebaseReposit
     return row ? this.mapRow(row) : undefined;
   }
 
-  async update(id: string, updates: Partial<ProjectCodebase>): Promise<ProjectCodebase> {
+  async update(
+    id: string,
+    updates: Omit<Partial<ProjectCodebase>, 'lastError'> & { lastError?: string | null },
+  ): Promise<ProjectCodebase> {
     const values: Record<string, unknown> = {};
     if (updates.alias !== undefined) values['alias'] = updates.alias;
     if (updates.type !== undefined) values['type'] = updates.type;

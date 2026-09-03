@@ -41,6 +41,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import { extToLang } from '@/components/common/SyntaxHighlightedCode.js';
 import { FileCodeView } from '@/components/diff/FileCodeView.js';
+import { DiffProviders } from '@/components/diff/DiffProviders.js';
 import { toast } from '@/components/Toast.js';
 import { Modal, Button, Badge, Spinner, Tabs, PageHeader, Popover, PopoverTrigger, PopoverContent, type BadgeTone } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
@@ -505,14 +506,18 @@ function FilePreviewPanel({
           ) : (
             // Shares the diff viewer's worker pool + Shiki theme, so a
             // 20k-line file scrolls without blocking the main thread and
-            // highlighting matches what the Changes panel shows.
-            <FileCodeView
-              name={filePath}
-              contents={content}
-              cacheKey={`${codebaseId}:${filePath}:${content.length}`}
-              hideHeader
-              style={{ height: '100%', overflow: 'auto' }}
-            />
+            // highlighting matches what the Changes panel shows. W28 —
+            // DiffProviders wraps at the point of use; see the identical
+            // comment in ChangesSurface.tsx.
+            <DiffProviders>
+              <FileCodeView
+                name={filePath}
+                contents={content}
+                cacheKey={`${codebaseId}:${filePath}:${content.length}`}
+                hideHeader
+                style={{ height: '100%', overflow: 'auto' }}
+              />
+            </DiffProviders>
           )
         )}
       </div>

@@ -67,6 +67,38 @@ export interface ClaudeAgentProviderOptions {
   settingSources?: Array<'user' | 'project' | 'local'>;
   /** Enable file checkpointing. */
   enableFileCheckpointing?: boolean;
+
+  // ── W13 — provider hardening ──────────────────────────────────
+  //
+  // All three have working defaults inside the mechanisms themselves
+  // (`ToolSemaphore`, `ByteCapper`, `cancelSemantically`), so leaving them
+  // unset is the supported configuration. They exist so a deployment with an
+  // unusual workload can widen a bound without editing the package — never so
+  // a call site has to opt IN to being bounded.
+
+  /**
+   * W13 — per-tool-call budget in ms. A handler that exceeds it is abandoned
+   * and reported as a timeout; the poison-pill ladder then downgrades and
+   * eventually quarantines a tool that keeps doing it.
+   * Defaults to `DEFAULT_TOOL_TIMEOUT_MS` (120 s). `0` disables.
+   */
+  toolTimeoutMs?: number;
+
+  /**
+   * W13 — per-record byte cap. A tool result larger than this is DROPPED and
+   * replaced with model-legible guidance rather than truncated, because a
+   * half-serialised result is corrupt rather than merely smaller.
+   * Defaults to `DEFAULT_RECORD_BYTE_CAP` (1 MiB). `0` disables.
+   */
+  recordByteCapBytes?: number;
+
+  /**
+   * W13 — how long a cancel waits for the runtime's own terminal event before
+   * synthesising one. Never a process kill: the runtime may be shared, and
+   * killing it would take every co-tenant session with it.
+   * Defaults to `DEFAULT_CANCEL_GRACE_MS` (2 s).
+   */
+  cancelGraceMs?: number;
 }
 
 export interface ActiveQuery {
@@ -75,6 +107,20 @@ export interface ActiveQuery {
   abortController: AbortController;
   closeHandle?: () => void;
   status: 'running' | 'completed' | 'failed' | 'aborted';
+  /**
+   * W13 — the late-update guard's token for this turn, from
+   * `GenerationGuard.begin(conversationId)`.
+   *
+   * Every update produced by this query carries it, and `GenerationGuard.accept`
+   * discards anything stamped with an older one. Without it, a turn that was
+   * cancelled or timed out can still deliver its trailing SDK messages — its
+   * text, a re-opened tool call, or (worst) its own `harness.idle` — into the
+   * REPLACEMENT turn, ending a running turn in the UI. Checking
+   * `abortController.signal.aborted` does not catch this: the superseded turn's
+   * last message can already be queued on the microtask queue behind the new
+   * turn's first one.
+   */
+  generation?: number;
 }
 
 export interface StoredConversationConfig {

@@ -5,11 +5,32 @@ import { test, expect } from '../helpers/test';
 // Fully deterministic: no AI runs, no seeded data required.
 
 test.describe('Settings', () => {
-  test('switches between all four tabs', async ({ page, gotoApp }) => {
+  // These tab names come from SettingsModal's own section list. The spec used
+  // to iterate ['General', 'Provider', 'Copilot', 'Advanced'] — of which only
+  // 'General' has ever existed — so three quarters of it asserted against a UI
+  // that was never shipped.
+  test('switches between every settings tab', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+    // Two elements render the text "Settings" (the dialog's sr-only title and
+    // the visible banner heading), so an unqualified name match is a strict
+    // mode violation. Pin the visible one.
+    await expect(page.getByRole('banner').getByRole('heading', { name: 'Settings' })).toBeVisible();
 
-    for (const tab of ['General', 'Provider', 'Copilot', 'Advanced']) {
+    for (const tab of [
+      'General',
+      'Appearance',
+      'Model Providers',
+      'Agents',
+      'Skills',
+      'MCP Servers',
+      'Templates',
+      'Source Control',
+      'Browser & Terminal',
+      'Computer Use',
+      'Extensions',
+      'Security & Devices',
+      'Diagnostics',
+    ]) {
       await page.getByRole('button', { name: tab, exact: true }).click();
       // Each tab keeps the tab bar; assert the clicked tab is present/active.
       await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
@@ -130,30 +151,55 @@ test.describe('Settings', () => {
     expect(audit.failures).toEqual([]);
   });
 
-  test('Advanced tab shows server health info', async ({ page, gotoApp }) => {
+  // The tab is 'Diagnostics', not 'Advanced' — this spec named a tab that has
+  // never existed in the shipped SettingsModal (`git show HEAD` has no
+  // 'Advanced' either), so it was asserting against an imagined UI.
+  test('Diagnostics tab shows server health info', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Advanced', exact: true }).click();
+    await page.getByRole('button', { name: 'Diagnostics', exact: true }).click();
     await expect(page.getByText(/Server Health|Database|Uptime|Sandbox/i).first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test('Provider tab shows the active provider', async ({ page, gotoApp }) => {
+  test('Model Providers tab shows the active provider', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Provider', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'AI Provider' })).toBeVisible();
+    await page.getByRole('button', { name: 'Model Providers', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Model Providers' })).toBeVisible();
+    // Both providers this build knows are listed here regardless of which one
+    // is primary, so asserting on Copilot's presence is safe under
+    // HARNESS_TYPE=claude-agent too.
     await expect(page.getByText(/GitHub Copilot/i).first()).toBeVisible();
     await expect(page.getByText('Active', { exact: true }).first()).toBeVisible();
   });
 });
 
 test.describe('Dashboard', () => {
-  test('renders header, quick actions and recent panels', async ({ page, gotoApp }) => {
+  // The dashboard's own heading is 'Mission Control' — 'Dashboard' is only the
+  // sidebar entry and the header breadcrumb (a <span>, not a heading). The
+  // shipped page has no 'Recent Chats' / 'Recent Runs' panels either: the two
+  // lists were replaced by a single 'Activity' panel with Today / Running /
+  // Needs attention tabs. All three names were asserting a UI that never
+  // shipped, so they are retargeted at what actually renders.
+  test('renders header, quick actions, stat cards and the activity panel', async ({ page, gotoApp }) => {
     await gotoApp('/');
-    await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /New Chat/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /New Workflow/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Browse Workflows/ })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Recent Chats' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Recent Runs' })).toBeVisible();
+    const main = page.getByRole('main');
+    await expect(main.getByRole('heading', { name: 'Mission Control', exact: true, level: 1 })).toBeVisible();
+
+    await expect(main.getByRole('button', { name: /New Chat/ })).toBeVisible();
+    await expect(main.getByRole('button', { name: /New Workflow/ })).toBeVisible();
+
+    // Stat cards — the row that replaced the old "Browse …" quick actions.
+    // Matched on the label <p> specifically so a chat in the activity feed
+    // that happens to be called "Workflows" can't satisfy (or break) this.
+    for (const label of ['Chats', 'Workflows', 'Automations', 'System Health']) {
+      await expect(main.locator('p').filter({ hasText: new RegExp(`^${label}$`) })).toBeVisible();
+    }
+
+    await expect(main.getByRole('heading', { name: 'Activity', exact: true, level: 2 })).toBeVisible();
+    const tabs = main.getByRole('tablist').getByRole('tab');
+    await expect(tabs).toHaveCount(3);
+    for (const t of ['Today', 'Running', 'Needs attention']) {
+      await expect(main.getByRole('tab', { name: new RegExp(`^${t}`) })).toBeVisible();
+    }
   });
 
   test('quick action "New Workflow" navigates to the builder', async ({ page, gotoApp }) => {
@@ -162,38 +208,89 @@ test.describe('Dashboard', () => {
     await expect(page).toHaveURL(/\/workflows\/new/);
   });
 
-  test('quick action "Browse Workflows" navigates to the list', async ({ page, gotoApp }) => {
+  // There is no 'Browse Workflows' button — that quick action was never built.
+  // The dashboard affordance that actually reaches the workflow list is the
+  // 'Workflows' stat card (DashboardPage.tsx -> navigate('/workflows')), so
+  // the test is retargeted there rather than dropped.
+  //
+  // NOTE (app issue, not fixed here): StatCard renders a plain <div> with an
+  // onClick — no role="button", no tabindex, no key handler — so the card is
+  // unreachable by role and by keyboard. Hence the click goes through the
+  // label text, which bubbles to the card's handler.
+  test('the "Workflows" stat card navigates to the workflow list', async ({ page, gotoApp }) => {
     await gotoApp('/');
-    await page.getByRole('button', { name: /Browse Workflows/ }).click();
+    await page.getByRole('main').locator('p').filter({ hasText: /^Workflows$/ }).click();
     await expect(page).toHaveURL(/\/workflows$/);
+    await expect(page.getByRole('main').getByRole('heading', { name: 'Workflows', exact: true, level: 1 })).toBeVisible();
   });
 });
 
-test.describe('Templates', () => {
-  test('lists templates with a search box and Use Template actions', async ({ page, gotoApp }) => {
-    await gotoApp('/templates');
-    await expect(page.getByRole('heading', { name: 'Templates' })).toBeVisible();
-    await expect(page.getByPlaceholder(/Search templates/i)).toBeVisible();
-    expect(await page.getByRole('button', { name: 'Use Template' }).count()).toBeGreaterThan(0);
+// ── Templates ──
+// /templates is a 404: that route does not exist and never did (see
+// apps/web/src/router.tsx). Templates ship as a tab inside the Settings modal
+// (Catalogs.tsx -> TemplatesSection). Every test below is retargeted at that
+// real surface, which preserves the original intent — list, search, and
+// create-from-template — instead of skipping it.
+test.describe('Templates (Settings → Templates tab)', () => {
+  async function openTemplatesTab(page: import('@playwright/test').Page, gotoApp: (p: string) => Promise<void>) {
+    await gotoApp('/settings');
+    await page.getByRole('button', { name: 'Templates', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: 'Templates', exact: true, level: 2 })).toBeVisible();
+    // Wait for the list itself, not just the section header. The list header
+    // reads "Workflow templates" while `useTemplates()` has no data and only
+    // becomes "<n> templates" once it resolves — so this is the load gate.
+    // Without it a slow/failed templates fetch surfaced as an opaque
+    // "waiting for button 'Use'" click timeout.
+    await expect(dialog.getByRole('heading', { level: 3 })).toHaveText(/^\d+ templates$/, {
+      timeout: 20_000,
+    });
+    return dialog;
+  }
+
+  test('lists templates with a search box and Use actions', async ({ page, gotoApp }) => {
+    const dialog = await openTemplatesTab(page, gotoApp);
+    // The button is labelled 'Use', not 'Use Template'.
+    await expect(dialog.getByPlaceholder(/Search templates/i)).toBeVisible();
+    const uses = dialog.getByRole('button', { name: 'Use', exact: true });
+    const count = await uses.count();
+    expect(count).toBeGreaterThan(0);
+    // The list header states the count, so the two must agree — a rendering
+    // bug that dropped cards would otherwise slip past a `> 0` check.
+    await expect(dialog.getByRole('heading', { name: `${count} templates`, exact: true })).toBeVisible();
   });
 
-  test('search keeps matching templates visible', async ({ page, gotoApp }) => {
-    await gotoApp('/templates');
-    await page.getByPlaceholder(/Search templates/i).fill('Code Generation');
-    await page.waitForTimeout(300); // debounce settle
-    // The matching template stays visible and at least one card remains.
-    await expect(page.getByRole('heading', { name: /Code Generation/i }).first()).toBeVisible();
-    expect(await page.getByRole('button', { name: 'Use Template' }).count()).toBeGreaterThan(0);
+  test('search filters the list down to matching templates', async ({ page, gotoApp }) => {
+    const dialog = await openTemplatesTab(page, gotoApp);
+    const search = dialog.getByPlaceholder(/Search templates/i);
+    const uses = dialog.getByRole('button', { name: 'Use', exact: true });
+    const total = await uses.count();
+
+    await search.fill('Code Generation');
+    // Matching template stays; non-matching ones are gone — the original only
+    // checked that *something* remained, which a broken filter also satisfies.
+    await expect(dialog.getByText('Code Generation Workflow', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Code Review Workflow', { exact: true })).toHaveCount(0);
+    expect(await uses.count()).toBeLessThan(total);
+
+    await search.fill('zzz-no-such-template');
+    await expect(dialog.getByText('No templates found.')).toBeVisible();
+
+    await search.fill('');
+    await expect(uses).toHaveCount(total);
   });
 
-  test('Use Template creates a workflow and opens its detail page', async ({ page, gotoApp, tracker }) => {
-    await gotoApp('/templates');
-    await page.getByRole('button', { name: 'Use Template' }).first().click();
-    // from-template creates a definition and navigates to its detail page.
+  test('Use creates a workflow and opens its detail page', async ({ page, gotoApp, tracker }) => {
+    const dialog = await openTemplatesTab(page, gotoApp);
+    await dialog.getByRole('button', { name: 'Use', exact: true }).first().click();
+
+    // from-template creates a definition, closes settings and navigates to the
+    // new definition's detail page.
     await expect(page).toHaveURL(/\/workflows\/[0-9a-f-]{36}$/, { timeout: 15_000 });
-    // Track the created definition for cleanup.
     const id = page.url().split('/workflows/')[1];
     if (id) tracker.track('definition', id);
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByTestId('rf__wrapper')).toBeVisible({ timeout: 10_000 });
   });
 });

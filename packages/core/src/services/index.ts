@@ -23,8 +23,15 @@ export { StageExecutionService } from './StageExecutionService.js';
 export { WorkflowRunService } from './WorkflowRunService.js';
 
 // W18 — Admission control + concurrency management
-export { AdmissionController } from './AdmissionController.js';
-export type { AdmissionLane, AdmissionControllerConfig, LaneSnapshot } from './AdmissionController.js';
+export { AdmissionController, AdmissionTimeoutError, laneFor, sizeLane } from './AdmissionController.js';
+export type {
+  AdmissionLane,
+  AdmissionControllerConfig,
+  AdmissionClassification,
+  AdmissionTicket,
+  LaneSnapshot,
+  SizingDecision,
+} from './AdmissionController.js';
 
 // Orchestrator mode (background-agent orchestration for Chat)
 export { OrchestratorService, DEFAULT_ORCHESTRATOR_CONFIG } from './orchestrator/OrchestratorService.js';
@@ -115,8 +122,8 @@ export {
 export type { ParsedAgentMarkdown } from './agentMarkdown.js';
 
 // Workspace Management services
-export { WorkspaceManager } from './WorkspaceManager.js';
-export type { WorkspaceManagerConfig } from './WorkspaceManager.js';
+export { WorkspaceManager, WorkspaceTreeBusyError } from './WorkspaceManager.js';
+export type { WorkspaceManagerConfig, WorkspaceTeardownPhase } from './WorkspaceManager.js';
 export { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
 export type {
   CaptureWorkspaceCheckpointParams,
@@ -151,7 +158,11 @@ export type {
 
 // Integrated Terminal service
 export { TerminalService } from './TerminalService.js';
-export type { TerminalServiceConfig } from './TerminalService.js';
+export type { TerminalServiceConfig, TerminalViewer } from './TerminalService.js';
+
+// Voice Module service (Phase 0-4)
+export { VoiceService } from './VoiceService.js';
+export type { VoiceServiceConfig, SttSessionHandle, SpeakOptions, SpeechSessionHandle } from './VoiceService.js';
 
 // ── Widgets & Extensions ──
 export { WidgetRegistry } from './WidgetRegistry.js';
@@ -198,14 +209,29 @@ export { AgentHostClient } from './AgentHostClient.js';
 // W14 — PTY Host client (gateway-side PTY proxy)
 export { PtyHostClient } from './PtyHostClient.js';
 export type { PtyHostClientOptions, PtyDataHandler, PtyExitHandler, PtyReadyHandler } from './PtyHostClient.js';
+export { PtyHostAdapter } from './PtyHostAdapter.js';
+export type { PtyHostAdapterOptions } from './PtyHostAdapter.js';
 
-// W15 — Browser Host client (gateway-side browser proxy)
-export { BrowserHostClient } from './BrowserHostClient.js';
-export type { BrowserHostClientOptions, BrowserFrameHandler } from './BrowserHostClient.js';
-
-// W17 — CUA Host client (gateway-side computer-use proxy)
-export { CuaHostClient } from './CuaHostClient.js';
-export type { CuaHostClientOptions } from './CuaHostClient.js';
+// △ W15/W17 — `BrowserHostClient` and `CuaHostClient` were DELETED, not moved.
+//
+// Both were exported here with zero callers anywhere in the app, and neither
+// could acquire one without being rewritten:
+//
+//   • BrowserHostClient's own header called itself "a drop-in replacement for
+//     in-process Playwright usage". It covered 8 of `IBrowserBridge`'s ~30
+//     operations — no cookies, no DOM snapshot, no inspector, no ref-based
+//     element addressing, no `invokeFunction` — and its screencast was a
+//     `page.screenshot()` poll loop, which is the capture path W15 replaced.
+//   • CuaHostClient drives a protocol (`CuaHostIpc.ComputerAction`) that
+//     carries NO app or window identity, so every action resolves "whatever is
+//     frontmost". `IComputerBridge`'s own header names that hazard: "the user
+//     approves Safari and the click lands in 1Password." It must not be wired
+//     until the protocol carries addressing, so a client for it is dead by
+//     design, not by omission.
+//
+// `apps/browser-host` and `apps/cua-host` still exist and still have their own
+// tests. What is gone is the claim, made by exporting these from the core
+// package's public surface, that the gateway can already use them.
 
 // W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix)
 export { DurableExecutionEngine } from './DurableExecutionEngine.js';

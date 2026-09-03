@@ -4,6 +4,7 @@
 
 import { Router } from 'express';
 import { DiagLogLevel, diag } from '@opentelemetry/api';
+import { getConfigCorrections, fallbackReport } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 
 export function createHealthRoutes(container: Container): Router {
@@ -61,6 +62,29 @@ export function createHealthRoutes(container: Container): Router {
       activeChats: activeChatCount,
       activeWorkflowRuns: activeRunCount,
       runningChatIds,
+      // §1.Q — this process's own memory footprint, in bytes. Reading it
+      // over HTTP is the only cross-platform way for an external load test
+      // (or a real ops dashboard) to sample RSS without OS-specific PID
+      // introspection (Windows/Linux/macOS all need different tools for
+      // that from outside the process). Cheap: `process.memoryUsage()` is
+      // a synchronous, allocation-free syscall.
+      memory: process.memoryUsage(),
+      // W18 — "Publish depth in the health endpoint: makes throttling visible
+      // instead of mysterious." Each lane reports its cap alongside running,
+      // queued and parked counts. `parked` is the load-bearing one: work
+      // waiting on a human approval has given its permit back, so a lane
+      // showing `parked: 8, running: 0` is idle and healthy, whereas the same
+      // number under `running` would mean genuinely saturated.
+      admission: container.admissionController?.snapshot() ?? [],
+      // W18 — anything the numeric-config loader had to clamp or reject at
+      // boot. Empty in a correctly configured process; non-empty means an env
+      // var is being ignored or capped, which is otherwise invisible.
+      configCorrections: getConfigCorrections(),
+      // §11.1 — expensive fallbacks that have actually fired. Empty is the
+      // healthy state; an entry means the system is silently paying for a
+      // degraded path (HTTP-polled screencast, a TTY-less terminal, dropped
+      // broadcasts) while still returning 200s to everyone.
+      fallbacks: fallbackReport(),
       // OTel status
       otel: {
         enabled: config.otel.enabled,

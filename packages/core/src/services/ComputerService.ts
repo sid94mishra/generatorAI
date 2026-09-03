@@ -68,10 +68,11 @@ import type {
   VerifyPredicate,
   VerifyResult,
 } from '../domain/ports/IComputerBridge.js';
+import { readBoundedInt } from '@generatorai/shared';
 import { isElementAddressed } from '../domain/ports/IComputerBridge.js';
 import type { IWorkspaceArtifactRepository } from '../domain/ports/IWorkspaceArtifactRepository.js';
 import type { EventBus } from '../events/EventBus.js';
-import { transcodeScreenshot } from '../infrastructure/computer/screenshotCodec.js';
+import { transcodeScreenshot, validateFrameBytes } from '../infrastructure/computer/screenshotCodec.js';
 import { Semaphore } from '../utils/Semaphore.js';
 import { resolveWithinBase } from '../utils/safePath.js';
 
@@ -205,11 +206,32 @@ interface SessionRecord {
    */
   semaphore: Semaphore;
   /**
-   * X-16: Hash of the last JPEG frame sent to the model (or null for first frame).
-   * Used to suppress identical consecutive frames — the model is told the frame is
-   * unchanged and asked not to retry the same action.
+   * X-16: the last frame that produced an artifact, and the hash of the
+   * CANONICAL capture it came from — the bytes the driver wrote, before any
+   * resize or re-encode.
+   *
+   * Hashing post-transcode output would answer the wrong question: two
+   * different screens can encode to the same bytes only by coincidence, but the
+   * same screen re-encoded at a different `screenshotMaxEdge` (a config change,
+   * a display swap) produces different bytes for an identical frame. The plan
+   * says "hash the canonical full frame before cropping" for exactly this
+   * reason.
+   *
+   * The artifact is retained so a duplicate frame can point the caller at the
+   * frame it duplicates instead of at nothing — the image is genuinely still
+   * available, so the model asking to see it must not be told there is none.
    */
-  lastFrameHash: string | null;
+  lastFrame: {
+    hash: string;
+    artifact: WorkspaceArtifactRecord;
+    /** Post-transcode geometry, so a duplicate describes the file it points at. */
+    encoded: { format: 'png' | 'jpeg' | 'webp'; width: number; height: number; downscale: number };
+  } | null;
+  // NOTE: the X-15 integrity latch deliberately does NOT live here. It used
+  // to, as `inlineFramesOk`, and that made it not a latch at all: `stop()`,
+  // the idle sweeper, `handleCrash` and `restartRuntime` all drop the record,
+  // and the next action builds a fresh one with the latch open again. See
+  // `ComputerService.inlineLatchClosed`.
 }
 
 export interface ComputerServiceConfig {
@@ -322,6 +344,24 @@ const LAUNCH_TIMEOUT_MS = 90_000;
 /** Ceiling on a "this run" consent answer, in case no session close clears it. */
 const RUN_GRANT_TTL_MS = 60 * 60 * 1000;
 
+/**
+ * Stand-in identity for an audit row written before any app was resolved.
+ *
+ * The header's invariant is "every action including every refusal produces
+ * exactly one audit record", and a refusal that fires at the feature gate has
+ * no app to name — but "we refused before we ever looked" is precisely the
+ * thing an auditor needs to be able to see, so the row is written anyway with
+ * an identity that cannot be confused with a real bundle id.
+ */
+const UNRESOLVED_APP = '(unresolved)';
+
+/** Best available naming for an app the caller asked for but we never resolved. */
+function describeRef(ref: ComputerAppRef): { identity: string; label: string } {
+  if (ref.by === 'appId') return { identity: ref.appId, label: ref.appId };
+  if (ref.by === 'appName') return { identity: ref.appName, label: ref.appName };
+  return { identity: `pid:${ref.pid}`, label: `pid:${ref.pid}` };
+}
+
 /** Refusal returned to the AGENT for a blocked app. */
 function opaqueBlockRefusal(): ComputerRefusal {
   // Deliberately identical to "no such app". Returning `app_blocked` would let
@@ -344,6 +384,36 @@ export class ComputerService {
    * going quiet with the panel still showing a live badge.
    */
   private readonly recordingRequests = new Map<string, RecordingRequest>();
+  /**
+   * X-15 — the integrity latch. Workspaces whose INLINE screenshot path has
+   * been closed by a frame that failed validation.
+   *
+   * One-way and per WORKSPACE, not per session. It was per session
+   * (`SessionRecord.inlineFramesOk`) and that made it not a latch: `stop()`,
+   * the idle sweeper, `handleCrash()` and `restartRuntime()` all delete the
+   * record, and the very next action rebuilds one with the latch open. The
+   * worst case was `restartRuntime()` — the Computer panel's "restart the
+   * desktop driver", which is the remedy the service's own refusal text tells
+   * the model to suggest. A latch the recommended remedy clears protects
+   * nothing.
+   *
+   * Held here so it outlives every one of those, and only ever added to:
+   * there is no code path that removes an entry. A driver that produced one
+   * truncated capture has demonstrated the capture path is unreliable, and the
+   * failure mode is silent — the model cannot tell a grey half-frame from a
+   * real one, so "it looked fine this time" is not evidence.
+   *
+   * Only the INLINE path is closed; frames are still stored for the operator's
+   * panel, where a human can see that they are broken. Scoped per workspace so
+   * one bad driver does not blind an unrelated workspace, and unbounded only
+   * in the sense that it gains at most one short string per workspace that has
+   * ever produced a corrupt frame.
+   *
+   * BOUNDARY, stated honestly: this is process-lifetime, not persisted. A full
+   * server restart clears it. Surviving that needs a durable row, which is a
+   * schema change this fix does not make.
+   */
+  private readonly inlineLatchClosed = new Set<string>();
   /**
    * "Allow for this run" answers, per workspace.
    *
@@ -393,14 +463,26 @@ export class ComputerService {
     });
     // P1-29: Global cap now guards the TOTAL concurrent CUA actions across
     // all sessions. Per-session serialisation is enforced by SessionRecord.semaphore.
-    const globalMax = Number(
-      process.env['GENERATORAI_MAX_COMPUTER_ACTIONS'] ?? computerConfig.maxConcurrentSessions,
-    );
+    //
+    // Read through `readBoundedInt` rather than a bare `Number()`: a typo'd
+    // env value produced `NaN`, which `Semaphore` accepted (`NaN <= 0` is
+    // false) and then never granted a permit for (`NaN > 0` is also false) —
+    // every computer action hung forever with no error and no log.
+    const configuredMax = Math.trunc(Number(computerConfig.maxConcurrentSessions));
+    const globalMax = readBoundedInt('GENERATORAI_MAX_COMPUTER_ACTIONS', {
+      defaultValue: Number.isFinite(configuredMax) && configuredMax > 0 ? configuredMax : 4,
+      min: 1,
+      max: 64,
+      onWarn: (msg) => this.logger?.warn?.(msg),
+    });
     this.globalActionCap = new Semaphore(globalMax);
     this.userEnabled = computerConfig.enabled;
     this.syntheticAllowed = computerConfig.allowSyntheticFallback;
     this.maxRetainedSnapshots = config?.maxRetainedSnapshots ?? 16;
-    this.maxRetainedScreenshots = config?.maxRetainedScreenshots ?? 40;
+    // Floored at 1: X-16 points a duplicate frame at the artifact it duplicates,
+    // which only holds if the newest frame is never pruned. A configured 0 would
+    // delete the frame the very next capture is about to reference.
+    this.maxRetainedScreenshots = Math.max(1, config?.maxRetainedScreenshots ?? 40);
     this.eventScope = config?.eventBusScopeSessionId ?? 'computer';
     this.startIdleSweeper();
   }
@@ -603,8 +685,10 @@ export class ComputerService {
       // P1-29: Per-session semaphore (1 permit) so only one CUA action per
       // session runs at a time while still allowing other sessions to proceed.
       semaphore: new Semaphore(1),
-      // X-16: No previous frame hash on session start.
-      lastFrameHash: null,
+      // X-16: no previous frame on session start, so the first capture is
+      // always new.
+      lastFrame: null,
+      // X-15 is deliberately absent: a new session must NOT reopen the latch.
     };
     this.sessions.set(ctx.workspaceId, record);
 
@@ -730,11 +814,17 @@ export class ComputerService {
    */
   async listApps(ctx: ComputerCallContext): Promise<{ apps: ComputerAppInfo[]; refusal?: ComputerRefusal }> {
     const gate = this.featureGate();
-    if (gate) return { apps: [], refusal: gate };
+    if (gate) {
+      await this.auditGateRefusal(ctx, 'list_apps', gate);
+      return { apps: [], refusal: gate };
+    }
 
     const session = await this.ensureSession(ctx);
     const result = await session.bridge.listApps(session.handle);
-    if (result.refusal) return { apps: [], refusal: result.refusal };
+    if (result.refusal) {
+      await this.auditGateRefusal(ctx, 'list_apps', result.refusal);
+      return { apps: [], refusal: result.refusal };
+    }
 
     const visible: ComputerAppInfo[] = [];
     for (const app of result.apps) {
@@ -745,6 +835,20 @@ export class ComputerService {
       if (titles === null) continue;
       if (!this.evaluate(app, titles).blocked) visible.push(app);
     }
+    // Enumerating what is running is itself a disclosure, so it belongs in the
+    // trail alongside the refusals — otherwise "exactly one record per action"
+    // holds only for the calls that failed, and an auditor cannot tell a
+    // successful read from a call that never happened.
+    await this.writeAudit({
+      workspaceId: ctx.workspaceId,
+      chatId: ctx.chatId,
+      appIdentity: UNRESOLVED_APP,
+      appLabel: UNRESOLVED_APP,
+      action: 'list_apps',
+      target: `${visible.length} apps`,
+      verified: true,
+      createdAt: new Date(),
+    });
     return { apps: visible };
   }
 
@@ -768,7 +872,10 @@ export class ComputerService {
     refusal?: ComputerRefusal;
   }> {
     const gate = this.featureGate();
-    if (gate) return { refusal: gate };
+    if (gate) {
+      await this.auditGateRefusal(ctx, 'launch_app', gate, { identity: name, label: name });
+      return { refusal: gate };
+    }
 
     const requested = evaluateBlocklist(
       { name, executablePath: name },
@@ -862,7 +969,10 @@ export class ComputerService {
     opts: { windowId?: number; stableSamples?: number; timeoutMs?: number } = {},
   ): Promise<VerifyResult> {
     const gate = this.featureGate();
-    if (gate) return { outcome: 'unknown', results: [], refusal: gate };
+    if (gate) {
+      await this.auditGateRefusal(ctx, 'verify', gate, describeRef(ref));
+      return { outcome: 'unknown', results: [], refusal: gate };
+    }
 
     const session = await this.ensureSession(ctx);
     const resolved = await this.resolveApp(ctx, session, ref, 'verify');
@@ -909,7 +1019,10 @@ export class ComputerService {
   /** Restores and foregrounds an app's window so it can actually be driven. */
   async bringToFront(ctx: ComputerCallContext, ref: ComputerAppRef): Promise<ComputerActionResult> {
     const gate = this.featureGate();
-    if (gate) return refusalResult(gate);
+    if (gate) {
+      await this.auditGateRefusal(ctx, 'bring_to_front', gate, describeRef(ref));
+      return refusalResult(gate);
+    }
 
     const session = await this.ensureSession(ctx);
     const resolved = await this.resolveApp(ctx, session, ref, 'bring_to_front');
@@ -944,8 +1057,12 @@ export class ComputerService {
   async listWindows(
     ctx: ComputerCallContext,
     ref: ComputerAppRef,
-  ): Promise<{ windows: ComputerWindowInfo[]; refusal?: ComputerRefusal }> {    const gate = this.featureGate();
-    if (gate) return { windows: [], refusal: gate };
+  ): Promise<{ windows: ComputerWindowInfo[]; refusal?: ComputerRefusal }> {
+    const gate = this.featureGate();
+    if (gate) {
+      await this.auditGateRefusal(ctx, 'list_windows', gate, describeRef(ref));
+      return { windows: [], refusal: gate };
+    }
 
     const session = await this.ensureSession(ctx);
     const resolved = await this.resolveApp(ctx, session, ref, 'list_windows');
@@ -961,6 +1078,19 @@ export class ComputerService {
     }
 
     const result = await session.bridge.listWindows(session.handle, resolved.app);
+    // Audited on both outcomes: a window enumeration that came back refused is
+    // still an attempt to read screen content, and the trail is the only place
+    // that distinction survives.
+    await this.writeAudit({
+      workspaceId: ctx.workspaceId,
+      chatId: ctx.chatId,
+      appIdentity: resolved.app.appId,
+      appLabel: resolved.app.name,
+      action: 'list_windows',
+      verified: !result.refusal,
+      ...(result.refusal ? { refusalCode: result.refusal.code } : {}),
+      createdAt: new Date(),
+    });
     return { windows: result.windows, refusal: result.refusal };
   }
 
@@ -975,7 +1105,10 @@ export class ComputerService {
     } = {},
   ): Promise<ComputerActionResult> {
     const gate = this.featureGate();
-    if (gate) return refusalResult(gate);
+    if (gate) {
+      await this.auditGateRefusal(ctx, 'snapshot', gate, describeRef(ref));
+      return refusalResult(gate);
+    }
 
     const session = await this.ensureSession(ctx);
     const resolved = await this.resolveApp(ctx, session, ref, 'snapshot');
@@ -1066,7 +1199,10 @@ export class ComputerService {
    */
   async act(ctx: ComputerCallContext, ref: ComputerAppRef, req: ActionRequest): Promise<ComputerActionResult> {
     const gate = this.featureGate();
-    if (gate) return refusalResult(gate);
+    if (gate) {
+      await this.auditGateRefusal(ctx, req.type, gate, describeRef(ref));
+      return refusalResult(gate);
+    }
 
     const session = await this.ensureSession(ctx);
     const resolved = await this.resolveApp(ctx, session, ref, req.type);
@@ -1202,18 +1338,32 @@ export class ComputerService {
     ref: ComputerAppRef,
     action: string,
   ): Promise<{ app: ComputerAppIdentity } | { refusal: ComputerRefusal }> {
+    // Every exit below writes exactly one audit row, and every caller returns
+    // straight out on a refusal — so resolution failures are recorded here and
+    // nowhere else. Before this, three of the four ways resolution could fail
+    // left no trace at all, which made "the agent named an app that does not
+    // exist" and "the agent never called" indistinguishable in the trail.
     const listed = await session.bridge.listApps(session.handle);
-    if (listed.refusal) return { refusal: listed.refusal };
+    if (listed.refusal) {
+      await this.auditGateRefusal(ctx, action, listed.refusal, describeRef(ref));
+      return { refusal: listed.refusal };
+    }
 
     const match = listed.apps.find((app) => matchesRef(app, ref));
-    if (!match) return { refusal: this.refusal('target_lost') };
+    if (!match) {
+      const refusal = this.refusal('target_lost');
+      await this.auditGateRefusal(ctx, action, refusal, describeRef(ref));
+      return { refusal };
+    }
 
     const titles = await this.windowTitles(session, match, listed.windowsByPid);
     if (titles === null) {
       // Enumeration failed, so the window-title dimension could not run. Fail
       // closed: a vault popup under a trusted host is exactly the case that
       // dimension exists for.
-      return { refusal: this.refusal('target_lost') };
+      const refusal = this.refusal('target_lost');
+      await this.auditGateRefusal(ctx, action, refusal, { identity: match.id, label: match.name });
+      return { refusal };
     }
 
     const verdict = this.evaluate(match, titles);
@@ -1559,29 +1709,88 @@ export class ComputerService {
   // ── Artifacts, audit, events ─────────────────────────────────
 
   /**
+   * X-15 — close the integrity latch for a workspace. The ONLY writer.
+   *
+   * There is deliberately no `openInlineLatch`. "One-way" is enforced by there
+   * being no code that can undo this, rather than by a comment saying it must
+   * not be undone — which is exactly what the per-session flag had, and what
+   * every session-recreating path silently violated.
+   */
+  private closeInlineLatch(workspaceId: string, reason: string): void {
+    if (!this.inlineLatchClosed.has(workspaceId)) {
+      this.logger.warn?.(
+        `[ComputerService] X-15 latch closed for ${workspaceId}: ${reason}. ` +
+          'No further frames go inline for this workspace; restarting the driver does not reopen it.',
+      );
+    }
+    this.inlineLatchClosed.add(workspaceId);
+  }
+
+  /**
+   * Whether the X-15 latch has closed for a workspace. Read-only; exposed so
+   * the runtime status and tests can observe it without reaching into a Set.
+   */
+  inlineFramesBlocked(workspaceId: string): boolean {
+    return this.inlineLatchClosed.has(workspaceId);
+  }
+
+  /**
    * A captured frame as base64, for handing to a multimodal model.
    *
-   * Separate from `persistScreenshot` on purpose: every snapshot writes a PNG
+   * Separate from `persistScreenshot` on purpose: every snapshot writes a frame
    * for the Computer panel, but only a caller that explicitly asked to see the
    * image should pay a megabyte of context for it.
+   *
+   * This is the INLINE path X-15's latch governs: the bytes returned here go
+   * straight into a tool result the model reads as ground truth, so it is the
+   * one place where handing over a truncated frame is unrecoverable.
    */
   async readScreenshot(
     workspaceId: string,
     artifactId: string,
   ): Promise<{ base64: string; mimeType: string } | null> {
+    // X-15 latch, checked BEFORE the session lookup: a closed latch is a fact
+    // about the workspace, not about whichever session happens to be open, and
+    // restarting the driver must not be a way to ask again.
+    if (this.inlineLatchClosed.has(workspaceId)) return null;
     const session = this.sessions.get(workspaceId);
     if (!session) return null;
     try {
       // P1-31: Direct lookup by id instead of loading every workspace artifact.
       const artifact = await this.artifactRepo.findById(artifactId);
       if (!artifact || artifact.artifactType !== 'computer_screenshot') return null;
+      // Tenancy. `findById` is keyed by id alone, so without this a caller who
+      // learns an artifact id from another workspace reads that workspace's
+      // screen through this session — and `resolveWithinBase` would not stop
+      // it, because it only proves the path stays under a root, not that the
+      // ROW belongs here.
+      if (artifact.workspaceId !== workspaceId) {
+        this.logger.warn?.(
+          `[ComputerService] refusing cross-workspace screenshot read: ${artifactId} belongs to ${artifact.workspaceId}`,
+        );
+        return null;
+      }
+      // The row's recorded size is checked BEFORE the read, so an oversized
+      // frame is never loaded into memory only to be discarded. The read-back
+      // check below still stands: the row is metadata and the file is the
+      // truth, and they can disagree if the file was replaced.
+      const cap = this.computerConfig.screenshotMaxBytes;
+      if (artifact.fileSize !== undefined && artifact.fileSize > cap) return null;
       // Same containment rule as the write path: the stored path is relative,
       // and resolving it through the session root keeps a tampered row from
       // reading a file outside the workspace.
       const absolute = await resolveWithinBase(session.workspaceRoot, artifact.relativePath);
       if (!absolute) return null;
       const bytes = await fs.readFile(absolute);
-      if (bytes.byteLength > this.computerConfig.screenshotMaxBytes) return null;
+      if (bytes.byteLength > cap) return null;
+      const integrity = validateFrameBytes(bytes);
+      if (!integrity.ok) {
+        this.closeInlineLatch(
+          workspaceId,
+          `screenshot ${artifactId} failed integrity (${integrity.reason})`,
+        );
+        return null;
+      }
       return { base64: bytes.toString('base64'), mimeType: artifact.mimeType ?? 'image/png' };
     } catch (err) {
       this.logger.warn?.(`[ComputerService] could not read screenshot ${artifactId}: ${(err as Error).message}`);
@@ -1628,6 +1837,20 @@ export class ComputerService {
     return artifact;
   }
 
+  /**
+   * Takes ownership of one captured file and turns it into an artifact row.
+   *
+   * P0-f — ORDERING IS THE FIX HERE. Every gate that can reject a capture now
+   * runs against the file the driver wrote, BEFORE `transcodeScreenshot`
+   * replaces it with a new file and deletes the source. The previous order ran
+   * the integrity and dedup gates after that swap and then returned early, so
+   * the transcoded file existed on disk with no artifact row pointing at it —
+   * and `pruneScreenshots` is row-driven, so nothing could ever reclaim it.
+   * `shot.path` was left naming the deleted source on top of that.
+   *
+   * The invariant this method now holds, on every path: when it returns without
+   * an artifact, the capture file is gone and `shot.path` names nothing.
+   */
   private async writeScreenshotArtifact(
     session: SessionRecord,
     result: ComputerActionResult,
@@ -1642,7 +1865,69 @@ export class ComputerService {
     const absolute = await resolveWithinBase(session.workspaceRoot, shot.path);
     if (!absolute) {
       this.logger.warn?.(`[ComputerService] rejecting screenshot outside workspace: ${shot.path}`);
+      // Not deleted: a path that failed containment is not ours to unlink.
+      shot.path = undefined;
+      shot.dataOmitted = true;
       return null;
+    }
+
+    // The canonical capture — what the driver actually wrote, before any resize
+    // or re-encode. Both X-15 and X-16 are questions about THIS, not about
+    // whatever the codec later produces from it.
+    let sourceBytes: Buffer;
+    try {
+      sourceBytes = await fs.readFile(absolute);
+    } catch (err) {
+      this.logger.warn?.(
+        `[ComputerService] capture file unreadable (${(err as Error).message}); dropping the frame`,
+      );
+      shot.path = undefined;
+      shot.dataOmitted = true;
+      return null;
+    }
+
+    // X-15 — terminator and byte-length validation on the canonical frame. A
+    // truncated capture (driver crash mid-write, a full disk, a half-copied
+    // temp file) carries a perfectly valid header and renders to the model as a
+    // grey half-frame it cannot tell apart from the real screen.
+    const integrity = validateFrameBytes(sourceBytes);
+    if (!integrity.ok) {
+      // One-way latch, per plan. A capture path that has produced one
+      // unverifiable frame has stopped being trustworthy, and the model has no
+      // way to notice — so the latch outlives this session rather than being
+      // reset by the next stop, sweep, crash or driver restart.
+      this.closeInlineLatch(
+        session.workspaceId,
+        `corrupt capture (${integrity.format}, ${sourceBytes.byteLength}B): ${integrity.reason}`,
+      );
+      await this.discard(absolute);
+      shot.path = undefined;
+      shot.dataOmitted = true;
+      return null;
+    }
+
+    // X-16 — duplicate suppression, keyed on the canonical frame.
+    const frameHash = createHash('sha1').update(sourceBytes).digest('hex');
+    const previous = session.lastFrame;
+    if (previous && previous.hash === frameHash) {
+      // The duplicate file is redundant with a frame already on disk, so it is
+      // deleted rather than stored — this is the leak P0-f describes, and the
+      // only correct owner of the file is whoever decided not to keep it.
+      await this.discard(absolute);
+      // Point the result at the frame this one duplicates. Returning "no
+      // screenshot" instead would be a lie: the image exists, it is just the
+      // same one, and a caller that asked to SEE the screen must still be able
+      // to. The geometry is by definition identical, so `captureDownscale`
+      // stays whatever the original capture set it to — but the DESCRIPTOR has
+      // to be the stored file's, not the driver's raw PNG's, or the result
+      // claims a png at capture resolution while `path` names a downscaled webp.
+      shot.path = previous.artifact.relativePath;
+      shot.format = previous.encoded.format;
+      shot.width = previous.encoded.width;
+      shot.height = previous.encoded.height;
+      shot.downscale = previous.encoded.downscale;
+      shot.unchanged = true;
+      return previous.artifact;
     }
 
     // X-14 — re-encode BEFORE the byte cap is applied. The config comment has
@@ -1657,51 +1942,27 @@ export class ComputerService {
       quality: this.computerConfig.screenshotQuality,
       logger: this.logger,
     });
+    // From here on `stored` is the ONLY file that exists for this capture: the
+    // codec deleted the source if it wrote somewhere else. Every early return
+    // below therefore has to remove it.
     const stored = encoded.path;
     // Set here, not after the byte cap: this is the factor for whatever image
     // the model is about to be shown, and a stale value left over from an
     // earlier capture would scale the next click by the wrong amount.
     session.captureDownscale = encoded.downscale;
 
-    let fileBytes: Buffer;
+    // Size from `stat` rather than a second full read — the bytes were already
+    // read once above, and the only thing still needed from the encoded file is
+    // how big it is.
+    let fileSize: number;
     try {
-      fileBytes = await fs.readFile(stored);
+      fileSize = encoded.transcoded ? (await fs.stat(stored)).size : sourceBytes.byteLength;
     } catch {
+      await this.discard(stored);
+      shot.path = undefined;
+      shot.dataOmitted = true;
       return null;
     }
-    const fileSize = fileBytes.byteLength;
-
-    // X-15: Validate JPEG frame integrity. A truncated capture (network glitch,
-    // driver crash mid-write) starts with the SOI marker but is missing the EOI.
-    // Silently passing a truncated frame to the model causes hallucinated UI state.
-    const isJpeg = stored.endsWith('.jpg') || stored.endsWith('.jpeg')
-      || (encoded.mimeType === 'image/jpeg');
-    if (isJpeg && fileBytes.length >= 4) {
-      const hasSOI = fileBytes[0] === 0xFF && fileBytes[1] === 0xD8 && fileBytes[2] === 0xFF;
-      const hasEOI = fileBytes[fileBytes.length - 2] === 0xFF && fileBytes[fileBytes.length - 1] === 0xD9;
-      if (!hasSOI || !hasEOI) {
-        this.logger.warn?.(
-          `[ComputerService] rejecting truncated JPEG (${fileSize}B, SOI=${hasSOI}, EOI=${hasEOI})`,
-        );
-        shot.dataOmitted = true;
-        return null;
-      }
-    }
-
-    // X-16: Suppress identical consecutive frames. If the model just received
-    // this exact image, re-sending it wastes context and confuses retry logic.
-    const frameHash = createHash('md5').update(fileBytes).digest('hex');
-    if (frameHash === session.lastFrameHash) {
-      // Stamp an advisory so the model knows the screen didn't change.
-      if (result.action) {
-        (result.action as Record<string, unknown>)['frameUnchanged'] = true;
-        (result.action as Record<string, unknown>)['frameUnchangedHint'] =
-          'Frame unchanged — the action may not have had visible effect. Do not retry the same action.';
-      }
-      // Still return null so no redundant artifact row is written.
-      return null;
-    }
-    session.lastFrameHash = frameHash;
 
     // `screenshotMaxBytes` was configurable and enforced nowhere, which only
     // stayed harmless while capture was accidentally disabled. Now that every
@@ -1712,7 +1973,7 @@ export class ComputerService {
       this.logger.warn?.(
         `[ComputerService] dropping ${fileSize}B screenshot (cap ${this.computerConfig.screenshotMaxBytes}B)`,
       );
-      await fs.rm(stored, { force: true }).catch(() => undefined);
+      await this.discard(stored);
       // The file is gone, so the result must stop advertising it — otherwise
       // `result.screenshot.path` points at nothing and the panel renders a
       // broken frame instead of showing that the capture was dropped.
@@ -1729,8 +1990,8 @@ export class ComputerService {
       shot.width = encoded.width;
       shot.height = encoded.height;
       shot.downscale = encoded.downscale;
-      shot.path = path.relative(session.workspaceRoot, stored);
     }
+    shot.path = path.relative(session.workspaceRoot, stored);
 
     const artifact: WorkspaceArtifactRecord = {
       id: randomUUID(),
@@ -1749,9 +2010,40 @@ export class ComputerService {
       createdAt: new Date(),
     };
     // Artifact write happens BEFORE the event that references it (INV-3).
-    await this.artifactRepo.create(artifact);
+    try {
+      await this.artifactRepo.create(artifact);
+    } catch (err) {
+      // A row that failed to write leaves a file nothing can ever reclaim,
+      // because pruning walks rows. Same ownership rule as every gate above.
+      this.logger.warn?.(
+        `[ComputerService] artifact row failed (${(err as Error).message}); discarding the capture file`,
+      );
+      await this.discard(stored);
+      shot.path = undefined;
+      shot.dataOmitted = true;
+      return null;
+    }
+    // Recorded only once the row exists, so a frame we failed to store can
+    // never be the baseline a later capture is deduplicated against.
+    session.lastFrame = {
+      hash: frameHash,
+      artifact,
+      encoded: {
+        format: shot.format,
+        width: shot.width,
+        height: shot.height,
+        downscale: encoded.downscale,
+      },
+    };
     void this.pruneScreenshots(session).catch(() => undefined);
     return artifact;
+  }
+
+  /** Removes a capture file this service has decided not to keep. */
+  private async discard(absolutePath: string): Promise<void> {
+    await fs.rm(absolutePath, { force: true }).catch((err: Error) => {
+      this.logger.warn?.(`[ComputerService] could not remove ${absolutePath}: ${err.message}`);
+    });
   }
 
   /**
@@ -1771,6 +2063,33 @@ export class ComputerService {
       await fs.rm(absolute, { force: true }).catch(() => undefined);
       await this.artifactRepo.delete(stale.id);
     }
+  }
+
+  /**
+   * Audit row for a refusal that fired before an app identity existed.
+   *
+   * Deliberately audit-only, with no `computer.refusal` event: these are gate
+   * and resolution failures the CALLER already learns about from the returned
+   * refusal, and emitting for them would put "computer use is off" banners in a
+   * transcript for a feature the user turned off on purpose. The audit trail is
+   * what has to be complete — that is what the header's invariant is about.
+   */
+  private async auditGateRefusal(
+    ctx: ComputerCallContext,
+    action: string,
+    refusal: ComputerRefusal,
+    subject?: { identity: string; label: string },
+  ): Promise<void> {
+    await this.writeAudit({
+      workspaceId: ctx.workspaceId,
+      chatId: ctx.chatId,
+      appIdentity: subject?.identity ?? UNRESOLVED_APP,
+      appLabel: subject?.label ?? UNRESOLVED_APP,
+      action,
+      verified: false,
+      refusalCode: refusal.code,
+      createdAt: new Date(),
+    });
   }
 
   private async recordRefusal(

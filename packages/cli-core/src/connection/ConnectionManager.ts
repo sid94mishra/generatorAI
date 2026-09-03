@@ -92,14 +92,72 @@ export class FileStorage implements Storage {
   }
 }
 
+/** The capability-ish fields `/api/auth/server-info` already publishes, previously fetched and discarded. */
+export interface ProbeCapabilities {
+  authentication?: {
+    required?: boolean;
+    dpopRequired?: boolean;
+    legacyApiKeyAccepted?: boolean;
+  };
+  transports?: {
+    loopback?: boolean;
+    lan?: boolean;
+    privateNetwork?: boolean;
+    relay?: boolean;
+  };
+}
+
 export interface ProbeResult {
   endpoint: string;
   ok: boolean;
   serverId?: string;
   serverName?: string;
-  version?: string;
+  /**
+   * The server's `/api/auth/server-info` protocol version (a small integer
+   * the server bumps on breaking wire-shape changes — currently always `2`).
+   * Compare against `SUPPORTED_PROTOCOL_VERSIONS` via
+   * `checkProtocolCompatibility()`, not directly: a bare `!==` check is
+   * exactly the all-or-nothing gate this module replaces.
+   */
+  protocolVersion?: number;
+  capabilities?: ProbeCapabilities;
   latencyMs: number;
   error?: string;
+}
+
+/**
+ * Server `protocolVersion` values this CLI build understands.
+ *
+ * `min` — the oldest server this CLI can still usefully talk to. Below it,
+ * response shapes this CLI relies on may not exist at all, so this is a hard
+ * failure with upgrade guidance, not a degraded-but-working state.
+ *
+ * `max` — the newest server-info shape this CLI has actually been written
+ * against. A server ahead of `max` is running features this CLI build
+ * predates — forward-compatible in practice (unknown fields are just
+ * ignored), so this is a one-time heads-up, not a failure.
+ *
+ * Both are `2` today because `2` is the only value this protocol has ever
+ * had (`apps/server/src/routes/auth.ts`) — the range exists so a future bump
+ * on either side is a data change here, not new branching logic at every
+ * call site.
+ */
+export const SUPPORTED_PROTOCOL_VERSIONS = { min: 2, max: 2 } as const;
+
+export type ProtocolCompatibility =
+  /** No version advertised at all — an old server predating this field. Treated as compatible: refusing outright would break every real deployment that exists today. */
+  | 'unknown'
+  | 'compatible'
+  /** Server is older than this CLI build requires. */
+  | 'server-too-old'
+  /** Server is newer than this CLI build has been tested against. */
+  | 'server-ahead';
+
+export function checkProtocolCompatibility(protocolVersion: number | undefined): ProtocolCompatibility {
+  if (protocolVersion === undefined) return 'unknown';
+  if (protocolVersion < SUPPORTED_PROTOCOL_VERSIONS.min) return 'server-too-old';
+  if (protocolVersion > SUPPORTED_PROTOCOL_VERSIONS.max) return 'server-ahead';
+  return 'compatible';
 }
 
 export class ConnectionManager {
@@ -242,18 +300,34 @@ export async function probeEndpoint(endpoint: string, timeoutMs = 4000): Promise
     if (!res.ok) {
       return { endpoint: base, ok: false, latencyMs, error: `HTTP ${res.status}` };
     }
+    // Field names matched against what `apps/server/src/routes/auth.ts`'s
+    // `/server-info` handler actually sends. This used to look for `name`
+    // and `version` — neither of which that response has ever contained
+    // (it sends `serverName` and `protocolVersion`) — so `serverName` and
+    // the protocol version were silently always `undefined`, for every real
+    // server, since this probe was written.
     const info = (await res.json()) as {
       serverId?: string;
-      name?: string;
-      version?: string;
+      serverName?: string;
+      protocolVersion?: number;
+      authentication?: ProbeCapabilities['authentication'];
+      transports?: ProbeCapabilities['transports'];
     };
     return {
       endpoint: base,
       ok: true,
       latencyMs,
       ...(info.serverId ? { serverId: info.serverId } : {}),
-      ...(info.name ? { serverName: info.name } : {}),
-      ...(info.version ? { version: info.version } : {}),
+      ...(info.serverName ? { serverName: info.serverName } : {}),
+      ...(info.protocolVersion !== undefined ? { protocolVersion: info.protocolVersion } : {}),
+      ...(info.authentication || info.transports
+        ? {
+            capabilities: {
+              ...(info.authentication ? { authentication: info.authentication } : {}),
+              ...(info.transports ? { transports: info.transports } : {}),
+            },
+          }
+        : {}),
     };
   } catch (error) {
     return {

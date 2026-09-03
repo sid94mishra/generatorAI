@@ -1,15 +1,32 @@
 // ────────────────────────────────────────────────────────────────
-// MarkdownRenderer — Renders markdown with syntax-highlighted code blocks
-// Uses highlight.js via rehype-highlight for syntax highlighting
-// Each code block includes a copy button
+// MarkdownRenderer — markdown with syntax-highlighted code blocks.
+//
+// ── W27 / P0-47: highlighting is not on this thread ──────────────
+// `rehype-highlight` used to run inside the unified pipeline, which runs
+// inside React's render, which runs on the thread that paints. On the chat
+// path that is the worst possible place for it: a fenced block is re-rendered
+// on every token that arrives after it, so a 200-line code block in a
+// streaming answer is re-highlighted dozens of times, synchronously, while
+// the user is watching the text move.
+//
+// The plugin is gone. Code blocks render as plain text immediately and are
+// repainted with colour when the worker answers (`lib/highlight/client.ts`).
+// The first paint is never blocked on highlighting, and a cache hit — which
+// is what every re-render of an unchanged block is — paints coloured on the
+// first frame, so there is no flash.
+//
+// Each code block still includes a copy button.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useState, useCallback, useRef, useEffect, isValidElement } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo, isValidElement } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
 import { Check, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { highlightCode, peekHighlight, type HighlightToken } from '@/lib/highlight/client.js';
+// `languageNames`, not `languages`: the latter imports every grammar, and this
+// module runs on the main thread. See that file's header.
+import { resolveLanguage } from '@/lib/highlight/languageNames.js';
 
 /** Extract raw text from a DOM element (used for copy-to-clipboard on highlighted code) */
 function extractDomText(el: HTMLElement | null): string {
@@ -42,12 +59,14 @@ const MARKDOWN_COMPONENTS = {
  * MarkdownBody — the ReactMarkdown core (no `.markdown-content` wrapper, no
  * theme hook). Memoized on `content` so block-level streaming can skip
  * re-parsing blocks whose source slice hasn't changed.
+ *
+ * No `rehypePlugins`. Highlighting happens in a worker and is applied by
+ * `InlineCode` below — see this file's header for why.
  */
 export const MarkdownBody = React.memo(function MarkdownBody({ content }: { content: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkPreserveMeta]}
-      rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
       components={MARKDOWN_COMPONENTS}
     >
       {content}
@@ -63,16 +82,36 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({ content, 
   );
 });
 
-// ── Inline Code ──
+// ── Inline Code / fenced blocks ──
+
+/**
+ * Flatten a ReactMarkdown `<code>` child into the source text.
+ *
+ * With no rehype plugin in the pipeline this is a string (or an array of
+ * strings), never a nested element tree — but the recursion is cheap and a
+ * silently truncated code block would be a much worse bug than a redundant
+ * branch.
+ */
+function codeText(node: React.ReactNode): string {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(codeText).join('');
+  if (isValidElement(node)) return codeText((node.props as { children?: React.ReactNode }).children);
+  return '';
+}
 
 function InlineCode({
   className,
   children,
   ...props
 }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
-  // If the code has an hljs class, it's a code block handled by PreBlock
-  if (className && /hljs|language-/.test(className)) {
-    return <code className={className} {...props}>{children}</code>;
+  const language = resolveLanguage(/language-([\w+-]+)/.exec(className ?? '')?.[1]);
+
+  // A fenced block: PreBlock owns the chrome, this owns the colour.
+  if (className && /language-/.test(className)) {
+    return (
+      <HighlightedCode className={className} language={language} code={codeText(children)} {...props} />
+    );
   }
 
   return (
@@ -81,6 +120,75 @@ function InlineCode({
       {...props}
     >
       {children}
+    </code>
+  );
+}
+
+/**
+ * A fenced code block, highlighted off the main thread.
+ *
+ * The initial state is a synchronous CACHE read, not `null`. That is what
+ * makes streaming look right: every re-render of an already-highlighted block
+ * — which is what a token arriving below it causes — paints coloured on its
+ * first frame. Only genuinely new text spends one frame as plain text.
+ *
+ * Tokens are rendered as real elements. Nothing here goes through
+ * `dangerouslySetInnerHTML`; see `tokenize.ts` for why that matters on the
+ * one path that renders model-authored content.
+ */
+function HighlightedCode({
+  className,
+  language,
+  code,
+  ...props
+}: React.HTMLAttributes<HTMLElement> & { language: string | null; code: string }) {
+  const [tokens, setTokens] = useState<HighlightToken[] | null>(() =>
+    language ? peekHighlight(language, code) : null,
+  );
+
+  useEffect(() => {
+    if (!language) {
+      setTokens(null);
+      return;
+    }
+    const cached = peekHighlight(language, code);
+    if (cached) {
+      setTokens(cached);
+      return;
+    }
+    // Clear first: showing the PREVIOUS block's colours over this block's text
+    // while the worker answers is worse than a frame of plain text.
+    setTokens(null);
+    let live = true;
+    void highlightCode(language, code).then((next) => {
+      // The block changed (another chunk arrived) while the worker was busy.
+      // Its answer is for text that is no longer on screen.
+      if (live && next.length > 0) setTokens(next);
+    });
+    return () => {
+      live = false;
+    };
+  }, [language, code]);
+
+  const rendered = useMemo(() => {
+    if (!tokens) return code;
+    return tokens.map(([cls, text], i) =>
+      cls ? (
+        // The index IS the identity here: tokens are positional, the whole
+        // list is replaced on every change, and nothing in a token is stable
+        // enough to key on.
+        <span key={i} className={cls}>
+          {text}
+        </span>
+      ) : (
+        <React.Fragment key={i}>{text}</React.Fragment>
+      ),
+    );
+  }, [tokens, code]);
+
+  return (
+    <code className={cn(className, tokens ? 'hljs' : undefined)} {...props}>
+      {rendered}
     </code>
   );
 }

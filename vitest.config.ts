@@ -14,6 +14,12 @@ const EXCLUDE = [
   '**/node_modules/**',
   '**/dist/**',
   '**/.{idea,git,cache,output,temp}/**',
+  // Sub-agent worktrees (.claude/worktrees/**, gitignored) carry their own
+  // full checkout, including this same test suite. Without this, running
+  // vitest from repo root silently double-runs (and double-reports) every
+  // test that happens to exist in both trees — found during end-to-end
+  // review when a single test file printed results twice.
+  '**/.claude/**',
 ];
 
 export default defineConfig({

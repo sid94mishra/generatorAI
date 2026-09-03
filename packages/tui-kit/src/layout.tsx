@@ -144,6 +144,66 @@ export interface TabsProps {
   numbered?: boolean;
 }
 
+/**
+ * Which contiguous slice of `items` fits `budget` columns, guaranteeing
+ * `activeIndex` is inside it.
+ *
+ * Filling from index 0 forward (the original behaviour) can leave the
+ * active tab past the end of what fits — rendered completely off-screen,
+ * with nothing to say so; the `+N` count looked identical whether the
+ * hidden tabs were harmless background ones or the one the user is
+ * actually looking at. Filling from 0 first and only re-centring on the
+ * active tab when it doesn't already fit keeps the common case (active
+ * tab near the front) visually identical to before.
+ */
+function computeVisibleTabWindow(
+  items: TabItem[],
+  activeIndex: number,
+  budget: number,
+  widthOf: (item: TabItem) => number,
+): { start: number; end: number } {
+  let used = 0;
+  let end = 0;
+  for (; end < items.length; end++) {
+    const width = widthOf(items[end]!);
+    if (used + width > budget && end > 0) break;
+    used += width;
+  }
+  if (activeIndex === -1 || activeIndex < end) return { start: 0, end };
+
+  // The active tab didn't fit from the front — grow a window around it
+  // instead, alternating sides so tabs on BOTH sides stay reachable rather
+  // than always biasing toward one direction.
+  let start = activeIndex;
+  let stop = activeIndex + 1;
+  used = widthOf(items[activeIndex]!);
+  let canGrowRight = stop < items.length;
+  let canGrowLeft = start > 0;
+  while (canGrowRight || canGrowLeft) {
+    if (canGrowRight) {
+      const width = widthOf(items[stop]!);
+      if (used + width <= budget) {
+        used += width;
+        stop++;
+      } else {
+        canGrowRight = false;
+      }
+      canGrowRight = canGrowRight && stop < items.length;
+    }
+    if (canGrowLeft) {
+      const width = widthOf(items[start - 1]!);
+      if (used + width <= budget) {
+        used += width;
+        start--;
+      } else {
+        canGrowLeft = false;
+      }
+      canGrowLeft = canGrowLeft && start > 0;
+    }
+  }
+  return { start, end: stop };
+}
+
 export function Tabs({ items, activeId, numbered = true }: TabsProps): React.JSX.Element {
   const theme = useTheme();
   const { columns } = useTerminalSize();
@@ -151,18 +211,16 @@ export function Tabs({ items, activeId, numbered = true }: TabsProps): React.JSX
   // Tabs are elided rather than wrapped: a wrapped tab bar changes height and
   // pushes the whole layout down by a row, which reads as a glitch.
   const budget = columns - 4;
-  let used = 0;
-  const visible: TabItem[] = [];
-  for (const item of items) {
-    const width = item.label.length + (numbered ? 4 : 2) + 4;
-    if (used + width > budget && visible.length > 0) break;
-    used += width;
-    visible.push(item);
-  }
-  const hidden = items.length - visible.length;
+  const widthOf = (item: TabItem): number => item.label.length + (numbered ? 4 : 2) + 4;
+  const activeIndex = items.findIndex((item) => item.id === activeId);
+  const { start, end } = computeVisibleTabWindow(items, activeIndex, budget, widthOf);
+  const visible = items.slice(start, end);
+  const hiddenBefore = start;
+  const hiddenAfter = items.length - end;
 
   return (
     <Box>
+      {hiddenBefore > 0 ? <Text color={theme.c('muted')}>+{hiddenBefore} </Text> : null}
       {visible.map((item, index) => {
         const active = item.id === activeId;
         return (
@@ -173,7 +231,7 @@ export function Tabs({ items, activeId, numbered = true }: TabsProps): React.JSX
               bold={active}
             >
               {' '}
-              {numbered ? `${index + 1} ` : ''}
+              {numbered ? `${start + index + 1} ` : ''}
               {item.tone ? `${toneGlyph(theme, item.tone)} ` : ''}
               {item.label}
               {item.badge !== undefined ? ` (${item.badge})` : ''}{' '}
@@ -181,7 +239,7 @@ export function Tabs({ items, activeId, numbered = true }: TabsProps): React.JSX
           </Box>
         );
       })}
-      {hidden > 0 ? <Text color={theme.c('muted')}>+{hidden}</Text> : null}
+      {hiddenAfter > 0 ? <Text color={theme.c('muted')}>+{hiddenAfter}</Text> : null}
     </Box>
   );
 }

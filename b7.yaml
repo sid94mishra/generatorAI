@@ -1,0 +1,301 @@
+- generic [ref=e2]:
+  - generic [ref=e106]:
+    - complementary [ref=e107]:
+      - generic [ref=e108]:
+        - generic [ref=e109]:
+          - button "GeneratorAI" [ref=e110] [cursor=pointer]:
+            - img [ref=e112]
+            - generic [ref=e114]: GeneratorAI
+          - button "Hide sidebar" [pressed] [ref=e115] [cursor=pointer]:
+            - img [ref=e116]
+        - navigation [ref=e119]:
+          - button "Dashboard" [ref=e120] [cursor=pointer]:
+            - img [ref=e121]
+            - text: Dashboard
+          - button "Projects" [ref=e126] [cursor=pointer]:
+            - img [ref=e127]
+            - text: Projects
+          - button "Chats" [ref=e129] [cursor=pointer]:
+            - img [ref=e130]
+            - text: Chats
+          - button "Agents" [ref=e132] [cursor=pointer]:
+            - img [ref=e133]
+            - text: Agents
+          - button "Workflows" [ref=e136] [cursor=pointer]:
+            - img [ref=e137]
+            - text: Workflows
+          - button "Scripts" [ref=e141] [cursor=pointer]:
+            - img [ref=e142]
+            - text: Scripts
+          - button "Automations" [ref=e147] [cursor=pointer]:
+            - img [ref=e148]
+            - text: Automations
+        - generic [ref=e153]:
+          - button "Settings" [ref=e154] [cursor=pointer]:
+            - img [ref=e155]
+            - text: Settings
+          - generic [ref=e158]:
+            - generic [ref=e159]: Command palette
+            - generic [ref=e160]:
+              - generic [ref=e161]: Ctrl
+              - generic [ref=e162]: K
+    - generic [ref=e163]:
+      - banner [ref=e164]:
+        - generic [ref=e167]: Workflows
+        - 'button "Appearance: dark. Click to change." [ref=e169] [cursor=pointer]':
+          - img [ref=e170]
+      - main [ref=e172]:
+        - generic [ref=e10588]:
+          - generic [ref=e10589]:
+            - generic [ref=e10590]:
+              - button "Back to workflow list" [ref=e10591] [cursor=pointer]:
+                - img [ref=e10592]
+              - textbox "Untitled Workflow" [ref=e10595]: CSV Toolkit Pipeline
+              - generic [ref=e11057]: (unsaved)
+            - generic [ref=e10596]:
+              - button "Undo (Ctrl+Z)" [disabled] [ref=e10597] [cursor=pointer]:
+                - img [ref=e10598]
+              - button "Redo (Ctrl+Shift+Z)" [disabled] [ref=e10601] [cursor=pointer]:
+                - img [ref=e10602]
+              - button "Settings" [ref=e10606] [cursor=pointer]:
+                - img [ref=e10607]
+                - text: Settings
+              - button "Validate" [ref=e10610] [cursor=pointer]:
+                - img [ref=e10611]
+                - text: Validate
+              - button "Hide properties" [ref=e10614] [cursor=pointer]:
+                - img [ref=e10615]
+              - button "Save" [ref=e10619] [cursor=pointer]:
+                - img [ref=e10620]
+                - text: Save
+              - button "Run" [disabled] [ref=e10624] [cursor=pointer]:
+                - img [ref=e10625]
+                - text: Run
+          - generic [ref=e11536]:
+            - img [ref=e11537]
+            - generic [ref=e11539]:
+              - generic [ref=e11540]: 1 validation error
+              - list [ref=e11541]:
+                - listitem [ref=e11542]:
+                  - img [ref=e11543]
+                  - text: Stage "Stage 1" has no prompts or agent configured
+          - generic [ref=e10627]:
+            - application [ref=e10630]:
+              - group [ref=e11058]:
+                - 'button "Stage: Plan" [ref=e11545] [cursor=pointer]':
+                  - generic [ref=e11062]:
+                    - generic [ref=e11063]:
+                      - img [ref=e11065]
+                      - generic [ref=e11068]: Plan
+                    - generic [ref=e11069]:
+                      - button [ref=e11070]:
+                        - img [ref=e11071]
+                      - button [ref=e11074]:
+                        - img [ref=e11075]
+                  - generic [ref=e11079]: 1 prompt
+              - img
+              - generic "Control Panel" [ref=e10633]:
+                - button "Zoom In" [ref=e10634] [cursor=pointer]:
+                  - img [ref=e10635]
+                - button "Zoom Out" [ref=e10637] [cursor=pointer]:
+                  - img [ref=e10638]
+                - button "Fit View" [ref=e10640] [cursor=pointer]:
+                  - img [ref=e10641]
+                - button "Toggle Interactivity" [ref=e10643] [cursor=pointer]:
+                  - img [ref=e10644]
+              - button "Auto-Layout" [ref=e10647] [cursor=pointer]:
+                - img [ref=e10648]
+                - text: Auto-Layout
+              - button "Add Stage" [ref=e10652] [cursor=pointer]:
+                - img [ref=e10653]
+                - text: Add Stage
+            - generic [ref=e10666]:
+              - separator "Resize panel" [ref=e10667]
+              - generic [ref=e10675]:
+                - generic [ref=e10676]:
+                  - generic [ref=e11080]:
+                    - generic [ref=e11081]:
+                      - img [ref=e11083]
+                      - generic [ref=e11086]:
+                        - heading "Plan" [level=3] [ref=e11546]
+                        - paragraph [ref=e11088]: Custom stage
+                    - button "Close properties panel" [ref=e11089] [cursor=pointer]:
+                      - img [ref=e11090]
+                  - tablist [ref=e11093]:
+                    - tab "Properties" [selected] [ref=e11094] [cursor=pointer]
+                    - tab "Execution" [ref=e11095] [cursor=pointer]
+                - tabpanel [ref=e11096]:
+                  - generic [ref=e11097]:
+                    - generic [ref=e11098]:
+                      - button "Basic" [expanded] [ref=e11099] [cursor=pointer]:
+                        - generic [ref=e11100]:
+                          - img [ref=e11101]
+                          - text: Basic
+                        - img [ref=e11105]
+                      - generic [ref=e11109]:
+                        - generic [ref=e11110]:
+                          - generic [ref=e11111]: Stage Name
+                          - textbox "Stage Name" [ref=e11112]:
+                            - /placeholder: Stage name
+                            - text: Plan
+                        - generic [ref=e11113]:
+                          - generic [ref=e11114]: Description
+                          - textbox "Description" [ref=e11115]:
+                            - /placeholder: Optional description
+                    - generic [ref=e11116]:
+                      - button "Model & Template" [expanded] [ref=e11117] [cursor=pointer]:
+                        - generic [ref=e11118]:
+                          - img [ref=e11119]
+                          - text: Model & Template
+                        - img [ref=e11122]
+                      - generic [ref=e11126]:
+                        - generic [ref=e11127]:
+                          - generic [ref=e11128]: Template
+                          - button "No template" [ref=e11130] [cursor=pointer]:
+                            - generic [ref=e11131]: No template
+                            - img [ref=e11132]
+                        - generic [ref=e11134]:
+                          - generic [ref=e11135]: Model Override
+                          - button "Stage model override" [ref=e11137] [cursor=pointer]:
+                            - generic [ref=e11139]: Workflow default
+                            - img [ref=e11140]
+                        - generic [ref=e11142]:
+                          - generic [ref=e11143]: Reasoning Effort
+                          - button "Default" [ref=e11145] [cursor=pointer]:
+                            - generic [ref=e11146]: Default
+                            - img [ref=e11147]
+                    - generic [ref=e11149]:
+                      - button "Prompts & Context 1" [expanded] [ref=e11547] [cursor=pointer]:
+                        - generic [ref=e11151]:
+                          - img [ref=e11152]
+                          - text: Prompts & Context
+                          - generic [ref=e11155]: "1"
+                        - img [ref=e11156]
+                      - generic [ref=e11160]:
+                        - tablist "Prompt type" [ref=e11161]:
+                          - tab "Inline" [selected] [ref=e11162] [cursor=pointer]:
+                            - img [ref=e11163]
+                            - text: Inline
+                          - tab "Files" [ref=e11166] [cursor=pointer]:
+                            - img [ref=e11167]
+                            - text: Files
+                          - tab "Agent" [ref=e11169] [cursor=pointer]:
+                            - img [ref=e11170]
+                            - text: Agent
+                        - generic [ref=e11173]:
+                          - generic [ref=e11174]:
+                            - generic [ref=e11175]: Prompts (1)
+                            - button "Add Prompt" [ref=e11176] [cursor=pointer]:
+                              - img [ref=e11177]
+                              - text: Add Prompt
+                          - generic [ref=e11549]:
+                            - generic [ref=e11550]:
+                              - textbox "Prompt label" [ref=e11551]: Prompt 1
+                              - generic [ref=e11552]:
+                                - checkbox "Wait" [checked] [ref=e11553]
+                                - text: Wait
+                              - generic [ref=e11554]:
+                                - button "Move up" [disabled] [ref=e11555] [cursor=pointer]:
+                                  - img [ref=e11556]
+                                - button "Move down" [disabled] [ref=e11558] [cursor=pointer]:
+                                  - img [ref=e11559]
+                                - button "Edit prompt" [ref=e11561] [cursor=pointer]:
+                                  - img [ref=e11562]
+                                - button "Preview prompt" [ref=e11564] [cursor=pointer]:
+                                  - img [ref=e11565]
+                                - button "Delete prompt" [ref=e11568] [cursor=pointer]:
+                                  - img [ref=e11569]
+                            - 'textbox "Enter prompt text... Use {{variableName}} for variable interpolation" [active] [ref=e11573]': "You are planning a small {{language}} project: {{feature}}. Write a file named PLAN.md in the current working directory containing: - A \"## Goal\" section describing the feature in 2 sentences. - A \"## Files\" section listing exactly {{maxFiles}} files you will create, each with a one-line purpose. - A \"## Acceptance\" section with 3 checkable acceptance criteria. Strict validation mode is {{strictMode}}. When the file is written, reply with exactly this single line and nothing else: PLAN_READY"
+                    - generic [ref=e11179]:
+                      - button "Skills" [ref=e11180] [cursor=pointer]:
+                        - generic [ref=e11181]:
+                          - img [ref=e11182]
+                          - text: Skills
+                        - img [ref=e11185]
+                      - generic [ref=e11188]:
+                        - img [ref=e11189]
+                        - paragraph [ref=e11192]: No skills available. Link a project to access its skills.
+                    - generic [ref=e11193]:
+                      - button "MCP Servers" [ref=e11194] [cursor=pointer]:
+                        - generic [ref=e11195]:
+                          - img [ref=e11196]
+                          - text: MCP Servers
+                        - img [ref=e11199]
+                      - generic [ref=e11202]:
+                        - generic [ref=e11203]:
+                          - generic [ref=e11204]: 8/8 enabled
+                          - generic [ref=e11205]:
+                            - button "Select all" [disabled] [ref=e11206] [cursor=pointer]
+                            - generic [ref=e11207]: ·
+                            - button "Deselect all" [ref=e11208] [cursor=pointer]
+                        - generic [ref=e11209]:
+                          - generic [ref=e11210] [cursor=pointer]:
+                            - checkbox "GitHub Access GitHub repositories, issues, pull requests and more system" [checked] [ref=e11211]
+                            - img [ref=e11212]
+                            - generic [ref=e11215]:
+                              - generic [ref=e11216]: GitHub
+                              - generic [ref=e11217]: Access GitHub repositories, issues, pull requests and more
+                            - generic [ref=e11218]: system
+                          - generic [ref=e11219] [cursor=pointer]:
+                            - checkbox "Filesystem Read and write local files with configurable allowed directories system" [checked] [ref=e11220]
+                            - img [ref=e11221]
+                            - generic [ref=e11224]:
+                              - generic [ref=e11225]: Filesystem
+                              - generic [ref=e11226]: Read and write local files with configurable allowed directories
+                            - generic [ref=e11227]: system
+                          - generic [ref=e11228] [cursor=pointer]:
+                            - checkbox "PostgreSQL Query and explore PostgreSQL databases system" [checked] [ref=e11229]
+                            - img [ref=e11230]
+                            - generic [ref=e11233]:
+                              - generic [ref=e11234]: PostgreSQL
+                              - generic [ref=e11235]: Query and explore PostgreSQL databases
+                            - generic [ref=e11236]: system
+                          - generic [ref=e11237] [cursor=pointer]:
+                            - checkbox "SQLite Query and manage SQLite databases system" [checked] [ref=e11238]
+                            - img [ref=e11239]
+                            - generic [ref=e11242]:
+                              - generic [ref=e11243]: SQLite
+                              - generic [ref=e11244]: Query and manage SQLite databases
+                            - generic [ref=e11245]: system
+                          - generic [ref=e11246] [cursor=pointer]:
+                            - checkbox "Slack Send messages, list channels and interact with Slack workspaces system" [checked] [ref=e11247]
+                            - img [ref=e11248]
+                            - generic [ref=e11251]:
+                              - generic [ref=e11252]: Slack
+                              - generic [ref=e11253]: Send messages, list channels and interact with Slack workspaces
+                            - generic [ref=e11254]: system
+                          - generic [ref=e11255] [cursor=pointer]:
+                            - checkbox "Web Search (Brave) Search the web using the Brave Search API system" [checked] [ref=e11256]
+                            - img [ref=e11257]
+                            - generic [ref=e11260]:
+                              - generic [ref=e11261]: Web Search (Brave)
+                              - generic [ref=e11262]: Search the web using the Brave Search API
+                            - generic [ref=e11263]: system
+                          - generic [ref=e11264] [cursor=pointer]:
+                            - checkbox "Puppeteer (Browser Automation) Control a headless browser for web automation and scraping system" [checked] [ref=e11265]
+                            - img [ref=e11266]
+                            - generic [ref=e11269]:
+                              - generic [ref=e11270]: Puppeteer (Browser Automation)
+                              - generic [ref=e11271]: Control a headless browser for web automation and scraping
+                            - generic [ref=e11272]: system
+                          - generic [ref=e11273] [cursor=pointer]:
+                            - checkbox "AWS Knowledge Base Retrieve information from AWS Bedrock Knowledge Bases system" [checked] [ref=e11274]
+                            - img [ref=e11275]
+                            - generic [ref=e11278]:
+                              - generic [ref=e11279]: AWS Knowledge Base
+                              - generic [ref=e11280]: Retrieve information from AWS Bedrock Knowledge Bases
+                            - generic [ref=e11281]: system
+                    - generic [ref=e11282]:
+                      - button "Variables" [ref=e11283] [cursor=pointer]:
+                        - generic [ref=e11284]:
+                          - img [ref=e11285]
+                          - text: Variables
+                        - img [ref=e11290]
+                      - generic [ref=e11293]:
+                        - paragraph [ref=e11294]: No variables defined
+                        - button "+ Add variable" [ref=e11295] [cursor=pointer]
+  - region "Notifications alt+T"
+  - generic [ref=e6]:
+    - img [ref=e8]
+    - button "Open Tanstack query devtools" [ref=e56] [cursor=pointer]:
+      - img [ref=e57]

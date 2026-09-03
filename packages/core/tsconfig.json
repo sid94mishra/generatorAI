@@ -12,6 +12,7 @@
     { "path": "../changes" },
     { "path": "../checkpoints" },
     { "path": "../review" },
+    { "path": "../secrets" },
     { "path": "../source-control" }
   ]
 }

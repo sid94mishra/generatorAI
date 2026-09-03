@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import type { IScriptRunner, ScriptRunOptions, ScriptRunResult } from '../domain/ports/IScriptRunner.js';
 import type { ILogger } from '@generatorai/shared';
-import { SecurityError } from '@generatorai/shared';
+import { SecurityError, buildChildEnv } from '@generatorai/shared';
 
 /**
  * Allowed commands that may be spawned. Any command not on this list
@@ -113,7 +113,11 @@ export class SandboxedScriptRunner implements IScriptRunner {
     return new Promise<ScriptRunResult>((resolve) => {
       const proc = spawn(spawnCmd, spawnArgs, {
         cwd: options.cwd ? path.resolve(options.cwd) : undefined,
-        env: options.env ? { ...process.env, ...options.env } : process.env,
+        // Workflow scripts are model-authorable, so this child gets an
+        // allowlisted environment rather than a clone of the server's — a
+        // clone would hand a generated `.workflow.mjs` the vault key, the
+        // desktop admin token, DATABASE_URL and every provider credential.
+        env: buildChildEnv(options.env ? { extra: options.env } : {}),
         shell: false, // Never use shell to prevent injection
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout,

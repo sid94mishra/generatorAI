@@ -136,7 +136,8 @@ program
   .command('tui')
   .description('Launch the interactive terminal UI')
   .option('--restore', 'Reopen the tabs from the last session')
-  .action(async (options: { restore?: boolean }) => {
+  .option('--inline', 'Render in normal scrollback instead of taking over the screen (screen readers, terminal recordings)')
+  .action(async (options: { restore?: boolean; inline?: boolean }) => {
     const session = await getSession();
     const { launchTui } = await import('./tui/launch.js');
     await launchTui({
@@ -144,6 +145,7 @@ program
       flags: program.opts<GlobalFlags>(),
       registry,
       restore: Boolean(options.restore ?? session.config.tui.restoreLayout),
+      inline: Boolean(options.inline),
       signal: abort.signal,
     });
   });
@@ -221,6 +223,7 @@ async function main(): Promise<void> {
       flags: program.opts<GlobalFlags>(),
       registry,
       restore: session.config.tui.restoreLayout,
+      inline: argv.includes('--inline'),
       signal: abort.signal,
     });
     return;

@@ -205,3 +205,106 @@ export async function transcodeScreenshot(req: TranscodeRequest): Promise<Transc
     return unchanged(sourcePath, 0, 0);
   }
 }
+
+// ────────────────────────────────────────────────────────────────
+// X-15 — frame integrity.
+//
+// "A truncated JPEG has a valid header and renders as a grey half-frame to the
+// model", so the magic number alone proves nothing: the plan asks for the
+// TERMINATOR and the BYTE LENGTH. The previous implementation checked SOI+EOI
+// and only for JPEG — and the shipped default codec is `webp`
+// (`AppConfig.ts:screenshotFormat`), so on the default configuration the check
+// never ran at all.
+//
+// Format is detected from the bytes themselves rather than from the extension
+// or the artifact row's mimeType: both are metadata a corrupt or tampered
+// capture can carry while the payload is something else entirely, and the
+// question being asked here is "is this file a whole image".
+// ────────────────────────────────────────────────────────────────
+
+/**
+ * Smallest plausible screenshot, in bytes.
+ *
+ * A 1280x720 WebP of a real desktop measures tens of kilobytes; the smallest
+ * legal *anything* in these three containers is still ~70 bytes of header and
+ * terminator. Anything under this is a stub, a truncated first write, or an
+ * error page the driver wrote where an image should be — none of which the
+ * terminator check would necessarily catch, because a 20-byte file can still
+ * end in the right two bytes by accident.
+ */
+export const MIN_FRAME_BYTES = 100;
+
+export interface FrameIntegrity {
+  ok: boolean;
+  /** Detected container, or `unknown` when no signature matched. */
+  format: ScreenshotFormat | 'unknown';
+  /** Human-readable cause, present only when `ok` is false. */
+  reason?: string;
+}
+
+function detectFormat(bytes: Buffer): ScreenshotFormat | 'unknown' {
+  if (bytes.length >= 8 && bytes.readUInt32BE(0) === 0x89504e47 && bytes.readUInt32BE(4) === 0x0d0a1a0a) {
+    return 'png';
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpeg';
+  if (
+    bytes.length >= 12 &&
+    bytes.toString('latin1', 0, 4) === 'RIFF' &&
+    bytes.toString('latin1', 8, 12) === 'WEBP'
+  ) {
+    return 'webp';
+  }
+  return 'unknown';
+}
+
+/**
+ * Decides whether a captured frame is a WHOLE image.
+ *
+ * Cheap and total: a signature, a terminator, and — for WebP, the only one of
+ * the three whose container declares its own length — an arithmetic check that
+ * the declared length matches the bytes actually on disk. That last one is the
+ * strongest truncation detector available here, because a truncated RIFF keeps
+ * its original header claiming the full size.
+ *
+ * Never throws. A caller deciding whether to show a frame to the model must be
+ * able to ask this about arbitrary bytes.
+ */
+export function validateFrameBytes(bytes: Buffer): FrameIntegrity {
+  const format = detectFormat(bytes);
+  if (bytes.length < MIN_FRAME_BYTES) {
+    return { ok: false, format, reason: `only ${bytes.length}B (minimum ${MIN_FRAME_BYTES}B)` };
+  }
+
+  switch (format) {
+    case 'png': {
+      // IEND is the last chunk and is fixed-width: type + CRC, no payload.
+      const tail = bytes.subarray(bytes.length - 8);
+      const ok = tail.toString('latin1', 0, 4) === 'IEND' && tail.readUInt32BE(4) === 0xae426082;
+      return ok ? { ok: true, format } : { ok: false, format, reason: 'missing PNG IEND terminator' };
+    }
+    case 'jpeg': {
+      const ok = bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9;
+      return ok ? { ok: true, format } : { ok: false, format, reason: 'missing JPEG EOI terminator' };
+    }
+    case 'webp': {
+      // RIFF declares "everything after the 8-byte header". Chunks are padded
+      // to even lengths, so a writer may leave one trailing pad byte the size
+      // field does not count — hence the 1-byte tolerance, and only upward: a
+      // file SHORTER than it claims is exactly the truncation being hunted.
+      const declared = bytes.readUInt32LE(4) + 8;
+      if (bytes.length < declared) {
+        return { ok: false, format, reason: `truncated: RIFF declares ${declared}B, file is ${bytes.length}B` };
+      }
+      if (bytes.length > declared + 1) {
+        return { ok: false, format, reason: `trailing garbage: RIFF declares ${declared}B, file is ${bytes.length}B` };
+      }
+      return { ok: true, format };
+    }
+    default:
+      // We only ever write these three, so an unrecognised container means the
+      // capture is not an image at all. Fail closed — the whole point of this
+      // check is that the model must not reason about a frame we cannot vouch
+      // for.
+      return { ok: false, format, reason: 'no PNG/JPEG/WebP signature' };
+  }
+}

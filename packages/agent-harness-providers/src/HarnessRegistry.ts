@@ -28,10 +28,10 @@
 //     boot returns stale-but-useful data instantly rather than blocking.
 // ────────────────────────────────────────────────────────────────
 
-import type { IAgentHarness, HarnessModel } from '@generatorai/core';
+import type { IAgentHarness, HarnessModel, ProviderInstanceId } from '@generatorai/core';
 import { createHarnessProvider } from './HarnessFactory.js';
 import type { HarnessType, HarnessProviderConfig } from './types.js';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, rename, rm } from 'node:fs/promises';
 
 /**
  * Optional credential probe. Providers that can distinguish "installed" from
@@ -50,6 +50,20 @@ interface AccountAware {
 
 function isAccountAware(a: unknown): a is AccountAware {
   return typeof (a as AccountAware)?.getAccountInfo === 'function';
+}
+
+/**
+ * W41 — providers whose `getModels()` never throws report the reason for an
+ * empty catalog here instead. Without this the registry loses the diagnostic:
+ * `getModels()` returning `[]` used to be indistinguishable from "the account
+ * genuinely has no entitlements".
+ */
+interface ModelProbeErrorAware {
+  getLastModelProbeError(): string | undefined;
+}
+
+function isModelProbeErrorAware(a: unknown): a is ModelProbeErrorAware {
+  return typeof (a as ModelProbeErrorAware)?.getLastModelProbeError === 'function';
 }
 
 /**
@@ -146,6 +160,40 @@ export interface HarnessProviderStatus {
   error?: string;
   /** When the catalog was last refreshed (epoch ms). */
   checkedAt?: number;
+  /**
+   * W41 — this verdict was restored from the disk cache and has NOT been
+   * re-verified by a live probe in this process. The catalog is still usable
+   * for routing (that is the entire point of the cache: a cold boot answers
+   * instantly instead of blocking on a ~10 s CLI spawn), but a UI may want to
+   * mark it provisional. Cleared by the first successful live probe.
+   */
+  fromDiskCache?: boolean;
+  /**
+   * W41 — identity this verdict was measured against, written only into the
+   * DISK cache (never kept in memory, so it does not leak into snapshots).
+   *
+   * A readiness verdict belongs to one ACCOUNT of one driver, not to a driver
+   * name. Keying the cache by `type` alone meant a "ready, 12 models" verdict
+   * measured for `copilot:work` was replayed for `copilot:personal`, and a
+   * verdict for an instance the operator has since DISABLED was replayed as
+   * though it were live. See {@link statusCacheKey}.
+   */
+  cacheKey?: string;
+}
+
+/**
+ * W41 — the identity a cached status is valid for: instance ∧ driver ∧ enabled.
+ *
+ * `instanceId` is absent for the per-TYPE entries (the two auto-probed managed
+ * providers), which are keyed on the driver alone because that is genuinely
+ * what they describe.
+ */
+export function statusCacheKey(args: {
+  driverType: HarnessType;
+  instanceId?: ProviderInstanceId;
+  enabled: boolean;
+}): string {
+  return `${args.instanceId ?? '__type__'}|${args.driverType}|${args.enabled ? 'on' : 'off'}`;
 }
 
 interface Entry {
@@ -179,6 +227,17 @@ interface DiskCachePayload {
   version: 1;
   savedAt: number;
   statuses: HarnessProviderStatus[];
+  /**
+   * W41 — per-INSTANCE (per-account) verdicts. Absent in files written by
+   * builds before W41; those files carry driver-level statuses only, which is
+   * exactly the conflation this field exists to end.
+   */
+  instances?: Array<{
+    instanceId: ProviderInstanceId;
+    driverType: HarnessType;
+    enabled: boolean;
+    status: HarnessProviderStatus;
+  }>;
 }
 
 /** How long a disk-cache file is considered fresh enough to pre-seed from. */
@@ -186,12 +245,65 @@ const DISK_CACHE_MAX_AGE_MS = 60 * 60_000; // 1 hour
 
 export class HarnessRegistry {
   private readonly entries = new Map<HarnessType, Entry>();
+  /**
+   * W34 — one adapter per registered provider INSTANCE (account/credential
+   * set), keyed by its persisted `ProviderInstanceId` rather than its driver
+   * type. This is what actually lets two accounts of the same driver
+   * ('copilot:work' and 'copilot:personal') run concurrently: `entries`
+   * above still holds exactly one adapter per TYPE (the pre-W34 ceiling,
+   * kept for `get()`/`peek()` callers and the "no specific instance chosen"
+   * default path), while `instanceEntries` holds one adapter per ACCOUNT.
+   * Each instance carries its own `HarnessProviderConfig` — captured at
+   * `registerInstance()` time rather than derived from `opts.buildConfig`,
+   * since two instances of the same type need DIFFERENT config (credentials,
+   * homeDir) that a single `(type) => config` function cannot express.
+   */
+  private readonly instanceEntries = new Map<ProviderInstanceId, Entry & { driverType: HarnessType; config: HarnessProviderConfig; enabled: boolean }>();
   private readonly opts: HarnessRegistryOptions;
   private readonly statusTtlMs: number;
   private _primary: HarnessType;
   private refreshInFlight: Promise<HarnessProviderStatus[]> | null = null;
   /** W41 — semaphore flag for fire-and-forget background refresh. */
   #refreshing = false;
+  /** Serialises disk-cache writes — see `persistDiskCache`. */
+  #persistChain: Promise<void> = Promise.resolve();
+  #persistSeq = 0;
+
+  // ── W41 — generational enrichment ────────────────────────────────────────
+  //
+  // Every source of status (a live probe, a disk-cache seed) belongs to a
+  // GENERATION. Writes used to be unconditional, so whichever source happened
+  // to finish last won — and the slowest source is systematically the STALEST
+  // one. The concrete failure is a boot race: `loadDiskCache()` reads a file
+  // (real I/O, ~ms) while a live `refresh()` runs entirely in memory, so the
+  // hour-old cached verdict routinely landed ON TOP of the fresh probe and the
+  // provider was reported with a stale catalog and `fromDiskCache: true`.
+  //
+  // A monotonic counter fixes it in one line at each write site: a result may
+  // only be written if its generation is not older than the one already there.
+  #generation = 0;
+  readonly #statusGeneration = new Map<string, number>();
+
+  /**
+   * Claim the right to write `key`'s status on behalf of generation `gen`.
+   * Returns false when a newer generation has already written — in which case
+   * this result is superseded and MUST be discarded rather than applied.
+   */
+  #claimGeneration(key: string, gen: number): boolean {
+    const last = this.#statusGeneration.get(key) ?? -1;
+    if (gen < last) return false;
+    this.#statusGeneration.set(key, gen);
+    return true;
+  }
+
+  // ── W41 — watcher-gated refresh ──────────────────────────────────────────
+  //
+  // `statusSnapshot` is a pure read and must stay one. Anything that wants to
+  // be TOLD about changes subscribes here, and the periodic refresh exists
+  // only for as long as someone is subscribed: a server with no status UI
+  // attached should not be spawning provider CLIs on a timer forever.
+  readonly #watchers = new Set<(statuses: HarnessProviderStatus[]) => void>();
+  #watchTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(opts: HarnessRegistryOptions) {
     this.opts = opts;
@@ -233,39 +345,125 @@ export class HarnessRegistry {
       const payload = JSON.parse(raw) as unknown;
       if (!isDiskCachePayload(payload)) return;
       if (Date.now() - payload.savedAt > DISK_CACHE_MAX_AGE_MS) return; // too old
+
+      // W41 — the seed is generation 0: the OLDEST possible source. Any live
+      // probe that has already written (generation ≥ 1) outranks it, so a slow
+      // file read can no longer land on top of a fresh result.
+      const SEED_GENERATION = 0;
+
       for (const status of payload.statuses) {
         const entry = this.entries.get(status.type);
         if (!entry) continue;
-        // Pre-seed: installed/models/checkedAt from cache; connected/authenticated
-        // remain false until a live probe — they require a running process.
+
+        // W41 — instance ∧ driver ∧ enabled. A verdict written for a different
+        // identity is not evidence about this one. `cacheKey` is absent in
+        // files written by pre-W41 builds; those are accepted by type for the
+        // one hour it takes them to age out, rather than being discarded and
+        // costing every upgrading user a cold boot.
+        const expected = statusCacheKey({ driverType: status.type, enabled: true });
+        if (status.cacheKey !== undefined && status.cacheKey !== expected) continue;
+
+        if (!this.#claimGeneration(`type:${status.type}`, SEED_GENERATION)) continue;
+        // Pre-seed installed/models/checkedAt AND the readiness verdict.
+        //
+        // This used to deliberately leave `ready: false`, which made the whole
+        // cache dead weight: every consumer — `getAllModels`,
+        // `resolveProviderForModel`, `readyTypes` — filters on `ready`, so the
+        // seeded catalog was unreachable and a cold boot still routed nothing
+        // until a live probe finished. `connected` stays false because no
+        // process is running yet; `get(type)` brings one up lazily on first
+        // use, so a cached-ready provider is genuinely usable.
         entry.status = {
           ...entry.status,
           installed: status.installed,
           models: status.models,
           checkedAt: status.checkedAt,
+          authenticated: status.ready,
+          ready: status.ready,
+          fromDiskCache: true,
           ...(status.error ? { error: status.error } : {}),
         };
       }
+
+      // W41 — per-instance verdicts. Only applied to an instance that is
+      // registered NOW, with the same driver and the same enabled state; a
+      // cache entry for an account that has since been disabled or re-pointed
+      // is dropped rather than replayed. (Instances must therefore be
+      // registered before `loadDiskCache()` for their cache to apply — the
+      // composition root does exactly that.)
+      for (const row of payload.instances ?? []) {
+        const entry = this.instanceEntries.get(row.instanceId);
+        if (!entry) continue;
+        const expected = statusCacheKey({
+          driverType: entry.driverType,
+          instanceId: row.instanceId,
+          enabled: entry.enabled,
+        });
+        if (row.status.cacheKey !== expected) continue;
+        if (!this.#claimGeneration(`instance:${row.instanceId}`, SEED_GENERATION)) continue;
+        entry.status = {
+          ...entry.status,
+          installed: row.status.installed,
+          models: row.status.models,
+          checkedAt: row.status.checkedAt,
+          authenticated: row.status.ready,
+          ready: row.status.ready,
+          fromDiskCache: true,
+          ...(row.status.error ? { error: row.status.error } : {}),
+        };
+      }
+
       this.opts.logger?.info(`[HarnessRegistry] Loaded provider status cache (${payload.statuses.length} entries, ${Math.round((Date.now() - payload.savedAt) / 60_000)} min old)`);
     } catch {
       // Missing file, parse error, permission issue — start fresh.
     }
   }
 
-  /** Persist the current snapshot to the disk cache. Best-effort. */
-  private async persistDiskCache(): Promise<void> {
+  /**
+   * Persist the current snapshot to the disk cache. Best-effort.
+   *
+   * Writes are (a) atomic — tmp file then rename, so a crash or a concurrent
+   * reader never sees a half-written JSON document that `loadDiskCache` would
+   * silently discard — and (b) serialised through `#persistChain`, because
+   * every caller invokes this fire-and-forget (`void this.persistDiskCache()`)
+   * and two overlapping `writeFile`s to the same path interleave their bytes.
+   * `#refreshing` does not prevent that: it is cleared in a `.finally()` that
+   * runs before the persist it kicked off has finished.
+   */
+  private persistDiskCache(): Promise<void> {
     const path = this.opts.diskCacheFile;
-    if (!path) return;
-    try {
-      const payload: DiskCachePayload = {
-        version: 1,
-        savedAt: Date.now(),
-        statuses: this.getStatuses(),
-      };
-      await writeFile(path, JSON.stringify(payload, null, 2), 'utf8');
-    } catch {
-      // Non-fatal — the cache is best-effort.
-    }
+    if (!path) return Promise.resolve();
+    this.#persistChain = this.#persistChain.then(async () => {
+      const tmp = `${path}.${process.pid}.${++this.#persistSeq}.tmp`;
+      try {
+        // W41 — every persisted verdict carries the identity it was measured
+        // against, so a later load can refuse to replay it for a different one.
+        const payload: DiskCachePayload = {
+          version: 1,
+          savedAt: Date.now(),
+          statuses: this.getStatuses().map((s) => ({
+            ...s,
+            cacheKey: statusCacheKey({ driverType: s.type, enabled: true }),
+          })),
+          instances: [...this.instanceEntries.entries()].map(([instanceId, e]) => ({
+            instanceId,
+            driverType: e.driverType,
+            enabled: e.enabled,
+            status: {
+              ...e.status,
+              cacheKey: statusCacheKey({ driverType: e.driverType, instanceId, enabled: e.enabled }),
+            },
+          })),
+        };
+        await writeFile(tmp, JSON.stringify(payload, null, 2), 'utf8');
+        await rename(tmp, path);
+      } catch {
+        // Non-fatal — the cache is best-effort. Clean up the partial file so a
+        // failing disk does not accumulate one `.tmp` per refresh.
+        await rm(tmp, { force: true }).catch(() => { /* nothing more to do */ });
+      }
+    });
+    return this.#persistChain;
   }
 
   // ── W41 — Demand-gated refresh ───────────────────────────────────────────
@@ -295,8 +493,12 @@ export class HarnessRegistry {
     this.#refreshing = true;
     const start = Date.now();
     this.refresh(false)
-      .then(() => {
-        void this.persistDiskCache();
+      // AWAIT the persist rather than firing it off: `#refreshing` is cleared
+      // in the `.finally()` below, so a fire-and-forget write left the door
+      // open for the next `requestRefresh()` to start a second, overlapping
+      // write of the same file.
+      .then(async () => {
+        await this.persistDiskCache();
         if (Date.now() - start > 2_000) {
           this.opts.logger?.info(`[HarnessRegistry] Background refresh completed in ${Date.now() - start} ms`);
         }
@@ -307,6 +509,68 @@ export class HarnessRegistry {
       .finally(() => {
         this.#refreshing = false;
       });
+  }
+
+  /**
+   * W41 — subscribe to status changes, and gate the periodic refresh on there
+   * being a subscriber.
+   *
+   * Two things were missing. The refresh was purely demand-driven, so a status
+   * surface (the model picker, a health page) had no way to be told about a
+   * change without polling `statusSnapshot` — and polling a *snapshot* never
+   * refreshes it, so such a surface showed a frozen verdict indefinitely. And
+   * the obvious fix, an unconditional interval, is worse: it spawns provider
+   * CLIs every TTL forever on a server nobody is looking at.
+   *
+   * Gating the interval on the watcher count gives both properties: work
+   * happens exactly while something is watching, and `statusSnapshot` stays a
+   * pure, non-blocking read that never triggers a probe.
+   *
+   * @returns unsubscribe. The last unsubscribe stops the timer.
+   */
+  watchStatus(listener: (statuses: HarnessProviderStatus[]) => void): () => void {
+    this.#watchers.add(listener);
+    if (this.#watchTimer === undefined) {
+      this.#watchTimer = setInterval(() => {
+        if (this.isStale()) this.requestRefresh();
+      }, this.statusTtlMs);
+      // Never hold the process open for a status poll.
+      (this.#watchTimer as unknown as { unref?: () => void }).unref?.();
+    }
+    // Give the new watcher the current verdict immediately — it is a Ref-style
+    // read, so this costs nothing and saves every caller a first-render special
+    // case. A refresh is requested only if the snapshot is actually stale.
+    listener(this.getStatuses());
+    if (this.isStale()) this.requestRefresh();
+
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this.#watchers.delete(listener);
+      if (this.#watchers.size === 0 && this.#watchTimer !== undefined) {
+        clearInterval(this.#watchTimer);
+        this.#watchTimer = undefined;
+      }
+    };
+  }
+
+  /** W41 — how many status watchers are attached (the refresh gate). */
+  get watcherCount(): number {
+    return this.#watchers.size;
+  }
+
+  /** Notify every watcher. A throwing listener never blocks the others. */
+  #notifyWatchers(): void {
+    if (this.#watchers.size === 0) return;
+    const statuses = this.getStatuses();
+    for (const listener of [...this.#watchers]) {
+      try {
+        listener(statuses);
+      } catch (err) {
+        this.opts.logger?.warn(`[HarnessRegistry] status watcher threw: ${String(err)}`);
+      }
+    }
   }
 
   /** Provider used when a request doesn't specify one. */
@@ -363,9 +627,172 @@ export class HarnessRegistry {
     return this.entries.get(type)?.adapter ?? null;
   }
 
+  // ── W34 — Multi-instance (per-account) adapters ─────────────────────────
+
+  /**
+   * Registers one provider INSTANCE (account/credential set) with the
+   * config needed to construct its own adapter. Idempotent by design —
+   * re-registering the same `instanceId` (e.g. on a hot-reload of instance
+   * metadata) replaces the stored config for the NEXT `getInstance()` call
+   * but does not tear down an adapter already running under the old config;
+   * call `shutdownInstance()` first if the credentials actually changed.
+   */
+  registerInstance(
+    instanceId: ProviderInstanceId,
+    driverType: HarnessType,
+    config: HarnessProviderConfig,
+    /**
+     * W41 — whether the operator currently has this account switched on.
+     * Part of the disk-cache key: a verdict measured while an instance was
+     * enabled must not be replayed for the same id once it has been disabled.
+     * Defaults to `true` so existing three-argument callers are unaffected.
+     */
+    enabled = true,
+  ): void {
+    const existing = this.instanceEntries.get(instanceId);
+    if (existing) {
+      existing.config = config;
+      existing.driverType = driverType;
+      existing.enabled = enabled;
+      return;
+    }
+    this.instanceEntries.set(instanceId, {
+      adapter: null,
+      initializing: null,
+      driverType,
+      config,
+      enabled,
+      status: {
+        type: driverType,
+        label: `${harnessTypeLabel(driverType)} (${instanceId})`,
+        installed: false,
+        connected: false,
+        authenticated: false,
+        ready: false,
+        models: [],
+      },
+    });
+  }
+
+  /** Whether `instanceId` has been registered (regardless of live status). */
+  hasInstance(instanceId: ProviderInstanceId): boolean {
+    return this.instanceEntries.has(instanceId);
+  }
+
+  /**
+   * W41 — flip an instance's enabled flag. Changes its disk-cache key, so a
+   * verdict cached while it was enabled is not replayed once it is disabled.
+   */
+  setInstanceEnabled(instanceId: ProviderInstanceId, enabled: boolean): void {
+    const entry = this.instanceEntries.get(instanceId);
+    if (entry) entry.enabled = enabled;
+  }
+
+  /** W41 — an instance's current enabled flag, or `undefined` if unregistered. */
+  isInstanceEnabled(instanceId: ProviderInstanceId): boolean | undefined {
+    return this.instanceEntries.get(instanceId)?.enabled;
+  }
+
+  /** Every registered instance id, in registration order. */
+  listInstanceIds(): ProviderInstanceId[] {
+    return [...this.instanceEntries.keys()];
+  }
+
+  /**
+   * Get (and lazily bring up) the adapter for a specific provider instance.
+   * Mirrors `get(type)`'s concurrent-caller sharing so two requests for the
+   * same instance never spawn two CLIs for one account.
+   */
+  async getInstance(instanceId: ProviderInstanceId): Promise<IAgentHarness> {
+    const entry = this.instanceEntries.get(instanceId);
+    if (!entry) throw new Error(`[HarnessRegistry] Unknown provider instance: "${instanceId}" (was it registered?)`);
+    if (entry.adapter) return entry.adapter;
+    if (entry.initializing) return entry.initializing;
+
+    entry.initializing = (async () => {
+      const adapter = await createHarnessProvider(entry.config);
+      entry.status.installed = true;
+      await adapter.initialize();
+      entry.status.connected = true;
+      entry.adapter = adapter;
+      this.opts.logger?.info(`[HarnessRegistry] instance '${instanceId}' (${entry.driverType}) initialized`);
+      return adapter;
+    })();
+
+    try {
+      return await entry.initializing;
+    } catch (err) {
+      entry.status.error = (err as Error).message;
+      entry.status.ready = false;
+      throw err;
+    } finally {
+      entry.initializing = null;
+    }
+  }
+
+  /** The already-initialized adapter for an instance, if any. */
+  peekInstance(instanceId: ProviderInstanceId): IAgentHarness | null {
+    return this.instanceEntries.get(instanceId)?.adapter ?? null;
+  }
+
+  /** Shut a single instance's adapter down (e.g. before re-registering new credentials). */
+  async shutdownInstance(instanceId: ProviderInstanceId): Promise<void> {
+    const entry = this.instanceEntries.get(instanceId);
+    if (!entry?.adapter) return;
+    try { await entry.adapter.shutdown(); } catch { /* best effort */ }
+    entry.adapter = null;
+    entry.status.connected = false;
+    entry.status.ready = false;
+  }
+
   /** Last known status for every provider (may be stale — see `refresh`). */
   getStatuses(): HarnessProviderStatus[] {
     return ALL_HARNESS_TYPES.map((t) => ({ ...this.entries.get(t)!.status }));
+  }
+
+  /**
+   * Has any auto-probed provider ever been probed — either in this process or
+   * in a previous one, via `loadDiskCache()`?
+   *
+   * This is the "do we have something worth serving right now" question. A
+   * read-only display path should answer from the snapshot and refresh in the
+   * background whenever this is true, and block only when it is false (a
+   * genuinely first-ever boot, where blocking is the only way to return
+   * anything meaningful).
+   */
+  get hasProbedStatuses(): boolean {
+    return this.autoProbeEntries().some((e) => e.status.checkedAt != null);
+  }
+
+  /**
+   * Public read of `isStale()`, so HTTP callers can tell a client that what
+   * they are holding is last-known-good and a fresher answer is on its way.
+   */
+  get statusesAreStale(): boolean {
+    return this.isStale();
+  }
+
+  /** The entries a refresh actually probes. */
+  private autoProbeEntries(): Entry[] {
+    return AUTO_PROBE_TYPES.map((t) => this.entries.get(t)!);
+  }
+
+  /**
+   * Is the cached snapshot old enough to warrant a background refresh?
+   *
+   * Computed over the AUTO-PROBED types only. Asking it of all five was a
+   * silent performance defect: `refresh()` probes copilot and claude-agent and
+   * nothing else, so codex/opencode/acp never get a `checkedAt` and were
+   * therefore *permanently* stale. Every `getAllModels()` and every
+   * `resolveProviderForModel()` — i.e. every new chat and every model lookup —
+   * consequently fired `requestRefresh()`, whose success path writes the whole
+   * disk cache. The 5-minute TTL suppressed precisely nothing.
+   */
+  private isStale(): boolean {
+    const now = Date.now();
+    return this.autoProbeEntries().some(
+      (e) => e.status.checkedAt == null || now - e.status.checkedAt >= this.statusTtlMs,
+    );
   }
 
   /**
@@ -379,8 +806,16 @@ export class HarnessRegistry {
     const fresh = (e: Entry): boolean =>
       !force && e.status.checkedAt != null && Date.now() - e.status.checkedAt < this.statusTtlMs;
 
-    if (!force && [...this.entries.values()].every(fresh)) return this.getStatuses();
+    // Only the AUTO-PROBED types can ever be fresh — nothing sets `checkedAt`
+    // on codex/opencode/acp. Asking `every entry` here meant this early return
+    // never fired; see `isStale()` for the same bug's expensive half.
+    if (!force && this.autoProbeEntries().every(fresh)) return this.getStatuses();
     if (this.refreshInFlight) return this.refreshInFlight;
+
+    // W41 — this refresh's generation. Every write below is guarded by it, so
+    // a result produced here can never be overwritten by an older source that
+    // happens to finish later (see `#claimGeneration`).
+    const gen = ++this.#generation;
 
     this.refreshInFlight = (async () => {
       // Only probe the managed providers (copilot, claude-agent).
@@ -408,7 +843,16 @@ export class HarnessRegistry {
               }
             }
 
+            // W41 — `getModels()` no longer throws; an empty catalog can mean
+            // "probe failed". Recover the reason so the status still explains
+            // itself instead of silently reporting an entitlement-less account.
+            if (models.length === 0 && !credentialError && isModelProbeErrorAware(adapter)) {
+              credentialError = adapter.getLastModelProbeError();
+            }
+
             const usable = models.length > 0 && !credentialError;
+            // W41 — discard a result a newer generation has already superseded.
+            if (!this.#claimGeneration(`type:${type}`, gen)) return;
             entry.status = {
               ...entry.status,
               installed: true,
@@ -420,11 +864,14 @@ export class HarnessRegistry {
               // Don't advertise a catalog the account can't actually use.
               models: usable ? models : [],
               checkedAt: Date.now(),
+              // A live probe supersedes whatever the disk cache claimed.
+              fromDiskCache: false,
             };
             if (credentialError) entry.status.error = credentialError;
             else delete entry.status.error;
           } catch (err) {
             const message = (err as Error).message ?? String(err);
+            if (!this.#claimGeneration(`type:${type}`, gen)) return; /* W41 */
             entry.status = {
               ...entry.status,
               // `installed` stays true once we've proven the module resolves.
@@ -433,11 +880,13 @@ export class HarnessRegistry {
               models: [],
               error: message,
               checkedAt: Date.now(),
+              fromDiskCache: false,
             };
             this.opts.logger?.warn(`[HarnessRegistry] '${type}' unavailable: ${message}`);
           }
         }),
       );
+      this.#notifyWatchers(); /* W41 */
       return this.getStatuses();
     })().finally(() => {
       this.refreshInFlight = null;
@@ -465,10 +914,7 @@ export class HarnessRegistry {
     }
 
     // Fast path: use the snapshot, trigger a background refresh if stale.
-    const stale = [...this.entries.values()].some(
-      (e) => e.status.checkedAt == null || Date.now() - e.status.checkedAt >= this.statusTtlMs,
-    );
-    if (stale) this.requestRefresh(); // W41 — fire-and-forget, never blocks
+    if (this.isStale()) this.requestRefresh(); // W41 — fire-and-forget, never blocks
 
     return this.getStatuses()
       .filter((s) => s.ready)
@@ -483,10 +929,7 @@ export class HarnessRegistry {
    * Callers wanting guaranteed freshness should `await refresh(true)` first.
    */
   async resolveProviderForModel(modelId: string): Promise<HarnessType | null> {
-    const stale = [...this.entries.values()].some(
-      (e) => e.status.checkedAt == null || Date.now() - e.status.checkedAt >= this.statusTtlMs,
-    );
-    if (stale) this.requestRefresh();
+    if (this.isStale()) this.requestRefresh();
 
     for (const s of this.getStatuses()) {
       if (!s.ready) continue;
@@ -495,17 +938,25 @@ export class HarnessRegistry {
     return null;
   }
 
-  /** Shut every initialized provider down. */
+  /** Shut every initialized provider down — both per-type and per-instance adapters. */
   async shutdownAll(): Promise<void> {
-    await Promise.all(
-      [...this.entries.values()].map(async (e) => {
+    // W41 — drop watchers and their timer first, so nothing schedules a probe
+    // against a registry that is being torn down.
+    this.#watchers.clear();
+    if (this.#watchTimer !== undefined) {
+      clearInterval(this.#watchTimer);
+      this.#watchTimer = undefined;
+    }
+    await Promise.all([
+      ...[...this.entries.values()].map(async (e) => {
         if (!e.adapter) return;
         try { await e.adapter.shutdown(); } catch { /* best effort */ }
         e.adapter = null;
         e.status.connected = false;
         e.status.ready = false;
       }),
-    );
+      ...[...this.instanceEntries.keys()].map((id) => this.shutdownInstance(id)),
+    ]);
   }
 }
 

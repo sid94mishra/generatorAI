@@ -6,6 +6,9 @@
   "bin": {
     "generatorai": "./dist-bundle/generatorai.mjs"
   },
+  "files": [
+    "dist-bundle"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "bundle": "node esbuild.config.mjs",
@@ -14,9 +17,18 @@
     "lint": "eslint src/",
     "dev": "tsx --import ./src/instrumentation.ts src/index.tsx",
     "docs": "tsx scripts/generate-docs.ts",
-    "docs:check": "tsx scripts/generate-docs.ts --check"
+    "docs:check": "tsx scripts/generate-docs.ts --check",
+    "surface": "tsx scripts/generate-surface.ts",
+    "surface:check": "tsx scripts/generate-surface.ts --check",
+    "baseline": "tsx scripts/record-baseline.ts"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "node-pty": "^1.1.0",
+    "playwright": "^1.58.2",
+    "playwright-core": "^1.58.2"
+  },
+  "devDependencies": {
     "@generatorai/agent-harness-providers": "workspace:*",
     "@generatorai/cli-core": "workspace:*",
     "@generatorai/client-core": "workspace:*",
@@ -38,26 +50,24 @@
     "@opentelemetry/sdk-node": "^0.214.0",
     "@opentelemetry/sdk-trace-node": "^2.6.1",
     "@opentelemetry/semantic-conventions": "^1.40.0",
+    "@types/react": "^19.0.0",
+    "@types/ws": "^8.5.13",
+    "@xterm/headless": "^6.0.0",
     "cli-highlight": "^2.1.11",
     "cli-table3": "^0.6.5",
     "commander": "^13.1.0",
+    "esbuild": "^0.25.0",
     "ink": "^6.3.1",
+    "ink-testing-library": "^4.0.0",
     "marked": "^15.0.0",
     "picocolors": "^1.1.1",
     "pino": "^9.5.0",
     "react": "^19.0.0",
     "string-width": "^7.2.0",
+    "tsx": "^4.19.0",
     "ws": "^8.18.0",
     "yaml": "^2.6.0",
     "zod": "^3.24.0",
     "zustand": "^5.0.11"
-  },
-  "devDependencies": {
-    "@types/react": "^19.0.0",
-    "@types/ws": "^8.5.13",
-    "@xterm/headless": "^6.0.0",
-    "esbuild": "^0.25.0",
-    "ink-testing-library": "^4.0.0",
-    "tsx": "^4.19.0"
   }
 }

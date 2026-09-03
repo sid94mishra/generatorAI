@@ -13,7 +13,7 @@ import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Server, LayoutTemplate, Globe, Terminal, ChevronRight, Loader2,
-  FileText, Plus, Trash2, ArrowLeft, X, Eye,
+  FileText, Plus, Trash2, ArrowLeft, X, Eye, AlertTriangle,
 } from 'lucide-react';
 import { useSystemArtifacts, useSystemMcpServers, useArtifactContent } from '@/hooks/projectQueries.js';
 import { useTemplates } from '@/hooks/queries.js';
@@ -509,7 +509,13 @@ function DetailLine({ label, value, mono }: { label: string; value: string; mono
 // ── Templates ──
 
 export function TemplatesSection() {
-  const { data: templates, isLoading } = useTemplates();
+  // `isError` is read deliberately. This component used to destructure only
+  // `{ data, isLoading }`, so a FAILED fetch fell through to the empty state
+  // and told the user "No templates found" — indistinguishable from a catalog
+  // that is genuinely empty, and with no way to recover. `useTemplates` sets
+  // `staleTime: Infinity` and nothing invalidates it, so within a mounted
+  // settings modal that wrong answer was also a permanent one.
+  const { data: templates, isLoading, isError, refetch, isFetching } = useTemplates();
   const createFromTemplate = useCreateFromTemplate();
   const navigate = useNavigate();
   const closeSettings = useSettingsUiStore((s) => s.closeSettings);
@@ -533,6 +539,20 @@ export function TemplatesSection() {
 
       {isLoading ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner size="sm" /> Loading templates…</div>
+      ) : isError ? (
+        <div
+          className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-[var(--color-danger)] py-10 text-center"
+          data-testid="templates-error"
+        >
+          <AlertTriangle className="h-8 w-8 text-[var(--color-danger)]" />
+          <p className="text-sm text-foreground">Couldn&apos;t load templates.</p>
+          <p className="text-xs text-muted-foreground">
+            The catalog request failed — this is not an empty catalog.
+          </p>
+          <Button variant="secondary" size="sm" loading={isFetching} onClick={() => void refetch()}>
+            Retry
+          </Button>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-10 text-center">
           <LayoutTemplate className="h-8 w-8 text-muted-foreground" />

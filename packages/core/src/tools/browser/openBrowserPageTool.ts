@@ -16,13 +16,17 @@
 import type { ToolDefinition } from '../../domain/ports/IAgentHarness.js';
 import type { BrowserToolContext, BrowserToolFactory } from './browserToolTypes.js';
 import { coerceString, wrapHandler } from './browserToolTypes.js';
+import { SNAPSHOT_HANDOFF_HINT, writeSnapshotHandoff } from './snapshotHandoff.js';
 
 export const createOpenBrowserPageTool: BrowserToolFactory = (ctx: BrowserToolContext): ToolDefinition => ({
   name: 'open_browser_page',
   description:
     'Open a URL in the integrated browser (or bootstrap the session with no URL). ' +
     'Returns a pageId that must be passed to every follow-up browser tool. ' +
-    'Idempotent — safe to call even if a session is already running.',
+    'Idempotent — safe to call even if a session is already running. ' +
+    'The page\'s accessibility snapshot is written to a file whose path is returned; ' +
+    'read that file only when you need element refs — the url and title returned ' +
+    'inline are enough for most next steps.',
   owner: ctx.owner ?? 'browser-tools',
   skipPermission: true,
   requiredPermissions: [
@@ -67,14 +71,33 @@ export const createOpenBrowserPageTool: BrowserToolFactory = (ctx: BrowserToolCo
           };
         }
       }
-      // Fetch a fresh readPage so the model has element refs immediately.
+      // Fetch a fresh readPage so element refs exist immediately…
       const snapshot = await ctx.browserService.readPage(ctx.workspaceId).catch(() => null);
-      return {
-        ok: true,
+      const base = {
+        ok: true as const,
         pageId: ctx.workspaceId,
         url: snapshot?.url ?? descriptor.currentUrl ?? url ?? '',
         title: snapshot?.title ?? '',
-        snapshot: snapshot?.snapshot ?? '',
+      };
+      if (!snapshot) return base;
+
+      // …but hand the tree over ON DISK. This is the first call of every
+      // browser loop, so inlining the full a11y tree here charged the whole
+      // snapshot to every session before the model had asked for one element.
+      // X-17 fixed this in `read_page` and nowhere else, which left the
+      // dominant cost untouched.
+      const handoff = await writeSnapshotHandoff(ctx, snapshot.snapshot);
+      if (!handoff) {
+        // No workspace root, or the write failed — inline rather than return
+        // nothing, so the tool degrades in cost instead of in function.
+        return { ...base, snapshot: snapshot.snapshot };
+      }
+      return {
+        ...base,
+        page: `Browser: ${base.title} at ${base.url}`,
+        snapshotFile: handoff.snapshotFile,
+        snapshotBytes: handoff.bytes,
+        hint: SNAPSHOT_HANDOFF_HINT,
       };
     }),
 });

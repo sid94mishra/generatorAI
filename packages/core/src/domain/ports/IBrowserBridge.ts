@@ -59,12 +59,63 @@ export interface PageOutcome {
   durationMs?: number;
 }
 
+/**
+ * Wire codec of a screencast frame.
+ *
+ * D5 chose WebCodecs over the existing socket. `vp8` is what that decision
+ * buys: an inter-coded chunk of a mostly-static page is 100–1500 bytes where
+ * the equivalent JPEG is 100–150 KB (measured 17× over a 60-frame capture of a
+ * text page; the ratio grows with how little of the page changes). `jpeg` is
+ * kept because it is what a client without `VideoDecoder` can render, and
+ * because the encoder is a real resource that can legitimately be unavailable.
+ *
+ * The codec is carried on every frame rather than agreed once, so a mid-stream
+ * fall back to JPEG (encoder crash, renderer gone) is a value the client reads,
+ * not an exception it has to catch — P1-33's failure mode, at frame level.
+ */
+export type ScreencastCodec = 'jpeg' | 'vp8';
+
 /** Screencast frame payload (only used in screencast mode). */
 export interface ScreencastFrame {
-  /** JPEG-encoded bytes ready to write to an MJPEG stream. */
-  jpeg: Buffer;
-  /** Epoch ms. */
+  /** Which decoder these bytes are for. */
+  codec: ScreencastCodec;
+  /** Encoded bytes for `codec`. */
+  data: Buffer;
+  /**
+   * True when the frame decodes without reference to any earlier frame. Always
+   * true for `jpeg`; for `vp8` it marks the key frames a late joiner must wait
+   * for before its `VideoDecoder` produces anything.
+   */
+  keyframe: boolean;
+  /** Pixel dimensions of this frame. */
+  width: number;
+  height: number;
+  /**
+   * Presentation timestamp in MICROseconds, monotonic within one stream.
+   * `EncodedVideoChunk` requires microseconds and requires monotonicity — an
+   * epoch-ms value silently produces a decoder that stalls.
+   */
+  timestampUs: number;
+  /** Epoch ms. Diagnostics and the idle sweeper; never a decoder input. */
   ts: number;
+}
+
+/**
+ * What a bridge can do for live view, **declared** rather than discovered.
+ *
+ * P1-33: transport used to be chosen by calling `screencast()` and catching the
+ * throw from bridges that have no such concept (native/desktop mode renders
+ * on-screen through Electron — there is no CDP screencast to consume). An
+ * exception is a terrible feature detector: it cannot distinguish "this bridge
+ * does not do screencast" from "this bridge does, and it just broke", so a
+ * transient CDP failure silently demoted a healthy session to HTTP polling for
+ * the rest of its life. Asking is cheap, total, and cannot lie by omission.
+ */
+export interface ScreencastCapabilities {
+  /** False ⇒ `screencast()` will throw; callers must not call it. */
+  supportsScreencast: boolean;
+  /** Codecs `screencast()` may emit, most-preferred first. Empty iff unsupported. */
+  codecs: readonly ScreencastCodec[];
 }
 
 /**
@@ -175,11 +226,51 @@ export interface IBrowserBridge {
   }>;
 
   /**
+   * Declare what this bridge can stream, before anything is attempted.
+   * Synchronous and total: it must never throw and never depend on a live
+   * handle, because its whole job is to let a caller decide *not* to call
+   * `screencast()`. See {@link ScreencastCapabilities}.
+   */
+  screencastCapabilities(): ScreencastCapabilities;
+
+  /**
    * Return an async iterable of screencast frames. Only meaningful for
    * hosts in `screencast` mode; native hosts throw `Error('screencast unsupported')`.
-   * Consumers must return / dispose the iterator when the client disconnects.
+   * Consumers must check {@link screencastCapabilities} first rather than
+   * relying on that throw. Consumers must return / dispose the iterator when
+   * the client disconnects.
+   *
+   * `codecs` is the caller's accept-list, most-preferred first. The bridge
+   * emits the first entry it can actually produce; every frame states which
+   * codec it is, so the caller never has to assume.
+   *
+   * `signal` is how a consumer ends a stream that is IDLE. Screencast is
+   * paint-driven, so between frames the generator is parked on a promise, not
+   * on a `yield` — and an async generator parked on an `await` does not
+   * observe `return()` until it next resumes. Without a signal, closing the
+   * socket on a settled page left the generator, its subscriber registration
+   * and its encoder stream alive until the page happened to repaint.
+   *
+   * `onRequestKeyframe` is how a consumer gets the stream BACK after losing a
+   * frame. Inter-coded codecs (vp8) emit deltas that decode only against the
+   * frame before them, so one chunk dropped downstream — by a congested
+   * socket, or by a browser that stopped decoding for a hidden tab — makes
+   * every later chunk undecodable, permanently and silently. The bridge calls
+   * this once with a function the consumer may invoke to force a fresh key
+   * frame. Bridges that only ever emit self-contained frames (jpeg) may ignore
+   * it; the function must be safe to call at any time, including after the
+   * encoder has died.
    */
-  screencast(handle: BrowserHandle, opts: { fps: number; quality: number }): AsyncIterable<ScreencastFrame>;
+  screencast(
+    handle: BrowserHandle,
+    opts: {
+      fps: number;
+      quality: number;
+      codecs?: readonly ScreencastCodec[];
+      signal?: AbortSignal;
+      onRequestKeyframe?: (request: () => void) => void;
+    },
+  ): AsyncIterable<ScreencastFrame>;
 
   /**
    * Capture a single JPEG frame of the current viewport. Preferred by the

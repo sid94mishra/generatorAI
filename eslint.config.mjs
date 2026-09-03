@@ -30,15 +30,19 @@ export default [
     },
   },
   {
-    // React hooks rules for the web app. Registered mainly so the
-    // `eslint-disable-next-line react-hooks/exhaustive-deps` suppressions
-    // scattered through the components refer to a rule that actually exists —
-    // without the plugin every one of them is itself a lint error.
+    // React hooks rules for every surface that actually uses React hooks —
+    // the web app AND the CLI's Ink-based TUI (`apps/cli/src/tui`). Registered
+    // mainly so the `eslint-disable-next-line react-hooks/exhaustive-deps`
+    // suppressions scattered through the components refer to a rule that
+    // actually exists — without the plugin every one of them is itself a
+    // lint error. △ Fixed during end-to-end review: this used to cover only
+    // `apps/web`, so the exact failure the comment above warns about was
+    // happening for `apps/cli/src/tui/App.tsx`'s own suppression comment.
     //
     // `exhaustive-deps` stays a warning: the existing suppressions are
     // deliberate, and promoting it to an error would block the build on
     // judgement calls rather than defects.
-    files: ['apps/web/src/**/*.{ts,tsx}'],
+    files: ['apps/web/src/**/*.{ts,tsx}', 'apps/cli/src/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': reactHooks,
     },
@@ -177,6 +181,129 @@ export default [
               message: 'packages/db may not import node-pty.',
             },
           ],
+        },
+      ],
+    },
+  },
+  {
+    // CLI_TUI_POST_OVERHAUL_PARITY_AUDIT_2026.md §5.3 — every real command
+    // bug this audit found at the API boundary had the exact same shape:
+    // `as never` on a request body let a wrong or nonexistent field name
+    // through, `validate()` silently stripped it server-side, and the
+    // command reported success while doing less than asked. Command
+    // handlers must use the client method's real parameter type instead —
+    // fixing the type error IS fixing the bug.
+    //
+    // Test files are exempt: `as never` there widens a literal test fixture
+    // to a handler's input type, which is not a wire-payload cast.
+    //
+    // Also covers `apps/server/src/routes` and `apps/web/src/hooks` — the
+    // adversarial review of this fix found the identical bug shape in both
+    // (an unvalidated-looking `req.body`/mutation-arg cast standing in for a
+    // real, often already-validated, type) and both were fixed in the same
+    // pass; every remaining `as never` in those two directories was
+    // individually re-verified as gone before this glob was widened to them,
+    // so widening it further to either directory's siblings needs the same
+    // per-file check first, not just a broader glob.
+    files: [
+      'packages/cli-core/src/commands/**/*.ts',
+      'apps/server/src/routes/**/*.ts',
+      'apps/web/src/hooks/**/*.ts',
+    ],
+    ignores: ['packages/cli-core/src/commands/**/__tests__/**', '**/__tests__/**', '**/*.test.ts', '**/*.test.tsx'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "TSAsExpression[typeAnnotation.type='TSNeverKeyword']",
+          message:
+            'as never erases type checking at exactly the boundary that matters. Fix the client method\'s parameter type (or the call site) instead of casting past the mismatch.',
+        },
+      ],
+    },
+  },
+  // ── PART 11.1 guardrails ─────────────────────────────────────────────────
+  //
+  // The plan lists twelve rules that each need an enforcement mechanism, and
+  // an audit found only two were actually enforced. These are the three that
+  // ESLint can express directly; the rest live in `scripts/check-*.mjs`
+  // (security invariants, §1.P doc drift, durability invariants), which the
+  // root `lint` script runs.
+  //
+  // Scoped to the hot paths the plan names rather than applied repo-wide:
+  // a rule that fires 500 times is a rule everyone learns to ignore.
+  {
+    files: [
+      'packages/core/src/services/**/*.ts',
+      'packages/core/src/events/**/*.ts',
+      'packages/core/src/infrastructure/**/*.ts',
+      'packages/db/src/**/*.ts',
+      'apps/server/src/**/*.ts',
+      'apps/agent-host/src/**/*.ts',
+      'apps/pty-host/src/**/*.ts',
+      'apps/browser-host/src/**/*.ts',
+      'apps/cua-host/src/**/*.ts',
+    ],
+    ignores: ['**/__tests__/**', '**/*.test.ts', '**/__benchmarks__/**'],
+    rules: {
+      // `warn`, not `error`, and deliberately so.
+      //
+      // §11.1 asks for a "lint tripwire with a **shrink-only allowance**" for
+      // the synchronous-IO rule — not a hard failure, because there are
+      // already ~30 legitimate boot-time call sites and failing the build on
+      // day one would just get the rule deleted. The allowance is enforced by
+      // `scripts/check-sync-io-budget.mjs`, which counts these warnings and
+      // fails when the count goes UP. That gives the rule teeth against new
+      // violations while letting the existing ones be paid down over time.
+      //
+      // The backpressure rule below is a genuine `error` because its current
+      // violation count is zero — there is nothing to grandfather.
+      // All three selectors live in ONE entry on purpose.
+      //
+      // `no-restricted-syntax` takes a single severity, and in flat config a
+      // later block targeting the same files REPLACES the rule rather than
+      // merging with it — so splitting the backpressure selector into its own
+      // `error` block silently deleted the two synchronous-IO selectors for
+      // every file both blocks matched, and the budget script dutifully
+      // recorded a baseline of zero. They stay together at `warn`; the hard
+      // limits are enforced by `scripts/check-sync-io-budget.mjs`, which
+      // ratchets the synchronous-IO count downward and holds the backpressure
+      // count at exactly zero.
+      'no-restricted-syntax': [
+        'warn',
+        {
+          // §11.1: "No `stream.on('data', d => other.write(d))`".
+          // Measured cost of ignoring backpressure, from the plan's own
+          // research: ~17× memory for zero throughput gain. `pipe()` and
+          // `pipeline()` propagate backpressure; a manual data→write does not.
+          //
+          // `addListener` is matched too: it is the same call under a different
+          // name, and a rule that knows only one spelling is one anybody can
+          // step around without meaning to.
+          selector:
+            "CallExpression[callee.property.name=/^(on|addListener)$/][arguments.0.value='data']" +
+            " CallExpression[callee.property.name='write']",
+          message:
+            "Manual 'data' → write() ignores backpressure (~17x memory for no throughput gain). " +
+            'Use pipe()/pipeline(), or await the write and pause the source.',
+        },
+        {
+          // §11.1: "No new synchronous filesystem or process call on the event
+          // loop." A shrink-only allowance: existing call sites are grandfathered
+          // by their own eslint-disable, and this stops NEW ones appearing.
+          selector:
+            "CallExpression[callee.object.name=/^(fs|fsSync|nodeFs)$/][callee.property.name=/^(readFileSync|writeFileSync|appendFileSync|readdirSync|statSync|lstatSync|mkdirSync|rmSync|unlinkSync|copyFileSync|renameSync|existsSync)$/]",
+          message:
+            'Synchronous filesystem call on the event loop. Use the promises API. ' +
+            'If this is genuinely boot-only or in a child process, add an eslint-disable with the reason.',
+        },
+        {
+          selector:
+            "CallExpression[callee.object.name='child_process'][callee.property.name=/Sync$/]," +
+            "CallExpression[callee.name=/^(execSync|execFileSync|spawnSync)$/]",
+          message:
+            'Synchronous process spawn on the event loop blocks every other request. ' +
+            'Use the async form; if this is boot-only, add an eslint-disable with the reason.',
         },
       ],
     },

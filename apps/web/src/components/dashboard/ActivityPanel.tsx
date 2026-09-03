@@ -110,7 +110,17 @@ export function ActivityPanel({ today, running, attention, isLoading }: Activity
               busy={busy}
               onOpen={() => navigate(item.href)}
               onCancelRun={() => cancelRun.mutate(item.runId!)}
-              onRetryRun={() => retryRun.mutate(item.runId!)}
+              onRetryRun={() => {
+                // Retry starts a NEW run — open it rather than leaving the
+                // card pointing at the terminal ancestor.
+                void retryRun.mutateAsync(item.runId!).then((res) => {
+                  // `item.href` is `/workflows/<defId>/runs/<runId>`; swap the
+                  // trailing run id for the new run rather than re-deriving it.
+                  if (res?.runId && item.href.includes('/runs/')) {
+                    navigate(item.href.replace(/\/runs\/[^/]+$/, `/runs/${res.runId}`));
+                  }
+                });
+              }}
               onStopChat={() => cancelChat.mutate(item.id)}
               onCancelExec={() =>
                 cancelExec.mutate({ automationId: item.automationId!, executionId: item.executionId! })}

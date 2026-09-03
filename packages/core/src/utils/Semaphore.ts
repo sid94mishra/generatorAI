@@ -21,6 +21,20 @@ export class Semaphore {
 
   /** @param permits Max concurrent holders. `<= 0` means unlimited. */
   constructor(permits: number) {
+    // Reject NaN/Infinity at construction rather than deadlocking at the first
+    // `acquire()`. A `NaN` permit count (the shape a bare
+    // `parseInt(process.env.X)` produces from a typo) would otherwise pass the
+    // `permits <= 0` test as `false`, set `available = NaN`, and make every
+    // `acquire()` await a promise nobody ever resolves — an unbounded hang
+    // with no error and no log. Callers should read config through
+    // `readBoundedInt` from @generatorai/shared, which cannot produce this.
+    if (!Number.isFinite(permits)) {
+      throw new TypeError(
+        `Semaphore: permits must be a finite number, received ${String(permits)}. ` +
+          'This usually means a numeric env var failed to parse — read it with ' +
+          '`readBoundedInt` so an invalid value falls back to the default.',
+      );
+    }
     this.unlimited = permits <= 0;
     this.available = this.unlimited ? Number.POSITIVE_INFINITY : permits;
   }

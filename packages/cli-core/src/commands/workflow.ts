@@ -3,6 +3,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
+import { HookDefinitionSchema, type HookDefinition } from '@generatorai/shared';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
 import { CliError } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
@@ -17,6 +18,7 @@ import {
   ok,
   parseList,
   projectFlag,
+  readTextFile,
   record,
   requireSomeUpdate,
 } from './_shared.js';
@@ -30,17 +32,91 @@ export const WORKFLOW_GROUP = {
 
 const EDGE_TYPES = ['on_success', 'on_failure', 'on_completion', 'always'] as const;
 const SESSION_MODES = ['isolated', 'shared', 'continue'] as const;
+/** `StageCondition['type']` (`packages/shared/src/types/StageDefinition.ts`). */
+const CONDITION_TYPES = ['always', 'on_success', 'on_failure', 'expression'] as const;
+/**
+ * Read off the server's own schema rather than retyped here: a hand-written
+ * list drifts the moment a phase is added, and a phase this CLI does not
+ * offer is one no terminal user can ever attach a hook to. `.options` is
+ * zod's own enum member array, so this list is the route's list by
+ * construction.
+ */
+const HOOK_PHASES = HookDefinitionSchema.shape.phase.options;
+const HOOK_TYPES = ['script', 'http', 'function'] as const;
+const HOOK_FAILURE_POLICIES = ['abort', 'skip', 'continue'] as const;
+
+/**
+ * `--var name=value` pairs → the `variables` record the stage schema takes
+ * (`CreateStageSchema.variables: z.record(z.unknown())`).
+ *
+ * A value that parses as JSON is stored as JSON (`--var retries=3` is the
+ * number 3, `--var opts={"a":1}` an object); anything else is stored as the
+ * literal string. Without this every variable would be a string, and a
+ * workflow expression comparing one to a number would silently never match.
+ */
+function parseVariablePairs(pairs: string[] | undefined): Record<string, unknown> | undefined {
+  if (!pairs?.length) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const pair of pairs) {
+    const at = pair.indexOf('=');
+    if (at <= 0) {
+      throw CliError.usage(`--var expects name=value, got "${pair}".`);
+    }
+    const name = pair.slice(0, at).trim();
+    const raw = pair.slice(at + 1);
+    try {
+      out[name] = JSON.parse(raw) as unknown;
+    } catch {
+      out[name] = raw;
+    }
+  }
+  return out;
+}
+
+/**
+ * `--condition`/`--condition-expression` → the `StageCondition` the stage
+ * schema takes. `expression` without an expression is refused rather than
+ * sent as a condition that can never evaluate.
+ */
+function buildCondition(
+  type: (typeof CONDITION_TYPES)[number] | undefined,
+  expression: string | undefined,
+): { type: (typeof CONDITION_TYPES)[number]; expression?: string } | undefined {
+  if (!type) {
+    if (expression) {
+      throw CliError.usage('--condition-expression needs --condition expression.');
+    }
+    return undefined;
+  }
+  if (type === 'expression' && !expression) {
+    throw CliError.usage('--condition expression needs --condition-expression.');
+  }
+  return { type, ...(expression ? { expression } : {}) };
+}
+
+/** The stage a `--stage`-style reference names, with its current stored shape. */
+async function findStageFull(
+  ctx: CliContext,
+  defId: string,
+  ref: string,
+): Promise<Record<string, unknown> & { id: string; name?: string }> {
+  const full = (await ctx.api.definitions.get(defId)) as unknown as {
+    stages?: Array<Record<string, unknown> & { id: string; name?: string }>;
+  };
+  const matched = resolveRef(ref, { kind: 'stage', candidates: full.stages ?? [] });
+  return (full.stages ?? []).find((s) => s.id === matched.id) ?? matched;
+}
 
 async function findDefinition(ctx: CliContext, ref: string) {
   const definitions = await ctx.api.definitions.list();
-  return resolveRef(ref, { kind: 'workflow', candidates: definitions as never });
+  return resolveRef(ref, { kind: 'workflow', candidates: definitions });
 }
 
 async function findStageDef(ctx: CliContext, defId: string, ref: string) {
   const full = (await ctx.api.definitions.get(defId)) as unknown as {
     stages?: Array<{ id: string; name?: string }>;
   };
-  return resolveRef(ref, { kind: 'stage', candidates: (full.stages ?? []) as never });
+  return resolveRef(ref, { kind: 'stage', candidates: full.stages ?? [] });
 }
 
 export function workflowCommands(): CommandSpec[] {
@@ -228,7 +304,16 @@ export function workflowCommands(): CommandSpec[] {
           throw new CliError(
             'VALIDATION',
             `Workflow is not valid:\n${(result.errors ?? []).map((e) => `  ${e}`).join('\n')}`,
-            { details: { workflowId: target.id } },
+            {
+              // `issues` names the stage/edge each error belongs to — the
+              // whole point of this being machine-readable, and what the
+              // TUI's validation navigation reads. `--json` surfaces
+              // `details`, so a scripted caller gets the same structure.
+              details: {
+                workflowId: target.id,
+                ...(result.issues ? { issues: result.issues } : {}),
+              },
+            },
           );
         }
         return {
@@ -277,7 +362,7 @@ export function workflowCommands(): CommandSpec[] {
         const raw =
           args.file === '-'
             ? await readAll(process.stdin)
-            : await fs.readFile(path.resolve(args.file), 'utf8');
+            : await readTextFile(path.resolve(args.file), 'JSON file');
         let parsed: unknown;
         try {
           parsed = JSON.parse(raw);
@@ -354,7 +439,10 @@ export function workflowCommands(): CommandSpec[] {
           idColumn,
           nameColumn,
           { key: 'order', header: 'Order', format: 'number', priority: 2 },
-          { key: 'model', header: 'Model', priority: 3 },
+          // The model override lives at `harnessConfigOverrides.model` — the
+          // flat `model` key this used to read does not exist on a stage, so
+          // the column rendered "—" even for stages that had one set.
+          { key: 'harnessConfigOverrides.model', header: 'Model', priority: 3 },
           { key: 'agentRef', header: 'Agent', priority: 4 },
         ],
       },
@@ -383,7 +471,10 @@ export function workflowCommands(): CommandSpec[] {
         { name: 'agent', description: 'Agent reference', type: 'string', completes: 'agent' },
         { name: 'order', description: 'Display order', type: 'number' },
         { name: 'timeout', description: 'Timeout in seconds', type: 'number' },
-        { name: 'retries', description: 'Retry attempts on failure', type: 'number' },
+        { name: 'retries', description: 'Retry attempts on failure (0-10)', type: 'number' },
+        { name: 'var', description: 'Stage variable as name=value (repeatable)', type: 'string', variadic: true },
+        { name: 'condition', description: 'When this stage runs', type: 'string', choices: CONDITION_TYPES },
+        { name: 'conditionExpression', description: 'Expression for --condition expression', type: 'string' },
       ],
       schema: inputSchema(
         { workflow: z.string() },
@@ -395,7 +486,10 @@ export function workflowCommands(): CommandSpec[] {
           agent: z.string().optional(),
           order: z.coerce.number().int().optional(),
           timeout: z.coerce.number().int().positive().optional(),
-          retries: z.coerce.number().int().min(0).optional(),
+          retries: z.coerce.number().int().min(0).max(10).optional(),
+          var: z.array(z.string()).optional(),
+          condition: z.enum(CONDITION_TYPES).optional(),
+          conditionExpression: z.string().optional(),
         },
       ),
       output: { kind: 'record', successMessage: 'Added stage {id}' },
@@ -405,21 +499,41 @@ export function workflowCommands(): CommandSpec[] {
           throw CliError.usage('--prompt and --prompt-file are mutually exclusive.');
         }
         const prompt = flags.promptFile
-          ? await fs.readFile(path.resolve(flags.promptFile), 'utf8')
+          ? await readTextFile(path.resolve(flags.promptFile), 'prompt file')
           : flags.prompt;
+        const condition = buildCondition(flags.condition, flags.conditionExpression);
 
+        // Field names/shapes below are `CreateStageParams`'s exactly. The
+        // previous body sent `prompt` (real field is `prompts: PromptDefinition[]`),
+        // `model` (real field is nested in `harnessConfigOverrides.model`),
+        // `timeoutSeconds` (real field is `timeoutMs`) and `maxRetries` (real
+        // field is nested in `retryPolicy.maxRetries`) — `validate()` drops
+        // unknown keys, so all four were silently discarded on every call.
         return record(
           await ctx.api.definitions.addStage(
             target.id,
-            compact({
+            {
               name: flags.name,
-              prompt,
-              model: flags.model,
-              agentRef: flags.agent,
-              order: flags.order,
-              timeoutSeconds: flags.timeout,
-              maxRetries: flags.retries,
-            }) as never,
+              ...compact({
+                agentRef: flags.agent,
+                order: flags.order,
+                prompts: prompt
+                  ? [{ label: 'prompt', text: prompt, source: 'inline' as const, waitForCompletion: true }]
+                  : undefined,
+                harnessConfigOverrides: flags.model ? { model: flags.model } : undefined,
+                timeoutMs: flags.timeout !== undefined ? flags.timeout * 1000 : undefined,
+                retryPolicy:
+                  flags.retries !== undefined
+                    ? { maxRetries: flags.retries, backoffMs: 1000, backoffMultiplier: 2 }
+                    : undefined,
+                // `variables` and `condition` are real fields on
+                // `CreateStageSchema` that this command has never exposed —
+                // a stage could only ever be given variables or a run
+                // condition through the web UI or a raw API call.
+                variables: parseVariablePairs(flags.var),
+                condition,
+              }),
+            },
           ),
         );
       },
@@ -443,7 +557,11 @@ export function workflowCommands(): CommandSpec[] {
         { name: 'model', description: 'Model override', type: 'string', completes: 'model' },
         { name: 'agent', description: 'Agent reference', type: 'string', completes: 'agent' },
         { name: 'timeout', description: 'Timeout in seconds', type: 'number' },
-        { name: 'retries', description: 'Retry attempts', type: 'number' },
+        { name: 'retries', description: 'Retry attempts (0-10)', type: 'number' },
+        { name: 'var', description: 'Stage variable as name=value (repeatable, merges)', type: 'string', variadic: true },
+        { name: 'clearVars', description: 'Remove every variable before applying --var', type: 'boolean' },
+        { name: 'condition', description: 'When this stage runs', type: 'string', choices: CONDITION_TYPES },
+        { name: 'conditionExpression', description: 'Expression for --condition expression', type: 'string' },
       ],
       schema: inputSchema(
         { workflow: z.string(), stage: z.string() },
@@ -454,29 +572,278 @@ export function workflowCommands(): CommandSpec[] {
           model: z.string().optional(),
           agent: z.string().optional(),
           timeout: z.coerce.number().int().positive().optional(),
-          retries: z.coerce.number().int().min(0).optional(),
+          retries: z.coerce.number().int().min(0).max(10).optional(),
+          var: z.array(z.string()).optional(),
+          clearVars: z.boolean().optional(),
+          condition: z.enum(CONDITION_TYPES).optional(),
+          conditionExpression: z.string().optional(),
         },
       ),
       output: { kind: 'record', successMessage: 'Updated stage {id}' },
       async handler(ctx, { args, flags }) {
         const definition = await findDefinition(ctx, args.workflow);
-        const stage = await findStageDef(ctx, definition.id, args.stage);
+        const stage = await findStageFull(ctx, definition.id, args.stage);
         const prompt = flags.promptFile
-          ? await fs.readFile(path.resolve(flags.promptFile), 'utf8')
+          ? await readTextFile(path.resolve(flags.promptFile), 'prompt file')
           : flags.prompt;
 
+        // The route PUTs the whole `variables` record, so a partial update
+        // has to merge against what the stage already has or every unnamed
+        // variable is dropped. `--clear-vars` is the explicit way to ask for
+        // the replacing behaviour instead.
+        const incoming = parseVariablePairs(flags.var);
+        const existing = (stage['variables'] as Record<string, unknown> | undefined) ?? {};
+        const variables =
+          incoming || flags.clearVars
+            ? { ...(flags.clearVars ? {} : existing), ...(incoming ?? {}) }
+            : undefined;
+
+        // Same real field names/shapes as `workflow stage add` — see that
+        // handler's comment. `updateStage` used to accept a bare
+        // `Record<string, unknown>`, so this compiled fine while sending
+        // fields the route's schema silently dropped.
         const body = requireSomeUpdate(
           compact({
             name: flags.name,
-            prompt,
-            model: flags.model,
             agentRef: flags.agent,
-            timeoutSeconds: flags.timeout,
-            maxRetries: flags.retries,
+            prompts: prompt
+              ? [{ label: 'prompt', text: prompt, source: 'inline' as const, waitForCompletion: true }]
+              : undefined,
+            harnessConfigOverrides: flags.model ? { model: flags.model } : undefined,
+            timeoutMs: flags.timeout !== undefined ? flags.timeout * 1000 : undefined,
+            retryPolicy:
+              flags.retries !== undefined
+                ? { maxRetries: flags.retries, backoffMs: 1000, backoffMultiplier: 2 }
+                : undefined,
+            variables,
+            condition: buildCondition(flags.condition, flags.conditionExpression),
           }),
           'Pass at least one field to change.',
         );
         return record(await ctx.api.definitions.updateStage(definition.id, stage.id, body));
+      },
+    }),
+
+    // ── Stage variables and hooks (Phase 7 item 4) ─────────────────
+    //
+    // `CreateStageSchema` has accepted `variables` and `hooks` since it
+    // existed; no CLI surface ever set either, so the only way to give a
+    // stage a variable or a lifecycle hook was the web UI or a raw API
+    // call. `--var` above covers writing variables; these read them back and
+    // manage the hook array, which is too structured for flat flags to
+    // express as a whole (one hook at a time is exactly the right grain).
+
+    defineCommand({
+      id: 'workflow.stage.variables',
+      group: 'workflow',
+      verb: 'stage variables',
+      aliases: ['stage vars'],
+      summary: "A stage's variables",
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [
+        { name: 'workflow', description: 'Workflow reference', required: true, completes: 'workflow' },
+        { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
+      ],
+      flags: [],
+      schema: inputSchema({ workflow: z.string(), stage: z.string() }, {}),
+      output: {
+        kind: 'list',
+        columns: [
+          { key: 'name', header: 'Name', priority: 0 },
+          { key: 'value', header: 'Value', priority: 0 },
+        ],
+      },
+      async handler(ctx, { args }) {
+        const definition = await findDefinition(ctx, args.workflow);
+        const stage = await findStageFull(ctx, definition.id, args.stage);
+        const variables = (stage['variables'] as Record<string, unknown> | undefined) ?? {};
+        return list(
+          Object.entries(variables).map(([name, value]) => ({
+            name,
+            value: typeof value === 'string' ? value : JSON.stringify(value),
+          })),
+        );
+      },
+    }),
+
+    defineCommand({
+      id: 'workflow.stage.hook.list',
+      group: 'workflow',
+      verb: 'stage hook list',
+      summary: "A stage's lifecycle hooks",
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [
+        { name: 'workflow', description: 'Workflow reference', required: true, completes: 'workflow' },
+        { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
+      ],
+      flags: [],
+      schema: inputSchema({ workflow: z.string(), stage: z.string() }, {}),
+      output: {
+        kind: 'list',
+        columns: [
+          idColumn,
+          nameColumn,
+          { key: 'phase', header: 'Phase', priority: 0 },
+          { key: 'type', header: 'Type', priority: 1 },
+          { key: 'failurePolicy', header: 'On failure', priority: 2 },
+          { key: 'priority', header: 'Priority', format: 'number', priority: 3 },
+          { key: 'enabled', header: 'On', format: 'boolean', priority: 1 },
+        ],
+      },
+      async handler(ctx, { args }) {
+        const definition = await findDefinition(ctx, args.workflow);
+        const stage = await findStageFull(ctx, definition.id, args.stage);
+        return list((stage['hooks'] as Array<Record<string, unknown>> | undefined) ?? []);
+      },
+    }),
+
+    defineCommand({
+      id: 'workflow.stage.hook.add',
+      group: 'workflow',
+      verb: 'stage hook add',
+      summary: 'Attach a lifecycle hook to a stage',
+      description:
+        '--config is the hook-type-specific config object, the same shape `hook test --config` ' +
+        'takes: {"command":"...","args":[...]} for script, {"url":"...","method":"POST"} for ' +
+        'http, {"modulePath":"..."} or {"handlerName":"..."} for function.',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [
+        { name: 'workflow', description: 'Workflow reference', required: true, completes: 'workflow' },
+        { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
+      ],
+      flags: [
+        { name: 'name', description: 'Hook name', type: 'string', required: true },
+        { name: 'phase', description: 'When it runs', type: 'string', choices: HOOK_PHASES, required: true },
+        { name: 'type', description: 'Hook type', type: 'string', choices: HOOK_TYPES, required: true },
+        { name: 'config', description: 'JSON config object for --type', type: 'string', required: true },
+        { name: 'priority', description: 'Execution order among hooks on this phase', type: 'number', default: 0 },
+        { name: 'timeout', description: 'Timeout in milliseconds', type: 'number', default: 30000 },
+        { name: 'retries', description: 'Retry attempts after the first try', type: 'number', default: 0 },
+        { name: 'failurePolicy', description: 'What a failure does to the phase', type: 'string', choices: HOOK_FAILURE_POLICIES, default: 'abort' },
+        { name: 'disabled', description: 'Attach it switched off', type: 'boolean' },
+      ],
+      schema: inputSchema(
+        { workflow: z.string(), stage: z.string() },
+        {
+          name: z.string().min(1),
+          phase: z.enum(HOOK_PHASES),
+          type: z.enum(HOOK_TYPES),
+          config: z.string(),
+          priority: z.coerce.number().int().default(0),
+          timeout: z.coerce.number().int().positive().default(30000),
+          retries: z.coerce.number().int().min(0).max(10).default(0),
+          failurePolicy: z.enum(HOOK_FAILURE_POLICIES).default('abort'),
+          disabled: z.boolean().optional(),
+        },
+      ),
+      output: { kind: 'record', successMessage: 'Attached hook {name}' },
+      async handler(ctx, { args, flags }) {
+        const definition = await findDefinition(ctx, args.workflow);
+        const stage = await findStageFull(ctx, definition.id, args.stage);
+
+        let config: Record<string, unknown>;
+        try {
+          config = JSON.parse(flags.config) as Record<string, unknown>;
+        } catch (error) {
+          throw new CliError('VALIDATION', '--config is not valid JSON.', {
+            hint: error instanceof Error ? error.message : String(error),
+          });
+        }
+        // Same rule `hook test` already enforces: the executor dispatches on
+        // `config.type`, so a `--config` naming a different one would run a
+        // different hook than at least one of the two flags asked for.
+        if (typeof config['type'] === 'string' && config['type'] !== flags.type) {
+          throw new CliError(
+            'VALIDATION',
+            `--config's "type" ("${String(config['type'])}") does not match --type ("${flags.type}").`,
+            { hint: 'Drop "type" from --config\'s JSON, or make it match --type.' },
+          );
+        }
+
+        const existing = (stage['hooks'] as Array<Record<string, unknown>> | undefined) ?? [];
+        if (existing.some((hook) => hook['name'] === flags.name)) {
+          throw new CliError(
+            'CONFLICT',
+            `This stage already has a hook named "${flags.name}".`,
+            { hint: 'Remove it first, or pick another name.' },
+          );
+        }
+
+        const hook: HookDefinition = {
+          // The route PUTs the whole array, so the id has to be stable and
+          // supplied here — there is no per-hook create endpoint to mint one.
+          id: `${flags.phase}-${flags.name}`,
+          name: flags.name,
+          phase: flags.phase,
+          type: flags.type,
+          priority: flags.priority,
+          enabled: !flags.disabled,
+          failurePolicy: flags.failurePolicy,
+          timeoutMs: flags.timeout,
+          retries: flags.retries,
+          // Cast, not `as never`: an arbitrary `--config` JSON object cannot
+          // be proven to match one of the three config shapes statically, so
+          // this names the exact type being trusted — the same treatment
+          // `hook test` gives the identical flag.
+          config: { ...config, type: flags.type } as HookDefinition['config'],
+        };
+
+        // Checked against the SAME schema the route validates with, before
+        // sending: an `http` config missing `method`, or a `script` one
+        // missing `command`, otherwise comes back as a raw 400 naming a
+        // field the user cannot map to the flag they typed.
+        const parsed = HookDefinitionSchema.safeParse(hook);
+        if (!parsed.success) {
+          throw new CliError(
+            'VALIDATION',
+            `--config is not a valid ${flags.type} hook config.`,
+            {
+              hint: parsed.error.issues
+                .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+                .join('; '),
+            },
+          );
+        }
+
+        await ctx.api.definitions.updateStage(definition.id, stage.id, {
+          hooks: [...(existing as unknown as HookDefinition[]), hook],
+        });
+        return record(hook);
+      },
+    }),
+
+    defineCommand({
+      id: 'workflow.stage.hook.remove',
+      group: 'workflow',
+      verb: 'stage hook remove',
+      aliases: ['stage hook rm'],
+      summary: 'Detach a lifecycle hook from a stage',
+      requiresServer: true,
+      destructive: true,
+      sinceVersion: '0.2.0',
+      args: [
+        { name: 'workflow', description: 'Workflow reference', required: true, completes: 'workflow' },
+        { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
+        { name: 'hook', description: 'Hook id or name', required: true },
+      ],
+      flags: [],
+      schema: inputSchema({ workflow: z.string(), stage: z.string(), hook: z.string() }, {}),
+      output: { kind: 'void', successMessage: 'Detached.' },
+      async handler(ctx, { args }) {
+        const definition = await findDefinition(ctx, args.workflow);
+        const stage = await findStageFull(ctx, definition.id, args.stage);
+        const existing = (stage['hooks'] as Array<Record<string, unknown>> | undefined) ?? [];
+        const target = resolveRef(args.hook, {
+          kind: 'hook',
+          candidates: existing as Array<{ id: string; name?: string }>,
+        });
+        await ctx.api.definitions.updateStage(definition.id, stage.id, {
+          hooks: (existing as unknown as HookDefinition[]).filter((hook) => hook.id !== target.id),
+        });
+        return ok(`Detached hook ${target.name ?? target.id}.`);
       },
     }),
 
@@ -547,7 +914,6 @@ export function workflowCommands(): CommandSpec[] {
         { name: 'from', description: 'Source stage', type: 'string', required: true, completes: 'stage' },
         { name: 'to', description: 'Target stage', type: 'string', required: true, completes: 'stage' },
         { name: 'on', description: 'Edge type', type: 'string', choices: EDGE_TYPES, default: 'on_success' },
-        { name: 'condition', description: 'Boolean expression evaluated server-side', type: 'string' },
       ],
       schema: inputSchema(
         { workflow: z.string() },
@@ -555,7 +921,6 @@ export function workflowCommands(): CommandSpec[] {
           from: z.string(),
           to: z.string(),
           on: z.enum(EDGE_TYPES).default('on_success'),
-          condition: z.string().optional(),
         },
       ),
       output: { kind: 'record', successMessage: 'Added edge {id}' },
@@ -566,16 +931,17 @@ export function workflowCommands(): CommandSpec[] {
         if (from.id === to.id) {
           throw CliError.usage('An edge cannot connect a stage to itself.');
         }
+        // `CreateEdgeParams` has no `condition` field — an edge is only
+        // `{fromStageId, toStageId, edgeType}`. Conditional branching is a
+        // property of the STAGE (`StageCondition`), not the edge; a
+        // previous `--condition` flag here was silently dropped by
+        // `validate()` on every call and is not offered any more.
         return record(
-          await ctx.api.definitions.addEdge(
-            definition.id,
-            compact({
-              fromStageId: from.id,
-              toStageId: to.id,
-              edgeType: flags.on,
-              condition: flags.condition,
-            }) as never,
-          ),
+          await ctx.api.definitions.addEdge(definition.id, {
+            fromStageId: from.id,
+            toStageId: to.id,
+            edgeType: flags.on,
+          }),
         );
       },
     }),
@@ -601,7 +967,7 @@ export function workflowCommands(): CommandSpec[] {
         const full = (await ctx.api.definitions.get(definition.id)) as unknown as {
           edges?: Array<{ id: string }>;
         };
-        const edge = resolveRef(args.edge, { kind: 'edge', candidates: (full.edges ?? []) as never });
+        const edge = resolveRef(args.edge, { kind: 'edge', candidates: full.edges ?? [] });
         await ctx.api.definitions.deleteEdge(definition.id, edge.id);
         return ok(`Deleted edge ${edge.id}.`);
       },

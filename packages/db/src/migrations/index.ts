@@ -1919,8 +1919,10 @@ export function migrateDB(db: AppDatabase): void {
     //                 stage results that need a durable home.
     //
     //   usage_ledger — per-turn cost accounting stored alongside the scope
-    //                  that incurred it. Gives a queryable audit trail for
-    //                  billing without coupling the hot event path.
+    //                  that incurred it. △ NEVER GAINED A WRITER OR A READER
+    //                  and is dropped again by migration 43 — see the reasons
+    //                  recorded there. Migration 38 is left untouched because
+    //                  a shipped migration must never be edited.
     //
     // All three are append-only by design; settlement is a flag update, never
     // a row delete.
@@ -2003,6 +2005,190 @@ export function migrateDB(db: AppDatabase): void {
         `CREATE INDEX IF NOT EXISTS idx_usage_ledger_recorded_at ON usage_ledger(recorded_at);`,
       ],
     },
+
+    // ── G8 fix — persist WorkflowDefinition.skills/.agents ────────────────
+    //
+    // Found during end-to-end review: `WorkflowDefinition` has typed
+    // `skills?: SkillReference[]` / `agents?: AgentReference[]` fields that
+    // are genuinely populated by real callers (`WorkflowDefinitionService`,
+    // the Programmatic Workflow Script materializer in
+    // `apps/server/src/routes/workflowScripts.ts`) — but the repository
+    // never persisted them: no column existed, so `create()`/`update()`
+    // silently dropped whatever was set, and every read returned `undefined`
+    // regardless. `selectedArtifacts` (a plain string-id map) is a separate,
+    // already-persisted mechanism and does not carry the same information —
+    // `SkillReference`/`AgentReference` are richer objects, not bare ids.
+    {
+      version: 39,
+      name: 'workflow_definitions_skills_agents',
+      sql: [
+        `ALTER TABLE workflow_definitions ADD COLUMN skills TEXT;`,
+        `ALTER TABLE workflow_definitions ADD COLUMN agents TEXT;`,
+      ],
+    },
+
+    // ── W34 fix — conversation → provider INSTANCE ownership ──────────────
+    //
+    // `conversation_ownership` (created earlier) only ever recorded a driver
+    // TYPE ('copilot', 'claude-agent', …) — the one-adapter-per-type ceiling
+    // that made `harness_instances` (multiple accounts of the same driver)
+    // and `ProviderInstanceRegistry` dead code: routing could name a driver
+    // family but never a SPECIFIC account within it. This table is the
+    // missing persistence layer for that finer-grained key, separate from
+    // (not a replacement for) `conversation_ownership` so existing
+    // single-account deployments are unaffected — see
+    // `SqliteProviderInstanceOwnershipStore` and `HarnessRegistry.getInstance()`.
+    {
+      version: 40,
+      name: 'conversation_instance_ownership',
+      sql: [
+        `CREATE TABLE IF NOT EXISTS conversation_instance_ownership (
+          conversation_id TEXT PRIMARY KEY,
+          instance_id     TEXT NOT NULL,
+          updated_at      INTEGER NOT NULL
+        );`,
+        `CREATE INDEX IF NOT EXISTS idx_conv_instance_ownership_instance ON conversation_instance_ownership(instance_id);`,
+      ],
+    },
+
+    // ── W24 fix — persist orchestrator wave state across restart ───────────
+    //
+    // `OrchestratorService.waveCount`/`.orchestrationStartedAt` lived ONLY in
+    // in-memory `Map`s, deleted outright by `disposeForParent()` — a restart
+    // (or an archived-then-reopened orchestrator chat) silently forgot how
+    // many waves had run and when the orchestration started, resetting both
+    // termination guards for free. These 2 columns on the orchestrator's own
+    // `chats` row (it already carries `orchestrator_mode`) let
+    // `OrchestratorService` rehydrate its termination state instead of
+    // restarting the wave/time budget from zero after every restart.
+    {
+      version: 41,
+      name: 'chats_orchestrator_wave_state',
+      sql: [
+        `ALTER TABLE chats ADD COLUMN orchestrator_wave_count INTEGER;`,
+        `ALTER TABLE chats ADD COLUMN orchestrator_started_at INTEGER;`,
+      ],
+    },
+
+    // ── §3.4 fix — one settlement row per operationId ─────────────────────
+    //
+    // The effect sandwich memoises on `findToolResult(scope, scopeId, key)`,
+    // but nothing stopped two rows existing for one operationId: a
+    // `replay: safe` re-run that raced the original writer inserted a second
+    // settlement, and which of the two a later read returned was arbitrary —
+    // so the same operationId could memoise to two different results. The
+    // unique index makes the duplicate impossible; `withEffect` treats the
+    // resulting constraint failure as "someone else settled first" and reads
+    // that row instead of re-running the effect.
+    //
+    // Existing databases may already hold duplicates, and CREATE UNIQUE INDEX
+    // fails on those, so the dedup DELETE runs first (inside this migration's
+    // transaction). Oldest row wins — it is the settlement that happened
+    // first, and it matches `findToolResultStmt`'s `ORDER BY rowid ASC`.
+    {
+      version: 42,
+      name: 'entries_unique_tool_result_key',
+      sql: [
+        `DELETE FROM entries
+           WHERE kind = 'tool_result'
+             AND key IS NOT NULL
+             AND rowid NOT IN (
+               SELECT MIN(rowid) FROM entries
+                WHERE kind = 'tool_result' AND key IS NOT NULL
+                GROUP BY scope, scope_id, key
+             );`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_tool_result_key
+           ON entries(scope, scope_id, key)
+           WHERE kind = 'tool_result' AND key IS NOT NULL;`,
+      ],
+    },
+
+    // ── Drop `usage_ledger` — dead schema, deliberately removed ───────────
+    //
+    // Migration 38 created `usage_ledger` as part of the W47/§3.4 storage
+    // trio, and the tracker counted it as W24 delivered. It has **zero
+    // writers and zero readers**, on every code path, since the day it was
+    // created — verified by grep across `apps/`, `packages/` and `scripts/`:
+    // the only occurrences are its own CREATE TABLE and this DROP.
+    //
+    // The choice was "give it a real writer and reader, or drop it". Dropping
+    // is the honest one, for two reasons:
+    //
+    //  1. The product already HAS a usage path, and it is not this table.
+    //     Per-turn cost arrives as `harness.usage` events and is persisted in
+    //     `messages.metadata`, which is what `UsageChip` and the CLI/mobile
+    //     cost surfaces read. A second, parallel accounting store with no
+    //     consumer is not "billing support" — it is a claim of billing
+    //     support, which is exactly the failure mode the V2 audit was
+    //     commissioned to find.
+    //  2. A writer that only covered workflow stages (the one scope reachable
+    //     from the durability layer) would be a ledger that silently omits
+    //     chat turns — the dominant source of spend. A partial ledger is
+    //     worse than none, because it reads as authoritative.
+    //
+    // The table is empty on every deployment by construction, so this drops no
+    // data. Re-introducing it is one migration once a real consumer exists,
+    // and it should be re-introduced together with that consumer, not before.
+    {
+      version: 43,
+      name: 'drop_dead_usage_ledger',
+      sql: [
+        `DROP INDEX IF EXISTS idx_usage_ledger_scope;`,
+        `DROP INDEX IF EXISTS idx_usage_ledger_session;`,
+        `DROP INDEX IF EXISTS idx_usage_ledger_recorded_at;`,
+        `DROP TABLE IF EXISTS usage_ledger;`,
+      ],
+    },
+
+    // W34 — the full `ProviderRuntimeBinding` shape.
+    //
+    // The table shipped as `(conversation_id, instance_id, updated_at)`, which
+    // is only enough to answer "which account owns this thread". The plan's
+    // binding needs to answer "and how do I resume it": which adapter, at what
+    // cursor, in which runtime mode — and whether the binding was chosen by a
+    // human or inferred, because the promotion rules treat those differently.
+    //
+    // All nullable except `binding_origin`, which back-fills at
+    // 'migrated-ambiguous' — the LOWEST trust level of the three.
+    //
+    // B2. The first cut of this migration defaulted to 'explicit', on the
+    // reasoning that "every row that exists today was written by an explicit
+    // ownership claim". That is not what 'explicit' means. Per
+    // `ProviderInstanceRegistry`'s `BindingOrigin`, 'explicit' is "the user
+    // configured this account"; the rows in question were written by
+    // `save(conversationId, instanceId)`, which records no `provider`, no
+    // `adapter_key` and no human decision. Stamping them at the top of the
+    // trust ladder asserts a fact nobody established, and — because the
+    // promotion rules exist precisely to re-derive that fact from the
+    // instances configured NOW — makes those rules unreachable for exactly
+    // the rows they govern. 'migrated-ambiguous' is the honest floor: "we
+    // inferred this; surface it so a human can correct it."
+    //
+    // The default also applies to every future INSERT that omits the column,
+    // which is the narrow `save()` path — so this is a runtime guarantee, not
+    // only a back-fill: a row can never claim to be user-chosen unless
+    // `saveBinding` says so.
+    //
+    // A null `provider`/`adapter_key` on such a row still means "not
+    // recorded", and `loadBindings()` deliberately skips those rows so
+    // `ProviderInstanceRegistry` promotes them on read rather than inventing
+    // a driver — an incorrect guess here resumes a thread against the wrong
+    // account, which is worse than refusing.
+    //
+    // `ADD COLUMN` is O(1) metadata-only in SQLite and takes no table lock
+    // beyond the transaction the runner already holds.
+    {
+      version: 44,
+      name: 'provider_runtime_binding_columns',
+      sql: [
+        `ALTER TABLE conversation_instance_ownership ADD COLUMN provider TEXT;`,
+        `ALTER TABLE conversation_instance_ownership ADD COLUMN adapter_key TEXT;`,
+        `ALTER TABLE conversation_instance_ownership ADD COLUMN resume_cursor TEXT;`,
+        `ALTER TABLE conversation_instance_ownership ADD COLUMN runtime_payload TEXT;`,
+        `ALTER TABLE conversation_instance_ownership ADD COLUMN runtime_mode TEXT;`,
+        `ALTER TABLE conversation_instance_ownership ADD COLUMN binding_origin TEXT NOT NULL DEFAULT 'migrated-ambiguous';`,
+      ],
+    },
   ];
 
 
@@ -2010,7 +2196,29 @@ export function migrateDB(db: AppDatabase): void {
     if (m.version <= currentVersion) continue;
     sqlite.exec('BEGIN');
     try {
-      for (const stmt of m.sql) sqlite.exec(stmt);
+      for (const stmt of m.sql) {
+        // `ALTER TABLE … ADD COLUMN` is the one statement class here that is
+        // not naturally re-runnable — SQLite has no `IF NOT EXISTS` for it,
+        // unlike every `CREATE TABLE`/`CREATE INDEX` above which already say
+        // `IF NOT EXISTS`. That matters because migrations genuinely do get
+        // re-run: `DurableStorageRepositories.test.ts` rolls `_schema_versions`
+        // back and calls `migrateDB` again to prove a migration is safe on an
+        // existing database, and a real deployment can hit the same path if a
+        // crash lands between the DDL and the version row.
+        //
+        // Tolerating ONLY "duplicate column" keeps this narrow: the column
+        // already exists, which is precisely the post-condition the statement
+        // was trying to establish. Every other error still aborts and rolls
+        // back. Mirrors `safeAddColumn` above, which does the same for the
+        // pre-versioned section.
+        try {
+          sqlite.exec(stmt);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const additive = /\bADD\s+COLUMN\b/i.test(stmt);
+          if (!(additive && msg.includes('duplicate column'))) throw err;
+        }
+      }
       sqlite
         .prepare(`INSERT INTO _schema_versions (version, applied_at, name) VALUES (?, ?, ?)`)
         .run(m.version, Date.now(), m.name);

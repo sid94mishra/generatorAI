@@ -19,6 +19,13 @@ export const EXIT_CODES = {
   ERROR: 1,
   /** Bad arguments, unknown command, failed schema validation. */
   USAGE: 2,
+  /**
+   * The command is real and the arguments were valid, but this exact
+   * capability is not implemented yet. Distinct from `USAGE`: the caller did
+   * nothing wrong, and distinct from silently doing less than asked — an
+   * accepted option that has no effect must raise this, not warn-and-succeed.
+   */
+  UNSUPPORTED: 3,
   /** The requested entity does not exist. */
   NOT_FOUND: 4,
   /** The operation completed but the result was a failure state (e.g. a run failed). */
@@ -42,6 +49,7 @@ export type ExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
 export type CliErrorCode =
   | 'USAGE'
   | 'VALIDATION'
+  | 'UNSUPPORTED'
   | 'NOT_FOUND'
   | 'AMBIGUOUS_REF'
   | 'CONFLICT'
@@ -57,6 +65,7 @@ export type CliErrorCode =
 const EXIT_BY_CODE: Record<CliErrorCode, ExitCode> = {
   USAGE: EXIT_CODES.USAGE,
   VALIDATION: EXIT_CODES.USAGE,
+  UNSUPPORTED: EXIT_CODES.UNSUPPORTED,
   NOT_FOUND: EXIT_CODES.NOT_FOUND,
   AMBIGUOUS_REF: EXIT_CODES.USAGE,
   CONFLICT: EXIT_CODES.ERROR,
@@ -115,6 +124,11 @@ export class CliError extends Error {
 
   static notFound(what: string, ref: string, options?: CliErrorOptions): CliError {
     return new CliError('NOT_FOUND', `No ${what} matches "${ref}".`, options);
+  }
+
+  /** For an accepted option or command that would otherwise silently do less than asked. */
+  static unsupported(message: string, options?: CliErrorOptions): CliError {
+    return new CliError('UNSUPPORTED', message, options);
   }
 
   static internal(message: string, cause?: unknown): CliError {

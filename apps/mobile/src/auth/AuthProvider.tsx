@@ -61,6 +61,15 @@ export interface AuthContextValue {
   keyBacking: KeyBacking;
   /** Authenticated fetch, already routed and DPoP-signed. */
   fetch(path: string, init?: RequestInit): Promise<Response>;
+  /**
+   * The origin the runtime resolved to, or null before one exists.
+   *
+   * Needed by the multiplexed stream: RN's authenticated fetch cannot produce
+   * a streaming body, so the long-lived attach runs through `expo/fetch`,
+   * which has no notion of a base endpoint and needs an absolute url. Every
+   * other caller should use `fetch`/`streamUrl` and stay out of URL building.
+   */
+  endpoint: string | null;
   /** Mint a single-use ticket and build an SSE/WS URL. */
   streamUrl(scope: string, id: string | null): Promise<string>;
   socketUrl(path: string, scope: string, id: string | null): Promise<string>;
@@ -267,6 +276,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         if (!runtime) throw new Error('Not paired');
         return runtime.fetch(path, init);
       },
+      // Recomputed whenever `state` changes, which is the only time the
+      // runtime is built or replaced — pairing, restore, unpair, revoke.
+      endpoint: runtimeRef.current?.endpoint ?? null,
       streamUrl: (scope, id) => {
         const runtime = runtimeRef.current;
         if (!runtime) throw new Error('Not paired');

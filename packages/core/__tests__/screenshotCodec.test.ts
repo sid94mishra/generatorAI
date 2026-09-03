@@ -12,7 +12,11 @@ import path from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { transcodeScreenshot } from '../src/infrastructure/computer/screenshotCodec.js';
+import {
+  MIN_FRAME_BYTES,
+  transcodeScreenshot,
+  validateFrameBytes,
+} from '../src/infrastructure/computer/screenshotCodec.js';
 
 let dir: string;
 
@@ -160,5 +164,72 @@ describe('transcodeScreenshot', () => {
     expect(out.path).toBe(missing);
     expect(out.downscale).toBe(1);
     expect(out.mimeType).toBe('image/png');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────
+// X-15 — frame integrity.
+//
+// The check that shipped only understood JPEG, while the shipped default codec
+// is WebP, so on the default configuration nothing was validated at all. These
+// exercise every format we actually write, with REAL encoder output truncated
+// the way a mid-write crash truncates it.
+// ────────────────────────────────────────────────────────────────
+
+describe('validateFrameBytes (X-15)', () => {
+  async function encode(format: 'png' | 'jpeg' | 'webp'): Promise<Buffer> {
+    const sharp = (await import('sharp')).default;
+    const base = sharp({ create: { width: 320, height: 240, channels: 3, background: { r: 9, g: 120, b: 60 } } });
+    if (format === 'png') return base.png().toBuffer();
+    if (format === 'jpeg') return base.jpeg({ quality: 80 }).toBuffer();
+    return base.webp({ quality: 75 }).toBuffer();
+  }
+
+  it.runIf(sharpAvailable).each(['png', 'jpeg', 'webp'] as const)(
+    'accepts a whole %s frame',
+    async (format) => {
+      const result = validateFrameBytes(await encode(format));
+      expect(result).toMatchObject({ ok: true, format });
+    },
+  );
+
+  it.runIf(sharpAvailable).each(['png', 'jpeg', 'webp'] as const)(
+    'rejects a %s frame truncated mid-write — the grey-half-frame case',
+    async (format) => {
+      const whole = await encode(format);
+      // Cut the last tenth off. The header, the magic number and most of the
+      // image data all survive; only the terminator (and, for WebP, the
+      // declared length) can tell the difference. That is the entire point.
+      const truncated = whole.subarray(0, Math.floor(whole.length * 0.9));
+      const result = validateFrameBytes(truncated);
+      expect(result.ok).toBe(false);
+      expect(result.format).toBe(format);
+      expect(result.reason).toBeTruthy();
+    },
+  );
+
+  it.runIf(sharpAvailable)('rejects a WebP whose RIFF length disagrees with the file', async () => {
+    const whole = await encode('webp');
+    // Same length, valid signature, valid trailing bytes — only the declared
+    // size is wrong. A terminator-only check passes this.
+    const lying = Buffer.from(whole);
+    lying.writeUInt32LE(whole.length * 4, 4);
+    expect(validateFrameBytes(lying)).toMatchObject({ ok: false, format: 'webp' });
+  });
+
+  it('rejects a file too small to be any real screenshot', () => {
+    const stub = Buffer.alloc(MIN_FRAME_BYTES - 1, 0);
+    stub.write('RIFF', 0, 'latin1');
+    stub.write('WEBP', 8, 'latin1');
+    expect(validateFrameBytes(stub).ok).toBe(false);
+  });
+
+  it('rejects bytes that are not an image at all, rather than assuming', () => {
+    const notAnImage = Buffer.from('<html><body>Driver error: capture failed</body></html>'.repeat(4));
+    expect(validateFrameBytes(notAnImage)).toMatchObject({ ok: false, format: 'unknown' });
+  });
+
+  it('rejects an empty file without throwing', () => {
+    expect(validateFrameBytes(Buffer.alloc(0)).ok).toBe(false);
   });
 });

@@ -40,6 +40,13 @@ export interface TimelineStep {
    */
   detail?: string | (() => string);
   children?: TimelineStep[];
+  /** The provider tool callId — lets action buttons address this call. */
+  callId?: string;
+  /** Per-op +/− line stats for file write/edit tools. */
+  fileOp?: { kind: string; filePath: string; additions: number; deletions: number };
+  /** True for shell-command tools (Bash / PowerShell) — enables the
+   *  "open in terminal" affordance. */
+  isShell?: boolean;
 }
 
 export interface TodoItem {

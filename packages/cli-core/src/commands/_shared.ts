@@ -7,6 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import * as fs from 'node:fs/promises';
 import type { CliContext } from '../context/CliContext.js';
 import { CliError } from '../errors/CliError.js';
 import type { ColumnSpec, CommandFlag, CommandResult } from '../registry/CommandSpec.js';
@@ -81,6 +82,24 @@ export function parseList(value: string | string[] | undefined): string[] | unde
   const items = Array.isArray(value) ? value : value.split(',');
   const cleaned = items.map((i) => i.trim()).filter(Boolean);
   return cleaned.length ? cleaned : undefined;
+}
+
+/**
+ * Reads a text file the user pointed a flag/arg at, converting a missing or
+ * unreadable path into a clean `CliError` instead of a raw Node ENOENT/EACCES
+ * that would otherwise reach `toCliError`'s fallback and get reported as an
+ * "internal" error — misleading the user into thinking the tool is broken
+ * when they just typo'd a path. Matches the pattern already used by
+ * `loadRunProfile` (run.ts) and `readAttachments` (chat.ts).
+ */
+export async function readTextFile(filePath: string, label = 'file'): Promise<string> {
+  try {
+    return await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    throw new CliError('VALIDATION', `Could not read ${label} at ${filePath}.`, {
+      hint: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /** Drops undefined so a PATCH body never clears a field it did not mention. */
@@ -219,6 +238,15 @@ export async function streamUntil(
     filter?: string[];
     isDone?: (event: { kind: string; data: Record<string, unknown> }) => boolean;
     onEvent?: (event: { kind: string; data: Record<string, unknown>; sequence?: number }) => void;
+    /**
+     * Suppresses every emit this function makes on the caller's behalf —
+     * the generic `stream` event AND the reconnect/disconnect log lines —
+     * not just whatever the caller's own `onEvent` chooses to render.
+     * Without this, `--ndjson` still echoed one `data` frame per event for
+     * a caller that asked to wait silently (e.g. `chat send --no-stream`),
+     * because that path only gated its OWN callback, not this one.
+     */
+    silent?: boolean;
   } = {},
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -227,7 +255,8 @@ export async function streamUntil(
       if (settled) return;
       settled = true;
       unsubscribe();
-      error ? reject(error) : resolve();
+      if (error) reject(error);
+      else resolve();
     };
 
     const unsubscribe = ctx.stream.subscribe(
@@ -235,16 +264,24 @@ export async function streamUntil(
       id,
       (event) => {
         options.onEvent?.(event);
-        ctx.emit({ type: 'stream', kind: event.kind, data: event.data, ...(event.sequence !== undefined ? { sequence: event.sequence } : {}) });
+        if (!options.silent) {
+          ctx.emit({ type: 'stream', kind: event.kind, data: event.data, ...(event.sequence !== undefined ? { sequence: event.sequence } : {}) });
+        }
         if (options.isDone?.(event)) finish();
       },
       {
         ...(options.afterSequence !== undefined ? { afterSequence: options.afterSequence } : {}),
         ...(options.filter ? { filter: options.filter } : {}),
-        onReconnecting: (attempt) =>
-          ctx.emit({ type: 'log', level: 'debug', message: `Stream reconnecting (attempt ${attempt})` }),
-        onDisconnected: (reason) =>
-          ctx.emit({ type: 'log', level: 'debug', message: `Stream disconnected${reason ? `: ${reason}` : ''}` }),
+        onReconnecting: (attempt) => {
+          if (!options.silent) {
+            ctx.emit({ type: 'log', level: 'debug', message: `Stream reconnecting (attempt ${attempt})` });
+          }
+        },
+        onDisconnected: (reason) => {
+          if (!options.silent) {
+            ctx.emit({ type: 'log', level: 'debug', message: `Stream disconnected${reason ? `: ${reason}` : ''}` });
+          }
+        },
       },
     );
 

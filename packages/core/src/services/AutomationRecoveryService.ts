@@ -29,6 +29,16 @@ export interface IIdempotencyKeyRepository {
  *  systems don't hammer the DB. */
 const DEFAULT_IDEMPOTENCY_SWEEP_MS = 60_000;
 
+/**
+ * P0-b — the re-drive hook, wired to `AutomationService.resumeExecution`.
+ * Reports whether it took ownership of the execution; `false` means there was
+ * nothing left to run and the reconciler should finalise as before.
+ */
+export type ResumeExecutionFn = (
+  executionId: string,
+  opts: { activeIterationIndexes?: number[] },
+) => Promise<{ resumed: boolean; remaining: number }>;
+
 export class AutomationRecoveryService {
   private idempotencyTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -39,6 +49,15 @@ export class AutomationRecoveryService {
     private eventBus: EventBus,
     private idempotencyRepo: IIdempotencyKeyRepository,
     private logger: ILogger,
+    /**
+     * P0-b — re-drive callback for interrupted batches. Without it this
+     * service only ever FINALISES: a 1000-row batch that died at row 40 was
+     * marked `completed` with 40 iterations and the remaining 960 durable
+     * slots were never claimed by anyone, which is P0-41 verbatim — the exact
+     * defect the durable iteration machinery was built to fix. Optional so
+     * embeddings without an `AutomationService` keep the old behaviour.
+     */
+    private onResumeExecution?: ResumeExecutionFn,
   ) {}
 
   /**
@@ -82,12 +101,53 @@ export class AutomationRecoveryService {
    * WorkflowRunService's own recovery + polling will drive them and
    * the automation execution will be picked up on the NEXT boot if
    * this process dies again.
+   *
+   * P0-b — before ANY of that, offer the execution to the resume hook.
+   * Finalising an execution that still has unclaimed iteration slots is the
+   * data loss: it reports success for work that was never attempted.
    */
   private async recoverOne(exec: AutomationExecution): Promise<boolean> {
     const runs = await this.executionRepo.getExecutionRunsByExecutionId(exec.id);
 
+    // Consult the *current* workflow_run status for each execution-run.
+    // Repo status is a snapshot that may lag if the process crashed
+    // mid-write, so we always cross-check against workflow_runs.
+    const statuses = await Promise.all(
+      runs.map(async (run) => this.resolveRunStatus(run)),
+    );
+
+    const anyActive = statuses.some((s) => s === 'pending' || s === 'running');
+
+    // ── P0-b: re-drive whatever is left before finalising anything ──
+    if (this.onResumeExecution) {
+      // Iterations whose workflow run is still live. StartupRecoveryService
+      // re-drives those, so their slots must keep their claim — reclaiming
+      // them here would run the same iteration twice.
+      const activeIterationIndexes = runs
+        .filter((_run, idx) => statuses[idx] === 'pending' || statuses[idx] === 'running')
+        .map((run) => run.iterationIndex);
+      try {
+        const outcome = await this.onResumeExecution(exec.id, { activeIterationIndexes });
+        if (outcome.resumed) {
+          this.logger.info(
+            `[AutomationRecoveryService] Execution ${exec.id} resumed with ${outcome.remaining} ` +
+            `iteration(s) still to run — not finalising`,
+          );
+          return false;
+        }
+      } catch (err) {
+        // A failed resume must not block the reconciler from settling the
+        // execution; falling through is the pre-P0-b behaviour.
+        this.logger.warn(
+          `[AutomationRecoveryService] Resume of execution ${exec.id} failed: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     // No children → the run was interrupted before it could dispatch
-    // any workflow runs. Mark failed with a clear reason.
+    // any workflow runs (and, per the resume attempt above, has no
+    // unclaimed iterations left either). Mark failed with a clear reason.
     if (runs.length === 0) {
       await this.executionRepo.updateExecution(exec.id, {
         status: 'failed',
@@ -98,14 +158,6 @@ export class AutomationRecoveryService {
       return true;
     }
 
-    // Consult the *current* workflow_run status for each execution-run.
-    // Repo status is a snapshot that may lag if the process crashed
-    // mid-write, so we always cross-check against workflow_runs.
-    const statuses = await Promise.all(
-      runs.map(async (run) => this.resolveRunStatus(run)),
-    );
-
-    const anyActive = statuses.some((s) => s === 'pending' || s === 'running');
     if (anyActive) {
       // Still have live children — leave `exec.status` alone. The
       // WorkflowRunService's own recovery will drive completions and

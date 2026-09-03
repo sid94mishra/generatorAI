@@ -11,11 +11,13 @@ import React from 'react';
 import { render } from 'ink';
 import {
   CliContext,
+  CliError,
   createCliClient,
   getTuiStateFilePath,
   Keymap,
   toCliError,
   type CommandRegistry,
+  type TerminalAttachPort,
 } from '@generatorai/cli-core';
 import { enterAlternateScreen, ThemeProvider } from '@generatorai/tui-kit';
 import { App } from './App.js';
@@ -24,7 +26,9 @@ import { rehydrateRestoredPanes } from './open.js';
 import {
   createTuiStore,
   deserialiseWorkbench,
+  loadData,
   serialiseWorkbench,
+  setReconciler,
   setStore,
   StreamReconciler,
   useTui,
@@ -46,6 +50,22 @@ export interface LaunchOptions {
    */
   stdout?: NodeJS.WriteStream;
   stdin?: NodeJS.ReadStream;
+  /**
+   * Skip the alternate-screen takeover; render the workbench inline in
+   * normal scrollback instead (Phase 4 item 8). Two real audiences: a
+   * screen reader, which handles sequential scrollback far better than a
+   * full-screen app that redraws the same region in place, and a real
+   * terminal session being captured to a log/recording, where alt-screen
+   * escape codes are noise rather than useful history.
+   *
+   * Still requires a real interactive terminal underneath (stdin AND
+   * stdout) — this changes only which SCREEN BUFFER the frames land in,
+   * not whether the app can receive input at all. A fully headless
+   * "render without any TTY" mode is a materially different, much bigger
+   * feature (no keyboard input to react to at all) that this flag does
+   * not attempt.
+   */
+  inline?: boolean;
 }
 
 export async function launchTui(options: LaunchOptions): Promise<void> {
@@ -83,7 +103,18 @@ export async function launchTui(options: LaunchOptions): Promise<void> {
 
   const restored = options.restore ? await readLayout() : null;
   const store = createTuiStore({
-    ...(restored?.workbench ? { workbench: deserialiseWorkbench(restored.workbench) } : {}),
+    ...(restored?.workbench
+      ? {
+          // Phase 4 item 5 — responsive restore: the CURRENT terminal size,
+          // not necessarily the one the layout was saved from, decides
+          // per-tab whether the saved split geometry is safe to restore
+          // exactly or should fall back to flatten-and-resplit-evenly.
+          workbench: deserialiseWorkbench(restored.workbench, {
+            columns: session.capabilities.columns,
+            rows: session.capabilities.rows,
+          }),
+        }
+      : {}),
     ...(restored?.history ? { history: restored.history } : {}),
     theme: session.config.tui.theme,
   });
@@ -121,13 +152,47 @@ export async function launchTui(options: LaunchOptions): Promise<void> {
       );
   }
 
+  // Non-fatal: the server is ahead of what this CLI build understands.
+  // `createCliClient` already refuses outright (VERSION_MISMATCH) when the
+  // server is too OLD to talk to at all — this is the other, survivable
+  // direction, surfaced once rather than silently discovered later.
+  if (client.protocolWarning) {
+    store.getState().toast(client.protocolWarning, 'warning');
+  }
+
   const reconciler = new StreamReconciler(store, client.stream);
-  const stopReconciler = reconciler.start();
+  // Open question #6 — the diagnostics pane reads its counters from here.
+  setReconciler(reconciler);
+  const stopReconciler = reconciler.start({
+    // Open question #4 — a lifecycle event that CREATES something cannot
+    // supply the row a list renders (`chat.created` has an id and a name;
+    // the list shows status, model and `updatedAt`), so it asks for a
+    // refetch of that one cache instead of synthesising a half-populated
+    // row that fills itself in seconds later. Deletions and status changes
+    // are applied directly — see `lifecycle.ts`.
+    onStale: (keys) => void loadData(store, client.api, keys),
+  });
 
   // Restoring rebuilds the panes but not their contents.
   if (restored?.workbench) {
     void rehydrateRestoredPanes(client.api, store.getState());
   }
+
+  // `terminal.attach` is `inPalette: false, inRpc: false` (see
+  // `commands/workspace.ts`) — the command runner never dispatches it from
+  // here. The TUI's raw takeover instead happens directly in `App.tsx`'s
+  // own `terminal.attach` keybinding, via `useTerminalSuspension`, which
+  // never touches this port either. It exists only so a `CliContext` is
+  // never built with a missing field, and so any future path that DID
+  // reach it fails with a clear message instead of a crash.
+  const terminalAttachUnavailable: TerminalAttachPort = {
+    attach() {
+      throw CliError.unsupported(
+        'Raw terminal attach in the TUI happens through the terminal pane, not this command.',
+        { hint: 'Focus a terminal pane and press the attach key.' },
+      );
+    },
+  };
 
   const makeContext = async (): Promise<CliContext> =>
     new CliContext({
@@ -175,6 +240,7 @@ export async function launchTui(options: LaunchOptions): Promise<void> {
           ),
       },
       stream: client.stream,
+      terminalAttach: terminalAttachUnavailable,
       // Command output inside the TUI surfaces as toasts and pane updates;
       // writing to stdout here would punch a hole in the frame.
       emit: (event) => {
@@ -192,8 +258,9 @@ export async function launchTui(options: LaunchOptions): Promise<void> {
     });
 
   // Before the first paint, not from an effect: an effect runs after Ink has
-  // already written frame one to the main buffer.
-  const leaveAlternateScreen = enterAlternateScreen(stdout);
+  // already written frame one to the main buffer. `--inline` skips this
+  // entirely — the first frame then lands directly in normal scrollback.
+  const leaveAlternateScreen = options.inline ? () => {} : enterAlternateScreen(stdout);
 
   const instance = render(
     <ThemedWorkbench
@@ -209,6 +276,11 @@ export async function launchTui(options: LaunchOptions): Promise<void> {
         api={client.api}
         makeContext={makeContext}
         refreshMs={session.config.tui.refreshMs}
+        socketUrl={client.socketUrl}
+        // Phase 8 item 2 — which image transport this terminal actually
+        // supports. Detected since capabilities existed and, until now, used
+        // by nothing.
+        capabilities={session.capabilities}
       />
     </ThemedWorkbench>,
     {
@@ -236,6 +308,7 @@ export async function launchTui(options: LaunchOptions): Promise<void> {
   } finally {
     signal.removeEventListener('abort', onAbort);
     pump.stop();
+    setReconciler(null);
     stopReconciler();
     client.dispose();
     leaveAlternateScreen();

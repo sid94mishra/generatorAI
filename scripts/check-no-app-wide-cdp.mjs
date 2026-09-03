@@ -12,7 +12,10 @@
 // Run: node scripts/check-no-app-wide-cdp.mjs
 // ────────────────────────────────────────────────────────────────
 
-import { readFileSync, globSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+// Not `globSync` from node:fs — that is Node 22+, and CI pins Node 20, so
+// every checker in the root `lint` chain died at import before its first rule.
+import { globFiles } from './lib/globFiles.mjs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,7 +24,7 @@ const targetDir = resolve(repoRoot, 'apps', 'desktop', 'src');
 
 const DANGEROUS_PATTERN = /appendSwitch\(\s*['"]remote-debugging-(port|address)['"]/;
 
-const files = globSync('**/*.ts', { cwd: targetDir }).map((f) => resolve(targetDir, f));
+const files = globFiles('**/*.ts', targetDir).map((f) => resolve(targetDir, f));
 const offenders = [];
 for (const file of files) {
   const content = readFileSync(file, 'utf8');

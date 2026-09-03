@@ -4,6 +4,7 @@
 
 import { Router } from 'express';
 import type { Request, Response } from 'express';
+import type { z } from 'zod';
 import type { Container } from '../composition-root.js';
 import { validate } from '../middleware/validate.js';
 import {
@@ -261,7 +262,11 @@ export function createAutomationRoutes(container: Container): Router {
       try {
         const automationId = param(req, 'id');
         const scope = `automation:${automationId}`;
-        const body: { dataset?: unknown; saveAsDefault?: boolean } = req.body ?? {};
+        // `validate(TriggerAutomationBodySchema)` above already replaced
+        // `req.body` with its parsed, stripped output — this names that
+        // real type instead of re-widening to `unknown` and casting past
+        // it, which hid that the body was validated at all.
+        const body: z.infer<typeof TriggerAutomationBodySchema> = req.body ?? {};
 
         await runWithIdempotency(
           req,
@@ -269,7 +274,7 @@ export function createAutomationRoutes(container: Container): Router {
           scope,
           async () => {
             const exec = await automationService.triggerManual(automationId, {
-              dataset: body.dataset as never,
+              dataset: body.dataset,
               saveAsDefault: body.saveAsDefault,
             });
             return { executionId: exec.id, body: exec, status: 202 };

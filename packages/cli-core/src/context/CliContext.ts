@@ -85,7 +85,7 @@ export interface PromptPort {
  */
 export interface StreamPort {
   subscribe(
-    scope: 'session' | 'run' | 'chat' | 'global',
+    scope: 'session' | 'run' | 'chat' | 'global' | 'automation' | 'workspace',
     id: string,
     handler: (event: { kind: string; data: Record<string, unknown>; sequence?: number }) => void,
     options?: {
@@ -98,6 +98,40 @@ export interface StreamPort {
   ): () => void;
 }
 
+/** What `terminal.attach` needs to say about a session to attach to. */
+export interface TerminalAttachRequest {
+  workspaceId: string;
+  /** Existing session id; omit to have the port create a fresh one. */
+  terminalId?: string;
+}
+
+/** How a raw terminal takeover ended. */
+export interface TerminalAttachOutcome {
+  reason: 'detached' | 'exited' | 'error' | 'aborted';
+  /** Only meaningful when `reason === 'exited'`. */
+  exitCode?: number | null;
+  /** Set on `'error'`; occasionally set on `'exited'` (killed by signal). */
+  message?: string;
+}
+
+/**
+ * Raw terminal takeover — hands the caller's real stdin/stdout to a live
+ * server-side PTY over WebSocket until the remote session exits or the user
+ * detaches.
+ *
+ * `cli-core` deliberately does not import `ws`, and does not touch raw mode
+ * itself — both are surface concerns (the binary CLI proxies its own
+ * stdin/stdout; the TUI's terminal pane instead goes through Ink's terminal
+ * suspension and never calls this port at all). Every surface must still
+ * supply one: a surface with no terminal to hand over (the companion RPC
+ * server) supplies a port that refuses cleanly rather than leaving this
+ * `undefined` and letting a real command crash on `.attach is not a
+ * function`.
+ */
+export interface TerminalAttachPort {
+  attach(request: TerminalAttachRequest): Promise<TerminalAttachOutcome>;
+}
+
 export interface CliContextOptions {
   api: Api;
   config: ResolvedCliConfig;
@@ -106,6 +140,7 @@ export interface CliContextOptions {
   logger: Logger;
   prompt: PromptPort;
   stream: StreamPort;
+  terminalAttach: TerminalAttachPort;
   emit: (event: CliEvent) => void;
   signal: AbortSignal;
   /** True when the surface can ask the user something and get an answer. */
@@ -130,6 +165,7 @@ export class CliContext {
   readonly logger: Logger;
   readonly prompt: PromptPort;
   readonly stream: StreamPort;
+  readonly terminalAttach: TerminalAttachPort;
   readonly signal: AbortSignal;
   readonly interactive: boolean;
   readonly assumeYes: boolean;
@@ -149,6 +185,7 @@ export class CliContext {
     this.logger = options.logger;
     this.prompt = options.prompt;
     this.stream = options.stream;
+    this.terminalAttach = options.terminalAttach;
     this.signal = options.signal;
     this.interactive = options.interactive;
     this.assumeYes = options.assumeYes;

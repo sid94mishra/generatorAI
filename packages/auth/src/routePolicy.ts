@@ -127,6 +127,10 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: '/widget-assets', read: [], write: [], public: true },
 
   { prefix: '/stt', read: ['write:chats'], write: ['write:chats'] },
+  // Reading a message aloud carries the same authority as reading that
+  // chat — the mirror image of /stt's write:chats (speech input becomes a
+  // chat message).
+  { prefix: '/tts', read: ['read:chats'], write: ['read:chats'] },
 
   // OpenAPI docs.
   { prefix: '/openapi.json', read: [], write: [], public: true },

@@ -11,6 +11,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 interface CatalogPrefsState {
   /** Artifact ids of skills the user has turned OFF. */
@@ -21,7 +22,7 @@ interface CatalogPrefsState {
   setMcpEnabled: (id: string, enabled: boolean) => void;
 }
 
-export const useCatalogPrefsStore = create<CatalogPrefsState>()(
+const useCatalogPrefsStoreImpl = create<CatalogPrefsState>()(
   persist(
     (set) => ({
       disabledSkills: [],
@@ -56,3 +57,8 @@ export function getDisabledSkillSet(): Set<string> {
 export function getDisabledMcpSet(): Set<string> {
   return new Set(useCatalogPrefsStore.getState().disabledMcp);
 }
+
+
+// HMR-split-proof: every module instance shares the first-created store.
+// See lib/globalSingleton.ts for why this is load-bearing in dev.
+export const useCatalogPrefsStore = globalSingleton('web.catalogPrefsStore', () => useCatalogPrefsStoreImpl);

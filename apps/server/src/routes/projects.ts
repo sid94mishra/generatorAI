@@ -147,9 +147,12 @@ export function createProjectRoutes(container: Container): Router {
   // PUT /projects/:id/codebases/:cid — Update codebase config
   router.put('/:id/codebases/:cid', async (req, res, next) => {
     try {
-      const { alias, defaultBranch, subdirectory, settings } = req.body;
+      // `url` / `localPath` are accepted so a codebase linked with a wrong
+      // location can be corrected in place — before this the only way out of
+      // `status: 'error'` was to delete and re-add it.
+      const { alias, defaultBranch, subdirectory, settings, url, localPath } = req.body;
       const updated = await codebaseService.updateCodebase(String(req.params['cid']), {
-        alias, defaultBranch, subdirectory, settings,
+        alias, defaultBranch, subdirectory, settings, url, localPath,
       });
       res.json(updated);
     } catch (err) {

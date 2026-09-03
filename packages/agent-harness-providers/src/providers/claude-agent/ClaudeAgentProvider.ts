@@ -13,13 +13,19 @@
 //   SDK MCP tools        →  Domain ToolDefinition[]
 // ────────────────────────────────────────────────────────────────
 
-import {
-  query as claudeQuery,
-  deleteSession,
-} from '@anthropic-ai/claude-agent-sdk';
+// ── W41 — the SDK is resolved on FIRST USE, not at module load ──
+//
+// This was `import { query, deleteSession } from '@anthropic-ai/claude-agent-sdk'`
+// — a static VALUE import, which meant merely importing this module (as the
+// package barrel used to, eagerly) resolved and evaluated the whole Claude
+// Agent SDK. `HarnessFactory.loadClaudeAgentModule()`'s dynamic import was
+// therefore decorative: by the time it ran the SDK was long since loaded, and
+// W41's "boot loads zero provider SDK code" was false. `import type` is erased
+// by the compiler, so the types below cost nothing at runtime.
 import type {
   Query,
   Options as ClaudeOptions,
+  SDKControlGetContextUsageResponse as ClaudeContextUsageResponse,
 } from '@anthropic-ai/claude-agent-sdk';
 import type {
   IAgentHarness,
@@ -38,8 +44,13 @@ import type {
 import type { HookBridge } from '@generatorai/core';
 import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
 import { HarnessSessionError, withSpan, getMeter, createAgentEvent } from '@generatorai/shared';
-import { mapClaudeAgentMessageToAgentEvents } from './event-mapper.js';
-import { buildClaudeAgentMcpTools, ToolSemaphore } from './tool-factory.js';
+import { lastIterationUsage, mapClaudeAgentMessageToAgentEvents } from './event-mapper.js';
+// W41 — `./tool-factory.js` value-imports `createSdkMcpServer` from the Claude
+// SDK (and `zod`), so importing it statically here would defeat the lazy load
+// above. It is imported dynamically at its single call site in
+// `createConversation`. `ToolSemaphore` comes from its own SDK-free module
+// (tool-factory only re-exports it) so it can stay static.
+import { ToolSemaphore, MAX_PARALLEL_TOOLS } from '../../toolSemaphore.js';
 import { mapClaudeToolNameToDomainType } from './permission-map.js';
 import type { AgentHostSupervisor } from '../../AgentHostSupervisor.js';
 import { existsSync } from 'node:fs';
@@ -63,6 +74,51 @@ import {
   normaliseClaudeQuestions,
 } from './plan-gate.js';
 import { buildHarnessEnv } from '../../childEnv.js';
+
+// ── W41 — lazy SDK module singleton ──────────────────────────────
+//
+// Resolved once, on first use, and cached for the process lifetime. Mirrors
+// `HarnessFactory`'s module cache so a provider that is constructed but never
+// driven (e.g. a registry entry for an account the user never selects) still
+// costs nothing.
+
+// `import type * as` — erased at compile time, so the SDK is still only
+// loaded by the dynamic `import()` below (W41). The inline `typeof import()`
+// form this replaces is what `consistent-type-imports` forbids.
+import type * as ClaudeAgentSdkNs from '@anthropic-ai/claude-agent-sdk';
+type ClaudeAgentSdk = typeof ClaudeAgentSdkNs;
+
+let claudeSdk: ClaudeAgentSdk | null = null;
+let claudeSdkLoading: Promise<ClaudeAgentSdk> | null = null;
+
+/**
+ * Resolve `@anthropic-ai/claude-agent-sdk`.
+ *
+ * The SDK is an OPTIONAL dependency, so a failure here is a legitimate runtime
+ * state ("this build doesn't have Claude installed"), not a crash — callers
+ * surface it as a provider-unavailable error rather than letting it escape at
+ * import time, which is what a static import would have done to the whole
+ * process.
+ */
+export async function loadClaudeSdk(): Promise<ClaudeAgentSdk> {
+  if (claudeSdk) return claudeSdk;
+  claudeSdkLoading ??= import('@anthropic-ai/claude-agent-sdk')
+    .then((mod) => {
+      claudeSdk = mod;
+      return mod;
+    })
+    .catch((err: unknown) => {
+      // Clear the memo so a later call can retry (e.g. after an install).
+      claudeSdkLoading = null;
+      throw err;
+    });
+  return claudeSdkLoading;
+}
+
+/** W41 — test seam: has the SDK been pulled into this process yet? */
+export function isClaudeSdkLoaded(): boolean {
+  return claudeSdk !== null;
+}
 
 /**
  * Locate the user's installed Claude Code CLI.
@@ -229,6 +285,44 @@ const listenerLeakWarnings = meter.createCounter('claude_agent.listeners.leak_wa
 
 const LISTENER_LEAK_THRESHOLD = 50;
 
+// ── W35 — PreToolUse gate primitives ─────────────────────────────
+//
+// Hoisted to module scope so BOTH construction paths (`buildClaudeHooks`, the
+// bridge translator, and `buildConversationHooks`, the always-on installer)
+// build the SDK entry the same way. Two copies of this shape is exactly how
+// the gate came to exist on one path and not the other.
+
+/** The domain policy callback a `PreToolUse` gate delegates to. */
+type PreToolUseGate = NonNullable<HookBridge['onPreToolUse']>;
+
+/**
+ * W35-B2 — deadline for a single `PreToolUse` gate evaluation.
+ *
+ * A hung permission handler must not wedge the agent forever, and the
+ * expiry MUST deny: a gate that opens on timeout is not a gate.
+ */
+const PRE_TOOL_USE_GATE_TIMEOUT_MS = 5_000;
+
+/** Wrap a plain handler into the SDK's `Options.hooks` matcher/callback shape. */
+function wrapClaudeHook(
+  fn: (input: Record<string, unknown>) => Promise<Record<string, unknown> | void>,
+): unknown[] {
+  return [{ hooks: [async (input: unknown) => (await fn(input as Record<string, unknown>)) ?? {}] }];
+}
+
+/**
+ * W35 — how many tool calls ran through the always-installed `PreToolUse`
+ * hook with NO policy attached (neither a conversation `HookBridge` nor a
+ * provider-level default gate). This is the observable that keeps the
+ * capability ledger honest: a non-zero count means tool calls on this process
+ * are gated only by the SDK's own permission evaluation, which per Anthropic
+ * ("`canUseTool` … is invoked only when the permission evaluation flow
+ * resolves to a prompt") is NOT a security boundary.
+ */
+const ungatedToolCalls = meter.createCounter('claude_agent.tool_gate.ungated_calls', {
+  description: 'Tool calls that reached PreToolUse with no policy gate installed',
+});
+
 /**
  * W13 / X-1 — Maximum parallel tool calls per conversation.
  *
@@ -239,8 +333,13 @@ const LISTENER_LEAK_THRESHOLD = 50;
  * the parallelism benefit for most tool workloads.
  *
  * Set `GENERATORAI_MAX_PARALLEL_TOOLS=0` to disable limiting.
+ *
+ * W13 — the value now comes from `toolSemaphore.ts` (imported at the top of
+ * this file) rather than being re-parsed here. This file and
+ * `CopilotProvider.ts` each used to carry their own
+ * `Number(process.env[...] ?? 8)`, so the two providers could disagree about
+ * the bound, and a typo'd env var became `NaN` independently in each.
  */
-const MAX_PARALLEL_TOOLS = Number(process.env['GENERATORAI_MAX_PARALLEL_TOOLS'] ?? 8);
 
 /**
  * W13-B1: Returns true when a model stop reason indicates the response was
@@ -253,8 +352,14 @@ const MAX_PARALLEL_TOOLS = Number(process.env['GENERATORAI_MAX_PARALLEL_TOOLS'] 
  *  - Some providers use 'length' for the same condition
  *  - context_length errors can also manifest here
  */
+/*
+ * Exported ONLY so `__tests__/truncation-guard.test.ts` can assert against the
+ * real predicate. That suite used to paste a copy of this function into itself,
+ * which meant deleting the guard here left the suite green — the regression
+ * evidence for W13-B1 tested nothing. Not part of the provider's public API.
+ */
 /* W13-B1 */
-function isTruncationStopReason(reason: string): boolean {
+export function isTruncationStopReason(reason: string): boolean {
   const r = reason.toLowerCase();
   return r === 'max_tokens' || r === 'length' || r.includes('max_token') || r.includes('context_length');
 }
@@ -309,6 +414,42 @@ export class ClaudeAgentProvider implements IAgentHarness {
   private conversationWarnings = new Map<string, ConversationWarning[]>();
   /** Agents registered on each conversation. */
   private conversationAgents = new Map<string, HarnessAgentInfo[]>();
+
+  /**
+   * W35 — provider-level default `PreToolUse` policy.
+   *
+   * The `PreToolUse` hook is ALWAYS installed (see `buildConversationHooks`),
+   * but a hook with nothing to ask is not a boundary. This is the one place a
+   * host can attach a policy that applies to EVERY conversation this provider
+   * creates, including the ones that pass no `hooks` of their own —
+   * `acp-entry.ts` and `StageExecutionService`, both of which currently rely
+   * solely on `canUseTool` and are therefore ungated.
+   *
+   * Left `undefined` deliberately: see `DEFER` in `preToolUseHandler` for why
+   * the no-policy default cannot be "deny", and `capabilities()` for why the
+   * ledger reports `fullToolGating: false` until this is set.
+   */
+  private defaultToolGate: PreToolUseGate | undefined;
+
+  /**
+   * W35 — install (or clear) the provider-level default tool gate.
+   *
+   * Setting this flips `capabilities().fullToolGating` to `true`, because it
+   * is then true: every conversation, hooks or no hooks, is evaluated by a
+   * fail-closed `PreToolUse` policy. Callers that do NOT set it get an honest
+   * `false` rather than the unconditional `true` this provider used to claim.
+   *
+   * Takes effect on the NEXT turn of every conversation — options are rebuilt
+   * per `sendPrompt`, so already-open conversations are covered too.
+   */
+  setDefaultToolGate(gate: PreToolUseGate | undefined): void {
+    this.defaultToolGate = gate;
+  }
+
+  /** W35 — whether a provider-level default gate is installed. */
+  hasDefaultToolGate(): boolean {
+    return this.defaultToolGate !== undefined;
+  }
 
   constructor(private options: ClaudeAgentProviderOptions) {
     this.supervisor = options.supervisor;
@@ -401,8 +542,28 @@ export class ClaudeAgentProvider implements IAgentHarness {
    *
    * L9: Capability discovery is by declaration, not by exception.
    * W42 — N-2 fix: no runtime probe required.
-   * W35 — fullToolGating is true: the PreToolUse hook fires on EVERY tool
-   *   call, regardless of allowedTools or permissionMode (N-5 fix).
+   *
+   * W35 — `fullToolGating` is NO LONGER an unconditional `true`.
+   *
+   * It used to be, on the strength of a comment asserting "the PreToolUse hook
+   * fires on EVERY tool call". The hook did fire on every tool call — of the
+   * conversations that supplied a `HookBridge` with an `onPreToolUse`. Two
+   * production callers supply none (`apps/server/src/acp-entry.ts`, and
+   * `StageExecutionService`, which passes `onPermissionRequest` but no
+   * `hooks`), so for them nothing was installed and the only gate was
+   * `canUseTool` — which Anthropic documents as "invoked only when the
+   * permission evaluation flow resolves to a prompt … To gate every tool call,
+   * use a `PreToolUse` hook instead", i.e. explicitly not a boundary (N-5).
+   * The ledger was claiming a property the runtime did not have.
+   *
+   * Two changes make claim and runtime agree:
+   *   1. The `PreToolUse` hook is now installed on EVERY conversation
+   *      (`buildConversationHooks`), so a policy always has somewhere to land
+   *      and no caller has to remember to opt in.
+   *   2. This flag reports whether a POLICY is actually attached. Provider-wide
+   *      that means `setDefaultToolGate()` has been called; per conversation,
+   *      ask `conversationCapabilities()`, which also counts a conversation's
+   *      own `hooks.onPreToolUse`.
    */
   capabilities(): ProviderCapabilities {
     return {
@@ -413,16 +574,37 @@ export class ClaudeAgentProvider implements IAgentHarness {
       planMode: true,
       mcpServers: true,
       skillDirectories: true,
-      // W35 / N-5 fix — fullToolGating is now true because the security gate
-      // is wired to PreToolUse (fires before every tool) rather than canUseTool
-      // (fires only on fall-through).
-      fullToolGating: true,
+      // W35 / N-5 — true only when a policy is genuinely attached to every
+      // conversation. The hook itself is always installed; a hook with no
+      // policy behind it defers to the SDK's own permission evaluation and
+      // must not be advertised as a gate.
+      fullToolGating: this.hasDefaultToolGate(),
       sessionPersistence: true,
       budgetTracking: true,
       maxContextTokens: 200_000,
       // MINOR-4 fix: computerUse must be explicitly declared (L9 fail-closed).
       // Claude supports the native computer_use tool via its SDK.
       computerUse: true,
+    };
+  }
+
+  /**
+   * W35 — capabilities as they actually apply to ONE conversation.
+   *
+   * `IAgentHarness.capabilities()` takes no arguments, so it can only describe
+   * the provider-wide floor. Tool gating, though, is decided per conversation:
+   * a chat that supplies `hooks.onPreToolUse` is fully gated even when no
+   * provider-level default has been installed. Callers holding a conversation
+   * id should ask this instead of the ledger's floor.
+   *
+   * An unknown conversation id reports the floor — fail-closed: we never
+   * claim gating for a conversation we cannot see.
+   */
+  conversationCapabilities(conversationId: string): ProviderCapabilities {
+    const bridge = this.conversations.get(conversationId)?.hooks as HookBridge | undefined;
+    return {
+      ...this.capabilities(),
+      fullToolGating: !!bridge?.onPreToolUse || this.hasDefaultToolGate(),
     };
   }
 
@@ -506,6 +688,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // Park forever; the caller closes the handle when it's done.
       await new Promise<void>(() => { /* never settles */ });
     }
+    const { query: claudeQuery } = await loadClaudeSdk(); // W41
     const q = claudeQuery({
       prompt: neverYields() as unknown as Parameters<typeof claudeQuery>[0]['prompt'],
       options: {
@@ -521,7 +704,42 @@ export class ClaudeAgentProvider implements IAgentHarness {
     }
   }
 
+  /**
+   * W41 — why `getModels()` NEVER throws.
+   *
+   * A model catalog is a *description of what is available*, and "nothing" is a
+   * valid answer to that question. Throwing made an un-configured or logged-out
+   * provider fatal to whatever asked: `HarnessRegistry.refresh()` probes every
+   * managed provider, so one broken CLI could take the whole catalog with it,
+   * and boot must not fail because one provider is misconfigured.
+   *
+   * The reason is not swallowed — it is recorded on
+   * {@link getLastModelProbeError} so the registry can still surface *why* a
+   * provider has an empty catalog instead of just reporting it unusable.
+   */
+  private lastModelProbeError: string | undefined;
+
+  /** W41 — why the last `getModels()` returned `[]`, if it did. */
+  getLastModelProbeError(): string | undefined {
+    return this.lastModelProbeError;
+  }
+
   async getModels(): Promise<HarnessModel[]> {
+    try {
+      const models = await this.probeModels();
+      this.lastModelProbeError = undefined;
+      return models;
+    } catch (err) {
+      this.lastModelProbeError = (err as Error)?.message ?? String(err);
+      if (this.verbose) {
+        console.warn(`[ClaudeAgentAdapter] Model probe failed — returning empty catalog: ${this.lastModelProbeError}`);
+      }
+      return []; // W41 — failure mode is an empty catalog, never a throw.
+    }
+  }
+
+  /** The real probe. May throw; only {@link getModels} calls it. */
+  private async probeModels(): Promise<HarnessModel[]> {
     const cached = this.modelCache;
     if (cached && Date.now() - cached.at < ClaudeAgentProvider.MODEL_CACHE_TTL_MS) {
       return cached.models;
@@ -582,7 +800,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
       let mcpConfig: Record<string, unknown> = {};
       let domainToolNames: string[] = [];
       if (params.tools && params.tools.length > 0) {
-        const { mcpServerConfig, toolNames } = buildClaudeAgentMcpTools(params.tools, this.toolSemaphore);
+        // W41 — dynamic: tool-factory pulls in the SDK and zod.
+        const { buildClaudeAgentMcpTools } = await import('./tool-factory.js');
+        // W13-B1 — the conversationId is what lets the semaphore refuse to run
+        // a tool for a turn already marked truncated. Without it the latch has
+        // no key and every tool executes regardless of stop reason.
+        const { mcpServerConfig, toolNames } = buildClaudeAgentMcpTools(
+          params.tools,
+          this.toolSemaphore,
+          params.conversationId,
+        );
         mcpConfig = { 'generatorai-tools': mcpServerConfig };
         domainToolNames = toolNames;
       }
@@ -674,12 +901,6 @@ export class ClaudeAgentProvider implements IAgentHarness {
           params: { field: 'provider', provider: 'claude-agent' },
         });
       }
-      if (params.excludedBuiltinTools?.length) {
-        warnings.push({
-          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-          params: { field: 'excludedBuiltinTools', provider: 'claude-agent' },
-        });
-      }
 
       // Store configuration for later use.
       //
@@ -694,9 +915,20 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // deliberately drop it and start a fresh agent session on the new model;
       // the user-visible transcript lives in our own DB and is unaffected,
       // only the provider-side context restarts.
+      //
+      // When this adapter has NEVER seen the conversation, there is nothing to
+      // carry over — but the caller may know the session id anyway (a runtime
+      // recycle reads it off the outgoing adapter and passes it in
+      // `resumeProviderSessionId`). Honouring it is the difference between the
+      // chat continuing and the model silently restarting with no history.
       const previous = this.conversations.get(params.conversationId);
       const nextModel = params.model ?? this.options.defaultModel;
       const modelChanged = !!previous && previous.model !== nextModel;
+      const resumeSessionId = previous
+        ? modelChanged
+          ? undefined
+          : previous.sdkSessionId
+        : params.resumeProviderSessionId;
       const config: StoredConversationConfig = {
         conversationId: params.conversationId,
         model: nextModel,
@@ -708,7 +940,17 @@ export class ClaudeAgentProvider implements IAgentHarness {
         permissionMode: params.permissionMode ?? this.options.defaultPermissionMode ?? 'bypassPermissions',
         tools: builtinAllowList,
         allowedTools: resolvedAllowedTools.length > 0 ? resolvedAllowedTools : undefined,
-        disallowedTools: params.excludedTools,
+        // `disallowedTools` takes BUILT-IN tool names too (that is how Claude
+        // Code itself disables e.g. `Agent`), so `excludedBuiltinTools` maps
+        // here rather than being warn-and-dropped — orchestrator chats rely
+        // on it to remove the SDK's in-process Agent/Task delegation tools.
+        disallowedTools: (() => {
+          const merged = [
+            ...(params.excludedTools ?? []),
+            ...(params.excludedBuiltinTools ?? []),
+          ];
+          return merged.length > 0 ? [...new Set(merged)] : undefined;
+        })(),
         mcpServers: Object.keys(mergedMcpServers).length > 0 ? mergedMcpServers : undefined,
         agents: Object.keys(agents).length > 0 ? agents : undefined,
         ...(params.skills?.length ? { skills: params.skills } : {}),
@@ -724,7 +966,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         onPlanReviewRequest: params.onPlanReviewRequest,
         onQuestionRequest: params.onQuestionRequest,
         planModeInstructions: params.planModeInstructions,
-        ...(previous?.sdkSessionId && !modelChanged ? { sdkSessionId: previous.sdkSessionId } : {}),
+        ...(resumeSessionId ? { sdkSessionId: resumeSessionId } : {}),
       };
 
       this.conversations.set(params.conversationId, config);
@@ -800,6 +1042,19 @@ export class ClaudeAgentProvider implements IAgentHarness {
     return this.conversations.has(conversationId);
   }
 
+  /**
+   * W12 — the SDK session id backing this conversation, i.e. the value the CLI
+   * needs in `options.resume` to continue it with its history.
+   *
+   * Undefined until the first turn has run (the SDK mints it and we capture it
+   * from the init message), and undefined for a conversation this adapter does
+   * not hold. A caller moving the conversation to another adapter instance
+   * passes it back as `CreateConversationParams.resumeProviderSessionId`.
+   */
+  getProviderSessionId(conversationId: string): string | undefined {
+    return this.conversations.get(conversationId)?.sdkSessionId;
+  }
+
   getConversationWarnings(conversationId: string): ConversationWarning[] {
     return this.conversationWarnings.get(conversationId) ?? [];
   }
@@ -836,6 +1091,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     this.cleanupConversation(conversationId);
     // Also try to delete the SDK session
     try {
+      const { deleteSession } = await loadClaudeSdk(); // W41
       await deleteSession(conversationId, {});
     } catch {
       // Session may not exist on disk — that's fine
@@ -878,6 +1134,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
       // Fire and forget — run query in background
       const abortController = new AbortController();
+      // W13-B1 — a turn starts un-truncated. Without this the latch set by a
+      // previous truncated turn would persist and refuse every tool for the
+      // rest of the conversation.
+      this.toolSemaphore.beginTurn(conversationId);
+      // Likewise for the context breakdown: last turn's describes a window
+      // that no longer exists, and publishing it against this turn's token
+      // total would report a split that does not add up.
+      this.resetContextUsageProbe(conversationId);
+
       const activeQuery: ActiveQuery = {
         queryId: crypto.randomUUID(),
         conversationId,
@@ -930,8 +1195,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
         if (signal.aborted) {
           throw new Error('sendPromptAndWait aborted before start');
         }
+        // W13 / X-4 — route an externally-signalled abort through the SAME
+        // canonical stop path as `abortConversation()`. Aborting the controller
+        // directly (what this used to do) tore the turn down without ever
+        // emitting `harness.cancelled`, so a caller that stops a turn via its
+        // own AbortSignal — every workflow stage and every automation — got a
+        // bare rejection and the UI never rendered the neutral "Stopped" badge.
+        // The two cancellation origins must be observationally identical; see
+        // `runCancellationConformance`, which now asserts exactly that.
         abortHandler = () => {
-          abortController.abort();
+          void this.abortConversation(conversationId);
         };
         signal.addEventListener('abort', abortHandler, { once: true });
       }
@@ -964,6 +1237,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
         }, tickMs);
       }
 
+      // W13-B1 — a turn starts un-truncated. Without this the latch set by a
+      // previous truncated turn would persist and refuse every tool for the
+      // rest of the conversation.
+      this.toolSemaphore.beginTurn(conversationId);
+      // Likewise for the context breakdown: last turn's describes a window
+      // that no longer exists, and publishing it against this turn's token
+      // total would report a split that does not add up.
+      this.resetContextUsageProbe(conversationId);
+
       const activeQuery: ActiveQuery = {
         queryId: crypto.randomUUID(),
         conversationId,
@@ -986,6 +1268,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       try {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Sending prompt to ${conversationId} (${prompt.length} chars)`);
 
+        const { query: claudeQuery } = await loadClaudeSdk(); // W41
         const queryHandle = claudeQuery({ prompt, options });
         activeQuery.closeHandle = () => queryHandle.close();
 
@@ -1008,6 +1291,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
           // Accumulate content
           if (message.type === 'assistant') {
+            // Sample the authoritative context breakdown while the query is
+            // still open — see `beginContextUsageProbe` for why this cannot
+            // wait for `result` and must not be awaited.
+            this.beginContextUsageProbe(conversationId, queryHandle);
             const betaMsg = message.message;
             if (betaMsg?.content) {
               for (const block of betaMsg.content) {
@@ -1030,6 +1317,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
               const reason = String(betaMsg.stop_reason);
               if (isTruncationStopReason(reason)) {
                 truncationStopReason = reason;
+                // W13-B1 — latch the turn so the semaphore refuses any tool
+                // still queued behind this message. Recording the reason
+                // locally only affects the events we emit; it does not stop a
+                // tool whose arguments were cut mid-JSON from running.
+                this.toolSemaphore.markTruncated(conversationId, reason);
               }
             }
           } else if (message.type === 'result') {
@@ -1041,7 +1333,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
               }
             }
             this.recordObservedLimits(message);
-            await this.emitContextUsageSnapshot(conversationId, queryHandle);
+            this.emitContextUsageSnapshot(conversationId, message);
           }
         }
 
@@ -1226,73 +1518,185 @@ export class ClaudeAgentProvider implements IAgentHarness {
     }
   }
 
+  // ── W35 — the always-installed PreToolUse gate ───────────────────────────
+
+  /**
+   * Build the `PreToolUse` callback the SDK invokes before every tool call.
+   *
+   * `gate` is the policy. Both call sites funnel through here so the
+   * fail-closed semantics exist in exactly one place:
+   *
+   *   • ERROR   → deny. A gate that opens on an exception is no gate (L16).
+   *   • TIMEOUT → deny, after {@link PRE_TOOL_USE_GATE_TIMEOUT_MS}. A hung
+   *     approver must not wedge the agent, and must not be allowed to buy the
+   *     model a free tool call by hanging.
+   *   • NO POLICY (`gate === undefined`) → DEFER.
+   *
+   * ── Why the no-policy default is DEFER and not deny or allow ──
+   *
+   * The hook is installed unconditionally so that a boundary never depends on
+   * a caller remembering to opt in. But "installed" and "opinionated" are
+   * different things, and with no policy supplied there is no opinion to
+   * express:
+   *
+   *   deny  — would break every working path in the product. Chats,
+   *           `acp-entry.ts`, and every workflow stage create conversations
+   *           with no `hooks`; denying by default would refuse every tool call
+   *           they make. A boundary nobody can pass is an outage, not
+   *           security.
+   *   allow — would be strictly WORSE than the pre-W35 behaviour. A
+   *           `permissionDecision: 'allow'` from `PreToolUse` short-circuits
+   *           the SDK's permission evaluation, so it would suppress the
+   *           `canUseTool` prompts (and therefore the HITL approvals) that
+   *           these paths currently do get. Returning "allow" for a policy
+   *           that was never asked is precisely the overclaim being fixed.
+   *   DEFER — returns no decision, leaving `permissionMode` / `allowedTools` /
+   *           `canUseTool` to decide exactly as they do today. Behaviour is
+   *           unchanged, the funnel point exists for a policy to be attached
+   *           at any time, and every such call is counted on
+   *           `claude_agent.tool_gate.ungated_calls` so the gap is measurable
+   *           rather than merely asserted.
+   *
+   * DEFER is honest, not sufficient — which is why `capabilities()` reports
+   * `fullToolGating: false` while it is the operative policy.
+   */
+  private preToolUseHandler(
+    gate: PreToolUseGate | undefined,
+  ): (input: Record<string, unknown>) => Promise<Record<string, unknown> | void> {
+    return async (input) => {
+      const toolName = String(input['tool_name'] ?? '');
+
+      if (!gate) {
+        // DEFER — see the method doc. Emit the metric so an ungated process is
+        // visible in telemetry instead of only in a capability flag.
+        ungatedToolCalls.add(1, { tool: toolName });
+        return;
+      }
+
+      let out;
+      try {
+        /* W35-B2 */ out = await Promise.race([
+          gate(
+            {
+              timestamp: Date.now(),
+              cwd: String(input['cwd'] ?? ''),
+              toolName,
+              toolArgs: input['tool_input'],
+            },
+            { sessionId: String(input['session_id'] ?? '') },
+          ),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error(`PreToolUse gate timeout after ${PRE_TOOL_USE_GATE_TIMEOUT_MS}ms`)),
+              PRE_TOOL_USE_GATE_TIMEOUT_MS,
+            ),
+          ),
+        ]);
+      } catch (err) {
+        // Fail CLOSED: any error or timeout → deny the tool call.
+        // An open gate on error would be a security regression (L16).
+        if (this.verbose) {
+          console.warn(
+            `[ClaudeAgentAdapter] PreToolUse gate error for tool '${toolName}' — denying (fail-closed): ${err}`,
+          );
+        }
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: `Permission gate error: ${String(err)}`,
+          },
+        };
+      }
+      if (!out) return;
+      return {
+        ...(out.suppressOutput !== undefined ? { suppressOutput: out.suppressOutput } : {}),
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          ...(out.decision ? { permissionDecision: out.decision } : {}),
+          ...(out.reason ? { permissionDecisionReason: out.reason } : {}),
+          ...(out.modifiedArgs ? { updatedInput: out.modifiedArgs } : {}),
+          ...(out.additionalContext ? { additionalContext: out.additionalContext } : {}),
+        },
+      };
+    };
+  }
+
+  /**
+   * W35 — the hook set handed to the SDK for ONE conversation.
+   *
+   * Differs from `buildClaudeHooks` (a pure translator of whatever the caller
+   * supplied) in one load-bearing way: `PreToolUse` is ALWAYS present. It was
+   * previously installed only when `config.hooks?.onPreToolUse` existed, which
+   * meant the security gate was opt-in per caller — and two production callers
+   * did not opt in. A boundary that every caller must remember to switch on is
+   * not a boundary.
+   *
+   * Policy precedence: the conversation's own bridge → the provider-level
+   * default (`setDefaultToolGate`) → DEFER (see `preToolUseHandler`).
+   */
+  private buildConversationHooks(config: StoredConversationConfig): ClaudeOptions['hooks'] {
+    const bridge = (config.hooks as HookBridge | undefined) ?? {};
+    const hooks = { ...(this.buildClaudeHooks(bridge) as unknown as Record<string, unknown[]>) };
+    if (!hooks['PreToolUse']) {
+      hooks['PreToolUse'] = wrapClaudeHook(this.preToolUseHandler(this.defaultToolGate));
+    }
+    // Pin SDK subagents to the foreground — always installed, alongside the
+    // policy gate (a deny from the gate still wins; this only rewrites input).
+    //
+    // The SDK's `Agent` tool runs subagents in the background BY DEFAULT
+    // (`run_in_background` defaults to true). This provider spawns one CLI
+    // process per turn and that process exits when the turn's `result`
+    // arrives, so a "background" subagent silently evaporates: observed live
+    // (2026-09-01) as "Async agent launched successfully" followed by a turn
+    // that ended with the model promising results that could never come.
+    // Foreground subagents block the turn until they finish, which is the
+    // only semantics a per-turn process can honour. (Platform-level
+    // background work goes through spawn_background_agent instead, which
+    // outlives the process by design.)
+    (hooks['PreToolUse'] as unknown[]).push({
+      matcher: 'Agent',
+      hooks: [
+        async (rawInput: unknown) => {
+          const input = rawInput as {
+            tool_name?: string;
+            tool_input?: Record<string, unknown>;
+          };
+          // The matcher is a regex over tool names, so guard exactly here
+          // too — this must never touch another tool's input.
+          if (input.tool_name !== 'Agent') return {};
+          const toolInput = input.tool_input ?? {};
+          if (toolInput['run_in_background'] === false) return {};
+          return {
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'allow',
+              permissionDecisionReason:
+                'Subagents must run in the foreground on this per-turn runtime; background subagents do not survive the turn.',
+              updatedInput: { ...toolInput, run_in_background: false },
+            },
+          };
+        },
+      ],
+    });
+    return hooks as ClaudeOptions['hooks'];
+  }
+
   /**
    * HKS-01 — bridge the domain hook surface onto the Claude SDK's
    * `Options.hooks`. Only the six phases the domain models are wired; the SDK
    * exposes 31 events and the rest stay unused.
+   *
+   * Pure translation: a phase appears here only when the bridge supplies a
+   * handler for it. The unconditional `PreToolUse` gate is layered on top by
+   * `buildConversationHooks`, which is what `buildQueryOptions` actually calls.
    */
   private buildClaudeHooks(bridge: HookBridge): ClaudeOptions['hooks'] {
     const hooks: Record<string, unknown[]> = {};
-    const wrap = (fn: (input: Record<string, unknown>) => Promise<Record<string, unknown> | void>) => [
-      { hooks: [async (input: unknown) => (await fn(input as Record<string, unknown>)) ?? {}] },
-    ];
+    const wrap = wrapClaudeHook;
 
     if (bridge.onPreToolUse) {
-      // W35-B2 fix: PreToolUse MUST fail CLOSED on any error or timeout.
-      // The gate is a security boundary (L16/N-5): every tool call goes
-      // through it, and a gate that fails-open on an exception is no gate at
-      // all. The 5-second deadline prevents a hung permission handler from
-      // blocking the agent indefinitely; on timeout we deny rather than allow.
-      const PRE_TOOL_USE_GATE_TIMEOUT_MS = 5_000;
-      hooks['PreToolUse'] = wrap(async (input) => {
-        const toolName = String(input['tool_name'] ?? '');
-        let out;
-        try {
-          /* W35-B2 */ out = await Promise.race([
-            bridge.onPreToolUse!(
-              {
-                timestamp: Date.now(),
-                cwd: String(input['cwd'] ?? ''),
-                toolName,
-                toolArgs: input['tool_input'],
-              },
-              { sessionId: String(input['session_id'] ?? '') },
-            ),
-            new Promise<never>((_, reject) =>
-              setTimeout(
-                () => reject(new Error(`PreToolUse gate timeout after ${PRE_TOOL_USE_GATE_TIMEOUT_MS}ms`)),
-                PRE_TOOL_USE_GATE_TIMEOUT_MS,
-              ),
-            ),
-          ]);
-        } catch (err) {
-          // Fail CLOSED: any error or timeout → deny the tool call.
-          // An open gate on error would be a security regression (L16).
-          if (this.verbose) {
-            console.warn(
-              `[ClaudeAgentAdapter] PreToolUse gate error for tool '${toolName}' — denying (fail-closed): ${err}`,
-            );
-          }
-          return {
-            hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'deny',
-              permissionDecisionReason: `Permission gate error: ${String(err)}`,
-            },
-          };
-        }
-        if (!out) return;
-        return {
-          ...(out.suppressOutput !== undefined ? { suppressOutput: out.suppressOutput } : {}),
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            ...(out.decision ? { permissionDecision: out.decision } : {}),
-            ...(out.reason ? { permissionDecisionReason: out.reason } : {}),
-            ...(out.modifiedArgs ? { updatedInput: out.modifiedArgs } : {}),
-            ...(out.additionalContext ? { additionalContext: out.additionalContext } : {}),
-          },
-        };
-      });
+      hooks['PreToolUse'] = wrap(this.preToolUseHandler(bridge.onPreToolUse));
     }
 
     if (bridge.onPostToolUse) {
@@ -1484,9 +1888,13 @@ export class ClaudeAgentProvider implements IAgentHarness {
     }
 
     // HKS-01 — synchronous hook bridge, previously Copilot-only.
-    if (config.hooks) {
-      options.hooks = this.buildClaudeHooks(config.hooks as HookBridge);
-    }
+    //
+    // W35: UNCONDITIONAL. This used to be `if (config.hooks)`, so a caller that
+    // passed no hooks got no `PreToolUse` hook and therefore no tool gate,
+    // while `capabilities()` claimed `fullToolGating: true` regardless.
+    // `buildConversationHooks` always installs the gate; see there for the
+    // no-policy default and `capabilities()` for the (now honest) ledger.
+    options.hooks = this.buildConversationHooks(config);
 
     // ── Child environment ──────────────────────────────────────────
     //
@@ -1653,33 +2061,132 @@ export class ClaudeAgentProvider implements IAgentHarness {
   }
 
   /**
-   * Ask the CLI for an authoritative context-window breakdown and publish it.
-   *
-   * Token math derived from a `result` message can only ever approximate the
-   * window (it describes one API call, not the assembled prompt). The control
-   * channel exposes the real thing — the same data `/context` renders — so we
-   * ask for it at turn end and overwrite the derived estimate.
-   *
-   * Best-effort: the handle may already be closing, and a missing breakdown
-   * must never fail a turn, so failures are swallowed.
+   * Latest `getContextUsage()` response per conversation, plus whether a probe
+   * is currently in flight. Cleared at the start of every turn — a breakdown
+   * from a previous turn describes a window that no longer exists.
    */
-  private async emitContextUsageSnapshot(conversationId: string, q: Query): Promise<void> {
-    try {
-      const usage = await q.getContextUsage();
-      if (!usage || typeof usage.totalTokens !== 'number') return;
+  private readonly contextProbes = new Map<
+    string,
+    { inFlight: boolean; latest: ClaudeContextUsageResponse | null }
+  >();
 
+  /**
+   * Start a background `getContextUsage()` probe, at most one at a time.
+   *
+   * WHY THIS IS NOT AWAITED, AND NOT DONE AT `result`
+   * -------------------------------------------------
+   * It used to be both, and neither worked:
+   *
+   *  - **At `result` it can never succeed.** A string-prompt `query()` closes
+   *    its transport as soon as the `result` message is yielded, so the
+   *    control request loses the race every single time and rejects with
+   *    "Query closed before response received". The failure was swallowed
+   *    (verbose-only warning), so the authoritative snapshot silently never
+   *    landed and the gauge ran permanently on the derived estimate.
+   *  - **Awaited, it is far too expensive to be on the critical path.**
+   *    Measured against the live CLI, a single call takes 1.3–3.6 s. Awaiting
+   *    one per assistant message would add multiple seconds of dead time to
+   *    every tool-using turn.
+   *
+   * So it is fired while the query is demonstrably still open — on assistant
+   * messages, mid-turn — and never waited on. Single-flight keeps at most one
+   * outstanding request, which naturally samples as often as the round-trip
+   * allows and always advances toward the turn's latest state. Whatever has
+   * landed by `result` is what {@link emitContextUsageSnapshot} publishes;
+   * anything still in flight is simply dropped when the handle closes.
+   */
+  private beginContextUsageProbe(conversationId: string, q: Query): void {
+    let entry = this.contextProbes.get(conversationId);
+    if (!entry) {
+      entry = { inFlight: false, latest: null };
+      this.contextProbes.set(conversationId, entry);
+    }
+    if (entry.inFlight) return;
+    entry.inFlight = true;
+    void q
+      .getContextUsage()
+      .then((usage) => {
+        const cur = this.contextProbes.get(conversationId);
+        if (cur && usage && typeof usage.totalTokens === 'number') {
+          cur.latest = usage as unknown as ClaudeContextUsageResponse;
+        }
+      })
+      .catch((err: unknown) => {
+        // Expected whenever the turn ends while a probe is outstanding.
+        if (this.verbose) {
+          console.warn(`[ClaudeAgentAdapter] context-usage probe for ${conversationId}: ${(err as Error).message}`);
+        }
+      })
+      .finally(() => {
+        const cur = this.contextProbes.get(conversationId);
+        if (cur) cur.inFlight = false;
+      });
+  }
+
+  /** Drop any breakdown carried over from the previous turn. */
+  private resetContextUsageProbe(conversationId: string): void {
+    this.contextProbes.delete(conversationId);
+  }
+
+  /**
+   * Publish the authoritative context-window breakdown for the finished turn.
+   *
+   * `currentTokens` is taken from the `result` message's LAST API call rather
+   * than from the probe's own `totalTokens`, because the probe was answered
+   * mid-turn and the final call added to the window after that. The two agree
+   * exactly when both describe the same point in the turn — measured, the
+   * last iteration's prompt equals `getContextUsage().totalTokens` to the
+   * token (41,932 vs 41,932; 35,368 vs 35,368) — so this composes the newest
+   * total with the richest breakdown rather than choosing between them.
+   *
+   * Emits nothing when no probe landed: `event-mapper` has already published
+   * the same total as a `derived` snapshot, and a second event carrying a
+   * stale or absent breakdown would only overwrite it with less.
+   */
+  private emitContextUsageSnapshot(conversationId: string, resultMessage: unknown): void {
+    try {
+      const usage = this.contextProbes.get(conversationId)?.latest;
+      if (!usage || typeof usage.totalTokens !== 'number') return;
+      const lastCall = lastIterationUsage(
+        (resultMessage as { usage?: Record<string, unknown> } | undefined)?.usage,
+      );
+      const currentTokens = lastCall
+        ? lastCall.input + lastCall.cacheRead + lastCall.cacheWrite
+        : usage.totalTokens;
+
+      // DEFERRED ENTRIES OCCUPY NO CONTEXT, and `totalTokens` excludes them.
+      // Counting them made the popover's rows sum to more than the total they
+      // sit above and overflowed the stacked bar. Measured on a live session:
+      //
+      //   System prompt              13,197
+      //   System tools               23,770
+      //   MCP tools (deferred)       14,957   isDeferred, every tool isLoaded:false
+      //   System tools (deferred)    14,178   isDeferred
+      //   Messages                    2,071
+      //   totalTokens                39,029   = 13,197 + 23,770 + 2,071 (+ rounding)
+      //
+      // All 38 MCP tools reported `isLoaded: false` — the model can request
+      // them later, but none of them is in the window now — and the old code
+      // summed them unconditionally, adding 14,957 to a 39,029 total (+38%).
+      const notDeferred = (c: { isDeferred?: boolean }): boolean => c.isDeferred !== true;
       const cat = (name: RegExp): number | undefined => {
-        const hit = usage.categories?.find((c) => name.test(c.name));
+        const hit = usage.categories?.find((c) => notDeferred(c) && name.test(c.name));
         return hit ? hit.tokens : undefined;
       };
       const sum = (rows?: { tokens: number }[]): number | undefined =>
         rows?.length ? rows.reduce((a, r) => a + r.tokens, 0) : undefined;
+      const loadedMcpTools = usage.mcpTools?.filter((t) => t.isLoaded !== false);
 
       const mb = usage.messageBreakdown;
       const breakdown = {
-        ...(sum(usage.systemPromptSections) != null ? { system: sum(usage.systemPromptSections) } : cat(/system/i) != null ? { system: cat(/system/i) } : {}),
-        ...(sum(usage.systemTools) != null ? { tools: sum(usage.systemTools) } : cat(/tool/i) != null ? { tools: cat(/tool/i) } : {}),
-        ...(sum(usage.mcpTools) != null ? { mcpTools: sum(usage.mcpTools) } : {}),
+        // The category regexes are anchored rather than loose: `/system/i`
+        // also matches "System tools" and "System tools (deferred)", so a
+        // change in category ORDER — the only thing that made the loose form
+        // land on the right row — would silently relabel deferred tokens as
+        // the system prompt. `notDeferred` above is the second guard.
+        ...(sum(usage.systemPromptSections) != null ? { system: sum(usage.systemPromptSections) } : cat(/^system prompt/i) != null ? { system: cat(/^system prompt/i) } : {}),
+        ...(sum(usage.systemTools) != null ? { tools: sum(usage.systemTools) } : cat(/^system tools/i) != null ? { tools: cat(/^system tools/i) } : {}),
+        ...(sum(loadedMcpTools) != null ? { mcpTools: sum(loadedMcpTools) } : {}),
         ...(sum(usage.memoryFiles) != null ? { memoryFiles: sum(usage.memoryFiles) } : {}),
         ...(sum(usage.agents) != null ? { agents: sum(usage.agents) } : {}),
         ...(usage.skills ? { skills: usage.skills.tokens } : {}),
@@ -1703,7 +2210,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       this.emitEventToHandlers(conversationId, createAgentEvent('harness.context_usage', {
         provider: 'claude-agent',
         source: 'provider',
-        currentTokens: usage.totalTokens,
+        currentTokens,
         ...(usage.model ? { model: usage.model } : {}),
         ...(typeof usage.maxTokens === 'number' && usage.maxTokens > 0
           ? { promptTokenLimit: usage.maxTokens }
@@ -1715,20 +2222,34 @@ export class ClaudeAgentProvider implements IAgentHarness {
           ? { compactionThreshold: usage.autoCompactThreshold }
           : {}),
         ...(Object.keys(breakdown).length > 0 ? { breakdown } : {}),
-        ...(usage.apiUsage
+        // Prefer the result message's own last call over the probe's
+        // `apiUsage`: the probe answered mid-turn, so its counts describe an
+        // earlier call than `currentTokens` above and the popover's Input /
+        // Cache read / Cache write rows would not add up to the total they
+        // sit under.
+        ...(lastCall
           ? {
               apiUsage: {
-                input: usage.apiUsage.input_tokens,
-                output: usage.apiUsage.output_tokens,
-                cacheRead: usage.apiUsage.cache_read_input_tokens,
-                cacheWrite: usage.apiUsage.cache_creation_input_tokens,
+                input: lastCall.input,
+                output: lastCall.output,
+                cacheRead: lastCall.cacheRead,
+                cacheWrite: lastCall.cacheWrite,
               },
             }
-          : {}),
+          : usage.apiUsage
+            ? {
+                apiUsage: {
+                  input: usage.apiUsage.input_tokens,
+                  output: usage.apiUsage.output_tokens,
+                  cacheRead: usage.apiUsage.cache_read_input_tokens,
+                  cacheWrite: usage.apiUsage.cache_creation_input_tokens,
+                },
+              }
+            : {}),
       }));
     } catch (err) {
       if (this.verbose) {
-        console.warn(`[ClaudeAgentAdapter] getContextUsage failed for ${conversationId}:`, err);
+        console.warn(`[ClaudeAgentAdapter] context-usage snapshot failed for ${conversationId}:`, err);
       }
     }
   }
@@ -1747,6 +2268,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     try {
       if (this.verbose) console.log(`[ClaudeAgentAdapter] Starting background query for ${conversationId}`);
 
+      const { query: claudeQuery } = await loadClaudeSdk(); // W41
       const queryHandle = claudeQuery({ prompt, options });
       activeQuery.closeHandle = () => queryHandle.close();
 
@@ -1763,6 +2285,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
         // Accumulate assistant content for getMessages()
         if (message.type === 'assistant') {
+          // See `beginContextUsageProbe` — sampled mid-turn, never awaited.
+          this.beginContextUsageProbe(conversationId, queryHandle);
           const betaMsg = message.message;
           if (betaMsg?.content) {
             for (const block of betaMsg.content) {
@@ -1785,6 +2309,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
           // W13-B1: detect truncation stop reason.
           /* W13-B1 */ if (betaMsg?.stop_reason && isTruncationStopReason(String(betaMsg.stop_reason))) {
             truncationStopReason = String(betaMsg.stop_reason);
+            this.toolSemaphore.markTruncated(conversationId, truncationStopReason);
           }
         } else if (message.type === 'result') {
           // Store SDK session ID for resume
@@ -1795,11 +2320,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
           if (message.subtype === 'success' && !fullContent && message.result) {
             fullContent = message.result;
           }
-          // Learn the account's real per-model limits, then replace the
-          // derived context estimate with the CLI's authoritative breakdown.
-          // Must happen inside the loop — the handle closes once it drains.
+          // Learn the account's real per-model limits, then publish the
+          // CLI's authoritative breakdown alongside the derived estimate.
           this.recordObservedLimits(message);
-          await this.emitContextUsageSnapshot(conversationId, queryHandle);
+          this.emitContextUsageSnapshot(conversationId, message);
         }
       }
 
@@ -1907,6 +2431,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     this.conversationMessages.delete(conversationId);
     this.conversationWarnings.delete(conversationId);
     this.conversationAgents.delete(conversationId);
+    this.contextProbes.delete(conversationId);
     activeSessions.add(-1);
   }
 }

@@ -18,8 +18,10 @@ import type { IWorkflowDefinitionRepository } from '../domain/ports/IWorkflowDef
 import type { IStageDefinitionRepository } from '../domain/ports/IStageDefinitionRepository.js';
 import type { IStageEdgeRepository } from '../domain/ports/IStageEdgeRepository.js';
 import { validateDAG, buildDAG } from '../domain/dag/DAGValidator.js';
+import type { DAGValidationResult } from '../domain/dag/types.js';
 import type { TemplateRegistry } from './TemplateRegistry.js';
-import type { WorkflowTemplate } from '@generatorai/shared';
+import type { WorkflowTemplate, WorkflowTemplateStage } from '@generatorai/shared';
+import { templateStageToCreateParams } from '@generatorai/shared';
 import type { DAGScheduler } from './DAGScheduler.js';
 
 export class WorkflowDefinitionService {
@@ -139,6 +141,17 @@ export class WorkflowDefinitionService {
       contextSources: params.contextSources,
       outputFormat: params.outputFormat,
       approvalRequired: params.approvalRequired ?? false,
+      // These are all declared on CreateStageParams but were never copied onto
+      // the entity, so anything set on a stage *before its first save* — the
+      // agent binding, its skills, the prompt type, agent mode and per-stage
+      // browser config — was dropped on create and only stuck if the user
+      // happened to save a second time (which goes through updateStage).
+      // `null` is the wire form for "no agent"; the entity uses undefined.
+      agentRef: params.agentRef ?? undefined,
+      skills: params.skills,
+      promptType: params.promptType,
+      agentMode: params.agentMode,
+      browserConfig: params.browserConfig,
       createdAt: new Date(),
     };
     const created = await this.stageRepo.create(stage);
@@ -195,14 +208,20 @@ export class WorkflowDefinitionService {
 
   // ── DAG Validation ──
 
-  async validateDefinition(
-    id: string,
-  ): Promise<{ valid: boolean; errors: string[]; warnings: string[] }> {
+  async validateDefinition(id: string): Promise<DAGValidationResult> {
     const stages = await this.stageRepo.getByDefinitionId(id);
     const edges = await this.edgeRepo.getByDefinitionId(id);
 
     const result = validateDAG(stages, edges);
-    return { valid: result.valid, errors: result.errors, warnings: result.warnings };
+    // `issues` carries the same findings with the stage/edge each belongs to,
+    // so a client can navigate from an error to the element responsible
+    // instead of re-parsing the prose in `errors`.
+    return {
+      valid: result.valid,
+      errors: result.errors,
+      warnings: result.warnings,
+      issues: result.issues,
+    };
   }
 
   // ── Template Import/Export ──
@@ -285,9 +304,16 @@ export class WorkflowDefinitionService {
       version: `${def.version}.0.0`,
       tags: def.tags ?? [],
       sessionMode: def.sessionMode ?? 'auto',
-      requiresCodebase: false,
-      supportsMultipleCodebases: false,
+      // These mirror fields `createFromTemplate` reads straight back out of the
+      // template, so hardcoding them threw away part of every round trip: a
+      // workflow that required a codebase came back not requiring one.
+      requiresCodebase: def.orchestratorConfig?.requiresCodebase ?? false,
+      supportsMultipleCodebases: (def.orchestratorConfig?.codebaseAliases?.length ?? 0) > 1,
       harnessConfig: (def.harnessConfig ?? {}) as WorkflowTemplate['harnessConfig'],
+      // Everything `importFromJSON` knows how to read has to be written here,
+      // or the documented "re-importable" round-trip quietly returns a
+      // different workflow: retry policies, timeouts, run conditions, context
+      // filters, validation rules and approval gates were all dropped.
       stages: def.stages.map((stage, i) => ({
         name: stage.name,
         description: stage.description ?? '',
@@ -301,6 +327,18 @@ export class WorkflowDefinitionService {
         hooks: (stage.hooks ?? []) as WorkflowTemplate['hooks'],
         variables: stage.variables ?? {},
         harnessConfigOverrides: stage.harnessConfigOverrides as WorkflowTemplate['harnessConfig'],
+        ...(stage.retryPolicy ? { retryPolicy: stage.retryPolicy } : {}),
+        ...(stage.timeoutMs !== undefined ? { timeoutMs: stage.timeoutMs } : {}),
+        ...(stage.condition ? { condition: stage.condition } : {}),
+        ...(stage.contextFilter ? { contextFilter: stage.contextFilter } : {}),
+        ...(stage.contextSources ? { contextSources: stage.contextSources } : {}),
+        ...(stage.outputFormat ? { outputFormat: stage.outputFormat } : {}),
+        ...(stage.resultValidation?.length ? { resultValidation: stage.resultValidation } : {}),
+        ...(stage.expectedOutput ? { expectedOutput: stage.expectedOutput } : {}),
+        ...(stage.outputSchema ? { outputSchema: stage.outputSchema } : {}),
+        ...(stage.approvalRequired ? { approvalRequired: true } : {}),
+        ...(stage.agentName ? { agentName: stage.agentName } : {}),
+        ...(stage.agentRef ? { agentRef: stage.agentRef } : {}),
         isLocked: false,
       })) as WorkflowTemplate['stages'],
       edges: edges.map((e) => ({
@@ -317,9 +355,11 @@ export class WorkflowDefinitionService {
         defaultValue: v.defaultValue,
         options: v.options,
       })),
-      hooks: [],
-      preprocessingSteps: [],
-      resultValidations: [],
+      hooks: (def.hooks ?? []) as WorkflowTemplate['hooks'],
+      preprocessingSteps: (def.orchestratorConfig?.preprocessingSteps
+        ?? []) as unknown as WorkflowTemplate['preprocessingSteps'],
+      resultValidations: (def.orchestratorConfig?.resultValidations
+        ?? []) as unknown as WorkflowTemplate['resultValidations'],
     };
   }
 
@@ -363,27 +403,12 @@ export class WorkflowDefinitionService {
         // 2. Create all stages and track their IDs by index
         const stageIdsByIndex: string[] = [];
         for (const stageData of data.stages) {
-          const stage = await this.addStage({
-            workflowDefinitionId: definition.id,
-            name: stageData.name,
-            description: stageData.description,
-            templateId: stageData.templateId,
-            order: stageData.order,
-            prompts: stageData.prompts,
-            harnessConfigOverrides: stageData.harnessConfigOverrides,
-            variables: stageData.variables,
-            hooks: stageData.hooks,
-            retryPolicy: stageData.retryPolicy ?? undefined,
-            timeoutMs: stageData.timeoutMs ?? undefined,
-            condition: stageData.condition ?? undefined,
-            contextFilter: stageData.contextFilter ?? undefined,
-            agentName: stageData.agentName ?? undefined,
-            resultValidation: stageData.resultValidation ?? undefined,
-            expectedOutput: stageData.expectedOutput ?? undefined,
-            outputSchema: stageData.outputSchema ?? undefined,
-            iterationConfig: stageData.iterationConfig ?? undefined,
-            approvalRequired: stageData.approvalRequired ?? false,
-          });
+          const stage = await this.addStage(
+            templateStageToCreateParams(
+              stageData as unknown as WorkflowTemplateStage,
+              definition.id,
+            ) as unknown as CreateStageParams,
+          );
           stageIdsByIndex.push(stage.id);
         }
 

@@ -324,7 +324,16 @@ export function WorkflowRunPageV2() {
   const handlePause = useCallback(() => { if (runId) void pauseRun.mutateAsync(runId); }, [runId, pauseRun]);
   const handleResume = useCallback(() => { if (runId) void resumeRun.mutateAsync(runId); }, [runId, resumeRun]);
   const handleCancel = useCallback(() => { if (runId) void cancelRun.mutateAsync(runId); }, [runId, cancelRun]);
-  const handleRetry = useCallback(() => { if (runId) void retryRun.mutateAsync(runId); }, [runId, retryRun]);
+  // Retry produces a NEW run (the failed one stays terminal), so follow the
+  // user to it — staying put on the ancestor is what made retry look inert.
+  const handleRetry = useCallback(() => {
+    if (!runId) return;
+    void retryRun.mutateAsync(runId).then((res) => {
+      if (res?.runId && res.runId !== runId && definitionId) {
+        navigate(`/workflows/${definitionId}/runs/${res.runId}`);
+      }
+    });
+  }, [runId, retryRun, navigate, definitionId]);
 
   const handleApproveHitl = useCallback(async (stageId: string, followUp?: string) => {
     if (!runId) return;
@@ -621,6 +630,8 @@ export function WorkflowRunPageV2() {
                     tabId={ctx.id}
                     urlScopeKey={browserUrlScopeKey}
                     open={true}
+                    // P1-50 — see ChatPage: hidden tabs hold no live socket.
+                    visible={ctx.active}
                     onClose={() => setRightPaneOpen(false)}
                     onTabStateChange={(s) => setBrowserTabs((prev) => {
                       const cur = prev[ctx.id];
@@ -641,6 +652,8 @@ export function WorkflowRunPageV2() {
               description: 'Integrated shell in the run workspace',
               icon: <TerminalSquare className="h-3.5 w-3.5" />,
               allowMultiple: true,
+              // P2-54 — see ChatPage: one WebGL context and one PTY per tab.
+              maxInstances: 4,
               disabled: !runData?.workspaceId,
               disabledReason: 'This run has no workspace yet',
               render: (ctx) => {

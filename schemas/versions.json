@@ -1,6 +1,40 @@
 {
-  "acp": "0.2.1",
-  "opencode": "1.4.0",
-  "codex": "1.0.0",
-  "_comment": "Pinned schema versions. Update these when pulling new upstream schemas and re-run pnpm generate:schemas."
+  "_comment": "Manifest for scripts/generate-schemas.ts (W45). One entry per protocol. status=generated means a pinned upstream artifact is available to this repo — either shipped inside an exact-versioned npm dependency (npmPackage + artifactExport) or captured from upstream and committed under schemas/ (artifactPath + version + capturedBy) — and the TypeScript in packages/agent-harness-providers/src/protocol/ is emitted from it. status=missing-upstream-artifact means no such artifact can be obtained; the generator refuses to emit anything for it and exits non-zero unless --allow-missing is passed. As of the Codex/OpenCode integration work there are no missing entries: all three protocols are generated from real upstream artifacts.",
+
+  "_provenance": "The two committed artifacts were captured from the real upstream binaries, not authored here. Re-capture with the `capturedBy` command on each entry and re-run `pnpm generate:schemas`; CI's `git diff --exit-code` then reports the drift. A committed artifact records its version explicitly because there is no installed package.json to read it from.",
+
+  "protocols": {
+    "acp": {
+      "status": "generated",
+      "npmPackage": "@agentclientprotocol/sdk",
+      "artifactExport": "./schema/schema.json",
+      "methodTable": "x-method",
+      "tableName": "ACP",
+      "output": "acp.generated.ts"
+    },
+
+    "codex": {
+      "status": "generated",
+      "artifactPath": "schemas/codex/codex_app_server_protocol.schemas.json",
+      "version": "0.151.0",
+      "capturedBy": "npx --yes @openai/codex@0.151.0 codex app-server generate-json-schema --out <dir>  →  codex_app_server_protocol.schemas.json",
+      "namespaces": ["v2"],
+      "methodTable": "jsonrpc",
+      "tableName": "CODEX",
+      "output": "codex.generated.ts",
+      "_note": "One self-contained artifact: 82 top-level definitions (the JSON-RPC envelope, initialize, and the approval/elicitation server requests) plus definitions.v2.* holding the 604 types of the current thread/turn API. The v2 namespace is flattened with a `V2` prefix because the two namespaces genuinely disagree — `RequestId` is defined differently in each — so a bare merge would silently pick one."
+    },
+
+    "opencode": {
+      "status": "generated",
+      "artifactPath": "schemas/opencode/openapi.json",
+      "version": "1.18.25",
+      "capturedBy": "npx --yes opencode-ai@1.18.25 opencode serve --port <p> && curl -s http://127.0.0.1:<p>/doc  →  openapi.json",
+      "defsPath": "components.schemas",
+      "methodTable": "openapi",
+      "tableName": "OPENCODE",
+      "output": "opencode.generated.ts",
+      "_note": "OpenAPI 3.1: schemas live under components.schemas rather than $defs, and the endpoint table is derived from `paths`. The generated OPENCODE_OPERATIONS table records which routes stream (text/event-stream) and which return JSON — the distinction the previous hand-written stand-in got backwards for POST /session/{sessionID}/message."
+    }
+  }
 }

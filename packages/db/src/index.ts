@@ -83,6 +83,8 @@ export type {
 } from './repositories/HarnessInstanceRepository.js';
 // W34 / P1-42 — durable conversation→harness ownership (migration v33)
 export { SqliteConversationOwnershipRepository } from './repositories/ConversationOwnershipRepository.js';
+// W34 — durable conversation→provider INSTANCE ownership (migration v40)
+export { SqliteConversationInstanceOwnershipRepository } from './repositories/ConversationInstanceOwnershipRepository.js';
 
 // Project & Codebase Management repositories
 export { DrizzleProjectRepository } from './repositories/ProjectRepository.js';
@@ -110,7 +112,7 @@ export type { IWidgetInstanceRepository } from './repositories/WidgetInstanceRep
 export { RegisterRepository } from './repositories/RegisterRepository.js';
 export type { RegisterEntry } from './repositories/RegisterRepository.js';
 export { EntryRepository } from './repositories/EntryRepository.js';
-export type { EntryRecord, EntryKind, EntryScope } from './repositories/EntryRepository.js';
+export type { EntryRecord, EntryKind, EntryScope, ArtifactRecord } from './repositories/EntryRepository.js';
 
 
 

@@ -33,6 +33,29 @@ const { version } = JSON.parse(fs.readFileSync(path.join(here, 'package.json'), 
 const EXTERNAL = ['better-sqlite3', 'node-pty', 'playwright', 'playwright-core'];
 
 /**
+ * `react-devtools-core` is a DEVELOPMENT dependency of Ink: it is imported
+ * unconditionally but only used when `DEV` is set. Bundling it costs 680 KB
+ * of parse time in every distributed binary for a code path a released CLI
+ * never takes, so it is stubbed out rather than shipped.
+ */
+const STUB_DEV_TOOLS = {
+  name: 'stub-react-devtools',
+  setup(pluginBuild) {
+    pluginBuild.onResolve({ filter: /^react-devtools-core$/ }, () => ({
+      path: 'react-devtools-core',
+      namespace: 'stub',
+    }));
+    pluginBuild.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
+      contents: [
+        'export function connectToDevTools() {}',
+        'export default { connectToDevTools };',
+      ].join('\n'),
+      loader: 'js',
+    }));
+  },
+};
+
+/**
  * ESM interop shim: bundled CommonJS dependencies call `require()`, which
  * does not exist in an ESM module scope.
  *
@@ -50,9 +73,28 @@ const BANNER = [
   'const __dirname = __pathDirname(__filename);',
 ].join('\n');
 
+// Code splitting, so the TUI's dependency tree is not paid for by
+// `generatorai --version` (open question #35).
+//
+// `src/index.tsx` already loads the workbench through `await
+// import('./tui/launch.js')` — but a SINGLE-FILE bundle has nowhere to put a
+// separate chunk, so esbuild inlines it and the dynamic import buys nothing
+// at runtime. Measured, that was ~4 MB of TUI-only code (highlight.js 1.4 MB,
+// react-reconciler 1.1 MB, react-devtools-core 0.7 MB, parse5, yoga-layout,
+// @xterm/headless, ink, react) evaluated before printing a version string.
+//
+// `splitting: true` needs `outdir` rather than `outfile`; `files: ["dist-bundle"]`
+// already ships the whole directory, so the extra chunks travel with it, and
+// `bin` still points at `generatorai.mjs`.
 const result = await build({
   entryPoints: [path.join(here, 'src', 'index.tsx')],
-  outfile: path.join(here, 'dist-bundle', 'generatorai.mjs'),
+  outdir: path.join(here, 'dist-bundle'),
+  entryNames: 'generatorai',
+  chunkNames: 'chunks/[name]-[hash]',
+  // `bin` points at `generatorai.mjs`, and Node needs the extension to treat
+  // a file as ESM outside a `type: module` package.
+  outExtension: { '.js': '.mjs' },
+  splitting: true,
   bundle: true,
   platform: 'node',
   target: 'node20',
@@ -69,6 +111,7 @@ const result = await build({
   minify: false,
   logLevel: 'info',
   metafile: true,
+  plugins: [STUB_DEV_TOOLS],
 });
 
 const bytes = Object.values(result.metafile.outputs).reduce((sum, o) => sum + o.bytes, 0);

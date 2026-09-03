@@ -387,8 +387,19 @@ export class RelayCell {
         host.revokedBindings.add(message.relayBinding);
         // Kill any live stream belonging to the revoked device immediately —
         // revocation that waits for the next reconnect is not revocation.
+        //
+        // △ Fixed during end-to-end review — this used to require
+        // `stream.hostSocket` to already be attached, so a stream in the
+        // window between `client_hello` (registered in `host.streams`) and
+        // the host's own belated dial-back to `/relay/data` was invisible to
+        // revocation: the client socket stayed open, and the host's data
+        // socket would attach normally moments later as if nothing happened.
+        // Deleting the entry regardless of attachment closes that window —
+        // `onHostDataSocket`'s `host.streams.get(streamId)` lookup then
+        // correctly finds nothing and refuses the belated attach as an
+        // "unknown stream" instead of completing it.
         for (const [streamId, stream] of host.streams) {
-          if (stream.hostSocket && streamId.startsWith(`${message.relayBinding}:`)) {
+          if (streamId.startsWith(`${message.relayBinding}:`)) {
             try {
               stream.clientSocket.close(4403, 'device revoked');
             } catch {

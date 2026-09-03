@@ -5,44 +5,15 @@
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { takeToolBinaries, type ToolDefinition } from '@generatorai/core';
 import { jsonSchemaToZodShape } from './jsonSchemaToZodShape.js';
+import { ToolSemaphore } from '../../toolSemaphore.js';
 
 const MCP_SERVER_NAME = 'generatorai-tools';
 
-/**
- * W13 / X-1 — Minimal FIFO semaphore for bounding parallel tool execution.
- *
- * Declared locally (rather than imported from @generatorai/core) because
- * agent-harness-providers must not import from the services layer, only from
- * the domain ports layer, and Semaphore lives in core/utils (services layer).
- */
-export class ToolSemaphore {
-  private available: number;
-  private readonly waiters: Array<() => void> = [];
-
-  /** @param permits Max concurrent tool calls. <= 0 means unlimited. */
-  constructor(readonly permits: number) {
-    this.available = permits > 0 ? permits : Number.POSITIVE_INFINITY;
-  }
-
-  async acquire(): Promise<void> {
-    if (this.available > 0) {
-      this.available--;
-      return;
-    }
-    await new Promise<void>((resolve) => { this.waiters.push(resolve); });
-  }
-
-  release(): void {
-    const next = this.waiters.shift();
-    if (next) { next(); } else { this.available++; }
-  }
-
-  /** Run `fn` with one permit held, releasing it on completion or error. */
-  async run<T>(fn: () => Promise<T>): Promise<T> {
-    await this.acquire();
-    try { return await fn(); } finally { this.release(); }
-  }
-}
+// W13 / X-1 — `ToolSemaphore` moved to `../../toolSemaphore.js` so
+// CopilotProvider's tool factory can share it instead of going without a
+// concurrency bound entirely. Re-exported here so existing imports of
+// `ToolSemaphore` from this module (e.g. `ClaudeAgentProvider.ts`) keep working.
+export { ToolSemaphore };
 
 /**
  * Wraps domain ToolDefinition[] into an in-process SDK MCP server.
@@ -52,12 +23,21 @@ export class ToolSemaphore {
  * tool namespace, which is how you reference them in `allowedTools`.
  *
  * @param semaphore W13 / X-1 — optional semaphore bounding parallel tool
- *   execution. When provided, each tool call acquires one permit before
- *   running the handler, bounding concurrent executions to `permits`.
+ *   execution. When provided, each tool call goes through `runGuarded`, which
+ *   applies the whole W13 ladder and not just the permit: the truncation latch
+ *   (B1 — a truncated response never executes a tool), the poison-pill
+ *   downgrade, the per-item timeout, and the per-record byte cap on the result.
+ *   All of those default to ON inside `ToolSemaphore`, so a provider that only
+ *   ever wrote `new ToolSemaphore(MAX_PARALLEL_TOOLS)` gets them for free.
+ * @param conversationId W13 / B1 — enables the truncation latch for this
+ *   conversation's handlers. Omit and the latch is skipped (steps 2-6 still
+ *   apply): a latch keyed globally would let a truncation in one conversation
+ *   refuse another conversation's tools on a shared provider instance.
  */
 export function buildClaudeAgentMcpTools(
   toolDefs: ToolDefinition[],
   semaphore?: ToolSemaphore,
+  conversationId?: string,
 ): {
   mcpServerConfig: ReturnType<typeof createSdkMcpServer>;
   toolNames: string[];
@@ -77,10 +57,14 @@ export function buildClaudeAgentMcpTools(
       description: def.description,
       inputSchema: jsonSchemaToZodShape(def.parametersSchema),
       handler: async (args: Record<string, unknown>) => {
-        // W13 / X-1 — apply the parallel-tool semaphore when provided.
+        // W13 — the whole ladder, not just the permit. See `runGuarded`.
         const runHandler = () => def.handler(args);
         try {
-          const result = semaphore ? await semaphore.run(runHandler) : await runHandler();
+          const result = semaphore
+            ? await semaphore.runGuarded(def.name, runHandler, {
+                ...(conversationId !== undefined ? { conversationId } : {}),
+              })
+            : await runHandler();
           // MCP content blocks carry images natively, so an attachment goes on
           // the wire as one rather than as base64 inside the text.
           const { text: payload, binaries } = takeToolBinaries(result);
@@ -89,6 +73,13 @@ export function buildClaudeAgentMcpTools(
             text = typeof payload === 'string' ? payload : JSON.stringify(payload);
           } catch {
             text = String(payload);
+          }
+          // W13 — per-record byte cap with drop-on-exceed. Applied AFTER
+          // `takeToolBinaries` so an image that was correctly moved to its own
+          // content block is not counted against the text budget, and so the
+          // cap measures exactly the bytes that will reach the model.
+          if (semaphore) {
+            text = semaphore.byteCap.apply(text, def.name).value;
           }
           return {
             content: [

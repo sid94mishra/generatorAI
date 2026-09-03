@@ -8,6 +8,7 @@
 
 import { create } from 'zustand';
 import type { Chat } from '@generatorai/shared';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 export interface ChatState {
   /** Currently active chat ID (the one being viewed) */
@@ -41,7 +42,7 @@ const initialState: ChatState = {
   chatCache: {},
 };
 
-export const useChatStore = create<ChatState & ChatStoreActions>((set, get) => ({
+const useChatStoreImpl = create<ChatState & ChatStoreActions>((set, get) => ({
   ...initialState,
 
   setActiveChatId: (chatId) => set({ activeChatId: chatId }),
@@ -81,3 +82,8 @@ export const useChatStore = create<ChatState & ChatStoreActions>((set, get) => (
 
   reset: () => set(initialState),
 }));
+
+
+// HMR-split-proof: every module instance shares the first-created store.
+// See lib/globalSingleton.ts for why this is load-bearing in dev.
+export const useChatStore = globalSingleton('web.chatStore', () => useChatStoreImpl);

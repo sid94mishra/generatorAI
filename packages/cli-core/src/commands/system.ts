@@ -3,7 +3,11 @@
 import { z } from 'zod';
 import { defineCommand, type CommandSpec } from '../registry/CommandSpec.js';
 import { describeCapabilities } from '../capabilities/TerminalCapabilities.js';
-import { probeEndpoint } from '../connection/ConnectionManager.js';
+import {
+  checkProtocolCompatibility,
+  probeEndpoint,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from '../connection/ConnectionManager.js';
 import { inputSchema, list, record } from './_shared.js';
 
 export const SYSTEM_GROUP = {
@@ -188,12 +192,36 @@ export function systemCommands(version = '0.0.0-dev'): CommandSpec[] {
           node: process.version,
           platform: `${process.platform}-${process.arch}`,
         };
+        const warnings: string[] = [];
         if (ctx.connection) {
           const probe = await probeEndpoint(ctx.baseUrl);
-          payload['server'] = probe.ok ? (probe.version ?? 'unknown') : `unreachable (${probe.error})`;
           payload['endpoint'] = ctx.baseUrl;
+          if (!probe.ok) {
+            payload['server'] = `unreachable (${probe.error})`;
+          } else {
+            // `probe.protocolVersion` used to be read under the WRONG field
+            // name (`probe.version`, which this response has never had), so
+            // this command's own summary — "whether they are compatible" —
+            // was never actually answered; it just printed "unknown" forever.
+            payload['server'] = probe.serverName ?? 'unknown';
+            payload['protocolVersion'] = probe.protocolVersion ?? 'unknown';
+            const compat = checkProtocolCompatibility(probe.protocolVersion);
+            // "Ahead" is forward-compatible (unknown response fields are just
+            // ignored) — only "too old" is a genuine incompatibility.
+            payload['compatible'] = compat !== 'server-too-old';
+            if (compat === 'server-too-old') {
+              warnings.push(
+                `This server speaks protocol v${probe.protocolVersion}; this CLI needs at least v${SUPPORTED_PROTOCOL_VERSIONS.min}. Upgrade the server.`,
+              );
+            } else if (compat === 'server-ahead') {
+              warnings.push(
+                `This server speaks protocol v${probe.protocolVersion}, ahead of the v${SUPPORTED_PROTOCOL_VERSIONS.max} this CLI build understands. ` +
+                  'Most things should still work, but a newer CLI may behave better against it.',
+              );
+            }
+          }
         }
-        return record(payload);
+        return { data: payload, ...(warnings.length ? { warnings } : {}) };
       },
     }),
 
@@ -250,6 +278,20 @@ export function systemCommands(version = '0.0.0-dev'): CommandSpec[] {
               : (probe.error ?? 'unreachable'),
             ok: probe.ok,
           });
+
+          if (probe.ok) {
+            const compat = checkProtocolCompatibility(probe.protocolVersion);
+            checks.push({
+              check: 'server.protocol',
+              result:
+                compat === 'server-too-old'
+                  ? `v${probe.protocolVersion} — too old for this CLI (needs v${SUPPORTED_PROTOCOL_VERSIONS.min}+); upgrade the server`
+                  : compat === 'server-ahead'
+                    ? `v${probe.protocolVersion} — ahead of this CLI build (understands up to v${SUPPORTED_PROTOCOL_VERSIONS.max})`
+                    : `v${probe.protocolVersion ?? 'unknown'} — compatible`,
+              ok: compat !== 'server-too-old',
+            });
+          }
 
           if (probe.ok) {
             try {

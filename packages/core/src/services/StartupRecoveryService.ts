@@ -2,7 +2,7 @@
 // StartupRecoveryService — recovers interrupted sessions on startup
 // ────────────────────────────────────────────────────────────────
 
-import type { ILogger } from '@generatorai/shared';
+import type { ILogger, StageRun } from '@generatorai/shared';
 import type { ISessionRepository } from '../domain/ports/IRepositories.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
@@ -10,6 +10,8 @@ import type { IChatRepository } from '../domain/ports/IChatRepository.js';
 import type { IAgentHarness } from '../domain/ports/IAgentHarness.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { SessionAllocator } from './SessionAllocator.js';
+import type { DurableExecutionEngine } from './DurableExecutionEngine.js';
+import { recordSessionLineage } from './StageExecutionService.js';
 
 /**
  * Optional sandbox cleanup interface. Implemented by `SandboxLifecycleManager`
@@ -55,6 +57,18 @@ export class StartupRecoveryService {
      */
     private chatRepo?: IChatRepository,
   ) {}
+
+  /**
+   * X-13 — durable engine, used only to append session-lineage links. Late
+   * wired (this constructor is already nine arguments long) and entirely
+   * optional: without it recovery behaves exactly as before, it just leaves
+   * no record of which session it discarded.
+   */
+  private durableEngine?: DurableExecutionEngine;
+
+  setDurableEngine(engine: DurableExecutionEngine): void {
+    this.durableEngine = engine;
+  }
 
   /** Called once during application initialization. */
   async recover(): Promise<void> {
@@ -137,9 +151,18 @@ export class StartupRecoveryService {
     // restart is invisible. The DB is the source of truth; an interrupted
     // stage re-runs from scratch (at-least-once — the accepted durable
     // baseline). Only `running`/`queued` stages are reset; `sleeping`
-    // (the durable-sleep sweeper owns it) and `awaiting_input` (HITL, still
-    // legitimately parked) are left untouched so they resume on their own
-    // terms.
+    // (the durable-sleep sweeper owns it) and `awaiting_input` are left
+    // untouched.
+    //
+    // P0-a — `awaiting_input` is deliberately NOT reset here, and that is
+    // correct: an approval that has not happened must stay parked, and
+    // resetting the row to `pending` would relaunch the stage and re-ask the
+    // human. The transition out of `awaiting_input` belongs to the moment the
+    // approval actually arrives — `HitlService.resume()` sees there is no
+    // live in-process awaiter (this restart destroyed it), returns the row to
+    // `pending` and re-drives the run itself, so the ready sweep picks the
+    // stage up. Before that fix resume() wrote `running`, a status no
+    // scheduler path relaunches, and the run wedged permanently.
     const runningRuns = await workflowRunRepo.getByStatus(['running', 'starting']);
     for (const run of runningRuns) {
       const interrupted = await stageRunRepo.getByStatus(run.id, ['running', 'queued']);
@@ -148,9 +171,43 @@ export class StartupRecoveryService {
         // preserves retryCount. Drop the (now-dead) session handle so the
         // re-launch allocates a fresh one rather than reusing a stale id.
         await stageRunRepo.resetForRetry(stage.id);
+
+        // △ W22 — rewind the step counter too. `resetForRetry` does NOT touch
+        // `currentStep`, and leaving it at the step that was in flight makes
+        // `executeStage` start its prompt loop THERE. The earlier prompts are
+        // then skipped by the counter instead of being replayed out of the
+        // durable journal — and because the relaunch also allocates a FRESH
+        // conversation (the handle below is dropped), the agent is handed
+        // prompt N with no memory of prompts 1..N-1 and no replay recap, which
+        // is exactly the failure the effect sandwich exists to prevent.
+        //
+        // Rewinding to 0 puts the decision back in the journal: every settled
+        // turn replays out of `entries` (no model call, no tool call, one
+        // recap message), and only the turn that genuinely did not settle is
+        // re-run or skipped per its replay policy.
+        //
+        // Unconditional, including embeddings with no durable engine wired:
+        // there the stage re-runs from scratch, which is the at-least-once
+        // baseline this method's own comment declares above — and strictly
+        // better than resuming a fresh, empty conversation at prompt N.
+        const patch: Partial<StageRun> = { currentStep: 0 };
+
         if (stage.sessionId) {
-          await stageRunRepo.update(stage.id, { sessionId: null as unknown as undefined });
+          // X-13 — record the loss BEFORE dropping the handle. This is the
+          // one moment where the reason is known, and it is the moment the
+          // only pointer to the old session disappears: after the update the
+          // row is `sessions.status='closed'` with nothing referring to it,
+          // which is why "why did it forget X?" had no answer.
+          recordSessionLineage(this.durableEngine, stage.id, {
+            event: 'lost',
+            sessionId: stage.sessionId,
+            reason: 'process restart — the in-process conversation did not survive',
+            at: Date.now(),
+          });
+          patch.sessionId = null as unknown as undefined;
         }
+
+        await stageRunRepo.update(stage.id, patch);
       }
 
       if (this.onRedriveRun) {

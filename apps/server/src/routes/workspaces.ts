@@ -775,5 +775,110 @@ export function createWorkspaceRoutes(container: Container): Router {
     }
   });
 
+  // PUT /workspaces/:id/files/content — write a file into the workspace.
+  //
+  // Open question #24: there was NO write route at all. A client could read
+  // every file in a workspace and create none, so "add a file to this
+  // workspace" was reachable only by having the agent do it, or by having
+  // filesystem access to the server. The CLI's `$EDITOR` handoff sidesteps
+  // it for EDITING (it opens the real path on a shared filesystem) but that
+  // is not available to a remote client, and it cannot create.
+  //
+  // Deliberately the mirror image of the GET above — same `source`/
+  // `worktreeAlias` resolution, same traversal guard, same size ceiling —
+  // so the two cannot disagree about which directory a path means. A second,
+  // differently-resolved base directory would be a path-traversal bug
+  // waiting to happen.
+  router.put('/:id/files/content', async (req, res, next) => {
+    try {
+      const id = String(req.params['id']);
+      const body = (req.body ?? {}) as {
+        path?: unknown;
+        content?: unknown;
+        source?: unknown;
+        worktreeAlias?: unknown;
+        createDirectories?: unknown;
+      };
+      const filePath = typeof body.path === 'string' ? body.path : '';
+      const content = typeof body.content === 'string' ? body.content : null;
+      const source = typeof body.source === 'string' ? body.source : 'workspace';
+      const worktreeAlias = typeof body.worktreeAlias === 'string' ? body.worktreeAlias : undefined;
+
+      if (!filePath || content === null) {
+        res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: 'path and content are required' },
+        });
+        return;
+      }
+      const MAX_SIZE = 512 * 1024;
+      if (Buffer.byteLength(content, 'utf-8') > MAX_SIZE) {
+        // The same ceiling the read path truncates at. Accepting a larger
+        // write would create a file this API can never read back whole.
+        res.status(413).json({
+          error: { code: 'PAYLOAD_TOO_LARGE', message: `Content exceeds ${MAX_SIZE} bytes` },
+        });
+        return;
+      }
+
+      const info = await workspaceManager.getWorkspaceInfo(id);
+      if (!info) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Workspace not found: ${id}` } });
+        return;
+      }
+
+      let baseDir: string;
+      if (source === 'worktree' && worktreeAlias) {
+        const wt = (info.worktrees ?? []).find((w) => w.alias === worktreeAlias);
+        if (!wt) {
+          res.status(404).json({ error: { code: 'NOT_FOUND', message: `Worktree not found: ${worktreeAlias}` } });
+          return;
+        }
+        baseDir = path.join(info.rootPath, wt.worktreePath);
+      } else if (source === 'artifacts') {
+        baseDir = path.join(info.rootPath, 'artifacts');
+      } else if (source === 'source') {
+        baseDir = path.join(info.rootPath, 'source');
+      } else {
+        baseDir = info.workingDirectory;
+      }
+
+      const resolvedBase = path.resolve(baseDir);
+      const fullPath = path.resolve(resolvedBase, filePath);
+      // `startsWith` on the base alone would accept a sibling directory whose
+      // name merely begins with it (`/w/ws` vs `/w/ws-evil`), so the
+      // separator is part of the comparison.
+      if (fullPath !== resolvedBase && !fullPath.startsWith(resolvedBase + path.sep)) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid file path' } });
+        return;
+      }
+
+      if (body.createDirectories !== false) {
+        await fs.mkdir(path.dirname(fullPath), { recursive: true });
+      }
+      const existed = await fs
+        .stat(fullPath)
+        .then(() => true)
+        .catch(() => false);
+      await fs.writeFile(fullPath, content, 'utf-8');
+
+      res.status(existed ? 200 : 201).json({
+        path: filePath,
+        size: Buffer.byteLength(content, 'utf-8'),
+        created: !existed,
+      });
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        res.status(400).json({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'The parent directory does not exist. Omit createDirectories:false to create it.',
+          },
+        });
+        return;
+      }
+      next(err);
+    }
+  });
+
   return router;
 }

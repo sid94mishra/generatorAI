@@ -58,6 +58,17 @@ describe('startChildReaperHeartbeat', () => {
   });
 });
 
+// Every test in this block calls the REAL reaper, which enumerates the OS
+// process table — `powershell.exe Get-CimInstance Win32_Process` on Windows,
+// `ps -eo` elsewhere. That is a process spawn plus a full table serialisation:
+// ~2 s on an idle machine here, and several seconds when the rest of the
+// monorepo's suites are running in parallel. Vitest's 5 s default left ~80 ms
+// of headroom, so this block failed intermittently in full-suite runs and
+// passed in isolation — which reads as a real defect and is not one. The
+// budget is generous on purpose: these assert a *refusal to kill*, so a slow
+// run must never be the thing that turns them red.
+const PROCESS_TABLE_TIMEOUT_MS = 30_000;
+
 describe('reapOrphanedHarnessChildren', () => {
   it('ignores its own record — a running server does not reap itself', async () => {
     const mod = await loadModule();
@@ -70,7 +81,7 @@ describe('reapOrphanedHarnessChildren', () => {
     // Our own record must survive: the NEXT boot needs it.
     expect(readdirSync(registryDir)).toHaveLength(1);
     mod.stopChildReaperHeartbeat();
-  });
+  }, PROCESS_TABLE_TIMEOUT_MS);
 
   it('leaves a record alone while its server is still alive', async () => {
     const mod = await loadModule();
@@ -85,7 +96,7 @@ describe('reapOrphanedHarnessChildren', () => {
 
     expect(result.terminated).toEqual([]);
     expect(readdirSync(registryDir)).toHaveLength(1);
-  });
+  }, PROCESS_TABLE_TIMEOUT_MS);
 
   it('discards a record older than the trust window without killing anything', async () => {
     const mod = await loadModule();
@@ -100,7 +111,7 @@ describe('reapOrphanedHarnessChildren', () => {
 
     expect(result.terminated).toEqual([]);
     expect(readdirSync(registryDir)).toHaveLength(0);
-  });
+  }, PROCESS_TABLE_TIMEOUT_MS);
 
   it('discards a malformed record rather than acting on it', async () => {
     const mod = await loadModule();
@@ -111,13 +122,13 @@ describe('reapOrphanedHarnessChildren', () => {
     expect(result.recordsInspected).toBe(0);
     expect(result.terminated).toEqual([]);
     expect(readdirSync(registryDir)).toHaveLength(0);
-  });
+  }, PROCESS_TABLE_TIMEOUT_MS);
 
   it('does nothing when there is no record at all', async () => {
     const mod = await loadModule();
     const result = await mod.reapOrphanedHarnessChildren();
     expect(result).toEqual({ recordsInspected: 0, terminated: [], skipped: [] });
-  });
+  }, PROCESS_TABLE_TIMEOUT_MS);
 
   it('refuses to act on a dead server whose pid now has unrelated children', async () => {
     // The pid-reuse case. A dead server's pid gets recycled; whatever holds it
@@ -138,7 +149,7 @@ describe('reapOrphanedHarnessChildren', () => {
     expect(result.recordsInspected).toBe(1);
     expect(result.terminated).toEqual([]);
     expect(readdirSync(registryDir)).toHaveLength(0);
-  });
+  }, PROCESS_TABLE_TIMEOUT_MS);
 });
 
 // ── The kill decision ───────────────────────────────────────────────────────

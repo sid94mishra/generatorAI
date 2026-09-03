@@ -21,6 +21,11 @@
 //  5. `usage` / `contextUsage` survive `clearStream`. The context gauge
 //     describes the conversation, not the turn; resetting it to 0% the
 //     instant a turn ends is wrong.
+//  6. The record is BOUNDED. Every write stamps `lastActivityAt`, and
+//     `pruneStreams` evicts the least-recently-touched entries past a cap.
+//     Without it, every session and every `stageRun:<id>` key ever streamed
+//     retains its full block array — tool results and widget props included
+//     — for the lifetime of the tab (W27 "bounded stores").
 // ────────────────────────────────────────────────────────────────
 
 import { parseInlineToolCalls } from './parseInlineToolCalls.js';
@@ -36,6 +41,7 @@ import {
   type SystemBlock,
   type SystemCategory,
   type ToolCallBlock,
+  type ToolFileOp,
   type WidgetBlock,
 } from './types.js';
 
@@ -44,9 +50,20 @@ export function getStream(streams: StreamsRecord, sessionId: string): StreamStat
   return streams[sessionId] ?? DEFAULT_STREAM;
 }
 
+/**
+ * Recency clock for LRU eviction.
+ *
+ * A counter, not `Date.now()`: a streaming turn writes dozens of times per
+ * millisecond, so a millisecond clock leaves whole bursts tied and makes the
+ * eviction order arbitrary — precisely under the load where eviction matters.
+ * The absolute value is meaningless; only the ordering is.
+ */
+let activityStamp = 0;
+
 /** Replace one session's entry, leaving the rest of the record untouched. */
 function put(streams: StreamsRecord, sessionId: string, next: StreamState): StreamsRecord {
-  return { ...streams, [sessionId]: next };
+  activityStamp += 1;
+  return { ...streams, [sessionId]: { ...next, lastActivityAt: activityStamp } };
 }
 
 function existingOrDefault(streams: StreamsRecord, sessionId: string): StreamState {
@@ -186,6 +203,7 @@ export function addToolCall(
   tool: string,
   args: unknown,
   callId?: string,
+  parentCallId?: string,
 ): StreamsRecord {
   const existing = existingOrDefault(streams, sessionId);
   const id = callId ?? `tc_${existing._toolCallCounter}`;
@@ -230,11 +248,15 @@ export function addToolCall(
     tool,
     args,
     status: 'running',
+    ...(parentCallId ? { parentCallId } : {}),
   };
 
   return put(streams, sessionId, {
     ...existing,
-    toolCalls: [...existing.toolCalls, { id, tool, args, status: 'running' }],
+    toolCalls: [
+      ...existing.toolCalls,
+      { id, tool, args, status: 'running', ...(parentCallId ? { parentCallId } : {}) },
+    ],
     status: liveStatus(existing, 'streaming'),
     blocks: [...existing.blocks, newBlock],
     _nextBlockId: existing._nextBlockId + 1,
@@ -247,6 +269,7 @@ export function completeToolCall(
   sessionId: string,
   toolOrCallId: string,
   result: unknown,
+  fileOp?: ToolFileOp,
 ): StreamsRecord {
   const existing = existingOrDefault(streams, sessionId);
 
@@ -257,7 +280,7 @@ export function completeToolCall(
     if (foundFlat || tc.status !== 'running') return tc;
     if (tc.id === toolOrCallId || tc.tool === toolOrCallId) {
       foundFlat = true;
-      return { ...tc, result, status: 'complete' as const };
+      return { ...tc, result, status: 'complete' as const, ...(fileOp ? { fileOp } : {}) };
     }
     return tc;
   });
@@ -267,7 +290,7 @@ export function completeToolCall(
     if (foundBlock || block.type !== 'tool_call' || block.status !== 'running') return block;
     if (block.callId === toolOrCallId || block.tool === toolOrCallId) {
       foundBlock = true;
-      return { ...block, result, status: 'complete' as const };
+      return { ...block, result, status: 'complete' as const, ...(fileOp ? { fileOp } : {}) };
     }
     return block;
   });
@@ -321,12 +344,19 @@ export function startPending(
   const existing = streams[sessionId];
   // Invariant 4 — carry widgets across the turn barrier.
   const priorWidgets = (existing?.blocks ?? []).filter((b) => b.type === 'widget');
+  /**
+   * A `harness.user_message` echo carries no content of its own for some
+   * providers. Falling back to the optimistic message the composer already
+   * showed keeps the user's own prompt on screen; without it the turn's
+   * prompt blinked out the moment the server acknowledged it.
+   */
+  const text = userMessage ?? existing?.pendingUserMessage ?? undefined;
 
   return put(streams, sessionId, {
     ...DEFAULT_STREAM,
     status: 'pending',
-    pendingUserMessage: userMessage ?? null,
-    turnUserMessage: userMessage ?? null,
+    pendingUserMessage: text ?? null,
+    turnUserMessage: text ?? null,
     // The new turn's turn_start has not arrived; consumers fall back to
     // content matching until it does.
     serverTurnId: null,
@@ -367,6 +397,30 @@ export function startTurn(
   return startPending(streams, sessionId, userMessage);
 }
 
+/**
+ * Begin a turn only if this key is genuinely empty.
+ *
+ * A workflow stage reporting `running` is not always a new turn. After a page
+ * reload the REST replay has already rebuilt that stage's blocks, and after a
+ * pause→resume the model continues from where it stopped — in both cases
+ * `startPending`'s reset would delete content the user is looking at and
+ * cannot get back without another replay.
+ *
+ * "Empty" therefore means no blocks AND no live status, not merely "not
+ * currently streaming": a settled stage that already has blocks stays as it
+ * is.
+ */
+export function startPendingIfEmpty(streams: StreamsRecord, sessionId: string): StreamsRecord {
+  const existing = streams[sessionId];
+  const hasContent =
+    existing !== undefined &&
+    (existing.blocks.length > 0 ||
+      existing.status === 'streaming' ||
+      existing.status === 'thinking');
+  if (hasContent) return streams;
+  return startPending(streams, sessionId);
+}
+
 export function setServerTurnId(
   streams: StreamsRecord,
   sessionId: string,
@@ -377,11 +431,37 @@ export function setServerTurnId(
   return put(streams, sessionId, { ...existing, serverTurnId: turnId });
 }
 
+/**
+ * W30-d — show or hide the "the agent is writing" indicator.
+ *
+ * Set only by `StreamEventRouter` on a surface that declares
+ * `highLatencyBlockDelivery`, and only while text is genuinely being held back
+ * to a block boundary. Returning the original record on a no-op matters here:
+ * this is called on every frame tick of a fast token stream.
+ */
+export function setTyping(
+  streams: StreamsRecord,
+  sessionId: string,
+  typing: boolean,
+): StreamsRecord {
+  const existing = streams[sessionId];
+  // A typing indicator for a session that has never streamed is noise, and
+  // creating the entry here would resurrect a key eviction just dropped.
+  if (!existing) {
+    if (!typing) return streams;
+    return put(streams, sessionId, { ...DEFAULT_STREAM, typing: true });
+  }
+  if (existing.typing === typing) return streams;
+  return put(streams, sessionId, { ...existing, typing });
+}
+
 export function completeStream(streams: StreamsRecord, sessionId: string): StreamsRecord {
   const existing = existingOrDefault(streams, sessionId);
   // Do not overwrite 'pending' — a new turn has already started.
   if (existing.status === 'pending') return streams;
-  return put(streams, sessionId, { ...existing, status: 'complete' });
+  // A settled turn has no held text left (the router force-flushes before the
+  // terminal event), so an indicator surviving here would never clear.
+  return put(streams, sessionId, { ...existing, status: 'complete', typing: false });
 }
 
 /**
@@ -399,12 +479,18 @@ export function requestCancel(streams: StreamsRecord, sessionId: string): Stream
     cancelRequested: true,
     status: 'complete',
     pendingUserMessage: null,
+    typing: false,
   });
 }
 
 export function errorStream(streams: StreamsRecord, sessionId: string): StreamsRecord {
   const existing = existingOrDefault(streams, sessionId);
-  return put(streams, sessionId, { ...existing, status: 'error', pendingUserMessage: null });
+  return put(streams, sessionId, {
+    ...existing,
+    status: 'error',
+    pendingUserMessage: null,
+    typing: false,
+  });
 }
 
 export function clearStreamText(streams: StreamsRecord, sessionId: string): StreamsRecord {
@@ -427,6 +513,72 @@ export function clearStream(streams: StreamsRecord, sessionId: string): StreamsR
     usage: existing?.usage ?? null,
     contextUsage: existing?.contextUsage ?? null,
   });
+}
+
+// ── Eviction (invariant 6) ──────────────────────────────────────
+
+/**
+ * Drop one session's entry entirely.
+ *
+ * `clearStream` resets the CONTENT but keeps the key, which is right for a
+ * session the user is still looking at and wrong for one they have closed:
+ * the entry, its `usage` and its carried widget blocks stay resident forever.
+ * This is the close-driven counterpart — use it when the owner knows the key
+ * will never be rendered again.
+ */
+export function evictStream(streams: StreamsRecord, sessionId: string): StreamsRecord {
+  if (!(sessionId in streams)) return streams;
+  const next = { ...streams };
+  delete next[sessionId];
+  return next;
+}
+
+export interface PruneOptions {
+  /** Hard cap on retained entries, excluding `protect`. */
+  maxEntries: number;
+  /**
+   * Keys that must survive regardless of age — what the UI is rendering
+   * right now. A user reading an idle chat while twenty stage runs stream
+   * would otherwise watch their own transcript get evicted underneath them.
+   */
+  protect?: Iterable<string>;
+}
+
+/**
+ * Bound the record by evicting the least-recently-touched entries.
+ *
+ * A live turn needs no special case: it writes on every token, so LRU ranks
+ * it as the most recent entry there is. What gets evicted is what nothing has
+ * touched — a chat left three navigations ago, a stage run that finished
+ * hours of wall-clock time earlier.
+ *
+ * Returns the ORIGINAL record when it is already within the cap, so the
+ * common path allocates nothing and callers skip a re-render.
+ */
+export function pruneStreams(
+  streams: StreamsRecord,
+  { maxEntries, protect }: PruneOptions,
+): StreamsRecord {
+  const keys = Object.keys(streams);
+  if (keys.length <= maxEntries) return streams;
+
+  const protectedKeys = protect ? new Set(protect) : null;
+  const evictable = protectedKeys ? keys.filter((k) => !protectedKeys.has(k)) : keys;
+  // Protected keys are exempt, so the retained size is `maxEntries` plus at
+  // most however many keys the UI is currently rendering — still bounded,
+  // because that count is bounded by what fits on screen.
+  const excess = keys.length - maxEntries;
+  if (excess <= 0 || evictable.length === 0) return streams;
+
+  evictable.sort(
+    (a, b) => (streams[a]?.lastActivityAt ?? 0) - (streams[b]?.lastActivityAt ?? 0),
+  );
+
+  const next = { ...streams };
+  for (let i = 0; i < excess && i < evictable.length; i++) {
+    delete next[evictable[i]!];
+  }
+  return next;
 }
 
 // ── Usage ───────────────────────────────────────────────────────

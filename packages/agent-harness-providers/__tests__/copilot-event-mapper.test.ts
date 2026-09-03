@@ -40,6 +40,16 @@ describe('mapSdkEventToAgentEvent (TEST-1)', () => {
     expect(mapSdkEventToAgentEvent(ev('session.error', {})).kind).toBe('harness.error');
   });
 
+  it('maps abort to harness.cancelled, not harness.session_info (W13/X-4)', () => {
+    // △ Fixed during end-to-end review — this used to map to session_info,
+    // so a cancelled Copilot turn never got the semantic-cancellation
+    // treatment (settled predicate, orchestrator cancelled-tracking, the
+    // on_session_cancelled hook phase) that Claude-agent/Codex turns do.
+    const out = mapSdkEventToAgentEvent(ev('abort', { reason: 'user initiated' }));
+    expect(out.kind).toBe('harness.cancelled');
+    expect(out.data).toMatchObject({ reason: 'user_abort', provider: 'copilot' });
+  });
+
   it('falls back to harness.unknown for an unmapped SDK type', () => {
     const out = mapSdkEventToAgentEvent(ev('totally.unknown.kind', {}));
     expect(out.kind).toBe('harness.unknown');

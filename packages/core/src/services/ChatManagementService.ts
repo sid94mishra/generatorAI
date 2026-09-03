@@ -1478,6 +1478,24 @@ export class ChatManagementService {
         mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
         content: (existingSys?.content ?? '') + `\n\n${ORCHESTRATOR_SYSTEM_PROMPT}`,
       };
+
+      // The harness's NATIVE delegation tools must go. Observed live
+      // (2026-09-01): given both, Sonnet picked the SDK's own `Agent` tool —
+      // "Async agent launched successfully" — whose workers live inside the
+      // per-turn CLI process. The turn ended, the process exited, both
+      // "background" agents evaporated, and the orchestrator sat idle forever
+      // with zero Background Tasks. Platform orchestration only works through
+      // spawn_background_agent, so the in-process lookalikes are removed
+      // (claude-agent maps these into the SDK's disallowedTools; harnesses
+      // without such tools ignore unknown names).
+      {
+        const existingExcluded = Array.isArray(conversationConfig['excludedBuiltinTools'])
+          ? (conversationConfig['excludedBuiltinTools'] as string[])
+          : [];
+        conversationConfig['excludedBuiltinTools'] = [
+          ...new Set([...existingExcluded, 'Agent', 'Task']),
+        ];
+      }
     }
 
     // HKS-01 + TOL-04 — synchronous hook bridge (plan-mode + user hooks).
@@ -2164,13 +2182,53 @@ export class ChatManagementService {
             break;
           }
           case 'harness.tool_start': {
+            const callId = data?.['callId'] as string | undefined;
+            const args = data?.['args'];
+            // A tool call can be ANNOUNCED before its arguments have finished
+            // streaming. The Claude Agent SDK does exactly that: `tool_start`
+            // fires twice for one call — once from `content_block_start` with
+            // `args: {}`, then again from the assistant message's `tool_use`
+            // block with the materialized args — both carrying the same
+            // `callId`. Pushing both persisted the same call twice: the first
+            // copy kept `args: {}` and collected the result, while the second
+            // kept the args and stayed `running` forever. The transcript then
+            // showed every tool twice, and the copy holding the result was the
+            // one that could not say what the tool was called with.
+            //
+            // Merge on `callId` instead. (`@generatorai/client-core`'s stream
+            // reducer already de-dupes the live view this same way — see
+            // `addToolCall`; this is the persistence side of that contract.)
+            const existing = callId
+              ? turnMetadata.toolCalls!.find((t) => t.id === callId)
+              : undefined;
+            if (existing) {
+              // Only overwrite args when this event actually carries some: the
+              // announcement arrives empty and must not erase what a prior
+              // event already materialized (order between the two is the
+              // provider's business, not ours).
+              const hasArgs =
+                args != null &&
+                (typeof args !== 'object' || Object.keys(args as Record<string, unknown>).length > 0);
+              if (hasArgs) existing.args = args;
+              if (!existing.tool || existing.tool === 'unknown') {
+                existing.tool = (data?.['tool'] as string) ?? existing.tool;
+              }
+              // Status is NOT touched: a `tool_complete` may already have
+              // landed between the two announcements, and reviving it to
+              // 'running' would strand the call mid-flight forever.
+              break;
+            }
             const sequence = this.takeTurnSequence(chatId);
+            const parentId = data?.['parentToolCallId'];
             turnMetadata.toolCalls!.push({
-              id: (data?.['callId'] as string) ?? `tc_${turnMetadata.toolCalls!.length}`,
+              id: callId ?? `tc_${turnMetadata.toolCalls!.length}`,
               tool: (data?.['tool'] as string) ?? 'unknown',
-              args: data?.['args'],
+              args,
               status: 'running',
               ...(sequence === undefined ? {} : { sequence }),
+              // SDK-subagent nesting: replayed history must group this call
+              // under its Agent step the same way the live timeline does.
+              ...(typeof parentId === 'string' && parentId ? { parentId } : {}),
             });
             break;
           }
@@ -2182,6 +2240,13 @@ export class ChatManagementService {
             if (tc) {
               tc.result = data?.['result'];
               tc.status = 'complete';
+              // Per-op +/− line stats (see FileOpStat) — derived once by the
+              // provider from structured tool output, persisted so history
+              // renders the same chips as the live stream.
+              const fileOp = data?.['fileOp'];
+              if (fileOp && typeof fileOp === 'object') {
+                tc.fileOp = fileOp as NonNullable<typeof tc.fileOp>;
+              }
             }
             break;
           }
@@ -2460,6 +2525,36 @@ export class ChatManagementService {
     if (unsub) {
       unsub();
       this.activeSubscriptions.delete(chatId);
+    }
+
+    // P0-d: Tear the workspace down BEFORE the chat rows go.
+    //
+    // `deleteWorkspace` is the only thing that fires the `beforeDelete`
+    // listeners, and those listeners are what stop the Chromium, kill every
+    // PTY, end the CUA session and drop the review threads / checkpoints /
+    // staged skills. Deleting the chat without it left all of them running
+    // against a workspace nobody could reach any more — the workspace row is
+    // keyed by `ownerId = chatId`, so once the chat row is gone the workspace
+    // is unreachable from the UI and leaks permanently.
+    //
+    // The SHARED-workspace guard mirrors `archiveChat`: an orchestrator worker
+    // reuses the orchestrator's workspaceId and must never delete a workspace
+    // it does not own.
+    //
+    // Runs first so that a failure (e.g. a Windows handle still holding the
+    // tree) leaves the chat — and therefore the workspace — findable and
+    // re-deletable. The failure is non-fatal: a user must always be able to
+    // get rid of a chat, and the workspace row survives for the retention
+    // sweep to retry.
+    if (chat.workspaceId && this.extensions.workspaceManager) {
+      try {
+        const ws = await this.extensions.workspaceManager.getExecutionWorkspace(chat.workspaceId);
+        if (ws && ws.ownerId === chatId) {
+          await this.extensions.workspaceManager.deleteWorkspace(chat.workspaceId);
+        }
+      } catch (err) {
+        console.warn(`[ChatManagement] Workspace teardown failed for chat ${chatId}:`, err);
+      }
     }
 
     // Delete records

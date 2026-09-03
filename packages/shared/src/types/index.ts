@@ -348,6 +348,17 @@ export type {
   TerminalOutputFrame,
 } from './Terminal.js';
 
+// ── Voice Module Types ──
+export type {
+  SttEngineKind,
+  SttSessionStatus,
+  SttSessionDescriptor,
+  SttClientFrame,
+  SttServerFrame,
+  TtsClientFrame,
+  TtsServerFrame,
+} from './Voice.js';
+
 // ── Widgets + Extensions (agent-rendered UI) ──
 export type {
   WidgetSurface,

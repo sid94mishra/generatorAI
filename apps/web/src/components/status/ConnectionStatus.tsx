@@ -18,6 +18,10 @@ export function ConnectionStatus({ sessionId }: ConnectionStatusProps) {
   const state = connection?.state ?? 'disconnected';
   const lastEventTime = connection?.lastEventTime;
   const eventsReceived = connection?.eventsReceived ?? 0;
+  // N4 — a resume that had to skip past a hole. The transcript on screen is
+  // missing events that will never arrive, so the indicator says so rather
+  // than showing a healthy green dot over an incomplete conversation.
+  const unrecoverable = connection?.unrecoverableEvents ?? 0;
 
   const dotColor: Record<string, string> = {
     connected: 'bg-green-500',
@@ -40,6 +44,15 @@ export function ConnectionStatus({ sessionId }: ConnectionStatusProps) {
       <div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[var(--color-muted-foreground)]">
         <span className={cn('h-2 w-2 rounded-full', dotColor[state])} />
         <span className="hidden sm:inline">{label[state]}</span>
+        {unrecoverable > 0 && (
+          <span
+            data-testid="connection-gap-badge"
+            title={`${unrecoverable} event${unrecoverable === 1 ? '' : 's'} could not be recovered after a dropped connection — reload to refetch the full transcript`}
+            className="rounded bg-[var(--color-warning)]/15 px-1 text-[10px] font-semibold text-[var(--color-warning)]"
+          >
+            ⚠ gap
+          </span>
+        )}
       </div>
 
       {/* Tooltip */}
@@ -57,6 +70,12 @@ export function ConnectionStatus({ sessionId }: ConnectionStatusProps) {
               <span className="text-[var(--color-muted-foreground)]">Events</span>
               <span className="font-medium text-[var(--color-foreground)]">{eventsReceived}</span>
             </div>
+            {unrecoverable > 0 && (
+              <div className="flex justify-between gap-2">
+                <span className="text-[var(--color-warning)]">Unrecovered</span>
+                <span className="font-medium text-[var(--color-warning)]">{unrecoverable}</span>
+              </div>
+            )}
             {lastEventTime && (
               <div className="flex justify-between">
                 <span className="text-[var(--color-muted-foreground)]">Last event</span>

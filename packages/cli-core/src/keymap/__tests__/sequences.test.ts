@@ -5,7 +5,7 @@ describe('keymap · sequence chords', () => {
   const keymap = new Keymap({});
 
   it('registers the leader prefix so the leader context is reachable', () => {
-    expect(keymap.lookup(normalise('ctrl+b'), ['global'])).toBe('pane.leader');
+    expect(keymap.lookup(normalise('alt+l'), ['global'])).toBe('pane.leader');
   });
 
   it.each([

@@ -17,11 +17,29 @@ import { BrowserContextManager } from './BrowserContextManager.js';
 
 const MAX_CONTEXTS = 10;
 
+/**
+ * Idle-timeout override, in milliseconds.
+ *
+ * Exists because the defect this bounds — an idle context that never leaves the
+ * map, permanently exhausting MAX_CONTEXTS — is only observable after the idle
+ * timeout elapses, and the shipped timeout is five minutes. Read once, bounded,
+ * and ignored unless it parses: a test seam must not become a way to disable
+ * the idle sweep in production by typing a word into an env var.
+ */
+function configuredIdleTimeoutMs(): number | undefined {
+  const raw = process.env['GENERATORAI_BROWSER_HOST_IDLE_MS'];
+  if (raw === undefined) return undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.min(60 * 60_000, Math.max(200, Math.trunc(parsed)));
+}
+
 export class BrowserHostServer {
   /* W15 */
   private browser: Browser | null = null;
   private readonly contexts = new Map<string, BrowserContextManager>();
   private readonly bootTime = Date.now();
+  private readonly idleTimeoutMs = configuredIdleTimeoutMs();
 
   start(): void {
     if (typeof process.send !== 'function') {
@@ -77,6 +95,20 @@ export class BrowserHostServer {
               const notification: BrowserFrameNotification = { type: 'frame', contextId, data, format };
               this.send(notification);
             },
+            // An idle context closes itself; the map and the gateway have to
+            // learn about it from somewhere. Before this the entry stayed in
+            // `contexts` forever, so ten idle contexts permanently exhausted
+            // MAX_CONTEXTS and `create_context` refused for the life of the
+            // host — while the gateway, never told, kept addressing a context
+            // whose Playwright handles were already closed.
+            onSelfClose: (id) => {
+              // Guard against a stale callback from a context that was already
+              // replaced under the same id.
+              if (this.contexts.get(id) !== ctx) return;
+              this.contexts.delete(id);
+              this.send({ type: 'context_destroyed', contextId: id });
+            },
+            ...(this.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: this.idleTimeoutMs }),
           });
           await ctx.initialize(browser, config);
           this.contexts.set(contextId, ctx);

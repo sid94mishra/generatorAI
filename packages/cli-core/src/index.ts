@@ -16,6 +16,9 @@ export * from './registry/CommandSpec.js';
 export * from './registry/registry.js';
 export * from './registry/toCommander.js';
 export * from './registry/toCompletions.js';
+export * from './registry/toForm.js';
+export * from './registry/adminViews.js';
+export * from './registry/surfaceSnapshot.js';
 export * from './registry/generators.js';
 
 export * from './context/CliContext.js';
@@ -26,6 +29,8 @@ export * from './keymap/Keymap.js';
 export * from './auth/cliAuth.js';
 
 export * from './config/schema.js';
+export * from './config/settingsView.js';
+export * from './config/migrate.js';
 export * from './config/paths.js';
 export * from './config/loadConfig.js';
 
@@ -46,4 +51,3 @@ export {
 export * from './session/PaneModel.js';
 export * from './viewmodels/index.js';
 export * from './client/createCliClient.js';
-export { SharedStreamPort } from './client/SharedStreamPort.js';

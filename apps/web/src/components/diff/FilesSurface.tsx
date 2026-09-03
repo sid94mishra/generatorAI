@@ -34,6 +34,7 @@ import { useWorkspaceTree, useWorkspaceTreeFile } from '@/hooks/queries.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import { FileCodeView } from './FileCodeView.js';
+import { DiffProviders } from './DiffProviders.js';
 import { ChangesTree } from './ChangesTree.js';
 import type { FileTabRef } from './fileTabId.js';
 
@@ -411,14 +412,20 @@ function FilePreview({
   }
 
   return (
-    <FileCodeView
-      name={path}
-      contents={file.contents}
-      cacheKey={file.cacheKey}
-      wrapLines={wrapLines}
-      hideHeader
-      style={{ height: '100%', overflow: 'auto' }}
-    />
+    // W28 — see the identical comment in ChangesSurface.tsx: DiffProviders
+    // wraps at the point of use, not the app root, safely (true singleton
+    // pool underneath) and keeps the highlighter/WASM bundle out of every
+    // page load that never opens a file.
+    <DiffProviders>
+      <FileCodeView
+        name={path}
+        contents={file.contents}
+        cacheKey={file.cacheKey}
+        wrapLines={wrapLines}
+        hideHeader
+        style={{ height: '100%', overflow: 'auto' }}
+      />
+    </DiffProviders>
   );
 }
 

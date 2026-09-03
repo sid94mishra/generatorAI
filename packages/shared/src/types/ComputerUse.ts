@@ -177,6 +177,15 @@ export interface ComputerScreenshot {
   artifactId?: string;
   /** True when the capture was dropped for exceeding the byte budget. */
   dataOmitted?: boolean;
+  /**
+   * X-16 — this frame is byte-identical to the previous capture, so `path` and
+   * `artifactId` point at the frame it duplicates rather than at a new file.
+   *
+   * Surfaced to the model in the tool payload, because the expensive failure is
+   * not the wasted tokens: an agent that cannot tell "nothing happened" from
+   * "I have not looked yet" re-clicks a button it already submitted.
+   */
+  unchanged?: boolean;
   engine?: string;
 }
 

@@ -142,7 +142,7 @@ Determines how harness sessions are allocated per stage during execution:
 |---|---|
 | `single` | All stages share **one** harness session (`SessionAllocator.allocateSession()` returns the same conversation for every stage). Stage prompts are sequential. No parallelism possible. |
 | `per-stage` | Each stage gets its **own** harness session. Maximum parallelism. Independent context. |
-| `auto` (default) | Independent stages (no edges between them at the same DAG layer) get their own session; dependent chains share a session. Hybrid. |
+| `auto` (default) | Resolved once at run start for the WHOLE run: `per-stage` if the DAG has any parallelism (more than one root, or any execution layer with more than one stage), otherwise `single`. It is not a per-chain hybrid — a shared session cannot serve two concurrent stages, so `single` is also force-overridden to `per-stage` when the DAG is parallel. The resolved value is written back to `workflow_runs.sessionMode`. |
 
 Override at run time via `runProfile.sessionMode`. See [feature-workflow-runs.md](./feature-workflow-runs.md#session-allocation).
 
@@ -211,9 +211,14 @@ Hooks at this level run *between* stages or at run boundaries. Stage-scope hooks
 ```typescript
 type OrchestratorConfig = {
   templateId?: string;                          // origin template if cloned
-  gitRepositories?: Array<{                     // override the project's codebases
-    url?: string;
-    alias: string;
+  codebaseAliases?: string[];                   // which of the project's codebases to use
+  createWorktrees?: boolean;                    // default true
+  requiresCodebase?: boolean;
+  autoCommit?: boolean;                         // commit the worktrees after a successful run
+  autoCreatePR?: boolean;
+  gitRepositories?: Array<{                     // LEGACY clone-a-URL path; not accepted by
+    url?: string;                               // the server schema, which strips it. New
+    alias: string;                              // work should use codebaseAliases.
     branch?: string;
   }>;
   preprocessing?: { ... };                      // pre-prompt enrichment passes
@@ -227,6 +232,16 @@ type OrchestratorConfig = {
 ```
 
 Mostly used by the Orchestrator + system templates. Plain user workflows usually omit this.
+
+**Which codebase field is authoritative.** The project/codebase model uses
+`codebaseAliases` — the builder writes it, `OrchestratorConfigSchema` validates it, and
+the run path reads it to decide which worktrees to create. `gitRepositories` is the older
+clone-a-URL path; the server schema does not declare it, so anything sent there is
+silently dropped by zod. `loadDefinition` still falls back to `gitRepositories` aliases
+when reading so definitions saved before `codebaseAliases` existed keep working.
+
+`autoCommit` / `autoCreatePR` apply to whatever the run actually has checked out — the
+legacy cloned repos *or* the worktrees created from `codebaseAliases`.
 
 ### 3.7 `tags`
 
@@ -248,6 +263,10 @@ Each `StageDefinition` is a node (see [feature-stages.md](./feature-stages.md) f
 | `always` | any terminal status incl. `skipped` and `cancelled` |
 
 Edge eval is implemented in `DAGScheduler.onStageCompleted()` (see [feature-workflow-runs.md → DAG scheduling](./feature-workflow-runs.md#dag-scheduling)).
+
+> **Setting the type in the builder:** click an edge's condition badge on the canvas to open the picker. New edges are created as `on_success`.
+
+> **Skipped predecessors are asymmetric.** A stage skipped because *its own* condition or incoming edges never fired routes as `skipped`, so only an `always` edge leaves it. A stage skipped by a run-time **stage override** routes as `completed`, so its `on_success` edges DO fire — otherwise skipping any non-leaf stage would kill the whole downstream, which is not what an operator asking to skip one stage means.
 
 ### DAG validity rules (`DAGValidator.validateDAG`)
 
@@ -382,7 +401,7 @@ for await (const event of ai.workflows.stream(run.id)) {
 4. **Adding a variable to an existing template** — old runs use the snapshot in `workflow_runs.variables`; new runs see the new variable.
 5. **Re-importing a JSON export** — IDs are re-generated. To overwrite an existing definition, delete it first then import.
 6. **Validation passes but run fails** — usually means the assistant ignored output format / a tool failed. Look at `stage_runs.error` and the `harness.error` SSE event.
-7. **Circular dependencies via condition expressions** — `condition` cannot reference downstream stages; only `parentStatus` and workflow-scope variables. Use the `expression` field with `&&`/`||`/comparisons only.
+7. **Condition expression grammar** — `condition.expression` cannot reference downstream stages. Operands are `status` / `parentStatus`, `variables.<dotted.path>`, and quoted-string / numeric / boolean literals. Comparisons are `== != < <= > >=` (**not** `===`). Logical operators are `AND` / `OR` / `NOT` (case-insensitive) or `&& || !`, with parentheses. Anything unparseable evaluates to **false**, so a typo silently prevents the stage from running — e.g. `status == 'completed' AND variables.env == 'prod'`.
 8. **`scope='project'` workflows** filtered out of the global `/workflows` list. Make sure the UI passes `projectId` when you want both.
 9. **Workflows with no edges** — a workflow with N stages and zero edges has N roots; all run in parallel.
 10. **Duplicate names** — allowed at the definition level (names aren't unique). Use IDs in CLI/SDK.

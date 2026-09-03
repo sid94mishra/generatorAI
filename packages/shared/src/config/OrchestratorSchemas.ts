@@ -84,6 +84,18 @@ export const TaskResultDigestSchema = z.object({
   risks: z.array(z.string()).optional().default([]),
   openQuestions: z.array(z.string()).optional().default([]),
   reviewHook: z.string().optional(),
+  /**
+   * W24 fix — a worker's own signal that it has reached a stable end state
+   * and needs no further follow-up this wave. `OrchestratorConfig.convergenceThreshold`
+   * (packages/core/src/services/orchestrator/OrchestratorService.ts) reads
+   * this field to decide whether the current wave has converged; before this
+   * field existed there was nothing for a worker to set, so the threshold
+   * config was declared and validated but structurally could never be
+   * satisfied by anything other than `status === 'completed'`. Optional and
+   * additive — a worker (or an older/other harness) that never sets it is
+   * still evaluated via the `status === 'completed'` fallback.
+   */
+  converged: z.boolean().optional(),
 });
 
 export type TaskResultDigest = z.infer<typeof TaskResultDigestSchema>;

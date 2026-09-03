@@ -171,6 +171,85 @@ describe('ChatManagementService', () => {
       await service.archiveChat(chat.id);
       await expect(service.sendPrompt(chat.id, 'Nope')).rejects.toThrow(/archived/);
     });
+
+    // A provider may ANNOUNCE a tool call before its arguments have finished
+    // streaming, then repeat it with the arguments filled in. The Claude Agent
+    // SDK does exactly this: two `harness.tool_start` events per call, same
+    // `callId`, the first carrying `args: {}`.
+    //
+    // Persisting both produced one call the user could see twice — the copy
+    // holding the RESULT could not say what the tool was called with, and the
+    // copy holding the args stayed `running` forever. `StageExecutionService`
+    // already merged these; the chat path did not.
+    it('merges a tool call re-announced with the same callId', async () => {
+      const chat = await service.createChat({ name: 'Tool dedup' });
+      const session = await sessionRepo.getById(chat.sessionId);
+      const conversationId = session.conversationId;
+
+      await service.sendPrompt(chat.id, 'write a file');
+
+      const emit = (kind: string, data: Record<string, unknown>): void =>
+        copilot.simulateConversationEvent(conversationId, { kind, data } as never);
+
+      emit('harness.tool_start', { tool: 'Write', args: {}, callId: 'toolu_1' });
+      emit('harness.tool_start', {
+        tool: 'Write',
+        args: { file_path: 'hello.txt', content: 'hi' },
+        callId: 'toolu_1',
+      });
+      emit('harness.tool_complete', { tool: 'unknown', callId: 'toolu_1', result: 'written' });
+      emit('harness.message_complete', { content: 'Done.' });
+      emit('harness.idle', {});
+
+      // The listener is async; let its microtasks drain.
+      await new Promise((r) => setTimeout(r, 0));
+
+      const assistant = (messageRepo.create as unknown as { mock: { calls: unknown[][] } }).mock.calls
+        .map((c) => c[0] as ChatMessage)
+        .filter((m) => m.role === 'assistant')
+        .pop();
+
+      expect(assistant).toBeDefined();
+      const toolCalls = assistant!.metadata?.toolCalls ?? [];
+      expect(toolCalls).toHaveLength(1);
+      // The surviving entry keeps BOTH halves: the args from the second
+      // announcement and the result from the completion.
+      expect(toolCalls[0]!.tool).toBe('Write');
+      expect(toolCalls[0]!.args).toEqual({ file_path: 'hello.txt', content: 'hi' });
+      expect(toolCalls[0]!.result).toBe('written');
+      expect(toolCalls[0]!.status).toBe('complete');
+    });
+
+    // Two genuinely concurrent calls to the same tool must stay separate —
+    // de-duplication keys on callId, never on the tool name.
+    it('keeps distinct callIds as distinct tool calls', async () => {
+      const chat = await service.createChat({ name: 'Two tools' });
+      const session = await sessionRepo.getById(chat.sessionId);
+      const conversationId = session.conversationId;
+
+      await service.sendPrompt(chat.id, 'read two files');
+
+      const emit = (kind: string, data: Record<string, unknown>): void =>
+        copilot.simulateConversationEvent(conversationId, { kind, data } as never);
+
+      emit('harness.tool_start', { tool: 'Read', args: { file_path: 'a.txt' }, callId: 'toolu_a' });
+      emit('harness.tool_start', { tool: 'Read', args: { file_path: 'b.txt' }, callId: 'toolu_b' });
+      emit('harness.tool_complete', { callId: 'toolu_a', result: 'A' });
+      emit('harness.tool_complete', { callId: 'toolu_b', result: 'B' });
+      emit('harness.message_complete', { content: 'Read both.' });
+      emit('harness.idle', {});
+
+      await new Promise((r) => setTimeout(r, 0));
+
+      const assistant = (messageRepo.create as unknown as { mock: { calls: unknown[][] } }).mock.calls
+        .map((c) => c[0] as ChatMessage)
+        .filter((m) => m.role === 'assistant')
+        .pop();
+
+      const toolCalls = assistant!.metadata?.toolCalls ?? [];
+      expect(toolCalls).toHaveLength(2);
+      expect(toolCalls.map((t) => t.result)).toEqual(['A', 'B']);
+    });
   });
 
   // ── getChatHistory ──

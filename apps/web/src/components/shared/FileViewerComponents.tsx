@@ -24,6 +24,7 @@ import hljs from 'highlight.js';
 import { Modal, Button } from '@/components/ui/index.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import { FileCodeView } from '@/components/diff/FileCodeView.js';
+import { DiffProviders } from '@/components/diff/DiffProviders.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
 
 // ── Types ──
@@ -475,13 +476,17 @@ export function FileViewerModal({ filePath, source, worktreeAlias, onClose, file
             // Shared viewer: virtualized + Shiki, matching the Changes panel.
             // The modal supplies its own title bar, so the built-in header is
             // suppressed to avoid showing the filename twice.
-            <FileCodeView
-              name={filePath}
-              contents={fileContent.content}
-              cacheKey={`${source}:${filePath}:${fileContent.content.length}`}
-              hideHeader
-              style={{ height: '100%', overflow: 'auto' }}
-            />
+            // W28 — DiffProviders wraps at the point of use; see the identical
+            // comment in ChangesSurface.tsx / FilesSurface.tsx.
+            <DiffProviders>
+              <FileCodeView
+                name={filePath}
+                contents={fileContent.content}
+                cacheKey={`${source}:${filePath}:${fileContent.content.length}`}
+                hideHeader
+                style={{ height: '100%', overflow: 'auto' }}
+              />
+            </DiffProviders>
           )
         ) : (
           <div className="p-6 text-center text-sm text-[var(--color-muted-foreground)]">No content</div>

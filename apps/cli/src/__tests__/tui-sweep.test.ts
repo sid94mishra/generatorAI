@@ -8,15 +8,20 @@ import { describe, expect, it } from 'vitest';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import xterm from '@xterm/headless';
+import type { Terminal as XtermTerminal } from '@xterm/headless';
 import { buildRegistry, DEFAULT_KEYMAP, detectTerminal, loadConfig } from '@generatorai/cli-core';
 import { Renderer } from '../render/Renderer.js';
 import { createLogger } from '../logger.js';
 import { launchTui } from '../tui/launch.js';
 import type { Session } from '../session.js';
 
-const Terminal = (xterm as unknown as { Terminal: typeof import('@xterm/headless').Terminal }).Terminal;
+const Terminal = (xterm as unknown as { Terminal: typeof XtermTerminal }).Terminal;
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const GALLERY = 'tui-sweep-gallery.txt';
+// Read from the real keymap rather than hard-coded, so a future leader
+// rebind can't silently desync this test from what the app actually binds
+// (exactly what happened here once already — see Phase 4's Keymap.ts fix).
+const LEADER_CHORD = DEFAULT_KEYMAP.find((b) => b.id === 'pane.leader')!.keys;
 
 /** Escape sequences for the named keys the keymap uses. */
 const KEYS: Record<string, string> = {
@@ -200,7 +205,7 @@ describe('TUI · full command sweep', () => {
 
     // The whole leader grammar.
     for (const binding of DEFAULT_KEYMAP.filter((b) => b.context === 'leader')) {
-      await step(`leader · ${binding.description}`, `ctrl+b ${binding.keys}`, 500);
+      await step(`leader · ${binding.description}`, `${LEADER_CHORD} ${binding.keys}`, 500);
       h.send('\x1b');
       await delay(150);
     }

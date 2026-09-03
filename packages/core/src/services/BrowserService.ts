@@ -33,7 +33,7 @@ import type {
   WorkspaceArtifactRecord,
   WorkspaceArtifactType,
 } from '@generatorai/shared';
-import { matchesAnyHostPattern } from '@generatorai/shared';
+import { matchesAnyHostPattern, readBoundedInt } from '@generatorai/shared';
 import { importBrowserCookies, type SupportedCookieBrowser } from '../infrastructure/browser/CookieImport.js';
 import { redactPii, flagPromptInjection } from '../infrastructure/ContentSafety.js';
 import type {
@@ -43,6 +43,8 @@ import type {
   IBrowserBridge,
   InvokeFunctionResult,
   PageOutcome,
+  ScreencastCapabilities,
+  ScreencastCodec,
   ScreencastFrame,
 } from '../domain/ports/IBrowserBridge.js';
 import type { IExecutionWorkspaceRepository } from '../domain/ports/IExecutionWorkspaceRepository.js';
@@ -139,7 +141,13 @@ export class BrowserService {
     }
     this.bridges = bridges;
     this.cfg = {
-      maxConcurrent: config?.maxConcurrent ?? Number(process.env['GENERATORAI_BROWSER_MAX_CONCURRENT'] ?? '5'),
+      // Bounded read: a bare `Number()` made a typo'd value `NaN`, and `NaN`
+      // as a cap makes every `>=` comparison false — the documented limit
+      // silently stops existing (§1.P already lists this variable as one of
+      // the claims the code did not honour).
+      maxConcurrent:
+        config?.maxConcurrent ??
+        readBoundedInt('GENERATORAI_BROWSER_MAX_CONCURRENT', { defaultValue: 5, min: 1, max: 100 }),
       maxRestarts: config?.maxRestarts ?? 3,
       restartCooldownMs: config?.restartCooldownMs ?? 10_000,
       eventBusScopeSessionId: config?.eventBusScopeSessionId ?? 'browser',
@@ -236,14 +244,31 @@ export class BrowserService {
     }
 
     if (this.sessions.size >= this.cfg.maxConcurrent) {
-      // LRU-evict: pick the session with the oldest `lastActivityAt` and
-      // stop it. This makes the max-concurrent cap behave like a memory
-      // budget rather than a hard "sorry, come back later" — the LLM's
-      // lazy-start via `open_browser_page` should always succeed as long
-      // as at least one session in the pool has been idle long enough.
+      // LRU-evict: pick the least recently used session and stop it. This makes
+      // the max-concurrent cap behave like a memory budget rather than a hard
+      // "sorry, come back later" — the LLM's lazy-start via `open_browser_page`
+      // should always succeed as long as at least one session in the pool has
+      // been idle long enough.
+      //
+      // "Least recently used" has to mean the same thing here as it does in the
+      // idle sweeper, which honours both signals (P0-25):
+      //  - `lastFrameSentAt`: a session screencasting to a live view is in use
+      //    even when nobody is clicking. Sorting on `lastActivityAt` alone made
+      //    the browser the human is watching the FIRST eviction candidate.
+      //  - `visibility: 'visible'`: the human can see this window. Evicting it
+      //    closes a browser out from under them. Visible sessions are ranked
+      //    last and only evicted when nothing else is available — the cap still
+      //    has to be enforceable.
+      const lastUsed = (s: SessionRecord): number =>
+        Math.max(s.lastActivityAt, s.lastFrameSentAt);
       const evictable = Array.from(this.sessions.values())
         .filter((s) => !s.fsm.isTerminal && s.fsm.status !== 'starting')
-        .sort((a, b) => a.lastActivityAt - b.lastActivityAt);
+        .sort((a, b) => {
+          const aVisible = a.config.visibility === 'visible' ? 1 : 0;
+          const bVisible = b.config.visibility === 'visible' ? 1 : 0;
+          if (aVisible !== bVisible) return aVisible - bVisible;
+          return lastUsed(a) - lastUsed(b);
+        });
       const victim = evictable[0];
       if (!victim) {
         // Every session is starting — respect the cap; the caller will retry.
@@ -252,7 +277,7 @@ export class BrowserService {
         );
       }
       this.logger.info?.(
-        `[BrowserService] LRU-evicting browser session ${victim.workspaceId} (idle for ${Date.now() - victim.lastActivityAt}ms) to make room for ${workspace.id}`,
+        `[BrowserService] LRU-evicting browser session ${victim.workspaceId} (idle for ${Date.now() - lastUsed(victim)}ms) to make room for ${workspace.id}`,
       );
       try {
         await this.stop(victim.workspaceId, 'lru-evicted');
@@ -517,21 +542,49 @@ export class BrowserService {
     };
   }
 
-  screencast(workspaceId: string, opts: { fps: number; quality: number }): AsyncIterable<ScreencastFrame> {
+  /**
+   * P1-33 — what the live view for this workspace can actually stream, asked
+   * rather than discovered by catching a throw from {@link screencast}.
+   *
+   * A workspace with no session declares nothing rather than throwing: "there
+   * is no browser here" and "the browser here cannot stream" are both answers
+   * to the caller's real question, which is whether to open a stream.
+   */
+  screencastCapabilities(workspaceId: string): ScreencastCapabilities {
+    const record = this.sessions.get(workspaceId);
+    if (!record || record.fsm.status === 'terminated') {
+      return { supportsScreencast: false, codecs: [] };
+    }
+    return record.bridge.screencastCapabilities();
+  }
+
+  screencast(
+    workspaceId: string,
+    opts: {
+      fps: number;
+      quality: number;
+      codecs?: readonly ScreencastCodec[];
+      signal?: AbortSignal;
+      /** See `IBrowserBridge.screencast` — the consumer's way back from a lost frame. */
+      onRequestKeyframe?: (request: () => void) => void;
+    },
+  ): AsyncIterable<ScreencastFrame> {
     const record = this.mustRecord(workspaceId);
     // P0-25: Wrap the bridge's async iterable so every yielded frame bumps
     // `lastFrameSentAt`, keeping the idle sweeper from reaping a watched session.
     const bridge = record.bridge;
     const handle = record.handle;
-    const service = this;
+    // Arrow functions throughout, not method shorthand — they close over the
+    // real `this` lexically, so no `const service = this` alias is needed to
+    // reach `this.sessions` from inside the nested iterator object.
     return {
-      [Symbol.asyncIterator](): AsyncIterator<ScreencastFrame> {
+      [Symbol.asyncIterator]: (): AsyncIterator<ScreencastFrame> => {
         const iter = bridge.screencast(handle, opts)[Symbol.asyncIterator]();
         return {
-          async next() {
+          next: async () => {
             const result = await iter.next();
             if (!result.done) {
-              const rec = service['sessions'].get(workspaceId);
+              const rec = this.sessions.get(workspaceId);
               if (rec) rec.lastFrameSentAt = Date.now();
             }
             return result;

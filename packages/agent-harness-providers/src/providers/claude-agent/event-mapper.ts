@@ -133,6 +133,51 @@ function dominantModelUsage(
   return best ? { model: best.model, usage: best.usage } : null;
 }
 
+/** One API call's prompt, as `usage.iterations` reports it. */
+export interface LastCallUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/**
+ * The token counts for the LAST API call of a turn.
+ *
+ * `usage.iterations` is Anthropic's per-API-call breakdown; the field's own
+ * documentation states it exists so callers can "calculate the true context
+ * window size from the last iteration". That is exactly what the context
+ * gauge needs, and it is NOT what the sibling totals on `usage` mean — those
+ * sum every call the turn made, so they measure spend, not occupancy.
+ *
+ * Compaction entries are skipped: a `compaction` iteration describes the
+ * summarisation pass, not the assembled prompt that followed it, so treating
+ * it as the final call would report the wrong window. Returns null when the
+ * array is missing or holds nothing usable, which the caller reads as "we do
+ * not know" rather than substituting the aggregate.
+ */
+export function lastIterationUsage(usage: Record<string, unknown> | undefined): LastCallUsage | null {
+  const iterations = usage?.['iterations'];
+  if (!Array.isArray(iterations)) return null;
+  for (let i = iterations.length - 1; i >= 0; i -= 1) {
+    const it = iterations[i] as Record<string, unknown> | null;
+    if (!it || typeof it !== 'object') continue;
+    if (it['type'] === 'compaction') continue;
+    const num = (key: string): number => {
+      const v = it[key];
+      return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+    };
+    const call: LastCallUsage = {
+      input: num('input_tokens'),
+      output: num('output_tokens'),
+      cacheRead: num('cache_read_input_tokens'),
+      cacheWrite: num('cache_creation_input_tokens'),
+    };
+    if (call.input + call.cacheRead + call.cacheWrite > 0) return call;
+  }
+  return null;
+}
+
 function buildUsagePayload(
   model: string,
   inputTokens: number,
@@ -173,6 +218,75 @@ function buildSessionInfoPayload(infoType: string, message: string) {
  * A single SDK message can produce multiple events (e.g. AssistantMessage
  * with both text and tool_use content blocks).
  */
+// ── File-op stats from structured tool output ──
+//
+// The SDK's `user` messages carry `tool_use_result` — the tool's full Output
+// object (FileWriteOutput / FileEditOutput), not just the text the model
+// sees. Its `structuredPatch` hunks are exactly the per-operation diff, so
+// "+A −D" per Write/Edit costs nothing to compute here and nothing at all
+// client-side. `gitDiff.additions/deletions` is preferred when present (it
+// is git's own count); the hunk-line count is the fallback.
+interface StructuredPatchHunk {
+  lines?: unknown[];
+}
+
+function deriveFileOp(
+  toolUseResult: unknown,
+): { kind: 'create' | 'update' | 'edit'; filePath: string; additions: number; deletions: number } | undefined {
+  if (!toolUseResult || typeof toolUseResult !== 'object') return undefined;
+  const r = toolUseResult as Record<string, unknown>;
+  const filePath = typeof r['filePath'] === 'string' ? r['filePath'] : undefined;
+  const patch = Array.isArray(r['structuredPatch']) ? (r['structuredPatch'] as StructuredPatchHunk[]) : undefined;
+  if (!filePath || !patch) return undefined;
+
+  const kind: 'create' | 'update' | 'edit' =
+    r['type'] === 'create' ? 'create' : r['type'] === 'update' ? 'update' : 'edit';
+
+  const gitDiff = r['gitDiff'] as { additions?: unknown; deletions?: unknown } | undefined;
+  if (gitDiff && typeof gitDiff.additions === 'number' && typeof gitDiff.deletions === 'number') {
+    return { kind, filePath, additions: gitDiff.additions, deletions: gitDiff.deletions };
+  }
+
+  let additions = 0;
+  let deletions = 0;
+  for (const hunk of patch) {
+    if (!hunk || !Array.isArray(hunk.lines)) continue;
+    for (const line of hunk.lines) {
+      if (typeof line !== 'string') continue;
+      if (line.startsWith('+')) additions += 1;
+      else if (line.startsWith('-')) deletions += 1;
+    }
+  }
+  return { kind, filePath, additions, deletions };
+}
+
+// ── Tool-name correlation (bounded) ──
+//
+// A `tool_result` block carries only `tool_use_id`; the SDK message that
+// names the tool arrived earlier. The mapper is stateless per message, so
+// completions used to go out as tool "unknown" — harmless for the web UI
+// (which matches on callId) but wrong for the CLI renderer, the event log
+// and anything replaying the stream without reducer state.
+//
+// `tool_use` ids are globally unique (`toolu_…`), so one process-wide map is
+// safe across conversations. Bounded FIFO: entries are only needed until the
+// matching result, which follows within the same turn.
+const TOOL_NAME_CACHE_MAX = 2048;
+const toolNamesByCallId = new Map<string, string>();
+
+function rememberToolName(callId: string | undefined, name: string | undefined): void {
+  if (!callId || !name || name === 'unknown') return;
+  if (!toolNamesByCallId.has(callId) && toolNamesByCallId.size >= TOOL_NAME_CACHE_MAX) {
+    const oldest = toolNamesByCallId.keys().next().value;
+    if (oldest !== undefined) toolNamesByCallId.delete(oldest);
+  }
+  toolNamesByCallId.set(callId, name);
+}
+
+function recallToolName(callId: string): string {
+  return toolNamesByCallId.get(callId) ?? 'unknown';
+}
+
 export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEvent[] {
   const events: AgentEvent[] = [];
 
@@ -192,6 +306,7 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
             break;
 
           case 'tool_use':
+            rememberToolName(block.id, block.name);
             events.push(createAgentEvent(
               'harness.tool_start',
               buildToolStartPayload(
@@ -225,6 +340,16 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
       const betaMsg = message.message;
       if (!betaMsg?.content || !Array.isArray(betaMsg.content)) break;
 
+      // `tool_use_result` is per-message; only attach its stats when the
+      // message carries exactly one tool_result, so they cannot be
+      // mis-attributed in a (rare) batched-results message.
+      const resultBlocks = betaMsg.content.filter(
+        (b: { type: string }) => b.type === 'tool_result',
+      );
+      const fileOp = resultBlocks.length === 1
+        ? deriveFileOp((message as unknown as { tool_use_result?: unknown }).tool_use_result)
+        : undefined;
+
       for (const block of betaMsg.content) {
         if (block.type === 'tool_result') {
           const resultContent = Array.isArray(block.content)
@@ -237,7 +362,18 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
 
           events.push(createAgentEvent(
             'harness.tool_complete',
-            buildToolCompletePayload('unknown', block.tool_use_id, resultContent, !block.is_error),
+            {
+              ...buildToolCompletePayload(
+                recallToolName(block.tool_use_id),
+                block.tool_use_id,
+                resultContent,
+                !block.is_error,
+              ),
+              ...(fileOp ? { fileOp } : {}),
+              ...(message.parent_tool_use_id
+                ? { parentToolCallId: message.parent_tool_use_id }
+                : {}),
+            },
           ));
         }
       }
@@ -285,6 +421,7 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
         case 'content_block_start': {
           const contentBlock = (streamEvent as unknown as { content_block?: { type: string; id?: string; name?: string } }).content_block;
           if (contentBlock?.type === 'tool_use') {
+            rememberToolName(contentBlock.id, contentBlock.name);
             events.push(createAgentEvent(
               'harness.tool_start',
               buildToolStartPayload(
@@ -341,14 +478,41 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
       ));
 
       // A derived context snapshot so the gauge has something truthful even
-      // before `getContextUsage()` answers. `contextWindow` here is the total
-      // window; the prompt budget excludes the completion reserve.
+      // when the control-channel breakdown does not arrive. `contextWindow`
+      // here is the total window; the prompt budget excludes the completion
+      // reserve.
+      //
+      // The numerator is the LAST API call's prompt, never the turn's totals.
+      // `message.usage` (and `modelUsage`) aggregate every API call the turn
+      // made, so a turn with five tool round-trips re-counts the same cached
+      // prefix five times. That is correct for *spend* — which is what
+      // `harness.usage` above reports — and badly wrong for *occupancy*: two
+      // messages in a fresh chat read as 212k tokens / 23% full, and the
+      // figure climbed every turn because it was a running total of billing,
+      // not a measure of the window.
+      //
+      // `usage.iterations` is the per-API-call breakdown, and the SDK's own
+      // documentation for it says: "Calculate the true context window size
+      // from the last iteration." Measured against `getContextUsage()`, the
+      // CLI's authoritative answer, on the same turns:
+      //
+      //   aggregate 188,441   last iteration 41,932   getContextUsage 41,932
+      //   aggregate 101,003   last iteration 35,368   getContextUsage 35,368
+      //
+      // Exact, not approximate. When `iterations` is absent (an older API
+      // build) we publish no snapshot at all rather than the aggregate — this
+      // module's stated rule is to say nothing instead of inventing a number,
+      // and `ClaudeAgentProvider.emitContextUsageSnapshot` still supplies the
+      // provider-reported one.
       //
       // Skipped entirely when the turn reported no tokens at all — that means
       // the query failed (auth, abort) rather than that the context is empty,
       // and publishing "0 / 200k · 0%" would state a falsehood confidently.
-      const contextTokens = inputTokens + cacheReadTokens + cacheWriteTokens;
-      if (contextTokens > 0) {
+      const lastCall = lastIterationUsage(message.usage as unknown as Record<string, unknown> | undefined);
+      const contextTokens = lastCall
+        ? lastCall.input + lastCall.cacheRead + lastCall.cacheWrite
+        : 0;
+      if (contextTokens > 0 && lastCall) {
         const totalContextWindow = mu?.contextWindow;
         const maxOutputTokens = mu?.maxOutputTokens;
         const promptTokenLimit =
@@ -362,11 +526,14 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
           currentTokens: contextTokens,
           ...(promptTokenLimit != null ? { promptTokenLimit } : {}),
           ...(totalContextWindow != null ? { totalContextWindow } : {}),
+          // The same call the total describes, so the popover's Input /
+          // Cache read / Cache write rows add up to the number above them.
+          // Turn-wide spend stays on `harness.usage`.
           apiUsage: {
-            input: inputTokens,
-            output: outputTokens,
-            cacheRead: cacheReadTokens,
-            cacheWrite: cacheWriteTokens,
+            input: lastCall.input,
+            output: lastCall.output,
+            cacheRead: lastCall.cacheRead,
+            cacheWrite: lastCall.cacheWrite,
           },
         }));
       }

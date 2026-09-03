@@ -32,14 +32,21 @@ export interface RightPaneTabDef {
   /** Lucide icon element. */
   icon: React.ReactNode;
   /**
-   * Renders the tab body. Called only while the tab is active.
+   * Renders the tab body.
    *
    * `ctx.id` is the stable per-tab id assigned by the RightPane (e.g.
    * `terminal-1`, `browser-1`). Panels that need to persist per-tab
    * state (like TerminalPanel's server-side session id) key off it.
    * `ctx.index` is the 1-based ordinal among tabs of the same type.
+   *
+   * `ctx.active` is false for every tab except the selected one. EVERY tab
+   * is mounted (see the body below — that is what keeps a terminal's
+   * scrollback and a browser's page alive across tab switches), so a panel
+   * that holds an open socket or decodes frames MUST gate that work on this
+   * flag. P1-50: without it, five browser tabs each ran a live screencast
+   * socket and decoded every frame while four of them were invisible.
    */
-  render: (ctx: { id: string; type: string; index: number }) => React.ReactNode;
+  render: (ctx: { id: string; type: string; index: number; active: boolean }) => React.ReactNode;
   /** When true, the tab may appear multiple times. Default: singleton. */
   allowMultiple?: boolean;
   /** Cap on concurrent instances of this tab kind (only meaningful with
@@ -204,6 +211,21 @@ export function RightPane({
   );
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  // N7 — a cap that refuses in silence reads as a bug. Both cap paths (the
+  // "+" menu and an imperative focus request) route through `capNotice`, so
+  // the user is told why no new tab appeared instead of clicking again.
+  const [capNotice, setCapNotice] = useState<string | null>(null);
+  const capNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const announceCap = useCallback((def: RightPaneTabDef, max: number) => {
+    setCapNotice(
+      `${max} ${def.label} tab${max === 1 ? '' : 's'} is the limit — close one to open another.`,
+    );
+    if (capNoticeTimer.current) clearTimeout(capNoticeTimer.current);
+    capNoticeTimer.current = setTimeout(() => setCapNotice(null), 6000);
+  }, []);
+  useEffect(() => () => {
+    if (capNoticeTimer.current) clearTimeout(capNoticeTimer.current);
+  }, []);
   const addMenuRef = useRef<HTMLDivElement>(null);
   // ── Tab-strip overflow ──
   // When the pane is narrow the tab strip can't fit every tab. Rather than
@@ -272,17 +294,26 @@ export function RightPane({
   );
 
   const addTab = useCallback((type: string) => {
+    const def = tabs[type];
+    if (!def) return;
+    // The cap is evaluated OUTSIDE the state updater: announcing the refusal
+    // is a state write of its own, and React may run an updater twice.
+    const atCap =
+      def.allowMultiple &&
+      def.maxInstances !== undefined &&
+      state.tabs.filter((t) => t.type === type).length >= def.maxInstances;
+    if (atCap) announceCap(def, def.maxInstances!);
+
     setState((prev) => {
-      const def = tabs[type];
-      if (!def) return prev;
       const existing = prev.tabs.find((t) => t.type === type);
       if (existing && !def.allowMultiple) {
         return { ...prev, active: existing.id };
       }
-      // Enforce per-kind instance cap.
-      if (def.allowMultiple && def.maxInstances) {
-        const count = prev.tabs.filter((t) => t.type === type).length;
-        if (count >= def.maxInstances) return prev;
+      // At the cap, focus the oldest instance — same behaviour as the
+      // explicit-id path below, never a silent no-op.
+      if (atCap) {
+        const oldest = prev.tabs.find((t) => t.type === type);
+        return oldest ? { ...prev, active: oldest.id } : prev;
       }
       const id = mintTabId(type);
       return {
@@ -292,7 +323,7 @@ export function RightPane({
       };
     });
     setAddMenuOpen(false);
-  }, [tabs]);
+  }, [tabs, state.tabs, setState, announceCap]);
 
   const closeTab = useCallback((id: string) => {
     const closing = state.tabs.find((t) => t.id === id);
@@ -328,6 +359,14 @@ export function RightPane({
     const type = focusTabRequest.type;
     const def = tabs[type];
     if (!def) return;
+    // Same reason as `addTab`: the refusal notice is its own state write, so
+    // it is decided before the updater runs.
+    const atCap =
+      def.maxInstances !== undefined &&
+      focusTabRequest.tabId !== undefined &&
+      !state.tabs.some((t) => t.id === focusTabRequest.tabId) &&
+      state.tabs.filter((t) => t.type === type).length >= def.maxInstances;
+    if (atCap) announceCap(def, def.maxInstances!);
     setState((prev) => {
       // An explicit id addresses ONE instance: re-opening the same file must
       // focus the tab already showing it rather than reusing whichever file
@@ -365,7 +404,10 @@ export function RightPane({
         active: id,
       };
     });
-  }, [focusTabRequest, tabs]);
+    // `state.tabs` participates only in the cap check; `lastFocusTokenRef`
+    // still guarantees one add/focus cycle per token even though tab-list
+    // changes now re-run this effect.
+  }, [focusTabRequest, tabs, state.tabs, setState, announceCap]);
 
   // Types available in the "+" menu (only those not already open, unless
   // the tab kind opts in to `allowMultiple` and is below its instance cap).
@@ -733,8 +775,22 @@ export function RightPane({
           </div>
         </div>
 
+        {/* Instance-cap refusal (N7). Inline rather than a toast: the cap
+            belongs to this pane, and the message has to appear next to the
+            control the user just pressed. */}
+        {capNotice && (
+          <div
+            role="status"
+            data-testid="right-pane-cap-notice"
+            className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-warning)]/10 px-3 py-1.5 text-[11px] text-[var(--color-warning)]"
+          >
+            {capNotice}
+          </div>
+        )}
+
         {/* Body — mount every tab once, hide inactive ones. Keeps stateful
-            children (e.g. Browser stream) alive across tab switches. */}
+            children (e.g. Browser stream) alive across tab switches. Panels
+            gate live work on `ctx.active`; see `RightPaneTabDef.render`. */}
         <div className="relative min-h-0 flex-1">
           {state.tabs.map((t) => {
             const def = tabs[t.type];
@@ -752,7 +808,7 @@ export function RightPane({
                   !isActive && 'pointer-events-none invisible',
                 )}
               >
-                {def.render({ id: t.id, type: t.type, index })}
+                {def.render({ id: t.id, type: t.type, index, active: isActive })}
               </div>
             );
           })}

@@ -11,6 +11,23 @@ import type {
   ComputerConsentDecision,
   ComputerRefusalCode,
 } from './ComputerUse.js';
+import type { TerminalHostKind } from './Terminal.js';
+import type { SttEngineKind } from './Voice.js';
+
+/**
+ * Per-operation file-change stats, derived from the provider's structured
+ * tool output (Claude `FileWriteOutput` / `FileEditOutput`). Rides on
+ * `harness.tool_complete` so the streaming panel can show "+A −D" per
+ * write/edit without diffing anything client-side.
+ */
+export interface FileOpStat {
+  /** What the operation did to the file. */
+  kind: 'create' | 'update' | 'edit' | 'delete';
+  /** Workspace-relative when derivable; otherwise as reported. */
+  filePath: string;
+  additions: number;
+  deletions: number;
+}
 
 export type AgentEvent =
   // ── LLM Harness Events (provider-agnostic) ──
@@ -22,7 +39,7 @@ export type AgentEvent =
   | { kind: 'harness.reasoning_delta'; data: { text: string } }
   | { kind: 'harness.reasoning_complete'; data: { content: string } }
   | { kind: 'harness.tool_start'; data: { tool: string; args: unknown; callId?: string | null; parentToolCallId?: string } }
-  | { kind: 'harness.tool_complete'; data: { tool: string; result: unknown; callId?: string | null; success?: boolean; parentToolCallId?: string } }
+  | { kind: 'harness.tool_complete'; data: { tool: string; result: unknown; callId?: string | null; success?: boolean; parentToolCallId?: string; fileOp?: FileOpStat } }
   | { kind: 'harness.idle'; data: Record<string, never> }
   | { kind: 'harness.error'; data: { message: string; provider?: string } }
   /** W13 / X-4 — semantic cancellation outcome. Not an error: the user pressed Stop. */
@@ -416,9 +433,21 @@ export type AgentEvent =
   // Lifecycle only; raw output stays on the dedicated WebSocket transport
   // (`/api/workspaces/:id/terminals/:sid/stream`) to keep the event log
   // small. The SPA subscribes to these to auto-focus tabs / show toasts.
-  | { kind: 'terminal.session_created'; data: { workspaceId: string; sessionId: string; host: 'node-pty' | 'fallback-child-process' | 'sandbox'; pid: number | null; cwd: string; shell: string } }
+  | { kind: 'terminal.session_created'; data: { workspaceId: string; sessionId: string; host: TerminalHostKind; pid: number | null; cwd: string; shell: string } }
   | { kind: 'terminal.session_closed'; data: { workspaceId: string; sessionId: string; code: number; signal?: string; reason?: string } }
   | { kind: 'terminal.session_resized'; data: { workspaceId: string; sessionId: string; cols: number; rows: number } }
+  // ── Voice Module Events ──
+  // Lifecycle only; audio never travels over the EventBus/SSE — it stays on
+  // the dedicated `/api/stt/stream` WebSocket, same reasoning as Terminal's
+  // raw PTY bytes. `workspaceId` is nullable — see Voice.ts file header.
+  | { kind: 'voice.stt_session_started'; data: { workspaceId: string | null; sessionId: string; engine: SttEngineKind } }
+  | { kind: 'voice.stt_session_ended'; data: { workspaceId: string | null; sessionId: string; reason: string } }
+  // Phase 1 — pause/resume (VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part C.3/C.4).
+  | { kind: 'voice.stt_paused'; data: { workspaceId: string | null; sessionId: string } }
+  | { kind: 'voice.stt_resumed'; data: { workspaceId: string | null; sessionId: string } }
+  // Phase 3 — TTS (speak()) lifecycle.
+  | { kind: 'voice.tts_session_started'; data: { workspaceId: string | null; sessionId: string } }
+  | { kind: 'voice.tts_session_ended'; data: { workspaceId: string | null; sessionId: string } }
   // ── Widget Events ──
   // Emitted by WidgetService on widget lifecycle + user/agent actions.
   // Widgets are rendered in an iframe on the client; the payload

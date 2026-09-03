@@ -12,6 +12,7 @@ import {
   Tree,
   ProgressBar,
   ContextGauge,
+  contextGaugeTone,
   Panel,
   Tabs,
   StatusBar,
@@ -24,6 +25,7 @@ import {
   parseDiffLines,
   Dag,
   JsonView,
+  Spinner,
 } from '../index.js';
 
 const WIDTHS = [80, 120, 200];
@@ -40,9 +42,10 @@ function draw(
   node: React.ReactNode,
   columns = 120,
   ladder: (typeof LADDERS)[number] = 'truecolor',
+  extraEnv: NodeJS.ProcessEnv = {},
 ): string {
   const capabilities = detectTerminal({
-    env: COLOR_ENV[ladder],
+    env: { ...COLOR_ENV[ladder], ...extraEnv },
     stdout: { isTTY: true, columns, rows: 40 },
     stdin: { isTTY: true },
     platform: 'linux',
@@ -215,6 +218,30 @@ describe('layout', () => {
     expectFits(frame, 80);
     // Wrapping would change the bar's height and shift the whole layout.
     expect(plain(frame).split('\n').filter((l) => l.trim()).length).toBeLessThanOrEqual(2);
+  });
+
+  it('Tabs keeps the ACTIVE tab visible even when it would not fit from the front (Phase 4 item 4)', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, label: `tab-${i}` }));
+    // Active tab is near the END — filling from index 0 forward would elide
+    // it completely, with only a `+N` count giving no hint it was the
+    // active one that got hidden.
+    const frame = plain(draw(<Tabs items={many} activeId="t39" />, 80));
+    expect(frame).toContain('tab-39');
+  });
+
+  it('Tabs still shows early tabs unchanged when the active tab already fits (no regression to the common case)', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, label: `tab-${i}` }));
+    const frame = plain(draw(<Tabs items={many} activeId="t0" />, 80));
+    expect(frame).toContain('tab-0');
+    expect(frame).toContain('tab-1');
+  });
+
+  it('Tabs indicates hidden tabs on BOTH sides when the active tab is in the middle', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, label: `tab-${i}` }));
+    const frame = plain(draw(<Tabs items={many} activeId="t20" />, 80));
+    expect(frame).toContain('tab-20');
+    // Two separate "+N" counts (leading and trailing), not one.
+    expect(frame.match(/\+\d+/g)?.length).toBe(2);
   });
 
   it.each(WIDTHS)('StatusBar fits within %i columns', (width) => {
@@ -419,12 +446,66 @@ describe('gauges', () => {
     expect(() => draw(<ProgressBar value={1} max={0} width={20} />)).not.toThrow();
   });
 
+  it('renders as a plain percentage, not a glyph bar, for a screen reader (Phase 4 item 8)', () => {
+    // A repeated fill/empty glyph reads aloud as noise; the number itself is
+    // the information a screen reader user actually wants.
+    const frame = plain(draw(<ProgressBar value={0.42} width={40} />, 80, 'truecolor', { GENERATORAI_SCREEN_READER: '1' }));
+    expect(frame).toContain('42%');
+    expect(frame).not.toMatch(/[#.█░]{5,}/);
+  });
+
+  it('still renders the glyph bar normally when screenReader is not set', () => {
+    const frame = plain(draw(<ProgressBar value={0.5} width={40} />, 80));
+    expect(frame).not.toContain('%');
+  });
+
   it('ContextGauge renders a percentage', () => {
     expect(plain(draw(<ContextGauge used={42_000} total={100_000} />))).toContain('42');
   });
 
   it('ContextGauge survives a zero total', () => {
     expect(() => draw(<ContextGauge used={0} total={0} />)).not.toThrow();
+  });
+
+  it('ContextGauge colors against compactionThreshold when given one, not just the raw total', () => {
+    // Same used/total (a "safe" 10% of the raw window), but a compaction
+    // threshold that number is already well past — the number that
+    // actually matters, per `harness.context_usage`'s own doc comment on
+    // why it exists. Checked against the pure `contextGaugeTone`, not
+    // rendered ANSI: chalk decides once at module load whether to emit
+    // color at all, which a single test cannot force after the fact.
+    expect(contextGaugeTone(20_000, 200_000)).toBe('running');
+    expect(contextGaugeTone(20_000, 200_000, 15_000)).toBe('failure');
+  });
+
+  it.each([
+    [0, 'running'],
+    [0.8, 'warning'],
+    [0.95, 'failure'],
+  ] as const)('contextGaugeTone(%s of total) is %s', (fraction, expected) => {
+    expect(contextGaugeTone(fraction * 100_000, 100_000)).toBe(expected);
+  });
+});
+
+describe('Spinner (Phase 4 item 8 — screen-reader / reduced-motion profile)', () => {
+  it('renders the static "running" marker, not an animated frame, for a screen reader', () => {
+    const frame = plain(draw(<Spinner />, 80, 'truecolor', { GENERATORAI_SCREEN_READER: '1' }));
+    // Unicode running glyph is '⟳', ASCII is '>' — either is the static
+    // marker; a spinner frame (e.g. one of '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' or '|/-\') is not.
+    expect(frame).toMatch(/[⟳>]/);
+  });
+
+  it('renders the static marker under reducedMotion too, even without screenReader', () => {
+    const frame = plain(draw(<Spinner />, 80, 'truecolor', { GENERATORAI_REDUCED_MOTION: '1' }));
+    expect(frame).toMatch(/[⟳>]/);
+  });
+
+  it('renders the animating spinner glyph, not the static marker, when neither preference is set', () => {
+    const frame = plain(draw(<Spinner />, 80));
+    // First frame of whichever spinner set is active (unicode '⠋⠙⠹...' or
+    // ASCII '|/-\') — distinct from the static running marker ('⟳' or '>').
+    expect(frame).toMatch(/[⠋|]/);
+    expect(frame).not.toMatch(/[⟳>]/);
   });
 });
 

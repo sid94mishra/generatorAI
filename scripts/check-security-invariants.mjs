@@ -13,7 +13,10 @@
 // Run: node scripts/check-security-invariants.mjs
 // ────────────────────────────────────────────────────────────────
 
-import { readFileSync, globSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+// Not `globSync` from node:fs — that is Node 22+, and CI pins Node 20, so
+// every checker in the root `lint` chain died at import before its first rule.
+import { globFiles } from './lib/globFiles.mjs';
 import { resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -108,13 +111,23 @@ const RULES = [
   {
     id: 'no-parent-env-clone-into-harness',
     description:
-      'A harness runs model-authored shell commands, so it must never inherit ' +
-      'this process environment — which holds the vault key, the desktop admin ' +
-      'token, source-control tokens and database credentials.',
+      'A harness, terminal or script sandbox runs model-authored shell commands, ' +
+      'so it must never inherit this process environment — which holds the vault ' +
+      'key, the desktop admin token, source-control tokens and database credentials.',
     remedy:
-      'Build the child environment with `buildHarnessEnv()` ' +
-      '(packages/agent-harness-providers/src/childEnv.ts), which allowlists.',
-    globs: ['packages/agent-harness-providers/src/**/*.ts'],
+      'Build the child environment with `buildChildEnv()` ' +
+      '(packages/shared/src/config/childEnv.ts), which allowlists. Providers ' +
+      'use the `buildHarnessEnv()` wrapper.',
+    // Originally scoped to the providers package only, which meant every
+    // actually-offending site was outside its blast radius by construction:
+    // the terminal hosts, the pty host and the script sandbox all cloned
+    // `process.env` and the rule could never have fired on any of them.
+    globs: [
+      'packages/agent-harness-providers/src/**/*.ts',
+      'packages/core/src/infrastructure/terminal/**/*.ts',
+      'packages/core/src/infrastructure/SandboxedScriptRunner.ts',
+      'apps/pty-host/src/**/*.ts',
+    ],
     // `{ ...process.env }` / `env: { ...process.env, … }` — the exact clone.
     pattern: /\{\s*\.\.\.process\.env\b/,
   },
@@ -132,7 +145,7 @@ for (const rule of RULES) {
   for (const glob of rule.globs) {
     let matched;
     try {
-      matched = globSync(glob, { cwd: repoRoot });
+      matched = globFiles(glob, repoRoot);
     } catch {
       continue;
     }

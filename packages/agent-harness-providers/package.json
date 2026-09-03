@@ -19,7 +19,9 @@
       "types": "./src/providers/claude-agent/index.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public",
     "main": "./dist/index.js",
@@ -46,13 +48,14 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@generatorai/core": "workspace:*",
     "@generatorai/shared": "workspace:*",
     "@opentelemetry/api": "^1.9.0"
   },
   "optionalDependencies": {
-    "@github/copilot-sdk": "^1.0.8",
-    "@anthropic-ai/claude-agent-sdk": "^0.3.220"
+    "@anthropic-ai/claude-agent-sdk": "^0.3.220",
+    "@github/copilot-sdk": "^1.0.8"
   },
   "devDependencies": {
     "zod": "^3.24.0"

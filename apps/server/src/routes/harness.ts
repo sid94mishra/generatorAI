@@ -27,14 +27,46 @@ export function createHarnessRoutes(container: Container): Router {
   });
 
   // GET /harness/providers — live readiness + model catalog per provider.
-  // `?refresh=1` forces a re-probe (otherwise results are cached, because a
-  // cold probe spawns a provider CLI and can take several seconds).
+  //
+  // `?refresh=1` forces a blocking re-probe. Everything else is served from
+  // the cached snapshot and refreshed in the BACKGROUND.
+  //
+  // This used to `await refresh(false)` unconditionally. That looks cached,
+  // but the TTL is 5 minutes and the disk cache restores each provider's
+  // `checkedAt` from the PREVIOUS run — which is essentially always older than
+  // that — so the first request after every boot missed the freshness check
+  // and blocked on a full cold probe. A cold probe spawns each provider's CLI
+  // and measured ~22 s here. The composer holds a skeleton until this resolves
+  // (`ChatInput` gates on `modelsPending`), so for ~22 s after every restart
+  // the chat could not be typed into at all.
+  //
+  // The registry was already built for this — `statusSnapshot` is a
+  // synchronous read, `requestRefresh()` is fire-and-forget, and the disk
+  // cache exists precisely so "a cold boot returns stale-but-useful data
+  // instantly rather than blocking". This route simply wasn't using any of it.
+  //
+  // We block in exactly one case: a genuinely first-ever boot with nothing
+  // cached, where returning immediately would mean returning nothing.
   router.get('/providers', async (req, res, next) => {
     try {
       const force = req.query['refresh'] === '1' || req.query['refresh'] === 'true';
-      const statuses = await harnessRegistry.refresh(force);
+      const servedFromCache = !force && harnessRegistry.hasProbedStatuses;
+
+      let statuses;
+      if (servedFromCache) {
+        statuses = harnessRegistry.getStatuses();
+        // Fire-and-forget; no-op if a refresh is already running.
+        if (harnessRegistry.statusesAreStale) harnessRegistry.requestRefresh();
+      } else {
+        statuses = await harnessRegistry.refresh(force);
+      }
+
       res.json({
         primary: harnessRegistry.primary,
+        // `stale` tells the client this is last-known-good and a fresher
+        // answer is being fetched, so it can poll briefly and converge rather
+        // than sit on cache until its own staleTime expires.
+        stale: servedFromCache && harnessRegistry.statusesAreStale,
         providers: statuses.map((s) => ({
           type: s.type,
           label: s.label,

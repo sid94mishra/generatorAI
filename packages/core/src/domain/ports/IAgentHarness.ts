@@ -374,6 +374,24 @@ export interface CreateConversationParams {
    */
   providerInstanceId?: ProviderInstanceId;
 
+  /**
+   * W12 — the provider's OWN session id to resume this conversation from,
+   * rather than starting a cold one.
+   *
+   * `conversationId` is OUR id; every provider also keeps an id of its own
+   * (Claude's `sdkSessionId`, Codex's thread id) and that is the one that
+   * carries the message history. An adapter instance normally remembers it
+   * across a create, so a rebind keeps the context — but a *different* instance
+   * has never heard of the conversation, and without this field it silently
+   * starts the model over with no memory of the chat. That is exactly what a
+   * runtime recycle does: it hands the same params to a brand-new adapter.
+   *
+   * Read from the outgoing runtime with `getProviderSessionId()` and passed
+   * here. Only honoured when the receiving adapter has no state of its own for
+   * the conversation; a live adapter's own session always wins.
+   */
+  resumeProviderSessionId?: string;
+
   // ── System Message ──
   systemMessage?: SystemMessageConfig;
   /** @deprecated use systemMessage instead */
@@ -520,6 +538,17 @@ export interface IHarnessConversationLifecycle {
    * signalling the caller to resume WITH `params` so tools are re-registered.
    */
   hasLiveConversation(conversationId: string): boolean;
+  /**
+   * W12 — the provider-side session id backing `conversationId`, when the
+   * provider has one and it is known.
+   *
+   * The counterpart of `CreateConversationParams.resumeProviderSessionId`: read
+   * it from the runtime that is going away, pass it to the one taking over, and
+   * the conversation keeps its history. Optional because not every provider has
+   * such an id; returning `undefined` means "cannot be resumed elsewhere", and
+   * callers must treat the move as a cold start rather than assume continuity.
+   */
+  getProviderSessionId?(conversationId: string): string | undefined;
   listConversations(): Promise<string[]>;
   getLastConversationId(): Promise<string | null>;
   deleteConversation(conversationId: string): Promise<void>;

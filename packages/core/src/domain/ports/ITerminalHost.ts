@@ -67,6 +67,22 @@ export interface ITerminalHandle {
   /** OS-level flow-control resume (XON). */
   resume(): void;
 
+  /**
+   * Optional credit acknowledgement — return N consumed bytes to a host that
+   * runs its own watermark (W14's out-of-process pty-host does; the in-process
+   * hosts hold the PTY directly and have nothing to credit). `TerminalService`
+   * calls this as output is actually consumed, which is the only thing that
+   * lets a paused shell start again.
+   */
+  ack?(bytesConsumed: number): void;
+
+  /**
+   * Optional rendered scrollback from a host-side headless VT model, oldest
+   * line first. Bounded at O(lines × columns) however much the command
+   * printed, unlike the gateway's raw byte ring.
+   */
+  scrollbackLines?(tailLines?: number): Promise<string[]>;
+
   /** Subscribe to raw PTY output. Returns unsubscribe. */
   onData(cb: (chunk: Buffer) => void): () => void;
   /** Subscribe to PTY exit. Returns unsubscribe. */
@@ -77,5 +93,26 @@ export interface ITerminalHost {
   readonly kind: TerminalHostKind;
   /** True when the host can actually spawn on the current platform. */
   isAvailable(): boolean;
+  /**
+   * Optional second gate on host selection. `isAvailable()` answers "can this
+   * host run at all on this machine"; `canServe()` answers "can it serve THIS
+   * spawn". A host that does not implement it can serve anything it is
+   * available for.
+   *
+   * `SandboxPtyHost` is why this exists: it sits first in the chain and its
+   * `isAvailable()` is true whenever docker is on PATH, but its `spawn()`
+   * throws unless `attachToSandbox` was asked for — so on any developer
+   * machine with docker installed, first-available selection handed it every
+   * ordinary terminal and every one of them failed.
+   */
+  canServe?(opts: TerminalSpawnOptions): boolean;
+  /**
+   * Optional: resolves once an asynchronous startup has settled (never
+   * rejects). `TerminalService` awaits this before falling through to a
+   * lower-priority host, so a terminal opened in the first few hundred ms of
+   * boot does not silently land on a different host than one opened a second
+   * later — the mixed-host pool that made terminal behaviour depend on timing.
+   */
+  whenReady?(): Promise<void>;
   spawn(opts: TerminalSpawnOptions): Promise<ITerminalHandle>;
 }

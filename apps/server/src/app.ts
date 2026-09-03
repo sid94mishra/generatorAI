@@ -10,6 +10,7 @@ import { reachableOrigins } from './network/reachableOrigins.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { requestMetricsMiddleware } from './middleware/requestMetrics.js';
 import { createCorsMiddleware } from './middleware/cors.js';
+import { createCspMiddleware } from './middleware/csp.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { createRateLimitMiddleware } from './middleware/rateLimit.js';
 import { createErrorMiddleware } from './middleware/errorHandler.js';
@@ -59,39 +60,10 @@ export function createApp(container: Container): Express {
   ];
   app.use(createCorsMiddleware({ origins: corsOrigins }));
 
-  // 2b. W31 — Content Security Policy.
-  //
-  // Prevents model-authored markdown / widget content served from the same
-  // origin from exfiltrating data or loading rogue scripts. Rules are
-  // intentionally tight for the API server; the web SPA's own CSP lives in
-  // vite.config.ts (injected as a <meta> in dev and a response header in prod
-  // via the static-files middleware).
-  //
-  // • script-src 'unsafe-inline' — required by inline Vite HMR runtime in dev
-  //   and by some dynamically-constructed widget bootstrap scripts.
-  // • style-src googleapis.com — Google Fonts stylesheet URL.
-  // • font-src gstatic.com — Google Fonts font binary CDN.
-  // • img-src data: blob: — chat images pasted as data URIs, blob URLs for
-  //   screenshot previews from the Integrated Browser.
-  // • connect-src 'self' — SSE and API calls back to the same origin only.
-  // • frame-ancestors 'none' — the API server itself must never be embedded.
-  //   (Widget iframes are served from a SEPARATE origin — the widget asset
-  //    server — so this directive does NOT break the widget sandbox.)
-  app.use((_req, res, next) => {
-    res.setHeader(
-      'Content-Security-Policy',
-      [
-        "default-src 'self'",
-        "script-src 'self' 'unsafe-inline'",
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-        "font-src 'self' https://fonts.gstatic.com",
-        "img-src 'self' data: blob:",
-        "connect-src 'self'",
-        "frame-ancestors 'none'",
-      ].join('; '),
-    );
-    next();
-  });
+  // 2b. W31 — Content Security Policy. See middleware/csp.ts for the full
+  // rationale, including why `script-src` uses a hash-source rather than
+  // 'unsafe-inline'.
+  app.use(createCspMiddleware());
 
   // 3+4. Body parsers.
   //

@@ -10,11 +10,44 @@
  */
 
 import { createLogger } from '@generatorai/shared';
-import { createHarnessProvider, HarnessRegistry } from '@generatorai/agent-harness-providers';
+import { createHarnessProvider } from '@generatorai/agent-harness-providers';
 import { AgentHostServer } from './AgentHostServer.js';
 
 const logger = createLogger({ level: process.env['LOG_LEVEL'] ?? 'info', service: 'agent-host' });
-const server = new AgentHostServer(logger);
+
+const primaryType = (process.env['GENERATORAI_PRIMARY_HARNESS'] as 'copilot' | 'claude-agent') ?? 'claude-agent';
+
+/**
+ * Builds a fully initialized harness. Used both for the boot runtime and, by
+ * `RuntimeSupervisor`, to stand up the replacement during an age/RSS recycle —
+ * without a factory the supervisor has nothing to swap TO and (correctly)
+ * refuses to recycle at all.
+ */
+async function buildHarness() {
+  const harness = await createHarnessProvider({ type: primaryType });
+  await harness.initialize();
+  return harness;
+}
+
+/**
+ * Concurrency bounds live here rather than only in the gateway: with the agent
+ * host enabled the gateway's in-process `AgentHostSupervisor` is not in the
+ * call path at all, so these env vars are the only bound that applies. Same
+ * names as the in-process path so an operator tunes one thing, not two.
+ */
+function intFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const server = new AgentHostServer({
+  logger,
+  createHarness: buildHarness,
+  maxConcurrentExecutions: intFromEnv('GENERATORAI_MAX_CONCURRENT_AGENT_TURNS', 16),
+  maxConcurrentColdStarts: intFromEnv('GENERATORAI_MAX_CONCURRENT_COLD_STARTS', 2),
+});
 
 const PARENT_PID = process.env['GENERATORAI_PARENT_PID']
   ? parseInt(process.env['GENERATORAI_PARENT_PID'], 10)
@@ -37,14 +70,10 @@ if (PARENT_PID !== undefined && !Number.isNaN(PARENT_PID)) {
 
 // ── Boot provider harnesses ──────────────────────────────────────────────────
 async function boot(): Promise<void> {
-  const primaryType = (process.env['GENERATORAI_PRIMARY_HARNESS'] as 'copilot' | 'claude-agent') ?? 'claude-agent';
-
   logger.info(`[agent-host] Booting with primary harness type: ${primaryType}`);
 
   try {
-    const harness = await createHarnessProvider({ type: primaryType });
-    await harness.initialize();
-    server.registerHarness(harness);
+    server.registerHarness(await buildHarness());
     logger.info(`[agent-host] ${primaryType} harness initialized`);
   } catch (err: unknown) {
     logger.warn(`[agent-host] Failed to initialize ${primaryType} harness: ${String(err)} — host will retry on demand`);

@@ -17,4 +17,13 @@ export interface IChatRepository {
   listBackgroundTasks(parentChatId: string): Promise<Chat[]>;
   /** Update just the background-task status of a worker chat. */
   updateBackgroundTaskStatus(id: string, status: BackgroundTaskStatus): Promise<void>;
+  /**
+   * W24 fix — durable orchestrator termination state. Returns `null` when
+   * the orchestrator chat has never recorded a wave (fresh orchestration).
+   */
+  getOrchestratorWaveState(chatId: string): Promise<{ waveCount: number; startedAt: number } | null>;
+  /** Persist the orchestrator's wave count + start time (see above). */
+  setOrchestratorWaveState(chatId: string, state: { waveCount: number; startedAt: number }): Promise<void>;
+  /** Clear the orchestrator's wave state back to "never started" (called on archive). */
+  clearOrchestratorWaveState(chatId: string): Promise<void>;
 }

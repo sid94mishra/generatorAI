@@ -9,6 +9,23 @@ import { ConnectionStatus } from '@/components/status/ConnectionStatus.js';
 import { renderWithProviders } from '../helpers/renderWithProviders.js';
 import { useConnectionStore } from '@/stores/connectionStore.js';
 
+/** A connection row with the N4 gap fields defaulted — most cases don't set them. */
+function conn(over: {
+  state: 'connected' | 'reconnecting' | 'disconnected';
+  lastEventTime?: number | null;
+  eventsReceived?: number;
+  unrecoverableEvents?: number;
+  lastGapAt?: number | null;
+}) {
+  return {
+    lastEventTime: Date.now(),
+    eventsReceived: 0,
+    unrecoverableEvents: 0,
+    lastGapAt: null,
+    ...over,
+  };
+}
+
 describe('ConnectionStatus', () => {
   beforeEach(() => {
     // Reset connection store state
@@ -23,7 +40,7 @@ describe('ConnectionStatus', () => {
   it('renders connected state', () => {
     useConnectionStore.setState({
       connections: {
-        's1': { state: 'connected', lastEventTime: Date.now(), eventsReceived: 5 },
+        's1': conn({ state: 'connected', eventsReceived: 5 }),
       },
     });
     renderWithProviders(<ConnectionStatus sessionId="s1" />);
@@ -33,7 +50,7 @@ describe('ConnectionStatus', () => {
   it('renders reconnecting state', () => {
     useConnectionStore.setState({
       connections: {
-        's1': { state: 'reconnecting', lastEventTime: Date.now(), eventsReceived: 0 },
+        's1': conn({ state: 'reconnecting' }),
       },
     });
     renderWithProviders(<ConnectionStatus sessionId="s1" />);
@@ -43,7 +60,7 @@ describe('ConnectionStatus', () => {
   it('shows green dot for connected', () => {
     useConnectionStore.setState({
       connections: {
-        's1': { state: 'connected', lastEventTime: Date.now(), eventsReceived: 10 },
+        's1': conn({ state: 'connected', eventsReceived: 10 }),
       },
     });
     renderWithProviders(<ConnectionStatus sessionId="s1" />);
@@ -54,7 +71,7 @@ describe('ConnectionStatus', () => {
   it('shows yellow dot for reconnecting', () => {
     useConnectionStore.setState({
       connections: {
-        's1': { state: 'reconnecting', lastEventTime: Date.now(), eventsReceived: 0 },
+        's1': conn({ state: 'reconnecting' }),
       },
     });
     renderWithProviders(<ConnectionStatus sessionId="s1" />);
@@ -65,7 +82,7 @@ describe('ConnectionStatus', () => {
   it('shows red dot for disconnected', () => {
     useConnectionStore.setState({
       connections: {
-        's1': { state: 'disconnected', lastEventTime: 0, eventsReceived: 0 },
+        's1': conn({ state: 'disconnected', lastEventTime: 0 }),
       },
     });
     renderWithProviders(<ConnectionStatus sessionId="s1" />);

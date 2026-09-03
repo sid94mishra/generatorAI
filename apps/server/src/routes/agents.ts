@@ -19,6 +19,7 @@ import {
   ResolvePreviewSchema,
   NotFoundError,
   ValidationError,
+  type ResolvePreviewInput,
 } from '@generatorai/shared';
 import { redactProjection } from '@generatorai/core';
 
@@ -152,14 +153,11 @@ export function createAgentApiRoutes(container: Container): Router {
   router.post('/resolve-preview', validate(ResolvePreviewSchema), async (req, res, next) => {
     try {
       if (!agentResolver) throw new ValidationError('Agents are not enabled on this server');
-      const body = req.body as {
-        agentRef?: string;
-        overrides?: Record<string, unknown>;
-        projectId?: string;
-        harnessType?: 'copilot' | 'claude-agent';
-        scope: 'chat' | 'stage' | 'worker';
-        draft?: Record<string, unknown>;
-      };
+      // `validate(ResolvePreviewSchema)` above already replaced `req.body`
+      // with its parsed output — naming that real type here (instead of a
+      // hand-rolled, looser one) is what let `overrides` below skip past
+      // `AgentOverrides` with `as never`.
+      const body = req.body as ResolvePreviewInput;
 
       // A draft is previewed WITHOUT persisting, so the editor can show
       // effective capabilities before the agent exists.
@@ -177,7 +175,7 @@ export function createAgentApiRoutes(container: Container): Router {
 
       const projection = await agentResolver.resolve({
         ...(body.agentRef ? { agentRef: body.agentRef } : {}),
-        ...(body.overrides ? { overrides: body.overrides as never } : {}),
+        ...(body.overrides ? { overrides: body.overrides } : {}),
         ...(body.projectId ? { projectId: body.projectId } : {}),
         harnessType: body.harnessType ?? 'copilot',
         scope: body.scope,

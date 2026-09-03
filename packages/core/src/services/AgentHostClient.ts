@@ -2,7 +2,8 @@
  * W12 — AgentHostClient: gateway-side IAgentHarness that proxies to the agent-host process.
  *
  * Drop-in replacement for MultiHarness. The composition root can switch between
- * them with a config flag (`GENERATORAI_AGENT_HOST_ENABLED=true`).
+ * them with a config flag (`GENERATORAI_AGENT_HOST=true` — opt-in; see
+ * composition-root.ts for why this is opt-in rather than the default).
  *
  * All provider handles (CLI processes, SDK instances) stay in the host process.
  * The gateway only holds typed IPC messages and session state.
@@ -13,6 +14,8 @@
 import { randomUUID } from 'node:crypto';
 import type {
   AgentEvent,
+  AgentEventNotification,
+  SessionEndedNotification,
   SpawnSessionRequest,
   SendTurnRequest,
   AbortSessionRequest,
@@ -49,15 +52,53 @@ const HOST_CLIENT_CAPABILITIES: ProviderCapabilities = {
   fullToolGating: true,
   sessionPersistence: true,
   budgetTracking: true,
+  // The host proxies provider turns over IPC and owns no computer-use driver
+  // of its own. Declared explicitly rather than left undefined: W44's
+  // capability-declaration suite requires every field to be stated, and an
+  // omitted optional field reads as "nobody decided" rather than "no".
+  computerUse: false,
 };
+
+/**
+ * Everything the gateway must know about a session to (a) route events and
+ * (b) re-create it verbatim on the far side after a host restart.
+ */
+interface HostSession {
+  /**
+   * The spawn params exactly as sent to the host. Held so a restarted host —
+   * which boots with empty maps — can be handed the same session back.
+   */
+  params: Record<string, unknown>;
+  /**
+   * Last `seq` seen for this session. A jump means the host's bounded queue
+   * dropped frames.
+   */
+  lastSeq: number;
+  /**
+   * Whether a terminal event (idle/error/cancelled) has been delivered to
+   * handlers for the current turn. Reset when `session_ended` is consumed.
+   */
+  terminalDelivered: boolean;
+}
 
 export class AgentHostClient implements IAgentHarness {
   /* W12 */
   private clientState: HarnessClientState = 'starting';
   private readonly clientHandlers = new Set<(e: HarnessClientEvent) => void>();
+  /**
+   * Subscription registry. △ This used to double as the liveness registry,
+   * which is what made `resumeConversation` unrecoverable: `onConversationEvent`
+   * auto-creates an entry for ANY id, so one stray subscribe made
+   * `hasLiveConversation()` answer true for a conversation the host had never
+   * heard of. Liveness now lives in `sessions`, which is only ever written by a
+   * successful spawn.
+   */
   private readonly conversationHandlers = new Map<string, Set<EventHandler>>();
+  private readonly sessions = new Map<string, HostSession>();
   private readonly conversationWarnings = new Map<string, ConversationWarning[]>();
   private readonly conversationMessages = new Map<string, ConversationMessage[]>();
+  /** Frames the host reported dropping, for health reporting. */
+  private droppedEventCount = 0;
 
   constructor(
     private readonly supervisor: HostSupervisor,
@@ -84,6 +125,12 @@ export class AgentHostClient implements IAgentHarness {
   }
 
   getClientState(): HarnessClientState {
+    // The supervisor is the source of truth for whether a host process exists.
+    // Checking it here means `getClientState()` cannot report 'running' in
+    // front of a dead host even if `onFatal` was never wired up.
+    const hostState = this.supervisor.getState();
+    if (hostState === 'fatal') return 'error';
+    if (hostState === 'stopped' && this.clientState === 'running') return 'stopped';
     return this.clientState;
   }
 
@@ -120,54 +167,81 @@ export class AgentHostClient implements IAgentHarness {
 
   async createConversation(params: CreateConversationParams): Promise<string> {
     const sessionId = randomUUID();
-    this.conversationHandlers.set(sessionId, new Set());
-    this.conversationWarnings.set(sessionId, []);
-    this.conversationMessages.set(sessionId, []);
+    await this.spawnSession(sessionId, params);
+    return sessionId;
+  }
+
+  /**
+   * Spawn a session on the host under a CALLER-CHOSEN id.
+   *
+   * The id is the routing key on both sides, so it has to be decided here and
+   * sent, never minted by a nested `createConversation()` call — that was the
+   * `resumeConversation` bug: it minted a fresh `randomUUID()`, discarded it,
+   * and left the caller's id bound to nothing, so the next `sendPrompt` failed
+   * SESSION_NOT_FOUND permanently.
+   */
+  private async spawnSession(sessionId: string, params: CreateConversationParams): Promise<void> {
+    const serialized = params as unknown as Record<string, unknown>;
+
+    this.conversationHandlers.set(sessionId, this.conversationHandlers.get(sessionId) ?? new Set());
+    if (!this.conversationWarnings.has(sessionId)) this.conversationWarnings.set(sessionId, []);
+    if (!this.conversationMessages.has(sessionId)) this.conversationMessages.set(sessionId, []);
 
     const spawnReq: Omit<SpawnSessionRequest, 'reqId'> = {
       type: 'spawn_session',
       sessionId,
-      params: params as unknown as Record<string, unknown>,
+      params: serialized,
     };
-    const resp = await this.supervisor.send(spawnReq);
+    const resp = await this.supervisor.send(spawnReq).catch((err: unknown) => {
+      this.cleanupSessionMaps(sessionId);
+      throw new Error(`AgentHostClient spawn failed for ${sessionId}: ${String(err)}`);
+    });
 
     if (resp.type === 'error') {
-      // N11-fix: clean all three maps on spawn failure, not just conversationHandlers
-      this.conversationHandlers.delete(sessionId);
-      this.conversationWarnings.delete(sessionId);
-      this.conversationMessages.delete(sessionId);
+      // N11-fix: clean all maps on spawn failure, not just conversationHandlers
+      this.cleanupSessionMaps(sessionId);
       throw new Error(`AgentHostClient.createConversation failed: ${resp.message}`);
     }
 
-    return sessionId;
+    // Liveness is committed only on a confirmed spawn.
+    this.sessions.set(sessionId, { params: serialized, lastSeq: 0, terminalDelivered: false });
+  }
+
+  private cleanupSessionMaps(sessionId: string): void {
+    this.sessions.delete(sessionId);
+    this.conversationHandlers.delete(sessionId);
+    this.conversationWarnings.delete(sessionId);
+    this.conversationMessages.delete(sessionId);
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
-    // Phase A: treat resume as create with the same id context
-    if (!this.conversationHandlers.has(conversationId)) {
-      await this.createConversation({ ...(params ?? {}), harnessType: params?.harnessType ?? 'claude-agent' } as CreateConversationParams);
-    }
+    if (this.sessions.has(conversationId)) return;
+    await this.spawnSession(conversationId, {
+      ...(params ?? {}),
+      harnessType: params?.harnessType ?? 'claude-agent',
+    } as CreateConversationParams);
   }
 
   hasLiveConversation(conversationId: string): boolean {
-    return this.conversationHandlers.has(conversationId);
+    return this.sessions.has(conversationId);
   }
 
   async listConversations(): Promise<string[]> {
-    return [...this.conversationHandlers.keys()];
+    return [...this.sessions.keys()];
   }
 
   async getLastConversationId(): Promise<string | null> {
-    const ids = [...this.conversationHandlers.keys()];
+    const ids = [...this.sessions.keys()];
     return ids[ids.length - 1] ?? null;
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
     const deleteReq: Omit<DeleteSessionRequest, 'reqId'> = { type: 'delete_session', sessionId: conversationId };
-    await this.supervisor.send(deleteReq);
-    this.conversationHandlers.delete(conversationId);
-    this.conversationWarnings.delete(conversationId);
-    this.conversationMessages.delete(conversationId);
+    await this.supervisor.send(deleteReq).catch((err: unknown) => {
+      // The host may already be gone; local state must still be released.
+      this.logger.warn(`[AgentHostClient] delete_session for ${conversationId} failed: ${String(err)}`);
+    });
+    this.cleanupSessionMaps(conversationId);
   }
 
   async destroyConversation(conversationId: string): Promise<void> {
@@ -214,8 +288,23 @@ export class AgentHostClient implements IAgentHarness {
     signal?: AbortSignal,
     options?: SendPromptOptions,
   ): Promise<ConversationResponse> {
+    // △ Fixed during end-to-end review — this used to listen for
+    // 'chat.message_complete', an event kind nothing in the codebase ever
+    // emits (the real kind is 'harness.message_complete' — see
+    // packages/shared/src/types/AgentEvent.ts). So this branch never fired,
+    // and every turn resolved via 'harness.idle' with a hardcoded
+    // `{content: ''}`, discarding whatever the assistant actually said.
+    //
+    // `content` is the FINAL text segment of the turn, matching every other
+    // provider's contract (see ChatMessage.ts's `textSegments` doc: "content
+    // holds only the final one") — an agentic turn can emit several
+    // `harness.message_complete` events interleaved with tool calls, so we
+    // track the latest and resolve with it once the turn goes idle.
+    this.pushMessage(conversationId, { role: 'user', content: prompt, timestamp: new Date() });
+
     return new Promise<ConversationResponse>((resolve, reject) => {
       let settled = false;
+      let lastContent = '';
 
       // Capture the abort handler by reference so removeEventListener works cleanly in Node.js
       const abortHandler = (): void => {
@@ -229,12 +318,20 @@ export class AgentHostClient implements IAgentHarness {
 
       const cleanup = this.onConversationEvent(conversationId, (event) => {
         const kind = (event as { kind?: string }).kind ?? '';
-        if (kind === 'chat.message_complete' || kind === 'harness.idle') {
+        if (kind === 'harness.message_complete') {
+          const content = (event as { data?: { content?: unknown } }).data?.content;
+          if (typeof content === 'string') {
+            lastContent = content;
+            this.pushMessage(conversationId, { role: 'assistant', content, timestamp: new Date() });
+          }
+          return;
+        }
+        if (kind === 'harness.idle') {
           if (!settled) {
             settled = true;
             signal?.removeEventListener('abort', abortHandler);
             cleanup();
-            resolve({ content: '' });
+            resolve({ content: lastContent });
           }
         } else if (kind === 'harness.error') {
           if (!settled) {
@@ -248,8 +345,11 @@ export class AgentHostClient implements IAgentHarness {
             settled = true;
             signal?.removeEventListener('abort', abortHandler);
             cleanup();
-            // W13: cancellation is a semantic success value, not a throw
-            resolve({ content: '' });
+            // W13: cancellation is a semantic success value, not a throw.
+            // Whatever text streamed before the cancel still counts as the
+            // response — resolving with '' here would discard a partial
+            // answer the user already watched arrive.
+            resolve({ content: lastContent });
           }
         }
       });
@@ -269,6 +369,17 @@ export class AgentHostClient implements IAgentHarness {
 
   async getMessages(conversationId: string): Promise<ConversationMessage[]> {
     return this.conversationMessages.get(conversationId) ?? [];
+  }
+
+  /**
+   * Record a message for `getMessages()`. Mirrors every other provider's
+   * `pushMessage` — without this, `conversationMessages` was initialized in
+   * `createConversation()` and never written to again, so `getMessages()`
+   * always returned `[]` regardless of how many turns actually ran.
+   */
+  private pushMessage(conversationId: string, message: ConversationMessage): void {
+    const list = this.conversationMessages.get(conversationId);
+    if (list) list.push(message);
   }
 
   async abortConversation(conversationId: string): Promise<void> {
@@ -295,18 +406,186 @@ export class AgentHostClient implements IAgentHarness {
   // ── Called by HostSupervisor when events arrive from the host process ─────
 
   /** Wire this up: pass as `onHostEvent` to HostSupervisor. */
-  handleHostEvent(msg: { type: string; sessionId?: string; event?: AgentEvent }): void {
-    if (msg.type === 'agent_event' && msg.sessionId && msg.event) {
-      const handlers = this.conversationHandlers.get(msg.sessionId);
-      if (handlers) {
-        for (const h of handlers) {
-          try {
-            h(msg.event);
-          } catch {
-            // isolated — EVT-02
-          }
-        }
+  handleHostEvent(msg: AgentEventNotification | SessionEndedNotification): void {
+    if (msg.type === 'agent_event') {
+      this.handleAgentEvent(msg);
+      return;
+    }
+    if (msg.type === 'session_ended') {
+      this.handleSessionEnded(msg);
+      return;
+    }
+    // △ `handleHostEvent` used to test only `msg.type === 'agent_event'` and
+    // silently drop everything else, which made `session_ended` a fully dead
+    // path end to end — the host built it, the supervisor forwarded it, and it
+    // landed here and vanished.
+    this.logger.warn(`[AgentHostClient] Unhandled host notification type: ${(msg as { type: string }).type}`);
+  }
+
+  private handleAgentEvent(msg: AgentEventNotification): void {
+    const session = this.sessions.get(msg.sessionId);
+    if (session) {
+      this.noteSequence(msg.sessionId, session, msg);
+      const kind = (msg.event as { kind?: string }).kind ?? '';
+      if (kind === 'harness.idle' || kind === 'harness.error' || kind === 'harness.cancelled') {
+        session.terminalDelivered = true;
       }
+    }
+    this.deliver(msg.sessionId, msg.event);
+  }
+
+  /**
+   * The host's authoritative turn boundary.
+   *
+   * Normally the terminal AgentEvent that caused it has already been delivered
+   * and there is nothing to do but reset the turn flag. If it has NOT — which
+   * happens exactly when the host's bounded queue dropped it under load — a
+   * caller awaiting `sendPromptAndWait` would hang forever on a turn the host
+   * knows is over. Synthesising the terminal event here is the only thing
+   * standing between a dropped frame and a permanently stuck turn.
+   */
+  private handleSessionEnded(msg: SessionEndedNotification): void {
+    const session = this.sessions.get(msg.sessionId);
+    if (session && !session.terminalDelivered) {
+      this.logger.warn(
+        `[AgentHostClient] session_ended(${msg.reason}) for ${msg.sessionId} arrived without its terminal event — ` +
+          'synthesising it so the pending turn settles',
+      );
+      this.deliver(msg.sessionId, this.synthesiseTerminalEvent(msg));
+    }
+    if (session) session.terminalDelivered = false;
+  }
+
+  private synthesiseTerminalEvent(msg: SessionEndedNotification): AgentEvent {
+    const timestamp = new Date().toISOString();
+    if (msg.reason === 'error') {
+      return { kind: 'harness.error', data: { message: msg.error ?? 'Agent host reported an error' }, timestamp } as AgentEvent;
+    }
+    if (msg.reason === 'cancelled') {
+      return { kind: 'harness.cancelled', data: { reason: 'user_abort' }, timestamp } as AgentEvent;
+    }
+    return { kind: 'harness.idle', data: {}, timestamp } as AgentEvent;
+  }
+
+  /**
+   * Record the host's per-session sequence number and report loss.
+   *
+   * Two independent signals, because either alone can be missed: an explicit
+   * `droppedBefore` count from the overflowing queue, and a `seq` jump. A host
+   * that does not sequence at all (older build) sends no `seq`, and is skipped
+   * rather than reported as one continuous gap.
+   */
+  private noteSequence(sessionId: string, session: HostSession, msg: AgentEventNotification): void {
+    if (msg.droppedBefore && msg.droppedBefore > 0) {
+      this.droppedEventCount += msg.droppedBefore;
+      this.logger.warn(
+        `[AgentHostClient] Host dropped ${msg.droppedBefore} event(s) for session ${sessionId} — ` +
+          'its bounded queue overflowed',
+      );
+    }
+    if (typeof msg.seq !== 'number') return;
+    if (session.lastSeq > 0 && msg.seq > session.lastSeq + 1 && !msg.droppedBefore) {
+      const missing = msg.seq - session.lastSeq - 1;
+      this.droppedEventCount += missing;
+      this.logger.warn(`[AgentHostClient] Sequence gap of ${missing} for session ${sessionId}`);
+    }
+    session.lastSeq = msg.seq;
+  }
+
+  private deliver(sessionId: string, event: AgentEvent): void {
+    this.notify(this.conversationHandlers.get(sessionId), event);
+  }
+
+  /**
+   * Deliver to an explicitly-held handler set. Needed on the re-attach failure
+   * path, where the session's maps have already been torn down but its
+   * subscribers still have to be told the session is gone.
+   */
+  private notify(handlers: Set<EventHandler> | undefined, event: AgentEvent): void {
+    if (!handlers) return;
+    for (const h of handlers) {
+      try {
+        h(event);
+      } catch {
+        // isolated — EVT-02
+      }
+    }
+  }
+
+  /** Number of events the host reported dropping. Exposed for health reporting. */
+  getDroppedEventCount(): number {
+    return this.droppedEventCount;
+  }
+
+  // ── Host lifecycle callbacks (wire these to HostSupervisor) ───────────────
+
+  /**
+   * Re-establish every live session on a freshly restarted host.
+   *
+   * The new process starts with EMPTY session maps while this client still
+   * holds the handler map, so without this every later turn fails
+   * SESSION_NOT_FOUND forever and — because `clientState` stayed 'running' —
+   * the gateway reports the whole thing healthy. Pass as `onHostRestart`.
+   *
+   * A session that cannot be re-spawned is failed LOUDLY: its callers get a
+   * `harness.error` event and the session is dropped, rather than being left
+   * as a live-looking id that can never complete a turn again.
+   */
+  async reattachSessions(): Promise<void> {
+    const toReattach = [...this.sessions.entries()];
+    if (toReattach.length === 0) return;
+
+    this.logger.info(`[AgentHostClient] Agent host restarted — re-attaching ${toReattach.length} session(s)`);
+    let failed = 0;
+
+    for (const [sessionId, session] of toReattach) {
+      // Hold the subscriber set: a failed spawn tears the session's maps down,
+      // and those subscribers are precisely who has to be told it is gone.
+      const subscribers = this.conversationHandlers.get(sessionId);
+      // The host lost the session, so this client's record is stale too;
+      // drop it first so `spawnSession` commits a fresh one on success.
+      this.sessions.delete(sessionId);
+      try {
+        await this.spawnSession(sessionId, session.params as unknown as CreateConversationParams);
+      } catch (err: unknown) {
+        failed++;
+        this.logger.error(`[AgentHostClient] Failed to re-attach session ${sessionId}: ${String(err)}`);
+        this.cleanupSessionMaps(sessionId);
+        this.notify(subscribers, {
+          kind: 'harness.error',
+          data: { message: `Session lost: the agent host restarted and this session could not be restored (${String(err)})` },
+          timestamp: new Date().toISOString(),
+        } as AgentEvent);
+      }
+    }
+
+    if (failed > 0) {
+      this.clientState = 'error';
+      this.emitClientEvent({ type: 'client.error', data: { message: `${failed} session(s) lost across an agent-host restart` } });
+    }
+  }
+
+  /**
+   * The supervisor has given up on the host. Pass as `onFatal`.
+   *
+   * △ Restart-cap exhaustion used to be entirely silent here: the supervisor
+   * set its internal `stopped` flag, `spawn()` threw forever, and
+   * `getClientState()` kept answering 'running' — so health checks reported a
+   * healthy harness in front of a process that no longer exists.
+   */
+  handleHostFatal(reason: string): void {
+    this.clientState = 'error';
+    this.logger.error(`[AgentHostClient] Agent host is unrecoverable: ${reason}`);
+    this.emitClientEvent({ type: 'client.error', data: { message: reason } });
+    // Every live session is gone with the process. Tell their subscribers so
+    // pending turns reject instead of hanging.
+    for (const sessionId of [...this.sessions.keys()]) {
+      this.deliver(sessionId, {
+        kind: 'harness.error',
+        data: { message: `Agent host is unrecoverable: ${reason}` },
+        timestamp: new Date().toISOString(),
+      } as AgentEvent);
+      this.cleanupSessionMaps(sessionId);
     }
   }
 

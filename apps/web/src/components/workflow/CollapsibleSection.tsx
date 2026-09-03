@@ -52,7 +52,11 @@ export function CollapsibleSection({ title, icon, defaultOpen = true, badge, chi
           open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
         )}
       >
-        <div className="overflow-hidden">
+        {/* `inert` matters as much as the clipping does: a closed section keeps
+            its children mounted so the grid-rows transition has something to
+            animate, and without this they stayed focusable, clickable and
+            announced — a keyboard user could tab into invisible controls. */}
+        <div className="overflow-hidden" inert={!open}>
           <div className="px-4 pb-4 pt-1 space-y-4">{children}</div>
         </div>
       </div>

@@ -18,6 +18,12 @@ import {
   getCliAuthRuntime,
   parseCliPairingCode,
 } from '../auth/cliAuth.js';
+import {
+  LocalBootstrapError,
+  readBootstrapPairingFile,
+  requestRecoveryPairing,
+  type BootstrapPairingMaterial,
+} from '../auth/localBootstrap.js';
 import { idColumn, inputSchema, list, ok, record } from './_shared.js';
 
 /**
@@ -66,34 +72,30 @@ function findLocalAdminToken(explicitDir?: string): { token: string; dir: string
   return null;
 }
 
-/**
- * Mints an invite with the local admin bearer token.
- *
- * Deliberately not routed through the API client: that client always presents
- * this installation's device credential, which is precisely what does not
- * exist yet during bootstrap.
- */
-async function inviteWithAdminToken(
-  baseUrl: string,
-  token: string,
-  body: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/auth/devices/invites`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const detail = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
-    } | null;
-    throw new CliError(
-      'UNAVAILABLE',
-      detail?.error?.message ?? `Could not mint an invite (HTTP ${response.status}).`,
-      { hint: 'Is the server running, and is local-admin.json from this launch of it?' },
-    );
+/** Same search, for the server's self-minted unclaimed-install grant. */
+function findBootstrapPairing(explicitDir?: string): (BootstrapPairingMaterial & { dir: string }) | null {
+  const dirs = explicitDir ? [explicitDir] : candidateDataDirs();
+  for (const dir of dirs) {
+    const material = readBootstrapPairingFile(dir);
+    if (material) return { ...material, dir };
   }
-  return (await response.json()) as Record<string, unknown>;
+  return null;
+}
+
+/** Maps the local-bootstrap channel's own error vocabulary onto `CliError`. */
+function toCliError(error: LocalBootstrapError): CliError {
+  const codeByReason = {
+    NOT_LOOPBACK: 'VALIDATION',
+    UNREACHABLE: 'UNAVAILABLE',
+    UNAUTHORIZED: 'NOAUTH',
+    FAILED: 'UNAVAILABLE',
+  } as const;
+  return new CliError(codeByReason[error.code], error.message, {
+    hint:
+      error.code === 'NOT_LOOPBACK'
+        ? 'The local admin token only proves you own this machine, so it is only ever sent to a loopback endpoint. Use `--dataDir` pointed at the real server, or pair normally with a code from an already-paired device.'
+        : 'Is the server running, and is local-admin.json from this launch of it?',
+  });
 }
 
 export const DEVICE_GROUP = {
@@ -404,21 +406,60 @@ export function deviceCommands(): CommandSpec[] {
           ...(flags.scopes ? { scopes: flags.scopes.split(',').map((s) => s.trim()) } : {}),
           ttlMs: (flags.ttl ?? 10) * 60_000,
         };
+        const passthroughFlagsIgnoredWarning =
+          'Requested --scopes/--ttl are ignored for this grant: the bootstrap channel always issues full access for a fixed window.';
 
-        // Bootstrap: the very first device on a machine has no credential to
-        // authenticate this call with, so fall back to the server's
-        // per-launch local admin token. Without this there is no way to pair
-        // anything on a fresh install.
+        // Bootstrap path 1: the very first device on a machine has no
+        // credential to authenticate this call with. The server already
+        // solved that at startup by minting its own unclaimed-install grant
+        // to `bootstrap-pairing.json` (see composition/bootstrapPairing.ts).
+        // Reading it needs no token and touches no network — try it first.
+        const bootstrap = findBootstrapPairing(flags.dataDir);
+        if (bootstrap) {
+          return {
+            data: {
+              pairingCode: bootstrap.pairingCode,
+              ...(bootstrap.pairingUrl ? { pairingUrl: bootstrap.pairingUrl } : {}),
+              expiresAt: bootstrap.expiresAt,
+            },
+            warnings: [
+              'This code grants pairing access. Treat it like a password and let it expire unused if you do not use it.',
+              `Read the server's unclaimed-install grant from ${bootstrap.dir}.`,
+              ...(flags.scopes || flags.ttl !== 10 ? [passthroughFlagsIgnoredWarning] : []),
+            ],
+          };
+        }
+
+        // Bootstrap path 2: a device exists but every one of them is lost or
+        // revoked. Recover through the loopback-only local-admin channel —
+        // never send that token anywhere but a verified loopback origin.
         const admin = findLocalAdminToken(flags.dataDir);
-        const result = admin
-          ? await inviteWithAdminToken(ctx.baseUrl, admin.token, body)
-          : await ctx.api.devices.createInvite(body);
+        if (admin) {
+          try {
+            const recovery = await requestRecoveryPairing(ctx.baseUrl, admin.token, defaultCliDeviceName());
+            return {
+              data: {
+                pairingCode: recovery.pairingCode,
+                pairingUrl: recovery.pairingUrl,
+                shortCode: recovery.shortCode,
+                expiresAt: recovery.expiresAt,
+              },
+              warnings: [
+                'This code grants pairing access. Treat it like a password and let it expire unused if you do not use it.',
+                `Authorised with the server's local admin token from ${admin.dir}.`,
+                ...(flags.scopes || flags.ttl !== 10 ? [passthroughFlagsIgnoredWarning] : []),
+              ],
+            };
+          } catch (error) {
+            if (error instanceof LocalBootstrapError) throw toCliError(error);
+            throw error;
+          }
+        }
 
         return {
-          data: result,
+          data: await ctx.api.devices.createInvite(body),
           warnings: [
             'This code grants pairing access. Treat it like a password and let it expire unused if you do not use it.',
-            ...(admin ? [`Authorised with the server's local admin token from ${admin.dir}.`] : []),
           ],
         };
       },

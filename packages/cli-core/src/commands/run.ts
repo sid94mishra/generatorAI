@@ -57,7 +57,7 @@ async function findRun(ctx: CliContext, ref: string) {
 
 async function findDefinition(ctx: CliContext, ref: string) {
   const definitions = await ctx.api.definitions.list();
-  return resolveRef(ref, { kind: 'workflow', candidates: definitions as never });
+  return resolveRef(ref, { kind: 'workflow', candidates: definitions });
 }
 
 async function findStage(ctx: CliContext, runId: string, ref: string) {
@@ -145,7 +145,8 @@ export function validateVariables(
 }
 
 /** Renders a run's event stream and stops at the run's terminal state. */
-async function watchRun(
+/** Streams a run to completion. Exported so any command that starts a run — not just `run start` — can offer `--watch` without duplicating this. */
+export async function watchRun(
   ctx: CliContext,
   runId: string,
   verbosity: 'minimal' | 'normal' | 'verbose',
@@ -163,26 +164,34 @@ async function watchRun(
         return;
       }
 
+      // The server's real stage lifecycle: there is no `stage.*`/
+      // `stage_run.started` producer anywhere (confirmed against every
+      // emitter in `packages/core/src/services/*.ts`) — a stage actually
+      // beginning is `stage_run.running`, and HITL's real gate events are
+      // `stage_run.awaiting_input`/`stage_run.input_received`, keyed by
+      // `stageRunId`, not `stage.awaiting_input`/`stageId`. Before this fix,
+      // `run watch`/`--watch` never printed a single "▶ stage" progress
+      // line, nor the "waiting for approval" hint, against a real run.
       switch (event.kind) {
         case 'stage.started':
-        case 'stage_run.started': {
-          currentStage = String(data['stageName'] ?? data['name'] ?? data['stageId'] ?? '');
+        case 'stage_run.running': {
+          currentStage = String(data['name'] ?? data['stageName'] ?? data['stageRunId'] ?? '');
           ctx.emit({ type: 'log', level: 'info', message: `▶ ${currentStage}` });
           return;
         }
         case 'stage.completed':
         case 'stage_run.completed':
-          ctx.emit({ type: 'log', level: 'info', message: `✓ ${currentStage || String(data['stageName'] ?? '')}` });
+          ctx.emit({ type: 'log', level: 'info', message: `✓ ${currentStage || String(data['name'] ?? '')}` });
           return;
         case 'stage.failed':
         case 'stage_run.failed':
           ctx.emit({
             type: 'log',
             level: 'error',
-            message: `✗ ${currentStage || String(data['stageName'] ?? '')}: ${String(data['error'] ?? '')}`,
+            message: `✗ ${currentStage || String(data['name'] ?? '')}: ${String(data['error'] ?? '')}`,
           });
           return;
-        case 'stage.awaiting_input':
+        case 'stage_run.awaiting_input':
           ctx.emit({
             type: 'log',
             level: 'warn',
@@ -295,7 +304,12 @@ export function runCommands(): CommandSpec[] {
         },
       ],
       flags: [
-        { name: 'name', description: 'Name for this run', type: 'string' },
+        {
+          name: 'name',
+          description: 'Name for this run',
+          type: 'string',
+          unsupported: 'The server has no route that names a run, so this value is accepted and discarded.',
+        },
         { name: 'var', description: 'Variable as key=value (repeatable)', type: 'string', variadic: true },
         { name: 'profile', description: 'Run profile name or path', type: 'string' },
         { name: 'project', description: 'Project id or name', type: 'string', completes: 'project' },

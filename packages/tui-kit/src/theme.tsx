@@ -95,6 +95,16 @@ export interface Theme extends TerminalTheme {
   c(colour: keyof TerminalTheme | undefined): string | undefined;
   /** Border style honouring the unicode capability. */
   borderStyle: 'round' | 'single' | 'classic';
+  /**
+   * Carried straight from `TerminalCapabilities` (Phase 4 item 8) so any
+   * component reading the theme — not just the ones that happen to receive
+   * capabilities as a separate prop — can suppress animation/decoration
+   * that's noise for a screen reader or a non-interactive/CI render.
+   * `reducedMotion` already defaults true under CI/non-TTY, so consumers of
+   * this get that coverage without checking `screenReader` separately.
+   */
+  screenReader: boolean;
+  reducedMotion: boolean;
 }
 
 const ThemeContext = createContext<Theme | null>(null);
@@ -137,6 +147,8 @@ export function buildTheme(options: {
     glyphs,
     ladder,
     borderStyle: options.capabilities.unicode ? 'round' : 'classic',
+    screenReader: options.capabilities.screenReader,
+    reducedMotion: options.capabilities.reducedMotion,
     c(colour) {
       if (!colour || ladder === 'none') return undefined;
       const value = base[colour];

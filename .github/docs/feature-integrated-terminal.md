@@ -15,11 +15,12 @@ A running PTY on the server, keyed by an opaque `sid`, owned by an [`ExecutionWo
 - **Ephemeral** by design — sessions live in an in-memory `Map<sid, TerminalRecord>` on the server; server restart wipes them. Matches the Browser session model.
 - **Multi-tab** — up to 5 concurrent sessions per workspace, 20 server-wide (both env-tunable).
 
-Three host implementations exist behind the `ITerminalHost` port; the composition root picks the first `isAvailable()` in order:
+Four host implementations exist behind the `ITerminalHost` port. `TerminalService.selectHost()` takes the first host that (a) `canServe()` this particular spawn and (b) `isAvailable()` — awaiting `whenReady()` for a host that is still starting, so a terminal opened during boot lands on the same host as one opened a second later:
 
 | Host | When it's picked | Semantics |
 |---|---|---|
-| `SandboxPtyHost` *(Phase 2, opt-in)* | Workflow-run page + docker sandbox present + `attachToSandbox: true` in spawn body | `docker exec -it <sandboxName> …` wrapped in a host-side `node-pty` so xterm sees an outer PTY. |
+| `SandboxPtyHost` *(Phase 2, opt-in)* | Workflow-run page + docker sandbox present + `attachToSandbox: true` in spawn body — gated by `canServe()`, **not** `isAvailable()` (which takes no arguments, cannot see the spawn options, and reports true whenever docker is on PATH) | `docker exec -it <sandboxName> …` wrapped in a host-side `node-pty` so xterm sees an outer PTY. |
+| `PtyHostAdapter` *(opt-in, `GENERATORAI_PTY_HOST=true`)* | The `apps/pty-host` child process has acknowledged readiness and has not exhausted its restart budget | Real PTY, but every file descriptor lives in a separate process (L5). Adds credit flow control and a headless VT model. If the host dies, live sessions get a synthesised `exit` (`SIGHUP`); if it exhausts its restart budget, the adapter reports unavailable and selection falls through to `NodePtyHost`. |
 | `NodePtyHost` *(default)* | `node-pty` native module loads (Win/mac/Linux glibc) | Real PTY — `vim`, `htop`, colors, cursor addressing, alternate-screen buffer all work. |
 | `FallbackChildProcessHost` | Everything above unavailable (musl Linux, native build failed) | Plain `child_process.spawn` — line-buffered, no color/cursor. UI shows a yellow *"Fallback mode"* banner in the header. |
 
@@ -60,10 +61,11 @@ packages/core/src/domain/ports/ITerminalHost.ts
 ### `TerminalService`
 
 - **`spawn({ workspaceId, cols?, rows?, shell?, attachToSandbox?, runId? })`** — enforces caps (per-workspace 5, global 20; overflow returns HTTP 429), resolves `cwd` from `workspace.rootPath`, delegates to the first available host, wires `onData`/`onExit` → ring buffer + fanout.
-- **Idle reaper** — a `setInterval` (60 s default) kills sessions where `wsCount === 0` **and** `now - lastActivityAt > TERMINAL_IDLE_TTL_MS` (default 30 min). `lastActivityAt` bumps on any input / output / resize / ACK, so a background `pnpm dev` with one log line/min keeps the session alive even with no attached browser.
+- **Idle reaper** — a `setInterval` (60 s default) kills sessions where `wsCount === 0` **and** `now - lastActivityAt > TERMINAL_IDLE_TTL_MS` (default 30 min). `lastActivityAt` bumps on CLIENT activity (attach/detach, input, resize, ACK) — **not** on PTY output, since a process printing into a terminal nobody is watching is not evidence that a human is present (P1-38).
 - **`kill(sid, reason)`** — sets `closeReason` for the outgoing SSE, then `handle.kill()`, then drops the record after a short drain window.
 - **`killAllForWorkspace(workspaceId, reason?)`** — invoked by `WorkspaceManager.registerBeforeDelete` so PTYs never outlive a deleted workspace.
-- **Flow-control pass-through** — the WS layer decides watermark crossings and calls `terminalService.pause(sid)` / `resume(sid)`; the service forwards to `handle.pause() / resume()` (real OS-level XOFF via `node-pty`).
+- **Session-owned watermark (P1-28)** — the watermark lives on the SESSION, not on a WebSocket. `attachViewer(sid)` hands each connection its own ack cursor; outstanding work is `emitted - min(acked across viewers)`, so the **slowest attached viewer governs** and the service — never the transport — calls `handle.pause() / resume()` (real OS-level XOFF). A viewer that attaches mid-stream starts caught up; one that leaves stops holding the session back; with nobody attached there is nothing to wait for and the PTY is never paused. There is no public `pause`/`resume` on the service any more.
+- **Host credit (P0-23)** — a second, deliberately *unchained* loop: `handle.ack(n)` returns credit to the out-of-process pty-host the moment the gateway takes the bytes. The host's own low watermark (5 000 chars) sits far below the client's 64 KiB ack batch, so making host credit wait on a viewer would wedge a terminal on the tail of the last partial batch. In-process hosts do not implement `ack` — they hold the PTY directly and have nothing to credit.
 
 ### REST endpoints (`/api/workspaces/:id/terminals`)
 
@@ -73,6 +75,7 @@ packages/core/src/domain/ports/ITerminalHost.ts
 | `GET`  | `/` | List active sessions for this workspace (excludes exited) |
 | `GET`  | `/:sid` | Descriptor (`pid`, `cwd`, `shell`, `host`, `exitCode`, `lastActivityAt`, …) |
 | `GET`  | `/:sid/scrollback?tailBytes=N` | Raw PTY bytes for reconnect replay (`application/octet-stream`) |
+| `GET`  | `/:sid/scrollback?format=text&tailLines=N` | Rendered lines from the host's headless VT model (`{ lines: string[] }`) — bounded at O(lines × columns) however much the command printed. **409** on a host that keeps no VT model; today only the out-of-process pty-host does. |
 | `POST` | `/:sid/resize` | `{ cols, rows }` |
 | `POST` | `/:sid/signal` | `{ name: 'SIGINT' \| 'SIGTERM' \| … }`; best-effort on Windows |
 | `DELETE` | `/:sid` | Kill (idempotent — DELETE of an unknown sid returns 204) |
@@ -109,8 +112,9 @@ Registered via `noServer: true` in [apps/server/src/terminal-ws.ts](../../apps/s
 
 Two independent guards, both defensive:
 
-- **Watermark**: server tracks `unackedBytes`. When it crosses `HIGH_WATERMARK_BYTES = 256 KB`, `handle.pause()` (OS-level XOFF). Client ACKs every ~64 KB written into xterm. When `unackedBytes < LOW_WATERMARK_BYTES = 64 KB`, `handle.resume()`.
-- **`ws.bufferedAmount` circuit breaker**: if `bufferedAmount > 1 MB` (stalled TCP window), force-pause regardless of ACK state. Prevents multi-megabyte outbound queues on a slow client.
+- **Watermark (per SESSION, not per connection)**: `TerminalService` tracks bytes emitted against each attached viewer's ack cursor. Once the slowest viewer is `GENERATORAI_TERMINAL_HIGH_WATERMARK_BYTES` (default 256 KiB) behind, `handle.pause()` (OS-level XOFF); it resumes at `GENERATORAI_TERMINAL_LOW_WATERMARK_BYTES` (default 64 KiB). The client ACKs from **inside** `term.write(bytes, onParsed)`, so credit reflects what the terminal has parsed rather than what TCP delivered, batched at ~64 KiB — which is why the low watermark must stay **≥ the client's ack batch size**, or the tail of the last partial batch is never acked and the session never resumes.
+  This was previously per-WebSocket while acting on the *shared* PTY, so two viewers oscillated against each other and neither one's bound was actually enforced (P1-28).
+- **`ws.bufferedAmount` circuit breaker**: genuinely per-connection — `bufferedAmount` is a property of one socket. Above 1 MB (stalled TCP window) the connection reports a **stall** into the session watermark rather than pausing the PTY itself, so it is arbitrated alongside every other viewer; cleared at half the threshold.
 
 Server also **coalesces** PTY chunks with `setImmediate` and flushes every ~4 ms, up to 32 KB per WS frame — 4–10× fewer WS frames on log-heavy output with imperceptible latency cost.
 

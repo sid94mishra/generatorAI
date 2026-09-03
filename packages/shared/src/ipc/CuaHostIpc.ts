@@ -8,7 +8,35 @@
 
 // ─── Shared payload types ───────────────────────────────────────────────────
 
-/** Mirror of the ComputerAction union from shared/types/ComputerUse. */
+/**
+ * Mirror of the ComputerAction union from shared/types/ComputerUse.
+ *
+ * ⚠ BLOCKING DESIGN DEFECT — this host must not be wired until it is fixed.
+ *
+ * There is no app or window identity anywhere in this type. Every field below
+ * addresses the SCREEN (a coordinate, a keystroke), so `CuaDriverConnection`
+ * has to resolve a `{pid, window_id}` scope for the driver by asking which app
+ * happens to be frontmost *at the moment the action runs*. Consent, though, was
+ * given earlier and for a named application.
+ *
+ * `IComputerBridge`'s own header states the hazard in one line: "the user
+ * approves Safari and the click lands in 1Password." Anything that changes
+ * focus between the approval and the action — a notification stealing focus,
+ * an installer window, the user alt-tabbing, a slow settle after the previous
+ * action — turns an approved click into an unapproved one, with an audit
+ * record naming the app the user approved rather than the one that was hit.
+ *
+ * This is a protocol design defect, not a scope decision: `ComputerService`'s
+ * in-process path resolves the target identity and re-checks the blocklist
+ * against the RESOLVED identity, and nothing in this protocol can carry that.
+ * Wiring cua-host into `ComputerService` as it stands would be a security
+ * regression, not an incomplete migration.
+ *
+ * The fix is to carry the approved target end-to-end — the resolved
+ * `{pid, windowId, appName}` on every request, verified by the host against
+ * the live frontmost window and REFUSED (not silently retargeted) when they
+ * disagree — and only then wire it.
+ */
 export interface ComputerAction {
   type: string;
   // Common optional fields

@@ -130,7 +130,15 @@ describe('StreamEventRouter — turn lifecycle', () => {
     });
 
     // The stale text is flushed to its own (previous) turn, then cleared.
-    expect(effects.map((e) => e.op)).toEqual(['appendToken', 'startPending', 'invalidate']);
+    // `cancelTranscriptCleanup` disarms the settle-and-clear timer the
+    // PREVIOUS turn's idle armed — without it a new turn can be wiped a few
+    // seconds in by a timer that belongs to the turn before it.
+    expect(effects.map((e) => e.op)).toEqual([
+      'appendToken',
+      'cancelTranscriptCleanup',
+      'startPending',
+      'invalidate',
+    ]);
     // Nothing survives into the new turn.
     expect(router.hasPending).toBe(false);
     expect(router.drain()).toEqual([]);
@@ -159,8 +167,12 @@ describe('StreamEventRouter — turn lifecycle', () => {
     // with no explanation.
     const effects = run([{ kind: 'harness.error', data: { message: 'rate limited' } }]);
     expect(effects).toEqual([
-      { op: 'addSystemMessage', key: SID, message: 'rate limited', category: 'error' },
       { op: 'errorStream', key: SID },
+      { op: 'addSystemMessage', key: SID, message: 'Error: rate limited', category: 'error' },
+      // The session row and the message list both went stale: the turn is
+      // over and the server has already persisted whatever it managed.
+      { op: 'invalidate', resource: 'session' },
+      { op: 'invalidate', resource: 'messages' },
     ]);
   });
 

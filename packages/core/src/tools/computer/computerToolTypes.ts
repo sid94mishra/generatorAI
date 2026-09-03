@@ -108,6 +108,28 @@ export function refusalPayload(result: ComputerActionResult): Record<string, unk
 }
 
 /**
+ * X-16 duplicate-frame advisory, for whichever payload carries this result.
+ *
+ * It lives here rather than on `result.action` because a SNAPSHOT has no
+ * `action` at all — which is how the previous attempt at this ended up
+ * unreachable: it stamped fields onto `result.action` behind an
+ * `if (result.action)` guard that was false on the only path that reached it,
+ * and neither payload builder read those fields anyway. The model never once
+ * saw the advisory.
+ */
+function unchangedFrameNote(result: ComputerActionResult): Record<string, unknown> {
+  if (!result.screenshot?.unchanged) return {};
+  return {
+    frameUnchanged: true,
+    frameUnchangedNote:
+      'The screen is PIXEL-IDENTICAL to the previous capture — this frame is the same image, returned ' +
+      'under the same artifact id. Whatever you just did produced no visible change. Do NOT repeat it: ' +
+      'if it was a submit or a click, it may well have been accepted and repeating it would do it twice. ' +
+      'Either wait and look again, or find another way to confirm the outcome.',
+  };
+}
+
+/**
  * Projects elements for the model.
  *
  * Drops `bounds` and `traits` — the model addresses elements by index, so
@@ -189,6 +211,7 @@ export function snapshotPayload(
         }
       : {}),
     screenshotArtifactId: result.screenshot?.artifactId,
+    ...unchangedFrameNote(result),
     // A filtered view that does not say it is filtered reads as "this window
     // contains 13 things", and the agent concludes the control it wants is
     // absent.
@@ -233,6 +256,7 @@ export function actionPayload(result: ComputerActionResult): Record<string, unkn
     verified,
     verification: result.action?.verification?.reason,
     screenshotArtifactId: result.screenshot?.artifactId,
+    ...unchangedFrameNote(result),
     // The provider names the rung it thinks will work. Passing that on beats
     // letting the agent guess, which is how a stalled element action turns
     // into a dozen re-snapshots.

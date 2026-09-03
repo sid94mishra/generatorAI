@@ -16,10 +16,16 @@ import type {
 import type { CopilotProvider } from './providers/copilot/CopilotProvider.js';
 import type { WorkspacedCopilotPool } from './providers/copilot/WorkspacedCopilotPool.js';
 import type { ClaudeAgentProvider } from './providers/claude-agent/ClaudeAgentProvider.js';
-// W37/W38/W39: direct imports (no optional-dependency pattern needed — no external SDK required)
-import { CodexProvider } from './providers/codex/index.js';
-import { OpenCodeProvider } from './providers/opencode/index.js';
-import { AcpProvider } from './providers/acp/index.js';
+// W41 — codex/opencode/acp are now loaded the same way as copilot/claude-agent.
+// They used to be STATIC value imports on the grounds that they need no external
+// SDK. That is true of codex and opencode but was never true of acp (it
+// value-imported `@agentclientprotocol/sdk`), and it misses the point either
+// way: a static import here pulls ~3 000 lines of provider code, its protocol
+// tables and its child-process plumbing into every boot, for providers most
+// installs never select. `import type` is erased, so the types below are free.
+import type { CodexProvider } from './providers/codex/CodexProvider.js';
+import type { OpenCodeProvider } from './providers/opencode/OpenCodeProvider.js';
+import type { AcpProvider } from './providers/acp/AcpProvider.js';
 
 // ── Lazy Module Cache ──
 // Provider modules are loaded once on first access and cached for the
@@ -29,11 +35,23 @@ import { AcpProvider } from './providers/acp/index.js';
 type CopilotModule = {
   CopilotProvider: typeof CopilotProvider;
   WorkspacedCopilotPool: typeof WorkspacedCopilotPool;
+  /** W41 — resolves @github/copilot-sdk; see `getAvailableProviders`. */
+  loadCopilotSdk: () => Promise<unknown>;
 };
-type ClaudeAgentModule = { ClaudeAgentProvider: typeof ClaudeAgentProvider };
+type ClaudeAgentModule = {
+  ClaudeAgentProvider: typeof ClaudeAgentProvider;
+  /** W41 — resolves @anthropic-ai/claude-agent-sdk; see `getAvailableProviders`. */
+  loadClaudeSdk: () => Promise<unknown>;
+};
+type CodexModule = { CodexProvider: typeof CodexProvider };
+type OpenCodeModule = { OpenCodeProvider: typeof OpenCodeProvider };
+type AcpModule = { AcpProvider: typeof AcpProvider };
 
 let copilotModule: CopilotModule | null = null;
 let claudeAgentModule: ClaudeAgentModule | null = null;
+let codexModule: CodexModule | null = null;
+let openCodeModule: OpenCodeModule | null = null;
+let acpModule: AcpModule | null = null;
 
 async function loadCopilotModule(): Promise<CopilotModule> {
   if (copilotModule) return copilotModule;
@@ -65,6 +83,25 @@ async function loadClaudeAgentModule(): Promise<ClaudeAgentModule> {
     }
     throw err;
   }
+}
+
+// W41 — codex / opencode / acp: same lazy-cached pattern, no optional-dep
+// error mapping (codex and opencode need no npm SDK, and `@agentclientprotocol/sdk`
+// is a hard dependency of this package, so a failure here is a real fault
+// rather than "not installed").
+async function loadCodexModule(): Promise<CodexModule> {
+  codexModule ??= await import('./providers/codex/index.js') as CodexModule;
+  return codexModule;
+}
+
+async function loadOpenCodeModule(): Promise<OpenCodeModule> {
+  openCodeModule ??= await import('./providers/opencode/index.js') as OpenCodeModule;
+  return openCodeModule;
+}
+
+async function loadAcpModule(): Promise<AcpModule> {
+  acpModule ??= await import('./providers/acp/index.js') as AcpModule;
+  return acpModule;
 }
 
 // ── Public API ──
@@ -102,23 +139,31 @@ export async function createHarnessProvider(
 
     // W37 — Codex app-server (JSON-RPC over stdio)
     case 'codex': {
-      return new CodexProvider(config.codex ?? {});
+      const mod = await loadCodexModule(); /* W41 */
+      return new mod.CodexProvider(config.codex ?? {});
     }
 
     // W38 — OpenCode serve (HTTP + SSE)
     case 'opencode': {
-      // No guard needed: OpenCodeProvider defaults baseUrl to http://localhost:4096
-      return new OpenCodeProvider(config.opencode ?? { baseUrl: 'http://localhost:4096' });
+      // No default baseUrl is invented here. `opencode serve --port` defaults
+      // to an EPHEMERAL port, so the old `http://localhost:4096` fallback
+      // pointed at nothing on a stock install and surfaced as "server
+      // unreachable". The provider requires either a real `baseUrl` or
+      // `autoStart` (which discovers the port the server actually bound), and
+      // says which is missing.
+      const mod = await loadOpenCodeModule(); /* W41 */
+      return new mod.OpenCodeProvider(config.opencode ?? {});
     }
 
-    // W39 — ACP breadth client (long-tail agents)
+    // W39 — ACP breadth client (long-tail agents, real JSON-RPC-over-stdio ACP)
     case 'acp': {
-      if (!config.acp?.address) {
+      if (!config.acp?.command) {
         throw new Error(
-          `Harness type "acp" requires acp.address — the URL of the ACP-compliant agent.`,
+          `Harness type "acp" requires acp.command — the ACP agent binary to spawn.`,
         );
       }
-      return new AcpProvider(config.acp);
+      const mod = await loadAcpModule(); /* W41 */
+      return new mod.AcpProvider(config.acp);
     }
 
     default: {
@@ -131,25 +176,40 @@ export async function createHarnessProvider(
 /**
  * Returns which provider types are currently available (have their SDK installed).
  * Uses the same module cache — probing does not trigger redundant imports.
+ *
+ * W41 — this DOES load the optional SDKs, because that is precisely the
+ * question being asked. It is on no boot path; callers that only want to
+ * construct a provider use `createHarnessProvider`, which loads only what it
+ * actually needs.
  */
 export async function getAvailableProviders(): Promise<HarnessType[]> {
   const available: HarnessType[] = [];
 
+  // W41 — importing the provider module no longer resolves its SDK (that was
+  // the whole point of the change), so "is it installed?" must be asked of the
+  // SDK itself. Without this second step the function would report every
+  // provider available on a build with no SDKs at all.
   try {
-    await loadCopilotModule();
+    const mod = await loadCopilotModule();
+    await mod.loadCopilotSdk();
     available.push('copilot');
   } catch {
     // @github/copilot-sdk not installed — copilot unavailable
   }
 
   try {
-    await loadClaudeAgentModule();
+    const mod = await loadClaudeAgentModule();
+    await mod.loadClaudeSdk();
     available.push('claude-agent');
   } catch {
     // @anthropic-ai/claude-agent-sdk not installed — claude-agent unavailable
   }
 
-  // W37/W38/W39: directly-imported providers — always available (no optional SDK gate)
+  // W37/W38/W39: no optional SDK gate — always available.
+  // W41: deliberately NOT probed by importing them. `getAvailableProviders()`
+  // runs on boot paths, and importing three provider modules just to say "yes,
+  // they exist" is exactly the eager loading this work item removes. Their
+  // availability is a static property of the build, so state it.
   available.push('codex', 'opencode', 'acp');
 
   return available;

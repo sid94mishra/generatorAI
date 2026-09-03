@@ -153,7 +153,20 @@ function detectUnicode(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): boole
   // which is usually unset there.
   if (env['WT_SESSION'] || env['TERM_PROGRAM'] === 'vscode') return true;
   if (platform === 'win32') return false;
-  return locale === '' ? false : true;
+
+  // A locale that NAMES a charset and does not name UTF-8 is positive
+  // evidence against unicode, not the absence of evidence — `LANG=C`,
+  // `POSIX`, and `en_US.ISO-8859-1` all render box-drawing characters and
+  // emoji as mojibake. This used to fall through to the "any non-empty
+  // locale means modern" default below and claim unicode for all three.
+  const normalised = locale.toLowerCase();
+  if (normalised === 'c' || normalised === 'posix') return false;
+  if (normalised.includes('.')) return false;
+
+  // A locale with no charset suffix at all (`LANG=en_US`) on a unix-like
+  // system: no evidence either way, and modern terminals there are
+  // overwhelmingly UTF-8. Unchanged behaviour.
+  return locale !== '';
 }
 
 export function detectTerminal(options: DetectOptions = {}): TerminalCapabilities {

@@ -334,6 +334,19 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     deleteRun: vi.fn().mockResolvedValue(undefined),
     onStageCompleted: vi.fn().mockResolvedValue(undefined),
     onStageFailed: vi.fn().mockResolvedValue(undefined),
+    // retryRun creates a NEW run (W23 lineage) — the route must start
+    // *that* one, not the ancestor it was called with.
+    retryRun: vi.fn().mockResolvedValue({
+      id: 'run-retry-1',
+      workflowDefinitionId: 'def-1',
+      name: 'Test Run (retry)',
+      status: 'created',
+      sessionMode: 'auto',
+      variables: {},
+      ancestorRunId: 'run-1',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }),
   };
 
   const dagScheduler = {

@@ -163,18 +163,29 @@ function tokenize(input: string): Token[] {
       }
     }
 
-    // Word operators: AND / OR / NOT at a word boundary outside a leaf.
-    if (leafStart < 0) {
+    // Word operators: AND / OR / NOT at a word boundary.
+    //
+    // These must be recognised INSIDE a leaf as well. A leaf only ended at
+    // `&&`, `||` or a paren, so `status == 'completed' AND variables.x == 1`
+    // accumulated into a single leaf and compared `status` against the
+    // literal `completed' AND variables.x == 1` — always false, silently
+    // skipping the stage. Two guards keep this from over-splitting:
+    //   - the previous character must be a boundary, so `variables.someOR`
+    //     and `variables.ANDROID` stay one identifier;
+    //   - the trailing \b, so `ANDroid` never matches.
+    // Quoted strings are consumed whole above, so `'red AND blue'` is safe.
+    const prevCh = i > 0 ? input[i - 1] : ' ';
+    const atWordBoundary =
+      prevCh === ' ' || prevCh === '\t' || prevCh === '\n' || prevCh === '(' || prevCh === ')';
+    if (atWordBoundary) {
       const word = input.slice(i).match(/^(AND|OR|NOT)\b/i);
       if (word) {
         const kw = word[0].toUpperCase() as LogicalOp;
+        flushLeaf(i);
         out.push({ kind: 'op', op: kw });
         i += word[0].length;
         continue;
       }
-    } else {
-      // Inside a leaf: do not split on word operators. Comparison operators
-      // like `==` / `!=` stay in the leaf, they're parsed by resolveValue.
     }
 
     // Otherwise we're accumulating leaf characters.

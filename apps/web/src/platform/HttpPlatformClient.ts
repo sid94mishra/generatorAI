@@ -815,8 +815,13 @@ export class HttpPlatformClient implements IPlatformClient {
   }
 
   // PARITY-1: run-level retry (re-runs a failed run from `failed → created`).
-  async retryRun(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}/retry`, { method: 'POST' });
+  async retryRun(id: string): Promise<{ runId: string }> {
+    // The response carries the NEW run's id; callers navigate to it.
+    const res = await apiFetch<{ runId: string }>(
+      `${this.baseUrl}/api/workflow-runs/${id}/retry`,
+      { method: 'POST' },
+    );
+    return { runId: res?.runId ?? id };
   }
 
   // ── PARITY-2: true per-stage controls ──

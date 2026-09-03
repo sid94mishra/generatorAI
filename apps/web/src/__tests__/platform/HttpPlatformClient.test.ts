@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HttpPlatformClient } from '../../platform/HttpPlatformClient.js';
 import { __setAllowUnauthenticatedForTests } from '../../platform/authRuntime.js';
+import { resetMuxStreamForTests } from '../../platform/muxStream.js';
 
 // Every request now flows through the shared AuthenticatedClientRuntime. These
 // tests exercise the REST surface, not pairing, so the runtime is put into the
@@ -46,11 +47,18 @@ describe('HttpPlatformClient', () => {
   beforeEach(() => {
     client = new HttpPlatformClient('http://localhost:3000');
     globalThis.fetch = vi.fn();
+    // △ Fixed during end-to-end review — `subscribeToEvents` now routes
+    // through muxStream's shared, module-level connection singleton (W26).
+    // Without resetting it, the second `subscribeToEvents` test in this file
+    // silently reused the first test's already-open mock connection instead
+    // of creating its own, so its own `MockEventSource` spy was never called.
+    resetMuxStreamForTests();
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
     globalThis.EventSource = originalEventSource;
+    resetMuxStreamForTests();
   });
 
   // ── Session CRUD ──
@@ -258,18 +266,40 @@ describe('HttpPlatformClient', () => {
 
   // ── SSE (subscribeToEvents) ──
 
-  it('subscribeToEvents creates EventSource and returns unsubscribe function', async () => {
-    const closeFn = vi.fn();
+  // △ Fixed during end-to-end review — `subscribeToEvents` now opens (or
+  // joins) the shared multiplexed connection from `muxStream.ts` (W26)
+  // instead of constructing a plain single-scope `EventSource` directly.
+  // These two tests still asserted the PRE-W26 URL shape
+  // (`/api/stream?scope=session&id=s1`), which the mux client never
+  // produces — the scope/id pair now travels in the `POST
+  // /api/stream/connections` body, and the resulting `EventSource` is opened
+  // against `/api/stream?c=<connectionId>&ticket=<ticket>`. Both tests also
+  // need `fetch` mocked for that POST and `addEventListener` on the mock
+  // `EventSource`, since the mux client wires `hello`/`subs`/`gap` control
+  // frames through it immediately on connect.
+  function mockConnectionsEndpoint(): void {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      jsonResponse({ connectionId: 'conn-1', ticket: 't', expiresAt: Date.now() + 30_000 }, 201),
+    );
+  }
 
-    const MockEventSource = vi.fn().mockImplementation(() => ({
+  function makeMockEventSource(closeFn: () => void = vi.fn()) {
+    return vi.fn().mockImplementation(() => ({
       onopen: null,
       onerror: null,
       onmessage: null,
       close: closeFn,
       readyState: 0,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
     }));
+  }
 
+  it('subscribeToEvents creates EventSource and returns unsubscribe function', async () => {
+    const closeFn = vi.fn();
+    const MockEventSource = makeMockEventSource(closeFn);
     globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
+    mockConnectionsEndpoint();
 
     const handler = vi.fn();
     const unsubscribe = client.subscribeToEvents('s1', handler);
@@ -278,36 +308,40 @@ describe('HttpPlatformClient', () => {
     // so the EventSource appears on a later microtask.
     await vi.waitFor(() => expect(MockEventSource).toHaveBeenCalled());
 
-    // Per-session events now flow through the unified stream endpoint — it is
-    // the only SSE route that redeems tickets.
+    // The scope/id pair travels in the connection POST body, not the
+    // EventSource URL — the URL only ever carries the opaque connection id.
+    const connectBody = vi.mocked(globalThis.fetch).mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(connectBody.body as string)).toMatchObject({
+      subs: [{ scope: 'session', id: 's1' }],
+    });
     const url = MockEventSource.mock.calls[0]![0] as string;
     expect(url).toContain('/api/stream');
-    expect(url).toContain('scope=session');
-    expect(url).toContain('id=s1');
+    expect(url).toContain('c=conn-1');
     expect(typeof unsubscribe).toBe('function');
 
-    // Calling unsubscribe should close the EventSource
+    // Calling unsubscribe should close the EventSource (it is the last/only
+    // subscriber, so the shared connection closes with it).
     unsubscribe();
     expect(closeFn).toHaveBeenCalled();
   });
 
-  it('subscribeToEvents passes kindPrefixes as filter query param', async () => {
-    const MockEventSource = vi.fn().mockImplementation(() => ({
-      onopen: null,
-      onerror: null,
-      onmessage: null,
-      close: vi.fn(),
-      readyState: 0,
-    }));
-
+  it('subscribeToEvents passes kindPrefixes as a filter on the subscription', async () => {
+    const MockEventSource = makeMockEventSource();
     globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
+    mockConnectionsEndpoint();
 
     const handler = vi.fn();
     client.subscribeToEvents('s1', handler, { kindPrefixes: ['copilot', 'session'] });
 
     await vi.waitFor(() => expect(MockEventSource).toHaveBeenCalled());
-    const url = MockEventSource.mock.calls[0]![0] as string;
-    expect(url).toContain('filter=copilot%2Csession');
+
+    // Filter travels as part of the subscription in the connection POST body,
+    // not as a query param — there is no per-scope query string on a shared
+    // multiplexed connection.
+    const connectBody = vi.mocked(globalThis.fetch).mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(connectBody.body as string)).toMatchObject({
+      subs: [{ scope: 'session', id: 's1', filter: ['copilot', 'session'] }],
+    });
   });
 
   // ── Copilot-specific ──

@@ -10,7 +10,9 @@ import React, { useMemo, useState } from 'react';
 import {
   BookOpen, Search, FileEdit, Play, Wrench, Brain, Bot,
   Database, StickyNote, AlertCircle, CheckCircle2, Loader2, ChevronRight, Circle, PauseCircle,
+  FileDiff, SquareTerminal,
 } from 'lucide-react';
+import { useStreamActions } from '@/components/agent/streamActions.js';
 import { cn } from '@/lib/utils.js';
 import type { StepKind, StepStatus, TimelineStep } from '@/components/chat/redesign/types.js';
 
@@ -58,6 +60,7 @@ interface StepRowProps {
 
 export const StepRow = React.memo(function StepRow({ step, nested }: StepRowProps) {
   const [expanded, setExpanded] = useState(false);
+  const actions = useStreamActions();
   const Icon = KIND_ICON[step.kind];
   const isRunning = step.status === 'running';
   const isWaiting = step.status === 'waiting';
@@ -118,8 +121,62 @@ export const StepRow = React.memo(function StepRow({ step, nested }: StepRowProp
         {/* right meta */}
         <span className="flex shrink-0 items-center gap-2 text-[11px] text-[var(--color-muted-foreground)]/70">
           {isWaiting && <span className="text-[var(--color-primary)]">Waiting for you</span>}
-          {step.meta && <span>{step.meta}</span>}
+          {step.fileOp ? (
+            <span className="font-mono text-[10.5px]">
+              <span className="text-[var(--color-success)]">+{step.fileOp.additions}</span>{' '}
+              <span className="text-[var(--color-danger)]">−{step.fileOp.deletions}</span>
+            </span>
+          ) : (
+            step.meta && <span>{step.meta}</span>
+          )}
           {step.durationMs != null && <span>{formatDuration(step.durationMs)}</span>}
+          {/* Click-throughs — a <span role=button>, not a <button>: this row
+              is already inside a <button>, and nested buttons are invalid
+              HTML that browsers may silently re-parent. */}
+          {step.fileOp && actions.onOpenChanges && (
+            <span
+              role="button"
+              tabIndex={0}
+              title="Show in changes view"
+              aria-label={`Show ${step.fileOp.filePath} in changes view`}
+              className="rounded p-0.5 text-[var(--color-muted-foreground)]/60 hover:bg-[var(--color-subtle)] hover:text-[var(--color-primary)]"
+              onClick={(e) => {
+                e.stopPropagation();
+                actions.onOpenChanges?.(step.fileOp?.filePath);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  actions.onOpenChanges?.(step.fileOp?.filePath);
+                }
+              }}
+            >
+              <FileDiff className="h-3 w-3" />
+            </span>
+          )}
+          {step.isShell && step.callId && actions.onOpenShell && (
+            <span
+              role="button"
+              tabIndex={0}
+              title="Open in terminal view"
+              aria-label="Open this command in the terminal view"
+              className="rounded p-0.5 text-[var(--color-muted-foreground)]/60 hover:bg-[var(--color-subtle)] hover:text-[var(--color-primary)]"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (step.callId) actions.onOpenShell?.(step.callId);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (step.callId) actions.onOpenShell?.(step.callId);
+                }
+              }}
+            >
+              <SquareTerminal className="h-3 w-3" />
+            </span>
+          )}
           {hasExpandable && (
             <ChevronRight
               className={cn(

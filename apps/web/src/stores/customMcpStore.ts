@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 export type CustomMcpTransport = 'local' | 'http' | 'sse';
 
@@ -33,7 +34,7 @@ interface CustomMcpState {
   removeServer: (id: string) => void;
 }
 
-export const useCustomMcpStore = create<CustomMcpState>()(
+const useCustomMcpStoreImpl = create<CustomMcpState>()(
   persist(
     (set) => ({
       servers: [],
@@ -49,3 +50,8 @@ export const useCustomMcpStore = create<CustomMcpState>()(
     { name: 'generatorai:customMcp' },
   ),
 );
+
+
+// HMR-split-proof: every module instance shares the first-created store.
+// See lib/globalSingleton.ts for why this is load-bearing in dev.
+export const useCustomMcpStore = globalSingleton('web.customMcpStore', () => useCustomMcpStoreImpl);

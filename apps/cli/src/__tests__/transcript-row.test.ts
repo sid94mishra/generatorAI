@@ -3,10 +3,11 @@ import { PassThrough } from 'node:stream';
 import React from 'react';
 import { render, Box } from 'ink';
 import xterm from '@xterm/headless';
+import type { Terminal as XtermTerminal } from '@xterm/headless';
 import { ThemeProvider } from '@generatorai/tui-kit';
 import { TimelineRow } from '../tui/panes.js';
 
-const Terminal = (xterm as unknown as { Terminal: typeof import('@xterm/headless').Terminal }).Terminal;
+const Terminal = (xterm as unknown as { Terminal: typeof XtermTerminal }).Terminal;
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe('transcript rows', () => {

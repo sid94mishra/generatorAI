@@ -3,6 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { AgentMode, PlanCardSummary, QuestionCardSummary } from './AgentMode.js';
+import type { FileOpStat } from './AgentEvent.js';
 
 export interface ChatMessageMetadata {
   /** Thinking/reasoning text from the harness */
@@ -16,6 +17,10 @@ export interface ChatMessageMetadata {
     status: 'running' | 'complete';
     /** See {@link PlanCardSummary.sequence}. */
     sequence?: number;
+    /** Per-op +/− line stats for file write/edit tools. */
+    fileOp?: FileOpStat;
+    /** callId of the Agent tool call this ran inside (SDK subagent). */
+    parentId?: string;
   }>;
   /** System messages emitted during this response */
   systemMessages?: string[];

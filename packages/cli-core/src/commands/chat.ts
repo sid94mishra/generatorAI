@@ -1,9 +1,11 @@
 // `generatorai chat …` — the conversation surface.
 
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { z } from 'zod';
 import type { SendMessageInput } from '@generatorai/client-core';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
-import { CliError } from '../errors/CliError.js';
+import { CliError, EXIT_CODES } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
 import type { CliContext } from '../context/CliContext.js';
 import {
@@ -59,10 +61,20 @@ async function streamTurn(
   verbosity: 'minimal' | 'normal' | 'verbose',
   /** `false` follows the conversation instead of stopping at the first turn. */
   untilTurnEnds = true,
-): Promise<void> {
+  /**
+   * `chat send --no-stream` still needs to wait for the SAME completion
+   * event as the streaming path — it just prints nothing while waiting.
+   * Returning right after the POST (the previous behavior) answered before
+   * the turn had actually finished, which is the opposite of what the flag
+   * promises.
+   */
+  silent = false,
+): Promise<{ errored: boolean; errorMessage?: string }> {
   const showThinking = verbosity === 'verbose';
   const showTools = verbosity !== 'minimal';
   let internalTurn = false;
+  let errored = false;
+  let errorMessage: string | undefined;
 
   await streamUntil(ctx, sessionId ? 'session' : 'chat', sessionId ?? chatId, {
     onEvent: (event) => {
@@ -74,6 +86,16 @@ async function streamTurn(
         internalTurn = Boolean(data['__isInternalTurn']);
         return;
       }
+      // Tracked even when `silent` — a caller waiting quietly for the turn
+      // still needs to know it ended in error, not just that it ended.
+      // `isDone` below treats `harness.error` as an ordinary terminal
+      // condition (it resolves the wait either way), so this is the only
+      // signal distinguishing "finished" from "failed".
+      if (event.kind === 'harness.error' && !(internalTurn || data['__isInternalTurn'])) {
+        errored = true;
+        errorMessage = String(data['message'] ?? 'error');
+      }
+      if (silent) return;
       if (internalTurn || data['__isInternalTurn']) return;
 
       switch (event.kind) {
@@ -104,6 +126,7 @@ async function streamTurn(
           break;
       }
     },
+    silent,
     ...(untilTurnEnds
       ? {
           isDone: (event: { kind: string }) =>
@@ -113,6 +136,8 @@ async function streamTurn(
         }
       : {}),
   });
+
+  return { errored, ...(errorMessage ? { errorMessage } : {}) };
 }
 
 export function chatCommands(): CommandSpec[] {
@@ -326,32 +351,68 @@ export function chatCommands(): CommandSpec[] {
         const prompt = args.prompt === '-' ? await readStdin() : args.prompt;
         if (!prompt.trim()) throw CliError.usage('The prompt is empty.');
 
+        // There is no server route to change a chat's model or agent for one
+        // turn — the JSON and multipart prompt routes both only ever accept
+        // `prompt`/`mode`. Warning-and-sending-anyway silently drops what the
+        // caller asked for; refusing is the only honest option.
+        if (flags.model) {
+          throw CliError.unsupported(
+            '--model has no per-turn effect on `chat send`; there is no server route for it.',
+            { hint: `Run \`generatorai chat update ${target.id} --model ${flags.model}\` first, then send.` },
+          );
+        }
+        if (flags.agent) {
+          throw CliError.unsupported(
+            '--agent has no per-turn effect on `chat send`; there is no server route for it.',
+            { hint: `Run \`generatorai chat update ${target.id} --agent ${flags.agent}\` first, then send.` },
+          );
+        }
+
         // No cast: `SendMessageInput` is the contract, and the cast is what
         // let a wrong field name through to a 400 at runtime.
         const body: SendMessageInput = { message: prompt };
 
-        const warnings: string[] = [];
-        // Accepted for forward compatibility but not carried by the JSON
-        // prompt route — saying so beats silently dropping them.
-        if (flags.model) warnings.push('--model is not applied per turn; set it with `chat update --model`.');
-        if (flags.agent) warnings.push('--agent is not applied per turn; bind it with `chat update --agent`.');
-        if (flags.attach?.length) {
-          warnings.push('--attach needs a multipart upload and is not sent by this command yet.');
-        }
+        const send = flags.attach?.length
+          ? async () =>
+              ctx.api.chats.sendWithAttachments(target.id, body, await readAttachments(flags.attach!))
+          : async () => ctx.api.chats.send(target.id, body);
 
-        // Subscribe BEFORE sending. Subscribing after the POST races the
-        // first tokens, and on a fast local model the whole reply can land
-        // before the stream is open.
+        // Subscribe BEFORE sending in both branches. Subscribing after the
+        // POST races the first tokens, and on a fast local model the whole
+        // reply — or the turn-complete event `--no-stream` waits for — can
+        // land before the stream is open.
         if (flags.noStream) {
-          await ctx.api.chats.send(target.id, body);
-          return { ...ok('Sent.'), ...(warnings.length ? { warnings } : {}) };
+          // `silent: true` still waits for the SAME completion event the
+          // streaming path waits for; it just prints nothing meanwhile.
+          // Returning right after the POST (the previous behavior) answered
+          // before the turn had actually finished.
+          const streamed = streamTurn(ctx, target.id, chat.sessionId ?? null, flags.verbosity, true, true);
+          await send();
+          const { errored, errorMessage } = await streamed;
+          const [latest] = await ctx.api.chats.messages(target.id, { limit: 1 });
+          // `isDone` treats `harness.error` as an ordinary terminal
+          // condition — the awaited promise above resolves normally either
+          // way. Reporting "Turn complete." (exit 0) regardless of `errored`
+          // would tell an automation gating on this command's exit code
+          // that a failed turn succeeded.
+          if (errored) {
+            return {
+              data: latest ?? null,
+              exitCode: EXIT_CODES.RESULT_FAILED,
+              message: `Turn failed: ${errorMessage ?? 'unknown error'}`,
+            };
+          }
+          return record(latest ?? null, 'Turn complete.');
         }
 
         const streamed = streamTurn(ctx, target.id, chat.sessionId ?? null, flags.verbosity);
-        await ctx.api.chats.send(target.id, body);
-        await streamed;
+        await send();
+        const { errored } = await streamed;
         ctx.chunk('\n');
-        return ok('');
+        // The error itself was already printed via the streamed `log` event
+        // above; this only fixes the exit code so a script checking it does
+        // not see success.
+        return errored ? { data: null, exitCode: EXIT_CODES.RESULT_FAILED } : ok('');
       },
     }),
 
@@ -368,7 +429,7 @@ export function chatCommands(): CommandSpec[] {
         { chat: z.string() },
         { verbosity: z.enum(['minimal', 'normal', 'verbose']).default('normal') },
       ),
-      output: { kind: 'stream' },
+      output: { kind: 'stream', unbounded: true },
       async handler(ctx, { args, flags }) {
         const target = await findChat(ctx, args.chat);
         const chat = await ctx.api.chats.get(target.id);
@@ -424,6 +485,12 @@ export function chatCommands(): CommandSpec[] {
         { name: 'description', description: 'New description', type: 'string' },
         { name: 'tags', description: 'Comma-separated tags (replaces)', type: 'string' },
         { name: 'model', description: 'Default model', type: 'string', completes: 'model' },
+        {
+          name: 'agent',
+          description: "Bind an agent (scope:slug ref); '' or 'none' unbinds it",
+          type: 'string',
+          completes: 'agent',
+        },
       ],
       schema: inputSchema(
         { chat: z.string() },
@@ -432,6 +499,7 @@ export function chatCommands(): CommandSpec[] {
           description: z.string().optional(),
           tags: z.string().optional(),
           model: z.string().optional(),
+          agent: z.string().optional(),
         },
       ),
       output: { kind: 'record', successMessage: 'Updated {id}' },
@@ -443,10 +511,16 @@ export function chatCommands(): CommandSpec[] {
             description: flags.description,
             tags: parseList(flags.tags),
             model: flags.model,
+            // The flag's own help text promises `''` OR `'none'` unbinds —
+            // this used to only check for the literal string `'none'`, so
+            // `--agent ''` sent `agentRef: ''` to the server instead of
+            // `null`, silently failing to unbind exactly as documented.
+            agentRef:
+              flags.agent === undefined ? undefined : flags.agent === '' || flags.agent === 'none' ? null : flags.agent,
           }),
-          'Pass at least one of --name, --description, --tags or --model.',
+          'Pass at least one of --name, --description, --tags, --model or --agent.',
         );
-        return record(await ctx.api.chats.update(target.id, body as never));
+        return record(await ctx.api.chats.update(target.id, body));
       },
     }),
 
@@ -651,4 +725,29 @@ async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
+ * Reads `--attach` paths off disk for `chats.sendWithAttachments`.
+ *
+ * Fails on the first unreadable path rather than silently sending a partial
+ * set — a typo'd filename should not turn into "sent the message with one
+ * fewer attachment than asked for" with no indication anything was dropped.
+ */
+async function readAttachments(
+  paths: string[],
+): Promise<Array<{ name: string; data: Uint8Array }>> {
+  return Promise.all(
+    paths.map(async (p) => {
+      const resolved = path.resolve(p);
+      try {
+        const data = await fs.readFile(resolved);
+        return { name: path.basename(resolved), data };
+      } catch (error) {
+        throw new CliError('VALIDATION', `Could not read attachment "${p}".`, {
+          hint: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }),
+  );
 }

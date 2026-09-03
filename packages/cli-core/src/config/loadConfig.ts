@@ -13,6 +13,7 @@
 
 import * as fs from 'node:fs/promises';
 import { CliError } from '../errors/CliError.js';
+import { migrateConfig, type ConfigMigration } from './migrate.js';
 import {
   CliConfigSchema,
   CONFIG_VERSION,
@@ -232,8 +233,28 @@ export async function saveUserConfig(config: CliConfig, configPath?: string): Pr
 /** Reads the raw user config without merging, for `config set`/`unset`. */
 export async function readUserConfig(configPath?: string): Promise<CliConfig> {
   const { data } = await readJson(configPath ?? getUserConfigFilePath());
-  const parsed = CliConfigSchema.safeParse(data);
-  return parsed.success ? parsed.data : CliConfigSchema.parse({});
+  // Salvage rather than reset (open question #37). This used to be
+  // `parsed.success ? parsed.data : CliConfigSchema.parse({})` — a config the
+  // schema could not parse was silently replaced by DEFAULTS, and since
+  // `config set` reads through here and then writes the result back, one
+  // unrecognised key turned into "every setting you ever changed is gone",
+  // with no message. `migrateConfig` keeps every section and key that still
+  // validates and reports the rest.
+  return migrateConfig(data).config;
+}
+
+/**
+ * The same read, with what the migration had to drop.
+ *
+ * Separate from `readUserConfig` so the common caller stays a one-liner
+ * while a surface that can actually TELL the user (`config show`, the TUI's
+ * settings pane) can report it.
+ */
+export async function readUserConfigWithMigration(
+  configPath?: string,
+): Promise<ConfigMigration> {
+  const { data } = await readJson(configPath ?? getUserConfigFilePath());
+  return migrateConfig(data);
 }
 
 /** `server.url` → the value at that path, or undefined. */

@@ -9,9 +9,16 @@
 import React, { useMemo, useState } from 'react';
 import { Box, Text } from 'ink';
 import type { CommandRegistry, Keymap } from '@generatorai/cli-core';
-import { toPalette, type PaletteEntry } from '@generatorai/cli-core';
+import {
+  fieldKey,
+  formatRelative,
+  missingRequiredFields,
+  toPalette,
+  type PaletteEntry,
+} from '@generatorai/cli-core';
 import {
   Confirm,
+  JsonView,
   Overlay,
   Select,
   TextInput,
@@ -21,7 +28,7 @@ import {
   useSelection,
   useTheme,
 } from '@generatorai/tui-kit';
-import { useActions, useTui, type OverlayKind } from './store.js';
+import { blockedWorkItems, paneLeaves, useActions, useTui, type OverlayKind } from './store.js';
 
 export interface OverlayHostProps {
   registry: CommandRegistry;
@@ -54,6 +61,12 @@ export function OverlayHost({ registry, keymap, implemented, onRunCommand }: Ove
 
     case 'help':
       return <HelpOverlay keymap={keymap} implemented={implemented} onClose={actions.closeOverlay} />;
+
+    case 'tabs':
+      return <TabNavigator onClose={actions.closeOverlay} />;
+
+    case 'notifications':
+      return <NotificationQueue onClose={actions.closeOverlay} />;
 
     case 'confirm':
       return (
@@ -98,7 +111,287 @@ export function OverlayHost({ registry, keymap, implemented, onRunCommand }: Ove
 
     case 'error':
       return <ErrorOverlay overlay={overlay} onClose={actions.closeOverlay} />;
+
+    case 'form':
+      return (
+        <FormOverlay
+          overlay={overlay}
+          onSubmit={(values) => {
+            actions.closeOverlay();
+            overlay.onSubmit(values);
+          }}
+          onCancel={() => {
+            actions.closeOverlay();
+            // A caller awaiting `runWithForm` must hear about a dismissal, or
+            // its promise never settles.
+            overlay.onCancel?.();
+          }}
+        />
+      );
+
+    case 'validation':
+      return (
+        <ValidationOverlay
+          overlay={overlay}
+          onNavigate={(stageId) => {
+            actions.closeOverlay();
+            overlay.onNavigate(stageId);
+          }}
+          onClose={actions.closeOverlay}
+        />
+      );
+
+    case 'stageDetail':
+      return <StageDetailOverlay overlay={overlay} onClose={actions.closeOverlay} />;
   }
+}
+
+// ── Schema-driven form (Phase 7 item 4) ────────────────────────────
+//
+// Fields come from the command spec itself (`formFieldsForSpec`), so this
+// component knows nothing about workflows, stages, or any other domain —
+// which is exactly why it can back BOTH the workflow-authoring surface and
+// the palette's previously-refused "needs options" case with one
+// implementation.
+//
+// One `TextInput` is mounted at a time (the focused field). `useKeys` is a
+// module-level `useInput` registration per mount, so mounting one per field
+// would give every keystroke to every field at once — the same
+// parallel-listener hazard Phase 4 item 2 already hit with the leader key.
+
+function FormOverlay({
+  overlay,
+  onSubmit,
+  onCancel,
+}: {
+  overlay: Extract<OverlayKind, { kind: 'form' }>;
+  onSubmit: (values: Record<string, string>) => void;
+  onCancel: () => void;
+}): React.JSX.Element {
+  const theme = useTheme();
+  const { fields } = overlay;
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(fields.map((field) => [fieldKey(field), field.initial])),
+  );
+  const [index, setIndex] = useState(0);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const field = fields[index];
+  const editable = field !== undefined && field.type !== 'boolean' && field.type !== 'enum';
+
+  const setValue = (key: string, value: string): void => {
+    setProblem(null);
+    setValues((current) => ({ ...current, [key]: value }));
+  };
+
+  const submit = (): void => {
+    const missing = missingRequiredFields(fields, values);
+    if (missing.length > 0) {
+      // Named, not counted: "3 required fields" leaves the user hunting.
+      setProblem(`Required: ${missing.map((f) => f.label).join(', ')}`);
+      setIndex(fields.indexOf(missing[0]!));
+      return;
+    }
+    onSubmit(values);
+  };
+
+  const move = (delta: 1 | -1): void =>
+    setIndex((current) => (current + delta + fields.length) % fields.length);
+
+  // Non-text fields own the bare keys a `TextInput` would otherwise swallow
+  // (space to toggle, ←→ to cycle) — so this handler stands down entirely
+  // while a text field is focused, except for the chords that can never be
+  // typed INTO one.
+  useKeys((input, key) => {
+    if (key.escape) return onCancel();
+    if (key.tab && key.shift) return move(-1);
+    if (key.tab) return move(1);
+    // Ctrl+S submits from anywhere, including mid-word in a text field —
+    // the only way to submit without first walking to the last field.
+    if (key.ctrl && input === 's') return submit();
+    if (key.upArrow) return move(-1);
+    if (key.downArrow) return move(1);
+    if (editable) return;
+
+    if (key.return) return submit();
+    if (!field) return;
+    if (field.type === 'boolean') {
+      if (input === ' ' || key.leftArrow || key.rightArrow) {
+        setValue(fieldKey(field), values[fieldKey(field)] === 'true' ? 'false' : 'true');
+      }
+      return;
+    }
+    // enum: cycle, including through "" for an optional one so it can be
+    // cleared back to unset rather than being stuck on whatever was landed on.
+    const options = [...(field.choices ?? [])];
+    if (!field.required) options.unshift('');
+    const at = options.indexOf(values[fieldKey(field)] ?? '');
+    if (key.leftArrow) {
+      setValue(fieldKey(field), options[(at - 1 + options.length) % options.length] ?? '');
+    } else if (key.rightArrow || input === ' ') {
+      setValue(fieldKey(field), options[(at + 1) % options.length] ?? '');
+    }
+  });
+
+  return (
+    <Overlay
+      title={overlay.title}
+      footer="↑↓/tab field · ←→/space choose · ⏎ next/run · ctrl+s run · Esc cancel"
+      height={20}
+    >
+      {overlay.description ? (
+        <Box marginBottom={1}>
+          <Text color={theme.c('muted')} wrap="truncate-end">
+            {overlay.description}
+          </Text>
+        </Box>
+      ) : null}
+
+      <VirtualList
+        items={fields}
+        selectedIndex={index}
+        height={12}
+        emptyMessage="This command takes no input."
+        renderItem={(item, itemIndex, selected) => {
+          const key = fieldKey(item);
+          const value = values[key] ?? '';
+          return (
+            <Box>
+              <Box flexShrink={0} width={22}>
+                <Text
+                  color={selected ? theme.c('primary') : theme.c('muted')}
+                  bold={selected}
+                  wrap="truncate-end"
+                >
+                  {selected ? theme.glyphs.arrowRight : ' '} {item.label}
+                  {item.required ? <Text color={theme.c('danger')}>*</Text> : ''}
+                </Text>
+              </Box>
+              <Box flexGrow={1} overflow="hidden">
+                {selected && item.type !== 'boolean' && item.type !== 'enum' ? (
+                  <TextInput
+                    value={value}
+                    onChange={(next) => setValue(key, next)}
+                    // Enter on the last field runs; anywhere else it advances,
+                    // matching how a terminal form is expected to behave.
+                    onSubmit={() => (itemIndex === fields.length - 1 ? submit() : move(1))}
+                    placeholder={item.description}
+                  />
+                ) : item.type === 'boolean' ? (
+                  <Text color={value === 'true' ? theme.c('success') : theme.c('muted')}>
+                    {value === 'true' ? '[x] on' : '[ ] off'}
+                  </Text>
+                ) : item.type === 'enum' ? (
+                  <Text color={value ? undefined : theme.c('muted')}>
+                    {value || '(unset)'}
+                    <Text color={theme.c('muted')}>{`   ${(item.choices ?? []).join(' / ')}`}</Text>
+                  </Text>
+                ) : (
+                  <Text color={value ? undefined : theme.c('muted')} wrap="truncate-end">
+                    {value || item.description}
+                  </Text>
+                )}
+              </Box>
+            </Box>
+          );
+        }}
+      />
+
+      {problem ? (
+        <Box marginTop={1}>
+          <Text color={theme.c('danger')} wrap="truncate-end">
+            {problem}
+          </Text>
+        </Box>
+      ) : field ? (
+        <Box marginTop={1}>
+          <Text color={theme.c('muted')} wrap="truncate-end">
+            {field.description}
+            {field.variadic ? ' (repeatable — separate with commas)' : ''}
+          </Text>
+        </Box>
+      ) : null}
+    </Overlay>
+  );
+}
+
+// ── Validation findings (Phase 7 item 6) ───────────────────────────
+//
+// Before this the only validation surface was `workflow validate`'s prose
+// error list — and that list never even reached a client, because the
+// route answers 422 and the client threw the body away (see
+// `requestAllowing` in client-core). With `issues` carrying the responsible
+// stage ids, Enter can move the DAG cursor straight to the element at fault.
+
+function ValidationOverlay({
+  overlay,
+  onNavigate,
+  onClose,
+}: {
+  overlay: Extract<OverlayKind, { kind: 'validation' }>;
+  onNavigate: (stageId: string) => void;
+  onClose: () => void;
+}): React.JSX.Element {
+  const theme = useTheme();
+  const selection = useSelection(overlay.issues.length);
+  const selected = overlay.issues[selection.index];
+
+  useKeys((_input, key) => {
+    if (key.escape) return onClose();
+    if (key.upArrow) return selection.move(-1);
+    if (key.downArrow) return selection.move(1);
+    if (key.return) {
+      const stageId = selected?.stageIds[0];
+      // An issue with no navigable stage (an empty graph, an edge whose
+      // both ends are missing) says so rather than silently doing nothing.
+      if (stageId) onNavigate(stageId);
+    }
+  });
+
+  return (
+    <Overlay
+      title={overlay.title}
+      footer="↑↓ move · ⏎ jump to stage · Esc close"
+      height={18}
+    >
+      <Box marginBottom={1}>
+        <Text color={overlay.valid ? theme.c('success') : theme.c('danger')} bold>
+          {overlay.valid ? `${theme.glyphs.success} Valid` : `${theme.glyphs.failure} Not valid`}
+        </Text>
+        <Text color={theme.c('muted')}>
+          {`  ${overlay.issues.filter((i) => i.severity === 'error').length} error(s), ${
+            overlay.issues.filter((i) => i.severity === 'warning').length
+          } warning(s)`}
+        </Text>
+      </Box>
+
+      <VirtualList
+        items={overlay.issues}
+        selectedIndex={selection.index}
+        height={10}
+        emptyMessage="No findings."
+        renderItem={(issue, _index, isSelected) => (
+          <Text color={isSelected ? theme.c('primary') : undefined} wrap="truncate-end">
+            {isSelected ? theme.glyphs.arrowRight : ' '}{' '}
+            <Text color={issue.severity === 'error' ? theme.c('danger') : theme.c('warning')}>
+              {issue.severity === 'error' ? theme.glyphs.failure : theme.glyphs.warning}
+            </Text>{' '}
+            {issue.message}
+          </Text>
+        )}
+      />
+
+      {selected ? (
+        <Box marginTop={1}>
+          <Text color={theme.c('muted')} wrap="truncate-end">
+            {selected.code}
+            {selected.stageIds.length > 0 ? `  ${theme.glyphs.neutral} stages: ${selected.stageIds.join(', ')}` : '  (not tied to a stage)'}
+            {selected.field ? `  ${theme.glyphs.neutral} field: ${selected.field}` : ''}
+          </Text>
+        </Box>
+      ) : null}
+    </Overlay>
+  );
 }
 
 // ── Command palette ───────────────────────────────────────────────
@@ -174,6 +467,267 @@ function CommandPalette({
           </Text>
         )}
       />
+    </Overlay>
+  );
+}
+
+// ── Tab navigator (Phase 4 item 4) ─────────────────────────────────
+//
+// `pane.nextTab`/`pane.prevTab` only step one at a time; jumping straight to
+// a specific tab by number, name, or a fuzzy filter needed a real picker,
+// the same reasoning the command palette already exists for.
+
+function TabNavigator({ onClose }: { onClose: () => void }): React.JSX.Element {
+  const theme = useTheme();
+  const actions = useActions();
+  const workbench = useTui((s) => s.workbench);
+  const [query, setQuery] = useState('');
+
+  const allTabs = useMemo(
+    () =>
+      workbench.tabs.map((tab, index) => ({
+        id: tab.id,
+        index,
+        title: tab.title,
+        running: paneLeaves(tab.root).some((leaf) => leaf.content.attachment),
+      })),
+    [workbench.tabs],
+  );
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return allTabs;
+    return allTabs.filter((tab) => tab.title.toLowerCase().includes(q));
+  }, [allTabs, query]);
+
+  const selection = useSelection(results.length);
+
+  const jumpTo = (tab: (typeof allTabs)[number] | undefined): void => {
+    if (!tab) return;
+    onClose();
+    actions.focusTab(tab.index);
+  };
+
+  useKeys((input, key) => {
+    if (key.escape) return onClose();
+    if (key.upArrow) return selection.move(-1);
+    if (key.downArrow) return selection.move(1);
+    if (key.return) return jumpTo(results[selection.index]);
+    if (key.backspace || key.delete) return setQuery((q) => q.slice(0, -1));
+    if (key.ctrl || key.meta || key.tab) return;
+    // Digits jump straight to that 1-based tab, matching the numbers the
+    // tab strip itself already shows — typing "2" need not go through the
+    // filter/select flow at all when the target is already on screen.
+    if (/^[0-9]$/.test(input) && !query) {
+      const oneBased = Number(input);
+      const direct = allTabs[oneBased - 1];
+      if (direct) return jumpTo(direct);
+    }
+    if (key.ctrl || key.meta || key.tab || !input) return;
+    setQuery((q) => q + input);
+  });
+
+  return (
+    <Overlay title="Jump to tab" footer="↑↓ move · ⏎ jump · 1-9 direct · Esc close">
+      <Box marginBottom={1}>
+        <Text color={theme.c('primary')}>{'> '}</Text>
+        <Text>{query || <Text color={theme.c('muted')}>Type to filter, or press a number…</Text>}</Text>
+        <Text inverse> </Text>
+      </Box>
+
+      <VirtualList
+        items={results}
+        selectedIndex={selection.index}
+        height={12}
+        emptyMessage="No tab matches."
+        renderItem={(tab, _index, selected) => (
+          <Text color={selected ? theme.c('primary') : undefined} wrap="truncate-end">
+            {selected ? theme.glyphs.arrowRight : ' '}
+            {` ${tab.index + 1} `}
+            {tab.running ? `${theme.glyphs.running} ` : '  '}
+            {tab.title}
+            {tab.id === workbench.activeTabId ? <Text color={theme.c('muted')}>{'  (current)'}</Text> : null}
+          </Text>
+        )}
+      />
+    </Overlay>
+  );
+}
+
+// ── Blocked work / notification queue (Phase 6 item 5) ─────────────
+//
+// Deliberately mirrors `TabNavigator` immediately above: a filtered list,
+// Enter jumps. No design precedent existed anywhere in this codebase (or
+// `apps/web`) for a cross-entity aggregation of pending gates, so rather
+// than invent a new interaction shape, this reuses the one the tab
+// navigator already proved — a list of "places," Enter goes there. Once
+// jumped to, the pane's own existing `chat.respond`/`run.approve` handling
+// resolves the gate; this overlay only ever navigates, never answers,
+// keeping exactly one place in the code that actually resolves a gate.
+
+function NotificationQueue({ onClose }: { onClose: () => void }): React.JSX.Element {
+  const theme = useTheme();
+  const actions = useActions();
+  const workbench = useTui((s) => s.workbench);
+  const timelines = useTui((s) => s.timelines);
+
+  const items = useMemo(() => blockedWorkItems(workbench, timelines), [workbench, timelines]);
+  const selection = useSelection(items.length);
+
+  const jumpTo = (item: (typeof items)[number] | undefined): void => {
+    if (!item) return;
+    onClose();
+    actions.jumpToPane(item.paneId);
+  };
+
+  useKeys((_input, key) => {
+    if (key.escape) return onClose();
+    if (key.upArrow) return selection.move(-1);
+    if (key.downArrow) return selection.move(1);
+    if (key.return) return jumpTo(items[selection.index]);
+  });
+
+  return (
+    <Overlay title="Blocked work" footer="↑↓ move · ⏎ jump to pane · Esc close">
+      <VirtualList
+        items={items}
+        selectedIndex={selection.index}
+        height={12}
+        emptyMessage="Nothing is waiting for you."
+        renderItem={(item, _index, selected) => (
+          // One row per item, matching `TabNavigator`'s convention just
+          // above — `VirtualList`'s `height` prop is an item-count budget,
+          // not a terminal-row one, so a taller multi-line row would blow
+          // past the overlay's fixed viewport without it knowing.
+          <Text color={selected ? theme.c('primary') : undefined} wrap="truncate-end">
+            {selected ? theme.glyphs.arrowRight : ' '} {theme.glyphs.warning}{' '}
+            <Text color={theme.c('warning')} bold>
+              {item.tabTitle}
+            </Text>{' '}
+            {theme.glyphs.neutral} {item.paneTitle}
+            <Text color={theme.c('muted')}> — {item.summary}</Text>
+          </Text>
+        )}
+      />
+    </Overlay>
+  );
+}
+
+// ── Stage detail (Phase 6 item 4) ──────────────────────────────────
+//
+// `stages`/`variables` are a point-in-time snapshot fetched when this
+// opened (`App.tsx`'s `openStageDetail`) — this overlay does not re-fetch
+// while open, matching the terminal chooser's `select` overlay. Per-stage
+// steps and run-wide hooks, though, DO need to be live: they come out of
+// the pane's own timeline (`stage_run.step_started`/`.step_completed`,
+// `hook.*`), which is already reducer-maintained and keeps updating while
+// this overlay is open.
+
+function StageDetailOverlay({
+  overlay,
+  onClose,
+}: {
+  overlay: Extract<OverlayKind, { kind: 'stageDetail' }>;
+  onClose: () => void;
+}): React.JSX.Element {
+  const theme = useTheme();
+  const timeline = useTui((s) => s.timelines[overlay.paneId]);
+  const selection = useSelection(overlay.stages.length);
+
+  const selectedStage = overlay.stages[selection.index];
+  const steps = useMemo(
+    () => (timeline?.items ?? []).filter((item) => item.kind === 'step' && item.stageRunId === selectedStage?.id),
+    [timeline, selectedStage?.id],
+  );
+  // Hooks are run-wide, not stage-scoped (no producer correlates a hook to
+  // a specific stage run) — shown once, not per selected stage.
+  const hooks = useMemo(() => (timeline?.items ?? []).filter((item) => item.kind === 'hook'), [timeline]);
+
+  useKeys((_input, key) => {
+    if (key.escape) return onClose();
+    if (key.upArrow) return selection.move(-1);
+    if (key.downArrow) return selection.move(1);
+  });
+
+  const statusColor = (status: string): string | undefined => {
+    if (status === 'completed') return theme.c('success');
+    if (status === 'failed') return theme.c('danger');
+    if (status === 'running') return theme.c('running');
+    return theme.c('muted');
+  };
+
+  return (
+    <Overlay title="Stage detail" footer="↑↓ select stage · Esc close" height={22}>
+      <Box flexDirection="column">
+        <VirtualList
+          items={overlay.stages}
+          selectedIndex={selection.index}
+          height={Math.min(6, overlay.stages.length)}
+          emptyMessage="No stages."
+          renderItem={(stage, _index, selected) => (
+            <Text color={selected ? theme.c('primary') : undefined} wrap="truncate-end">
+              {selected ? theme.glyphs.arrowRight : ' '}
+              {' '}
+              <Text color={statusColor(stage.status)}>{stage.status.padEnd(10)}</Text>
+              {stage.name ?? stage.id}
+              {stage.retryCount ? <Text color={theme.c('warning')}>{`  retry ×${stage.retryCount}`}</Text> : null}
+            </Text>
+          )}
+        />
+
+        {selectedStage ? (
+          <Box flexDirection="column" marginTop={1}>
+            <Text bold color={theme.c('primary')}>
+              {selectedStage.name ?? selectedStage.id}
+            </Text>
+            <Text color={theme.c('muted')}>
+              {selectedStage.startedAt ? `started ${formatRelative(selectedStage.startedAt)}` : 'not started'}
+              {selectedStage.completedAt ? `  ·  completed ${formatRelative(selectedStage.completedAt)}` : ''}
+            </Text>
+            {selectedStage.error ? (
+              <Text color={theme.c('danger')} wrap="wrap">
+                {selectedStage.error}
+              </Text>
+            ) : null}
+
+            {steps.length > 0 ? (
+              <Box flexDirection="column" marginTop={1}>
+                <Text color={theme.c('muted')}>Steps</Text>
+                {steps.map((step) => (
+                  <Text key={step.id}>
+                    {step.step?.status === 'complete' ? theme.glyphs.success : theme.glyphs.running}{' '}
+                    {step.step?.label ?? step.text}
+                  </Text>
+                ))}
+              </Box>
+            ) : null}
+          </Box>
+        ) : null}
+
+        {hooks.length > 0 ? (
+          <Box flexDirection="column" marginTop={1}>
+            <Text color={theme.c('muted')}>Hooks (this run)</Text>
+            {hooks.slice(-5).map((hook) => (
+              <Text key={hook.id}>
+                {hook.hook?.status === 'error'
+                  ? theme.glyphs.failure
+                  : hook.hook?.status === 'complete'
+                    ? theme.glyphs.success
+                    : theme.glyphs.running}{' '}
+                {hook.text}
+                {hook.hook?.error ? <Text color={theme.c('danger')}>{`  ${hook.hook.error}`}</Text> : null}
+              </Text>
+            ))}
+          </Box>
+        ) : null}
+
+        {Object.keys(overlay.variables).length > 0 ? (
+          <Box flexDirection="column" marginTop={1}>
+            <Text color={theme.c('muted')}>Variables</Text>
+            <JsonView value={overlay.variables} height={4} />
+          </Box>
+        ) : null}
+      </Box>
     </Overlay>
   );
 }

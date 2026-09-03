@@ -8,24 +8,29 @@
 
 import React, { useEffect, useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useChat, useChatMessages, useSendChatPrompt, useUpdateChat, useCancelChat, useBackgroundTasks } from '@/hooks/queries.js';
+import { useChat, useChatMessages, useSendChatPrompt, useUpdateChat, useCancelChat, useBackgroundTasks, useHarnessConfig } from '@/hooks/queries.js';
+import { providerLabel } from '@/components/shared/ModelPicker.js';
 // PLN-01 — plan mode
 import { useDecidePlan, useAnswerQuestion, usePendingInteractions } from '@/hooks/queries.js';
 import { PlanDocumentPanel } from '@/components/chat/PlanDocumentPanel.js';
 import type { AgentMode } from '@generatorai/shared';
 import { DEFAULT_AGENT_MODE } from '@generatorai/shared';
-import { useStreamStore } from '@/stores/streamStore.js';
+import { protectStream, useStreamStore } from '@/stores/streamStore.js';
 import { useChatStore } from '@/stores/chatStore.js';
 import { useStickToBottom } from '@/hooks/useStickToBottom.js';
+import { useTwoPhaseStop } from '@/hooks/useTwoPhaseStop.js';
+import { applyStopEffects } from '@/pages/chatStopEffects.js';
 import { useComputerUseSettings } from '@/hooks/composerQueries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { connectChatSession } from '@/stores/sseManager.js';
+import { AgentConsole } from '@/components/chat/AgentConsole.js';
 import { hydrateWidgetsForChat } from '@/utils/hydrateWidgets.js';
 import { ChatMessageList } from '@/components/chat/ChatMessageList.js';
 import { StreamingMessage } from '@/components/chat/StreamingMessage.js';
 import { awaitsUserDecision } from '@/components/agent/deriveTimeline.js';
 import { ChatInput } from '@/components/chat/ChatInput.js';
 import type { ComposerAttachment } from '@/components/chat/composer/types.js';
+import type { UsageInfo } from '@/components/chat/redesign/types.js';
 import { useFileTabs } from '@/components/diff/useFileTabs.js';
 import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
 import { ChatMessageSkeleton } from '@/components/Skeleton.js';
@@ -37,6 +42,10 @@ import { widgetTabId, parseWidgetTabId } from '@/components/widgets/widgetTabId.
 import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js';
 import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList, PauseCircle, MonitorCog } from 'lucide-react';
 import { openMultiplexedStream } from '@/platform/muxStream.js';
+import {
+  addableRightPaneTabs as addableRightPaneTabsFor,
+  defaultRightPaneTab,
+} from '@/platform/surfaceCapabilities.js';
 import { cn } from '@/lib/utils.js';
 
 // Right-pane-only surfaces, code-split out of the chat route chunk. They pull
@@ -67,6 +76,13 @@ export function ChatPage() {
   const platform = usePlatform();
 
   const { data: chat, isLoading: chatLoading, error: chatError } = useChat(chatId);
+  // The empty-state used to name Copilot unconditionally, which is simply
+  // wrong for a self-hosted install running HARNESS_TYPE=claude-agent — it
+  // told the user they were talking to a provider they had not configured.
+  const { data: harnessConfig } = useHarnessConfig();
+  const activeHarnessLabel = harnessConfig?.harness?.type
+    ? providerLabel(harnessConfig.harness.type)
+    : null;
   // P0-48 fix: pagination — start with the most recent PAGE_SIZE messages.
   // The "Load more" button increases the limit incrementally so the user can
   // page back through history without fetching the entire corpus at once.
@@ -85,6 +101,13 @@ export function ChatPage() {
   const stream = useStreamStore((state) =>
     sessionId ? state.streams[sessionId] : undefined,
   );
+  // The stream record is LRU-bounded; exempt the transcript that is on screen
+  // so a busy workflow run streaming twenty stages cannot evict the chat the
+  // user is actually reading.
+  React.useEffect(() => {
+    if (!sessionId) return;
+    return protectStream(sessionId);
+  }, [sessionId]);
   const sendChatMutation = useSendChatPrompt(chatId ?? '');
   const updateChatMutation = useUpdateChat(chatId ?? '');
   const cancelMutation = useCancelChat();
@@ -171,16 +194,11 @@ export function ChatPage() {
   // The Computer tab is only offered when desktop automation is actually on —
   // otherwise it is a tab that can never show anything.
   const computerUseEnabled = useComputerUseSettings().data?.enabled === true;
+  // W29 — the panel list is a ledger decision, not a literal. A surface that
+  // declares it cannot render the browser or computer live view must not be
+  // offered a tab for it; see `platform/surfaceCapabilities.ts`.
   const addableRightPaneTabs = useMemo(
-    () => [
-      'files',
-      'browser',
-      'terminal',
-      ...(computerUseEnabled ? ['computer'] : []),
-      'widget',
-      'plan',
-      ...(isOrchestrator ? ['background_tasks'] : []),
-    ],
+    () => addableRightPaneTabsFor({ computerUseEnabled, isOrchestrator }),
     [computerUseEnabled, isOrchestrator],
   );
   const { data: backgroundTasksData } = useBackgroundTasks(chatId, isOrchestrator);
@@ -222,6 +240,28 @@ export function ChatPage() {
       setActivePlanId(planId);
       setRightPaneOpen(true);
       setBrowserTabFocusRequest({ type: 'plan', token: Date.now() });
+    },
+    [setRightPaneOpen],
+  );
+
+  // Per-op diff icons + the end-of-turn summary card land here. The file
+  // path is accepted for future per-file scrolling; today the Changes tab
+  // itself is the destination.
+  const openChangesTab = useCallback(
+    (_filePath?: string) => {
+      setRightPaneOpen(true);
+      setBrowserTabFocusRequest({ type: 'changes', token: Date.now() });
+    },
+    [setRightPaneOpen],
+  );
+
+  /** Which agent shell command the Terminal tab's console is focused on. */
+  const [agentConsoleCallId, setAgentConsoleCallId] = useState<string | null>(null);
+  const openAgentShell = useCallback(
+    (callId: string) => {
+      setAgentConsoleCallId(callId);
+      setRightPaneOpen(true);
+      setBrowserTabFocusRequest({ type: 'terminal', token: Date.now() });
     },
     [setRightPaneOpen],
   );
@@ -551,6 +591,32 @@ export function ChatPage() {
   const pendingUserMessage = stream?.pendingUserMessage ?? null;
   const isChatActive = chat?.status === 'active';
 
+  /**
+   * W30-b — two-phase Stop.
+   *
+   * `isLive` is the BACKEND's view: `stream.status` is driven entirely by the
+   * event stream, so a turn the server has settled returns the control to idle
+   * even when the cancel request itself got no response, and a turn the server
+   * is still running keeps offering escalation regardless of how many times
+   * the button was pressed. That is the fourth rule of W30-b, and it is why
+   * this is not a local `hasPressedStop` boolean.
+   *
+   * `requestCancel` latches the stream out of its live statuses so the events
+   * still draining out of the provider cannot flip it back to `streaming` —
+   * without it the button reappears mid-abort and the click reads as a no-op.
+   * The blocks are KEPT: stopping is how you say "that is enough, let me read
+   * it", and the auto-clear effect swaps them for the persisted message once
+   * the history refetch lands.
+   */
+  const stop = useTwoPhaseStop({
+    isLive: isCopilotWorking,
+    onCancel: ({ force }) => {
+      if (!chatId) return;
+      applyStopEffects(useStreamStore.getState(), sessionId, force);
+      cancelMutation.mutate(chatId);
+    },
+  });
+
   // The turn is parked on a gate: the agent is idle and the ball is with the
   // user, so every "generating" affordance must stand down.
   const awaitingUserDecision = useMemo(
@@ -576,7 +642,7 @@ export function ChatPage() {
   // W30: Track the previous completed turn's usage for the cache-miss notice.
   // When a turn transitions to 'complete', capture its usage in a ref so the
   // NEXT turn's UsageChip can compare against it.
-  const prevUsageRef = React.useRef<{ usage: import('@/components/chat/redesign/types.js').UsageInfo; completedAt: number } | null>(null);
+  const prevUsageRef = React.useRef<{ usage: UsageInfo; completedAt: number } | null>(null);
   const lastStreamUsage = stream?.status === 'complete' ? stream.usage : null;
   React.useEffect(() => {
     if (stream?.status === 'complete' && stream.usage) {
@@ -779,6 +845,8 @@ export function ChatPage() {
           <ChatMessageList
             messages={displayMessages}
             onOpenPlan={openPlanTab}
+            onOpenChanges={openChangesTab}
+            onOpenShell={openAgentShell}
             // Thread the page-level scroll ref so VirtualChatList can attach
             // to the outer scroll container rather than creating a nested one.
             // This avoids dual scroll bars and the 60-vh height cap (W30 fix).
@@ -810,6 +878,8 @@ export function ChatPage() {
             prevUsage={prevUsageRef.current?.usage ?? null}
             prevCompletedAt={prevUsageRef.current?.completedAt ?? null}
             onOpenPlan={openPlanTab}
+            onOpenChanges={openChangesTab}
+            onOpenShell={openAgentShell}
             onApprovePlan={handleApprovePlan}
             onRequestPlanChanges={handleRequestPlanChanges}
             onAnswerQuestion={handleAnswerQuestion}
@@ -828,7 +898,9 @@ export function ChatPage() {
                 Start the conversation
               </p>
               <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
-                Type a message below to chat with Copilot
+                {activeHarnessLabel
+                  ? `Type a message below to chat with ${activeHarnessLabel}`
+                  : 'Type a message below to start chatting'}
               </p>
             </div>
           </div>
@@ -849,7 +921,7 @@ export function ChatPage() {
                   <span className="h-2 w-2 rounded-full bg-[var(--color-primary)] dot-pulse-3" />
                 </div>
                 <span className="text-sm font-medium text-[var(--color-foreground)]">
-                  Copilot is thinking...
+                  {activeHarnessLabel ?? 'Agent'} is thinking...
                 </span>
               </div>
               {/* Shimmer skeleton lines */}
@@ -926,21 +998,8 @@ export function ChatPage() {
                 setBrowserTabFocusRequest({ type: 'terminal', token: Date.now() });
               }
             }}
-            onStop={() => {
-              if (!chatId) return;
-              // Settle the turn locally so the "generating" affordances clear
-              // and the composer re-enables, but KEEP the blocks: the user is
-              // stopping to read what already streamed. The server persists
-              // the same partial turn, and the auto-clear effect swaps these
-              // blocks for the persisted message once it lands.
-              //
-              // The latch matters as much as the status: aborting is a round
-              // trip, so without it the events still draining out of the
-              // provider set `streaming` again, the Stop button reappears, and
-              // the click looks like it did nothing.
-              if (sessionId) useStreamStore.getState().requestCancel(sessionId);
-              cancelMutation.mutate(chatId);
-            }}
+            stopState={stop}
+            onStop={stop.press}
             customSendFn={async ({ prompt, attachments, mode }) => {
               const mergedAttachments = pendingCaptures.length
                 ? [...attachments, ...pendingCaptures.map((c) => c.file)]
@@ -984,7 +1043,7 @@ export function ChatPage() {
         onOpenChange={setRightPaneOpen}
         storageKey={rightPaneStorageKey}
         widthStorageKey="generatorai:rightPane:chat:width"
-        defaultTabType="changes"
+        defaultTabType={defaultRightPaneTab()}
         addableTabTypes={addableRightPaneTabs}
         focusTabRequest={browserTabFocusRequest}
         onTabClose={handleRightPaneTabClose}
@@ -1034,6 +1093,9 @@ export function ChatPage() {
                       tabId={ctx.id}
                       urlScopeKey={browserUrlScopeKey}
                       open={true}
+                      // P1-50 — every tab is mounted; only the selected one
+                      // may hold a live screencast socket.
+                      visible={ctx.active}
                       onClose={() => setRightPaneOpen(false)}
                       onCapture={(file) =>
                         setPendingCaptures((prev) => [
@@ -1062,22 +1124,37 @@ export function ChatPage() {
             description: 'Integrated shell in this workspace',
             icon: <TerminalSquare className="h-3.5 w-3.5" />,
             allowMultiple: true,
+            // P2-54 — terminals are the one uncapped WebGL-context consumer:
+            // each xterm instance takes a WebGL context, and browsers hand out
+            // ~16 per page before evicting the oldest, at which point earlier
+            // terminals silently stop painting. Also one PTY per tab on the
+            // host. 4 is above any observed real use of parallel shells.
+            maxInstances: 4,
             disabled: !chat?.workspaceId,
             disabledReason: 'Send a message first to create a workspace',
             render: (ctx) => (
               <React.Suspense fallback={<PanelFallback />}>
-                <TerminalPanel
-                  embedded
-                  workspaceId={chat?.workspaceId}
-                  tabId={ctx.id}
-                  onCapture={(file) =>
-                    setPendingCaptures((prev) => [
-                      ...prev,
-                      { id: `terminal:${Date.now()}:${file.name}`, file, source: 'terminal', label: file.name },
-                    ])
-                  }
-                  agentBusy={isCopilotWorking}
-                />
+                {agentConsoleCallId != null ? (
+                  <AgentConsole
+                    messages={messages}
+                    stream={stream}
+                    selectedCallId={agentConsoleCallId}
+                    onClose={() => setAgentConsoleCallId(null)}
+                  />
+                ) : (
+                  <TerminalPanel
+                    embedded
+                    workspaceId={chat?.workspaceId}
+                    tabId={ctx.id}
+                    onCapture={(file) =>
+                      setPendingCaptures((prev) => [
+                        ...prev,
+                        { id: `terminal:${Date.now()}:${file.name}`, file, source: 'terminal', label: file.name },
+                      ])
+                    }
+                    agentBusy={isCopilotWorking}
+                  />
+                )}
               </React.Suspense>
             ),
           },

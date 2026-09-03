@@ -5,6 +5,40 @@
 import type { StageDefinition, StageEdge } from '@generatorai/shared';
 
 /**
+ * One validation finding, with the graph element responsible for it.
+ *
+ * Added alongside — never instead of — the flat `errors`/`warnings` string
+ * arrays below, which stay byte-identical so every existing consumer (the
+ * `/validate` route body, `buildDAG`'s thrown `DAGValidationError`, the CLI's
+ * `workflow validate`) is unaffected. The strings alone are unnavigable: a
+ * client that reads "Cycle detected involving stages: a, b" has to re-parse
+ * English to work out which stages to highlight, and "Duplicate edge from 'a'
+ * to 'b'" names no edge id at all. This carries the ids directly.
+ */
+export interface DAGValidationIssue {
+  severity: 'error' | 'warning';
+  /** Stable machine code, so a client can branch without matching prose. */
+  code:
+    | 'empty-graph'
+    | 'stage-without-prompts'
+    | 'self-edge'
+    | 'unknown-source-stage'
+    | 'unknown-target-stage'
+    | 'duplicate-edge'
+    | 'cycle'
+    | 'no-root-stages'
+    | 'disconnected-stages';
+  /** Same prose as the matching `errors`/`warnings` entry. */
+  message: string;
+  /** Stages this finding is about — the ones a UI should select/highlight. */
+  stageIds: string[];
+  /** Set when the finding is about a specific edge rather than a stage. */
+  edge?: { fromStageId: string; toStageId: string; edgeType?: string };
+  /** Set when the finding is about one field of a stage (e.g. `prompts`). */
+  field?: string;
+}
+
+/**
  * Result of DAG validation.
  */
 export interface DAGValidationResult {
@@ -14,6 +48,12 @@ export interface DAGValidationResult {
   errors: string[];
   /** List of validation warning messages */
   warnings: string[];
+  /**
+   * The same findings as `errors`/`warnings`, in the order they were
+   * produced, each carrying the stage/edge it belongs to. One issue per
+   * string in those two arrays — never more, never fewer.
+   */
+  issues: DAGValidationIssue[];
 }
 
 /**

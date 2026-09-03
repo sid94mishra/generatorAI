@@ -18,7 +18,7 @@ import type { IAgentHarness, HarnessModel } from '../../domain/ports/IAgentHarne
 import type { EventBus } from '../../events/EventBus.js';
 import type { ChatManagementService } from '../ChatManagementService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
-import type { Agent } from '@generatorai/shared';
+import type { Agent, Chat, HarnessConfig } from '@generatorai/shared';
 import { WORKER_SYSTEM_PROMPT, renderBriefMessage } from './prompts.js';
 
 /**
@@ -67,13 +67,15 @@ export interface OrchestratorConfig {
   timeBudgetMs: number;
 
   /**
-   * Convergence threshold — fraction (0–1) of workers in the current wave
-   * whose digests must have a `converged: true` flag or whose last tool was
-   * `task_complete` with no follow-up request for the wave to count as
-   * converged. When the threshold is met, the orchestrator automatically
-   * moves to the consolidation phase.
+   * Convergence threshold — fraction (0–1) of the workers in the CURRENT wave
+   * that must report convergence for the orchestration to stop and
+   * consolidate. Convergence is a claim a worker makes (`converged: true` in
+   * its `<TASK_RESULT>` digest, meaning "done, and I expect no further
+   * work"), not something finishing a turn implies; a failed or cancelled
+   * worker never converges.
    *
-   * Default: 1.0 (all workers must converge). Set to 0 to disable.
+   * Default: 1.0 (every worker in the wave must report it). Set to 0 to
+   * disable the guard entirely.
    */
   convergenceThreshold: number;
 }
@@ -108,6 +110,13 @@ interface TaskRecord {
   workerSessionId: string;
   model?: string;
   status: BackgroundTaskStatus;
+  /**
+   * W24 — the spawn wave this worker belongs to. Convergence is a property of
+   * the CURRENT wave; without this field it was computed over every worker
+   * the orchestration had ever spawned, so a converged early wave kept
+   * out-voting the wave actually in progress.
+   */
+  wave: number;
   reviewRounds: number;
   /** Longest assistant text captured this turn (from harness.message_complete). */
   lastAssistantText: string;
@@ -122,6 +131,89 @@ interface TaskRecord {
 }
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** What a worker inherits from the orchestrator that spawned it (G15). */
+export interface InheritedWorkerCapabilities {
+  harnessConfig: Partial<HarnessConfig>;
+  permissionMode?: Chat['permissionMode'];
+  defaultAgentMode?: Chat['defaultAgentMode'];
+  browserConfig?: Chat['browserConfig'];
+}
+
+/**
+ * G15 — worker capability inheritance.
+ *
+ * Before this, `spawnBackgroundAgent` built the worker's `harnessConfig` from
+ * scratch with exactly two fields (model and the constant worker prompt) and
+ * passed nothing else through. Every capability-bearing field of the parent
+ * was dropped: `mcpServers`, `availableTools`, `excludedTools`,
+ * `skillDirectories`, `disabledSkills`, `customAgents`, `configDir`,
+ * `provider`, `harnessType`, `reasoningEffort`, `contextTier`, `maxTurns`,
+ * plus the chat-level `permissionMode`, `defaultAgentMode` and
+ * `browserConfig`. With no `agentRef` either, `applyAgentProjection` fell
+ * through to `AgentResolver.empty()` — whose groups are
+ * `DEFAULT_AGENT_TOOL_POLICY`. So a worker spawned by a deliberately
+ * locked-down orchestrator silently ran with **full platform defaults**:
+ * file writes, shell and browser all on.
+ *
+ * Inheritance here is a CEILING, never a grant:
+ *   - `excludedTools` is the UNION of the parent's exclusions and the deny
+ *     list its resolved agent produced, so a tool the orchestrator was denied
+ *     stays denied for the worker even when the worker binds its own agent.
+ *   - `availableTools` is inherited whenever the parent declared one — an
+ *     allow-list is a restriction, and dropping it widens the worker.
+ *   - `permissionMode` is inherited so a worker cannot approve its own tool
+ *     calls in an orchestrator that requires prompting.
+ *
+ * △ `agentRef` is deliberately NOT inherited. The orchestrator's own agent
+ * has `role: 'orchestrator'`, which `AgentResolver` translates into
+ * `orchestration: true` — handing that to a worker would grant it the
+ * background-agent tool set and make recursive spawning reachable, the exact
+ * thing `orchestratorMode: false` is there to prevent. The capability CLAMP
+ * travels instead, via the concrete allow/deny lists the parent's projection
+ * already resolved to.
+ */
+export function inheritWorkerCapabilities(parent: Chat): InheritedWorkerCapabilities {
+  const parentConfig = parent.harnessConfig ?? {};
+  const snapshotPolicy = parent.agentSnapshot?.toolPolicy;
+
+  const excluded = new Set<string>([
+    ...(parentConfig.excludedTools ?? []),
+    ...(snapshotPolicy?.deny ?? []),
+  ]);
+
+  const harnessConfig: Partial<HarnessConfig> = {
+    ...(parentConfig.mcpServers ? { mcpServers: parentConfig.mcpServers } : {}),
+    ...(parentConfig.skillDirectories ? { skillDirectories: parentConfig.skillDirectories } : {}),
+    ...(parentConfig.disabledSkills ? { disabledSkills: parentConfig.disabledSkills } : {}),
+    ...(parentConfig.customAgents ? { customAgents: parentConfig.customAgents } : {}),
+    ...(parentConfig.excludedMcpServerIds
+      ? { excludedMcpServerIds: parentConfig.excludedMcpServerIds }
+      : {}),
+    ...(parentConfig.configDir ? { configDir: parentConfig.configDir } : {}),
+    ...(parentConfig.provider ? { provider: parentConfig.provider } : {}),
+    ...(parentConfig.harnessType ? { harnessType: parentConfig.harnessType } : {}),
+    ...(parentConfig.reasoningEffort ? { reasoningEffort: parentConfig.reasoningEffort } : {}),
+    ...(parentConfig.contextTier ? { contextTier: parentConfig.contextTier } : {}),
+    ...(parentConfig.maxTurns !== undefined ? { maxTurns: parentConfig.maxTurns } : {}),
+    ...(parentConfig.permissionMode ? { permissionMode: parentConfig.permissionMode } : {}),
+    ...(excluded.size > 0 ? { excludedTools: [...excluded] } : {}),
+    // An allow-list is a restriction. Inherit the parent's when it has one;
+    // an agent-derived allow-list only narrows further, so union is wrong here.
+    ...(parentConfig.availableTools?.length
+      ? { availableTools: parentConfig.availableTools }
+      : snapshotPolicy?.allow?.length
+        ? { availableTools: snapshotPolicy.allow }
+        : {}),
+  };
+
+  return {
+    harnessConfig,
+    ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
+    ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
+    ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
+  };
+}
 
 export class OrchestratorService {
   /** taskId → record. */
@@ -151,6 +243,19 @@ export class OrchestratorService {
    * Used to enforce `config.timeBudgetMs`.
    */
   private orchestrationStartedAt = new Map<string, number>();
+  /**
+   * parentChatIds whose current wave is still open — i.e. at least one worker
+   * has been spawned into it and they have not all gone idle yet. Further
+   * spawns join that wave rather than starting a new one.
+   *
+   * W24 fix: this used to be inferred from `waveWarmup`, which is a
+   * prompt-cache optimisation that only exists when `config.warmFirst` is on.
+   * With `warmFirst: false` there was never a warmup promise, so EVERY
+   * individual spawn counted as a fresh wave and `maxWaves` silently became a
+   * worker cap N times tighter than configured. Wave identity is a
+   * termination concept and must not depend on a caching flag.
+   */
+  private waveOpen = new Set<string>();
 
   private chatManagementService!: ChatManagementService;
   private workspaceManager?: WorkspaceManager;
@@ -210,33 +315,13 @@ export class OrchestratorService {
       return { ok: false, error: 'Orchestrator not initialized' };
     }
 
-    // ── W24 / X-20: Termination guards ───────────────────────────────────────
-    // Three independent termination conditions — any one that fires halts
-    // further spawning and forces the orchestrator to consolidate.
-
-    // 1. Time budget — wall-clock limit on the whole orchestration.
-    const startedAt = this.orchestrationStartedAt.get(parentChatId);
-    if (startedAt === undefined) {
-      // First spawn — record the start time.
-      this.orchestrationStartedAt.set(parentChatId, Date.now());
-    } else if (this.config.timeBudgetMs > 0 && Date.now() - startedAt >= this.config.timeBudgetMs) {
-      return {
-        ok: false,
-        error:
-          `Time budget exhausted (${Math.floor(this.config.timeBudgetMs / 60000)} min). ` +
-          `Consolidate results from the workers that have completed so far.`,
-      };
-    }
-
-    // 2. Wave cap — maximum number of spawn rounds.
-    const waves = this.waveCount.get(parentChatId) ?? 0;
-    if (waves >= this.config.maxWaves) {
-      return {
-        ok: false,
-        error:
-          `Wave limit reached (${this.config.maxWaves} spawn rounds). ` +
-          `No more workers may be started. Consolidate existing results.`,
-      };
+    // ── W24 / X-20: the arbiter ───────────────────────────────────────────
+    // One decision point evaluating all three independent termination
+    // conditions together (time budget, wave cap, convergence) — see
+    // `evaluateTermination` below.
+    const verdict = await this.evaluateTermination(parentChatId);
+    if (verdict.shouldStop) {
+      return { ok: false, error: verdict.reason };
     }
 
     // Enforce max workers per orchestrator.
@@ -304,6 +389,10 @@ export class OrchestratorService {
     // the orchestrator (sharedWorkspace defaults to true).
     const useShared = brief.sharedWorkspace !== false;
     const sharedWorkspaceId = useShared ? parent.workspaceId : undefined;
+    // G15 — a worker must never be able to do something its orchestrator
+    // could not. Computed before `createChat` so the clamp is part of the
+    // creation, not a correction applied afterwards.
+    const inherited = inheritWorkerCapabilities(parent);
     let worker;
     try {
       worker = await this.chatManagementService.createChat({
@@ -333,7 +422,15 @@ export class OrchestratorService {
         // The agent instructions are appended AFTER the constant worker prompt, so
         // the shared cache prefix survives for workers that share an agent.
         ...(workerAgentRef ? { agentRef: workerAgentRef } : {}),
+        // G15 — capability inheritance (see `inheritWorkerCapabilities`).
+        ...(inherited.permissionMode ? { permissionMode: inherited.permissionMode } : {}),
+        ...(inherited.defaultAgentMode ? { defaultAgentMode: inherited.defaultAgentMode } : {}),
+        ...(inherited.browserConfig ? { browserConfig: inherited.browserConfig } : {}),
         harnessConfig: {
+          // The inherited config goes UNDER the worker's own two fields: the
+          // model and the constant worker prompt are worker-specific and must
+          // win, everything else is the orchestrator's environment.
+          ...inherited.harnessConfig,
           ...(workerModel ? { model: workerModel } : {}),
           systemMessage: { mode: 'append', content: WORKER_SYSTEM_PROMPT },
         },
@@ -344,6 +441,22 @@ export class OrchestratorService {
 
     const workerSession = await this.sessionRepo.getById(worker.sessionId);
 
+    // W24: count a wave the first time a worker is spawned into it. The wave
+    // stays open until every worker in it goes idle (see onWorkerEvent), so
+    // the rest of a parallel spawn round joins this wave instead of each
+    // consuming one of `maxWaves`.
+    if (!this.waveOpen.has(parentChatId)) {
+      this.waveOpen.add(parentChatId);
+      const nextWaveCount = (this.waveCount.get(parentChatId) ?? 0) + 1;
+      this.waveCount.set(parentChatId, nextWaveCount);
+      // Persist immediately (not just on dispose) so a restart mid-orchestration
+      // resumes at the correct wave count rather than re-opening the budget.
+      const startedAt = this.orchestrationStartedAt.get(parentChatId) ?? Date.now();
+      void this.chatRepo
+        .setOrchestratorWaveState(parentChatId, { waveCount: nextWaveCount, startedAt })
+        .catch(() => undefined);
+    }
+
     const record: TaskRecord = {
       taskId: worker.id,
       taskName: brief.taskName,
@@ -352,6 +465,7 @@ export class OrchestratorService {
       workerSessionId: worker.sessionId,
       model: workerModel,
       status: 'running',
+      wave: this.waveCount.get(parentChatId) ?? 1,
       reviewRounds: 0,
       lastAssistantText: '',
       idlePromise: Promise.resolve(),
@@ -363,13 +477,6 @@ export class OrchestratorService {
     this.armIdle(record);
     this.tasks.set(record.taskId, record);
     this.activeByParent.set(parentChatId, (this.activeByParent.get(parentChatId) ?? 0) + 1);
-
-    // W24: Increment the wave counter when this is the FIRST worker of a new
-    // wave (i.e. waveWarmup has just been cleared by the previous wave settling).
-    // We use the absence of a warmup promise as the "new wave" signal.
-    if (!this.waveWarmup.has(parentChatId)) {
-      this.waveCount.set(parentChatId, (this.waveCount.get(parentChatId) ?? 0) + 1);
-    }
 
     // Track the wave leader's warmup (the first running worker of this wave).
     if (this.config.warmFirst && !this.waveWarmup.has(parentChatId)) {
@@ -527,6 +634,158 @@ export class OrchestratorService {
     }
   }
 
+  /**
+   * Re-invoke an idle orchestrator once its whole wave has settled.
+   * No-op when the parent is mid-turn (the completion events already reached
+   * its live stream) or when the chat is gone/archived.
+   */
+  private async nudgeParentAfterWave(parentChatId: string): Promise<void> {
+    try {
+      const streaming = this.chatManagementService.getStreamingChatIds?.() ?? [];
+      if (streaming.includes(parentChatId)) return;
+      await this.chatManagementService.sendPrompt(
+        parentChatId,
+        '[system] Every background agent in the current wave has finished. ' +
+          'Call check_background_agents to collect their results, then consolidate ' +
+          'and deliver the final answer (or spawn a follow-up wave if something is missing).',
+      );
+    } catch (err) {
+      console.warn(
+        `[Orchestrator] wave-complete nudge failed for ${parentChatId}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  // ── W24 / X-20: Termination — the arbiter ────────────────────────────────
+
+  /**
+   * The arbiter. A single decision point that evaluates all three
+   * independent termination conditions TOGETHER — time budget, wave cap,
+   * convergence — replacing what used to be sequential `if` checks inline
+   * in `spawnBackgroundAgent` with no single place that reasoned about
+   * them as one policy. Called once per spawn attempt, before any worker
+   * is actually created.
+   */
+  private async evaluateTermination(
+    parentChatId: string,
+  ): Promise<{ shouldStop: true; reason: string } | { shouldStop: false }> {
+    const { startedAt } = await this.getOrInitWaveState(parentChatId);
+
+    // 1. Time budget — wall-clock limit on the whole orchestration.
+    if (this.config.timeBudgetMs > 0 && Date.now() - startedAt >= this.config.timeBudgetMs) {
+      return {
+        shouldStop: true,
+        reason:
+          `Time budget exhausted (${Math.floor(this.config.timeBudgetMs / 60000)} min). ` +
+          `Consolidate results from the workers that have completed so far.`,
+      };
+    }
+
+    // 2. Wave cap — maximum number of spawn rounds.
+    const waves = this.waveCount.get(parentChatId) ?? 0;
+    if (waves >= this.config.maxWaves) {
+      return {
+        shouldStop: true,
+        reason:
+          `Wave limit reached (${this.config.maxWaves} spawn rounds). ` +
+          `No more workers may be started. Consolidate existing results.`,
+      };
+    }
+
+    // 3. Convergence — over the CURRENT wave only, and only on an explicit
+    // `converged: true` from the worker's digest.
+    //
+    // Two fixes here, both structural. (a) The population was every worker
+    // this orchestrator had ever spawned, so an early wave that converged
+    // permanently out-voted the wave in progress. It is now the current wave,
+    // which is what the config field has always claimed to measure. (b) The
+    // old rule also counted any worker whose digest merely PARSED as
+    // `completed` — which `buildDigest` returns for every worker that is not
+    // running or failed, cancelled ones included. Under the shipped default
+    // of 1.0 that made the guard fire as soon as wave 1 stopped running, so a
+    // second wave was unreachable and `maxWaves` / `timeBudgetMs` were dead
+    // config that no orchestration could ever reach. Convergence is now
+    // something a worker claims (see the `converged` field in
+    // `TaskResultDigestSchema` and the worker system prompt), which is the
+    // only signal that actually means "no new findings, stop".
+    //
+    // Only meaningful once at least one worker exists in the wave — an empty
+    // wave can't be converged, and gating the first spawn on it would
+    // deadlock every orchestration before it starts.
+    if (this.config.convergenceThreshold > 0) {
+      const currentWave = this.waveCount.get(parentChatId) ?? 0;
+      const records = [...this.tasks.values()].filter(
+        (t) => t.parentChatId === parentChatId && t.wave === currentWave,
+      );
+      if (records.length > 0) {
+        let convergedCount = 0;
+        for (const r of records) {
+          if (await this.hasConverged(r)) convergedCount += 1;
+        }
+        const fraction = convergedCount / records.length;
+        if (fraction >= this.config.convergenceThreshold) {
+          return {
+            shouldStop: true,
+            reason:
+              `Convergence threshold met (${convergedCount}/${records.length} workers in wave ` +
+              `${currentWave} converged, ≥ ${Math.round(this.config.convergenceThreshold * 100)}% required). ` +
+              `Consolidate results instead of spawning more.`,
+          };
+        }
+      }
+    }
+
+    return { shouldStop: false };
+  }
+
+  /**
+   * Has this worker reported convergence?
+   *
+   * A worker that is still running has not finished deciding. A `failed` or
+   * `cancelled` worker produced no verdict at all — counting it as converged
+   * (which the old digest-status rule did, because `buildDigest` reports
+   * `completed` for anything not running or failed) let a cancelled wave
+   * terminate the whole orchestration.
+   */
+  private async hasConverged(record: TaskRecord): Promise<boolean> {
+    if (record.status === 'running' || record.status === 'failed' || record.status === 'cancelled') {
+      return false;
+    }
+    const digest = await this.buildDigest(record);
+    return digest.converged === true;
+  }
+
+  /**
+   * W24 fix — resolves this parent's wave-tracking state, rehydrating from
+   * the durable columns on the orchestrator's own chat row (migration v41)
+   * on first access in THIS process (e.g. after a restart) instead of
+   * silently restarting the wave count and time budget from zero — the
+   * opposite of the plan's requirement, and previously the only behaviour
+   * `disposeForParent`'s in-memory-only Maps could produce. A truly fresh
+   * orchestration (no prior row) initializes and persists immediately so
+   * the very next process to touch this parent finds it too.
+   */
+  private async getOrInitWaveState(parentChatId: string): Promise<{ waveCount: number; startedAt: number }> {
+    const cachedStartedAt = this.orchestrationStartedAt.get(parentChatId);
+    if (cachedStartedAt !== undefined) {
+      return { waveCount: this.waveCount.get(parentChatId) ?? 0, startedAt: cachedStartedAt };
+    }
+
+    const persisted = await this.chatRepo.getOrchestratorWaveState(parentChatId).catch(() => null);
+    if (persisted) {
+      this.orchestrationStartedAt.set(parentChatId, persisted.startedAt);
+      this.waveCount.set(parentChatId, persisted.waveCount);
+      return persisted;
+    }
+
+    const fresh = { waveCount: 0, startedAt: Date.now() };
+    this.orchestrationStartedAt.set(parentChatId, fresh.startedAt);
+    this.waveCount.set(parentChatId, fresh.waveCount);
+    await this.chatRepo.setOrchestratorWaveState(parentChatId, fresh).catch(() => undefined);
+    return fresh;
+  }
+
   // ── Internals ────────────────────────────────────────────────
 
   private armIdle(record: TaskRecord): void {
@@ -594,6 +853,25 @@ export class OrchestratorService {
         if (remaining <= 0) {
           this.activeByParent.delete(record.parentChatId);
           this.waveWarmup.delete(record.parentChatId);
+          // W24: the wave is over — the next spawn opens a new one. Tracked
+          // separately from waveWarmup so wave counting works identically
+          // with `warmFirst` off.
+          this.waveOpen.delete(record.parentChatId);
+          // The wave finished AFTER the orchestrator went idle — nudge it.
+          //
+          // The intended loop is `check_background_agents(wait: true)`, but
+          // its wait is bounded: on a long wave the orchestrator's turn ends
+          // with "still running", and nothing on a per-turn runtime survives
+          // to check again (observed live 2026-09-01: the model fell back to
+          // the SDK's ScheduleWakeup, which died with the CLI process, and
+          // two completed research agents sat unconsolidated forever). The
+          // platform is the only durable party, so it re-prompts the parent
+          // when the last worker settles. Deferred a tick so the terminal
+          // status write above lands first; a parent mid-turn gets the
+          // completion event on its stream instead and the prompt is skipped.
+          setTimeout(() => {
+            void this.nudgeParentAfterWave(record.parentChatId);
+          }, 2_000);
         } else {
           this.activeByParent.set(record.parentChatId, remaining);
         }
@@ -769,10 +1047,16 @@ export class OrchestratorService {
     this.parentSessions.delete(parentChatId);
     this.activeByParent.delete(parentChatId);
     this.waveWarmup.delete(parentChatId);
+    this.waveOpen.delete(parentChatId);
     // W24: Clean up termination-tracking state so a restarted orchestration
-    // on the same chat starts fresh.
+    // on the same chat starts fresh. This is the ARCHIVE path specifically —
+    // unlike a server restart (which now rehydrates via `getOrInitWaveState`
+    // against the durable columns, see above), archiving a chat is a
+    // deliberate, terminal action, so the persisted wave state is cleared
+    // too rather than left to linger on a dead orchestrator's row.
     this.waveCount.delete(parentChatId);
     this.orchestrationStartedAt.delete(parentChatId);
+    void this.chatRepo.clearOrchestratorWaveState(parentChatId).catch(() => undefined);
   }
 
   /**

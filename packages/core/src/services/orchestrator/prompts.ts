@@ -109,9 +109,15 @@ Rules:
       "keyFindings": ["..."],
       "artifacts": [{ "path": "relative/path", "kind": "response_md" }],
       "risks": ["..."],
-      "openQuestions": ["..."] }
+      "openQuestions": ["..."],
+      "converged": true }
     </TASK_RESULT>
 
+  • Set "converged": true only when your task is genuinely DONE and you expect
+    no further follow-up this wave — no open questions you're waiting on, no
+    partial work still in flight. The orchestrator may stop spawning new waves
+    once enough workers report this. Omit it (or set false) if you're still
+    mid-task, blocked on "needs_input", or expect a review round.
   • Keep the summary tight. Prefer references over pasting large content. Respect
     any budget (max tool calls / tokens) in your brief.
 `.trim();

@@ -5,8 +5,15 @@
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { CopilotClient, RuntimeConnection, approveAll } from '@github/copilot-sdk';
+// ── W41 — the SDK is resolved on FIRST USE, not at module load ──
+//
+// This was `import { CopilotClient, RuntimeConnection, approveAll } from
+// '@github/copilot-sdk'` — a static VALUE import, so importing this module at
+// all pulled the whole Copilot SDK into the process and made
+// `HarnessFactory.loadCopilotModule()`'s dynamic import decorative. The type
+// imports below are erased by the compiler and cost nothing at runtime.
 import type {
+  CopilotClient,
   CopilotSession,
   SessionConfig,
   SessionEvent,
@@ -31,9 +38,12 @@ import type {
 import type { AgentEvent } from '@generatorai/shared';
 import { HarnessSessionError, withSpan, getMeter } from '@generatorai/shared';
 import { mapSdkEventToAgentEvent } from './event-mapper.js';
-import { buildSdkTools } from './tool-factory.js';
+// W41 — `./tool-factory.js` value-imports `defineTool` from the Copilot SDK,
+// so a static import here would defeat the lazy load above. Imported
+// dynamically at its two call sites (createConversation / resumeConversation).
 import { mapPermissionKind } from './permissionMap.js';
 import { buildHarnessEnv } from '../../childEnv.js';
+import { ToolSemaphore, MAX_PARALLEL_TOOLS } from '../../toolSemaphore.js';
 import {
   flattenAnswer,
   fromCopilotSessionMode,
@@ -143,8 +153,13 @@ const LISTENER_LEAK_THRESHOLD = 50;
  * Copilot SDK uses `finishReason` on the assistant.message event; the values
  * may vary across SDK versions so we check a broad set of known truncation signals.
  */
+/*
+ * Exported ONLY so `__tests__/truncation-guard.test.ts` can assert against the
+ * real predicate rather than a copy pasted into the test file. Not part of the
+ * provider's public API.
+ */
 /* W13-B1 */
-function isTruncationFinishReason(reason: unknown): boolean {
+export function isTruncationFinishReason(reason: unknown): boolean {
   if (typeof reason !== 'string') return false;
   const r = reason.toLowerCase();
   return r === 'max_tokens' || r === 'length' || r.includes('max_token') || r.includes('context_length') || r === 'token_limit';
@@ -200,6 +215,56 @@ export function resolveAvailableTools(availableTools?: string[]): string[] | und
 // stopped (30 s grace) before a new one is created.
 const MAX_CONCURRENT_RUNTIMES = 10;
 
+/**
+ * W13 / X-1 — same bound and same env var as `ClaudeAgentProvider`.
+ *
+ * △ Fixed during end-to-end review — this constant, and the semaphore it
+ * feeds, did not exist here at all: every Copilot session's custom tool
+ * calls ran with no concurrency limit, so `MAX_PARALLEL_TOOLS` only ever
+ * protected Claude-agent sessions despite being documented as a
+ * provider-wide guarantee. Set `GENERATORAI_MAX_PARALLEL_TOOLS=0` to disable.
+ */
+// W13 — the value is imported from `toolSemaphore.ts` (top of this file)
+// rather than re-parsed here, so this provider and ClaudeAgentProvider
+// cannot disagree about the bound.
+
+// ── W41 — lazy SDK module singleton ──────────────────────────────
+
+// `import type * as` — erased at compile time, so the SDK is still only
+// loaded by the dynamic `import()` below (W41). The inline `typeof import()`
+// form this replaces is what `consistent-type-imports` forbids.
+import type * as CopilotSdkNs from '@github/copilot-sdk';
+type CopilotSdk = typeof CopilotSdkNs;
+
+let copilotSdk: CopilotSdk | null = null;
+let copilotSdkLoading: Promise<CopilotSdk> | null = null;
+
+/**
+ * Resolve `@github/copilot-sdk` on first use.
+ *
+ * The SDK is an OPTIONAL dependency; a resolution failure is a legitimate
+ * runtime state ("Copilot isn't installed in this build"), surfaced by the
+ * caller, rather than an import-time crash of the whole process.
+ */
+export async function loadCopilotSdk(): Promise<CopilotSdk> {
+  if (copilotSdk) return copilotSdk;
+  copilotSdkLoading ??= import('@github/copilot-sdk')
+    .then((mod) => {
+      copilotSdk = mod;
+      return mod;
+    })
+    .catch((err: unknown) => {
+      copilotSdkLoading = null; // allow a retry after an install
+      throw err;
+    });
+  return copilotSdkLoading;
+}
+
+/** W41 — test seam: has the SDK been pulled into this process yet? */
+export function isCopilotSdkLoaded(): boolean {
+  return copilotSdk !== null;
+}
+
 /** W36: Entry in the per-workspace client registry. */
 interface WorkspaceEntry {
   client: CopilotClient;
@@ -214,7 +279,18 @@ interface WorkspaceEntry {
 }
 
 export class CopilotProvider implements IAgentHarness {
-  private client: CopilotClient;
+  /**
+   * W41 — created on first use by {@link ensureClient}, not in the constructor.
+   *
+   * `new CopilotClient()` needs the SDK, and the constructor is synchronous, so
+   * building the client here was what forced the SDK to be statically imported.
+   * Deferring it also means constructing a provider (which the registry does
+   * for every configured account, whether or not the user ever selects it)
+   * neither resolves the SDK nor spawns a CLI.
+   */
+  private client: CopilotClient | null = null;
+  /** W41 — the fully-resolved constructor options, computed eagerly (SDK-free). */
+  private readonly defaultClientOptions: Record<string, unknown>;
   private conversations = new Map<string, CopilotSession>();
 
   // W36 ── per-workspace runtime pool ──────────────────────────────────────
@@ -282,6 +358,8 @@ export class CopilotProvider implements IAgentHarness {
   private clientState: HarnessClientState = 'stopped';
   /** Consecutive failed liveness probes — used to debounce transient hiccups. */
   private consecutivePollFailures = 0;
+  /** W13 / X-1 — bounds concurrent custom-tool executions across every session. */
+  private readonly toolSemaphore = new ToolSemaphore(MAX_PARALLEL_TOOLS);
 
   constructor(private options: CopilotProviderOptions) {
     this.verbose = options.verbose ?? (process.env.GENERATORAI_LOG_LEVEL === 'debug');
@@ -302,18 +380,18 @@ export class CopilotProvider implements IAgentHarness {
       workingDirectory: options.defaultCwd,
     };
 
+    // W41 — `connection` is the one field that needs the SDK
+    // (`RuntimeConnection.forUri` / `.forStdio`), so it is filled in by
+    // `ensureClient()` / `buildWorkspaceClient()` once the SDK is loaded.
+    // Validation of `cliUrl` stays HERE: a malformed URL is a configuration
+    // error and must still be reported at construction time, not deferred to
+    // the first turn.
     if (options.cliUrl) {
       try {
         new URL(`http://${options.cliUrl}`);
       } catch {
         throw new Error(`Invalid cliUrl format: "${options.cliUrl}". Expected "host:port" format.`);
       }
-      clientOptions['connection'] = RuntimeConnection.forUri(options.cliUrl);
-    } else {
-      const resolvedCli = resolveCopilotCliPath(options.cliPath);
-      clientOptions['connection'] = RuntimeConnection.forStdio(
-        resolvedCli ? { path: resolvedCli } : undefined,
-      );
     }
 
     // Auth — when a GitHub token is provided, forward it to the bundled CLI
@@ -375,7 +453,45 @@ export class CopilotProvider implements IAgentHarness {
       },
     });
 
+    this.defaultClientOptions = clientOptions; /* W41 */
+  }
+
+  // ── W41 — lazy client construction ──────────────────────────────────────
+
+  /**
+   * Build the SDK `connection` for a set of client options.
+   *
+   * Kept in one place because the default client and every per-workspace
+   * client must connect identically; they differ only in `workingDirectory`.
+   */
+  private async applyConnection(clientOptions: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const { RuntimeConnection } = await loadCopilotSdk();
+    const options = this.options;
+    if (options.cliUrl) {
+      clientOptions['connection'] = RuntimeConnection.forUri(options.cliUrl);
+    } else {
+      const resolvedCli = resolveCopilotCliPath(options.cliPath);
+      clientOptions['connection'] = RuntimeConnection.forStdio(
+        resolvedCli ? { path: resolvedCli } : undefined,
+      );
+    }
+    return clientOptions;
+  }
+
+  /**
+   * The default-workspace client, constructed on first use.
+   *
+   * Every async path that needs the client goes through here. Teardown paths
+   * (`stop` / `forceStop` / `shutdown` / `ping`) deliberately do NOT: creating
+   * a client in order to stop it would resolve the SDK and spawn a CLI for a
+   * provider that was never used.
+   */
+  private async ensureClient(): Promise<CopilotClient> {
+    if (this.client) return this.client;
+    const { CopilotClient } = await loadCopilotSdk();
+    const clientOptions = await this.applyConnection({ ...this.defaultClientOptions });
     this.client = new CopilotClient(clientOptions as ConstructorParameters<typeof CopilotClient>[0]);
+    return this.client;
   }
 
   // ── W36: Per-workspace runtime pool ─────────────────────────────────────
@@ -385,17 +501,10 @@ export class CopilotProvider implements IAgentHarness {
    * Re-uses the same connection options as the default client but overrides
    * `workingDirectory` so each workspace gets its own CLI subprocess.
    */
-  private buildWorkspaceClient(cwd: string): CopilotClient {
+  private async buildWorkspaceClient(cwd: string): Promise<CopilotClient> {
     const options = this.options;
-    const clientOptions: Record<string, unknown> = { workingDirectory: cwd };
-    if (options.cliUrl) {
-      clientOptions['connection'] = RuntimeConnection.forUri(options.cliUrl);
-    } else {
-      const resolvedCli = resolveCopilotCliPath(options.cliPath);
-      clientOptions['connection'] = RuntimeConnection.forStdio(
-        resolvedCli ? { path: resolvedCli } : undefined,
-      );
-    }
+    const { CopilotClient } = await loadCopilotSdk(); /* W41 */
+    const clientOptions = await this.applyConnection({ workingDirectory: cwd }); /* W41 */
     const ghHost = options.githubHost ?? process.env['COPILOT_GH_HOST'] ?? process.env['GH_HOST'];
     const ambientToken = process.env['COPILOT_GITHUB_TOKEN'] ?? process.env['GITHUB_TOKEN'] ?? process.env['GH_TOKEN'];
     const githubToken = options.githubToken ?? (ghHost ? undefined : ambientToken);
@@ -435,7 +544,7 @@ export class CopilotProvider implements IAgentHarness {
       await this.evictLruWorkspace();
     }
 
-    const client = this.buildWorkspaceClient(cwd);
+    const client = await this.buildWorkspaceClient(cwd); /* W41 */
     const entry: WorkspaceEntry = { client, refCount: 0, lastUsedAt: Date.now(), started: false };
     this.workspaceClients.set(cwd, entry);
 
@@ -490,13 +599,13 @@ export class CopilotProvider implements IAgentHarness {
    * W36 — Return the CopilotClient that owns `conversationId`.
    * Falls back to `this.client` (the default workspace).
    */
-  private clientForConversation(conversationId: string): CopilotClient {
+  private async clientForConversation(conversationId: string): Promise<CopilotClient> {
     const key = this.conversationClientKey.get(conversationId);
     if (key && key !== '__default__') {
       const entry = this.workspaceClients.get(key);
       if (entry) return entry.client;
     }
-    return this.client;
+    return this.ensureClient(); /* W41 */
   }
 
   /**
@@ -531,7 +640,7 @@ export class CopilotProvider implements IAgentHarness {
   async initialize(): Promise<void> {
     return withSpan('copilot-bridge', 'copilot.initialize', async () => {
       try {
-        await this.client.start();
+        await (await this.ensureClient()).start(); /* W41 */
       } catch (err) {
         // Surface a failed start as 'error' rather than leaving the default
         // 'stopped' — getClientState() should reflect that start was attempted.
@@ -547,7 +656,8 @@ export class CopilotProvider implements IAgentHarness {
   async stop(): Promise<void> {
     return withSpan('copilot-bridge', 'copilot.stop', async () => {
       this.stopClientStatePolling();
-      await this.client.stop();
+      // W41 — never construct a client just to stop one that was never built.
+      await this.client?.stop();
       this.clientState = 'stopped';
       this.emitClientEvent({ type: 'client.stopped' });
     });
@@ -555,7 +665,7 @@ export class CopilotProvider implements IAgentHarness {
 
   async forceStop(): Promise<void> {
     this.stopClientStatePolling();
-    await this.client.forceStop();
+    await this.client?.forceStop(); /* W41 */
     // W36: also force-stop all workspace clients
     for (const [key, entry] of this.workspaceClients) {
       if (entry.teardownTimer) clearTimeout(entry.teardownTimer);
@@ -600,6 +710,8 @@ export class CopilotProvider implements IAgentHarness {
 
   async ping(): Promise<boolean> {
     try {
+      // W41 — an un-constructed client is not alive; do not build one to find out.
+      if (!this.client) return false;
       await this.client.ping('health');
       return true;
     } catch {
@@ -615,7 +727,7 @@ export class CopilotProvider implements IAgentHarness {
     // Run listener cleanups + drop all in-memory conversation state (not just
     // the conversations map) so no per-conversation SDK listeners leak.
     this.cleanupAllConversations();
-    await this.client.stop();
+    await this.client?.stop(); /* W41 */
     // W36: gracefully stop all workspace clients
     for (const [key, entry] of this.workspaceClients) {
       if (entry.teardownTimer) clearTimeout(entry.teardownTimer);
@@ -630,12 +742,46 @@ export class CopilotProvider implements IAgentHarness {
 
   // ── Model Discovery ──
 
+  /**
+   * W41 — why `getModels()` NEVER throws.
+   *
+   * A model catalog describes what is available, and "nothing" is a valid
+   * answer. Throwing made a logged-out or un-started Copilot CLI fatal to
+   * whatever asked — `HarnessRegistry.refresh()` probes every managed provider,
+   * so one broken provider could take the whole catalog down with it, and boot
+   * must not fail because one provider is misconfigured.
+   *
+   * The reason is recorded on {@link getLastModelProbeError} rather than
+   * swallowed, so the registry can still say WHY the catalog is empty.
+   */
+  private lastModelProbeError: string | undefined;
+
+  /** W41 — why the last `getModels()` returned `[]`, if it did. */
+  getLastModelProbeError(): string | undefined {
+    return this.lastModelProbeError;
+  }
+
   async getModels(): Promise<HarnessModel[]> {
+    try {
+      const models = await this.probeModels();
+      this.lastModelProbeError = undefined;
+      return models;
+    } catch (err) {
+      this.lastModelProbeError = (err as Error)?.message ?? String(err);
+      if (this.verbose) {
+        console.warn(`[CopilotAdapter] Model probe failed — returning empty catalog: ${this.lastModelProbeError}`);
+      }
+      return []; // W41 — failure mode is an empty catalog, never a throw.
+    }
+  }
+
+  /** The real probe. May throw; only {@link getModels} calls it. */
+  private async probeModels(): Promise<HarnessModel[]> {
     // SDK method is listModels(), returns ModelInfo[]. We surface the full
     // capability/billing metadata so the UI can drive the model picker
     // (context window, reasoning-effort levels, pricing) from the provider
     // instead of hardcoding it.
-    const sdkModels = await this.client.listModels();
+    const sdkModels = await (await this.ensureClient()).listModels(); /* W41 */
     return sdkModels.map((m) => {
       // Some fields (category, price tier) live on the richer runtime `Model`
       // shape but aren't declared on the typed `ModelInfo`; read them
@@ -818,7 +964,10 @@ export class CopilotProvider implements IAgentHarness {
       span.setAttribute('copilot.model', params.model ?? 'claude-sonnet-4.6');
 
     const warnings: ConversationWarning[] = [];
-    const sdkTools = buildSdkTools(params.tools ?? []);
+    // W41 — dynamic: tool-factory pulls in the Copilot SDK.
+    const { buildSdkTools } = await import('./tool-factory.js');
+    const { approveAll } = await loadCopilotSdk();
+    /* W13-B1 */ const sdkTools = buildSdkTools(params.tools ?? [], this.toolSemaphore, params.conversationId);
 
     const systemMessage = params.systemMessage
       ? { mode: params.systemMessage.mode, content: params.systemMessage.content }
@@ -1050,7 +1199,7 @@ export class CopilotProvider implements IAgentHarness {
     // and differs from the default.  getOrCreateWorkspaceEntry is a no-op when
     // the cwd matches the default, returning null (→ use this.client).
     const workspaceEntry = await this.getOrCreateWorkspaceEntry(params.workingDirectory); /* W36 */
-    const createClient = workspaceEntry ? workspaceEntry.client : this.client; /* W36 */
+    const createClient = workspaceEntry ? workspaceEntry.client : await this.ensureClient(); /* W36, W41 */
     const session = await createClient.createSession(sessionConfig);
     // W36 — record which workspace owns this conversation
     const wsKey = params.workingDirectory && workspaceEntry ? params.workingDirectory : '__default__'; /* W36 */
@@ -1151,11 +1300,14 @@ export class CopilotProvider implements IAgentHarness {
     // it refuse every browser/tool task for the rest of the chat. Passing the
     // tools (and the systemMessage hint + tool filters) rebinds them on the
     // resumed session while the SDK preserves the persisted history.
+    // W41 — dynamic: both the SDK helper and tool-factory are loaded on demand.
+    const { approveAll } = await loadCopilotSdk();
+    const { buildSdkTools } = await import('./tool-factory.js');
     const resumeConfig: ResumeSessionConfig = { onPermissionRequest: approveAll };
     const warnings: ConversationWarning[] = [];
     let registeredAgents: HarnessAgentInfo[] = [];
     if (params) {
-      resumeConfig.tools = buildSdkTools(params.tools ?? []);
+      /* W13-B1 */ resumeConfig.tools = buildSdkTools(params.tools ?? [], this.toolSemaphore, conversationId);
       if (params.systemMessage) {
         resumeConfig.systemMessage = { mode: params.systemMessage.mode, content: params.systemMessage.content };
       } else if (params.systemPromptAppend) {
@@ -1175,7 +1327,7 @@ export class CopilotProvider implements IAgentHarness {
     // PLN-01 — reinstall the plan-mode gates on resume (see installPlanGates).
     if (params) this.installPlanGates(resumeConfig, params);
     // W36 — resume on the same workspace client that owns this conversation
-    const resumeClient = this.clientForConversation(conversationId); /* W36 */
+    const resumeClient = await this.clientForConversation(conversationId); /* W36 */
     const session = await resumeClient.resumeSession(conversationId, resumeConfig);
     this.attachTurnTextTracker(conversationId, session);
     this.conversations.set(conversationId, session);
@@ -1408,7 +1560,7 @@ export class CopilotProvider implements IAgentHarness {
 
   async listConversations(): Promise<string[]> {
     // SDK listSessions() returns SessionMetadata[], extract sessionId
-    const sessions = await this.client.listSessions();
+    const sessions = await (await this.ensureClient()).listSessions(); /* W41 */
     return sessions.map((s) => s.sessionId);
   }
 
@@ -1448,7 +1600,7 @@ export class CopilotProvider implements IAgentHarness {
   }
 
   async getLastConversationId(): Promise<string | null> {
-    return (await this.client.getLastSessionId()) ?? null;
+    return (await (await this.ensureClient()).getLastSessionId()) ?? null; /* W41 */
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
@@ -1472,7 +1624,7 @@ export class CopilotProvider implements IAgentHarness {
       activeSessions.add(-1);
     }
     // W36 — delete on the workspace client that owns this conversation
-    const deleteClient = this.clientForConversation(conversationId); /* W36 */
+    const deleteClient = await this.clientForConversation(conversationId); /* W36 */
     await deleteClient.deleteSession(conversationId);
     this.releaseWorkspaceRef(conversationId); /* W36 */
   }
@@ -1544,6 +1696,11 @@ export class CopilotProvider implements IAgentHarness {
       span.setAttribute('copilot.conversation_id', conversationId);
       span.setAttribute('copilot.prompt.length', prompt.length);
       promptCounter.add(1, { conversation_id: conversationId });
+
+    // W13-B1 — a turn starts un-truncated. Without this the latch set by a
+    // previous truncated turn would persist and refuse every tool for the rest
+    // of the conversation.
+    this.toolSemaphore.beginTurn(conversationId);
 
     const session = this.getSession(conversationId);
 
@@ -1676,6 +1833,10 @@ export class CopilotProvider implements IAgentHarness {
       /* W13-B1 */
       const finishReason = (data['finishReason'] ?? data['finish_reason'] ?? data['stopReason'] ?? data['stop_reason']) as unknown;
       if (isTruncationFinishReason(finishReason)) {
+        // W13-B1 — refuse any tool still queued for this turn. The notice
+        // below tells the model; the latch is what actually stops a call
+        // whose arguments were cut off mid-JSON from executing.
+        this.toolSemaphore.markTruncated(conversationId, String(finishReason));
         const toolRequests = data['toolRequests'] as Array<{ name: string }> | undefined;
         const toolCount = toolRequests?.length ?? 0;
         const truncMsg =
@@ -1834,6 +1995,8 @@ export class CopilotProvider implements IAgentHarness {
   private async pollClientHealth(): Promise<void> {
     let alive: boolean;
     try {
+      // W41 — the poll never constructs a client; no client means not alive.
+      if (!this.client) throw new Error('client not constructed');
       await this.client.ping('health');
       alive = true;
     } catch {

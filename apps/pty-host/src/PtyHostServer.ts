@@ -13,8 +13,29 @@ import type {
   PtyExitNotification,
   PtySessionReadyNotification,
 } from '@generatorai/shared';
-import { isPtyHostRequest } from '@generatorai/shared';
+import { buildChildEnv, isPtyHostRequest } from '@generatorai/shared';
 import { PtySession } from './PtySession.js';
+
+/**
+ * Mirrors `NodePtyHost.buildShellArgs` (packages/core) so switching to the
+ * out-of-process host doesn't regress PowerShell startup latency — loading
+ * the user's profile takes ~2s vs ~200ms without it, per that file's own
+ * measurement.
+ */
+function buildShellArgs(shell: string, extra?: string[]): string[] {
+  const base = extra ?? [];
+  if (process.platform === 'win32') {
+    const low = shell.toLowerCase();
+    if (low.endsWith('pwsh.exe') || low.endsWith('powershell.exe')) {
+      const has = (a: string) => base.some((x) => x.toLowerCase() === a);
+      const inject: string[] = [];
+      if (!has('-nologo')) inject.push('-NoLogo');
+      if (!has('-noprofile')) inject.push('-NoProfile');
+      return [...inject, ...base];
+    }
+  }
+  return base;
+}
 
 export class PtyHostServer {
   /* W14 */
@@ -51,24 +72,36 @@ export class PtyHostServer {
         return;
 
       case 'create_session': {
-        const { reqId, sessionId, cols, rows, cwd, env } = req;
+        const { reqId, sessionId, cols, rows, cwd, env, shellArgs } = req;
         if (this.sessions.has(sessionId)) {
           this.send({ type: 'error', reqId, ok: false, message: `Session ${sessionId} already exists`, sessionId });
           return;
         }
         try {
-          const shell = process.platform === 'win32' ? 'powershell.exe' : (process.env['SHELL'] ?? 'bash');
-          const ptyProcess = spawn(shell, [], {
+          const shell = req.shell ?? (process.platform === 'win32' ? 'powershell.exe' : (process.env['SHELL'] ?? 'bash'));
+          const args = buildShellArgs(shell, shellArgs);
+          const ptyProcess = spawn(shell, args, {
             name: 'xterm-256color',
             cols,
             rows,
             cwd,
-            env: { ...process.env, ...env } as Record<string, string>,
+            // Allowlist, not a clone. This host inherits the gateway's own
+            // environment, so cloning it here would put the vault key, the
+            // desktop admin token and every provider credential inside a
+            // shell the agent can type into.
+            env: buildChildEnv({
+              passthrough: ['EDITOR', 'VISUAL', 'PAGER', 'LESS'],
+              ...(env ? { extra: env } : {}),
+            }),
           });
 
           const session = new PtySession({
             sessionId,
             pty: ptyProcess,
+            // The headless VT model needs the same geometry as the PTY, or its
+            // rendered scrollback wraps at a different column than the client's.
+            cols,
+            rows,
             onData: (chunk) => {
               const notification: PtyDataNotification = { type: 'data', sessionId, chunk };
               this.send(notification);
@@ -115,6 +148,42 @@ export class PtyHostServer {
         return;
       }
 
+      case 'signal': {
+        const { reqId, sessionId, signal } = req;
+        const session = this.sessions.get(sessionId);
+        if (!session) {
+          this.send({ type: 'error', reqId, ok: false, message: `Session ${sessionId} not found`, sessionId });
+          return;
+        }
+        session.signal(signal);
+        this.send({ type: 'ack', reqId, ok: true });
+        return;
+      }
+
+      case 'pause': {
+        const { reqId, sessionId } = req;
+        const session = this.sessions.get(sessionId);
+        if (!session) {
+          this.send({ type: 'error', reqId, ok: false, message: `Session ${sessionId} not found`, sessionId });
+          return;
+        }
+        session.pause();
+        this.send({ type: 'ack', reqId, ok: true });
+        return;
+      }
+
+      case 'resume': {
+        const { reqId, sessionId } = req;
+        const session = this.sessions.get(sessionId);
+        if (!session) {
+          this.send({ type: 'error', reqId, ok: false, message: `Session ${sessionId} not found`, sessionId });
+          return;
+        }
+        session.resume();
+        this.send({ type: 'ack', reqId, ok: true });
+        return;
+      }
+
       case 'destroy': {
         const { reqId, sessionId } = req;
         const session = this.sessions.get(sessionId);
@@ -133,6 +202,24 @@ export class PtyHostServer {
           session.creditAck(bytesConsumed);
         }
         this.send({ type: 'ack', reqId, ok: true });
+        return;
+      }
+
+      case 'scrollback': {
+        const { reqId, sessionId, tailLines } = req;
+        const session = this.sessions.get(sessionId);
+        if (!session) {
+          this.send({ type: 'error', reqId, ok: false, message: `Session ${sessionId} not found`, sessionId });
+          return;
+        }
+        this.send({
+          type: 'scrollback',
+          reqId,
+          ok: true,
+          sessionId,
+          lines: session.scrollbackLines(tailLines ?? 0),
+          vt: session.hasVtModel,
+        });
         return;
       }
 

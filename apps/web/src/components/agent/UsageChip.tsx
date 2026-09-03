@@ -8,47 +8,133 @@
 // See ARCHITECTURE_V2_MASTER_PLAN_FINAL.md §W30 for the full spec:
 //   - 5 min TTL: we only report a miss that could have been a hit within 5 min
 //   - 1024-token noise floor: below this threshold we don't surface a notice
-//   - miss = min(prev.inputTokens, inputTokens) - cacheReadTokens
+//   - miss = min(prev.promptTokens, promptTokens) - cacheReadTokens
 //   - attributed to `idleMs` (if gap since last turn > 5 min) or `modelChanged`
-//   - sticky `reportedCache` flag: providers that never report cache produce no
-//     false positives
+//   - sticky `reportedCache` flag: providers that never report caching produce
+//     no false positives — see `cacheReportLedger` below, which is what makes
+//     the flag actually sticky rather than a read of the previous turn.
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
 
+// ── Sticky `reportedCache` ledger ────────────────────────────────
+//
+// The flag has to survive turns. Derived per render from the immediately
+// preceding turn it produced two wrong answers:
+//
+//   • a cache-WRITE turn reports 0 reads, so the genuine miss on the turn
+//     after it was suppressed (false negative);
+//   • a provider that demonstrated caching five turns ago was reclassified
+//     as non-caching the moment any single turn reported 0 reads.
+//
+// Once a scope has shown that it caches, it caches. The evidence is monotonic
+// and the ledger only ever grows, so there is nothing to invalidate.
+//
+// Scope is (session, provider): the same provider behaves the same way across
+// a session, and two sessions on different providers must not contaminate
+// each other. It is persisted so a reload does not restart the observation —
+// the alternative is that the first turn after every refresh is unclassified.
+
+const LEDGER_STORAGE_KEY = 'generatorai:usage:cacheCapableScopes';
+
+function loadLedger(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(LEDGER_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+const cacheCapableScopes: Set<string> = typeof window === 'undefined' ? new Set() : loadLedger();
+
+function persistLedger(): void {
+  try {
+    window.localStorage.setItem(LEDGER_STORAGE_KEY, JSON.stringify([...cacheCapableScopes]));
+  } catch {
+    /* quota / private mode — the in-memory ledger still works for this tab */
+  }
+}
+
+/** Ledger key for a turn. Falls back to the model when no provider is named. */
+export function cacheScopeKey(sessionId: string | undefined, usage: UsageInfo): string {
+  return `${sessionId ?? 'global'}::${usage.provider ?? usage.model}`;
+}
+
+/**
+ * Record what a turn proved about its provider.
+ *
+ * A cache WRITE counts as proof exactly like a read: writing the cache is the
+ * provider telling us it supports caching, and it is precisely the turn whose
+ * successor's miss the old per-render check suppressed.
+ */
+export function noteCacheReport(scope: string, usage: UsageInfo | null | undefined): void {
+  if (!usage) return;
+  if ((usage.cacheReadTokens ?? 0) <= 0 && (usage.cacheWriteTokens ?? 0) <= 0) return;
+  if (cacheCapableScopes.has(scope)) return;
+  cacheCapableScopes.add(scope);
+  persistLedger();
+}
+
+/** Has this (session, provider) ever reported prompt caching? */
+export function hasReportedCache(scope: string): boolean {
+  return cacheCapableScopes.has(scope);
+}
+
+/** Test-only: forget everything the ledger has observed. */
+export function _resetCacheReportLedger(): void {
+  cacheCapableScopes.clear();
+  try {
+    window.localStorage.removeItem(LEDGER_STORAGE_KEY);
+  } catch {
+    /* noop */
+  }
+}
+
+// ── Miss computation ─────────────────────────────────────────────
+
+/**
+ * Prompt tokens actually sent this turn.
+ *
+ * `inputTokens` EXCLUDES cached tokens (Anthropic's `usage.input_tokens`
+ * semantics, preserved end to end — see `contextTokensFromUsage`), so it is
+ * NOT the prompt size the spec's `min(prev.promptTokens, promptTokens)` means.
+ * Using it made the comparison meaningless: on a warm turn `inputTokens` is a
+ * few hundred, so the minimum sat under the 1024-token noise floor and the
+ * notice could essentially never fire.
+ */
+export function promptTokensOf(usage: UsageInfo): number {
+  return usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
+}
+
+/** Below this many tokens a "miss" is noise, not a cold cache. */
+const NOISE_FLOOR = 1024;
+
 /**
  * Compute the cache-miss token count for a turn.
  *
  * Returns 0 when:
- * - the provider does not report cache reads (sticky flag not set → no false positive)
+ * - the provider has never reported cache usage (`reportedCache` false → no
+ *   false positive on a provider that simply does not cache)
  * - miss is below the 1024-token noise floor
  * - there is no previous turn to compare against
  */
 export function computeCacheMiss(
   usage: UsageInfo,
-  prevUsage?: UsageInfo | null,
+  prevUsage: UsageInfo | null | undefined,
+  reportedCache: boolean,
 ): number {
-  // Only produce a notice when the PREVIOUS turn reported a cache read. That
-  // is the only reliable signal that the provider supports prompt caching for
-  // this session — if we checked the current turn's cacheReadTokens we'd gate
-  // on data we're already subtracting, which produces a spurious miss=0 on
-  // the very turns that are cache hits.
-  //
-  // F5 fix: use `&&` (only prevUsage.cacheReadTokens) not `||` (either). The
-  // old `||` branch that checked `usage.cacheReadTokens > 0` made no sense:
-  // if the current turn has cache reads, `actualHit` is large → `miss` is
-  // small or zero — it's a hit, not a miss scenario.
-  const reportedCache = (prevUsage?.cacheReadTokens ?? 0) > 0;
   if (!reportedCache) return 0;
   if (!prevUsage) return 0;
 
-  // miss = min(prev.inputTokens, inputTokens) - cacheReadTokens
-  // A negative miss (more was read from cache than expected) is clamped to 0.
-  const expectedHit = Math.min(prevUsage.inputTokens, usage.inputTokens);
+  // miss = min(prev.promptTokens, promptTokens) - cacheReadTokens
+  // A negative miss (more was read from cache than expected) clamps to 0.
+  const expectedHit = Math.min(promptTokensOf(prevUsage), promptTokensOf(usage));
   const actualHit = usage.cacheReadTokens ?? 0;
   const miss = expectedHit - actualHit;
-  const NOISE_FLOOR = 1024;
   return miss >= NOISE_FLOOR ? miss : 0;
 }
 
@@ -67,34 +153,61 @@ export function cacheMissReason(
   return null;
 }
 
+/**
+ * Approximate cost of the missed tokens.
+ *
+ * KNOWN DEVIATION from §W30, which asks for the rate "actually paid" from the
+ * message's own cost breakdown. The wire carries a single `cost` scalar for
+ * the whole turn and no per-component breakdown, and `ChatModel.pricing` is
+ * a credit-batch tier that no provider populates — so no exact input rate is
+ * reachable from the client. What we can do honestly is divide the turn's cost
+ * by EVERY token the provider billed for, cache tokens included; the previous
+ * denominator (`inputTokens + outputTokens`) omitted the cache tokens that
+ * `cost` already covers and so inflated the rate on exactly the cache-heavy
+ * turns this notice is about.
+ *
+ * Returns null when the turn reports no cost, in which case the caller shows
+ * the token count instead of a dollar figure.
+ */
+export function estimateMissCost(usage: UsageInfo, missTokens: number): number | null {
+  if (!usage.cost || missTokens <= 0) return null;
+  const billedTokens = promptTokensOf(usage) + usage.outputTokens;
+  if (billedTokens <= 0) return null;
+  return (usage.cost / billedTokens) * missTokens;
+}
+
 interface UsageChipProps {
   usage: UsageInfo;
   /** Previous turn's usage, used for the cache-miss notice. */
   prevUsage?: UsageInfo | null;
   /** When the previous turn completed (epoch ms) — used to detect idle > 5 min. */
   prevCompletedAt?: number | null;
+  /**
+   * Session (or stage stream key) this turn belongs to. Scopes the sticky
+   * `reportedCache` ledger; without it every surface shares one global scope,
+   * which is only correct for a single-session view.
+   */
+  scopeId?: string;
 }
 
-export function UsageChip({ usage, prevUsage, prevCompletedAt }: UsageChipProps) {
-  const missTokens = computeCacheMiss(usage, prevUsage);
+export function UsageChip({ usage, prevUsage, prevCompletedAt, scopeId }: UsageChipProps) {
+  const scope = cacheScopeKey(scopeId, usage);
+  // Recording during render rather than in an effect: the flag is needed by
+  // THIS render, and the write is an idempotent set insertion, so a double
+  // invocation under StrictMode is a no-op.
+  noteCacheReport(scope, prevUsage);
+  noteCacheReport(scope, usage);
+
+  const missTokens = computeCacheMiss(usage, prevUsage, hasReportedCache(scope));
   const reason = missTokens > 0 ? cacheMissReason(usage, prevUsage, prevCompletedAt) : null;
 
-  // Approximate cost of the missed tokens at the non-cached input rate.
-  // When the turn reports a `cost` value we can derive the per-token rate;
-  // otherwise we can't reliably price it and just show the token count.
   let missLabel: string | null = null;
   if (missTokens > 0) {
-    const totalInputCost = usage.cost;
-    if (totalInputCost && usage.inputTokens > 0) {
-      // Rough per-token rate from this turn (output tokens included in cost,
-      // so this is an upper bound, but it's the best we can derive client-side
-      // without knowing the provider's exact rate sheet).
-      const perToken = totalInputCost / (usage.inputTokens + usage.outputTokens);
-      const missCost = perToken * missTokens;
-      missLabel = `~$${missCost.toFixed(4)} cache miss`;
-    } else {
-      missLabel = `${(missTokens / 1000).toFixed(1)}k tokens uncached`;
-    }
+    const missCost = estimateMissCost(usage, missTokens);
+    missLabel =
+      missCost !== null
+        ? `~$${missCost.toFixed(4)} cache miss`
+        : `${(missTokens / 1000).toFixed(1)}k tokens uncached`;
   }
 
   return (

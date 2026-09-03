@@ -207,7 +207,7 @@ export function useTriggerAutomation() {
       idempotencyKey?: string;
     }) => platform.triggerAutomation(
       args.id,
-      args.body as never,
+      args.body,
       args.idempotencyKey ? { idempotencyKey: args.idempotencyKey } : undefined,
     ),
     onSuccess: (_data, args) => {

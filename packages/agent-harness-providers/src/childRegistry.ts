@@ -345,15 +345,21 @@ export async function killOwnDescendants(logger?: ReapLogger): Promise<number> {
   walk(process.pid);
 
   let killed = 0;
+  const killedNames: string[] = [];
   for (const proc of ordered) {
     if (liveness(proc.pid) !== 'alive') continue;
     terminate(proc.pid);
     killed += 1;
+    killedNames.push(proc.name);
   }
   if (killed > 0) {
     logger?.info?.('[ChildReaper] terminated own descendants on shutdown', {
       count: killed,
       inSnapshot: ordered.length,
+      // Names, not full command lines (a snapshot row carries no cmdline) —
+      // enough to tell "a leftover shell" from "a leftover crash-handler"
+      // from "a leftover browser" when this shows up in production logs.
+      names: killedNames,
     });
   }
   return killed;

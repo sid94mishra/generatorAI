@@ -1,15 +1,42 @@
 // ────────────────────────────────────────────────────────────────
-// ChatMessageList — Renders list of chat messages.
+// ChatMessageList — the settled transcript.
 //
-// WEB-01: Virtualization kicks in above VIRTUAL_THRESHOLD messages via
-// @tanstack/react-virtual. Below the threshold the DOM is a plain flow
-// (cheap, no measurement overhead). The virtualizer uses dynamic row
-// measurement because chat messages vary wildly in height (one-line
-// user prompt vs. multi-paragraph assistant response with code blocks).
+// ── D8: containment, not windowing ───────────────────────────────
+// This used to switch to `@tanstack/react-virtual` above 80 messages:
+// absolutely-positioned rows on a `translateY`, with everything outside the
+// window absent from the DOM. That is option (a) — the one D8 explicitly did
+// not choose. Its recorded reason is worth restating, because the cost is
+// invisible in a screenshot and obvious to anyone who relies on it:
+//
+//   "(c) — containment preserves find-in-page, tab order, selection and the
+//    accessibility tree, all of which windowing breaks"
+//
+// A row that is not in the DOM cannot be found by ⌘F, cannot be reached by
+// Tab, cannot be included in a select-all copy of the conversation, and does
+// not exist to a screen reader. Above 80 messages every one of those was
+// broken, silently, for the sake of a scroll optimisation the browser can do
+// itself.
+//
+// So every message is in the DOM, always, and each row carries
+// `content-visibility: auto`. The browser skips layout, paint and style for
+// rows outside the viewport — the same saving windowing was after — while
+// keeping them in the document, which is what preserves all four properties
+// above. `contain-intrinsic-size: auto <estimate>` supplies a placeholder
+// height so the scrollbar does not jump, and the `auto` keyword makes the
+// browser remember each row's real height once it has been rendered once, so
+// the estimate stops mattering after the first pass.
+//
+// Find-in-page is the one that needs the explicit note: browsers deliberately
+// force `content-visibility: auto` subtrees to render when the find bar
+// matches inside them, which is exactly why this technique preserves ⌘F and
+// windowing cannot.
+//
+// The streaming message is not rendered here at all — ChatPage renders it
+// after this list — so W27's "render the streaming message unvirtualized" is
+// structural rather than a special case.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useRef } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import React from 'react';
 import type { ChatMessage } from '@generatorai/shared';
 import { UserMessage } from './UserMessage.js';
 import { AssistantMessage } from './AssistantMessage.js';
@@ -20,20 +47,40 @@ interface ChatMessageListProps {
   messages: ChatMessage[];
   /** Opens a plan from a persisted card in the right-pane Plan tab. */
   onOpenPlan?: (planId: string) => void;
+  /** Click-throughs for per-op diff icons / shell console / summary card. */
+  onOpenChanges?: (filePath?: string) => void;
+  onOpenShell?: (callId: string) => void;
   /**
-   * External scroll container ref. When provided, the virtualizer uses this
-   * element as its scroll root instead of creating a nested scroll div.
-   * Pass the page-level scroll ref (e.g. from useStickToBottom) so there is
-   * only ONE scroll container in the hierarchy — two nested scroll areas
-   * creates a confusing UX where the inner box fills before the outer page.
+   * External scroll container ref.
+   *
+   * Kept for call-site compatibility. Containment needs no scroll root — the
+   * browser applies it against whatever viewport the row is in — so this is no
+   * longer read. It stays because ChatPage passes its page-level scroll ref and
+   * removing the prop would be a churn-only change across every call site.
    */
   scrollElementRef?: React.RefObject<HTMLElement | null>;
 }
 
-/** Threshold above which virtualization turns on.
- *  Below this, a flat list renders faster than virtualization because the
- *  measurement/ResizeObserver overhead isn't amortized yet. */
-const VIRTUAL_THRESHOLD = 80;
+/**
+ * Rows below this render with no containment at all.
+ *
+ * `content-visibility` is not free: it costs a containment context and a
+ * resize observation per row. Under a screenful or two of messages the browser
+ * was never going to struggle, so paying for it there is a pure loss — the
+ * same reasoning the old `VIRTUAL_THRESHOLD` encoded, applied to a mechanism
+ * that does not break the document when it engages.
+ */
+const CONTAINMENT_THRESHOLD = 40;
+
+/**
+ * Placeholder height for a row the browser has not measured yet.
+ *
+ * Only ever wrong once per row: `contain-intrinsic-size: auto` replaces it
+ * with the real height as soon as the row has been rendered a single time.
+ * Generous on purpose — an underestimate makes the scrollbar grow as the user
+ * scrolls, which reads as the page fighting them.
+ */
+const ESTIMATED_ROW_HEIGHT = '160px';
 
 /**
  * Does this assistant turn have anything to show?
@@ -60,6 +107,8 @@ function hasRenderableContent(message: ChatMessage): boolean {
 function renderMessage(
   message: ChatMessage,
   onOpenPlan?: (planId: string) => void,
+  onOpenChanges?: (filePath?: string) => void,
+  onOpenShell?: (callId: string) => void,
 ): React.ReactNode {
   // System messages are always meaningful and tool messages display
   // toolName/toolArgs rather than content, so only user/assistant rows are
@@ -72,7 +121,14 @@ function renderMessage(
     case 'user':
       return <UserMessage message={message} />;
     case 'assistant':
-      return <AssistantMessage message={message} {...(onOpenPlan ? { onOpenPlan } : {})} />;
+      return (
+        <AssistantMessage
+          message={message}
+          {...(onOpenPlan ? { onOpenPlan } : {})}
+          {...(onOpenChanges ? { onOpenChanges } : {})}
+          {...(onOpenShell ? { onOpenShell } : {})}
+        />
+      );
     case 'system':
       return <SystemMessage message={message} />;
     case 'tool':
@@ -82,108 +138,59 @@ function renderMessage(
   }
 }
 
-export function ChatMessageList({ messages, onOpenPlan, scrollElementRef }: ChatMessageListProps) {
-  if (messages.length <= VIRTUAL_THRESHOLD) {
-    return (
-      <div className="space-y-5">
-        {messages.map((message) => {
-          const node = renderMessage(message, onOpenPlan);
-          if (!node) return null;
-          return <React.Fragment key={message.id}>{node}</React.Fragment>;
-        })}
-      </div>
-    );
-  }
-
-  return (
-    <VirtualChatList
-      messages={messages}
-      scrollElementRef={scrollElementRef}
-      {...(onOpenPlan ? { onOpenPlan } : {})}
-    />
-  );
-}
-
-/** Dynamic-height virtualized list for large chat histories. */
-function VirtualChatList({
-  messages,
+/**
+ * One transcript row.
+ *
+ * `data-chat-row` is the hook the containment CSS and the D8 regression test
+ * both key off, so neither can drift from the markup without the other
+ * noticing.
+ */
+const MessageRow = React.memo(function MessageRow({
+  message,
+  contained,
   onOpenPlan,
-  scrollElementRef,
+  onOpenChanges,
+  onOpenShell,
 }: {
-  messages: ChatMessage[];
+  message: ChatMessage;
+  contained: boolean;
   onOpenPlan?: (planId: string) => void;
-  /**
-   * External scroll container. When provided the virtualizer attaches to it
-   * directly (no nested scroll box). When absent a self-contained scroll div
-   * is created as fallback (e.g. when ChatMessageList is used outside ChatPage).
-   */
-  scrollElementRef?: React.RefObject<HTMLElement | null>;
+  onOpenChanges?: (filePath?: string) => void;
+  onOpenShell?: (callId: string) => void;
 }) {
-  // Fallback inner scroll ref — only used when no outer ref is provided.
-  const innerRef = useRef<HTMLDivElement>(null);
-
-  const virtualizer = useVirtualizer({
-    count: messages.length,
-    getScrollElement: () => scrollElementRef?.current ?? innerRef.current,
-    // Rough initial height — re-measured when each row mounts via
-    // measureElement below. Keeping this generous avoids a visible reflow
-    // on first paint when many rows compute to <200px.
-    estimateSize: () => 160,
-    overscan: 8,
-    // Use the message id as the stable key so scroll position + measurements
-    // survive list mutations (e.g., streaming updates inserting mid-list).
-    getItemKey: (index) => messages[index]?.id ?? index,
-  });
-
-  const items = virtualizer.getVirtualItems();
-  const totalSize = virtualizer.getTotalSize();
-
-  // When using an external scroll container (scrollElementRef provided) we
-  // render a plain wrapper — no overflow, no height cap — and let the parent
-  // page handle scrolling. When no external ref is provided we fall back to a
-  // self-contained scroll div so the component is usable in isolation.
-  const inner = (
-    <div style={{ height: totalSize, position: 'relative', width: '100%' }}>
-      {items.map((item) => {
-        const message = messages[item.index];
-        if (!message) return null;
-        const node = renderMessage(message, onOpenPlan);
-        if (!node) return null;
-        return (
-          <div
-            key={item.key}
-            data-index={item.index}
-            ref={virtualizer.measureElement}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              transform: `translateY(${item.start}px)`,
-              paddingBottom: '1.25rem',
-            }}
-          >
-            {node}
-          </div>
-        );
-      })}
-    </div>
-  );
-
-  // External scroll container: no wrapper needed — the total-height div is
-  // placed directly in the flow, and the parent div handles overflow.
-  if (scrollElementRef) {
-    return inner;
-  }
-
-  // Fallback: own scroll container so the component is self-contained.
+  const node = renderMessage(message, onOpenPlan, onOpenChanges, onOpenShell);
+  if (!node) return null;
   return (
     <div
-      ref={innerRef}
-      className="h-[70vh] overflow-y-auto"
-      style={{ contain: 'strict' }}
+      data-chat-row
+      style={
+        contained
+          ? {
+              contentVisibility: 'auto',
+              containIntrinsicSize: `auto ${ESTIMATED_ROW_HEIGHT}`,
+            }
+          : undefined
+      }
     >
-      {inner}
+      {node}
+    </div>
+  );
+});
+
+export function ChatMessageList({ messages, onOpenPlan, onOpenChanges, onOpenShell }: ChatMessageListProps) {
+  const contained = messages.length > CONTAINMENT_THRESHOLD;
+  return (
+    <div className="space-y-5">
+      {messages.map((message) => (
+        <MessageRow
+          key={message.id}
+          message={message}
+          contained={contained}
+          {...(onOpenPlan ? { onOpenPlan } : {})}
+          {...(onOpenChanges ? { onOpenChanges } : {})}
+          {...(onOpenShell ? { onOpenShell } : {})}
+        />
+      ))}
     </div>
   );
 }

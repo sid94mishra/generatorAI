@@ -32,7 +32,8 @@ import type {
   WorkflowHookDefinition,
   HookPhaseResult,
 } from '@generatorai/shared';
-import { generateId, ValidationError } from '@generatorai/shared';
+import type { CreateStageParams, WorkflowTemplateStage } from '@generatorai/shared';
+import { generateId, ValidationError, templateStageToCreateParams } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { WorkflowRunService } from './WorkflowRunService.js';
@@ -307,19 +308,27 @@ export class WorkflowOrchestrator {
       tags: [`template:${templateId}`, ...template.tags],
       orchestratorConfig,
       projectId: params.projectId,
+      // Workflow-level hooks are part of the template (the exporter writes
+      // them and `importFromJSON` reads them); dropping them here meant a
+      // template's run-lifecycle hooks silently never fired in workflows
+      // created through Settings → Templates.
+      hooks: template.hooks as CreateWorkflowDefinitionParams['hooks'],
     };
 
     const definition = await this.definitionService.createDefinition(createParams);
 
-    // Create stages from template
+    // Create stages from template. This used to pass only name/description/
+    // order/prompts, so creating a workflow from a template silently threw
+    // away every retry policy, timeout, run condition, context filter,
+    // validation rule, approval gate, hook and model override the template
+    // declared — the same mapping the JSON importer uses is required here.
     for (const stageTemplate of template.stages) {
-      await this.definitionService.addStage({
-        workflowDefinitionId: definition.id,
-        name: stageTemplate.name,
-        description: stageTemplate.description,
-        order: stageTemplate.order,
-        prompts: stageTemplate.prompts,
-      });
+      await this.definitionService.addStage(
+        templateStageToCreateParams(
+          stageTemplate as unknown as WorkflowTemplateStage,
+          definition.id,
+        ) as unknown as CreateStageParams,
+      );
     }
 
     // Create edges from template
@@ -911,7 +920,11 @@ export class WorkflowOrchestrator {
         // ── Post-Processing Phase ──
         // Only run post-processing on successful completion
         if (event.kind === 'workflow_run.completed') {
-          const postSteps = this.buildPostProcessingSteps(orchestratorConfig, gitRepos);
+          const postSteps = this.buildPostProcessingSteps(
+            orchestratorConfig,
+            gitRepos,
+            context.clonedRepositories,
+          );
 
           if (postSteps.length > 0) {
             try {
@@ -1032,9 +1045,17 @@ export class WorkflowOrchestrator {
   private buildPostProcessingSteps(
     config: OrchestratorConfig | undefined,
     gitRepos: GitRepositoryConfig[],
+    /** Worktrees created for this run, keyed by alias (project/codebase model). */
+    clonedRepositories: Record<string, string> = {},
   ): PostProcessingStep[] {
     const steps: PostProcessingStep[] = [];
-    const hasGitRepos = gitRepos.length > 0;
+    // A run has something to commit if it either cloned legacy `gitRepositories`
+    // or (the normal case now) had worktrees created from the project's
+    // codebases. Gating on `gitRepos` alone meant autoCommit / autoCreatePR
+    // never fired for ANY project-linked workflow — the only kind the builder
+    // can create — because the project/codebase model leaves gitRepositories
+    // empty and carries codebases through `codebaseAliases` + worktrees.
+    const hasGitRepos = gitRepos.length > 0 || Object.keys(clonedRepositories).length > 0;
 
     // Explicit post-processing steps from config
     if (config?.postProcessingSteps) {

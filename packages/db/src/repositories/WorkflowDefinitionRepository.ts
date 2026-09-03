@@ -11,6 +11,8 @@ import type {
   OrchestratorConfig,
   WorkflowHookDefinition,
   HooksFileConfig,
+  SkillReference,
+  AgentReference,
 } from '@generatorai/shared';
 import { StorageError, NotFoundError, ValidationError } from '@generatorai/shared';
 import { workflowDefinitions } from '../schema.js';
@@ -32,6 +34,10 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
       validateJsonColumn(definition.selectedArtifacts, jsonRecord, { column: 'selectedArtifacts', table: 'workflow_definitions' });
       validateJsonColumn(definition.hooks, jsonArray, { column: 'hooks', table: 'workflow_definitions' });
       validateJsonColumn(definition.hooksFile, jsonRecord, { column: 'hooksFile', table: 'workflow_definitions' });
+      // G8 fix — these had no column at all before; validated the same way
+      // as every other JSON column now that one exists.
+      validateJsonColumn(definition.skills, jsonArray, { column: 'skills', table: 'workflow_definitions' });
+      validateJsonColumn(definition.agents, jsonArray, { column: 'agents', table: 'workflow_definitions' });
 
       await this.db.insert(workflowDefinitions).values({
         id: definition.id,
@@ -48,6 +54,8 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
         hooks: definition.hooks ?? [],
         hooksFile: definition.hooksFile ?? null,
         defaultAgentRef: definition.defaultAgentRef ?? null,
+        skills: definition.skills ?? null,
+        agents: definition.agents ?? null,
         createdAt: definition.createdAt,
         updatedAt: definition.updatedAt,
       });
@@ -111,6 +119,12 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
     if (updates.hooksFile !== undefined) {
       validateJsonColumn(updates.hooksFile, jsonRecord, { column: 'hooksFile', table: 'workflow_definitions' });
     }
+    if (updates.skills !== undefined) {
+      validateJsonColumn(updates.skills, jsonArray, { column: 'skills', table: 'workflow_definitions' });
+    }
+    if (updates.agents !== undefined) {
+      validateJsonColumn(updates.agents, jsonArray, { column: 'agents', table: 'workflow_definitions' });
+    }
 
     const values: Record<string, unknown> = {};
     if (updates.name !== undefined) values['name'] = updates.name;
@@ -126,6 +140,8 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
     if (updates.hooks !== undefined) values['hooks'] = updates.hooks;
     if (updates.hooksFile !== undefined) values['hooksFile'] = updates.hooksFile;
     if (updates.defaultAgentRef !== undefined) values['defaultAgentRef'] = updates.defaultAgentRef ?? null;
+    if (updates.skills !== undefined) values['skills'] = updates.skills;
+    if (updates.agents !== undefined) values['agents'] = updates.agents;
     values['updatedAt'] = new Date();
 
     await this.db
@@ -170,6 +186,8 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
       hooks: (safeJsonColumn(row.hooks, jsonArray, { fallback: [] }) ?? []) as WorkflowHookDefinition[],
       hooksFile: safeJsonColumn(row.hooksFile, jsonRecord, { fallback: undefined }) as HooksFileConfig | undefined,
       defaultAgentRef: row.defaultAgentRef ?? undefined,
+      skills: safeJsonColumn(row.skills, jsonArray, { fallback: undefined }) as SkillReference[] | undefined,
+      agents: safeJsonColumn(row.agents, jsonArray, { fallback: undefined }) as AgentReference[] | undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

@@ -79,7 +79,21 @@ describe('claude-agent → usage + context_usage', () => {
       subtype: 'success',
       duration_ms: 1_000,
       total_cost_usd: 0.02,
-      usage: { input_tokens: 100, output_tokens: 50 },
+      // `usage` is the turn's AGGREGATE — every API call summed. Here: three
+      // calls whose cached prefix was re-read each time. `iterations` carries
+      // the per-call breakdown, and its last entry is the assembled prompt of
+      // the final call, i.e. the actual window occupancy.
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_input_tokens: 40_000,
+        cache_creation_input_tokens: 5_000,
+        iterations: [
+          { type: 'message', input_tokens: 20, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 12_000 },
+          { type: 'message', input_tokens: 30, output_tokens: 15, cache_read_input_tokens: 12_000, cache_creation_input_tokens: 3_000 },
+          { type: 'message', input_tokens: 50, output_tokens: 25, cache_read_input_tokens: 15_000, cache_creation_input_tokens: 900 },
+        ],
+      },
       modelUsage: {
         'claude-sonnet-4-6': {
           inputTokens: 100,
@@ -103,17 +117,50 @@ describe('claude-agent → usage + context_usage', () => {
     expect(d['model']).toBe('claude-sonnet-4-6');
   });
 
-  it('counts cached tokens toward the context fill', () => {
+  it('measures the window from the last API call, not the turn total', () => {
     const events = mapClaudeAgentMessageToAgentEvents(resultMessage());
     const ctx = events.find((e) => e.kind === 'harness.context_usage')!;
     const d = ctx.data as Record<string, unknown>;
-    // input(100) + cacheRead(40k) + cacheWrite(5k). Without the cache buckets
-    // this used to report 100 tokens against a 200K window — i.e. 0%.
-    expect(d['currentTokens']).toBe(45_100);
+    // Last iteration: input(50) + cacheRead(15k) + cacheWrite(900) = 15,950.
+    //
+    // The aggregate — input(100) + cacheRead(40k) + cacheWrite(5k) = 45,100 —
+    // is what this used to report, and it is a sum of BILLING across the
+    // turn's three API calls, not a measure of the window. Live, that made a
+    // two-message chat read as 212k tokens / 23% full, climbing every turn,
+    // because each tool round-trip re-counted the same cached prefix.
+    expect(d['currentTokens']).toBe(15_950);
     expect(d['source']).toBe('derived');
     // 200K total window minus the 64K completion reserve.
     expect(d['promptTokenLimit']).toBe(136_000);
     expect(d['totalContextWindow']).toBe(200_000);
+    // apiUsage must describe the SAME call as the total above it, so the
+    // popover's rows add up to the number they sit under.
+    expect(d['apiUsage']).toEqual({ input: 50, output: 25, cacheRead: 15_000, cacheWrite: 900 });
+  });
+
+  it('still reports the turn TOTAL as usage — spend is cumulative, occupancy is not', () => {
+    const events = mapClaudeAgentMessageToAgentEvents(resultMessage());
+    const usage = events.find((e) => e.kind === 'harness.usage')!.data as Record<string, unknown>;
+    const ctx = events.find((e) => e.kind === 'harness.context_usage')!.data as Record<string, unknown>;
+    expect(usage['cacheReadTokens']).toBe(40_000);
+    expect(ctx['apiUsage']).not.toEqual(
+      expect.objectContaining({ cacheRead: usage['cacheReadTokens'] }),
+    );
+  });
+
+  it('skips a trailing compaction iteration — it is not the assembled prompt', () => {
+    const events = mapClaudeAgentMessageToAgentEvents(resultMessage({
+      usage: {
+        input_tokens: 5,
+        output_tokens: 5,
+        iterations: [
+          { type: 'message', input_tokens: 7, cache_read_input_tokens: 9_000, cache_creation_input_tokens: 100 },
+          { type: 'compaction', input_tokens: 0, cache_read_input_tokens: 180_000, cache_creation_input_tokens: 0 },
+        ],
+      },
+    }));
+    const d = events.find((e) => e.kind === 'harness.context_usage')!.data as Record<string, unknown>;
+    expect(d['currentTokens']).toBe(9_107);
   });
 
   it('publishes no context snapshot when the turn produced no tokens', () => {
@@ -124,6 +171,19 @@ describe('claude-agent → usage + context_usage', () => {
       modelUsage: {},
     }));
     expect(events.find((e) => e.kind === 'harness.context_usage')).toBeUndefined();
+  });
+
+  it('publishes no context snapshot when the API reported no per-call breakdown', () => {
+    // Without `iterations` there is no honest way to separate occupancy from
+    // spend, and this module's rule is to say nothing rather than invent a
+    // number. `ClaudeAgentProvider`'s control-channel probe still supplies the
+    // provider-reported snapshot in that case.
+    const events = mapClaudeAgentMessageToAgentEvents(resultMessage({
+      usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 40_000 },
+    }));
+    expect(events.find((e) => e.kind === 'harness.context_usage')).toBeUndefined();
+    // …but the turn's spend is still reported.
+    expect(events.find((e) => e.kind === 'harness.usage')).toBeDefined();
   });
 
   it('attributes usage to the model that did the most work, not insertion order', () => {

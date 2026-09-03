@@ -10,3 +10,4 @@
 export * from './dagLayout.js';
 export * from './runTimeline.js';
 export * from './format.js';
+export * from './widgetDegradation.js';

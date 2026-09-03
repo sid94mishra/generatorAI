@@ -491,4 +491,275 @@ describe('DAGScheduler', () => {
       expect(next).not.toContain(B);
     });
   });
+
+  // ── Two-tier definition cache validation (P1-19) ──
+  //
+  // The cache MUST still bust on every mid-run definition edit; these pin that
+  // guarantee down now that the check is no longer a digest over everything.
+
+  describe('definition cache validation (P1-19)', () => {
+    function withExpression(def: StageDefinition, expression: string): StageDefinition {
+      return { ...def, condition: { type: 'expression', expression } };
+    }
+
+    it('busts the cache when a stage is added mid-run', async () => {
+      const A = stageId();
+      await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
+      const dag1 = await scheduler.buildDAGForDefinition(DEF_ID);
+
+      await stageDefRepo.create(makeStageDef(stageId(), DEF_ID, 1));
+
+      const dag2 = await scheduler.buildDAGForDefinition(DEF_ID);
+      expect(dag2).not.toBe(dag1);
+      expect(dag2.nodes.size).toBe(2);
+    });
+
+    it('busts the cache when an edge is added mid-run', async () => {
+      const A = stageId();
+      const B = stageId();
+      await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
+      await stageDefRepo.create(makeStageDef(B, DEF_ID, 1));
+      const dag1 = await scheduler.buildDAGForDefinition(DEF_ID);
+      expect(dag1.rootIds).toEqual([A, B]);
+
+      await edgeRepo.create(makeEdge(DEF_ID, A, B));
+
+      const dag2 = await scheduler.buildDAGForDefinition(DEF_ID);
+      expect(dag2).not.toBe(dag1);
+      expect(dag2.rootIds).toEqual([A]);
+    });
+
+    it('busts the cache when a stage order changes mid-run', async () => {
+      const A = stageId();
+      const B = stageId();
+      await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
+      await stageDefRepo.create(makeStageDef(B, DEF_ID, 1));
+      await edgeRepo.create(makeEdge(DEF_ID, A, B));
+      const dag1 = await scheduler.buildDAGForDefinition(DEF_ID);
+
+      await stageDefRepo.update(B, { order: 7 });
+
+      expect(await scheduler.buildDAGForDefinition(DEF_ID)).not.toBe(dag1);
+    });
+
+    it('busts the cache when only a condition body is edited mid-run', async () => {
+      // The cheap tier-1 signature cannot see inside a condition — same stage
+      // ids, same order, same edges, condition still present — so this is the
+      // case that the condition digest exists to catch.
+      const A = stageId();
+      const B = stageId();
+      await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
+      await stageDefRepo.create(
+        withExpression(makeStageDef(B, DEF_ID, 1), "variables.env == 'prod'"),
+      );
+      await edgeRepo.create(makeEdge(DEF_ID, A, B));
+      const dag1 = await scheduler.buildDAGForDefinition(DEF_ID);
+
+      await stageDefRepo.update(B, {
+        condition: { type: 'expression', expression: "variables.env == 'dev'" },
+      });
+
+      const dag2 = await scheduler.buildDAGForDefinition(DEF_ID);
+      expect(dag2).not.toBe(dag1);
+      expect(dag2.nodes.get(B)?.stage.condition).toEqual({
+        type: 'expression',
+        expression: "variables.env == 'dev'",
+      });
+    });
+
+    it('busts the cache when a condition is added to a previously plain stage', async () => {
+      const A = stageId();
+      await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
+      const dag1 = await scheduler.buildDAGForDefinition(DEF_ID);
+
+      await stageDefRepo.update(A, {
+        condition: { type: 'expression', expression: 'variables.go == true' },
+      });
+
+      expect(await scheduler.buildDAGForDefinition(DEF_ID)).not.toBe(dag1);
+    });
+
+    it('validates an unchanged condition-free definition without any crypto digest', async () => {
+      // Regression for P1-19: validation used to SHA-1 every stage and every
+      // edge on every call, i.e. on every stage completion.
+      for (let i = 0; i < 50; i++) {
+        await stageDefRepo.create(makeStageDef(`plain-${i}`, DEF_ID, i));
+        if (i > 0) await edgeRepo.create(makeEdge(DEF_ID, `plain-${i - 1}`, `plain-${i}`));
+      }
+
+      const dag1 = await scheduler.buildDAGForDefinition(DEF_ID);
+      for (let i = 0; i < 5; i++) {
+        expect(await scheduler.buildDAGForDefinition(DEF_ID)).toBe(dag1);
+      }
+
+      expect(scheduler.stats.dagBuilds).toBe(1);
+      expect(scheduler.stats.conditionDigests).toBe(0);
+    });
+  });
+
+  // ── Incremental frontier (P1-19) ──
+
+  describe('incremental frontier (P1-19)', () => {
+    interface ChainScenario {
+      sched: DAGScheduler;
+      control: DAGScheduler;
+      runRepo: MockStageRunRepository;
+      ids: string[];
+    }
+
+    /** A → B → C → … of `n` stages, with the first one already completed. */
+    async function buildChain(n: number): Promise<ChainScenario> {
+      const defRepo = new MockStageDefinitionRepository();
+      const eRepo = new MockStageEdgeRepository();
+      const runRepo = new MockStageRunRepository();
+
+      const ids: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const id = `chain-${n}-${i}`;
+        ids.push(id);
+        await defRepo.create(makeStageDef(id, DEF_ID, i));
+        if (i > 0) await eRepo.create(makeEdge(DEF_ID, ids[i - 1]!, id));
+        await runRepo.create(
+          makeStageRun(`sr-${i}`, RUN_ID, id, i === 0 ? 'completed' : 'pending'),
+        );
+      }
+
+      return {
+        sched: new DAGScheduler(defRepo, eRepo, runRepo),
+        // Separate instance sharing the same repos: `getReadyStages` always
+        // walks every node, so it is the reference answer to compare against.
+        control: new DAGScheduler(defRepo, eRepo, runRepo),
+        runRepo,
+        ids,
+      };
+    }
+
+    async function nodesExaminedPerCompletion(n: number): Promise<number> {
+      const { sched, runRepo, ids } = await buildChain(n);
+
+      // The first scan for a run is the full one that primes the frontier.
+      expect(await sched.getReadyStages(RUN_ID, DEF_ID)).toEqual([ids[1]]);
+
+      await runRepo.updateStatus('sr-1', 'completed');
+      const before = sched.stats.nodesExamined;
+      expect(await sched.scheduleNext(RUN_ID, DEF_ID, ids[1]!)).toEqual([ids[2]]);
+      expect(sched.stats.incrementalScans).toBe(1);
+
+      return sched.stats.nodesExamined - before;
+    }
+
+    it('examines a bounded number of nodes per completion, whatever the DAG size', async () => {
+      const small = await nodesExaminedPerCompletion(10);
+      const large = await nodesExaminedPerCompletion(200);
+      expect(large).toBe(small);
+      expect(small).toBeLessThanOrEqual(4);
+    });
+
+    it('returns exactly what a full scan returns at every step of a chain', async () => {
+      const n = 12;
+      const { sched, control, runRepo, ids } = await buildChain(n);
+      await sched.getReadyStages(RUN_ID, DEF_ID);
+
+      for (let i = 1; i < n - 1; i++) {
+        await runRepo.updateStatus(`sr-${i}`, 'completed');
+        const incremental = await sched.scheduleNext(RUN_ID, DEF_ID, ids[i]!);
+        expect(incremental).toEqual(await control.getReadyStages(RUN_ID, DEF_ID));
+      }
+      expect(sched.stats.incrementalScans).toBe(n - 2);
+    });
+
+    it('keeps a still-ready sibling that is not a successor of the completed stage', async () => {
+      const A = stageId();
+      const B = stageId();
+      const C = stageId();
+      await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
+      await stageDefRepo.create(makeStageDef(B, DEF_ID, 1));
+      await stageDefRepo.create(makeStageDef(C, DEF_ID, 2));
+      await edgeRepo.create(makeEdge(DEF_ID, A, B));
+      await edgeRepo.create(makeEdge(DEF_ID, A, C));
+      await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, 'completed'));
+      await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'pending'));
+      await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
+
+      expect(await scheduler.getReadyStages(RUN_ID, DEF_ID)).toEqual([B, C]);
+
+      await stageRunRepo.updateStatus('sr-b', 'completed');
+      const next = await scheduler.scheduleNext(RUN_ID, DEF_ID, B);
+
+      expect(scheduler.stats.incrementalScans).toBe(1);
+      expect(next).toEqual([C]);
+    });
+
+    it('falls back to a full scan when a stage other than the completed one moved', async () => {
+      // A → B, A → C, C → E. B and C both finish before scheduleNext is told
+      // about B: E is ready because of C, and C is not a successor of B, so a
+      // successor-only answer would strand E.
+      const A = stageId();
+      const B = stageId();
+      const C = stageId();
+      const E = stageId();
+      await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
+      await stageDefRepo.create(makeStageDef(B, DEF_ID, 1));
+      await stageDefRepo.create(makeStageDef(C, DEF_ID, 2));
+      await stageDefRepo.create(makeStageDef(E, DEF_ID, 3));
+      await edgeRepo.create(makeEdge(DEF_ID, A, B));
+      await edgeRepo.create(makeEdge(DEF_ID, A, C));
+      await edgeRepo.create(makeEdge(DEF_ID, C, E));
+      await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, 'completed'));
+      await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'pending'));
+      await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
+      await stageRunRepo.create(makeStageRun('sr-e', RUN_ID, E, 'pending'));
+
+      expect(await scheduler.getReadyStages(RUN_ID, DEF_ID)).toEqual([B, C]);
+
+      await stageRunRepo.updateStatus('sr-b', 'completed');
+      await stageRunRepo.updateStatus('sr-c', 'completed');
+      const next = await scheduler.scheduleNext(RUN_ID, DEF_ID, B);
+
+      expect(scheduler.stats.incrementalScans).toBe(0);
+      expect(next).toEqual([E]);
+    });
+
+    it('falls back to a full scan when the definition is edited mid-run', async () => {
+      const A = stageId();
+      const B = stageId();
+      const C = stageId();
+      await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
+      await stageDefRepo.create(makeStageDef(B, DEF_ID, 1));
+      await stageDefRepo.create(makeStageDef(C, DEF_ID, 2));
+      await edgeRepo.create(makeEdge(DEF_ID, A, B));
+      await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, 'completed'));
+      await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'pending'));
+      await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
+
+      // C is a disconnected root here, so both B and C are ready.
+      expect(await scheduler.getReadyStages(RUN_ID, DEF_ID)).toEqual([B, C]);
+
+      // Mid-run edit: C now depends on B, so it is no longer ready. No stage
+      // status moved, so only the rebuilt DAG can force the fallback here.
+      await edgeRepo.create(makeEdge(DEF_ID, B, C));
+      const next = await scheduler.scheduleNext(RUN_ID, DEF_ID, A);
+
+      expect(scheduler.stats.incrementalScans).toBe(0);
+      expect(next).toEqual([B]);
+    });
+
+    it('drops the frontier once the DAG is complete', async () => {
+      const { sched, runRepo, ids } = await buildChain(3);
+      await sched.getReadyStages(RUN_ID, DEF_ID);
+      await runRepo.updateStatus('sr-1', 'completed');
+      await sched.scheduleNext(RUN_ID, DEF_ID, ids[1]!);
+      expect(sched.stats.incrementalScans).toBe(1);
+
+      await runRepo.updateStatus('sr-2', 'completed');
+      expect(await sched.isDAGComplete(RUN_ID, DEF_ID)).toBe(true);
+
+      // With the snapshot gone the next call has to rebuild it from a full
+      // scan rather than reason from stale state.
+      const fullScansBefore = sched.stats.fullScans;
+      await sched.scheduleNext(RUN_ID, DEF_ID, ids[2]!);
+      expect(sched.stats.fullScans).toBe(fullScansBefore + 1);
+      expect(sched.stats.incrementalScans).toBe(1);
+    });
+  });
 });

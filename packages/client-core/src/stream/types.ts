@@ -28,6 +28,14 @@ export interface TextBlock {
   content: string;
 }
 
+/** Per-operation file-change stats (from `harness.tool_complete.fileOp`). */
+export interface ToolFileOp {
+  kind: 'create' | 'update' | 'edit' | 'delete';
+  filePath: string;
+  additions: number;
+  deletions: number;
+}
+
 export interface ToolCallBlock {
   type: 'tool_call';
   blockId: number;
@@ -36,6 +44,10 @@ export interface ToolCallBlock {
   args: unknown;
   result?: unknown;
   status: 'running' | 'complete';
+  /** +/− line stats for file write/edit tools, set on completion. */
+  fileOp?: ToolFileOp;
+  /** callId of the Agent tool call this ran inside (SDK subagent nesting). */
+  parentCallId?: string;
 }
 
 export type SystemCategory = 'system' | 'subagent' | 'error';
@@ -157,6 +169,8 @@ export interface StreamToolCall {
   args: unknown;
   result?: unknown;
   status: 'running' | 'complete';
+  fileOp?: ToolFileOp;
+  parentCallId?: string;
 }
 
 /** Everything known about one session's in-flight turn. */
@@ -206,6 +220,28 @@ export interface StreamState {
    * the next `startPending`.
    */
   cancelRequested: boolean;
+  /**
+   * W30-d — the agent is producing text that is deliberately not on screen yet.
+   *
+   * Only ever true on a surface whose `TransportCapabilities` declares
+   * `highLatencyBlockDelivery`: there, `StreamEventRouter` holds partial text
+   * back to the last markdown block boundary, because editing the message once
+   * per chunk over a phone's link reads as a stutter rather than as typing.
+   * The renderer shows a typing indicator for exactly as long as this is true.
+   *
+   * On every other surface this stays false and text lands per chunk, which is
+   * what makes the mode observable rather than a constant.
+   */
+  typing: boolean;
+  /**
+   * Monotonic recency stamp, bumped by every reducer write to this entry.
+   *
+   * Exists so the record can be BOUNDED: `pruneStreams` evicts the
+   * least-recently-touched entries once the cap is exceeded. It is a counter,
+   * not a clock — see `reducer.ts` for why a millisecond timestamp is the
+   * wrong ordering key here.
+   */
+  lastActivityAt: number;
 }
 
 /** All sessions, keyed by session id. */
@@ -227,4 +263,6 @@ export const DEFAULT_STREAM: Readonly<StreamState> = Object.freeze({
   usage: null,
   contextUsage: null,
   cancelRequested: false,
+  typing: false,
+  lastActivityAt: 0,
 });

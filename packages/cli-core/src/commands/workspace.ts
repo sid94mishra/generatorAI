@@ -19,9 +19,17 @@ import {
   list,
   ok,
   projectFlag,
+  readTextFile,
   record,
   statusColumn,
 } from './_shared.js';
+
+/** Reads piped stdin, so `workspace put` composes in a pipeline. */
+async function readAll(stream: NodeJS.ReadableStream): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString('utf8');
+}
 
 export const WORKSPACE_GROUP = {
   name: 'workspace',
@@ -140,23 +148,36 @@ export function workspaceCommands(): CommandSpec[] {
       output: {
         kind: 'list',
         columns: [
+          { key: 'alias', header: 'Repo', priority: 1 },
           { key: 'name', header: 'Name', priority: 0 },
-          { key: 'type', header: 'Type', priority: 1 },
-          { key: 'size', header: 'Size', format: 'bytes', priority: 2 },
         ],
       },
       async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
         const target = await findWorkspace(ctx, args.workspace);
-        // `tree` understands worktree aliases; `files` is the flat listing.
-        if (flags.alias) {
-          const tree = await ctx.api.workspaces.tree(target.id, flags.alias);
-          return list(
-            Array.isArray(tree)
-              ? (tree as Array<Record<string, unknown>>)
-              : ((tree as { entries?: Array<Record<string, unknown>> }).entries ?? []),
-          );
-        }
-        return list(await ctx.api.workspaces.files(target.id, args.path));
+        // Two real bugs fixed here (found while building the TUI's own
+        // workspace-tree pane on top of this same call):
+        //  1. With `--alias`, the real response (`WorkspaceTree`,
+        //     `{workspaceId, hasGit, repos, totalPaths}`) was treated as a
+        //     bare array or `{entries: [...]}` — neither matches, so this
+        //     branch always returned an empty list.
+        //  2. Without `--alias`, `ctx.api.workspaces.files()` was called —
+        //     its real response is not an array at all (see
+        //     `WorkspaceFilesResponse`), so `list()` would have handed the
+        //     renderer a single object instead of rows.
+        // `tree()` already returns every repo (main + every worktree) when
+        // `alias` is omitted server-side (`workspaces.ts`'s `/:id/tree`), so
+        // one call now covers both cases — no branch needed.
+        //
+        // This only lists git-TRACKED paths (`git ls-files` under the hood)
+        // — an untracked new file, or anything under the `artifacts/`
+        // convention (never git-tracked), will not appear here. That
+        // coverage gap is real and not fixed by this change; see the
+        // tracker's open questions for this phase.
+        const tree = await ctx.api.workspaces.tree(target.id, flags.alias);
+        const rows = tree.repos.flatMap((repo) =>
+          repo.paths.map((name) => ({ alias: repo.alias, name })),
+        );
+        return list(args.path ? rows.filter((r) => r.name.startsWith(args.path!)) : rows);
       },
     }),
 
@@ -182,16 +203,98 @@ export function workspaceCommands(): CommandSpec[] {
       output: { kind: 'raw' },
       async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
         const target = await findWorkspace(ctx, args.workspace);
-        const payload = flags.alias
-          ? await ctx.api.workspaces.treeFile(target.id, { path: args.path, alias: flags.alias })
-          : await ctx.api.workspaces.fileContent(target.id, args.path);
-        const content = (payload as { content?: string }).content ?? '';
+        // `treeFile` is the one route that serves file content, aliased or
+        // not — its `alias` param is optional. There is no separate
+        // no-alias endpoint; calling one that does not exist previously
+        // threw a TypeError for every `workspace cat` without `--alias`.
+        const file = await ctx.api.workspaces.treeFile(target.id, {
+          path: args.path,
+          ...(flags.alias ? { alias: flags.alias } : {}),
+        });
+
+        if (file.contents === null) {
+          throw new CliError(
+            'USAGE',
+            file.isBinary
+              ? `"${args.path}" is a binary file; printing it would corrupt the terminal.`
+              : `"${args.path}" is larger than the inline content budget.`,
+            { hint: 'Open it through the web workbench, or fetch it with a raw HTTP client instead.' },
+          );
+        }
+        const content = file.contents;
 
         if (!flags.out) return record(content);
-        const file = path.resolve(flags.out);
-        await fs.mkdir(path.dirname(file), { recursive: true });
-        await fs.writeFile(file, content, 'utf8');
-        return record({ path: file }, `Wrote ${file}`);
+        const out = path.resolve(flags.out);
+        await fs.mkdir(path.dirname(out), { recursive: true });
+        await fs.writeFile(out, content, 'utf8');
+        return record({ path: out }, `Wrote ${out}`);
+      },
+    }),
+
+    defineCommand({
+      id: 'workspace.put',
+      group: 'workspace',
+      verb: 'put',
+      aliases: ['upload', 'write'],
+      summary: 'Write a local file into a workspace',
+      description:
+        'Uploads a local file, or content from stdin, to a path inside the workspace. This is the ' +
+        'counterpart of `workspace get`: until it existed a client could read every file in a ' +
+        'workspace and create none.',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      examples: [
+        'generatorai workspace put ws-1 notes.md --file ./notes.md',
+        'cat report.md | generatorai workspace put ws-1 docs/report.md',
+      ],
+      args: [
+        { name: 'workspace', description: 'Workspace reference', required: true, completes: 'workspace' },
+        { name: 'path', description: 'Destination path inside the workspace', required: true },
+      ],
+      flags: [
+        { name: 'file', short: 'f', description: 'Local file to upload; omit to read stdin', type: 'string', completes: 'file' },
+        {
+          name: 'source',
+          description: 'Which workspace directory the path is relative to',
+          type: 'string',
+          choices: ['workspace', 'worktree', 'artifacts', 'source'] as const,
+          default: 'workspace',
+        },
+        { name: 'alias', description: 'Worktree alias, with --source worktree', type: 'string' },
+        { name: 'noCreateDirs', description: 'Fail instead of creating missing parent directories', type: 'boolean' },
+      ],
+      schema: inputSchema(
+        { workspace: z.string(), path: z.string() },
+        {
+          file: z.string().optional(),
+          source: z.enum(['workspace', 'worktree', 'artifacts', 'source']).default('workspace'),
+          alias: z.string().optional(),
+          noCreateDirs: z.boolean().optional(),
+        },
+      ),
+      output: { kind: 'record', successMessage: 'Wrote {path}' },
+      async handler(ctx, { args, flags }) {
+        const target = await findWorkspace(ctx, args.workspace);
+        if (flags.source === 'worktree' && !flags.alias) {
+          throw CliError.usage('--source worktree needs --alias.');
+        }
+        // stdin when no `--file`, so this composes in a pipeline the way
+        // every other write-a-file CLI does.
+        const content = flags.file
+          ? await readTextFile(path.resolve(flags.file), 'upload')
+          : await readAll(process.stdin);
+        if (!content) {
+          throw CliError.usage('Nothing to write — pass --file or pipe content in.');
+        }
+        return record(
+          await ctx.api.workspaces.writeFile(target.id, {
+            path: args.path,
+            content,
+            source: flags.source,
+            ...(flags.alias ? { worktreeAlias: flags.alias } : {}),
+            ...(flags.noCreateDirs ? { createDirectories: false } : {}),
+          }),
+        );
       },
     }),
 
@@ -219,6 +322,7 @@ export function workspaceCommands(): CommandSpec[] {
       output: {
         kind: 'list',
         columns: [
+          { key: 'alias', header: 'Repo', priority: 2 },
           { key: 'status', header: 'S', priority: 0, width: 1 },
           { key: 'path', header: 'File', priority: 0 },
           { key: 'additions', header: '+', format: 'number', align: 'right', priority: 1 },
@@ -228,20 +332,28 @@ export function workspaceCommands(): CommandSpec[] {
       async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
         const target = await findWorkspace(ctx, args.workspace);
         if (args.path) {
-          const patch = await ctx.api.workspaces.filePatch(
-            target.id,
-            compact({ path: args.path, alias: flags.alias, base: flags.base, head: flags.head }) as never,
-          );
-          return record(typeof patch === 'string' ? patch : JSON.stringify(patch, null, 2));
+          const patch = await ctx.api.workspaces.filePatch(target.id, {
+            path: args.path,
+            ...(flags.alias ? { alias: flags.alias } : {}),
+            ...(flags.base ? { base: flags.base } : {}),
+            ...(flags.head ? { head: flags.head } : {}),
+          });
+          if (patch.truncated) {
+            return {
+              data: patch.patch,
+              warnings: [`The patch for "${args.path}" was truncated by the server.`],
+            };
+          }
+          return record(patch.patch);
         }
+        // `changes` groups files by repo (worktree alias), not a flat array —
+        // flatten so each row still has one file with one repo tag on it.
         const changes = await ctx.api.workspaces.changes(
           target.id,
           compact({ alias: flags.alias, base: flags.base, head: flags.head }),
         );
         return list(
-          Array.isArray(changes)
-            ? (changes as Array<Record<string, unknown>>)
-            : ((changes as { files?: Array<Record<string, unknown>> }).files ?? []),
+          changes.repos.flatMap((repo) => repo.files.map((file) => ({ alias: repo.alias, ...file }))),
         );
       },
     }),
@@ -438,10 +550,15 @@ export function workspaceCommands(): CommandSpec[] {
       schema: inputSchema({ workspace: z.string() }, {}),
       output: {
         kind: 'list',
+        // Field names match `WorktreeDetail`'s real shape
+        // (`packages/shared/src/types/Workspace.ts`) — `worktreePath` and
+        // `branchName`, not `path`/`branch`. The old keys matched neither
+        // real field, so both columns rendered empty for every row; only
+        // `alias` (a lucky coincidence) ever showed anything.
         columns: [
           { key: 'alias', header: 'Alias', priority: 0 },
-          { key: 'path', header: 'Path', priority: 1 },
-          { key: 'branch', header: 'Branch', priority: 1 },
+          { key: 'worktreePath', header: 'Path', priority: 1 },
+          { key: 'branchName', header: 'Branch', priority: 1 },
         ],
       },
       async handler(ctx, { args }) {
@@ -584,8 +701,15 @@ export function terminalCommands(): CommandSpec[] {
      *
      * The binary surface cannot host a PTY inside its own line-oriented
      * output, so this hands stdin/stdout straight to the socket and restores
-     * the terminal on exit. The TUI does the same thing via
-     * Ink's `suspendTerminal`.
+     * the terminal on exit. The TUI does the same thing via Ink's terminal
+     * suspension, but through its own keybinding — never through this
+     * command (`inPalette`/`inRpc` are both `false` for exactly that
+     * reason: this is reachable only by typing `generatorai terminal
+     * attach` in a plain shell).
+     *
+     * The actual socket/raw-mode plumbing lives behind `ctx.terminalAttach`
+     * — cli-core still must not import `ws` itself, so the port is
+     * constructed by whichever surface builds the `CliContext`.
      */
     defineCommand({
       id: 'terminal.attach',
@@ -602,7 +726,9 @@ export function terminalCommands(): CommandSpec[] {
       ],
       flags: [],
       schema: inputSchema({ workspace: z.string(), terminal: z.string().optional() }, {}),
-      output: { kind: 'stream' },
+      // Follows a PTY indefinitely, same as `chat watch` — `--json`/`--yaml`
+      // must refuse it outright rather than hang.
+      output: { kind: 'stream', unbounded: true },
       async handler(ctx, { args }) {
         if (!ctx.capabilities.isTTY) {
           throw CliError.usage('`terminal attach` needs a real terminal.', {
@@ -610,22 +736,22 @@ export function terminalCommands(): CommandSpec[] {
           });
         }
         const target = await findWorkspace(ctx, args.workspace);
-        const terminalId =
-          args.terminal ??
-          (await ctx.api.terminals.create(target.id, {
-            cols: ctx.capabilities.columns,
-            rows: ctx.capabilities.rows,
-          })).id;
-
-        // The transport is supplied by the surface: cli-core must not import
-        // `ws`, and the TUI attaches through Ink's terminal suspension rather
-        // than through raw stdin.
-        ctx.emit({
-          type: 'stream',
-          kind: 'terminal.attach_requested',
-          data: { workspaceId: target.id, terminalId },
+        const outcome = await ctx.terminalAttach.attach({
+          workspaceId: target.id,
+          ...(args.terminal ? { terminalId: args.terminal } : {}),
         });
-        return record({ workspaceId: target.id, terminalId });
+        if (outcome.reason === 'error') {
+          throw CliError.internal(outcome.message ?? 'Terminal connection error.');
+        }
+        if (outcome.reason === 'exited') {
+          const code = outcome.exitCode;
+          return ok(
+            `Terminal exited${code !== null && code !== undefined ? ` (code ${code})` : ''}${
+              outcome.message ? ` — ${outcome.message}` : ''
+            }.`,
+          );
+        }
+        return ok(outcome.reason === 'aborted' ? 'Interrupted.' : 'Detached.');
       },
     }),
   ];

@@ -65,6 +65,14 @@ export interface OutputSpec {
   successMessage?: string;
   /** For `list`: dot-path to the array when the payload is an envelope. */
   itemsAt?: string;
+  /**
+   * For `stream`: true when the command has no natural end (follows a
+   * conversation/tail indefinitely; ends only on Ctrl+C or disconnect).
+   * `--json`/`--yaml` promise exactly one bounded document, which an
+   * unbounded stream can never produce — those output modes must refuse
+   * the command outright rather than hang with no output at all.
+   */
+  unbounded?: boolean;
 }
 
 export interface CommandArg {
@@ -74,6 +82,10 @@ export interface CommandArg {
   variadic?: boolean;
   /** What this argument refers to, so completions can query the server for ids. */
   completes?: CompletionSource;
+  /** Closed set of valid values, e.g. a positional `provider` arg. Mirrors `CommandFlag.choices`. */
+  choices?: readonly string[];
+  /** See `CommandFlag.unsupported`. */
+  unsupported?: string;
 }
 
 export type CompletionSource =
@@ -113,6 +125,24 @@ export interface CommandFlag {
   completes?: CompletionSource;
   /** Hidden from help but still accepted — used for deprecated spellings. */
   hidden?: boolean;
+  /**
+   * Set when this option is ACCEPTED but does not do what its name implies,
+   * with the reason (Phase 0 item 1: "mark false-success options and
+   * commands as experimental or unsupported immediately").
+   *
+   * The audit's whole premise is that a flag which parses, validates, and
+   * then silently does nothing is worse than one that does not exist: the
+   * user gets a success exit code for work that never happened. Removing
+   * such a flag outright would break scripts that already pass it, so it
+   * stays accepted — and every derived surface (`--help`, the generated
+   * docs, the schema-driven form) says so, because the string lives here
+   * rather than being buried in one renderer's prose.
+   *
+   * A contract test asserts the converse too: no flag may DESCRIBE itself as
+   * having no effect without setting this, which is how the marking cannot
+   * be quietly forgotten on the next one.
+   */
+  unsupported?: string;
 }
 
 /** What a handler hands back. Renderers never see anything else. */

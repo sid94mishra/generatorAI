@@ -11,11 +11,12 @@
 //
 // Callers request this host via `TerminalSpawnOptions.attachToSandbox` +
 // `runId`. The composition root places this host BEFORE `NodePtyHost` in
-// the chain, but `isAvailable()` returns `false` unless attach is asked
-// for — so the default path is unaffected.
+// the chain; `canServe()` — not `isAvailable()`, which cannot see the spawn
+// options — is what keeps the default path on the ordinary hosts.
 // ────────────────────────────────────────────────────────────────
 
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { ILogger, TerminalHostKind } from '@generatorai/shared';
 import type {
   ITerminalHandle,
@@ -25,10 +26,13 @@ import type {
 import type { SandboxLifecycleManager } from '../../services/SandboxLifecycleManager.js';
 import { NodePtyHost } from './NodePtyHost.js';
 
+const execFileAsync = promisify(execFile);
+
 export class SandboxPtyHost implements ITerminalHost {
   readonly kind: TerminalHostKind = 'sandbox';
   private readonly inner: NodePtyHost;
   private dockerOnPath: boolean | null = null;
+  private readonly dockerProbe: Promise<void>;
 
   constructor(
     private readonly logger: ILogger,
@@ -36,21 +40,48 @@ export class SandboxPtyHost implements ITerminalHost {
   ) {
     // Delegates the PTY plumbing to node-pty — env sanitisation logic reused.
     this.inner = new NodePtyHost(logger);
+    this.dockerProbe = this.probeDocker();
+  }
+
+  /**
+   * The `which docker` probe used to be `execFileSync`, run lazily from
+   * `isAvailable()` — which sits on the terminal SPAWN path, so the first
+   * terminal after boot blocked the event loop on a process spawn while every
+   * other request waited. It is async now, kicked off at construction and
+   * awaited through `whenReady()`; `TerminalService` already awaits that
+   * before falling through to the next host, so nothing observes a difference
+   * except the blocked loop.
+   */
+  private async probeDocker(): Promise<void> {
+    try {
+      await execFileAsync(process.platform === 'win32' ? 'where' : 'which', ['docker']);
+      this.dockerOnPath = true;
+    } catch {
+      this.dockerOnPath = false;
+    }
+  }
+
+  async whenReady(): Promise<void> {
+    await this.dockerProbe;
   }
 
   isAvailable(): boolean {
     if (!this.inner.isAvailable()) return false;
-    if (this.dockerOnPath === null) {
-      try {
-        execFileSync(process.platform === 'win32' ? 'where' : 'which', ['docker'], {
-          stdio: 'ignore',
-        });
-        this.dockerOnPath = true;
-      } catch {
-        this.dockerOnPath = false;
-      }
-    }
-    return this.dockerOnPath;
+    // `null` = the probe has not finished. Reporting unavailable is the safe
+    // answer: `whenReady()` is what a caller uses to wait for the real one.
+    return this.dockerOnPath === true;
+  }
+
+  /**
+   * The file header above always claimed "`isAvailable()` returns `false`
+   * unless attach is asked for", but it never could: `isAvailable()` takes no
+   * arguments, so it cannot see `attachToSandbox`. On any machine with docker
+   * on PATH this host therefore won first-available selection for EVERY
+   * terminal and then threw from `spawn()` on the first line. `canServe()` is
+   * the gate the comment was describing.
+   */
+  canServe(options: TerminalSpawnOptions): boolean {
+    return options.attachToSandbox === true && typeof options.runId === 'string' && options.runId.length > 0;
   }
 
   async spawn(options: TerminalSpawnOptions): Promise<ITerminalHandle> {

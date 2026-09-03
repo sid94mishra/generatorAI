@@ -9,7 +9,15 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { buildRegistry, toDocs, DOCS_START, DOCS_END } from '@generatorai/cli-core';
+import {
+  applyKeymapDocs,
+  buildRegistry,
+  DEFAULT_KEYMAP,
+  toDocs,
+  toKeymapDocs,
+  DOCS_START,
+  DOCS_END,
+} from '@generatorai/cli-core';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const docPath = resolve(here, '../../../.github/docs/usage-cli.md');
@@ -29,8 +37,14 @@ if (start === -1 || end === -1) {
   process.exit(2);
 }
 
-const next =
-  original.slice(0, start) + generated + original.slice(end + DOCS_END.length);
+// Two generated regions: the command tables and the keymap. The keymap
+// used to be hand-written and described a TUI that had not existed since
+// the workbench rewrite (open question #8) — hand-writing it is the
+// reason it drifted.
+const next = applyKeymapDocs(
+  original.slice(0, start) + generated + original.slice(end + DOCS_END.length),
+  toKeymapDocs(DEFAULT_KEYMAP),
+);
 
 if (process.argv.includes('--check')) {
   if (next !== original) {

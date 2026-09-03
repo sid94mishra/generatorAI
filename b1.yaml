@@ -1,0 +1,108 @@
+- generic [ref=e2]:
+  - generic [ref=e106]:
+    - complementary [ref=e107]:
+      - generic [ref=e108]:
+        - generic [ref=e109]:
+          - button "GeneratorAI" [ref=e110] [cursor=pointer]:
+            - img [ref=e112]
+            - generic [ref=e114]: GeneratorAI
+          - button "Hide sidebar" [pressed] [ref=e115] [cursor=pointer]:
+            - img [ref=e116]
+        - navigation [ref=e119]:
+          - button "Dashboard" [ref=e120] [cursor=pointer]:
+            - img [ref=e121]
+            - text: Dashboard
+          - button "Projects" [ref=e126] [cursor=pointer]:
+            - img [ref=e127]
+            - text: Projects
+          - button "Chats" [ref=e129] [cursor=pointer]:
+            - img [ref=e130]
+            - text: Chats
+          - button "Agents" [ref=e132] [cursor=pointer]:
+            - img [ref=e133]
+            - text: Agents
+          - button "Workflows" [ref=e136] [cursor=pointer]:
+            - img [ref=e137]
+            - text: Workflows
+          - button "Scripts" [ref=e141] [cursor=pointer]:
+            - img [ref=e142]
+            - text: Scripts
+          - button "Automations" [ref=e147] [cursor=pointer]:
+            - img [ref=e148]
+            - text: Automations
+        - generic [ref=e153]:
+          - button "Settings" [ref=e154] [cursor=pointer]:
+            - img [ref=e155]
+            - text: Settings
+          - generic [ref=e158]:
+            - generic [ref=e159]: Command palette
+            - generic [ref=e160]:
+              - generic [ref=e161]: Ctrl
+              - generic [ref=e162]: K
+    - generic [ref=e163]:
+      - banner [ref=e164]:
+        - generic [ref=e167]: Workflows
+        - 'button "Appearance: dark. Click to change." [ref=e169] [cursor=pointer]':
+          - img [ref=e170]
+      - main [ref=e172]:
+        - generic [ref=e10588]:
+          - generic [ref=e10589]:
+            - generic [ref=e10590]:
+              - button "Back to workflow list" [ref=e10591] [cursor=pointer]:
+                - img [ref=e10592]
+              - textbox "Untitled Workflow" [ref=e10595]
+            - generic [ref=e10596]:
+              - button "Undo (Ctrl+Z)" [disabled] [ref=e10597] [cursor=pointer]:
+                - img [ref=e10598]
+              - button "Redo (Ctrl+Shift+Z)" [disabled] [ref=e10601] [cursor=pointer]:
+                - img [ref=e10602]
+              - button "Settings" [ref=e10606] [cursor=pointer]:
+                - img [ref=e10607]
+                - text: Settings
+              - button "Validate" [ref=e10610] [cursor=pointer]:
+                - img [ref=e10611]
+                - text: Validate
+              - button "Hide properties" [ref=e10614] [cursor=pointer]:
+                - img [ref=e10615]
+              - button "Save" [ref=e10619] [cursor=pointer]:
+                - img [ref=e10620]
+                - text: Save
+              - button "Run" [disabled] [ref=e10624] [cursor=pointer]:
+                - img [ref=e10625]
+                - text: Run
+          - generic [ref=e10627]:
+            - application [ref=e10630]:
+              - img
+              - generic "Control Panel" [ref=e10633]:
+                - button "Zoom In" [ref=e10634] [cursor=pointer]:
+                  - img [ref=e10635]
+                - button "Zoom Out" [ref=e10637] [cursor=pointer]:
+                  - img [ref=e10638]
+                - button "Fit View" [ref=e10640] [cursor=pointer]:
+                  - img [ref=e10641]
+                - button "Toggle Interactivity" [ref=e10643] [cursor=pointer]:
+                  - img [ref=e10644]
+              - button "Auto-Layout" [ref=e10647] [cursor=pointer]:
+                - img [ref=e10648]
+                - text: Auto-Layout
+              - button "Add Stage" [ref=e10652] [cursor=pointer]:
+                - img [ref=e10653]
+                - text: Add Stage
+              - generic [ref=e10655]:
+                - img [ref=e10657]
+                - heading "Start building your workflow" [level=3] [ref=e10661]
+                - paragraph [ref=e10662]: Click "Add Stage" below to create your first workflow stage, or drag from the sidebar
+                - button "Add First Stage" [ref=e10663] [cursor=pointer]:
+                  - img [ref=e10664]
+                  - text: Add First Stage
+            - generic [ref=e10666]:
+              - separator "Resize panel" [ref=e10667]
+              - generic [ref=e10675]:
+                - img [ref=e10677]
+                - heading "No stage selected" [level=3] [ref=e10680]
+                - paragraph [ref=e10681]: Click a stage on the canvas to view and edit its properties
+  - region "Notifications alt+T"
+  - generic [ref=e6]:
+    - img [ref=e8]
+    - button "Open Tanstack query devtools" [ref=e56] [cursor=pointer]:
+      - img [ref=e57]

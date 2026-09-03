@@ -16,6 +16,7 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { buildChildEnv } from '@generatorai/shared';
 import type { ILogger, TerminalHostKind } from '@generatorai/shared';
 import type {
   ITerminalHandle,
@@ -24,33 +25,19 @@ import type {
 } from '../../domain/ports/ITerminalHost.js';
 
 /**
- * Env vars stripped unconditionally — leaking these into a user shell
- * would give the child process ambient privileges the server was granted.
+ * Parent variables an interactive shell needs beyond the base allowlist.
+ *
+ * The base list in `@generatorai/shared` is deliberately minimal and shared
+ * with harness children; a shell additionally wants the user's editor and
+ * pager preferences, and (on Unix) agent-forwarding sockets so `git push`
+ * over SSH still works from an integrated terminal.
+ *
+ * `stripSensitiveSecrets` removes the SSH pair — the agent socket is a live
+ * credential, so the toggle is what decides whether a model-driven terminal
+ * may authenticate as the user.
  */
-const ALWAYS_STRIP = new Set<string>([
-  'NODE_OPTIONS',
-  'LD_PRELOAD',
-  'ELECTRON_RUN_AS_NODE',
-  'GENERATORAI_TOKEN',
-  'GENERATORAI_API_KEY',
-  'DATABASE_URL',
-]);
-
-/** Prefix-match strip patterns. */
-const STRIP_PREFIXES = ['DYLD_', 'GENERATORAI_'];
-
-/** Env vars ONLY stripped when the sensitive-secrets toggle is on. */
-const SENSITIVE = new Set<string>([
-  'SSH_AUTH_SOCK',
-  'SSH_AGENT_PID',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_SESSION_TOKEN',
-]);
-
-/** Re-inject after strip so the child shell still gets identity vars. */
-const KEEP_GENERATORAI = new Set<string>([
-  'GENERATORAI_WORKSPACE_ID',
-]);
+const SHELL_PASSTHROUGH: readonly string[] = ['EDITOR', 'VISUAL', 'PAGER', 'LESS'];
+const SHELL_SSH_PASSTHROUGH: readonly string[] = ['SSH_AUTH_SOCK', 'SSH_AGENT_PID'];
 
 /**
  * Minimal `node-pty` shape we need. Kept local so we can `require()` the
@@ -180,15 +167,17 @@ export class NodePtyHost implements ITerminalHost {
   }
 
   private buildEnv(workspaceId: string, extra?: Record<string, string>): Record<string, string> {
-    const src = process.env;
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(src)) {
-      if (v === undefined) continue;
-      if (ALWAYS_STRIP.has(k)) continue;
-      if (STRIP_PREFIXES.some((p) => k.startsWith(p)) && !KEEP_GENERATORAI.has(k)) continue;
-      if (this.opts.stripSensitiveSecrets && SENSITIVE.has(k)) continue;
-      out[k] = v;
-    }
+    // Allowlist, not denylist. The previous denylist stripped `GENERATORAI_*`
+    // and `DATABASE_URL` but passed `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+    // `GITHUB_TOKEN` and `AWS_ACCESS_KEY_ID` straight into a shell that runs
+    // model-authored commands — and every new secret added to the server
+    // would have been leaked by default. §11.1: no capability by negation.
+    const out = buildChildEnv({
+      passthrough: [
+        ...SHELL_PASSTHROUGH,
+        ...(this.opts.stripSensitiveSecrets ? [] : SHELL_SSH_PASSTHROUGH),
+      ],
+    });
     out['TERM'] = 'xterm-256color';
     out['COLORTERM'] = 'truecolor';
     out['GENERATORAI_WORKSPACE_ID'] = workspaceId;

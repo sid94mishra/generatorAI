@@ -14,6 +14,7 @@ import type {
   StageRun,
   StageRunStatus,
 } from '@generatorai/shared';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 // ── Types ──
 
@@ -138,7 +139,7 @@ function computeElapsed(run: WorkflowRun | null): number {
 
 // ── Store ──
 
-export const useWorkflowRunStore = create<RunMonitorState & RunMonitorActions>((set, get) => ({
+const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set, get) => ({
   ...initialState,
 
   setRun: (run) => {
@@ -350,3 +351,8 @@ export const useWorkflowRunStore = create<RunMonitorState & RunMonitorActions>((
     }));
   },
 }));
+
+
+// HMR-split-proof: every module instance shares the first-created store.
+// See lib/globalSingleton.ts for why this is load-bearing in dev.
+export const useWorkflowRunStore = globalSingleton('web.workflowRunStore', () => useWorkflowRunStoreImpl);

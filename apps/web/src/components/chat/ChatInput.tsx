@@ -10,6 +10,7 @@ import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import { useSlashCommands, useWorkspaceFileIndex } from '@/hooks/composerQueries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { fuzzyMatch } from './composer/builtins.js';
+import { CaretInsertionSequencer } from '@generatorai/shared';
 import { ComposerMenu, type ComposerMenuItem } from './composer/ComposerMenu.js';
 import type {
   SlashCommand,
@@ -34,7 +35,16 @@ import { ModelPicker, ProviderIcon, formatTokens, DetailRow } from '@/components
 import { ContextUsageGauge } from '@/components/shared/ContextUsageGauge.js';
 import { resolveModelLimit } from '@generatorai/client-core';
 import { VoiceRecorder } from './VoiceRecorder.js';
+import { useSpeechToText } from '@/hooks/useSpeechToText.js';
+import { composerAffordances } from '@/platform/surfaceCapabilities.js';
 import { toast } from '@/components/Toast.js';
+
+/**
+ * W29 — what the composer offers on THIS surface, read from the capability
+ * ledger. Module-level because the surface cannot change without a reload,
+ * and a per-render read would be pure overhead on the composer's hot path.
+ */
+const COMPOSER = composerAffordances();
 
 interface GitRepoInput {
   url: string;
@@ -73,6 +83,14 @@ interface ChatInputProps {
   filesPanelOpen?: boolean;
   /** Whether the model is currently generating (for stop button) */
   isStreaming?: boolean;
+  /**
+   * W30-b — what the Stop control should say and whether it accepts a press.
+   *
+   * Supplied by the page (which owns the turn), not derived here: the second
+   * press has to be judged against the BACKEND's view of whether the turn is
+   * still running, and the composer has no access to that.
+   */
+  stopState?: { label: string; enabled: boolean; forceAvailable: boolean };
   /** Callback when user clicks stop */
   onStop?: () => void;
   /**
@@ -147,6 +165,7 @@ export function ChatInput({
   filesPanelOpen,
   isStreaming = false,
   onStop,
+  stopState,
   pendingCaptures,
   onRemovePendingCapture,
   onBuiltinCommand,
@@ -572,34 +591,232 @@ export function ChatInput({
     activeAgentMode,
   ]);
 
-  // ── Voice input ────────────────────────────────────────────────
-  // Dictation appends after whatever is already typed. We snapshot the
-  // existing text when recording starts, then set text = base + transcript
-  // on every interim/final update so the box fills in real time. We never
-  // auto-send — the user reviews and presses Enter.
-  const textRef = useRef(text);
+  // ── Voice input (Phase 1 rewrite — VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part C) ──
+  //
+  // Two changes from the original design, per Part C.2:
+  //   1. Finalized text (segment/final) is inserted at the textarea's
+  //      CURRENT CARET position, not appended to a separately-tracked base
+  //      string. This is what lets a manual edit + resume "just work" —
+  //      the browser's own caret is the source of truth for where new
+  //      speech lands, exactly like native OS dictation.
+  //   2. Live/interim text NEVER enters the real editable `text` state — it
+  //      is rendered as a separate, visually distinct, non-editable preview
+  //      (see the dimmed line above the textarea in the JSX below). Only a
+  //      fully finalized segment ever gets inserted into the real value.
+  //      This is what removes the "correction collides with in-flight
+  //      dictation" problem entirely: there is never any uncommitted STT
+  //      text sitting inside the editable buffer for an edit to collide
+  //      with.
+  //
+  // `useSpeechToText` is owned HERE (not inside VoiceRecorder) because
+  // pausing on manual composer interaction (Part C.3) requires the
+  // composer's own key/paste/click handlers to call `pauseVoice()`.
+  // Sequences insertions so two segments arriving back-to-back (before the
+  // first's requestAnimationFrame caret-restore has run) compose in speech
+  // order instead of racing on a not-yet-repainted textarea — see
+  // CaretInsertionSequencer's doc comment for the exact failure mode this
+  // fixes. `useRef` (not state) because it's mutated outside the render
+  // cycle and never needs to trigger a re-render itself.
+  const caretSequencerRef = useRef(new CaretInsertionSequencer());
+
+  const insertAtCaret = useCallback((raw: string) => {
+    const el = textareaRef.current;
+
+    if (!el) {
+      const insertText = raw.trim();
+      if (insertText) setText((prev) => (prev ? `${prev.trimEnd()} ${insertText}` : insertText));
+      return;
+    }
+
+    setText((prev) => {
+      const result = caretSequencerRef.current.insert(prev, el.selectionStart, el.selectionEnd, raw);
+      return result ? result.text : prev;
+    });
+
+    requestAnimationFrame(() => {
+      const el2 = textareaRef.current;
+      const caret = caretSequencerRef.current.consumePending();
+      if (el2 && caret != null) {
+        el2.focus();
+        el2.selectionStart = el2.selectionEnd = caret;
+      }
+    });
+  }, []);
+
+  // ── Live dictation region ────────────────────────────────────
+  // Streaming partials are written STRAIGHT INTO the composer rather than
+  // into a preview beside it, so words appear where they will actually end
+  // up, as they are spoken. `dictationRef` remembers the span the
+  // current utterance occupies so each revision replaces it instead of
+  // appending — a streaming decoder rewrites itself constantly ("Hel" ->
+  // "Hello" -> "Hello, how"), and appending each revision would produce
+  // "HelHelloHello, how".
+  //
+  // The span is cleared whenever the user touches the composer, so a manual
+  // edit is never overwritten by a partial that lands a moment later.
+  // The live region is described by the composer text WITHOUT it (`base`) plus
+  // the offset it sits at. Storing the base rather than a length is what makes
+  // each revision a pure recomputation instead of a patch applied to whatever
+  // the previous patch happened to leave behind.
+  const dictationRef = useRef<{ base: string; start: number } | null>(null);
+  /**
+   * The committed composer text, readable synchronously.
+   *
+   * Partials arrive every ~190ms, faster than React re-renders settle, so a
+   * handler that read `text` from its closure would repeatedly build on a
+   * stale value.
+   */
+  const textRef = useRef('');
   textRef.current = text;
-  const voiceBaseRef = useRef('');
+
+  /**
+   * Whether the text of the CURRENT utterance is already visible in the
+   * composer because partials put it there.
+   *
+   * This is what tells a committed segment whether it is new text or a
+   * refinement of text the user is already looking at. Without it, typing
+   * mid-dictation produced a duplicate: the partial text was on screen, the
+   * edit detached the region, and the flushed segment — the same words, just
+   * formatted — was then appended at the caret:
+   *
+   *   "…the API integration by NOTE so I wanted to talk about the project
+   *    timeline. we need to finish the API integration by Friday…"
+   */
+  const utteranceShownRef = useRef(false);
+  /** The exact partial text last written for the current utterance. */
+  const shownTextRef = useRef('');
+
+  const clearDictationRegion = useCallback(() => {
+    dictationRef.current = null;
+  }, []);
+
+  /**
+   * Replace the live region with `incoming`; create it at the caret if absent.
+   *
+   * CRITICAL: everything is computed BEFORE `setText`, and the updater it
+   * passes is a constant. React.StrictMode invokes state updaters twice in
+   * development, so an updater that mutated the region ref or inserted a
+   * separator inline ran both effects twice — which is exactly how the
+   * composer ended up reading "…schedule a meeting. Hello, how are you today?
+   * I would like to schedule a meeting.CCan you help me…".
+   */
+  const writeDictationRegion = useCallback((incoming: string, commit: boolean) => {
+    let region = dictationRef.current;
+    if (!region) {
+      const el = textareaRef.current;
+      const prev = textRef.current;
+      const at = el ? Math.min(el.selectionStart, prev.length) : prev.length;
+      // Space off the preceding word so dictation never runs into it.
+      const needsSpace = at > 0 && !/\s$/.test(prev.slice(0, at));
+      region = {
+        base: needsSpace ? `${prev.slice(0, at)} ${prev.slice(at)}` : prev,
+        start: at + (needsSpace ? 1 : 0),
+      };
+      dictationRef.current = region;
+    }
+
+    const next = region.base.slice(0, region.start) + incoming + region.base.slice(region.start);
+    const caret = region.start + incoming.length;
+    if (commit) {
+      // Committed text becomes the base the NEXT utterance is written into.
+      dictationRef.current = null;
+    }
+    textRef.current = next;
+    utteranceShownRef.current = !commit;
+    shownTextRef.current = commit ? '' : incoming;
+    setText(next);
+
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      const pos = Math.min(caret, el.value.length);
+      el.selectionStart = el.selectionEnd = pos;
+    });
+  }, []);
+
+  const {
+    isSupported: voiceSupported,
+    status: voiceStatus,
+    error: voiceError,
+    amplitude: voiceAmplitude,
+    start: startVoice,
+    pause: pauseVoice,
+    resume: resumeVoice,
+    stop: stopVoice,
+    cancel: cancelVoice,
+  } = useSpeechToText({
+    // Partials go into the composer itself. On an engine with a native
+    // streaming decoder these arrive every ~190ms, sub-word; on a batch
+    // engine the server sends none and only the segments below appear.
+    onInterim: (t) => writeDictationRegion(t, false),
+    onSegment: (t) => {
+      if (dictationRef.current) {
+        // Normal case: refine the live region in place and commit it.
+        writeDictationRegion(t, true);
+      } else if (utteranceShownRef.current) {
+        // The user edited the composer while this utterance was still open,
+        // which detached the region. Its words are already on screen — and
+        // already filler-stripped, because partials go through the
+        // interim-safe formatter too — so re-inserting the whole segment here
+        // would duplicate them somewhere the user did not put them.
+        //
+        // The segment is NOT spliced back in, even though it usually contains
+        // a few more words than the last partial (whatever was still being
+        // spoken as the keystroke landed). Splicing was tried and reverted:
+        // by the time a flushed segment arrives, the resumed stream may have
+        // already opened a fresh region, and the late segment then lands
+        // against the wrong anchor — which is the duplicated-sentence bug
+        // this whole branch exists to prevent. Losing the half-word you were
+        // mid-way through when you started typing is the cheaper, predictable
+        // failure.
+        utteranceShownRef.current = false;
+        shownTextRef.current = '';
+      } else {
+        // Nothing was previewed (a batch engine emits no partials at all), so
+        // this segment IS the text.
+        insertAtCaret(t);
+      }
+    },
+    onFinal: (t) => {
+      clearDictationRegion();
+      utteranceShownRef.current = false;
+      shownTextRef.current = '';
+      if (t) insertAtCaret(t);
+    },
+    onError: (message) => toast({ variant: 'error', title: 'Voice input', description: message }),
+  });
 
   const handleVoiceStart = useCallback(() => {
-    voiceBaseRef.current = textRef.current.trimEnd();
-  }, []);
+    clearDictationRegion();
+    void startVoice();
+  }, [startVoice, clearDictationRegion]);
 
-  const applyVoiceTranscript = useCallback((transcript: string, final: boolean) => {
-    const base = voiceBaseRef.current;
-    const joined = base ? `${base} ${transcript}` : transcript;
-    setText(joined);
-    if (final) {
-      voiceBaseRef.current = joined.trimEnd();
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (el) {
-          el.focus();
-          el.selectionStart = el.selectionEnd = el.value.length;
-        }
-      });
-    }
-  }, []);
+  // Part C.3: EDITING the composer while dictation is live pauses it, so a
+  // manual correction and an incoming segment can't fight over the caret.
+  // Also drops any pending programmatic caret-restore (see insertAtCaret
+  // above) — once the user has genuinely touched the textarea, a
+  // `segment`/`final` frame that arrives moments later (network latency after
+  // the `pause` frame was sent) must land at their new position, not silently
+  // yank the caret back to wherever dictation had left off.
+  //
+  // "Editing" means typing or pasting — NOT clicking. Clicking is how you put
+  // the caret somewhere, and it is the first half of almost every correction,
+  // so pausing on it meant dictation stopped before the user had changed
+  // anything and stayed stopped until they noticed the pill and clicked it.
+  // Moving the caret still cancels the pending restore, which is the part
+  // that actually matters for a click.
+  const noteManualCaretMove = useCallback(() => {
+    caretSequencerRef.current.clearPending();
+    // The live region's offsets describe the text as it was; once the user has
+    // moved or edited around it, the next partial must start a fresh span
+    // rather than overwrite whatever now sits at those offsets.
+    clearDictationRegion();
+  }, [clearDictationRegion]);
+
+  const pauseVoiceIfListening = useCallback(() => {
+    noteManualCaretMove();
+    if (voiceStatus === 'listening') pauseVoice();
+  }, [voiceStatus, pauseVoice, noteManualCaretMove]);
 
   const insertNewline = useCallback(() => {
     const el = textareaRef.current;
@@ -618,6 +835,11 @@ export function ChatInput({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Part C.3: any manual keystroke while dictation is listening pauses
+      // it — this is the "the act of typing into the field IS the pause
+      // trigger" behavior, not something the user has to remember to do.
+      pauseVoiceIfListening();
+
       // Composer menu navigation takes priority while it is open.
       if (menu) {
         const count = menu.type === 'slash' ? filteredCommands.length : filteredMentions.length;
@@ -651,6 +873,10 @@ export function ChatInput({
       }
 
       if (e.key !== 'Enter') return;
+      // W29 — a surface that does not declare composer key bindings leaves
+      // Enter to the textarea's own newline behaviour, so the only way to
+      // send is the button. Web and desktop both declare it.
+      if (!COMPOSER.sendShortcut) return;
       // Ctrl/Cmd+Enter and Shift+Enter insert a newline; plain Enter sends.
       if (e.ctrlKey || e.metaKey || e.shiftKey) {
         e.preventDefault();
@@ -660,10 +886,11 @@ export function ChatInput({
       e.preventDefault();
       handleSend();
     },
-    [menu, filteredCommands, filteredMentions, menuIndex, applyMenuSelection, activeCommand, text, handleSend, insertNewline],
+    [menu, filteredCommands, filteredMentions, menuIndex, applyMenuSelection, activeCommand, text, handleSend, insertNewline, pauseVoiceIfListening],
   );
 
   const handleFileSelect = useCallback(() => {
+    if (!COMPOSER.attachments) return;
     fileInputRef.current?.click();
   }, []);
 
@@ -688,6 +915,10 @@ export function ChatInput({
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    // W29 — dropping a file on a surface that declares no file attachment
+    // must do nothing, not silently attach. `preventDefault` still runs so
+    // the browser does not navigate away to the dropped file.
+    if (!COMPOSER.attachments) return;
     const files = e.dataTransfer.files;
     if (files.length) {
       setAttachments((prev) => [
@@ -911,12 +1142,25 @@ export function ChatInput({
               </button>
             </div>
           )}
+          {/* No interim preview. Part C.2 rendered a dimmed running transcript
+              above the composer; it was noise — the text it showed was about
+              to be inserted a moment later anyway, so the same words appeared
+              twice, and the block shifted the composer's layout while typing.
+              The recording pill's waveform is the live feedback now. Dropping
+              it also lets the client turn the server's interim passes OFF
+              entirely (see `useSpeechToText`'s `interim: false`), which is
+              what buys back the headroom for an accurate engine. */
+          }
           <textarea
             ref={textareaRef}
             value={text}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
-            onClick={(e) => detectMenu(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
+            onPaste={pauseVoiceIfListening}
+            onClick={(e) => {
+              noteManualCaretMove();
+              detectMenu(e.currentTarget.value, e.currentTarget.selectionStart ?? 0);
+            }}
             onFocus={() => setIsFocused(true)}
             onBlur={() => { setIsFocused(false); setTimeout(() => setMenu(null), 120); }}
             disabled={disabled}
@@ -933,15 +1177,18 @@ export function ChatInput({
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-0.5">
           {/* Left: Actions (wrap + min-w-0 so icons never overflow the card) */}
           <div ref={toolbarRef} className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
-            {/* Attach */}
-            <button
-              onClick={handleFileSelect}
-              disabled={disabled}
-              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-50 transition-colors"
-              title="Attach file"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
+            {/* Attach — W29: absent, not disabled, on a surface that declares
+                no file attachment. A dead control is worse than no control. */}
+            {COMPOSER.attachments && (
+              <button
+                onClick={handleFileSelect}
+                disabled={disabled}
+                className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-50 transition-colors"
+                title="Attach file"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            )}
 
             {/* Model Selector — the shared canonical picker (same control the
                 create-chat dialog, settings and stage overrides use). */}
@@ -1208,24 +1455,49 @@ export function ChatInput({
 
           {/* Right: Voice input + Send/Stop */}
           <div className="flex flex-shrink-0 items-center gap-1">
-            {/* Voice input — local Whisper transcription; fills the box live. */}
+            {/* Voice input — local Whisper/Parakeet transcription; segments
+                insert at the caret as they finalize (see the voice section
+                above for the full Phase 1 design). */}
             <VoiceRecorder
               disabled={disabled || isLoading || isStreaming}
+              isSupported={voiceSupported}
+              status={voiceStatus}
+              error={voiceError}
+              amplitude={voiceAmplitude}
               onStart={handleVoiceStart}
-              onInterim={(t) => applyVoiceTranscript(t, false)}
-              onFinal={(t) => applyVoiceTranscript(t, true)}
-              onError={(message) => toast({ variant: 'error', title: 'Voice input', description: message })}
+              onResume={resumeVoice}
+              onStop={stopVoice}
+              onCancel={cancelVoice}
             />
 
-            {/* Stop button — enabled whenever a turn is streaming; theme-aware. */}
+            {/* Stop — W30-b's two-phase control.
+                Three states, and each one says something true: a plain Stop,
+                a 400 ms disabled window so a double-tap cannot skip to the
+                destructive path, and an explicit "Force reset" once the
+                graceful path has demonstrably failed. The label widens into a
+                pill only for the last one, so the composer's layout does not
+                shift on every ordinary stop. */}
             {isStreaming && onStop ? (
-              <button
-                onClick={onStop}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-primary)] text-[var(--color-primary-foreground,#fff)] hover:opacity-90 active:scale-[0.93] transition-all"
-                title="Stop generation"
-              >
-                <Square className="h-3.5 w-3.5 fill-current" />
-              </button>
+              stopState?.forceAvailable ? (
+                <button
+                  onClick={onStop}
+                  className="flex h-8 items-center justify-center gap-1.5 rounded-full bg-[var(--color-danger,var(--color-primary))] px-3 text-[11px] font-semibold text-[var(--color-primary-foreground,#fff)] hover:opacity-90 active:scale-[0.93] transition-all"
+                  title="The turn did not stop gracefully — reset it"
+                >
+                  <Square className="h-3 w-3 fill-current" />
+                  {stopState.label}
+                </button>
+              ) : (
+                <button
+                  onClick={onStop}
+                  disabled={stopState ? !stopState.enabled : false}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-primary)] text-[var(--color-primary-foreground,#fff)] hover:opacity-90 active:scale-[0.93] disabled:opacity-50 disabled:active:scale-100 transition-all"
+                  title={stopState?.label ?? 'Stop generation'}
+                  aria-label={stopState?.label ?? 'Stop generation'}
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                </button>
+              )
             ) : (
               /* Send button — circular */
               <button

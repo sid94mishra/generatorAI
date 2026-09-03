@@ -34,6 +34,8 @@ import { PreferencesProvider } from '../src/prefs/preferences';
 import { AuthProvider, useAuth } from '../src/auth/AuthProvider';
 import { Spinner, ToastProvider, Button, ErrorState } from '../src/components/ui';
 import { usePushNotifications } from '../src/notifications/usePushNotifications';
+import { MuxStreamProvider } from '../src/stream/MuxStreamProvider';
+import { useGlobalStream } from '../src/stream/useGlobalStream';
 
 installCrypto();
 
@@ -95,6 +97,11 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
   // rotation or a notification tap is handled no matter which route is open.
   // The hook no-ops until the session is authenticated.
   usePushNotifications();
+
+  // W09-a — the `global` scope, subscribed once for the app rather than once
+  // per list tab. Without it the Chats / Runs / Automations lists have no live
+  // lifecycle events at all and go stale until TanStack refetches them.
+  useGlobalStream();
 
   const isPublic = PUBLIC_ROUTES.has(pathname);
 
@@ -266,13 +273,18 @@ export default function RootLayout(): React.ReactElement {
             <ThemedShell>
               <QueryClientProvider client={queryClient}>
                 <AuthProvider>
-                  <ToastProvider>
-                    <BottomSheetModalProvider>
-                      <AuthGate>
-                        <RootStack />
-                      </AuthGate>
-                    </BottomSheetModalProvider>
-                  </ToastProvider>
+                  {/* Owns the app's ONE shared stream connection. Above
+                      AuthGate so the connection survives a route change and
+                      every screen's subscription rides the same socket. */}
+                  <MuxStreamProvider>
+                    <ToastProvider>
+                      <BottomSheetModalProvider>
+                        <AuthGate>
+                          <RootStack />
+                        </AuthGate>
+                      </BottomSheetModalProvider>
+                    </ToastProvider>
+                  </MuxStreamProvider>
                 </AuthProvider>
               </QueryClientProvider>
             </ThemedShell>

@@ -1,10 +1,8 @@
 // read_page — accessibility snapshot with element refs.
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import type { ToolDefinition } from '../../domain/ports/IAgentHarness.js';
 import type { BrowserToolContext, BrowserToolFactory } from './browserToolTypes.js';
 import { wrapHandler } from './browserToolTypes.js';
+import { SNAPSHOT_HANDOFF_HINT, writeSnapshotHandoff } from './snapshotHandoff.js';
 
 export const createReadPageTool: BrowserToolFactory = (ctx: BrowserToolContext): ToolDefinition => ({
   name: 'read_page',
@@ -38,42 +36,19 @@ export const createReadPageTool: BrowserToolFactory = (ctx: BrowserToolContext):
       }
       const result = await ctx.browserService.readPage(ctx.workspaceId);
 
-      // X-17: Write the full a11y tree to a file inside the workspace instead
-      // of returning it inline. The snapshot can be several thousand tokens for
-      // a complex page; auto-attaching it to every tool result dominates context
-      // usage even when the agent only needed the URL or title.
-      //
-      // F1-fix: write to <workspaceRoot>/browser/snapshots/ — inside the
-      // workspace tree so the harness's Read tool can access the path. Writing
-      // to os.tmpdir() is outside the harness's allowed read path and silently
-      // makes X-17 non-functional.
-      //
-      // F2-fix: writing inside the workspace means the file is automatically
-      // cleaned up when the workspace is deleted — no temp file accumulation.
-      let snapshotFile: string | undefined;
-      const workspaceRoot = ctx.browserService.getWorkspaceRoot(ctx.workspaceId);
-      if (workspaceRoot) {
-        try {
-          const snapId = randomUUID().slice(0, 8);
-          const snapshotsDir = path.join(workspaceRoot, 'browser', 'snapshots');
-          await fs.mkdir(snapshotsDir, { recursive: true });
-          snapshotFile = path.join(snapshotsDir, `snap-${snapId}.txt`);
-          await fs.writeFile(snapshotFile, result.snapshot, 'utf-8');
-        } catch {
-          // If we can't write the file, fall back to inline snapshot so the tool
-          // is still usable rather than silently returning no data.
-          snapshotFile = undefined;
-        }
-      }
-
-      if (snapshotFile) {
+      // X-17: hand the full a11y tree over on disk instead of inlining it —
+      // shared with `open_browser_page`, which used to inline the same tree on
+      // the first call of every loop. See `snapshotHandoff.ts`.
+      const handoff = await writeSnapshotHandoff(ctx, result.snapshot);
+      if (handoff) {
         return {
           ok: true,
           page: `Browser: ${result.title} at ${result.url}`,
           url: result.url,
           title: result.title,
-          snapshotFile,
-          hint: 'Read snapshotFile with the Read tool to inspect element refs.',
+          snapshotFile: handoff.snapshotFile,
+          snapshotBytes: handoff.bytes,
+          hint: SNAPSHOT_HANDOFF_HINT,
         };
       }
       // Fallback: inline snapshot (no workspace root, or file write failed).

@@ -67,6 +67,7 @@ import {
   type DiffLineRange,
 } from './DiffCodeView.js';
 import { ChangesTree, type TreeGitStatus } from './ChangesTree.js';
+import { DiffProviders } from './DiffProviders.js';
 import { CheckpointTimeline } from './CheckpointTimeline.js';
 import { diffSourceId, useDiffSources, useExpandedDiffs } from './useDiffSources.js';
 import { ReviewThreadCard } from './review/ReviewThreadCard.js';
@@ -1155,23 +1156,33 @@ export function ChangesSurface({
 
               {/* Diff viewer */}
               <div className="min-w-0 flex-1">
-                <DiffCodeView
-                  ref={viewerRef}
-                  sources={decoratedSources}
-                  viewMode={viewMode}
-                  wrapLines={wrapLines}
-                  enableSelection={reviewEnabled}
-                  style={{ height: '100%', overflow: 'auto' }}
-                  renderHeader={renderHeader}
-                  headerHeight={FILE_HEADER_HEIGHT}
-                  {...(reviewEnabled ? { onSelectRange: handleSelectRange } : {})}
-                  {...(reviewEnabled ? { renderAnnotation } : {})}
-                  emptyState={
-                    <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
-                      Select a file to view its diff.
-                    </div>
-                  }
-                />
+                {/* W28 — DiffProviders wraps the diff surface at its point of
+                    use, not the app root. See DiffProviders.tsx's header for
+                    why this is safe (the underlying worker pool is a true
+                    singleton, lazily created on first mount here and reference-
+                    counted, so this costs nothing extra if several diff
+                    surfaces are visible at once) and why it removes ~10 MB of
+                    eagerly-loaded highlighter/WASM code from every page load
+                    that never opens a diff. */}
+                <DiffProviders>
+                  <DiffCodeView
+                    ref={viewerRef}
+                    sources={decoratedSources}
+                    viewMode={viewMode}
+                    wrapLines={wrapLines}
+                    enableSelection={reviewEnabled}
+                    style={{ height: '100%', overflow: 'auto' }}
+                    renderHeader={renderHeader}
+                    headerHeight={FILE_HEADER_HEIGHT}
+                    {...(reviewEnabled ? { onSelectRange: handleSelectRange } : {})}
+                    {...(reviewEnabled ? { renderAnnotation } : {})}
+                    emptyState={
+                      <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
+                        Select a file to view its diff.
+                      </div>
+                    }
+                  />
+                </DiffProviders>
               </div>
             </>
           )}

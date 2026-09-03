@@ -13,13 +13,16 @@
 
 import { create } from 'zustand';
 import {
+  applyStreamEffects,
   DEFAULT_STREAM,
   streamReducer as r,
   type ContextUsageSnapshot,
+  type StreamEffect,
   type PlanBlock,
   type QuestionBlock,
   type StreamState,
   type StreamUsage,
+  type ToolFileOp,
   type StreamsRecord,
   type SystemCategory,
   type WidgetBlock,
@@ -41,9 +44,20 @@ export type {
   ToolCallBlock,
   WidgetBlock,
 } from '@generatorai/client-core';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 interface StreamStore {
   streams: StreamsRecord;
+
+  /**
+   * Apply a batch of router effects in ONE update.
+   *
+   * W26 — this is how `sseManager` writes now. A frame's worth of events
+   * produces one Zustand notification instead of one per effect, and the
+   * effect → reducer mapping is `applyStreamEffect` in client-core, shared
+   * with mobile, rather than a switch each surface maintains separately.
+   */
+  applyEffects: (effects: readonly StreamEffect[]) => void;
 
   /** Append a token to the session stream. */
   appendToken: (sessionId: string, token: string) => void;
@@ -55,10 +69,21 @@ interface StreamStore {
   completeThinking: (sessionId: string) => void;
 
   /** Record a tool call start. The server `callId` is used for matching when available. */
-  addToolCall: (sessionId: string, tool: string, args: unknown, callId?: string) => void;
+  addToolCall: (
+    sessionId: string,
+    tool: string,
+    args: unknown,
+    callId?: string,
+    parentCallId?: string,
+  ) => void;
 
   /** Complete a tool call, matching by callId first then tool name. */
-  completeToolCall: (sessionId: string, toolOrCallId: string, result: unknown) => void;
+  completeToolCall: (
+    sessionId: string,
+    toolOrCallId: string,
+    result: unknown,
+    fileOp?: ToolFileOp,
+  ) => void;
 
   /** Append a system/subagent/error note. */
   addSystemMessage: (sessionId: string, message: string, category?: SystemCategory) => void;
@@ -134,11 +159,56 @@ interface StreamStore {
   /** Restructure inline `<function_calls>` XML into proper blocks. */
   processInlineToolCalls: (sessionId: string, content: string) => void;
 
+  /** Drop a stream entirely — see the reducer's `evictStream`. */
+  evictStream: (sessionId: string) => void;
+
   /** Read a session's stream state (with defaults). */
   getStream: (sessionId: string) => StreamState;
 }
 
-export const useStreamStore = create<StreamStore>((set, get) => {
+/**
+ * W27 — the record is bounded.
+ *
+ * Every session and every `stageRun:<id>` key that ever streamed keeps its
+ * full block array (text, tool results, widget props) for the lifetime of the
+ * tab. A long orchestrator session or a re-run workflow walks that into tens
+ * of megabytes that nothing on screen references.
+ *
+ * 32 is well above what any surface renders at once (a chat renders one key;
+ * the run page renders one per visible stage), so eviction only ever reaches
+ * keys the user navigated away from — and those refill from REST replay on
+ * the way back.
+ */
+const MAX_RETAINED_STREAMS = 32;
+
+/**
+ * Keys the UI is currently rendering, exempt from eviction.
+ *
+ * Module-level rather than store state: registering a key must not re-render
+ * every stream subscriber, and the set is read inside the reducer bridge on
+ * the hot token path.
+ */
+const protectedStreamKeys = globalSingleton('web.streamStore.protected', () => new Set<string>());
+
+/**
+ * Mark a stream key as on-screen for as long as the returned function is
+ * uncalled. Pair it with a `useEffect` cleanup.
+ */
+export function protectStream(sessionId: string): () => void {
+  protectedStreamKeys.add(sessionId);
+  return () => {
+    protectedStreamKeys.delete(sessionId);
+  };
+}
+
+/** Test-only view of the protection set. */
+export function _protectedStreamKeys(): string[] {
+  return [...protectedStreamKeys];
+}
+
+export { MAX_RETAINED_STREAMS };
+
+const useStreamStoreImpl = create<StreamStore>((set, get) => {
   /**
    * Bridge a pure reducer into Zustand.
    *
@@ -151,11 +221,25 @@ export const useStreamStore = create<StreamStore>((set, get) => {
     (...args: A): void =>
       set((state) => {
         const streams = fn(state.streams, ...args);
-        return streams === state.streams ? state : { streams };
+        if (streams === state.streams) return state;
+        // Prune on the write path, not on a timer: a timer would have to be
+        // owned somewhere, and eviction only ever becomes necessary because
+        // of a write. `pruneStreams` returns the same record when the cap is
+        // not exceeded, so the token path pays one `Object.keys` and nothing
+        // else.
+        const bounded = r.pruneStreams(streams, {
+          maxEntries: MAX_RETAINED_STREAMS,
+          protect: protectedStreamKeys,
+        });
+        return { streams: bounded };
       });
 
   return {
     streams: {},
+
+    applyEffects: apply((streams, effects: readonly StreamEffect[]) =>
+      applyStreamEffects(streams, effects),
+    ),
 
     appendToken: apply(r.appendToken),
     appendThinking: apply(r.appendThinking),
@@ -181,7 +265,13 @@ export const useStreamStore = create<StreamStore>((set, get) => {
     clearStreamText: apply(r.clearStreamText),
     clearStream: apply(r.clearStream),
     processInlineToolCalls: apply(r.processInlineToolCalls),
+    evictStream: apply(r.evictStream),
 
     getStream: (sessionId) => get().streams[sessionId] ?? DEFAULT_STREAM,
   };
 });
+
+
+// HMR-split-proof: every module instance shares the first-created store.
+// See lib/globalSingleton.ts for why this is load-bearing in dev.
+export const useStreamStore = globalSingleton('web.streamStore', () => useStreamStoreImpl);

@@ -8,7 +8,8 @@
  */
 
 import { fork, type ChildProcess } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -16,14 +17,18 @@ import type {
   PtyHostResponse,
   PtyDataNotification,
   PtyExitNotification,
+  PtyScrollbackResponse,
   PtySessionReadyNotification,
 } from '@generatorai/shared';
 import { isPtyHostResponse } from '@generatorai/shared';
 import type { ILogger } from '@generatorai/shared';
 
-/* W14 — restart cap constants */
+/* W14 — restart cap defaults */
 const MAX_RESTARTS = 5;
 const RESTART_WINDOW_MS = 60_000;
+/** First backoff step; doubles per restart, capped at `RESTART_MAX_DELAY_MS`. */
+const RESTART_BASE_DELAY_MS = 1_000;
+const RESTART_MAX_DELAY_MS = 30_000;
 
 export type PtyDataHandler = (sessionId: string, chunk: string) => void;
 export type PtyExitHandler = (sessionId: string, code: number | null) => void;
@@ -36,6 +41,10 @@ export interface PtyHostClientOptions {
   onData?: PtyDataHandler;
   onExit?: PtyExitHandler;
   onReady?: PtyReadyHandler;
+  /** Crashes tolerated inside `RESTART_WINDOW_MS` before going fatal. Default 5. */
+  maxRestarts?: number;
+  /** First restart backoff step, doubling per restart. Default 1 000 ms. */
+  restartBaseDelayMs?: number;
 }
 
 export class PtyHostClient {
@@ -43,15 +52,35 @@ export class PtyHostClient {
   private child: ChildProcess | null = null;
   private readonly pendingRequests = new Map<string, { resolve: (r: PtyHostResponse) => void; reject: (e: Error) => void }>();
   private readonly restartTimestamps: number[] = [];
+  /**
+   * Sessions the host is believed to be running. Needed because a host crash
+   * kills every PTY it owned, and nothing else in the system can observe that:
+   * the child's own `exit` notifications die with it, so without this set the
+   * gateway keeps handles, `TerminalService` records stay `exited: false`, and
+   * the UI renders live terminals over processes that no longer exist.
+   */
+  private readonly liveSessions = new Set<string>();
   private stopped = false;
+  /**
+   * Set when the restart budget is exhausted. Distinct from `stopped`, which
+   * means "deliberately shut down": callers need to tell "the host is gone and
+   * is never coming back" from "we turned it off", because the first must make
+   * `PtyHostAdapter.isAvailable()` go false so spawns fall through to the
+   * in-process host instead of throwing forever.
+   */
+  private fatal = false;
   private readonly logger: ILogger;
   private readonly hostEntryPath: string;
   private readonly hostEnv: Record<string, string>;
   private readonly onData?: PtyDataHandler;
   private readonly onExit?: PtyExitHandler;
   private readonly onReady?: PtyReadyHandler;
+  private readonly maxRestarts: number;
+  private readonly restartBaseDelayMs: number;
 
   constructor(opts: PtyHostClientOptions) {
+    this.maxRestarts = Math.max(0, opts.maxRestarts ?? MAX_RESTARTS);
+    this.restartBaseDelayMs = Math.max(1, opts.restartBaseDelayMs ?? RESTART_BASE_DELAY_MS);
     this.logger = opts.logger;
     this.onData = opts.onData;
     this.onExit = opts.onExit;
@@ -75,14 +104,25 @@ export class PtyHostClient {
     this.logger.info('[PtyHostClient] PTY host ready');
   }
 
+  /** True once the restart budget is exhausted — the host is permanently down. */
+  isFatal(): boolean {
+    return this.fatal;
+  }
+
   async createSession(opts: {
     sessionId: string;
     cols: number;
     rows: number;
     cwd: string;
     env?: Record<string, string>;
+    shell?: string;
+    shellArgs?: string[];
   }): Promise<void> {
     await this.send({ type: 'create_session', ...opts });
+    // Only after the host has acked — a rejected create (duplicate id, spawn
+    // failure) must not leave a phantom session that a later crash would
+    // synthesise an exit for.
+    this.liveSessions.add(opts.sessionId);
   }
 
   async write(sessionId: string, data: string): Promise<void> {
@@ -94,11 +134,42 @@ export class PtyHostClient {
   }
 
   async destroy(sessionId: string): Promise<void> {
+    // Dropped before the round-trip, not after: a host that dies mid-destroy
+    // would otherwise synthesise an exit for a session the caller has already
+    // torn down, and the caller has no way to tell the two apart.
+    this.liveSessions.delete(sessionId);
     await this.send({ type: 'destroy', sessionId });
+  }
+
+  async signal(sessionId: string, signal: string): Promise<void> {
+    await this.send({ type: 'signal', sessionId, signal });
+  }
+
+  async pause(sessionId: string): Promise<void> {
+    await this.send({ type: 'pause', sessionId });
+  }
+
+  async resume(sessionId: string): Promise<void> {
+    await this.send({ type: 'resume', sessionId });
   }
 
   async ack(sessionId: string, bytesConsumed: number): Promise<void> {
     await this.send({ type: 'ack', sessionId, bytesConsumed });
+  }
+
+  /**
+   * Rendered scrollback from the host's headless VT model. Bounded at
+   * O(lines × columns) regardless of how much the command printed.
+   */
+  async scrollback(sessionId: string, tailLines = 0): Promise<{ lines: string[]; vt: boolean }> {
+    const resp = await this.send({ type: 'scrollback', sessionId, tailLines });
+    if (resp.type !== 'scrollback') {
+      throw new Error(
+        `[PtyHostClient] scrollback failed: ${(resp as { message?: string }).message ?? resp.type}`,
+      );
+    }
+    const ok = resp as PtyScrollbackResponse;
+    return { lines: ok.lines, vt: ok.vt };
   }
 
   async stop(): Promise<void> {
@@ -107,6 +178,9 @@ export class PtyHostClient {
       this.child.kill('SIGTERM');
       this.child = null;
     }
+    // Deliberate shutdown, so no synthesised exits: the caller is tearing the
+    // whole thing down and does not need per-session obituaries.
+    this.liveSessions.clear();
     for (const [id, { reject }] of this.pendingRequests) {
       reject(new Error('[PtyHostClient] Host stopped'));
       this.pendingRequests.delete(id);
@@ -146,12 +220,52 @@ export class PtyHostClient {
     });
   }
 
+  /**
+   * △ Found while adding real process tests for this client: plain `node
+   * <host entry>` cannot boot — every workspace package's `package.json`
+   * "exports" field resolves the `import` condition to `./src/index.ts`
+   * (correct for TS-aware tooling — tsx, vitest, the monorepo's own `tsc`
+   * project references), but plain Node's native `.ts` support only STRIPS
+   * TYPE SYNTAX — it does not resolve a `.js` import specifier to a sibling
+   * `.ts` file the way tsx/vite/ts-node do. Every relative `from './x.js'`
+   * inside that `.ts` source then fails with `ERR_MODULE_NOT_FOUND`.
+   *
+   * The original fix passed the bare specifier `'tsx'`, which Node resolves
+   * against the *current working directory*, and relied on `tsx` being a
+   * devDependency of `apps/server`. Both halves were wrong for anything but a
+   * dev checkout: under `pnpm install --prod` — and in a packaged desktop
+   * build — devDependencies are not installed at all, so the fork died on
+   * `ERR_MODULE_NOT_FOUND: tsx` and the pty host could not start AT ALL in
+   * production. `tsx` is now a real `dependency` of `@generatorai/pty-host`
+   * (the package that actually needs it), and it is resolved from the host
+   * entry file's own resolution root to an absolute path, so the answer does
+   * not depend on where the gateway happens to have been launched from.
+   *
+   * Returns `[]` when tsx cannot be resolved: a build whose workspace deps are
+   * genuinely compiled to `.js` needs no loader, and refusing to fork at all
+   * would turn a working configuration into a hard failure.
+   */
+  private resolveExecArgv(): string[] {
+    try {
+      const requireFromHost = createRequire(this.hostEntryPath);
+      const tsxLoader = requireFromHost.resolve('tsx');
+      return ['--import', pathToFileURL(tsxLoader).href];
+    } catch {
+      this.logger.warn(
+        '[PtyHostClient] `tsx` is not resolvable from the pty-host entry — forking without a TypeScript loader. ' +
+          'This is correct only if the workspace packages it imports are compiled JavaScript.',
+      );
+      return [];
+    }
+  }
+
   private async spawn(): Promise<void> {
     if (this.stopped) throw new Error('[PtyHostClient] Supervisor is stopped');
 
     const child = fork(this.hostEntryPath, [], {
       env: { ...process.env, ...this.hostEnv },
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      execArgv: this.resolveExecArgv(),
     });
 
     let stderrBuffer = '';
@@ -181,19 +295,46 @@ export class PtyHostClient {
         this.pendingRequests.delete(id);
       }
 
+      // Every PTY the host owned died with it. Synthesise the exit the host
+      // can no longer send, BEFORE any restart: without this the adapter keeps
+      // its handles, `TerminalService` records stay `exited: false`, the idle
+      // reaper never collects them, and the SPA renders live terminals over
+      // dead processes forever. `null` (rather than a fabricated numeric code)
+      // is the honest answer — nobody observed how the shell terminated.
+      const orphaned = [...this.liveSessions];
+      this.liveSessions.clear();
+      if (orphaned.length > 0) {
+        this.logger.warn(
+          `[PtyHostClient] Synthesising exit for ${orphaned.length} session(s) lost with the host`,
+        );
+      }
+      for (const sessionId of orphaned) {
+        try {
+          this.onExit?.(sessionId, null);
+        } catch (err: unknown) {
+          // One subscriber throwing must not strand the remaining sessions.
+          this.logger.warn(`[PtyHostClient] exit handler threw for ${sessionId}: ${String(err)}`);
+        }
+      }
+
       const now = Date.now();
       this.restartTimestamps.push(now);
       const windowStart = now - RESTART_WINDOW_MS;
       const recent = this.restartTimestamps.filter((t) => t >= windowStart);
       this.restartTimestamps.splice(0, this.restartTimestamps.length - recent.length);
 
-      if (recent.length > MAX_RESTARTS) {
+      if (recent.length > this.maxRestarts) {
         this.logger.error(`[PtyHostClient] FATAL: pty-host crashed ${recent.length} times — giving up`);
         this.stopped = true;
+        // `stopped` alone is invisible to callers, so `PtyHostAdapter` kept
+        // reporting `isAvailable() === true` and every subsequent spawn threw
+        // instead of falling through to the in-process host. This flag is what
+        // makes the fallback actually happen.
+        this.fatal = true;
         return;
       }
 
-      const delay = Math.min(1000 * 2 ** (recent.length - 1), 30_000);
+      const delay = Math.min(this.restartBaseDelayMs * 2 ** (recent.length - 1), RESTART_MAX_DELAY_MS);
       setTimeout(() => {
         this.spawn().then(() => this.waitForReady()).catch((err: unknown) => {
           this.logger.error(`[PtyHostClient] Restart failed: ${String(err)}`);
@@ -216,6 +357,9 @@ export class PtyHostClient {
     }
     if (msg.type === 'exit') {
       const n = msg as PtyExitNotification;
+      // The host reported this one itself, so it must not also be synthesised
+      // if the host later dies.
+      this.liveSessions.delete(n.sessionId);
       this.onExit?.(n.sessionId, n.code);
       return;
     }

@@ -5,7 +5,22 @@
  * (atomic tmp+rename, mode 0600) so the gateway can verify the host is alive.
  * The gateway never calls the CUA driver directly (L5).
  *
- * Implements fused act+settle+capture: one IPC round-trip per action.
+ * △ THE FUSION IN W17 IS NOT IMPLEMENTED. This header used to claim
+ * "fused act+settle+capture: one IPC round-trip per action", which is a
+ * different claim from W17's acceptance criterion AND is not what the code
+ * below does. Both halves of that matter:
+ *
+ *   • W17's criterion is "one click = one DRIVER round trip". Counting IPC
+ *     round trips instead measures the gateway hop, which is the cheap half.
+ *   • A `perform_action` with `captureAfter` is currently SIX driver round
+ *     trips: `resolveFocusedWindow()` (list_apps + list_windows) and the
+ *     action itself, then `resolveFocusedWindow()` AGAIN plus
+ *     `get_window_state` inside `captureScreen()` — and the frame comes back
+ *     via a full-screen PNG written to `os.tmpdir()` and read straight back.
+ *
+ * `__tests__/CuaDriverConnection.test.ts` pins that count so the number W17
+ * has to move is measured rather than asserted. See `CuaHostIpc.ts` for the
+ * protocol defect that must be fixed before this host is wired at all.
  */
 
 import { promises as fs } from 'node:fs';
@@ -18,6 +33,8 @@ import type {
   CuaConnectionDescriptor,
 } from '@generatorai/shared';
 import { isCuaHostRequest } from '@generatorai/shared';
+import type { ComputerAction } from '@generatorai/shared';
+import { CuaDriverConnection, type DriverModule } from './CuaDriverConnection.js';
 
 /** Milliseconds to wait for the system to settle after a mouse/keyboard action. */
 const SETTLE_DELAY_MS = 200;
@@ -26,6 +43,12 @@ export class CuaHostServer {
   /* W17 */
   private readonly bootTime = Date.now();
   private descriptorPath = '';
+  private readonly driver: CuaDriverConnection;
+
+  /** `driverModule` is injectable for tests; production loads the real `@trycua/cua-driver` package. */
+  constructor(driverModule?: DriverModule) {
+    this.driver = new CuaDriverConnection(driverModule);
+  }
 
   start(): void {
     if (typeof process.send !== 'function') {
@@ -99,7 +122,7 @@ export class CuaHostServer {
       case 'perform_action': {
         const { reqId, actionId, action, captureAfter } = req;
         try {
-          await this.performAction(action as { type: string } & Record<string, unknown>);
+          await this.performAction(action);
           // Settle delay — let the OS process the action before capturing
           if (captureAfter) {
             await new Promise<void>((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
@@ -125,27 +148,20 @@ export class CuaHostServer {
   }
 
   /**
-   * Perform a computer-use action. In production this will delegate to the
-   * platform CUA driver (pyautogui, xdotool, AppleScript, etc.).
-   * The driver integration is injected via GENERATORAI_CUA_DRIVER env var.
-   *
-   * For now we log the action and no-op; the host is wired but the driver
-   * binding is done in the platform-specific integration layer.
+   * Perform a computer-use action via the real `@trycua/cua-driver` SDK —
+   * see `CuaDriverConnection.performAction()` for the actual mapping.
    */
-  private async performAction(action: { type: string } & Record<string, unknown>): Promise<void> {
-    console.log(`[CuaHostServer] Performing action: ${action.type}`, action);
-    // TODO: delegate to platform driver once CUA driver package is available
-    // e.g. await cuaDriver.perform(action);
+  private async performAction(action: ComputerAction): Promise<void> {
+    await this.driver.performAction(action);
   }
 
   /**
-   * Capture the current screen state. In production this uses the platform
-   * screenshot API. Returns a base-64 encoded JPEG/PNG string.
+   * Capture a real screenshot of the currently focused window via the
+   * driver — see `CuaDriverConnection.captureScreen()`. Returns a base-64
+   * encoded PNG.
    */
   private async captureScreen(): Promise<string> {
-    // TODO: implement with platform driver; placeholder returns empty base64
-    console.log('[CuaHostServer] Capturing screen');
-    return '';
+    return this.driver.captureScreen();
   }
 
   async shutdown(): Promise<void> {

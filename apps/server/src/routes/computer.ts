@@ -17,7 +17,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Router, type Request, type Response } from 'express';
-import { createReadStream } from 'node:fs';
+import { createReadStream, watch as watchPath } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
@@ -104,6 +104,79 @@ async function exists(file: string): Promise<boolean> {
 }
 
 /**
+ * Longest a tail wakes up for on its own when the watcher says nothing.
+ *
+ * P1-11 replaced a flat 250 ms `fs.stat` poll with a watcher, but a watcher
+ * alone is not a safe sole source of truth: `fs.watch` is documented as not
+ * universally reliable, it does not fire at all on most network filesystems,
+ * and on some platforms it coalesces rapid appends. So the watcher is the
+ * FAST path and this is the floor — four times fewer wakeups than the old
+ * poll in the pathological case, and effectively none in the normal one.
+ */
+const TAIL_IDLE_STEP_MS = 1000;
+
+/**
+ * Floor between two idle wakeups.
+ *
+ * A directory watcher also fires for metadata-only changes and for events it
+ * cannot name (`filename` is null on some platforms), neither of which grows
+ * the file — without a floor, a busy recording directory turns the tail into a
+ * spin loop, which is a worse failure than the poll it replaced.
+ */
+const TAIL_MIN_WAIT_MS = 50;
+
+/**
+ * Waits for the next change to `file`, or for `timeoutMs`, whichever is first.
+ * Returns how long it actually waited, so the caller's idle budget stays honest.
+ *
+ * Watches the DIRECTORY rather than the file: a capture that has not started
+ * yet has no file to watch, and ffmpeg replaces its output by rename on some
+ * paths — both of which a file-scoped watcher misses entirely.
+ */
+async function waitForFileChange(file: string, timeoutMs: number, giveUp: AbortSignal): Promise<number> {
+  const started = Date.now();
+  const target = path.basename(file);
+  if (giveUp.aborted) return 0;
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let watcher: ReturnType<typeof watchPath> | undefined;
+    const done = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      giveUp.removeEventListener('abort', done);
+      try { watcher?.close(); } catch { /* already closed */ }
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    timer.unref?.();
+    // A disconnected client must not keep the tail asleep for a full step —
+    // that is a whole second of a dead response holding a watcher open.
+    giveUp.addEventListener('abort', done, { once: true });
+    try {
+      watcher = watchPath(path.dirname(file), (_event, name) => {
+        // `name` is null on some platforms; a wakeup we cannot attribute is
+        // still cheaper than sleeping through the write we were waiting for.
+        if (name === null || name === undefined || name === target) done();
+      });
+      watcher.on('error', done);
+      watcher.unref?.();
+    } catch {
+      // No watcher available (network mount, permissions) — the timeout alone
+      // degrades this back to polling, which is exactly the old behaviour.
+    }
+  });
+  // The watcher can fire instantly and repeatedly without the file having
+  // grown, so the floor is applied AFTER the wait rather than before it —
+  // before, it would delay every legitimate append by that much.
+  const elapsed = Date.now() - started;
+  if (elapsed < TAIL_MIN_WAIT_MS && !giveUp.aborted) {
+    await new Promise((resolve) => setTimeout(resolve, TAIL_MIN_WAIT_MS - elapsed));
+  }
+  return Date.now() - started;
+}
+
+/**
  * Streams a file that is still being written, then keeps going as it grows.
  *
  * A fragmented MP4 is playable from the first fragment, so the browser can
@@ -128,8 +201,10 @@ async function tailFile(
   // never resolves and the stream leaks for the process lifetime.
   let clientGone = false;
   let abortInFlight: (() => void) | undefined;
+  const disconnected = new AbortController();
   res.once('close', () => {
     clientGone = true;
+    disconnected.abort();
     abortInFlight?.();
   });
 
@@ -173,11 +248,59 @@ async function tailFile(
     // Nothing new. Stop once the capture has finished and we have drained it,
     // and give up on a capture that produces nothing at all.
     if (!isActive()) break;
-    idleFor += 250;
+    idleFor += await waitForFileChange(file, TAIL_IDLE_STEP_MS, disconnected.signal);
     if (idleFor > 30_000) break;
-    await new Promise((resolve) => setTimeout(resolve, 250));
   }
   res.end();
+}
+
+/**
+ * Memoised path → artifact-id join for the activity feed.
+ *
+ * The audit trail stores a relative PATH and the artifact store is keyed by id,
+ * so the two have to be joined somewhere. The repository port exposes no
+ * lookup-by-path, so the join needs the workspace's artifact rows — and the
+ * activity feed is POLLED, which turned a full table read into a per-second
+ * cost that grows with the length of the session.
+ *
+ * The cache is invalidated by a path it has never seen, not only by time: a new
+ * capture is exactly the event that makes it stale, and nothing else can add a
+ * path. Paths that were absent when the map was built are remembered as absent
+ * (their frame was pruned, and pruning is permanent) so a session whose oldest
+ * audit rows outlive their frames does not rebuild on every poll — the only
+ * case where a time-only cache would have been useless.
+ */
+const ACTIVITY_JOIN_TTL_MS = 30_000;
+const activityJoin = new Map<string, { at: number; byPath: Map<string, string>; absent: Set<string> }>();
+
+async function artifactIdsByPath(
+  repo: Container['workspaceArtifactRepo'],
+  workspaceId: string,
+  wanted: readonly string[],
+): Promise<Map<string, string>> {
+  const cached = activityJoin.get(workspaceId);
+  if (
+    cached &&
+    Date.now() - cached.at < ACTIVITY_JOIN_TTL_MS &&
+    wanted.every((p) => cached.byPath.has(p) || cached.absent.has(p))
+  ) {
+    return cached.byPath;
+  }
+
+  const byPath = new Map<string, string>();
+  for (const artifact of await repo.findByWorkspace(workspaceId)) {
+    if (artifact.artifactType !== 'computer_screenshot') continue;
+    byPath.set(artifact.relativePath.replace(/\\/g, '/'), artifact.id);
+  }
+  const absent = new Set(wanted.filter((p) => !byPath.has(p)));
+  activityJoin.set(workspaceId, { at: Date.now(), byPath, absent });
+  // Unbounded growth would make this a leak of its own; workspaces are few and
+  // the entries are small, but "few" is not a bound.
+  if (activityJoin.size > 64) {
+    const oldest = activityJoin.keys().next().value;
+    if (oldest !== undefined && oldest !== workspaceId) activityJoin.delete(oldest);
+  }
+  return byPath;
 }
 
 const ConsentBodySchema = z.object({
@@ -395,12 +518,10 @@ export function createComputerRoutes(container: Container): Router {
     try {
       const workspaceId = idOf(req as Request<WorkspaceIdParams>);
       const rows = await computerUseRepo.listAudit(workspaceId, 60);
-      const artifacts = await workspaceArtifactRepo.findByWorkspace(workspaceId);
-      const idByPath = new Map<string, string>();
-      for (const artifact of artifacts) {
-        if (artifact.artifactType !== 'computer_screenshot') continue;
-        idByPath.set(artifact.relativePath.replace(/\\/g, '/'), artifact.id);
-      }
+      const wanted = rows
+        .map((r) => r.artifactPath?.replace(/\\/g, '/'))
+        .filter((p): p is string => p !== undefined && p !== null);
+      const idByPath = await artifactIdsByPath(workspaceArtifactRepo, workspaceId, wanted);
       res.json({
         entries: rows
           .map((r) => ({
@@ -451,8 +572,16 @@ export function createComputerRoutes(container: Container): Router {
       const params = req.params as Record<string, string>;
       const workspaceId = String(params['id'] ?? '');
       const artifactId = String(params['artifactId'] ?? '');
-      const all = await workspaceArtifactRepo.findByWorkspace(workspaceId);
-      const artifact = all.find((a) => a.id === artifactId && a.artifactType === 'computer_screenshot');
+      // P1-31 — `findById`, not "load every row for the workspace and scan".
+      // A long session holds thousands of artifact rows and this route is hit
+      // once per thumbnail. The workspace comparison that the old `.find()` got
+      // for free is done explicitly, so a frame from another workspace is still
+      // a 404 rather than a leak.
+      const found = await workspaceArtifactRepo.findById(artifactId);
+      const artifact =
+        found && found.workspaceId === workspaceId && found.artifactType === 'computer_screenshot'
+          ? found
+          : null;
       if (!artifact) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Frame not found' } });
         return;

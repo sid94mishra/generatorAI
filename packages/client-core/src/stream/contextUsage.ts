@@ -110,6 +110,25 @@ export function contextTokensFromUsage(usage: TurnUsage): number {
 }
 
 /**
+ * Whether a provider's `harness.usage` can stand in for a context snapshot.
+ *
+ * It can only when the numbers describe ONE prompt. Copilot's do. The Claude
+ * Agent SDK's do not: its `result` message aggregates every API call the turn
+ * made, so a turn with five tool round-trips counts the same cached prefix
+ * five times. Reading that as occupancy is what put a two-message chat at
+ * "212k tokens / 23% full", climbing every turn — it was a running total of
+ * spend wearing a gauge's clothes.
+ *
+ * `harness.context_usage` carries the real figure for claude-agent (measured
+ * from the last API call, and cross-checked against the CLI's own
+ * `getContextUsage()`), so when no snapshot has arrived the honest answer is
+ * "not yet known" rather than a number several times too large.
+ */
+function usageMeasuresOnePrompt(usage: TurnUsage): boolean {
+  return usage.provider !== 'claude-agent';
+}
+
+/**
  * Resolve the model's prompt-token budget for the active context tier.
  *
  * Treats 0 as "unknown" — Copilot's `auto` model reports 0, and `??` would
@@ -152,7 +171,7 @@ export function resolveContextUsage(args: {
   if (snapshot && Number.isFinite(snapshot.currentTokens) && snapshot.currentTokens >= 0) {
     used = snapshot.currentTokens;
     source = snapshot.source;
-  } else if (usage) {
+  } else if (usage && usageMeasuresOnePrompt(usage)) {
     used = contextTokensFromUsage(usage);
     source = 'turn-usage';
   }

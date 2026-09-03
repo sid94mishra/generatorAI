@@ -7,20 +7,20 @@
 // `GENERATORAI_API_KEY` in the environment and skipped DPoP entirely.
 // ────────────────────────────────────────────────────────────────
 
-import { createAdminApi, createApiClient, SseParser } from '@generatorai/client-core';
-import { Backoff } from '@generatorai/client-transport';
+import { createAdminApi, createApiClient, MuxStreamClient } from '@generatorai/client-core';
 import type { AuthenticatedClientRuntime } from '@generatorai/client-runtime';
 import { getCliAuthRuntime } from '../auth/cliAuth.js';
 import {
+  checkProtocolCompatibility,
   ConnectionManager,
   probeEndpoint,
   resolveEndpoint,
+  SUPPORTED_PROTOCOL_VERSIONS,
   type ServerConnection,
 } from '../connection/ConnectionManager.js';
 import type { Api, StreamPort } from '../context/CliContext.js';
 import type { ResolvedCliConfig } from '../config/schema.js';
 import { CliError } from '../errors/CliError.js';
-import { SharedStreamPort } from './SharedStreamPort.js';
 
 export interface CliClient {
   api: Api;
@@ -28,6 +28,15 @@ export interface CliClient {
   runtime: AuthenticatedClientRuntime;
   baseUrl: string;
   connection: ServerConnection | null;
+  /**
+   * Set when the server's protocol version is ahead of what this CLI build
+   * has been written against (`checkProtocolCompatibility() === 'server-ahead'`).
+   * Not fatal — unknown response fields are just ignored — but worth a
+   * one-time heads-up rather than a silently stale CLI. A version genuinely
+   * too old to talk to fails outright in `selectEndpoint` instead; this is
+   * the one case left for the caller to decide how to surface.
+   */
+  protocolWarning: string | null;
   fetch: (path: string, init?: RequestInit) => Promise<Response>;
   /** Absolute ws:// or wss:// URL for a server WebSocket path. */
   socketUrl(path: string, scope: string, id: string | null): Promise<string>;
@@ -52,11 +61,12 @@ export interface CreateCliClientOptions {
  * `config.server.url`. The bare URL fallback exists so a fresh install with
  * no catalog still works against a local server.
  */
-async function selectEndpoint(
+/** Exported for direct testing of the version-negotiation branch — the rest of `createCliClient` needs a live DPoP runtime to exercise meaningfully, this does not. */
+export async function selectEndpoint(
   options: CreateCliClientOptions,
-): Promise<{ baseUrl: string; connection: ServerConnection | null }> {
+): Promise<{ baseUrl: string; connection: ServerConnection | null; protocolWarning: string | null }> {
   if (options.serverUrl) {
-    return { baseUrl: options.serverUrl.replace(/\/$/, ''), connection: null };
+    return { baseUrl: options.serverUrl.replace(/\/$/, ''), connection: null, protocolWarning: null };
   }
 
   const manager = new ConnectionManager();
@@ -66,11 +76,11 @@ async function selectEndpoint(
       manager.active();
 
   if (!connection) {
-    return { baseUrl: options.config.server.url.replace(/\/$/, ''), connection: null };
+    return { baseUrl: options.config.server.url.replace(/\/$/, ''), connection: null, protocolWarning: null };
   }
 
   if (options.offline) {
-    return { baseUrl: connection.endpoint, connection };
+    return { baseUrl: connection.endpoint, connection, protocolWarning: null };
   }
 
   const resolved = await resolveEndpoint(connection);
@@ -99,14 +109,43 @@ async function selectEndpoint(
     );
   }
 
+  // Protocol-version range check — real negotiation, replacing the previous
+  // "nothing is checked at all" state (the version field this reads was, until
+  // this same change, populated under the WRONG field name and always
+  // `undefined`; see `ConnectionManager.ts`'s `probeEndpoint`). A server
+  // below this CLI's minimum-supported version fails outright here, the same
+  // way the host-pinning check above does — a request against a genuinely
+  // incompatible server is not a request worth making. A server AHEAD of
+  // this CLI build is not fatal (unknown response fields are simply
+  // ignored), so that case is surfaced as `protocolWarning` for the caller
+  // to log/toast once, not thrown.
+  const compatibility = checkProtocolCompatibility(resolved.probe.protocolVersion);
+  if (compatibility === 'server-too-old') {
+    throw new CliError(
+      'VERSION_MISMATCH',
+      `${connection.label} speaks protocol v${resolved.probe.protocolVersion}; this CLI needs at least v${SUPPORTED_PROTOCOL_VERSIONS.min}.`,
+      {
+        hint: 'The server needs upgrading before this CLI build can talk to it.',
+        suggestions: [`generatorai connect test ${connection.label}`],
+      },
+    );
+  }
+
   if (resolved.endpoint !== connection.endpoint) {
     manager.markConnected(connection.serverId, resolved.endpoint);
   }
-  return { baseUrl: resolved.endpoint, connection };
+  return {
+    baseUrl: resolved.endpoint,
+    connection,
+    protocolWarning:
+      compatibility === 'server-ahead'
+        ? `${connection.label} speaks protocol v${resolved.probe.protocolVersion}, ahead of what this CLI build understands.`
+        : null,
+  };
 }
 
 export async function createCliClient(options: CreateCliClientOptions): Promise<CliClient> {
-  const { baseUrl, connection } = await selectEndpoint(options);
+  const { baseUrl, connection, protocolWarning } = await selectEndpoint(options);
 
   const runtime = getCliAuthRuntime({
     endpoint: baseUrl,
@@ -114,8 +153,6 @@ export async function createCliClient(options: CreateCliClientOptions): Promise<
     profile: options.config.activeProfile,
     legacyApiKey: options.config.server.apiKey,
   });
-
-  const disposers: Array<() => void> = [];
 
   const requestTimeoutMs = options.config.server.timeoutMs;
 
@@ -157,126 +194,41 @@ export async function createCliClient(options: CreateCliClientOptions): Promise<
 
   const api = deepMergeApi(createApiClient(apiFetch), createAdminApi(apiFetch)) as Api;
 
-  const stream: StreamPort = {
-    subscribe(scope, id, handler, subscribeOptions) {
-      let closed = false;
-      let lastSequence = subscribeOptions?.afterSequence ?? 0;
-      const backoff = new Backoff({ baseMs: 1000, maxMs: 30_000, factor: 1.5 });
-      let abort: AbortController | null = null;
-
-      const connect = async (): Promise<void> => {
-        while (!closed) {
-          abort = new AbortController();
-          const onOuterAbort = () => abort?.abort();
-          options.signal?.addEventListener('abort', onOuterAbort, { once: true });
-
-          try {
-            const query = new URLSearchParams({ scope, id });
-            if (lastSequence > 0) query.set('afterSequence', String(lastSequence));
-            if (subscribeOptions?.filter?.length) {
-              query.set('filter', subscribeOptions.filter.join(','));
-            }
-
-            const response = await runtime.fetch(`/api/stream?${query}`, {
-              headers: {
-                accept: 'text/event-stream',
-                // Belt and braces alongside `afterSequence`: whichever the
-                // server honours, no event is delivered twice or skipped.
-                ...(lastSequence > 0 ? { 'last-event-id': String(lastSequence) } : {}),
-              },
-              signal: abort.signal,
-            });
-
-            if (!response.ok || !response.body) {
-              throw new Error(`Stream failed: ${response.status} ${response.statusText}`);
-            }
-
-            subscribeOptions?.onConnected?.();
-            backoff.reset();
-
-            const parser = new SseParser();
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              for (const message of parser.push(decoder.decode(value, { stream: true }))) {
-                if (!message.data) continue;
-                let payload: { kind?: string; payload?: unknown; data?: unknown; sequence?: number };
-                try {
-                  payload = JSON.parse(message.data) as typeof payload;
-                } catch {
-                  continue;
-                }
-                const sequence = payload.sequence ?? (message.id ? Number(message.id) : undefined);
-                if (sequence !== undefined && Number.isFinite(sequence)) {
-                  lastSequence = Math.max(lastSequence, sequence);
-                }
-                handler({
-                  kind: payload.kind ?? message.event,
-                  data: (payload.payload ?? payload.data ?? {}) as Record<string, unknown>,
-                  ...(sequence !== undefined ? { sequence } : {}),
-                });
-              }
-            }
-          } catch (error) {
-            if (closed || abort?.signal.aborted) return;
-            subscribeOptions?.onDisconnected?.(
-              error instanceof Error ? error.message : String(error),
-            );
-          } finally {
-            options.signal?.removeEventListener('abort', onOuterAbort);
-          }
-
-          if (closed) return;
-          // A clean end-of-body is still a disconnect — the server closed the
-          // stream — so both paths fall through to the same reconnect.
-          const attempt = backoff.attempts + 1;
-          if (attempt > 20) {
-            subscribeOptions?.onDisconnected?.('giving up after 20 attempts');
-            return;
-          }
-          subscribeOptions?.onReconnecting?.(attempt);
-          await new Promise((resolve) => setTimeout(resolve, backoff.next()));
-        }
-      };
-
-      void connect();
-
-      const dispose = () => {
-        closed = true;
-        abort?.abort();
-        // Drop the registration too. A TUI session opens and closes a
-        // subscription per pane, and without this the array — and the aborted
-        // controllers it closes over — grows for the life of the process.
-        const index = disposers.indexOf(dispose);
-        if (index >= 0) disposers.splice(index, 1);
-      };
-      disposers.push(dispose);
-      return dispose;
-    },
-  };
-
-  // W48 / STR-04 — deduplicate connections for the same scope:id.
-  // `SharedStreamPort` fans multiple pane subscriptions to the same scope out
-  // from a single underlying HTTP SSE connection, eliminating duplicate requests
-  // when the user opens the same chat/run in more than one TUI pane.
-  // The full mux (single connection for ALL scopes) is the next step; see
-  // packages/cli-core/src/client/SharedStreamPort.ts for details.
-  const sharedStream = new SharedStreamPort(stream);
+  // Phase 3 items 1/2 — one shared connection multiplexing every subscribed
+  // scope, replacing the previous per-`scope:id` HTTP/SSE connection (each
+  // with its own `Backoff`/reconnect loop) plus `SharedStreamPort`'s
+  // same-scope-only dedup on top of it. `MuxStreamClient` talks to the SAME
+  // real server endpoints `apps/web`'s browser client already uses
+  // (`POST /api/stream/connections`, `POST .../subs`, `GET /api/stream?c=`)
+  // — `apps/server/src/routes/stream.ts`'s own comment on the older
+  // single-scope endpoint says as much: "stays for the CLI, curl and any
+  // client that has not moved." This is that move.
+  //
+  // Deliberately `runtime.fetch` directly, not `apiFetch`: `apiFetch` bounds
+  // every call to `--timeout`, which is correct for a REST call and wrong
+  // for a connection meant to stay open indefinitely — the original
+  // single-scope implementation made the same choice for the same reason.
+  // The POST control-plane calls (`/connections`, `.../subs`) inherit that
+  // same lack of a per-request timeout as a result; they are still bounded
+  // by `options.signal` (the whole client's lifetime), just not by
+  // `--timeout` specifically — a deliberate, minor trade-off, not an
+  // oversight.
+  const streamClient = new MuxStreamClient({
+    fetch: (path, init) => runtime.fetch(path, init),
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
 
   return {
     api,
-    stream: sharedStream,
+    stream: streamClient,
     runtime,
     baseUrl,
     connection,
+    protocolWarning,
     fetch: apiFetch,
     socketUrl: (path, scope, id) => runtime.buildSocketUrl(path, scope, id),
     dispose() {
-      sharedStream.disposeAll();
-      for (const dispose of disposers.splice(0)) dispose();
+      streamClient.disposeAll();
     },
   };
 }

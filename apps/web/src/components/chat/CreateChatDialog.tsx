@@ -192,7 +192,7 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
       open={open}
       onClose={() => onOpenChange(false)}
       title="New Chat"
-      description="Start a new conversation with Copilot"
+      description="Start a new conversation with your configured agent"
       size="lg"
       footer={
         <>

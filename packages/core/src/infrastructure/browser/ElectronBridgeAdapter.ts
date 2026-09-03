@@ -48,6 +48,8 @@ import type {
   IBrowserBridge,
   InvokeFunctionResult,
   PageOutcome,
+  ScreencastCapabilities,
+  ScreencastCodec,
   ScreencastFrame,
 } from '../../domain/ports/IBrowserBridge.js';
 import { INSPECTOR_SCRIPT } from './InspectorScript.js';
@@ -437,10 +439,24 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
     }
   }
 
-  async *screencast(_handle: BrowserHandle, _opts: { fps: number; quality: number }): AsyncIterable<ScreencastFrame> {
+  /**
+   * P1-33. Native mode draws to the screen through the WebContentsView; the
+   * compositor never hands us a frame, so there is nothing to stream and no
+   * codec to offer. Declaring that is the point: callers used to *discover* it
+   * by catching the throw below, which cannot tell "this mode has no
+   * screencast" apart from "the screencast just broke".
+   */
+  screencastCapabilities(): ScreencastCapabilities {
+    return { supportsScreencast: false, codecs: [] };
+  }
+
+  async *screencast(
+    _handle: BrowserHandle,
+    _opts: { fps: number; quality: number; codecs?: readonly ScreencastCodec[]; signal?: AbortSignal },
+  ): AsyncIterable<ScreencastFrame> {
     // Native mode renders on-screen via the WCV — no screencast stream.
     // Marker throw kept short so callers who forget to branch on
-    // `descriptor.mode` fail loudly during development.
+    // `screencastCapabilities()` fail loudly during development.
     throw new Error('screencast unsupported in native mode');
     // Unreachable, but keeps the async-generator return type well-formed.
     // eslint-disable-next-line no-unreachable

@@ -4,7 +4,7 @@
 
 import { EventEmitter } from 'node:events';
 import type { AgentEvent, PersistedEvent, ILogger } from '@generatorai/shared';
-import { DELTA_SESSION_INFO_TYPES, getMeter } from '@generatorai/shared';
+import { DELTA_SESSION_INFO_TYPES, getMeter, recordFallback } from '@generatorai/shared';
 import type { IEventRepository } from '../domain/ports/IRepositories.js';
 import type { ISequenceAllocator } from '../domain/ports/ISequenceAllocator.js';
 
@@ -325,6 +325,11 @@ export class EventBus {
           legacyOk = true;
         } catch (err2) {
           persistErrors.add(1, { session_id: sessionId, kind: event.kind });
+          // §11.1 — a dropped broadcast is the most expensive fallback in the
+          // system and the least visible: the request that caused it still
+          // succeeds, so only this counter distinguishes "quiet" from "losing
+          // events".
+          if (legacyIsCommitPoint) recordFallback('event_persist_dropped', { kind: event.kind });
           const err2Msg = err2 instanceof Error ? err2.message : String(err2);
           this.logger?.error(
             legacyIsCommitPoint

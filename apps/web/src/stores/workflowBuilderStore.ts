@@ -24,6 +24,7 @@ import type {
   EntityScope,
   WorkflowHookDefinition,
 } from '@generatorai/shared';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 // ── Types ──
 
@@ -148,7 +149,15 @@ interface WorkflowBuilderState {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
-  pushHistory: () => void;
+  /**
+   * Snapshot the current nodes/edges onto the undo stack.
+   *
+   * `coalesceKey` folds a burst of related edits into a single entry: while
+   * the same key keeps arriving inside COALESCE_WINDOW_MS the top entry is
+   * *replaced* rather than appended, so typing a stage name produces one
+   * undo step instead of one per keystroke.
+   */
+  pushHistory: (coalesceKey?: string) => void;
 
   // ── Actions: Validation ──
   validate: () => ValidationError[];
@@ -214,7 +223,17 @@ function detectCycles(nodes: Node[], edges: Edge[]): boolean {
 
 const MAX_HISTORY = 50;
 
-export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) => ({
+/**
+ * How long a coalescing key stays "hot". Consecutive edits carrying the same
+ * key inside this window collapse into one undo step.
+ */
+const COALESCE_WINDOW_MS = 700;
+
+/** Module-level because these are transient input state, not rendered state. */
+let coalesceKey: string | null = null;
+let coalesceAt = 0;
+
+const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => ({
   // ── Initial State ──
   definitionId: null,
   name: '',
@@ -267,7 +286,13 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       autoCreatePR: definition.orchestratorConfig?.autoCreatePR ?? false,
       scope: (definition as unknown as { scope?: EntityScope }).scope ?? 'global',
       projectId: definition.projectId ?? null,
-      selectedCodebases: definition.orchestratorConfig?.gitRepositories?.map(r => r.alias) ?? [],
+      // Prefer `codebaseAliases` (the project/codebase model the server
+      // persists); fall back to the legacy gitRepositories aliases so
+      // definitions saved before that field existed still load.
+      selectedCodebases:
+        definition.orchestratorConfig?.codebaseAliases?.length
+          ? definition.orchestratorConfig.codebaseAliases
+          : (definition.orchestratorConfig?.gitRepositories?.map((r) => r.alias) ?? []),
       hooks: (definition as unknown as { hooks?: WorkflowHookDefinition[] }).hooks ?? [],
       nodes,
       edges,
@@ -280,6 +305,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       history: [{ nodes: [...nodes], edges: [...edges] }],
       historyIndex: 0,
     });
+    coalesceKey = null;
   },
 
   resetBuilder: () => {
@@ -306,9 +332,14 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       isSaving: false,
       validationErrors: [],
       lastSavedAt: null,
-      history: [],
-      historyIndex: -1,
+      // Seed the empty canvas as entry 0. Without it `historyIndex` starts at
+      // -1, the first add lands at index 0, and `canUndo()` (index > 0) stays
+      // false — so the very first stage you add to a NEW workflow could never
+      // be undone.
+      history: [{ nodes: [], edges: [] }],
+      historyIndex: 0,
     });
+    coalesceKey = null;
   },
 
   setDefinitionId: (id) => set({ definitionId: id }),
@@ -328,6 +359,13 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       nodes: applyNodeChanges(changes, state.nodes),
       ...(hasMeaningfulChange ? { isDirty: true } : {}),
     }));
+    // Record the layout once the drag settles (React Flow reports
+    // `dragging: false` on the final position change). Snapshotting every
+    // intermediate frame would blow the history budget, and snapshotting
+    // none of them meant a redo silently reverted the layout.
+    if (changes.some((c) => c.type === 'position' && c.dragging === false)) {
+      get().pushHistory();
+    }
   },
 
   onEdgesChange: (changes) => {
@@ -401,6 +439,12 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       }),
       isDirty: true,
     }));
+    // Property edits are part of the canvas state, so they must be recorded:
+    // without this a redo replayed a snapshot taken *before* the edit and
+    // silently threw away every prompt, condition and validation rule typed
+    // since the last structural change. Keyed per stage+field so that holding
+    // down a key is one undo step but editing a different field is a new one.
+    get().pushHistory(`stage:${stageId}:${Object.keys(updates).join(',')}`);
   },
 
   removeStage: (stageId) => {
@@ -463,6 +507,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       }),
       isDirty: true,
     }));
+    get().pushHistory();
   },
 
   // ── Selection ──
@@ -491,16 +536,39 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
   setValidationErrors: (errors) => set({ validationErrors: errors }),
 
   // ── Undo/Redo ──
-  pushHistory: () => {
+  pushHistory: (key) => {
     const state = get();
+    const now = Date.now();
+    const entry = { nodes: [...state.nodes], edges: [...state.edges] };
+
+    // Fold this edit into the previous one when it continues the same burst
+    // (same key, still inside the window) — otherwise every keystroke would
+    // become its own undo step and evict all structural history.
+    const coalescing =
+      key !== undefined &&
+      key === coalesceKey &&
+      now - coalesceAt < COALESCE_WINDOW_MS &&
+      state.historyIndex >= 0;
+
+    coalesceKey = key ?? null;
+    coalesceAt = now;
+
+    if (coalescing) {
+      const newHistory = state.history.slice(0, state.historyIndex + 1);
+      newHistory[state.historyIndex] = entry;
+      set({ history: newHistory });
+      return;
+    }
+
     const newHistory = state.history.slice(0, state.historyIndex + 1);
-    newHistory.push({ nodes: [...state.nodes], edges: [...state.edges] });
+    newHistory.push(entry);
     if (newHistory.length > MAX_HISTORY) newHistory.shift();
     set({ history: newHistory, historyIndex: newHistory.length - 1 });
   },
 
   undo: () => {
     const state = get();
+    coalesceKey = null;
     if (state.historyIndex <= 0) return;
     const newIndex = state.historyIndex - 1;
     const entry = state.history[newIndex];
@@ -515,6 +583,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
 
   redo: () => {
     const state = get();
+    coalesceKey = null;
     if (state.historyIndex >= state.history.length - 1) return;
     const newIndex = state.historyIndex + 1;
     const entry = state.history[newIndex];
@@ -630,3 +699,8 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
     return node?.data.stage ?? null;
   },
 }));
+
+
+// HMR-split-proof: every module instance shares the first-created store.
+// See lib/globalSingleton.ts for why this is load-bearing in dev.
+export const useWorkflowBuilderStore = globalSingleton('web.workflowBuilderStore', () => useWorkflowBuilderStoreImpl);

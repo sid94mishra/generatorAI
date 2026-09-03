@@ -275,6 +275,15 @@ export interface DiffViewProps {
   /** First line to paint. Clamped, so callers can seek past the end freely. */
   scrollTop?: number;
   showLineNumbers?: boolean;
+  /**
+   * Index of the line the cursor is on (open question #21).
+   *
+   * `-1` (the default) means no cursor, which is every caller that only
+   * reads a diff. A caller that COMMENTS on a line needs one: `review
+   * create`'s `startLine` is required server-side, and without a cursor the
+   * only honest way to supply it was to ask the user to type a number.
+   */
+  selectedIndex?: number;
 }
 
 export function DiffView({
@@ -283,6 +292,7 @@ export function DiffView({
   height,
   scrollTop = 0,
   showLineNumbers = true,
+  selectedIndex = -1,
 }: DiffViewProps): React.JSX.Element {
   const theme = useTheme();
   const { columns } = useTerminalSize();
@@ -303,10 +313,14 @@ export function DiffView({
     <Box flexDirection="column">
       {visible.map((line, index) => {
         const { colour, marker } = diffStyle(theme, line.type);
+        const isCursor = first + index === selectedIndex;
         return (
-          <Text key={first + index} color={colour} wrap="truncate-end">
+          // `inverse` rather than a colour: the row already carries add/
+          // remove colour, and overriding it would hide the one thing a
+          // diff row is meant to say.
+          <Text key={first + index} color={colour} wrap="truncate-end" inverse={isCursor}>
             {showLineNumbers ? (
-              <Text color={theme.c('muted')}>
+              <Text color={isCursor ? colour : theme.c('muted')}>
                 {String(line.oldLine ?? '').padStart(4)}
                 {String(line.newLine ?? '').padStart(5)}{' '}
               </Text>

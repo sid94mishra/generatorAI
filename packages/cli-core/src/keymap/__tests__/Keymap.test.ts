@@ -83,6 +83,33 @@ describe('Keymap', () => {
     expect(() => new Keymap({ 'app.nope': 'ctrl+j' })).toThrow(CliError);
   });
 
+  describe('leader conflicts', () => {
+    // The leader arms via its own independent registration outside normal
+    // per-context shadowing (App.tsx), so a chord it shares with ANY other
+    // binding fires BOTH, not one-instead-of-the-other. This bit the
+    // shipped default once already (`ctrl+b` was both the leader and
+    // `composer.charLeft`) — these tests pin the fix and the general rule.
+
+    it("the default keymap's leader does not collide with anything (regression: it used to)", () => {
+      expect(() => new Keymap()).not.toThrow();
+      expect(new Keymap().chordFor('pane.leader')).toBe('alt+l');
+    });
+
+    it('rejects rebinding the leader onto a chord another binding already uses', () => {
+      // `ctrl+k` is already `app.palette` (global) and `composer.killLine`.
+      expect(() => new Keymap({ 'pane.leader': 'ctrl+k' })).toThrow(CliError);
+    });
+
+    it('rejects rebinding some OTHER action onto the leader\'s own chord', () => {
+      expect(() => new Keymap({ 'app.refresh': 'alt+l' })).toThrow(CliError);
+    });
+
+    it('allows a binding set with no leader at all (no crash on a missing pane.leader)', () => {
+      const withoutLeader = DEFAULT_KEYMAP.filter((b) => b.id !== 'pane.leader');
+      expect(() => new Keymap({}, withoutLeader)).not.toThrow();
+    });
+  });
+
   it('exposes a display chord for hints', () => {
     expect(new Keymap().chordFor('app.palette')).toBe('ctrl+k');
   });

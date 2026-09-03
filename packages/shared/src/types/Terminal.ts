@@ -51,7 +51,9 @@ export type TerminalHostKind =
   | 'node-pty'
   | 'fallback-child-process'
   /** Phase 2 — sandbox-attached terminal (docker exec -it). */
-  | 'sandbox';
+  | 'sandbox'
+  /** Out-of-process PTY host — see `packages/core/src/services/PtyHostAdapter.ts`. */
+  | 'pty-host';
 
 /**
  * Body of `POST /api/workspaces/:id/terminals`.

@@ -46,8 +46,26 @@ export function HealthStatCard({ health, isError, onClick }: HealthStatCardProps
   return (
     <Card
       interactive={!!onClick}
+      // Same fix as `StatCard`: a clickable `Card` is a plain <div>, so
+      // without these the card is mouse-only and unreachable by keyboard or
+      // assistive tech. Mirrors the pattern `EntityCard` already uses.
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
-      className="flex items-center justify-between gap-3 px-4 py-3.5"
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      className={cn(
+        'flex items-center justify-between gap-3 px-4 py-3.5',
+        onClick && 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      )}
     >
       <div className="min-w-0">
         <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">

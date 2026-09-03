@@ -51,24 +51,27 @@ test.describe('Create automation form', () => {
   });
 
   test('creates a manual automation end-to-end', async ({ page, gotoApp, seed, tracker }) => {
-    const wf = await seed.workflow({ name: `W3 Create WF ${Date.now()}`, stages: [{ localId: 's', name: 'S', prompt: 'ok' }] });
+    const wfName = `W3 Create WF ${Date.now()}`;
+    await seed.workflow({ name: wfName, stages: [{ localId: 's', name: 'S', prompt: 'ok' }] });
     const name = `W3 Created ${Date.now()}`;
 
     await gotoApp('/automations/new');
     await page.getByRole('textbox', { name: /My Automation/i }).fill(name);
-    // Manual is the default trigger. Select the seeded workflow in the multi-select.
-    const workflowSelect = page.locator('select').nth(1);
-    await workflowSelect.selectOption({ label: new RegExp(`W3 Create WF`) }).catch(async () => {
-      // Fallback: pick by partial value if label match fails.
-      const opts = await workflowSelect.locator('option').all();
-      for (const o of opts) {
-        const t = await o.innerText();
-        if (t.includes('W3 Create WF')) {
-          await workflowSelect.selectOption({ label: t });
-          break;
-        }
-      }
-    });
+
+    // Manual is the default trigger. The workflow picker is NOT a `<select>`:
+    // it is an "+ Add a workflow…" button that opens a `role="listbox"`. This
+    // test previously drove `page.locator('select').nth(1)` with
+    // `selectOption({label: RegExp})` — a `<select>` that is not the workflow
+    // picker, and an option shape `selectOption` does not accept (label must
+    // be a string). Both failures were swallowed by a `.catch()`, so the form
+    // submitted with nothing selected and failed its own "Select at least one
+    // workflow" validation.
+    await page.getByRole('button', { name: /Add a workflow/i }).click();
+    const listbox = page.getByRole('listbox');
+    await expect(listbox).toBeVisible();
+    await listbox.getByRole('option', { name: new RegExp(wfName) }).first().click();
+    // The picker must actually have registered the choice before we submit.
+    await expect(page.getByText(/Select at least one workflow/i)).toBeHidden();
 
     await page.getByRole('button', { name: /Create Automation/i }).click();
     // On success the app leaves the create form (to list or detail).

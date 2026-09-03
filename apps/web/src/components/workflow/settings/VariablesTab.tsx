@@ -17,6 +17,32 @@ const TYPE_LABELS: Record<string, { label: string; color: string }> = {
   text: { label: 'Text', color: 'bg-info-muted text-info' },
 };
 
+/**
+ * Coerce a typed default to the type the variable declares.
+ *
+ * The editor is a single text input for every type, so without this a
+ * `number` variable persisted `"4"` and a `boolean` one persisted `"true"`.
+ * Downstream consumers (the run dialog, CLI `--var`, the SDK, and
+ * `variables.*` in edge-condition expressions) each had to re-guess the type;
+ * storing it correctly in the definition is the actual fix. An input the user
+ * is still mid-way through typing (`"1e"`, `"ye"`) is kept verbatim rather
+ * than mangled — validation happens at run time.
+ */
+function coerceDefault(raw: string, type: VariableDefinition['type']): unknown {
+  if (raw === '') return undefined;
+  if (type === 'number') {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : raw;
+  }
+  if (type === 'boolean') {
+    const lowered = raw.trim().toLowerCase();
+    if (lowered === 'true') return true;
+    if (lowered === 'false') return false;
+    return raw;
+  }
+  return raw;
+}
+
 export function VariablesTab() {
   const variables = useWorkflowBuilderStore((s) => s.variables);
   const setVariables = useWorkflowBuilderStore((s) => s.setVariables);
@@ -170,9 +196,20 @@ export function VariablesTab() {
                         <label className="block text-[11px] font-medium text-muted-foreground mb-1">Type</label>
                         <Select
                           value={variable.type}
-                          onChange={(v) =>
-                            updateVariable(index, { type: v as VariableDefinition['type'] })
-                          }
+                          onChange={(v) => {
+                            const type = v as VariableDefinition['type'];
+                            updateVariable(index, {
+                              type,
+                              // Re-read the existing default under the new type
+                              // so switching String → Number turns "4" into 4.
+                              defaultValue: coerceDefault(
+                                variable.defaultValue === undefined || variable.defaultValue === null
+                                  ? ''
+                                  : String(variable.defaultValue),
+                                type,
+                              ),
+                            });
+                          }}
                           options={[
                             { value: 'string', label: 'String' },
                             { value: 'number', label: 'Number' },
@@ -220,7 +257,11 @@ export function VariablesTab() {
                       <Input
                         type="text"
                         value={String(variable.defaultValue ?? '')}
-                        onChange={(e) => updateVariable(index, { defaultValue: e.target.value || undefined })}
+                        onChange={(e) =>
+                          updateVariable(index, {
+                            defaultValue: coerceDefault(e.target.value, variable.type),
+                          })
+                        }
                         className="h-auto px-2.5 py-1.5 text-xs"
                         placeholder="Optional default"
                       />

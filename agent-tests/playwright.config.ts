@@ -28,5 +28,22 @@ export default defineConfig({
     actionTimeout: 10_000,
     navigationTimeout: 30_000,
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        // Escape hatch for a broken or partial browser download. Playwright
+        // pins one Chromium revision per version and refuses to start if that
+        // exact build is missing or half-extracted — which is indistinguishable
+        // from "Chromium does not work on this machine" unless you go looking
+        // in the install directory. Point this at any working
+        // chrome/chrome-headless-shell binary to run the suite anyway:
+        //   PLAYWRIGHT_CHROMIUM_PATH=... pnpm test:e2e
+        ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
+          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
+          : {}),
+      },
+    },
+  ],
 });

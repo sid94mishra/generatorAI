@@ -355,7 +355,12 @@ function ExecutionTab({
                 onUpdate({ condition: { type: 'expression', expression: e.target.value } })
               }
               className="mt-2 font-mono"
-              placeholder='e.g., stages.build.status === "completed"'
+              // The evaluator understands `status`/`parentStatus`,
+              // `variables.<path>`, `== != < <= > >=` and AND/OR/NOT — it has
+              // no `stages.` scope and no `===`. An unparseable expression
+              // fails safe to false, so advertising unsupported syntax here
+              // produced stages that silently never ran.
+              placeholder="e.g. status == 'completed' AND variables.env == 'prod'"
             />
           )}
         </div>

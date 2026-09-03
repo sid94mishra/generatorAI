@@ -172,6 +172,53 @@ export class DrizzleChatRepository implements IChatRepository {
       .where(eq(chats.id, id));
   }
 
+  /**
+   * W24 fix — durable orchestrator termination state (migration v41).
+   * Read directly off the orchestrator chat's own row rather than through
+   * the full `Chat` mapping — this is narrow, orchestrator-internal state,
+   * not a domain field every `Chat` consumer needs to reason about.
+   */
+  async getOrchestratorWaveState(
+    chatId: string,
+  ): Promise<{ waveCount: number; startedAt: number } | null> {
+    const rows = await this.db
+      .select({
+        orchestratorWaveCount: chats.orchestratorWaveCount,
+        orchestratorStartedAt: chats.orchestratorStartedAt,
+      })
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .limit(1);
+    const row = rows[0];
+    if (!row || row.orchestratorStartedAt == null) return null;
+    return {
+      waveCount: row.orchestratorWaveCount ?? 0,
+      startedAt: row.orchestratorStartedAt,
+    };
+  }
+
+  /** Persist the orchestrator's wave count + start time (see above). */
+  async setOrchestratorWaveState(
+    chatId: string,
+    state: { waveCount: number; startedAt: number },
+  ): Promise<void> {
+    await this.db
+      .update(chats)
+      .set({
+        orchestratorWaveCount: state.waveCount,
+        orchestratorStartedAt: state.startedAt,
+      })
+      .where(eq(chats.id, chatId));
+  }
+
+  /** Clear the orchestrator's wave state back to "never started" (called on archive). */
+  async clearOrchestratorWaveState(chatId: string): Promise<void> {
+    await this.db
+      .update(chats)
+      .set({ orchestratorWaveCount: null, orchestratorStartedAt: null })
+      .where(eq(chats.id, chatId));
+  }
+
   private mapRow(row: typeof chats.$inferSelect): Chat {
     const backgroundTask: BackgroundTaskMeta | undefined =
       row.parentChatId

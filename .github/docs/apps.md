@@ -30,7 +30,7 @@ Single Node process binding to `$GENERATORAI_PORT` (default 3100). Owns:
 | `automations.ts` | `POST/GET/PUT/DELETE /api/automations`, `/{id}/{enable,disable,trigger,rotate-webhook-token}`, `/{id}/executions`, `/executions/{execId}`, `/executions/{execId}/cancel`, `POST /api/automations/data-source/test` | `AutomationService` + `DataSourceResolver` |
 | `projects.ts` | `POST/GET/PUT/DELETE /api/projects`, `/{id}/codebases/*`, `/{id}/configs/*`, `/{id}/mcp-servers/*`, `/{id}/worktrees/*`, `/{id}/available-artifacts` | `ProjectService`, `CodebaseService`, `ProjectConfigService`, `WorktreeService`, `SystemArtifactService` |
 | `workspaces.ts` | `GET /api/workspaces`, `/:id`, `POST /:id/{archive,commit}`, `DELETE /:id`, `POST /api/workspaces/cleanup`, `/:id/worktrees` | `WorkspaceManager` + `WorktreeService` |
-| `browser.ts` | `POST /api/workspaces/:id/browser/{start,stop,actions,selection,attach,detach,capture,input,resize}`, `GET /api/workspaces/:id/browser/{descriptor,snapshots,scroll,screencast.jpg,screencast.mjpg,files/*}` — user + inspector-script surface for the Integrated Browser | `BrowserService` |
+| `browser.ts` | `POST /api/workspaces/:id/browser/{start,stop,actions,selection,attach,detach,capture,input,resize}`, `GET /api/workspaces/:id/browser/{descriptor,snapshots,scroll,screencast.jpg,files/*}` — user + inspector-script surface for the Integrated Browser | `BrowserService` |
 | `terminals.ts` | `POST/GET/DELETE /api/workspaces/:id/terminals[/:sid]`, `GET /:sid/scrollback`, `POST /:sid/{resize,signal}` — REST surface for the Integrated Terminal (WS handles live IO) | `TerminalService` |
 | `extensions.ts` | `GET /api/extensions[/:id]`, `GET /api/extensions/widgets`, `POST /api/extensions`, `PATCH /api/extensions/:id`, `DELETE /api/extensions/:id`, `POST /api/extensions/reload`, `POST /api/extensions/:id/reload`, `GET /api/widget-assets/:extensionId/*` — extension install / reload + widget bundle serving | `ExtensionManager` |
 | `widgets.ts` | `GET /api/widgets[?sessionId=&chatId=]`, `GET /api/widgets/:id`, `POST /api/widgets`, `PATCH /api/widgets/:id/state`, `POST /api/widgets/:id/actions`, `DELETE /api/widgets/:id` — widget-instance lifecycle backing the postMessage bridge (see [feature-extensions-widgets.md](./feature-extensions-widgets.md)) | `WidgetService` |
@@ -265,10 +265,62 @@ Runtime data is isolated under the OS user‐data dir (`<userData>/data/{generat
 
 **Integrated Browser + Terminal parity**: because the desktop main process spawns the same server binary the web build talks to, both features work identically inside Electron — no re-implementation. Two desktop-specific niceties:
 
-- Setting `GENERATORAI_DESKTOP_NATIVE_BROWSER=1` before launch enables the `ElectronBridgeAdapter`, which hosts a `WebContentsView` in the main process and lets the SPA render *native* Chromium pixels (as opposed to the MJPEG screencast used on the web). The main process module owning this is `browser-host.ts`. See [feature-integrated-browser.md §1](./feature-integrated-browser.md#1-what-a-browser-session-is).
+- Setting `GENERATORAI_DESKTOP_NATIVE_BROWSER=1` before launch enables the `ElectronBridgeAdapter`, which hosts a `WebContentsView` in the main process and lets the SPA render *native* Chromium pixels (as opposed to the MJPEG screencast used on the web). The main process module owning this is `apps/desktop/src/main/browser-host.ts` — **not** the separate `apps/browser-host` process described below; they are unrelated despite the similar name.
 - `node-pty` is a native dependency added to `apps/desktop/package.json`. `pnpm --filter @generatorai/desktop rebuild` (which runs `electron-rebuild -f -w better-sqlite3 -w node-pty`) recompiles it against Electron's ABI; both `better-sqlite3` and `node-pty` are then `asarUnpack`'d so the packaged app loads them at runtime.
 
 > Note: the embedded production server relies on `apps/server/src/middleware/staticFiles.ts`, which now (a) honours a `WEB_DIST_DIR` override for deterministic SPA resolution and (b) uses an Express‑5‑valid catch‑all route (the previous bare `'*'` threw under path‑to‑regexp@8). Packaging into a signed installer additionally needs `better-sqlite3` rebuilt for Electron's ABI (`pnpm --filter @generatorai/desktop rebuild`) — see the README.
+
+---
+
+## Host processes — `agent-host`, `pty-host`, `browser-host`, `cua-host`
+
+The V2 architecture ([ARCHITECTURE_V2_MASTER_PLAN_FINAL.md](../../docs/ARCHITECTURE_V2_MASTER_PLAN_FINAL.md) §3.2) moves anything owning a **native handle** out of the gateway process. The rule (L5) is that the gateway never holds a PTY file descriptor, a Chromium instance or a computer-use driver directly: a crash in any of them must not take the API down, and a gateway restart must not orphan them.
+
+All four share one shape:
+
+- Started by a gateway-side supervisor via `child_process.fork()`, so the channel is Node IPC — structured JSON, no socket to secure and no port to collide.
+- Protocol types live in `packages/shared/src/ipc/` (`AgentHostIpc.ts`, `PtyHostIpc.ts`, `BrowserHostIpc.ts`, `CuaHostIpc.ts`), so gateway and host cannot drift apart silently.
+- **Parent-PID heartbeat**: each host signals `0` to its parent every 5 s and exits if the parent is gone. With the boot-time reaper in `packages/agent-harness-providers/src/childRegistry.ts`, this is what makes "zero orphans after a kill" achievable.
+- Restart with backoff under a cap, supervised by `HostSupervisor` (`packages/core/src/infrastructure/`).
+
+| App | Work item | Owns | Gateway-side client | Status |
+|---|---|---|---|---|
+| [apps/agent-host](../../apps/agent-host/) | W12 | Provider harness runtimes (Copilot, Claude, …) | `AgentHostClient` | **Opt-in**, `GENERATORAI_AGENT_HOST=true` — not the default path |
+| [apps/pty-host](../../apps/pty-host/) | W14 | All `node-pty` handles | `PtyHostAdapter` / `PtyHostClient` | **Opt-in**, `GENERATORAI_PTY_HOST=true`; default is the in-process `NodePtyHost` |
+| [apps/browser-host](../../apps/browser-host/) | W15 | One Chromium instance, N contexts | *(none — deleted)* | Standalone only. `BrowserHostClient` had zero callers and covered 8 of `IBrowserBridge`'s ~30 operations; it was **deleted** rather than left exported as if it were usable |
+| [apps/cua-host](../../apps/cua-host/) | W17 | The `@trycua/cua-driver` session | *(none — deleted)* | Standalone only. **Must not be wired**: its protocol carries no app/window identity, so every action targets whatever is frontmost. `CuaHostClient` was **deleted**; see `packages/shared/src/ipc/CuaHostIpc.ts` |
+
+> Two of these are deliberately not the live path, and two are opt-in with known gaps. [docs/V2_REMAINING_WORK_AUDIT.md](../../docs/V2_REMAINING_WORK_AUDIT.md) records what is and is not finished for each — read it before turning any of them on.
+
+Child environments are built from an **allowlist** (`packages/shared/src/config/childEnv.ts`), never by cloning `process.env`. A host that spawns a shell — `pty-host` — runs model-authored commands, so inheriting the gateway's environment would hand the agent the vault key, the desktop admin token and every provider credential.
+
+---
+
+## `apps/relay` — self-hostable rendezvous
+
+**Path:** [apps/relay/](../../apps/relay/)
+
+A small, deliberately boring process you run somewhere a GeneratorAI server and a phone can both reach (a $5 VPS is enough). The **server dials out to it**, so the machine holding your code never needs an inbound firewall rule.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /relay/assignment?relayHostId=…` | Director — tells a host which cell to use |
+| `WS /relay/host` | Host control channel |
+| `WS /relay/client` | Client connection |
+| `WS /relay/data?streamId=…` | Per-stream byte pipe |
+| `GET /healthz` | Liveness + capacity |
+
+The relay is a byte pipe: it reads no application payloads. Identity and authorisation are end-to-end between the client and the GeneratorAI server (see [SECURITY_AUTH_RELAY_IMPLEMENTATION.md](../../docs/SECURITY_AUTH_RELAY_IMPLEMENTATION.md)). Frame lanes mirror `AdmissionController`'s interactive/ordinary/bulk classes so a bulk artifact transfer cannot starve interactive input.
+
+---
+
+## `apps/mobile` — Expo / React Native companion
+
+**Path:** [apps/mobile/](../../apps/mobile/)
+
+A companion client for chats and run monitoring, reaching the server directly on the LAN or through `apps/relay`. It shares `packages/client-core`'s stream reducer and types, but has its own transport (`src/stream/SseClient.ts`) and event router (`src/stream/useChatStream.ts`).
+
+> Mobile still uses the **per-scope** stream endpoint (`GET /api/stream?scope=chat&id=…`) rather than the multiplexed connection web and CLI moved to, and subscribes only to `chat` scope — so list screens have no live lifecycle events and fall back to polling. Tracked in [docs/V2_REMAINING_WORK_AUDIT.md](../../docs/V2_REMAINING_WORK_AUDIT.md) §4.
 
 ---
 

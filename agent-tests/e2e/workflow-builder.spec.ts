@@ -59,7 +59,13 @@ test.describe('Workflow Builder — validation', () => {
     await page.getByRole('button', { name: /Add (First )?Stage/ }).first().click();
     await expect(page.getByRole('textbox', { name: 'Stage Name' })).toBeVisible();
     await page.getByRole('button', { name: 'Validate' }).click();
-    await expect(page.getByText(/has no prompts configured/i)).toBeVisible({ timeout: 5_000 });
+    // Stale text: the builder's message became "has no prompts or agent
+    // configured" when agent-mode stages landed
+    // (workflowBuilderStore.ts) — the old /has no prompts configured/
+    // matched nothing. Also assert the error summary, so a validator that
+    // stops emitting the count regresses visibly.
+    await expect(page.getByText('1 validation error')).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/has no prompts or agent configured/i)).toBeVisible();
   });
 
   test('Validate flags an undefined {{variable}} reference (regression for the interpolation guard)', async ({ page, gotoApp }) => {

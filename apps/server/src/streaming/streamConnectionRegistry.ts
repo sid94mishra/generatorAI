@@ -25,8 +25,16 @@ import type { EphemeralScope } from './ephemeralScopes.js';
  */
 export type MuxScope = StreamScope | EphemeralScope;
 
-/** A live tab plus one still reconnecting. Anything beyond that is a leak. */
-export const MAX_CONNECTIONS_PER_PRINCIPAL = 2;
+/**
+ * Every surface shares ONE principal in the shared-key model — web tabs, the
+ * desktop app, the CLI companion and a second browser window all count
+ * against the same key. 2 ("a live tab plus one reconnecting") locked the
+ * principal out of live streaming the moment a second tab opened, and a
+ * reload raced its own dying socket for the last slot (observed live
+ * 2026-08-31 as an endless 429 retry loop with a dead UI). 8 bounds a
+ * runaway client while letting the normal multi-surface setup breathe.
+ */
+export const MAX_CONNECTIONS_PER_PRINCIPAL = 8;
 
 /** Bounds broker fan-out registrations and the size of the `hello` frame. */
 export const MAX_SUBS_PER_CONNECTION = 32;

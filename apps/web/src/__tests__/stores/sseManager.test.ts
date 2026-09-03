@@ -127,13 +127,19 @@ describe('sseManager (STR-04 per-scope EventSource)', () => {
     expect(_getRefCount('run', 'run-1')).toBe(1);
   });
 
-  it('calls platform.streamReplay on first connect', async () => {
+  // W26 — hydration waits for the mux to report the scope active (`hello`),
+  // with a 1 s fallback so a handshake that never lands cannot leave the view
+  // blank. This mock EventSource never dispatches `hello`, so these two tests
+  // exercise the FALLBACK specifically, and their timeout has to clear it.
+  const HYDRATE_FALLBACK_TIMEOUT = { timeout: 3_000 };
+
+  it('falls back to hydrating when the stream never reports hello', async () => {
     const platform = createMockPlatform();
     connectChatSession('chat-1', 'session-a', platform);
     await vi.waitFor(() => {
       expect((platform as unknown as { streamReplay: ReturnType<typeof vi.fn> }).streamReplay)
         .toHaveBeenCalledWith('chat', 'chat-1', 0, 500);
-    });
+    }, HYDRATE_FALLBACK_TIMEOUT);
   });
 
   it('does not replay again for duplicate connections', async () => {
@@ -142,7 +148,7 @@ describe('sseManager (STR-04 per-scope EventSource)', () => {
     await vi.waitFor(() => {
       expect((platform as unknown as { streamReplay: ReturnType<typeof vi.fn> }).streamReplay)
         .toHaveBeenCalledTimes(1);
-    });
+    }, HYDRATE_FALLBACK_TIMEOUT);
     connectChatSession('chat-1', 'session-a', platform);
     expect((platform as unknown as { streamReplay: ReturnType<typeof vi.fn> }).streamReplay)
       .toHaveBeenCalledTimes(1);

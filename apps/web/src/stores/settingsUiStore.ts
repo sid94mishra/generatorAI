@@ -5,6 +5,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { create } from 'zustand';
+import { globalSingleton } from '../lib/globalSingleton.js';
 
 export type SettingsSectionId =
   | 'general'
@@ -29,10 +30,15 @@ interface SettingsUiState {
   setSection: (section: SettingsSectionId) => void;
 }
 
-export const useSettingsUiStore = create<SettingsUiState>((set) => ({
+const useSettingsUiStoreImpl = create<SettingsUiState>((set) => ({
   open: false,
   section: 'general',
   openSettings: (section) => set((s) => ({ open: true, section: section ?? s.section })),
   closeSettings: () => set({ open: false }),
   setSection: (section) => set({ section }),
 }));
+
+
+// HMR-split-proof: every module instance shares the first-created store.
+// See lib/globalSingleton.ts for why this is load-bearing in dev.
+export const useSettingsUiStore = globalSingleton('web.settingsUiStore', () => useSettingsUiStoreImpl);

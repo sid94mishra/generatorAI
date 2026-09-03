@@ -31,17 +31,19 @@ import { fileURLToPath } from 'node:url';
 }
 import express from 'express';
 import { createServer } from 'node:http';
-import { AppConfigSchema } from '@generatorai/shared';
+import { AppConfigSchema, readBoundedInt } from '@generatorai/shared';
 import { StartupSecurityError } from './composition/security.js';
 import { ensureBootstrapPairing } from './composition/bootstrapPairing.js';
 import { RelayStreamBridge } from './relay/RelayStreamBridge.js';
 import { createContainer } from './composition-root.js';
 import type { Container } from './composition-root.js';
+import type { WedgeDetector, LoopTurnProber } from '@generatorai/core';
 import { createApp } from './app.js';
 import { createWidgetAssetRoutes } from './routes/extensions.js';
 import { attachBrowserWebSocket } from './browser-ws.js';
 import { attachTerminalWebSocket } from './terminal-ws.js';
 import { attachSttWebSocket } from './stt-ws.js';
+import { attachTtsWebSocket } from './tts-ws.js';
 import { resolveAdvertisedEndpoints } from './network/advertisedEndpoints.js';
 import { readExposureMode, resolveBindHost } from './network/exposure.js';
 import { readComputerUsePreferences } from './settings/computerUse.js';
@@ -273,7 +275,13 @@ async function startServer(): Promise<void> {
     templatesDir,
     extensionsDir,
     projectRoot,
-    maxConcurrentSessions: parseInt(process.env['MAX_CONCURRENT_SESSIONS'] ?? '10', 10),
+    // Bounded: this feeds a concurrency cap, and `NaN` from a typo makes
+    // every `>=` check against it false — removing the bound silently.
+    maxConcurrentSessions: readBoundedInt('MAX_CONCURRENT_SESSIONS', {
+      defaultValue: 10,
+      min: 1,
+      max: 500,
+    }),
     logLevel: process.env['LOG_LEVEL'] ?? 'info',
     copilot: {
       defaultModel: process.env['COPILOT_MODEL'] ?? 'claude-sonnet-4.6',
@@ -413,7 +421,12 @@ async function startServer(): Promise<void> {
   //
   // Imported here to keep the feature behind a single env flag that lets
   // operators disable it if the worker_threads overhead is undesirable.
-  let wedgeDetector: import('@generatorai/core').WedgeDetector | undefined;
+  let wedgeDetector: WedgeDetector | undefined;
+  // W21 — the loop-turn prober is created after `listen` (it needs the bound
+  // port), but the detector references it now so a diagnostic report written
+  // on trip carries the probe's state: "the HTTP probe had already been
+  // failing for 12 s" is what separates a wedged loop from a merely slow one.
+  let loopTurnProber: LoopTurnProber | undefined;
   if (process.env['GENERATORAI_WEDGE_DETECT'] !== '0') {
     const { WedgeDetector } = await import('@generatorai/core');
     const alertThresholdMs = parseInt(process.env['GENERATORAI_WEDGE_ALERT_MS'] ?? '5000', 10);
@@ -423,16 +436,49 @@ async function startServer(): Promise<void> {
       alertThresholdMs,
       tickIntervalMs,
       killOnWedge,
+      // W21 — write a diagnostic on trip and replay it on the NEXT boot. A
+      // wedge that ends in SIGKILL leaves nothing in the logs of the process
+      // that died, so the evidence has to outlive it. Kept beside the DB,
+      // which is the one directory we already own and know is writable.
+      diagnosticsDir: dirname(resolve(config.dbPath)),
+      probe: { snapshot: () => loopTurnProber?.snapshot() ?? { consecutiveFailures: 0 } },
+      logger: {
+        info: (m) => container.logger.info(m),
+        warn: (m) => container.logger.warn(m),
+        error: (m) => container.logger.error(m),
+      },
+      onPriorWedge: (report) => {
+        container.logger.error(
+          `[Server] PREVIOUS RUN WEDGED at ${report.at} — the event loop had not ticked for ` +
+          `~${report.overdueMsApprox}ms (threshold ${report.alertThresholdMs}ms)`,
+          {
+            wedgeReport: report,
+          },
+        );
+      },
       onWedge: (overdueMsApprox) => {
         console.error(
           `[Server] EVENT LOOP WEDGE DETECTED — main loop has not ticked for ~${overdueMsApprox}ms ` +
           `(threshold: ${alertThresholdMs}ms). The process may be unresponsive.`,
         );
-        // Attempt graceful shutdown via the normal path so in-flight state
-        // is persisted. Only do this if the loop is actually alive enough to
-        // receive the signal — if it is truly frozen, killOnWedge:true will
-        // have already sent SIGTERM from the worker.
-        if (requestShutdown) requestShutdown('wedge-detected');
+        // Tearing the server down is GATED ON `killOnWedge`, because reaching
+        // this callback at all proves the loop is alive: it is invoked from
+        // the main thread's message-port handler, so a truly frozen loop would
+        // never run it (that case is the worker's SIGTERM, which `killOnWedge`
+        // also gates). What lands here is therefore a loop that was merely
+        // SLOW — and `alertThresholdMs` defaults to 5s, which this workload
+        // crosses routinely: synchronous better-sqlite3 queries over a
+        // multi-hundred-MB database, listing hundreds of workflows, spawning
+        // agent subprocesses.
+        //
+        // Shutting down unconditionally made an ALERT threshold behave as a
+        // kill switch. Observed: a 5,295ms stall (295ms over) terminated the
+        // server mid-run and the child reaper took five descendants with it —
+        // three of them live `claude.exe` agent processes — losing the
+        // in-flight workflow. `GENERATORAI_WEDGE_KILL` is documented as
+        // opt-in; honouring it here makes the default alert-only, which is
+        // what `GENERATORAI_WEDGE_ALERT_MS` has always claimed to be.
+        if (killOnWedge && requestShutdown) requestShutdown('wedge-detected');
       },
     });
     wedgeDetector.start();
@@ -450,7 +496,95 @@ async function startServer(): Promise<void> {
   // already refused to build a container that would expose an unauthenticated
   // API here, so by the time we listen the posture is known-good.
   const bindHost = config.security.bindHost;
-  const server: Server = app.listen(config.port, bindHost, () => {
+
+  // W20 — identity-checked port acquisition with a fallback ladder.
+  //
+  // `app.listen` on a taken port emits an unhandled 'error' and kills the
+  // process with a bare EADDRINUSE. Two different situations hide behind that
+  // one error, and they need opposite responses:
+  //
+  //   another GeneratorAI server  → laddering onto port+1 would leave two
+  //                                 servers fighting over one SQLite file and
+  //                                 one admin-token file, and the CLI would
+  //                                 talk to whichever won. Refuse, loudly.
+  //   anything else               → the port is simply occupied; step to the
+  //                                 next one and carry on.
+  //
+  // The identity check is `/api/health/loop-turn` — public (see
+  // packages/auth routePolicy) and shaped distinctively enough that a foreign
+  // listener will not accidentally match.
+  const probeHost =
+    bindHost === '0.0.0.0' || bindHost === '::' || bindHost === '' ? '127.0.0.1' : bindHost;
+  const probeAuthority = (port: number): string =>
+    probeHost.includes(':') ? `[${probeHost}]:${port}` : `${probeHost}:${port}`;
+
+  const occupantIsGeneratorAI = async (port: number): Promise<boolean> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1_500);
+    try {
+      const res = await fetch(`http://${probeAuthority(port)}/api/health/loop-turn`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) return false;
+      const body = (await res.json()) as { ok?: unknown; respondedAt?: unknown; uptimeMs?: unknown };
+      return body?.ok === true && typeof body.respondedAt === 'number' && typeof body.uptimeMs === 'number';
+    } catch {
+      // No answer, wrong shape, not HTTP — whatever holds the port, it is not us.
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const listenOn = (port: number): Promise<Server> =>
+    new Promise<Server>((resolvePort, rejectPort) => {
+      const candidate = app.listen(port, bindHost);
+      const onError = (err: Error): void => {
+        candidate.removeListener('listening', onListening);
+        rejectPort(err);
+      };
+      const onListening = (): void => {
+        candidate.removeListener('error', onError);
+        resolvePort(candidate);
+      };
+      candidate.once('error', onError);
+      candidate.once('listening', onListening);
+    });
+
+  const maxPortAttempts = Math.max(1, parseInt(process.env['GENERATORAI_PORT_MAX_ATTEMPTS'] ?? '10', 10) || 10);
+  let server: Server | undefined;
+  let listenPort = config.port;
+
+  for (let attempt = 0; attempt < maxPortAttempts; attempt++) {
+    const candidatePort = config.port + attempt;
+    try {
+      server = await listenOn(candidatePort);
+      listenPort = candidatePort;
+      break;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EADDRINUSE') throw err;
+      if (await occupantIsGeneratorAI(candidatePort)) {
+        throw new Error(
+          `[Server] Port ${candidatePort} is already served by another GeneratorAI server. ` +
+          'Refusing to start a second instance against the same data directory — stop the running ' +
+          'server, or point this one at a different DB_PATH and PORT.',
+        );
+      }
+      container.logger.warn(
+        `[Server] Port ${candidatePort} is in use by another process — trying ${candidatePort + 1}`,
+        { attempt: attempt + 1, maxPortAttempts },
+      );
+    }
+  }
+
+  if (!server) {
+    throw new Error(
+      `[Server] Could not acquire a port: ${config.port}–${config.port + maxPortAttempts - 1} are all in use.`,
+    );
+  }
+
+  {
     // Only now is this process the one a local CLI should be able to talk to.
     if (container.localAdminToken) {
       publishLocalAdminToken(dirname(resolve(config.dbPath)), container.localAdminToken);
@@ -458,9 +592,9 @@ async function startServer(): Promise<void> {
       removeLocalAdminToken(dirname(resolve(config.dbPath)));
     }
     container.logger.info(
-      `[Server] GeneratorAI server listening on ${bindHost}:${config.port}`,
+      `[Server] GeneratorAI server listening on ${bindHost}:${listenPort}`,
       {
-        port: config.port,
+        port: listenPort,
         bindHost,
         environment: process.env['NODE_ENV'] ?? 'development',
         dbPath: config.dbPath,
@@ -476,7 +610,36 @@ async function startServer(): Promise<void> {
         },
       },
     );
-  });
+  }
+
+  // 5a-2. W21 — start the loop-turn prober now that the bound port is known.
+  //       It probes an endpoint answered FROM the event loop, so a slow or
+  //       absent response is direct evidence the loop is not turning — unlike
+  //       a socket check, which the kernel answers while the loop is frozen.
+  //       Disabled with GENERATORAI_LOOP_PROBE=0.
+  if (process.env['GENERATORAI_LOOP_PROBE'] !== '0') {
+    const { LoopTurnProber } = await import('@generatorai/core');
+    loopTurnProber = new LoopTurnProber({
+      url: `http://${probeAuthority(listenPort)}/api/health/loop-turn`,
+      intervalMs: parseInt(process.env['GENERATORAI_LOOP_PROBE_INTERVAL_MS'] ?? '10000', 10),
+      timeoutMs: parseInt(process.env['GENERATORAI_LOOP_PROBE_TIMEOUT_MS'] ?? '5000', 10),
+      logger: {
+        info: (m) => container.logger.info(m),
+        warn: (m) => container.logger.warn(m),
+        error: (m) => container.logger.error(m),
+      },
+      onUnresponsive: ({ consecutiveFailures, lastError }) => {
+        container.logger.error(
+          `[Server] Loop-turn endpoint unresponsive after ${consecutiveFailures} consecutive probes`,
+          { lastError },
+        );
+      },
+      onRecovered: ({ downForMs }) => {
+        container.logger.info(`[Server] Loop-turn endpoint recovered after ${downForMs}ms`);
+      },
+    });
+    loopTurnProber.start();
+  }
 
   // 5b. Attach Integrated Browser WebSocket (`/api/workspaces/:id/browser/stream`)
   //     for high-fps live-view streaming + input dispatch. Bypasses the
@@ -492,6 +655,11 @@ async function startServer(): Promise<void> {
   //     input. Runs Whisper (base.en) locally on CPU — no cloud, no key,
   //     no cost. Same noServer upgrade + auth/origin pattern.
   attachSttWebSocket(server, container);
+
+  // 5d-2. Attach Text-to-Speech WebSocket (`/api/tts/stream`) for voice
+  //       output (Phase 3 — "read this message aloud"). Runs Kokoro
+  //       locally on CPU. Same noServer upgrade + auth/origin pattern.
+  attachTtsWebSocket(server, container);
 
   // 5e. Dedicated widget-asset origin — serves ONLY `/api/widget-assets/*`
   //     on a separate loopback port so widget iframes live on a distinct
@@ -516,7 +684,7 @@ async function startServer(): Promise<void> {
     container.relayHostBroker.setStreamBridge(
       new RelayStreamBridge({
         logger: container.logger,
-        localPort: config.port,
+        localPort: listenPort,
       }),
     );
   }
@@ -526,7 +694,7 @@ async function startServer(): Promise<void> {
   //     no-op. Deliberately AFTER `listen` because the pairing offer has to
   //     advertise a reachable endpoint.
   const bootstrapEndpoints = resolveAdvertisedEndpoints({
-    port: config.port,
+    port: listenPort,
     bindHost,
     configuredOrigins: [
       ...(process.env['GENERATORAI_ADVERTISED_URLS']?.split(',') ?? []),
@@ -534,7 +702,7 @@ async function startServer(): Promise<void> {
     ],
     networkInterfaces: networkInterfaces(),
   });
-  const advertisedEndpoint = bootstrapEndpoints[0]?.origin ?? `http://127.0.0.1:${config.port}`;
+  const advertisedEndpoint = bootstrapEndpoints[0]?.origin ?? `http://127.0.0.1:${listenPort}`;
   try {
     await ensureBootstrapPairing({
       security: container.security,
@@ -650,6 +818,7 @@ async function startServer(): Promise<void> {
         // W21 — stop the wedge detector worker so it doesn't fire after
         // we've already begun shutting down.
         try { wedgeDetector?.stop(); } catch { /* non-fatal */ }
+        try { loopTurnProber?.stop(); } catch { /* non-fatal */ }
 
         // SEC-09 — single structured summary for ops dashboards.
         container.logger.info('[Server] shutdown complete', { signal, timings });

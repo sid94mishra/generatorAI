@@ -1,28 +1,44 @@
 /**
- * W12 — Bounded per-session event queue.
+ * W12 — Bounded per-session frame queue.
  *
  * L2: Every queue is bounded, and its overflow behaviour is stated in code.
- * Overflow: drop the oldest entry and prepend a `gap` marker so consumers
- * know they missed events.
+ * Overflow: drop the oldest entry and remember how many were dropped, so the
+ * NEXT entry handed to the writer carries a `droppedBefore` count.
+ *
+ * △ The gap marker used to be a fabricated `{kind:'harness.gap'}` object cast
+ * through `as unknown as AgentEvent`. That kind does not exist in
+ * `AgentEvent.ts`, so any consumer switching exhaustively over event kinds
+ * would fall through on it. A dropped-events notice is a property of this
+ * transport, not something a provider emitted, so it now travels as metadata
+ * on the IPC notification (`AgentEventNotification.droppedBefore`) and the
+ * domain event union is left alone.
  */
 
 import type { AgentEvent } from '@generatorai/shared';
 
-/** Base shape for a gap marker — a fresh copy is created on each overflow. */
-const GAP_MARKER_BASE = {
-  kind: 'harness.gap' as const,
-  data: { reason: 'queue_overflow' },
-} as const;
-
-/** Create a fresh gap marker event. Never share a singleton to avoid mutation. */
-function makeGapMarker(): AgentEvent {
-  return { ...GAP_MARKER_BASE, timestamp: new Date().toISOString() } as unknown as AgentEvent;
-}
+/**
+ * What the demux carries. Terminal notifications ride the SAME per-session
+ * queue as events: sending `session_ended` on a side channel would let it
+ * overtake the tokens still queued behind it, and the gateway would see a turn
+ * end before its own last token.
+ */
+export type SessionFrame =
+  | { kind: 'event'; event: AgentEvent }
+  | { kind: 'ended'; reason: 'complete' | 'error' | 'cancelled'; error?: string };
 
 export interface SessionQueueEntry {
-  event: AgentEvent;
-  /** Whether this entry is a gap marker (the real event was dropped). */
-  isGap: boolean;
+  frame: SessionFrame;
+  /**
+   * Per-session monotonic sequence number. Assigned at push time and never
+   * reused, so a consumer that sees seq jump knows frames were lost even if
+   * the `droppedBefore` marker itself were somehow missed.
+   */
+  seq: number;
+  /**
+   * How many frames were dropped from the head of this queue between the
+   * previously-shifted entry and this one. 0 in the normal case.
+   */
+  droppedBefore: number;
 }
 
 export class SessionQueue {
@@ -30,38 +46,82 @@ export class SessionQueue {
 
   private readonly _entries: SessionQueueEntry[] = [];
   private _droppedCount = 0;
+  /** Drops not yet reported to the writer — attached to the next shifted entry. */
+  private _pendingGap = 0;
+  private _nextSeq = 1;
+
+  constructor(private readonly maxSize: number = SessionQueue.MAX_SIZE) {}
 
   /**
-   * Enqueue an event. When the queue is at capacity:
-   *  - Drop the oldest entry (shift).
-   *  - If the current head is not already a gap marker, also shift one more
-   *    and prepend a fresh gap marker. This keeps length ≤ MAX_SIZE after push.
+   * Enqueue a frame. When the queue is at capacity the OLDEST entry is
+   * dropped, because in a live stream the newest tokens are the ones the user
+   * is waiting on; a stale token from 128 frames ago has no consumer. Dropping
+   * from the head also guarantees a terminal frame — always the newest at the
+   * moment it is pushed — is never the one discarded.
    *
-   * Without the extra shift the pattern would be: shift (−1), unshift (+1),
-   * push (+1) = net +1, growing the queue without bound on every overflow.
+   * Length is exactly `maxSize` after any overflow push: the drop and the push
+   * cancel out, so the queue cannot grow.
    */
-  push(event: AgentEvent): void {
-    if (this._entries.length >= SessionQueue.MAX_SIZE) {
-      this._entries.shift(); // drop oldest → length = MAX_SIZE - 1
+  push(frame: SessionFrame): void {
+    if (this._entries.length >= this.maxSize) {
+      this._entries.shift();
       this._droppedCount++;
-      if (!this._entries[0]?.isGap) {
-        // Make room for the gap marker without exceeding MAX_SIZE after push
-        this._entries.shift(); // drop next-oldest → length = MAX_SIZE - 2
-        this._entries.unshift({ event: makeGapMarker(), isGap: true }); // gap → MAX_SIZE - 1
-      }
-      // fall through: push → MAX_SIZE
+      this._pendingGap++;
     }
-    this._entries.push({ event, isGap: false });
+    this._entries.push({ frame, seq: this._nextSeq++, droppedBefore: 0 });
   }
 
-  /** Dequeue and return the next entry, or undefined if empty. */
+  /**
+   * Dequeue the next entry, stamping it with any drops that happened since the
+   * previous shift. Returns undefined if empty.
+   */
   shift(): SessionQueueEntry | undefined {
-    return this._entries.shift();
+    const entry = this._entries.shift();
+    if (!entry) return undefined;
+    if (this._pendingGap > 0) {
+      // `+=`, not `=`: a re-queued entry (see `unshift`) already carries the
+      // drops it was stamped with the first time it was shifted, and losing
+      // them would under-report the gap to the gateway.
+      entry.droppedBefore += this._pendingGap;
+      this._pendingGap = 0;
+    }
+    return entry;
   }
 
-  /** Drain all entries and return them. */
+  /**
+   * Put an already-shifted entry back at the head, keeping its seq and its
+   * `droppedBefore` stamp.
+   *
+   * The writer calls this when a frame it took off the queue was NOT delivered
+   * — a `process.send()` that threw, or one whose flush callback reported an
+   * error. Without it the entry is simply gone: the frame never reached the
+   * gateway and never will, and if it happened to be the turn's terminal frame
+   * the turn hangs forever with nothing logged (BLOCKER B1).
+   *
+   * Only ever called immediately after a `shift()` on the same queue, so there
+   * is room; the guard exists so a future caller cannot grow the queue past its
+   * bound. When the queue really is full the newly-arrived tail is dropped
+   * rather than this entry, because this one is older and the consumer is
+   * already waiting on it.
+   */
+  unshift(entry: SessionQueueEntry): void {
+    while (this._entries.length >= this.maxSize && this._entries.length > 0) {
+      this._entries.pop();
+      this._droppedCount++;
+      this._pendingGap++;
+    }
+    this._entries.unshift(entry);
+  }
+
+  /** Drain all entries and return them, gap markers applied. */
   drain(): SessionQueueEntry[] {
-    return this._entries.splice(0, this._entries.length);
+    const out: SessionQueueEntry[] = [];
+    for (;;) {
+      const entry = this.shift();
+      if (!entry) break;
+      out.push(entry);
+    }
+    return out;
   }
 
   get size(): number {

@@ -183,43 +183,64 @@ export function createWidgetAssetRoutes(container: Container): Router {
       return;
     }
     const mime = MIME[extname(target).toLowerCase()] ?? 'application/octet-stream';
-    // v2 CSP: allow same-origin script/style so widgets can ship as
-    // multi-file bundles (React/Vue/Svelte). Still no external hosts,
-    // no fetch (connect-src 'none'), no allow-same-origin on the
-    // iframe → the null-origin sandbox remains the isolation boundary.
     //
-    // NOTES:
-    //   - `default-src 'none'` is intentionally omitted: Chromium enforces
-    //     it on the top-level render of a sandboxed iframe (null origin)
-    //     and blocks the initial navigation. Setting explicit directives
-    //     (script/style/img/font/connect) is enough to lock down what
-    //     the widget can do without breaking the initial document render.
-    //   - `frame-ancestors` is omitted because Chromium refuses to embed
-    //     sandboxed iframes when the response asserts `frame-ancestors`
-    //     (the sandbox forces a null origin which cannot match 'self').
-    //   - `script-src 'self'` lets widgets do `<script src="./bundle.js">`
-    //     from their own asset folder. Combined with the sandbox iframe
-    //     (which strips origin/cookies) this is safe.
-    if (mime.startsWith('text/html')) {
-      // Widgets now load from a dedicated origin (separate loopback port),
-      // so they legitimately need to reach the host API cross-origin.
-      // `connect-src` allows the API origins (+ any WIDGET_CONNECT_SRC
-      // domains) instead of the previous null-origin `'none'`. Widgets can
-      // still only reach explicitly-allowed hosts — no arbitrary egress.
-      const apiConnect =
-        process.env['WIDGET_CONNECT_SRC'] ??
-        'http://localhost:3100 http://127.0.0.1:3100';
-      res.setHeader(
-        'Content-Security-Policy',
-        [
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-          "style-src 'self' 'unsafe-inline'",
-          "img-src data: blob: 'self'",
-          "font-src 'self' data:",
-          `connect-src 'self' ${apiConnect}`,
-        ].join('; '),
-      );
-    }
+    // This is the origin that renders MODEL-AUTHORED HTML, so its CSP is the
+    // real boundary — the host-app CSP protects a document the model does not
+    // write. Two things the previous version got wrong, both worth naming
+    // because the comments here asserted the opposite of the code:
+    //
+    //  1. The header was set only for `text/html`. `.svg` is served as
+    //     `image/svg+xml`, and an SVG rendered as a *top-level document*
+    //     (which a widget can navigate its own frame to) executes any
+    //     `<script>` inside it — with no CSP at all. Every response now
+    //     carries a policy; non-document types simply get the strictest one.
+    //  2. The old comment claimed "no allow-same-origin on the iframe → the
+    //     null-origin sandbox remains the isolation boundary." That has not
+    //     been true since widgets moved to a dedicated origin: the embedder
+    //     sets `allow-same-origin` (WidgetFrame.tsx), so widget script runs
+    //     with a real origin and real storage. The isolation boundary is now
+    //     the separate loopback origin, not a null origin — which means the
+    //     policy has to do the work the sandbox flag used to.
+    //
+    // `default-src 'none'` is still omitted deliberately: Chromium applies it
+    // to the top-level render of the frame's own document and blocks the
+    // initial navigation. The directives below therefore enumerate every
+    // fetch type explicitly rather than relying on a fallback.
+    // `frame-ancestors` is likewise omitted — Chromium refuses to embed a
+    // sandboxed frame whose response asserts it.
+    const isDocument = mime.startsWith('text/html');
+    // Widgets load from a dedicated origin, so reaching the host API is a
+    // legitimate cross-origin call. `connect-src` names the API origins
+    // explicitly (plus any WIDGET_CONNECT_SRC additions) — no arbitrary egress.
+    const apiConnect =
+      process.env['WIDGET_CONNECT_SRC'] ?? 'http://localhost:3100 http://127.0.0.1:3100';
+    res.setHeader(
+      'Content-Security-Policy',
+      (isDocument
+        ? [
+            // 'unsafe-inline'/'unsafe-eval' are what bundled widget frameworks
+            // need; they are scoped to this origin, which holds no host
+            // credentials and no host DOM.
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src data: blob: 'self'",
+            "font-src 'self' data:",
+            `connect-src 'self' ${apiConnect}`,
+            // This route injects a <base href> below. Without `base-uri`,
+            // widget script could inject a second <base> and re-point every
+            // relative URL in the document.
+            "base-uri 'self'",
+            // Nothing here needs plugins or form posts; both are live
+            // exfiltration paths that the fetch directives above do not cover.
+            "object-src 'none'",
+            "form-action 'none'",
+          ]
+        : // Non-document assets (scripts, styles, images, fonts, and any
+          // scripted SVG a widget tries to open directly) get the strictest
+          // policy that still lets them be *loaded* as subresources.
+          ["script-src 'none'", "object-src 'none'", "base-uri 'none'", "form-action 'none'"]
+      ).join('; '),
+    );
     res.setHeader('Content-Type', mime);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=60');

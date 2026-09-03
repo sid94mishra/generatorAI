@@ -17,6 +17,8 @@ import type {
   AgentOrchestrationPolicy,
   AgentOverrides,
   ResolvedAgentProjection,
+  SkillReference,
+  AgentReference,
 } from '@generatorai/shared';
 
 // ── Sessions ──
@@ -306,6 +308,10 @@ export const chats = sqliteTable(
     useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
     // ── Orchestrator mode (v17) ──
     orchestratorMode: integer('orchestrator_mode', { mode: 'boolean' }).notNull().default(false),
+    // ── W24 fix (v41) — durable orchestrator termination state ──
+    // Only meaningful when orchestratorMode=true. See migration 41's comment.
+    orchestratorWaveCount: integer('orchestrator_wave_count'),
+    orchestratorStartedAt: integer('orchestrator_started_at'),
     parentChatId: text('parent_chat_id'),
     backgroundTaskName: text('background_task_name'),
     backgroundTaskIndex: integer('background_task_index'),
@@ -369,6 +375,10 @@ export const workflowDefinitions = sqliteTable(
     useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
     hooks: text('hooks', { mode: 'json' }).$type<unknown[]>().default([]),
     hooksFile: text('hooks_file', { mode: 'json' }),
+    /** G8 fix — was typed on the domain object but never had a column at all. */
+    skills: text('skills', { mode: 'json' }).$type<SkillReference[]>(),
+    /** G8 fix — was typed on the domain object but never had a column at all. */
+    agents: text('agents', { mode: 'json' }).$type<AgentReference[]>(),
     /** Portable `scope:slug` ref of the default agent for stages without their own. */
     defaultAgentRef: text('default_agent_ref'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),

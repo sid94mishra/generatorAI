@@ -9,6 +9,7 @@ import { useChat, useArchiveChat } from '@/hooks/queries.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import { useStreamStore } from '@/stores/streamStore.js';
+import { useConnectionStore } from '@/stores/connectionStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { cn } from '@/lib/utils.js';
 import { Tooltip } from '@/components/Tooltip.js';
@@ -30,6 +31,18 @@ interface HeaderProps {
 }
 
 export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
+  // Worst state across the scopes this tab is subscribed to. 'disconnected'
+  // entries with zero received events are ignored — that is the initial
+  // record for a scope whose subscription never opened (or a stale default),
+  // not an outage.
+  const streamHealth = useConnectionStore((s) => {
+    let health: 'connected' | 'reconnecting' | 'disconnected' = 'connected';
+    for (const info of Object.values(s.connections)) {
+      if (info.state === 'reconnecting') health = 'reconnecting';
+      if (info.state === 'disconnected' && info.eventsReceived > 0) return 'disconnected';
+    }
+    return health;
+  });
   const { id: routeId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -134,6 +147,35 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
 
       {/* Right: actions + connection status + theme toggle */}
       <div className="flex items-center gap-2">
+        {/* Live-stream health. Quietly absent while everything is connected;
+            a server restart or dropped socket used to be completely invisible
+            (observed live: server killed mid-turn, page showed nothing). */}
+        {streamHealth !== 'connected' && (
+          <Tooltip
+            content={
+              streamHealth === 'reconnecting'
+                ? 'Live updates interrupted — reconnecting. Anything missed is replayed on reconnect.'
+                : 'Live updates disconnected. The page will keep retrying; refresh if this persists.'
+            }
+          >
+            <span
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium',
+                streamHealth === 'reconnecting'
+                  ? 'border-[var(--color-warning)]/40 text-[var(--color-warning)]'
+                  : 'border-[var(--color-danger)]/40 text-[var(--color-danger)]',
+              )}
+            >
+              <span className={cn(
+                'h-1.5 w-1.5 rounded-full',
+                streamHealth === 'reconnecting'
+                  ? 'animate-pulse bg-[var(--color-warning)]'
+                  : 'bg-[var(--color-danger)]',
+              )} />
+              {streamHealth === 'reconnecting' ? 'Reconnecting…' : 'Live updates off'}
+            </span>
+          </Tooltip>
+        )}
         {/* Chat Actions */}
         {isChatContext && chatId && (
           <div className="flex items-center gap-1">

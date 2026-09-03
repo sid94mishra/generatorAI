@@ -2,38 +2,45 @@
 // DiffProviders — one worker pool + one theme for every diff surface
 // ────────────────────────────────────────────────────────────────
 //
-// Mounted once near the app root. Every `<CodeView>` / `<FileDiff>` nested
-// underneath automatically:
+// Mounted at each diff/code-view surface's own point of use (ChangesSurface,
+// FilesSurface, FileViewerModal, CodebaseDetailPage) rather than once at the
+// app root. Every `<CodeView>` / `<FileDiff>` nested underneath automatically:
 //   • offloads Shiki syntax highlighting to a pool of 8 Web Workers, so a
 //     10k-line diff never blocks the main thread;
 //   • shares an LRU AST cache keyed by our blob-pair `cacheKey`, so
 //     re-opening a file it already rendered is instant;
 //   • follows the app's light/dark theme.
 //
-// The provider tears the pool down on unmount, and multiple providers share
-// one pool, so this is safe to mount defensively.
+// W28 — this used to be mounted once, unconditionally, at the app root
+// (`App.tsx`), specifically to dodge a React reconciliation trap: inserting a
+// provider ABOVE an already-mounted, stateful subtree changes the element
+// type at that position, and React does not reconcile across a changed type
+// — it unmounts and remounts everything below, destroying route state and
+// every live SSE/WebSocket subscription. But mounting at the root also forces
+// Vite to bundle `@pierre/diffs/react` (and its worker/Shiki/WASM payload)
+// into the eager entry chunk, even for a session that never opens a diff.
 //
-// P1-52 — it stays mounted at the ROOT and unconditionally. An earlier attempt
-// to defer construction until the first diff render was wrong: inserting the
-// provider above `children` changes the element type at that position, and
-// React does not reconcile across a changed type — it would unmount and
-// remount the entire routed application, destroying every route's state and
-// every SSE/WebSocket subscription the first time a user opened a file.
+// The fix is NOT "move the one provider somewhere else" — it's mounting one
+// `<DiffProviders>` per consumer, at that consumer's OWN initial render, so
+// there is never an existing subtree to insert above. Each consuming page is
+// already behind `React.lazy()` (see router.tsx), so its `<DiffProviders>`
+// wrap ships in that route's own lazy chunk instead of the eager one, and
+// mounts fresh alongside the page rather than retrofitting an ancestor onto
+// something already on screen.
 //
-// What is deferred instead is the largest part. `WorkerPoolManager`'s
-// constructor calls `queueInitialization(langs)`, which compiled every
-// preloaded TextMate grammar in every worker at app start. Preloading nothing
-// leaves the workers idle until a diff arrives, and the library then loads the
-// grammar a file actually needs on demand.
+// This only works because `WorkerPoolContextProvider` (verified in
+// `@pierre/diffs/react`'s own source) builds its pool via
+// `getOrCreateWorkerPoolSingleton()`, a true module-level singleton with
+// reference counting: the first mount anywhere in the app creates the pool,
+// every later mount reuses it, and it is torn down only once the last
+// consumer unmounts. Four independent mount points therefore still share
+// exactly one Shiki/WASM worker pool and one AST cache — the property the
+// original root-mount comment relied on ("multiple providers share one
+// pool") — without paying for it before any of them has rendered.
 //
-// STILL PAID AT ROOT, and deliberately not addressed here: the 8 workers
-// themselves and the shared Shiki/WASM highlighter, because
-// `WorkerPoolManager`'s constructor calls `initialize()` unconditionally and
-// `CodeView` captures the pool at instance-construction time — so a pool that
-// arrives later never reaches an already-mounted diff, and the first file a
-// user opens would render permanently unhighlighted. Removing that cost means
-// owning pool construction rather than the library's provider, which is W28's
-// "diff providers mounted lazily" in Phase 5, not a Phase 0 guard clause.
+// The other half of the original fix still applies: `PRELOAD_LANGS` stays
+// empty so no worker compiles a TextMate grammar until a diff actually needs
+// it, regardless of which consumer created the pool.
 
 import { useEffect, type ReactNode } from 'react';
 import { WorkerPoolContextProvider, useWorkerPool } from '@pierre/diffs/react';
