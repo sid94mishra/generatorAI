@@ -14,6 +14,9 @@ const COPY: Record<ResolutionWarning['code'], (p: Record<string, string | number
   SKILL_NOT_FOUND: (p) => `Skill "${p['id']}" was not found in the catalog and will be skipped.`,
   MCP_SERVER_NOT_FOUND: (p) =>
     `MCP server "${p['id']}" was not found in the registry and will be skipped.`,
+  MCP_SERVER_NEEDS_CONFIGURATION: (p) =>
+    `MCP server "${p['id']}" is missing configuration (${p['missing']}) and will be skipped.`,
+  MCP_SERVER_DISABLED: (p) => `MCP server "${p['id']}" is disabled and will be skipped.`,
   AGENT_NOT_FOUND: (p) => `Agent "${p['ref']}" no longer exists — running without an agent.`,
   AGENT_DISABLED: (p) => `Agent "${p['ref']}" is disabled — running without an agent.`,
   STAGING_BUDGET_EXCEEDED: (p) =>

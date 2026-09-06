@@ -190,6 +190,76 @@ export class DurableSleepService {
    * Returns the number of stages actually woken (can be less than the
    * candidate pool if another sweeper raced and claimed some first).
    */
+  /**
+   * Claim one sleeping row and resume it. Returns false when the claim was
+   * lost — another sweeper won the race, or the row was cancelled — which is
+   * ordinary, not an error.
+   *
+   * Shared by the timed sweep and by `wakeNow`, so an operator-triggered wake
+   * takes exactly the same path as an expiry: same atomic claim, same
+   * `stage_run.woken` event, same `onWake` resume. A second implementation
+   * here is how the two paths would drift.
+   */
+  private async _wakeOne(stage: StageRun): Promise<boolean> {
+    const claimed = await this.stageRunRepo.wake(stage.id);
+    if (!claimed) return false;
+    // W18 — decrement active count and auto-stop sweeper when drained.
+    this._onWakeComplete();
+    const overdueMs = stage.wakeAt ? Date.now() - stage.wakeAt.getTime() : 0;
+    try {
+      await this.eventBus.emitGlobal({
+        kind: 'stage_run.woken',
+        data: {
+          stageRunId: stage.id,
+          workflowRunId: stage.workflowRunId,
+          overdueMs,
+        },
+      });
+    } catch {
+      // EventBus failure shouldn't stop the wake — row is already
+      // queued. The normal scheduler will pick it up.
+    }
+    try {
+      // Refetch the row so `onWake` sees the post-wake status/version.
+      const queued = await this.stageRunRepo.getById(stage.id);
+      await this.onWake(queued);
+    } catch (err) {
+      this.logger?.error?.('[DurableSleep] onWake handler threw', {
+        stageRunId: stage.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return true;
+  }
+
+  /**
+   * Wake a sleeping stage immediately, ahead of its `wake_at`.
+   *
+   * The UI has shown a "Wake now" button beside every sleeping stage for a
+   * while, and it was wired to nothing at all — the whole wake path existed
+   * but had no on-demand entry point (review 6.x / D14). An operator watching
+   * a stage parked for six hours had no way to say "go now" short of
+   * restarting the server.
+   *
+   * Returns `'woken'`, or why it could not be: unknown row, a row that is not
+   * sleeping (already woken, cancelled, or never asleep).
+   */
+  async wakeNow(stageRunId: string): Promise<'woken' | 'not_found' | 'not_sleeping'> {
+    // `getById` REJECTS on a missing row rather than resolving undefined
+    // (`Promise<StageRun>`, throwing `NotFoundError`), so an unknown id
+    // arrives here as an exception. Both shapes are handled: a defensive
+    // null check alone would have been dead code.
+    let stage;
+    try {
+      stage = await this.stageRunRepo.getById(stageRunId);
+    } catch {
+      return 'not_found';
+    }
+    if (!stage) return 'not_found';
+    if (stage.status !== 'sleeping') return 'not_sleeping';
+    return (await this._wakeOne(stage)) ? 'woken' : 'not_sleeping';
+  }
+
   async sweep(): Promise<{ woken: number; candidates: number }> {
     if (this.running) {
       // Reentrance guard — avoids stacking sweeps when the previous tick
@@ -205,38 +275,7 @@ export class DurableSleepService {
       );
       let woken = 0;
       for (const stage of candidates) {
-        const claimed = await this.stageRunRepo.wake(stage.id);
-        if (!claimed) {
-          // Another sweeper got here first, or the row was cancelled.
-          continue;
-        }
-        woken++;
-        // W18 — decrement active count and auto-stop sweeper when drained.
-        this._onWakeComplete();
-        const overdueMs = stage.wakeAt ? Date.now() - stage.wakeAt.getTime() : 0;
-        try {
-          await this.eventBus.emitGlobal({
-            kind: 'stage_run.woken',
-            data: {
-              stageRunId: stage.id,
-              workflowRunId: stage.workflowRunId,
-              overdueMs,
-            },
-          });
-        } catch {
-          // EventBus failure shouldn't stop the wake — row is already
-          // queued. The normal scheduler will pick it up.
-        }
-        try {
-          // Refetch the row so `onWake` sees the post-wake status/version.
-          const queued = await this.stageRunRepo.getById(stage.id);
-          await this.onWake(queued);
-        } catch (err) {
-          this.logger?.error?.('[DurableSleep] onWake handler threw', {
-            stageRunId: stage.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
+        if (await this._wakeOne(stage)) woken++;
       }
       if (candidates.length > 0) {
         this.logger?.info?.('[DurableSleep] sweep complete', {

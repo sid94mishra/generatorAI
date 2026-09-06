@@ -10,6 +10,7 @@
 
 import React from 'react';
 import { AlertCircle, RefreshCw, ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/index.js';
 
 interface PageErrorBoundaryProps {
   children: React.ReactNode;
@@ -71,22 +72,24 @@ export class PageErrorBoundary extends React.Component<
             </p>
           </div>
           <div className="flex gap-2">
-            <button
+            <Button
+              variant="ghost"
               type="button"
               onClick={this.retry}
               className="inline-flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
             >
               <RefreshCw className="h-4 w-4" aria-hidden />
               Retry
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
               type="button"
               onClick={() => { window.location.href = '/'; }}
               className="inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm hover:bg-accent"
             >
               <ArrowLeft className="h-4 w-4" aria-hidden />
               Back to home
-            </button>
+            </Button>
           </div>
         </div>
       </div>

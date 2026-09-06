@@ -35,9 +35,19 @@ export class ResultValidator {
   ): Promise<StageValidationResult> {
     const stageRun = await this.stageRunRepo.getById(stageRunId);
 
-    // Get assistant messages for this stage's session
+    // Get assistant messages for THIS STAGE, not every message in the
+    // session. In shared-session mode (the default for any purely linear
+    // workflow — see `WorkflowRunService.startRun`'s auto-mode resolution)
+    // every stage in the run talks through the SAME conversation, so
+    // `getBySessionId` returned every prior stage's output concatenated
+    // together and validated that blob against THIS stage's rules. Every
+    // message `StageExecutionService` persists is tagged with
+    // `metadata.stageRunId` (see e.g. its prompt/summary/output-retry
+    // `messageRepo.create` calls), so `getBySessionAndStageRunId` scopes to
+    // exactly the turns this stage produced — correct in both single- and
+    // per-stage session mode.
     const messages = stageRun.sessionId
-      ? await this.messageRepo.getBySessionId(stageRun.sessionId)
+      ? await this.messageRepo.getBySessionAndStageRunId(stageRun.sessionId, stageRunId)
       : [];
 
     // Combine all assistant messages as the stage output

@@ -373,4 +373,57 @@ describe('HttpPlatformClient', () => {
     );
     expect(result).toEqual(state);
   });
+
+  // ── W48 — custom MCP servers now round-trip through the server instead of
+  // only ever reaching the browser's localStorage (customMcpStore). ──
+
+  it('createCustomMcpServer calls POST /api/system/mcp-servers/custom with the token, and the mocked response never echoes it back', async () => {
+    // GET would redact it server-side; this pins the CLIENT sends what the
+    // user typed (the vaulting itself is a server-side/db-package concern).
+    const created = { id: 'custom-mcp-1', name: 'Jira', source: 'custom', hasCredentials: true };
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(created, 201));
+
+    const body = { name: 'Jira', serverType: 'http', url: 'https://jira/mcp', headers: { Authorization: 'Bearer live-token' } };
+    const result = await client.createCustomMcpServer(body);
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/system/mcp-servers/custom',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+    // The RESPONSE (what a GET would also return) never carries the token.
+    expect(JSON.stringify(result)).not.toContain('live-token');
+  });
+
+  it('updateCustomMcpServer calls PUT /api/system/mcp-servers/custom/:id', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
+    const body = { name: 'Jira', serverType: 'http', url: 'https://jira/mcp', enabled: false };
+    await client.updateCustomMcpServer('custom-mcp-1', body);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/system/mcp-servers/custom/custom-mcp-1',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify(body) }),
+    );
+  });
+
+  it('deleteCustomMcpServer calls DELETE /api/system/mcp-servers/custom/:id', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
+    await client.deleteCustomMcpServer('custom-mcp-1');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/system/mcp-servers/custom/custom-mcp-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
+  it('updateSystemMcpServerPrefs calls PUT /api/system/mcp-servers/system/:id', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
+    const data = { enabled: true, inputs: { allowedDirectory: 'D:/work' } };
+    await client.updateSystemMcpServerPrefs('system-mcp-filesystem', data);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/system/mcp-servers/system/system-mcp-filesystem',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify(data) }),
+    );
+  });
 });

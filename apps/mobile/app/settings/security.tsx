@@ -13,8 +13,10 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { ShieldAlert, ShieldCheck, Smartphone } from 'lucide-react-native';
 
 import { useAuth } from '../../src/auth/AuthProvider';
+import { revokeDeviceRequest } from '../../src/auth/deviceRequests';
 import { describeScope, isSensitiveScope } from '../../src/auth/scopeLabels';
 import { checkFeature, grantableFeatures, type MobileFeature } from '../../src/auth/featureGate';
+import { ConfirmSheet } from '../../src/components/ui/ActionSheet';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 /** Short names for the capabilities a user can be granted after pairing. */
@@ -66,6 +68,9 @@ export default function SecurityScreen(): React.ReactElement {
   const { colors } = useTheme();
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
+  /** Device awaiting the "revoke?" confirmation, or null. */
+  const [revoking, setRevoking] = useState<DeviceRecord | null>(null);
+  const [unpairing, setUnpairing] = useState(false);
 
   const scopes = state.status === 'authenticated' ? state.scopes : [];
 
@@ -107,27 +112,28 @@ export default function SecurityScreen(): React.ReactElement {
   });
 
   /**
-   * Revoking a device is destructive and immediate, so it requires a local
-   * biometric check first. A phone left unlocked on a desk must not be able
-   * to cut off someone's laptop with two taps.
+   * Revoking a device is destructive and immediate. The user first confirms
+   * in a sheet that names the device and the consequence (the same pattern
+   * chat deletion uses), and then — where the phone can — proves presence
+   * with a biometric check. A phone left unlocked on a desk must not be able
+   * to cut off someone's laptop with two taps; a phone WITHOUT a sensor used
+   * to get no gate at all, which was the worse of the two.
    */
   const revokeDevice = useCallback(
     async (device: DeviceRecord) => {
-      const hasBiometrics = await LocalAuthentication.hasHardwareAsync();
+      const hasBiometrics =
+        (await LocalAuthentication.hasHardwareAsync()) && (await LocalAuthentication.isEnrolledAsync());
       if (hasBiometrics) {
         const result = await LocalAuthentication.authenticateAsync({
-          promptMessage: `Revoke ${device.deviceName}?`,
+          promptMessage: `Confirm revoking ${device.deviceName}`,
         });
         if (!result.success) return;
       }
 
       setBusy(device.deviceId);
       try {
-        const res = await authFetch(`/api/auth/devices/${device.deviceId}/revoke`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ reason: 'Revoked from mobile' }),
-        });
+        const { path, init } = revokeDeviceRequest(device.deviceId);
+        const res = await authFetch(path, init);
         if (!res.ok) throw new Error(`Revoke failed (${res.status})`);
         await queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] });
       } catch (err) {
@@ -155,16 +161,9 @@ export default function SecurityScreen(): React.ReactElement {
     }
   }, [refreshPermissions, queryClient]);
 
-  const confirmUnpair = useCallback(() => {
-    Alert.alert(
-      'Unpair this device?',
-      'This device will lose access immediately. You will need to scan a new pairing code to reconnect.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Unpair', style: 'destructive', onPress: () => void unpair() },
-      ],
-    );
-  }, [unpair]);
+  // Both destructive device actions on this screen confirm through the same
+  // sheet as chat deletion, so one pattern covers every irreversible action.
+  const confirmUnpair = useCallback(() => setUnpairing(true), []);
 
   const hardwareBacked = keyBacking !== 'software' && keyBacking !== 'web-preview';
 
@@ -328,7 +327,7 @@ export default function SecurityScreen(): React.ReactElement {
                 <Pressable
                   accessibilityRole="button"
                   disabled={busy === device.deviceId}
-                  onPress={() => void revokeDevice(device)}
+                  onPress={() => setRevoking(device)}
                   className="rounded-md border border-danger px-3 py-1.5"
                 >
                   <Text className="text-xs font-medium text-danger">
@@ -350,6 +349,31 @@ export default function SecurityScreen(): React.ReactElement {
       >
         <Text className="font-semibold text-danger">Unpair this device</Text>
       </Pressable>
+
+      <ConfirmSheet
+        visible={revoking !== null}
+        onClose={() => setRevoking(null)}
+        title={`Revoke “${revoking?.deviceName ?? ''}”?`}
+        message="That device loses access immediately and will need a new pairing code to reconnect. This cannot be undone."
+        confirmLabel="Revoke device"
+        onConfirm={() => {
+          const device = revoking;
+          setRevoking(null);
+          if (device) void revokeDevice(device);
+        }}
+      />
+
+      <ConfirmSheet
+        visible={unpairing}
+        onClose={() => setUnpairing(false)}
+        title="Unpair this device?"
+        message="This device will lose access immediately. You will need to scan a new pairing code to reconnect."
+        confirmLabel="Unpair"
+        onConfirm={() => {
+          setUnpairing(false);
+          void unpair();
+        }}
+      />
     </ScrollView>
   );
 }

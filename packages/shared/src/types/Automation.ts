@@ -65,8 +65,16 @@ export interface HttpDataSourceConfig {
 /** Configuration for a file-based data source */
 export interface FileDataSourceConfig {
   type: 'file';
-  /** Path to the file to read */
+  /**
+   * Path to the file to read, resolved against the automation's project
+   * root (never the server's working directory) and confined to it.
+   */
   filePath: string;
+  /**
+   * Hidden files/directories (`.env`, `.git/…`) are refused unless this
+   * is explicitly true — they are where credentials live.
+   */
+  allowHidden?: boolean;
   /** File format (default: json_array) */
   format?: DataSourceOutputFormat;
   /** Optional schema validation */
@@ -121,8 +129,19 @@ export interface DataSourceTestResult {
 /** What to do when a workflow run in the batch fails */
 export type AutomationErrorPolicy = 'continue' | 'stop';
 
-/** Automation execution status */
-export type AutomationExecutionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+/**
+ * Automation execution status. `partial` = the run finished with BOTH
+ * successes and failures; it is alerted through the same channel as
+ * `failed` so unattended operation never reports a mostly-failed batch
+ * as a success.
+ */
+export type AutomationExecutionStatus = 'pending' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled';
+
+/** What the scheduler does with slots that elapsed while nobody could run them. */
+export type AutomationMissedRunPolicy = 'skip' | 'run_once';
+
+/** What the scheduler does when a slot is due while a previous execution is still running. */
+export type AutomationOverlapPolicy = 'skip' | 'queue';
 
 /** Individual run status within an execution */
 export type AutomationRunItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -175,8 +194,30 @@ export interface Automation {
   /** Cron expression for schedule triggers (e.g. "0 9 * * *") */
   cronExpression?: string;
 
-  /** Unique token for webhook authentication */
+  /** IANA timezone the cron expression is evaluated in. Default: server zone. */
+  timezone?: string;
+
+  /** Catch-up policy for slots missed while the server was down. Default `skip`. */
+  missedRunPolicy?: AutomationMissedRunPolicy;
+
+  /** Overlap policy when a slot is due mid-execution. Default `skip`. */
+  overlapPolicy?: AutomationOverlapPolicy;
+
+  /**
+   * Raw webhook token. ONLY populated on the response to create /
+   * rotate-webhook-token — it is never persisted (only its sha256 is)
+   * and never returned by list/get.
+   */
   webhookToken?: string;
+
+  /**
+   * Raw webhook signing secret (HMAC key for `X-Signature-256`). Same
+   * one-time semantics as `webhookToken`; the value lives in the vault.
+   */
+  webhookSecret?: string;
+
+  /** sha256(webhookToken), the persisted lookup key. Stripped from API responses. */
+  webhookTokenHash?: string;
 
   /** Ordered list of workflow definition IDs to execute sequentially */
   workflowIds: string[];
@@ -249,6 +290,11 @@ export interface Automation {
   retryPolicy?: AutomationRetryPolicy;
 
   lastRunAt?: Date;
+  /**
+   * Next scheduled firing, written on create / update / enable / fire by
+   * the scheduler and read by the due-row poller. Null for non-schedule
+   * or disabled automations.
+   */
   nextRunAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -316,6 +362,9 @@ export interface CreateAutomationParams {
   description?: string;
   triggerType: AutomationTriggerType;
   cronExpression?: string;
+  timezone?: string;
+  missedRunPolicy?: AutomationMissedRunPolicy;
+  overlapPolicy?: AutomationOverlapPolicy;
   workflowIds: string[];
   /** Legacy — required when `dataSchema` is absent. Ignored otherwise. */
   inputMode: AutomationInputMode;
@@ -345,6 +394,9 @@ export interface UpdateAutomationParams {
   description?: string;
   triggerType?: AutomationTriggerType;
   cronExpression?: string;
+  timezone?: string | null;
+  missedRunPolicy?: AutomationMissedRunPolicy;
+  overlapPolicy?: AutomationOverlapPolicy;
   workflowIds?: string[];
   inputMode?: AutomationInputMode;
   loopVariable?: string;

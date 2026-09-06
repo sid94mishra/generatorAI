@@ -22,6 +22,7 @@ import React, { useState, useCallback, useRef, useEffect, useMemo, isValidElemen
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, Copy } from 'lucide-react';
+import { Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { highlightCode, peekHighlight, type HighlightToken } from '@/lib/highlight/client.js';
 // `languageNames`, not `languages`: the latter imports every grammar, and this
@@ -247,9 +248,12 @@ function PreBlock({ children, ...props }: React.HTMLAttributes<HTMLPreElement> &
             </span>
           )}
         </div>
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
           onClick={handleCopy}
-          className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium text-[var(--color-muted-foreground)] transition-all hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] shrink-0"
+          className="shrink-0 text-[11px] hover:bg-[var(--color-accent)]"
           aria-label={copied ? 'Copied' : 'Copy code'}
         >
           {copied ? (
@@ -263,7 +267,7 @@ function PreBlock({ children, ...props }: React.HTMLAttributes<HTMLPreElement> &
               Copy
             </>
           )}
-        </button>
+        </Button>
       </div>
       <pre
         ref={codeRef}

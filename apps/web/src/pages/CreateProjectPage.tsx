@@ -95,13 +95,15 @@ export function CreateProjectPage() {
 
   return (
     <PageContainer variant="narrow" className="max-w-2xl space-y-6">
-      <button
+      <Button
+        type="button"
+        variant="ghost"
         onClick={() => navigate('/projects')}
-        className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="flex h-auto items-center gap-1.5 rounded-none p-0 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />
         Back to Projects
-      </button>
+      </Button>
 
       <PageHeader
         leading={
@@ -147,6 +149,7 @@ export function CreateProjectPage() {
             <Select
               value={worktreeRetention}
               onChange={(v) => setWorktreeRetention(v as typeof worktreeRetention)}
+              aria-label="Worktree Retention Policy"
               options={[
                 { value: 'immediate', label: 'Immediate cleanup' },
                 { value: 'hours-24', label: 'Keep for 24 hours' },
@@ -163,6 +166,7 @@ export function CreateProjectPage() {
               onChange={(e) => setMaxCodebases(Math.max(1, Math.min(50, Number(e.target.value))))}
               min={1}
               max={50}
+              aria-label="Max Codebases"
             />
           </div>
         </div>
@@ -222,6 +226,7 @@ export function CreateProjectPage() {
                         value={r.type}
                         onChange={(v) => updateRepo(r.id, { type: v as CodebaseType })}
                         className="mt-0.5"
+                        aria-label={`Repository ${i + 1} type`}
                         options={[
                           { value: 'git-remote', label: 'Remote Git Repo' },
                           { value: 'git-local', label: 'Local Git Repo' },

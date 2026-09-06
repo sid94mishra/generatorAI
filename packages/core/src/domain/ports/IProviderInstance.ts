@@ -83,6 +83,21 @@ export interface ProviderCapabilities {
   computerUse?: boolean;
   /** Maximum token context window in tokens. Absent if not known statically. */
   maxContextTokens?: number;
+  /**
+   * Whether this provider can bring a conversation to readiness BEFORE a
+   * prompt arrives, via `prewarmConversation`.
+   *
+   * Every provider measured pays a per-conversation cold start — the process
+   * or session backing a brand-new conversation is built on the first prompt,
+   * while the user waits. On this machine that was 12.8 s for `claude-agent`
+   * and 7.1 s for `copilot`, against warm turns of 2.2 s and 3.9 s. Declaring
+   * the capability lets the harness-neutral layer move that cost off the
+   * user's critical path without knowing anything about the provider.
+   *
+   * Defaults false like every other capability: a provider that cannot warm
+   * simply does not claim it, and behaves exactly as it does today.
+   */
+  prewarm?: boolean;
 }
 
 /**

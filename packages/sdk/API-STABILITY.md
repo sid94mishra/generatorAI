@@ -1,5 +1,11 @@
 # `@generatorai/sdk` — API Stability & Versioning
 
+> **Frozen, internal, unpublished (September 2026).** The package is
+> `private: true`, has no importers in this repository, and cannot be installed
+> outside it (see README.md). The contract below describes the *intended*
+> surface should it ever be published; nothing here is a promise to an outside
+> consumer today.
+
 This document defines what is covered by the SDK's semantic-versioning contract,
 so you know what is safe to build on and what can change underneath you.
 
@@ -20,8 +26,9 @@ Exported from `@generatorai/sdk`:
 - The **facades** and their option/return types:
   `workflows`, `chat`, `automations`, `scripts`, `events`, `tools`, `projects`,
   `hooks`, `hitl`, `workspaces`, plus the `tool()` helper.
-- **Configuration**: `GeneratorAIConfig`, `ResolvedConfig`, `LoggerConfig`,
-  `SandboxConfig`.
+- **Configuration**: `GeneratorAIConfig`, `HarnessSelection`, `ResolvedConfig`,
+  `LoggerConfig`, `SandboxConfig`. `config.harness` is the harness field;
+  `config.provider` is a deprecated alias kept for one minor.
 - **Builders**: `WorkflowBuilder`, `StageBuilder`.
 - **Domain types** re-exported from `@generatorai/shared` (e.g.
   `WorkflowDefinition`, `WorkflowRun`, `Chat`, `ChatMessage`, `Automation`,
@@ -31,7 +38,7 @@ Exported from `@generatorai/sdk`:
   `SessionStateMachine` (pure, dependency-free).
 - **Bring-your-own-harness**: the `IAgentHarness` interface and the harness
   provider types (`HarnessType`, `HarnessProviderConfig`). Implement
-  `IAgentHarness` and pass the instance as `config.provider` to run on any
+  `IAgentHarness` and pass the instance as `config.harness` to run on any
   harness you like.
 - The testing entry point `@generatorai/sdk/testing` (`MockHarness`,
   `createTestGeneratorAI`).

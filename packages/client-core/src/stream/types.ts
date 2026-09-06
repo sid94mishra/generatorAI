@@ -50,7 +50,12 @@ export interface ToolCallBlock {
   parentCallId?: string;
 }
 
-export type SystemCategory = 'system' | 'subagent' | 'error';
+/**
+ * `warning` is distinct from `error` on purpose: the turn continues. It marks
+ * something the user has to act on — an MCP server that failed to start or
+ * needs credentials — which previously had nowhere to surface at all.
+ */
+export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning';
 
 export interface SystemBlock {
   type: 'system';
@@ -143,6 +148,36 @@ export interface QuestionBlock {
   openedAt?: number;
 }
 
+/**
+ * A blocking tool-permission prompt (review finding 5.1) — the agent
+ * cannot proceed past this tool call until the user allows or denies it.
+ *
+ * Mirrors {@link QuestionBlock} deliberately: same card lifecycle
+ * (pending → answered/expired), same replay story, same `openedAt`
+ * reconciliation rule (see `PlanBlock.openedAt`).
+ */
+export interface PermissionBlock {
+  type: 'permission';
+  blockId: number;
+  interactionId: string;
+  toolName: string;
+  /** `ToolPermissionType` from `@generatorai/shared` — kept as `string` here
+   *  so client-core does not need to import shared's enum just to pass it
+   *  through unchanged. */
+  permissionType: string;
+  description: string;
+  /** Bounded, secret-redacted rendering of the tool input. Render verbatim
+   *  as preformatted text — already safe for display. */
+  inputSummary: string;
+  /** Effective permission mode of the turn that raised the prompt. */
+  permissionMode: string;
+  status: 'pending' | 'allowed' | 'denied' | 'expired';
+  /** Optional reason the user gave when denying. */
+  message?: string;
+  /** See {@link PlanBlock.openedAt}. */
+  openedAt?: number;
+}
+
 export type StreamBlock =
   | ThinkingBlock
   | TextBlock
@@ -150,7 +185,8 @@ export type StreamBlock =
   | SystemBlock
   | WidgetBlock
   | PlanBlock
-  | QuestionBlock;
+  | QuestionBlock
+  | PermissionBlock;
 
 export interface StreamUsage {
   model: string;
@@ -173,6 +209,24 @@ export interface StreamToolCall {
   parentCallId?: string;
 }
 
+/**
+ * One hook invocation, built from `hook.started`/`hook.completed`/
+ * `hook.failed`. Feeds the run inspector's Hooks tab — previously these
+ * events were narrated as system-message text and nothing else, so the tab
+ * had no data to show and stayed permanently empty.
+ */
+export interface StreamHookInvocation {
+  id: string;
+  hookName: string;
+  phase: string;
+  hookType?: string;
+  /** Present when the event carried one — lets consumers attribute the
+   *  invocation to a stage rather than the run as a whole. */
+  stageRunId?: string;
+  status: 'running' | 'ok' | 'failed';
+  durationMs?: number;
+}
+
 /** Everything known about one session's in-flight turn. */
 export interface StreamState {
   /** Accumulated response text (all text blocks combined). */
@@ -190,6 +244,10 @@ export interface StreamState {
   _nextBlockId: number;
   /** Internal counter for synthesising tool-call ids. */
   _toolCallCounter: number;
+  /** Hook invocations observed on this stream (see `StreamHookInvocation`). */
+  hooks: StreamHookInvocation[];
+  /** Internal counter for synthesising hook ids when `hookId` is absent. */
+  _hookCounter: number;
   /** Optimistic user message, shown before the history refetch lands. */
   pendingUserMessage: string | null;
   /**
@@ -256,6 +314,8 @@ export const DEFAULT_STREAM: Readonly<StreamState> = Object.freeze({
   blocks: [] as StreamBlock[],
   _nextBlockId: 0,
   _toolCallCounter: 0,
+  hooks: [] as StreamHookInvocation[],
+  _hookCounter: 0,
   pendingUserMessage: null,
   turnUserMessage: null,
   turnId: 0,

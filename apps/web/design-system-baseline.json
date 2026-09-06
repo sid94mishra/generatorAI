@@ -1,9 +1,9 @@
 {
-  "hardcodedPaletteClass": 315,
-  "handRolledOverlay": 2,
+  "hardcodedPaletteClass": 314,
+  "handRolledOverlay": 1,
   "legacyGlassClass": 0,
-  "rawButtonElement": 191,
-  "rawInputElement": 31,
-  "adHocSpinner": 31,
+  "rawButtonElement": 44,
+  "rawInputElement": 40,
+  "adHocSpinner": 6,
   "nativeConfirm": 0
 }

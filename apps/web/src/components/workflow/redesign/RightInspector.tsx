@@ -9,6 +9,7 @@ import {
   Plus, Pencil, Minus, ArrowRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 import { useRunFileContent } from '@/hooks/workflowQueries.js';
 import { FileViewerModal } from '@/components/shared/FileViewerComponents.js';
 import type { StageView, FileChange } from './types.js';
@@ -58,13 +59,15 @@ export function RightInspector({ stage, defaultTab = 'files', runId }: RightInsp
       {/* Tabs */}
       <div role="tablist" className="flex shrink-0 items-center gap-0.5 border-b border-[var(--color-border)] px-2 pt-1.5">
         {tabs.map((t) => (
-          <button
+          <Button
             key={t.id}
             role="tab"
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
+            variant="ghost"
+            size="sm"
             className={cn(
-              'flex items-center gap-1.5 rounded-t-md border-b-2 px-2.5 py-1.5 text-[11.5px] font-medium transition-colors',
+              'h-auto flex items-center gap-1.5 rounded-t-md border-b-2 bg-transparent px-2.5 py-1.5 text-[11.5px] font-medium transition-colors hover:bg-transparent',
               tab === t.id
                 ? 'border-[var(--color-primary)] text-[var(--color-foreground)]'
                 : 'border-transparent text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]',
@@ -77,7 +80,7 @@ export function RightInspector({ stage, defaultTab = 'files', runId }: RightInsp
                 {t.count}
               </span>
             )}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -153,15 +156,17 @@ function FilesTab({ files, onOpen }: { files: FileChange[]; onOpen?: (f: FileCha
         const clickable = !!onOpen;
         return (
           <li key={i}>
-            <button
+            <Button
               type="button"
               onClick={clickable ? () => onOpen(f) : undefined}
               disabled={!clickable}
+              variant="ghost"
+              size="sm"
               className={cn(
-                'group flex w-full items-center gap-2 rounded px-1.5 py-1 text-left',
+                'h-auto group flex w-full items-center gap-2 rounded bg-transparent px-1.5 py-1 text-left',
                 clickable
                   ? 'cursor-pointer hover:bg-[var(--color-subtle)]/60'
-                  : 'cursor-default',
+                  : 'cursor-default hover:bg-transparent',
               )}
               title={clickable ? `Open ${f.path}` : f.path}
             >
@@ -175,7 +180,7 @@ function FilesTab({ files, onOpen }: { files: FileChange[]; onOpen?: (f: FileCha
               {f.size && (
                 <span className="text-[10.5px] text-[var(--color-muted-foreground)]/70">{f.size}</span>
               )}
-            </button>
+            </Button>
           </li>
         );
       })}
@@ -242,11 +247,16 @@ function HooksTab({ hooks }: { hooks: StageView['hooks'] extends undefined ? nev
           <div className="flex items-center gap-1.5">
             {h.status === 'ok' ? (
               <CheckCircle2 className="h-3 w-3 text-[var(--color-success)]" />
-            ) : (
+            ) : h.status === 'failed' ? (
               <AlertTriangle className="h-3 w-3 text-[var(--color-danger)]" />
+            ) : (
+              // Matches the running dot in ToolsTab below — same status vocabulary.
+              <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-primary)] animate-status-breathe" />
             )}
             <span className="text-[11.5px] font-medium text-[var(--color-foreground)]/85">{h.name}</span>
-            <span className="ml-auto text-[10px] text-[var(--color-muted-foreground)]/70">{h.durationMs}ms</span>
+            <span className="ml-auto text-[10px] text-[var(--color-muted-foreground)]/70">
+              {h.status === 'running' ? 'running…' : `${h.durationMs}ms`}
+            </span>
           </div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[var(--color-muted-foreground)]/80">
             <span className="rounded bg-[var(--color-muted-foreground)]/10 px-1.5 py-px font-mono">{h.type}</span>

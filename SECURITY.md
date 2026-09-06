@@ -1,9 +1,5 @@
 # Security Policy
 
-> **Placeholder contact.** `security@example.com` below is a stand-in and does
-> not receive mail. Replace it with a real address before announcing the
-> project publicly, or vulnerability reports will silently go nowhere.
-
 ## Project status
 
 GeneratorAI is **alpha** software (`0.0.1-alpha`). It is under active,
@@ -14,11 +10,11 @@ data or expose it to an untrusted network.
 
 **Please do not open a public issue for security problems.**
 
-Report privately via either:
-
-- GitHub's [private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
-  (Security → Report a vulnerability), or
-- email **security@example.com**
+Report privately through GitHub's
+[private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability):
+open the repository's **Security** tab and choose **Report a vulnerability**.
+That form is the only reporting channel; it creates a draft advisory visible
+to maintainers alone, and the conversation stays there until a fix ships.
 
 Please include: affected version or commit, reproduction steps, impact, and
 any proof-of-concept. We aim to acknowledge within 72 hours and to keep you

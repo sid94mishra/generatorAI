@@ -61,8 +61,15 @@ export class ChangeSummaryService {
    * How long a materialised working tree is reused. Long enough to cover one
    * panel render (summary + per-file fetches), short enough that a manual
    * refresh always sees current state.
+   *
+   * Must be at least `WorkspaceCheckpointService.LIVE_DEBOUNCE_MS` (2 s), the
+   * interval between live snapshots during a turn. At 1.5 s the entry had
+   * ALWAYS just expired by the time the next snapshot asked for it, so the
+   * cache never once hit on the path it exists to serve and every live
+   * snapshot re-ran a full change-summary rebuild (review 3.5). The invariant
+   * is asserted in `ChangeSummaryService.cacheTtl.test.ts`.
    */
-  private static readonly WORKING_TREE_TTL_MS = 1_500;
+  static readonly WORKING_TREE_TTL_MS = 2_500;
 
   constructor(
     private readonly git: IGitClient,
@@ -321,7 +328,9 @@ export class ChangeSummaryService {
     try {
       const fs = await import('node:fs/promises');
       const crypto = await import('node:crypto');
-      const buf = await fs.readFile(path.join(repoDir, relPath));
+      const abs = await this.resolveInsideRepo(repoDir, relPath);
+      if (!abs) return null;
+      const buf = await fs.readFile(abs);
       // git's blob object id: sha1("blob <len>\0" + content)
       const hash = crypto.createHash('sha1');
       hash.update(`blob ${buf.length}\0`);
@@ -675,12 +684,45 @@ export class ChangeSummaryService {
     return { alias: '.', repoDir: params.rootPath, kind: 'root' };
   }
 
+  /**
+   * Resolve `relPath` INSIDE `repoDir`, or return null.
+   *
+   * `relPath` arrives from a query parameter on the workspace changes routes,
+   * and both readers below simply joined it onto the repository directory — so
+   * `../../..`-style input, or an absolute path, read whatever the server user
+   * could read and returned it through the run page's Changes tab. Resolving
+   * and then checking containment is what makes the path a path inside the
+   * repository rather than a suggestion (review 6.2).
+   *
+   * `realpath` is applied when the file exists so a symlink planted inside the
+   * worktree cannot point out of it either; a missing file falls back to the
+   * lexical resolution, which is still contained.
+   */
+  private async resolveInsideRepo(repoDir: string, relPath: string): Promise<string | null> {
+    const fs = await import('node:fs/promises');
+    const root = path.resolve(repoDir);
+    const candidate = path.resolve(root, relPath);
+    const contained = (p: string): boolean => p === root || p.startsWith(root + path.sep);
+    if (!contained(candidate)) return null;
+    try {
+      const real = await fs.realpath(candidate);
+      const realRoot = await fs.realpath(root).catch(() => root);
+      return real === realRoot || real.startsWith(realRoot + path.sep) ? real : null;
+    } catch {
+      // Does not exist yet (a deleted or added file): the lexical check above
+      // already bounds it.
+      return candidate;
+    }
+  }
+
   /** Hash the working-tree copy so the head side still gets a cache key. */
   private async workingBlobSha(repoDir: string, relPath: string): Promise<string | null> {
     try {
       const fs = await import('node:fs/promises');
       const crypto = await import('node:crypto');
-      const buf = await fs.readFile(path.join(repoDir, relPath));
+      const abs = await this.resolveInsideRepo(repoDir, relPath);
+      if (!abs) return null;
+      const buf = await fs.readFile(abs);
       // git's blob object id: sha1("blob <len>\0" + content)
       const hash = crypto.createHash('sha1');
       hash.update(`blob ${buf.length}\0`);
@@ -706,7 +748,9 @@ export class ChangeSummaryService {
   private async readWorkingFile(repoDir: string, relPath: string): Promise<string | null> {
     try {
       const fs = await import('node:fs/promises');
-      return await fs.readFile(path.join(repoDir, relPath), 'utf-8');
+      const abs = await this.resolveInsideRepo(repoDir, relPath);
+      if (!abs) return null;
+      return await fs.readFile(abs, 'utf-8');
     } catch {
       return null;
     }

@@ -2,17 +2,24 @@
 // AppLayout — Top-level shell: sidebar + header + main content
 // Sidebar state lives in uiStore (persisted); registers the global
 // ⌘K / Ctrl+K keybinding for the command palette.
+//
+// Below the `md` breakpoint the sidebar is a real modal Drawer (Radix
+// Dialog): the page behind it is inert, focus is trapped, Escape and the
+// backdrop close it, and focus returns to the button that opened it. The
+// previous hand-rolled full-viewport backdrop had none of that.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
+import React, { useEffect, useRef } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar.js';
 import { Header } from './Header.js';
 import { TitleBar } from './TitleBar.js';
 import { CommandPalette } from './CommandPalette.js';
 import { SettingsModal } from '@/components/settings/SettingsModal.js';
+import { Drawer } from '@/components/ui/Drawer.js';
 import { useUiStore } from '@/stores/uiStore.js';
 import { useDesktopIntegration } from '@/hooks/useDesktopIntegration.js';
+import { useIsNarrowViewport } from '@/hooks/useMediaQuery.js';
 import { isDesktop } from '@/lib/desktop.js';
 import { cn } from '@/lib/utils.js';
 
@@ -28,6 +35,8 @@ export function AppLayout() {
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
+  const isMobile = useIsNarrowViewport();
+  const location = useLocation();
 
   // Publishes window chrome, handles native menu commands, and mirrors UI
   // state back into the menu. No-op outside the Electron shell.
@@ -51,36 +60,56 @@ export function AppLayout() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [setCommandPaletteOpen]);
 
+  // On a phone the drawer covers the page, so following a nav link must
+  // also dismiss it — otherwise the user lands on the new page and still
+  // sees the menu. Desktop keeps the sidebar where it is.
+  const lastPath = useRef(location.pathname);
+  useEffect(() => {
+    if (lastPath.current !== location.pathname) {
+      lastPath.current = location.pathname;
+      if (isMobile) setSidebarOpen(false);
+    }
+  }, [location.pathname, isMobile, setSidebarOpen]);
+
   return (
     // Column, not row: in the desktop shell the title bar spans the FULL width
     // above both the sidebar and the content, so the OS window controls get a
     // strip of their own instead of overlapping the header's buttons.
-    <div className="flex h-screen flex-col overflow-hidden bg-[var(--color-background)]">
+    <div className="flex h-screen flex-col overflow-hidden bg-background">
       <TitleBar visible={chrome.titleBarStyle !== 'native'} />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Mobile backdrop overlay */}
-        {sidebarOpen && (
-          <div
-            className="fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden"
-            onClick={() => setSidebarOpen(false)}
-          />
+        {isMobile ? (
+          // Sidebar has its own "Hide sidebar" control, so the Drawer's
+          // default close button is redundant here.
+          <Drawer
+            open={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            side="left"
+            title="Navigation"
+            hideTitle
+            hideClose
+            className="w-60 border-sidebar-border bg-sidebar"
+          >
+            <Sidebar />
+          </Drawer>
+        ) : (
+          <aside
+            className={cn(
+              'flex flex-col border-r border-sidebar-border bg-sidebar transition-[width,opacity] duration-200 ease-in-out',
+              sidebarOpen ? 'w-60' : 'w-0 overflow-hidden opacity-0',
+            )}
+            // A collapsed sidebar is still in the DOM (for the width
+            // transition); keep its links out of the tab order.
+            inert={!sidebarOpen}
+            aria-hidden={!sidebarOpen}
+          >
+            <Sidebar />
+          </aside>
         )}
 
-        {/* Sidebar */}
-        <aside
-          className={cn(
-            'flex flex-col border-r border-sidebar-border bg-sidebar transition-[width,transform,opacity] duration-200 ease-in-out',
-            sidebarOpen
-              ? 'fixed inset-y-0 left-0 z-50 w-60 md:relative md:z-auto'
-              : 'w-0 overflow-hidden opacity-0',
-          )}
-        >
-          <Sidebar />
-        </aside>
-
         {/* Main area */}
-        <div className="relative z-10 flex flex-1 flex-col overflow-hidden">
+        <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Header */}
           <Header
             sidebarOpen={sidebarOpen}

@@ -44,8 +44,10 @@ export interface HookInvocation {
   phase: string;
   type: 'script' | 'http' | 'function';
   name: string;
-  status: 'ok' | 'failed';
-  durationMs: number;
+  /** 'running' until the matching hook.completed/hook.failed event lands. */
+  status: 'running' | 'ok' | 'failed';
+  /** Absent while status is 'running' — never invent a duration. */
+  durationMs?: number;
 }
 
 export interface StageView {

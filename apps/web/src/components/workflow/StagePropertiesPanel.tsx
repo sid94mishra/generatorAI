@@ -25,7 +25,7 @@ import { StyledSelect } from './StyledSelect.js';
 import { ToggleSwitch } from './ToggleSwitch.js';
 import { NumberStepper } from './NumberStepper.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
-import { Input, Textarea } from '@/components/ui/index.js';
+import { Button, Input, Textarea } from '@/components/ui/index.js';
 import { useTemplates } from '@/hooks/queries.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
 import { cn } from '@/lib/utils.js';
@@ -102,13 +102,15 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
               </p>
             </div>
           </div>
-          <button
+          <Button
             onClick={onClose}
             aria-label="Close properties panel"
+            variant="ghost"
+            size="icon-sm"
             className="rounded-lg p-1.5 text-muted-foreground transition-colors duration-150 hover:bg-subtle hover:text-foreground"
           >
             <X className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
 
         {/* Tab bar */}
@@ -117,21 +119,23 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
             { key: 'properties' as PanelTab, label: 'Properties' },
             { key: 'execution' as PanelTab, label: 'Execution' },
           ]).map(({ key, label }) => (
-            <button
+            <Button
               key={key}
               role="tab"
               aria-selected={activeTab === key}
               aria-controls={`tabpanel-${key}`}
               onClick={() => setActiveTab(key)}
+              variant="ghost"
+              size="sm"
               className={cn(
-                'px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors',
+                'h-auto px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors',
                 activeTab === key
-                  ? 'bg-background text-foreground border border-b-0 border-border -mb-px'
-                  : 'text-muted-foreground hover:text-foreground',
+                  ? 'bg-background text-foreground border border-b-0 border-border -mb-px hover:bg-background'
+                  : 'bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground',
               )}
             >
               {label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -262,21 +266,23 @@ function PropertiesTab({
             { key: 'files' as PromptSubTab, label: 'Files', icon: <Paperclip className="h-3 w-3" /> },
             { key: 'agent' as PromptSubTab, label: 'Agent', icon: <Bot className="h-3 w-3" /> },
           ]).map(({ key, label, icon }) => (
-            <button
+            <Button
               key={key}
               role="tab"
               aria-selected={promptSubTab === key}
               onClick={() => setPromptSubTab(key)}
+              variant="ghost"
+              size="sm"
               className={cn(
-                'flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-medium transition-all',
+                'h-auto flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-medium transition-all',
                 promptSubTab === key
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
+                  ? 'bg-background text-foreground shadow-sm hover:bg-background'
+                  : 'bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground',
               )}
             >
               {icon}
               {label}
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -522,12 +528,15 @@ function HookEditor({
         <p className="text-xs text-muted-foreground mb-2">
           No hooks configured. Add pre/post execution hooks.
         </p>
-        <button
+        <Button
+          type="button"
           onClick={addHook}
-          className="text-xs text-primary hover:underline"
+          variant="ghost"
+          size="sm"
+          className="h-auto bg-transparent p-0 text-xs text-primary hover:bg-transparent hover:underline"
         >
           + Add a hook
-        </button>
+        </Button>
       </div>
     );
   }
@@ -536,12 +545,15 @@ function HookEditor({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">Hooks ({hooks.length})</span>
-        <button
+        <Button
+          type="button"
           onClick={addHook}
-          className="flex items-center gap-1 text-xs text-primary hover:underline"
+          variant="ghost"
+          size="sm"
+          className="h-auto gap-1 bg-transparent p-0 text-xs text-primary hover:bg-transparent hover:underline"
         >
           <Plus className="h-3 w-3" /> Add
-        </button>
+        </Button>
       </div>
       {hooks.map((hook, idx) => (
         <div key={hook.id} className="rounded-lg border border-border p-2.5 space-y-2">
@@ -550,6 +562,7 @@ function HookEditor({
               type="text"
               value={hook.name}
               onChange={(e) => updateHook(idx, { name: e.target.value })}
+              aria-label={`Hook ${idx + 1} name`}
               className="flex-1 h-auto rounded border-none bg-transparent px-1 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <div className="flex items-center gap-1">
@@ -558,12 +571,16 @@ function HookEditor({
                 onChange={(checked) => updateHook(idx, { enabled: checked })}
                 label=""
               />
-              <button
+              <Button
+                type="button"
                 onClick={() => removeHook(idx)}
-                className="p-0.5 text-muted-foreground hover:text-danger"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Remove ${hook.name || `hook ${idx + 1}`}`}
+                className="h-auto w-auto p-0.5 text-muted-foreground hover:bg-transparent hover:text-danger"
               >
                 <Trash2 className="h-3 w-3" />
-              </button>
+              </Button>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -679,12 +696,15 @@ function ValidationRuleEditor({
         <p className="text-xs text-muted-foreground mb-2">
           No validation rules. Add rules to verify stage output quality.
         </p>
-        <button
+        <Button
+          type="button"
           onClick={addRule}
-          className="text-xs text-primary hover:underline"
+          variant="ghost"
+          size="sm"
+          className="h-auto bg-transparent p-0 text-xs text-primary hover:bg-transparent hover:underline"
         >
           + Add a validation rule
-        </button>
+        </Button>
       </div>
     );
   }
@@ -693,23 +713,30 @@ function ValidationRuleEditor({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">Rules ({rules.length})</span>
-        <button
+        <Button
+          type="button"
           onClick={addRule}
-          className="flex items-center gap-1 text-xs text-primary hover:underline"
+          variant="ghost"
+          size="sm"
+          className="h-auto gap-1 bg-transparent p-0 text-xs text-primary hover:bg-transparent hover:underline"
         >
           <Plus className="h-3 w-3" /> Add
-        </button>
+        </Button>
       </div>
       {rules.map((rule, idx) => (
         <div key={idx} className="rounded-lg border border-border p-2.5 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-foreground">Rule {idx + 1}</span>
-            <button
+            <Button
+              type="button"
               onClick={() => removeRule(idx)}
-              className="p-0.5 text-muted-foreground hover:text-danger"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Remove rule ${idx + 1}`}
+              className="h-auto w-auto p-0.5 text-muted-foreground hover:bg-transparent hover:text-danger"
             >
               <Trash2 className="h-3 w-3" />
-            </button>
+            </Button>
           </div>
           <StyledSelect
             value={rule.type}
@@ -822,22 +849,27 @@ function VariableEditor({
             className="flex-1 h-auto rounded-lg px-2 py-1.5 text-xs"
             placeholder="Value"
           />
-          <button
+          <Button
             type="button"
             onClick={() => removeVariable(key)}
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Remove variable ${key}`}
             className="rounded-lg p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger transition-colors"
           >
             <X className="h-3.5 w-3.5" />
-          </button>
+          </Button>
         </div>
       ))}
-      <button
+      <Button
         type="button"
         onClick={addVariable}
-        className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        variant="ghost"
+        size="sm"
+        className="h-auto gap-1 bg-transparent p-0 text-xs font-medium text-primary hover:bg-transparent hover:underline"
       >
         + Add variable
-      </button>
+      </Button>
     </div>
   );
 }

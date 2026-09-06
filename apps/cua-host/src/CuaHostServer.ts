@@ -32,7 +32,8 @@ import type {
   CuaHostResponse,
   CuaConnectionDescriptor,
 } from '@generatorai/shared';
-import { isCuaHostRequest } from '@generatorai/shared';
+import { HOST_PROTOCOL_VERSIONS, isCuaHostRequest } from '@generatorai/shared';
+import { makeHostHello } from '@generatorai/shared/node';
 import type { ComputerAction } from '@generatorai/shared';
 import { CuaDriverConnection, type DriverModule } from './CuaDriverConnection.js';
 
@@ -65,10 +66,14 @@ export class CuaHostServer {
       });
     });
 
+    // Plan item 43 — hello is the FIRST frame, sent synchronously before the
+    // descriptor write so nothing else can slip ahead of it on the channel.
+    this.send(makeHostHello('cua-host', import.meta.url));
+
     // Write connection descriptor (async, but fire-and-forget for startup speed)
     void this.writeDescriptor().then(() => {
       this.send({ type: 'pong', reqId: '__ready__' });
-      console.log('[CuaHostServer] CUA host ready');
+      console.log(`[CuaHostServer] CUA host ready (protocol v${HOST_PROTOCOL_VERSIONS['cua-host']})`);
     });
   }
 

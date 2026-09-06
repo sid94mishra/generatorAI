@@ -50,7 +50,7 @@ export class WorkspaceCheckpointService {
    * a write-heavy agent turn from producing hundreds of snapshots.
    */
   private readonly liveTimers = new Map<string, NodeJS.Timeout>();
-  private static readonly LIVE_DEBOUNCE_MS = 2_000;
+  static readonly LIVE_DEBOUNCE_MS = 2_000;
 
   /**
    * Optional event bus. Late-wired because the bus is constructed before the

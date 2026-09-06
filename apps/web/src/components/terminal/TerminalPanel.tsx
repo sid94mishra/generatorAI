@@ -35,7 +35,6 @@ import {
   Send,
   FolderGit2,
   AlertTriangle,
-  Loader2,
   Zap,
   X,
   ChevronUp,
@@ -49,6 +48,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
+import { Button, Spinner, Input } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import { resolveTerminalPalette } from '@generatorai/design-tokens';
@@ -85,6 +85,30 @@ function sidStorageKey(workspaceId: string, tabId: string): string {
 
 // ── HTTP helpers ─────────────────────────────────────────────
 
+/**
+ * A sentence a person can act on, from a failed terminal request.
+ *
+ * The previous version pasted the raw response body into the panel, so a
+ * device without `exec:terminal` — the DEFAULT for a paired browser, since
+ * `DEFAULT_DEVICE_SCOPES` withholds it deliberately — met a wall of JSON
+ * complete with a requestId. That is the most common way to see this error,
+ * and it read like a crash rather than a permission the user can grant.
+ */
+async function terminalErrorMessage(res: Response): Promise<string> {
+  if (res.status === 401 || res.status === 403) {
+    return 'This device isn’t allowed to open a terminal. Grant it in Settings → Security → Devices on a device that is already connected.';
+  }
+  const body = await res.text().catch(() => '');
+  let detail = '';
+  try {
+    detail = (JSON.parse(body) as { error?: { message?: string } })?.error?.message ?? '';
+  } catch {
+    // Not the JSON envelope — fall back to a short slice of whatever came back.
+    detail = body.slice(0, 140);
+  }
+  return detail ? `Could not open a terminal: ${detail}` : `Could not open a terminal (${res.status}).`;
+}
+
 async function createSession(
   workspaceId: string,
   cols: number,
@@ -95,10 +119,7 @@ async function createSession(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cols, rows }),
   });
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    throw new Error(`create terminal failed (${res.status}): ${t}`);
-  }
+  if (!res.ok) throw new Error(await terminalErrorMessage(res));
   return (await res.json()) as TerminalSessionDescriptor;
 }
 
@@ -655,12 +676,14 @@ export function TerminalPanel({
           <WorktreeQuickCd worktrees={worktrees} onCd={handleCd} />
         )}
 
-        <button
+        <Button
+          type="button"
+          variant="ghost"
           data-testid="terminal-attach-to-chat"
           onClick={handleAttachSelection}
           disabled={!onCapture}
           className={cn(
-            'inline-flex h-6 items-center gap-1 rounded border px-1.5 text-[10px] disabled:opacity-40',
+            'h-6 inline-flex items-center gap-1 rounded border px-1.5 text-[10px] disabled:opacity-40',
             hasSelection && onCapture
               ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
               : 'border-[var(--color-border)] hover:bg-[var(--color-subtle)]',
@@ -675,11 +698,13 @@ export function TerminalPanel({
         >
           <Send className="h-3 w-3" />
           Attach
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
           onClick={openSearch}
           className={cn(
-            'inline-flex h-6 items-center gap-1 rounded border px-1.5 text-[10px]',
+            'h-6 inline-flex items-center gap-1 rounded border px-1.5 text-[10px]',
             searchOpen
               ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
               : 'border-[var(--color-border)] hover:bg-[var(--color-subtle)]',
@@ -687,21 +712,29 @@ export function TerminalPanel({
           title="Find (Ctrl+F)"
         >
           <Search className="h-3 w-3" />
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon-sm"
           onClick={handleClear}
-          className="inline-flex h-6 items-center gap-1 rounded border border-[var(--color-border)] px-1.5 text-[10px] hover:bg-[var(--color-subtle)]"
+          className="h-6 w-6 rounded"
           title="Clear scrollback"
+          aria-label="Clear scrollback"
         >
           <Eraser className="h-3 w-3" />
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
+          variant="danger"
+          size="icon-sm"
           onClick={handleKill}
-          className="inline-flex h-6 items-center gap-1 rounded border border-[var(--color-border)] px-1.5 text-[10px] text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10"
+          className="h-6 w-6 rounded border-[var(--color-border)] hover:bg-[var(--color-danger)]/10"
           title="Kill the terminal process"
+          aria-label="Kill the terminal process"
         >
           <Trash2 className="h-3 w-3" />
-        </button>
+        </Button>
       </div>
 
       {/* Sandbox / fallback banners */}
@@ -755,7 +788,7 @@ export function TerminalPanel({
 
         {connecting && !error && !sessionEnded && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[color-mix(in_srgb,var(--color-background)_60%,transparent)] text-xs text-[var(--color-foreground)]">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Starting terminal…
+            <Spinner size="md" className="mr-2" label="Starting terminal" /> Starting terminal…
           </div>
         )}
         {error && (
@@ -812,7 +845,7 @@ function TerminalSearchBar({
       aria-label="Search terminal"
     >
       <Search className="h-3 w-3 text-[var(--color-muted-foreground)]" />
-      <input
+      <Input
         ref={inputRef}
         type="text"
         value={query}
@@ -828,31 +861,43 @@ function TerminalSearchBar({
         placeholder="Find…"
         aria-label="Find in terminal"
         className={cn(
-          'w-40 bg-transparent px-1 py-0.5 text-[11px] text-[var(--color-foreground)] outline-none placeholder:text-[var(--color-muted-foreground)]',
+          'h-auto w-40 bg-transparent px-1 py-0.5 text-[11px] text-[var(--color-foreground)] outline-none placeholder:text-[var(--color-muted-foreground)]',
           noMatch && 'text-[var(--color-danger)]',
         )}
       />
-      <button
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
         onClick={onPrev}
         title="Previous match (Shift+Enter)"
-        className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--color-subtle)]"
+        aria-label="Previous match"
+        className="h-5 w-5 rounded text-[var(--color-foreground)]"
       >
         <ChevronUp className="h-3 w-3" />
-      </button>
-      <button
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
         onClick={onNext}
         title="Next match (Enter)"
-        className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--color-subtle)]"
+        aria-label="Next match"
+        className="h-5 w-5 rounded text-[var(--color-foreground)]"
       >
         <ChevronDown className="h-3 w-3" />
-      </button>
-      <button
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
         onClick={onClose}
         title="Close (Escape)"
-        className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--color-subtle)]"
+        aria-label="Close search"
+        className="h-5 w-5 rounded text-[var(--color-foreground)]"
       >
         <X className="h-3 w-3" />
-      </button>
+      </Button>
     </div>
   );
 }
@@ -867,25 +912,31 @@ function WorktreeQuickCd({
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <button
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-6 items-center gap-1 rounded border border-[var(--color-border)] px-1.5 text-[10px] hover:bg-[var(--color-subtle)]"
+        className="h-6 gap-1 rounded px-1.5 text-[10px] font-normal"
         title="cd to a worktree"
+        aria-expanded={open}
       >
         <FolderGit2 className="h-3 w-3" />
         cd
-      </button>
+      </Button>
       {open && (
         <div className="absolute right-0 top-7 z-10 w-40 rounded border border-[var(--color-border)] bg-[var(--color-card)] p-1 shadow-lg">
           {worktrees.map((w) => (
-            <button
+            <Button
               key={w.alias}
+              type="button"
+              variant="ghost"
               onClick={() => { onCd(w.path); setOpen(false); }}
-              className="block w-full truncate rounded px-2 py-1 text-left text-[11px] hover:bg-[var(--color-subtle)]"
+              className="h-auto block w-full truncate rounded px-2 py-1 text-left text-[11px] hover:bg-[var(--color-subtle)]"
             >
               {w.alias}
               <span className="ml-1 text-[10px] text-[var(--color-muted-foreground)]">{w.path}</span>
-            </button>
+            </Button>
           ))}
         </div>
       )}

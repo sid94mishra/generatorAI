@@ -14,11 +14,12 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useMemo, useRef } from 'react';
-import { ArrowLeft, Loader2, CircleX, SquareTerminal } from 'lucide-react';
+import { ArrowLeft, CircleX, SquareTerminal } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import type { ChatMessage } from '@generatorai/shared';
 import type { StreamState } from '@/stores/streamStore.js';
 import { isShellTool } from '@/components/agent/deriveTimeline.js';
+import { Button, Spinner } from '@/components/ui/index.js';
 
 interface ShellEntry {
   callId: string;
@@ -109,13 +110,15 @@ export function AgentConsole({
         <span className="text-[10.5px] text-[var(--color-muted-foreground)]/80">
           {entries.length} run in this chat
         </span>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={onClose}
           className="ml-auto inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10.5px] text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
         >
           <ArrowLeft className="h-3 w-3" /> Back to shell
-        </button>
+        </Button>
       </div>
       <p className="border-b border-[var(--color-border)]/50 px-3 py-1 text-[10.5px] leading-snug text-[var(--color-muted-foreground)]/75">
         The agent runs commands in its own sandboxed shell — output appears here the
@@ -145,7 +148,7 @@ export function AgentConsole({
             >
               <div className="flex items-start gap-2 px-2.5 py-1.5">
                 {entry.status === 'running' ? (
-                  <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-[var(--color-primary)]" />
+                  <Spinner size="xs" className="mt-0.5 shrink-0 text-[var(--color-primary)]" />
                 ) : entry.failed ? (
                   <CircleX className="mt-0.5 h-3 w-3 shrink-0 text-[var(--color-danger)]" />
                 ) : (

@@ -406,6 +406,12 @@ export function useResumeStageRun() {
   return useStageControl((runId, stageId) => platform.resumeStageRun(runId, stageId));
 }
 
+/** Wake a single sleeping stage ahead of its scheduled wake time */
+export function useWakeStageRun() {
+  const platform = usePlatform();
+  return useStageControl((runId, stageId) => platform.wakeStageRun(runId, stageId));
+}
+
 /** Retry a single failed stage */
 export function useRetryStageRun() {
   const platform = usePlatform();

@@ -1,10 +1,26 @@
 // ────────────────────────────────────────────────────────────────
 // End-to-end encryption for GeneratorAI remote clients.
 //
-// Applies to BOTH transports (plan §15.4 / §30 decision 4): LAN and relay.
-// The relay is a blind forwarder; the LAN listener may be reached through an
-// attacker-controlled network. In both cases the payload is protected by a
-// session established directly between the client and the GeneratorAI host.
+// !! FUTURE WORK — NOT WIRED. This module is complete and unit-tested, but as
+// of September 2026 nothing in the repository calls `sealFrame`/`openFrame`/
+// `deriveSessionKeys`: not `packages/client-transport` (DirectTransport), not
+// `apps/server/src/relay/RelayStreamBridge.ts`, not `apps/relay`. Relay and
+// LAN traffic are therefore protected only by TLS on the hop (where present)
+// and by the server's request authentication — the relay cell CAN read the
+// bytes it forwards. Any comment, doc or plan that says otherwise is wrong;
+// `docs/CLOUDFLARE_TUNNEL_RELAY_PLAN.md` was corrected for exactly this.
+//
+// Wiring it means framing the byte stream on both ends of `RelayStreamBridge`
+// (host) and in the client transport (mobile/web), with the handshake carried
+// as the first two frames of each stream — a cross-client change that is out
+// of scope for a relay bug-fix pass. Until then, treat the text below as the
+// DESIGN, not the deployed behaviour.
+//
+// Intended to apply to BOTH transports (plan §15.4 / §30 decision 4): LAN and
+// relay. The relay would then be a blind forwarder; the LAN listener may be
+// reached through an attacker-controlled network. In both cases the payload
+// would be protected by a session established directly between the client
+// and the GeneratorAI host.
 //
 // Construction (v1):
 //   X25519 key agreement (tweetnacl `box.before`)

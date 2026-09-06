@@ -1,22 +1,41 @@
 # @generatorai/sdk
 
-The official SDK for GeneratorAI — a local-first AI-agent workflow automation platform. Create, run, and manage multi-stage AI workflows programmatically.
+> **Status: INTERNAL / UNPUBLISHED / FROZEN (September 2026).**
+>
+> - `private: true`; there is no `publishConfig` and no release pipeline.
+> - **Zero importers in this repository.** Nothing in `apps/*` or `packages/*`
+>   imports `@generatorai/sdk`; the only consumer is its own smoke test.
+> - **It is not a client of the running server.** `createGeneratorAI()` builds
+>   the entire server dependency graph *in-process* — `createDB` + `migrateDB`
+>   (SQLite via `better-sqlite3`), `createAllRepositories`, `createCoreServices`
+>   and a harness provider — a second, independent wiring of the same engine
+>   `apps/server/src/composition-root.ts` wires. The two can and will drift.
+> - **It cannot be installed outside the monorepo.** All four runtime
+>   dependencies (`@generatorai/shared`, `@generatorai/core`, `@generatorai/db`,
+>   `@generatorai/agent-harness-providers`) are `private: true` workspace
+>   packages whose `main` points at raw TypeScript (`./src/index.ts`), so
+>   `pnpm add @generatorai/sdk` from another project has never worked.
+>
+> The decision recorded in `docs/APPLICATION-REVIEW-2026-09.md` (Phase 3) is:
+> freeze now; later either publish properly (build step, published deps, one
+> composition root shared with the server) or delete. Until then, treat this
+> package as a test harness for the core engine, not as a product surface.
 
-## Installation
+The rest of this file documents the API as it exists, for people working
+inside the repository.
 
-```bash
-pnpm add @generatorai/sdk
-```
+## Requirements
 
-> **Requirements:** Node.js ≥ 20, SQLite available on host (via `better-sqlite3`)
+Node.js ≥ 20, run from inside this monorepo (workspace symlinks resolve the
+private dependencies), and SQLite via `better-sqlite3` on the host.
 
-## Quick Start
+## Quick Start (in-repo)
 
 ```typescript
 import { createGeneratorAI } from '@generatorai/sdk';
 
 const ai = await createGeneratorAI({
-  provider: 'copilot',          // 'copilot' or 'claude-agent'
+  harness: 'copilot',           // HarnessType — same word as the server's HARNESS_TYPE
   database: './my-app.db',      // SQLite file path
 });
 
@@ -51,19 +70,27 @@ await ai.shutdown();
 import { createGeneratorAI, type GeneratorAIConfig } from '@generatorai/sdk';
 
 const ai = await createGeneratorAI({
-  // Required
-  provider: 'copilot',               // AI provider: 'copilot' | 'claude-agent'
+  // Required (one of):
+  harness: 'copilot',                 // HarnessType: 'copilot' | 'claude-agent' | 'codex' | 'opencode' | 'acp'
+                                      //   or an IAgentHarness instance (bring-your-own-harness)
+  // provider: 'copilot',             // deprecated alias for `harness`; still honoured
 
   // Optional
   database: './generatorai.db',       // SQLite path (default: ./generatorai.db)
-  artifactsDir: './artifacts',        // Output directory (default: ./generatorai-artifacts)
-  scriptsDir: './scripts',            // Workflow scripts directory
+  artifactsDir: './artifacts',        // Output directory (default: ./artifacts)
+  scriptsDir: './workflows',          // Workflow scripts directory
+  templatesDir: './templates',        // Workflow/stage templates + system artifacts
   projectRoot: process.cwd(),         // Project root for git operations
-  maxConcurrentSessions: 5,           // Concurrent AI sessions (default: 5)
+  maxConcurrentSessions: 10,          // Concurrent AI sessions (default: 10)
+  maxConcurrentStages: 8,             // Concurrent stage executions across runs (default: 8)
   logger: { level: 'info' },          // Pino log level or false to disable
-  providerOptions: { ... },           // Provider-specific config
+  providerOptions: { ... },           // Harness-specific config
 });
 ```
+
+`harness` was called `provider` before the server's `CopilotConfig → HarnessConfig`
+rename; the field was renamed here so an SDK example and a server `.env` use the
+same word for the same thing.
 
 ## API Reference
 
@@ -211,10 +238,9 @@ const workflow = new WorkflowBuilder('Code Pipeline')
 
 ### Bring Your Own Harness
 
-The `provider` accepts either a built-in shorthand (`'copilot'` | `'claude-agent'`)
-**or** a pre-built `IAgentHarness` instance — so you can run workflows, chats and
-automations on top of any harness you implement. This is the SDK's core
-extension point and part of the stable API.
+`harness` accepts either a built-in `HarnessType` **or** a pre-built
+`IAgentHarness` instance — so you can run workflows, chats and automations on
+top of any harness you implement. This is the SDK's core extension point.
 
 ```typescript
 import { createGeneratorAI, type IAgentHarness } from '@generatorai/sdk';
@@ -228,7 +254,7 @@ class MyHarness implements IAgentHarness {
 }
 
 const ai = await createGeneratorAI({
-  provider: new MyHarness(),     // ← runs entirely on your harness
+  harness: new MyHarness(),      // ← runs entirely on your harness
   database: './my-app.db',
 });
 await ai.initialize();
@@ -255,14 +281,17 @@ import { WorkflowRunStateMachine, StageRunStateMachine } from '@generatorai/sdk'
 ## Architecture
 
 ```
-@generatorai/sdk (facade)
+@generatorai/sdk (facade — a SECOND composition root, not an HTTP client)
     ├── @generatorai/core (domain services, DAG scheduler, event bus)
     ├── @generatorai/db (SQLite + Drizzle ORM)
     ├── @generatorai/shared (types, errors, config, builders)
-    └── @generatorai/agent-harness-providers (Copilot SDK, Claude Agent SDK)
+    └── @generatorai/agent-harness-providers (Copilot SDK, Claude Agent SDK, …)
 ```
 
-The SDK is a thin facade over the full GeneratorAI platform. It wires all internal services via dependency injection and exposes them through a clean, typed API.
+The SDK wires all internal services via dependency injection inside the caller's
+process. It does **not** connect to `apps/server`; if you want to drive a running
+server programmatically, use `@generatorai/client-core` (the HTTP/WS client the
+web, mobile and CLI apps share).
 
 ## License
 

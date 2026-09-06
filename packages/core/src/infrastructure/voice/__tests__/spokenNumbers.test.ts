@@ -81,9 +81,44 @@ describe('spoken numbers → digits', () => {
     expect(n(once)).toBe(once);
   });
 
-  it('does not glue a year-shaped pair into one number', () => {
-    // "nineteen eighty" is read as digits by people, not summed to 99.
-    expect(n('nineteen eighty')).toBe('19 80');
+  it('reads a year-shaped pair as a year, never as a sum', () => {
+    // "nineteen eighty" is read in pairs by people — 1980 — never summed to 99.
+    expect(n('nineteen eighty')).toBe('1980');
+    expect(n('nineteen eighty four')).toBe('1984');
+    expect(n('in twenty twenty six we shipped it')).toBe('in 2026 we shipped it');
+    expect(n('twenty oh six')).toBe('2006');
+    expect(n('nineteen hundred')).toBe('1900');
+    // …but a count of separate numbers is still a count.
+    expect(n('ten eleven twelve thirteen')).toBe('10 11 12 13');
+  });
+
+  it('reads clock times', () => {
+    expect(n('meet at ten thirty a m tomorrow')).toBe('meet at 10:30 AM tomorrow');
+    expect(n('at eleven fifteen')).toBe('at 11:15');
+    expect(n('by two forty five p m')).toBe('by 2:45 PM');
+    expect(n('nine o clock')).toBe("9 o'clock");
+    expect(n('ten a m')).toBe('10 AM');
+  });
+
+  it('groups thousands from five digits up, the way Dragon does', () => {
+    expect(n('twelve thousand requests')).toBe('12,000 requests');
+    expect(n('one point two million')).toBe('1.2 million');
+    expect(n('one thousand two hundred')).toBe('1200');
+    // Digit sequences are identifiers, never grouped.
+    expect(n('one zero zero two three')).toBe('10023');
+  });
+
+  it('reads dotted versions and unit words', () => {
+    expect(n('the version is two point three point one')).toBe('the version is 2.3.1');
+    expect(n('fifty percent more')).toBe('50% more');
+    expect(n('twenty percent sign off')).toBe('20% off');
+    expect(n('two hundred and fifty dollars')).toBe('$250');
+    expect(n('one hundred percent')).toBe('100%');
+  });
+
+  it('forces a digit after "numeral", the universal dictation escape', () => {
+    expect(n('numeral three items')).toBe('3 items');
+    expect(n('take numeral one')).toBe('take 1');
   });
 
   it('handles a scale phrase with a trailing connector', () => {

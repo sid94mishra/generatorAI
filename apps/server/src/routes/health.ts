@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { DiagLogLevel, diag } from '@opentelemetry/api';
 import { getConfigCorrections, fallbackReport } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
+import { getSlowStatementStats } from '@generatorai/db';
 
 export function createHealthRoutes(container: Container): Router {
   const router = Router();
@@ -26,15 +27,16 @@ export function createHealthRoutes(container: Container): Router {
     // v2: Gather workflow run and chat counts
     let activeChatCount = 0;
     let activeRunCount = 0;
+    // COUNT(*) — this used to load and map every active chat row and every
+    // active run row just to read `.length`, on an endpoint polled by health
+    // checks and the dashboard.
     try {
-      const activeChats = await container.chatEntityRepo.getByStatus('active');
-      activeChatCount = activeChats.length;
+      activeChatCount = await container.chatEntityRepo.countByStatus('active');
     } catch {
       // DB issue — already covered by dbOk
     }
     try {
-      const activeRuns = await container.workflowRunRepo.getByStatus(['running', 'starting', 'paused']);
-      activeRunCount = activeRuns.length;
+      activeRunCount = await container.workflowRunRepo.countByStatus(['running', 'starting', 'paused']);
     } catch {
       // DB issue
     }
@@ -54,7 +56,14 @@ export function createHealthRoutes(container: Container): Router {
     res.json({
       status,
       copilot: harnessAlive,
-      harness: { type: container.harnessRegistry.primary, healthy: harnessAlive },
+      harness: {
+        type: container.harnessRegistry.primary,
+        healthy: harnessAlive,
+        // What the harness is holding: live provider sessions are child
+        // processes (~230 MB each on Claude), so this is the number that
+        // explains a large RSS on the machine, not `memory` below.
+        runtime: harness.runtimeDiagnostics?.() ?? null,
+      },
       db: dbOk,
       uptime,
       timestamp: new Date().toISOString(),
@@ -69,6 +78,10 @@ export function createHealthRoutes(container: Container): Router {
       // that from outside the process). Cheap: `process.memoryUsage()` is
       // a synchronous, allocation-free syscall.
       memory: process.memoryUsage(),
+      // Slowest SQL statements since boot when `GENERATORAI_SQL_SLOW_MS` is
+      // set; empty otherwise. This is the answer to "why is the event loop
+      // stalling" that the RSS number above cannot give.
+      slowStatements: getSlowStatementStats(),
       // W18 — "Publish depth in the health endpoint: makes throttling visible
       // instead of mysterious." Each lane reports its cap alongside running,
       // queued and parked counts. `parked` is the load-bearing one: work

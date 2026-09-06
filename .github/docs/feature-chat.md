@@ -203,12 +203,52 @@ The model dropdown in the chat input is driven by a **live provider catalog**, n
 
 ### 4.2 Voice input (speech-to-text)
 
-The mic button next to Send streams microphone audio to a **local Whisper** transcriber over a dedicated WebSocket (`apps/server/src/stt-ws.ts`; client hook `useSpeechToText.ts`). Transcribed text is appended into the textarea, so it composes with typing and attachments. Runs fully on-device — no cloud key required.
+The mic button next to Send streams microphone audio to a **local** transcriber over a dedicated WebSocket (`apps/server/src/stt-ws.ts`; client hook `useSpeechToText.ts`). Transcribed text goes into the textarea, so it composes with typing and attachments. Runs fully on-device — no cloud key required.
+
+Four engines are available (`VoiceEngineFactory.ts` holds the measured
+head-to-head). `auto` picks **Nemotron** when its weights are downloaded and
+**Moonshine** otherwise, always keeping Whisper as the last resort.
+
+Nemotron is the only one with a **native streaming decoder**, and that is the
+difference between words appearing as you speak them and a block of text
+landing after each pause. On the other three the server segments on silence
+and previews the open utterance in blocks; on Nemotron the model itself emits
+a growing transcript roughly every 560ms. It is also the only multilingual
+engine (40 language-locales, auto-detected).
+
+**The weights are ours and are never downloaded automatically.** The model is
+the streaming ONNX export of Nemotron 3.5 ASR from
+`onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4` — about 790MB,
+fetched only when someone presses **Download model** in Settings → Audio, and
+stored under this app's own cache root. An earlier version read the weights
+out of VS Code's dictation cache; that was removed, because a user need not
+have VS Code, may never have enabled its dictation, and that directory belongs
+to another application that can clean it up underneath us.
+
+Without the download, dictation still works on Moonshine — English only, no
+live streaming, weaker on technical words. Settings → Audio says so rather
+than implying voice is broken.
+
+Everything the engine needs (vocab size, blank id, cache sizes, chunk length,
+mel parameters, and whether the encoder takes a `lang_id` prompt) is read from
+the model's own `genai_config.json`, because the published exports genuinely
+differ and the wrong constants still RUN — returning fluent nonsense rather
+than an error.
+
+Settings → **Audio** exposes engine choice, spoken-punctuation handling, the
+end-of-utterance pause, and the TTS voice/speed. Every control there is wired;
+the engine picker reports when `GENERATORAI_STT_ENGINE` has pinned it.
 
 | Var | Default | Purpose |
 |---|---|---|
 | `GENERATORAI_STT` | `1` | Set `0` to disable voice input (button hidden, WS returns 501). |
-| `STT_MODEL` | `Xenova/whisper-base.en` | Whisper model id to load. |
+| `GENERATORAI_STT_ENGINE` | `auto` | `auto`, `nemotron`, `moonshine`, `parakeet`, `whisper`, `disabled`. Anything but `auto` disables the fallback cascade. |
+| `GENERATORAI_STT_PREFERRED` | per machine | Which engine `auto` tries first. Defaults to `nemotron` when its weights are present, else `moonshine`. |
+| `GENERATORAI_NEMOTRON_ONNX_DIR` | our cache | Explicit path to the Nemotron streaming ONNX export. |
+| `GENERATORAI_NEMOTRON_LANG_ID` | `0` (auto-detect) | Language prompt id for the multilingual build. Auto measured best — forcing a locale dropped punctuation. |
+| `GENERATORAI_NEMOTRON_ENDPOINT_MS` | `500` | Silence that ends an utterance on the streaming path. |
+| `GENERATORAI_NEMO_SPEECH_BIN` | unset | Path to NVIDIA's NeMo-Speech.cpp binary. Set it to run Nemotron through NVIDIA's own runtime (the only route to GPU execution) instead of in-process ONNX. |
+| `STT_MODEL` | `Xenova/whisper-base.en` | Whisper model id. |
 | `STT_CACHE_DIR` | platform cache dir | Where the model weights are cached on first run. |
 
 ### 4.3 Stop generation + conversation recovery

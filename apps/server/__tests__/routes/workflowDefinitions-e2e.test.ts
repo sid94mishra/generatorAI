@@ -72,7 +72,17 @@ describe('E2E: Workflow Definition API Flow', () => {
       const res = await request(app).delete('/api/workflow-definitions/def-1');
 
       expect([200, 204]).toContain(res.status);
-      expect(container.workflowDefinitionService.deleteDefinition).toHaveBeenCalledWith('def-1');
+      // Item 9 — the route now always passes an explicit `force` (default
+      // false), reading `?force=true` so the client can force-delete a
+      // definition that still has runs.
+      expect(container.workflowDefinitionService.deleteDefinition).toHaveBeenCalledWith('def-1', { force: false });
+    });
+
+    it('passes force:true when ?force=true is given', async () => {
+      const res = await request(app).delete('/api/workflow-definitions/def-1?force=true');
+
+      expect([200, 204]).toContain(res.status);
+      expect(container.workflowDefinitionService.deleteDefinition).toHaveBeenCalledWith('def-1', { force: true });
     });
   });
 

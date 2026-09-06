@@ -22,7 +22,7 @@ import * as http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { log } from './logger';
 import { resolvePaths, ensureDataDirs, fileExists, type ResolvedPaths } from './paths';
-import { findFreePort } from './ports';
+import { findFreePort, preferredPort } from './ports';
 import { loadSettings } from './config';
 import { loadOrCreateSecretKey } from './secret-protection';
 import type { ServerStatus, ServerState } from '../shared/ipc';
@@ -174,7 +174,11 @@ export class ServerManager extends EventEmitter {
     this.setState('starting');
 
     const settings = loadSettings();
-    this.port = await findFreePort(settings.serverPort > 0 ? settings.serverPort : 0);
+    // A restart reuses the previous port when no fixed port is configured, so
+    // the window's URL stays valid; `findFreePort` still falls back to a
+    // random one if something grabbed it meanwhile — index.ts then repoints
+    // the window from the `status` event.
+    this.port = await findFreePort(preferredPort(settings.serverPort, this.port));
     // Acquire a separate free port for the isolated widget-asset origin.
     this.widgetPort = await findFreePort(0);
     ensureDataDirs(this.paths);

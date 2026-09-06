@@ -27,7 +27,9 @@ function principal(overrides: Partial<Principal> = {}): Principal {
   return {
     type: 'paired-device',
     id: 'device:d1',
-    scopes: ['read:chats', 'write:chats'],
+    // Enough to read chat AND workflow feeds; a principal that lacks one is
+    // exercised separately below.
+    scopes: ['read:chats', 'write:chats', 'read:workflows'],
     transport: 'lan',
     credentialKind: 'access-token',
     ...overrides,
@@ -188,6 +190,67 @@ describe('POST /api/stream/connections/:id/subs', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('INVALID_SUB');
+  });
+
+  /**
+   * Review 6.1 — the stream surface was gated on one coarse `stream:events`
+   * permission, so anything holding it could subscribe to any chat, any run,
+   * and the desktop's screen preview by id. That inverted the stated intent
+   * that a paired phone must not see the desktop: the default mobile grant
+   * deliberately withholds `exec:computer`, and watching the screen is not a
+   * lesser act than driving it.
+   */
+  describe('per-subscription authorisation', () => {
+    /** A default phone grant: chat access, no execution scopes. */
+    const phone = () =>
+      principal({ scopes: ['read:chats', 'write:chats', 'stream:events'] });
+
+    async function attach(app: ReturnType<typeof makeApp>): Promise<string> {
+      const created = await request(app)
+        .post('/api/stream/connections')
+        .send({ subs: [{ scope: 'chat', id: 'c1' }] });
+      const connectionId = created.body.connectionId as string;
+      const record = getConnection(connectionId);
+      if (!record) throw new Error('connection missing');
+      record.onMutate = async () => undefined;
+      return connectionId;
+    }
+
+    it('refuses a desktop screen-preview subscription without exec:computer', async () => {
+      const app = makeApp(phone());
+      const connectionId = await attach(app);
+
+      const res = await request(app)
+        .post(`/api/stream/connections/${connectionId}/subs`)
+        .send({ add: [{ scope: 'computer', id: 'ws1' }] });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('INSUFFICIENT_SCOPE');
+      expect(res.body.error.requiredScopes).toContain('exec:computer');
+    });
+
+    it('refuses a workflow-run subscription without read:workflows', async () => {
+      const app = makeApp(phone());
+      const connectionId = await attach(app);
+
+      const res = await request(app)
+        .post(`/api/stream/connections/${connectionId}/subs`)
+        .send({ add: [{ scope: 'run', id: 'r1' }] });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.requiredScopes).toContain('read:workflows');
+    });
+
+    it('still allows a chat subscription, which the grant does cover', async () => {
+      const app = makeApp(phone());
+      const connectionId = await attach(app);
+
+      const res = await request(app)
+        .post(`/api/stream/connections/${connectionId}/subs`)
+        .send({ add: [{ scope: 'chat', id: 'c2' }] });
+
+      expect(res.status).toBe(202);
+    });
   });
 
   it('accepts a well-formed mutation once attached, answering 202 without waiting on it', async () => {

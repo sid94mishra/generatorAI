@@ -12,10 +12,10 @@ import {
   FileArchive,
   File,
   Download,
-  Loader2,
   PackageOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button, Spinner } from '@/components/ui/index.js';
 
 interface ArtifactBrowserProps {
   sessionId: string;
@@ -27,7 +27,7 @@ export function ArtifactBrowser({ sessionId }: ArtifactBrowserProps) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-5 w-5 animate-spin text-[var(--color-muted-foreground)]" />
+        <Spinner size="lg" className="text-[var(--color-muted-foreground)]" />
       </div>
     );
   }
@@ -112,18 +112,19 @@ function ArtifactDownloadButton({ artifactId }: { artifactId: string }) {
   const downloadMutation = useDownloadArtifact();
 
   return (
-    <button
+    <Button
+      variant="ghost"
       onClick={() => downloadMutation.mutate(artifactId)}
       disabled={downloadMutation.isPending}
-      className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--color-primary)] transition-colors hover:bg-[var(--color-accent)]"
+      className="h-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--color-primary)] transition-colors hover:bg-[var(--color-accent)]"
     >
       {downloadMutation.isPending ? (
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Spinner size="xs" />
       ) : (
         <Download className="h-3 w-3" />
       )}
       Download
-    </button>
+    </Button>
   );
 }
 

@@ -1,13 +1,22 @@
 // ────────────────────────────────────────────────────────────────
-// customMcpStore — user-defined MCP servers added from the global
-// Settings → MCP Servers tab. The built-in system catalog is read-only
-// on disk, so servers the user adds here are persisted client-side and
-// listed alongside the system entries. Persisted to localStorage.
+// customMcpStore — LEGACY localStorage reader for pre-W48 custom MCP
+// servers, kept ONLY so `McpSection` can migrate old entries once.
+//
+// This used to be a zustand `persist` store that WROTE every custom MCP
+// server a user added in Settings → MCP Servers straight to
+// `localStorage['generatorai:customMcp']` and nowhere else. The server-side
+// harness config builder never read localStorage, so a server added there
+// was never actually usable — it only ever appeared in this browser tab.
+//
+// W48 moves persistence server-side: `McpSettingsStore`
+// (packages/core/src/mcp/McpSettingsStore.ts) via
+// `POST/PUT/DELETE /api/system/mcp-servers/custom` (see
+// hooks/projectQueries.ts's useCreateCustomMcpServer and friends). This
+// module now only reads back whatever a pre-W48 build already wrote, so
+// `McpSection` can POST it to the server once and delete the key.
 // ────────────────────────────────────────────────────────────────
 
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { globalSingleton } from '../lib/globalSingleton.js';
+const LEGACY_STORAGE_KEY = 'generatorai:customMcp';
 
 export type CustomMcpTransport = 'local' | 'http' | 'sse';
 
@@ -28,30 +37,31 @@ export interface CustomMcpServer {
   createdAt: number;
 }
 
-interface CustomMcpState {
-  servers: CustomMcpServer[];
-  addServer: (server: Omit<CustomMcpServer, 'id' | 'createdAt'>) => void;
-  removeServer: (id: string) => void;
+interface LegacyPersistedShape {
+  state?: { servers?: CustomMcpServer[] };
 }
 
-const useCustomMcpStoreImpl = create<CustomMcpState>()(
-  persist(
-    (set) => ({
-      servers: [],
-      addServer: (server) =>
-        set((s) => ({
-          servers: [
-            ...s.servers,
-            { ...server, id: `custom-mcp-${Date.now().toString(36)}`, createdAt: Date.now() },
-          ],
-        })),
-      removeServer: (id) => set((s) => ({ servers: s.servers.filter((x) => x.id !== id) })),
-    }),
-    { name: 'generatorai:customMcp' },
-  ),
-);
+/**
+ * Whatever a pre-W48 build wrote to `localStorage`, or `[]`. Never throws —
+ * a private window, cleared site data, or a corrupt value all just mean
+ * "nothing to migrate".
+ */
+export function readLegacyCustomMcpServers(): CustomMcpServer[] {
+  try {
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as LegacyPersistedShape;
+    return Array.isArray(parsed?.state?.servers) ? parsed.state.servers : [];
+  } catch {
+    return [];
+  }
+}
 
-
-// HMR-split-proof: every module instance shares the first-created store.
-// See lib/globalSingleton.ts for why this is load-bearing in dev.
-export const useCustomMcpStore = globalSingleton('web.customMcpStore', () => useCustomMcpStoreImpl);
+/** Call once the legacy entries have been migrated server-side. */
+export function clearLegacyCustomMcpServers(): void {
+  try {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    // best effort
+  }
+}

@@ -11,6 +11,7 @@ import {
   Check, Loader2, Clock, Pause, Hand, X, SkipForward, AlertTriangle, Zap, Moon, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 import type { StageStatus, StageView } from './types.js';
 
 interface PipelineFlowProps {
@@ -54,15 +55,17 @@ const StagePill = React.memo(function StagePill({ stage, focused, onFocus, compa
   const dur = formatShort(stage.durationMs);
 
   return (
-    <button
+    <Button
       onClick={() => onFocus(stage.id)}
       title={`${stage.name} — ${stage.status.replace(/_/g, ' ')}`}
       aria-current={focused ? 'true' : undefined}
+      variant="ghost"
+      size="sm"
       className={cn(
-        'group flex items-center gap-1.5 rounded-full border px-2 py-1 text-left transition-all',
+        'h-auto group flex items-center gap-1.5 rounded-full border px-2 py-1 text-left transition-all',
         'text-[11.5px] font-medium shrink-0 max-w-[220px]',
         focused
-          ? 'border-[var(--color-primary)]/50 bg-[var(--color-primary)]/10 text-[var(--color-foreground)]'
+          ? 'border-[var(--color-primary)]/50 bg-[var(--color-primary)]/10 text-[var(--color-foreground)] hover:bg-[var(--color-primary)]/10'
           : isActive
             ? 'border-[var(--color-primary)]/30 bg-[var(--color-primary)]/[0.04] text-[var(--color-foreground)] hover:bg-[var(--color-primary)]/[0.08]'
             : 'border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]',
@@ -91,7 +94,7 @@ const StagePill = React.memo(function StagePill({ stage, focused, onFocus, compa
       {dur && !compact && (
         <span className="shrink-0 tabular-nums text-[10.5px] text-[var(--color-muted-foreground)]/80">{dur}</span>
       )}
-    </button>
+    </Button>
   );
 });
 

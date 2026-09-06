@@ -28,6 +28,18 @@
 //   - "a"/"an" as in "a hundred" — too close to the article;
 //   - a run of only two bare digits ("two three"), which is as likely to be
 //     two separate quantities as the digits of a number.
+//
+// WHAT IT DOES BEYOND PLAIN QUANTITIES (added after the 2026-09 dictation
+// review, matching what Apple/Dragon/Windows dictation all agree on):
+//   - years read in pairs: "nineteen eighty four" -> 1984, "twenty twenty
+//     six" -> 2026, "twenty oh six" -> 2006;
+//   - clock times: "ten thirty" -> 10:30, "ten thirty a m" -> 10:30 AM,
+//     "nine o'clock" -> 9 o'clock;
+//   - thousands grouping from five digits up ("twelve thousand" -> 12,000,
+//     but 1200 stays 1200), the Dragon convention;
+//   - dotted versions: "two point three point one" -> 2.3.1;
+//   - "fifty percent" -> 50%, "two hundred dollars" -> $200;
+//   - "numeral three" -> 3, the universal escape for forcing a digit.
 // ────────────────────────────────────────────────────────────────
 
 const UNITS: Record<string, number> = {
@@ -78,7 +90,48 @@ const COUNTING_CUES = new Set([
   // inserted between number words would confuse the numeral parser), so at
   // this point these are still ordinary words.
   'sign', 'hash', 'hashtag', 'dollar', 'pound',
+  // "numeral" is the spoken escape every dictation product documents for
+  // forcing a digit ("numeral three" -> 3); the word itself is removed below.
+  'numeral',
 ]);
+
+/** Words that mark the number before them as a clock time. */
+const TIME_SUFFIX = /^(?:a\.?m\.?|p\.?m\.?|o'?clock)$/i;
+
+/**
+ * Read a clock suffix at `at`: "am", "a.m.", "pm", "o'clock" — or the two-token
+ * spellings the recogniser produces, "a m", "p m", "o clock". Returns the
+ * rendered suffix and where it ends, or null.
+ */
+function readTimeSuffix(tokens: Token[], at: number): { text: string; next: number; trail: string } | null {
+  if (at >= tokens.length) return null;
+  const first = split(tokens[at]!.text);
+  const w = first.core.toLowerCase();
+  if (TIME_SUFFIX.test(first.core)) {
+    const text = /o'?clock/i.test(w) ? "o'clock" : w.replace(/\./g, '').toUpperCase();
+    return { text, next: at + 1, trail: first.trail };
+  }
+  if ((w === 'a' || w === 'p' || w === 'o') && !first.trail && at + 1 < tokens.length) {
+    const second = split(tokens[at + 1]!.text);
+    const sw = second.core.toLowerCase();
+    if ((w === 'a' || w === 'p') && (sw === 'm' || sw === 'm.')) {
+      return { text: `${w.toUpperCase()}M`, next: at + 2, trail: second.trail };
+    }
+    if (w === 'o' && sw === 'clock') return { text: "o'clock", next: at + 2, trail: second.trail };
+  }
+  return null;
+}
+/** After a number these turn into a symbol, attached to it. */
+const UNIT_SUFFIX: Record<string, { symbol: string; side: 'before' | 'after' }> = {
+  percent: { symbol: '%', side: 'after' },
+  dollars: { symbol: '$', side: 'before' },
+  euros: { symbol: '€', side: 'before' },
+};
+
+/** Thousands separators from five digits up; four-digit values stay bare. */
+function formatInteger(value: number): string {
+  return value >= 10_000 ? value.toLocaleString('en-US') : String(value);
+}
 
 type Kind = 'unit' | 'teen' | 'ten' | 'scale' | 'and' | 'point' | 'other';
 
@@ -168,6 +221,41 @@ function split(word: string): { core: string; trail: string } {
 }
 
 /**
+ * Read the second half of a spoken pair starting at `at`: a tens word with an
+ * optional unit ("eighty four"), a teen ("fifteen"), or "oh"/"zero" + unit
+ * ("oh six"). Returns its value and where it ends, or null.
+ *
+ * `minutesShaped` is true for the forms that read as the minutes of a time
+ * or the back half of a year (10..59), and false for the bare "oh six".
+ */
+function readSecondPair(
+  tokens: Token[],
+  at: number,
+): { value: number; next: number; trail: string; minutesShaped: boolean } | null {
+  const first = split(tokens[at]!.text);
+  const k = kindOf(first.core);
+  const w = first.core.toLowerCase();
+  if (k === 'teen') return { value: TEENS[w]!, next: at + 1, trail: first.trail, minutesShaped: true };
+  if (k === 'ten') {
+    if (!first.trail && at + 1 < tokens.length) {
+      const second = split(tokens[at + 1]!.text);
+      const sw = second.core.toLowerCase();
+      if (kindOf(second.core) === 'unit' && sw !== 'oh' && sw !== 'zero' && sw !== 'nought') {
+        return { value: TENS[w]! + UNITS[sw]!, next: at + 2, trail: second.trail, minutesShaped: true };
+      }
+    }
+    return { value: TENS[w]!, next: at + 1, trail: first.trail, minutesShaped: true };
+  }
+  if ((w === 'oh' || w === 'zero') && !first.trail && at + 1 < tokens.length) {
+    const second = split(tokens[at + 1]!.text);
+    if (kindOf(second.core) === 'unit') {
+      return { value: UNITS[second.core.toLowerCase()]!, next: at + 2, trail: second.trail, minutesShaped: false };
+    }
+  }
+  return null;
+}
+
+/**
  * Rewrite spoken numbers in `text` as digits.
  *
  * Idempotent — digits are not number words, so a second pass is a no-op. That
@@ -185,7 +273,8 @@ export function normalizeSpokenNumbers(text: string): string {
     const { core, trail } = split(tokens[i]!.text);
     const kind = kindOf(core);
 
-    if (kind === 'other' || kind === 'and' || kind === 'point') {
+    // A bare scale word is not a quantity: "a hundred reasons", "1.2 million".
+    if (kind === 'other' || kind === 'and' || kind === 'point' || kind === 'scale') {
       out.push(tokens[i]!.gap + tokens[i]!.text);
       i += 1;
       continue;
@@ -225,6 +314,8 @@ export function normalizeSpokenNumbers(text: string): string {
       const p = split(tokens[j]!.text);
       const k = kindOf(p.core);
       if (!composes(prev, k)) break;
+      // "twenty oh six" is a year read in pairs, never twenty-plus-zero.
+      if (prev === 'ten' && k === 'unit' && UNITS[p.core.toLowerCase()] === 0) break;
       phrase.push(p.core);
       lastTrail = p.trail;
       // "and" is only a connector if a number really follows it.
@@ -236,39 +327,112 @@ export function normalizeSpokenNumbers(text: string): string {
       j += 1;
     }
 
-    let value = String(evaluate(phrase));
+    let numeric = evaluate(phrase);
+    let value = formatInteger(numeric);
+    let isTime = false;
+
+    // ── Pairs: years and clock times ──
+    // "nineteen eighty four" is read as two pairs, not summed; "ten thirty"
+    // is a time. Both are exactly two groups, where the second is a tens
+    // word (optionally + unit), a teen, or "oh"/"zero" + unit.
+    // A pair never starts right after another numeral: in "ten eleven twelve
+    // thirteen" the last two are a count, not 12:13.
+    const prevCore = i > 0 ? split(tokens[i - 1]!.text).core : '';
+    const prevKind = prevCore ? kindOf(prevCore) : 'other';
+    const afterNumeral = prevKind === 'unit' || prevKind === 'teen' || prevKind === 'ten';
+    const pairable = !lastTrail && !afterNumeral && phrase.every((w) => !(w.toLowerCase() in SCALES));
+    if (pairable && j < tokens.length) {
+      const second = readSecondPair(tokens, j);
+      if (second) {
+        const yearPrefix = numeric >= 13 && numeric <= 29;
+        const hour = numeric >= 1 && numeric <= 12;
+        const afterPair = second.next < tokens.length ? split(tokens[second.next]!.text).core : '';
+        const afterKind = afterPair ? kindOf(afterPair) : 'other';
+        const followedByNumeral = afterKind === 'unit' || afterKind === 'teen' || afterKind === 'ten';
+        const timeSuffix = readTimeSuffix(tokens, second.next) !== null;
+        if (hour && second.value <= 59 && (timeSuffix || (!followedByNumeral && second.minutesShaped))) {
+          value = `${numeric}:${String(second.value).padStart(2, '0')}`;
+          isTime = true;
+          lastTrail = second.trail;
+          j = second.next;
+        } else if (yearPrefix && !timeSuffix && !followedByNumeral) {
+          numeric = numeric * 100 + second.value;
+          value = String(numeric);
+          lastTrail = second.trail;
+          j = second.next;
+        }
+      }
+    }
 
     // ── Decimal: "thirty one point eight" -> 31.8 ──
-    // Only between two numbers, so "point number one" keeps its noun.
-    if (!lastTrail && j + 1 < tokens.length && kindOf(split(tokens[j]!.text).core) === 'point') {
+    // Only between two numbers, so "point number one" keeps its noun. Repeats
+    // for dotted versions: "two point three point one" -> 2.3.1.
+    let decimalGroups = 0;
+    while (!isTime && !lastTrail && j + 1 < tokens.length && kindOf(split(tokens[j]!.text).core) === 'point') {
       let d = j + 1;
       let decimals = '';
+      let trailing = '';
       while (d < tokens.length) {
         const p = split(tokens[d]!.text);
         if (kindOf(p.core) !== 'unit') break;
         decimals += String(UNITS[p.core.toLowerCase()]!);
         d += 1;
-        if (p.trail) { lastTrail = p.trail; break; }
+        if (p.trail) { trailing = p.trail; break; }
       }
-      if (decimals) {
-        value += `.${decimals}`;
-        j = d;
+      if (!decimals) break;
+      value += `.${decimals}`;
+      decimalGroups += 1;
+      lastTrail = trailing;
+      j = d;
+    }
+
+    // ── Clock suffix and unit words ──
+    let prefix = '';
+    let suffix = '';
+    if (!lastTrail && j < tokens.length) {
+      const nextTok = split(tokens[j]!.text);
+      const nextWord = nextTok.core.toLowerCase();
+      const clock = readTimeSuffix(tokens, j);
+      if (clock) {
+        suffix = ` ${clock.text}`;
+        lastTrail = clock.trail;
+        j = clock.next;
+        isTime = true;
+      } else if (nextWord in UNIT_SUFFIX && decimalGroups <= 1) {
+        const u = UNIT_SUFFIX[nextWord]!;
+        if (u.side === 'after') suffix = u.symbol;
+        else prefix = u.symbol;
+        lastTrail = nextTok.trail;
+        j += 1;
+        // "twenty percent sign" is the explicit command form of the same
+        // thing; swallow the "sign" so it does not survive as a word.
+        if (!lastTrail && nextWord === 'percent' && j < tokens.length) {
+          const signTok = split(tokens[j]!.text);
+          if (/^(?:sign|symbol)$/i.test(signTok.core)) { lastTrail = signTok.trail; j += 1; }
+        }
       }
     }
 
     // A lone small numeral is left as a word unless something marks it as a
-    // label — see LONE_DIGIT_MIN / COUNTING_CUES.
-    const isLone = phrase.length === 1 && !value.includes('.');
-    if (isLone && Number(value) < LONE_DIGIT_MIN) {
-      const prevWord = i > 0 ? split(tokens[i - 1]!.text).core.toLowerCase() : '';
-      if (!COUNTING_CUES.has(prevWord)) {
-        out.push(tokens[i]!.gap + tokens[i]!.text);
-        i += 1;
-        continue;
-      }
+    // label — see LONE_DIGIT_MIN / COUNTING_CUES. A time, a unit or a
+    // decimal is never lone.
+    const prevWord = i > 0 ? split(tokens[i - 1]!.text).core.toLowerCase() : '';
+    const isLone = phrase.length === 1 && !value.includes('.') && !isTime && !prefix && !suffix;
+    if (isLone && Number(value) < LONE_DIGIT_MIN && !COUNTING_CUES.has(prevWord)) {
+      out.push(tokens[i]!.gap + tokens[i]!.text);
+      i += 1;
+      continue;
     }
 
-    out.push(tokens[i]!.gap + value + lastTrail);
+    // "numeral three" -> "3": the escape word itself is not typed, and the
+    // number takes its place (and its leading space).
+    let gap = tokens[i]!.gap;
+    if (prevWord === 'numeral' && out.length > 0) {
+      const m = /^(\s*)numeral$/i.exec(out[out.length - 1]!);
+      if (m) { out.pop(); gap = m[1]!; }
+    }
+
+    out.push(gap + prefix + value + suffix + lastTrail);
     i = j;
   }
 

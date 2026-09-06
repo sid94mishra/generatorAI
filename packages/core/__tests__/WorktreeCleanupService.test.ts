@@ -99,8 +99,12 @@ describe('WorktreeCleanupService — orphan detection (DATA-1)', () => {
 
 describe('WorktreeCleanupService — per-project scoping (DATA-2)', () => {
   it('runCleanupForProject only touches the requested project (no global sweep)', async () => {
+    // Older than the project's 24-hour retention, so it is genuinely due for
+    // reclamation. A record that is merely finished is NOT due — see the
+    // retention test below.
+    const longAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
     const getByProjectId = vi.fn(async () => [
-      wt({ id: 'stale-1', projectId: 'p1', status: 'completed' }),
+      wt({ id: 'stale-1', projectId: 'p1', status: 'completed', createdAt: longAgo, updatedAt: longAgo }),
     ]);
     const del = vi.fn(async () => {});
     const getAll = vi.fn(async () => []);
@@ -121,5 +125,37 @@ describe('WorktreeCleanupService — per-project scoping (DATA-2)', () => {
     expect(getByProjectId).toHaveBeenCalledTimes(1); // only p1, no sweep over all projects
     expect(getAll).not.toHaveBeenCalled(); // global sweep would enumerate all projects
     expect(result.cleaned).toBe(1); // the stale 'completed' record was reclaimed
+  });
+
+  /**
+   * Review 6.2 — configured retention was in practice about 5-10 minutes.
+   * A fast path deleted any worktree already marked completed/orphaned
+   * outright, before the branch that checks age ever ran, so a 24- or 72-hour
+   * setting bought nothing. Finishing a run is not the same as being due for
+   * deletion.
+   */
+  it('does NOT reclaim a finished worktree that is still inside the retention window', async () => {
+    const justNow = new Date();
+    const getByProjectId = vi.fn(async () => [
+      wt({ id: 'fresh-1', projectId: 'p1', status: 'completed', createdAt: justNow, updatedAt: justNow }),
+    ]);
+    const del = vi.fn(async () => {});
+    const removeWorktree = vi.fn(async () => {});
+    const worktreeService = { removeWorktree } as unknown as WorktreeService;
+    const worktreeRepo = {
+      getByProjectId, delete: del, updateStatus: vi.fn(async () => {}),
+    } as unknown as IWorktreeRepository;
+    const projectRepo = {
+      getById: vi.fn(async () => ({ id: 'p1', settings: { worktreeRetention: 'hours-24' } })),
+      getAll: vi.fn(async () => []),
+    } as unknown as IProjectRepository;
+    const workflowRunRepo = { getById: vi.fn() } as unknown as IWorkflowRunRepository;
+
+    const svc = new WorktreeCleanupService(worktreeService, worktreeRepo, projectRepo, workflowRunRepo, noopLogger);
+    const result = await svc.runCleanupForProject('p1');
+
+    expect(result.cleaned).toBe(0);
+    expect(del).not.toHaveBeenCalled();
+    expect(removeWorktree).not.toHaveBeenCalled();
   });
 });

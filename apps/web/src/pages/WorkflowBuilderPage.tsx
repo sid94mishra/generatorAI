@@ -5,6 +5,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useBlocker } from 'react-router-dom';
+import { useShallow } from 'zustand/react/shallow';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
   Save,
@@ -87,10 +88,49 @@ export function WorkflowBuilderPage() {
   const isNew = !id;
 
   // ── Zustand store ──
-  const store = useWorkflowBuilderStore();
+  //
+  // W-render — this used to be `useWorkflowBuilderStore()` with no selector,
+  // subscribing to the entire ~700-line store: every field, so every drag of
+  // a node and every keystroke in the properties panel (which edits
+  // `nodes`) re-rendered the whole toolbar, banners and modals along with
+  // it. Below, DISPLAY-only fields the page's own JSX actually reads are
+  // selected individually (or via `useShallow` for grouped/derived values);
+  // everything the save/run handlers need is read from a fresh
+  // `getState()` snapshot INSIDE those handlers instead, so editing the
+  // canvas does not re-render this page at all just because a future Save
+  // would need that data.
+  const name = useWorkflowBuilderStore((s) => s.name);
+  const isDirty = useWorkflowBuilderStore((s) => s.isDirty);
+  const isSaving = useWorkflowBuilderStore((s) => s.isSaving);
+  const definitionId = useWorkflowBuilderStore((s) => s.definitionId);
+  const projectId = useWorkflowBuilderStore((s) => s.projectId);
+  const selectedCodebases = useWorkflowBuilderStore(useShallow((s) => s.selectedCodebases));
+  const variables = useWorkflowBuilderStore((s) => s.variables);
+  const validationErrors = useWorkflowBuilderStore((s) => s.validationErrors);
+  const canUndo = useWorkflowBuilderStore((s) => s.canUndo());
+  const canRedo = useWorkflowBuilderStore((s) => s.canRedo());
+  // Only the stage NAMES, shallow-compared — so dragging a node (which only
+  // changes `position`) does not re-render the Run dialog's stage list.
+  const stageNames = useWorkflowBuilderStore(useShallow((s) => s.nodes.map((n) => n.data.stage.name)));
+  // Actions are referentially stable for the store's lifetime, so grouping
+  // them in one `useShallow` selector never itself causes a re-render.
+  const actions = useWorkflowBuilderStore(
+    useShallow((s) => ({
+      loadDefinition: s.loadDefinition,
+      resetBuilder: s.resetBuilder,
+      addStage: s.addStage,
+      selectNode: s.selectNode,
+      setName: s.setName,
+      undo: s.undo,
+      redo: s.redo,
+      markSaving: s.markSaving,
+      markSaved: s.markSaved,
+      validate: s.validate,
+    })),
+  );
 
   // ── Server queries ──
-  const { data: definition, isLoading: isLoadingDef } = useWorkflowDefinition(id);
+  const { data: definition, isLoading: isLoadingDef, error: definitionError, refetch: refetchDefinition } = useWorkflowDefinition(id);
   const createDefinition = useCreateWorkflowDefinition();
   const updateDefinition = useUpdateWorkflowDefinition();
   const addStageMutation = useAddStage();
@@ -117,18 +157,18 @@ export function WorkflowBuilderPage() {
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
 
   // ── Project codebases (for auto-filling git variables in run dialog) ──
-  const { data: projectCodebases } = useProjectCodebases(store.projectId ?? undefined);
+  const { data: projectCodebases } = useProjectCodebases(projectId ?? undefined);
 
   const linkedCodebases = useMemo((): LinkedCodebaseInfo[] | undefined => {
-    if (!store.projectId || store.selectedCodebases.length === 0 || !projectCodebases) return undefined;
-    return store.selectedCodebases
+    if (!projectId || selectedCodebases.length === 0 || !projectCodebases) return undefined;
+    return selectedCodebases
       .map((alias) => {
         const cb = projectCodebases.find((c) => c.alias === alias);
         if (!cb) return null;
         return { alias: cb.alias, url: cb.url ?? cb.localPath ?? '', branch: cb.defaultBranch ?? 'main' };
       })
       .filter((x): x is LinkedCodebaseInfo => x !== null);
-  }, [store.projectId, store.selectedCodebases, projectCodebases]);
+  }, [projectId, selectedCodebases, projectCodebases]);
 
   // ── Resizable properties panel ──
   const { width: propertiesPanelWidth, isDragging: isResizingProps, handleProps: propsHandleProps } = useResizable({
@@ -139,13 +179,26 @@ export function WorkflowBuilderPage() {
   });
 
   // ── Load definition into builder store ──
+  //
+  // Reset on EVERY `id` change (not only for a new workflow) — otherwise
+  // navigating from workflow A to workflow B, when B fails to load, left A's
+  // content in the store: `definition` stays `undefined` while loading AND
+  // on error, so neither branch of the old `if (definition) load() else if
+  // (isNew) reset()` ever fired, and the canvas kept showing A under B's URL.
+  // Resetting immediately on every id change means the canvas is blank while
+  // B loads, then `loadDefinition` (below) fills it in once B's data
+  // arrives — or the error view further down renders instead.
+  useEffect(() => {
+    actions.resetBuilder();
+    // `actions` is a stable, referentially unchanging selector result (see
+    // the grouped selector above), so this effectively only re-runs on `id`.
+  }, [id, actions]);
+
   useEffect(() => {
     if (definition) {
-      store.loadDefinition(definition);
-    } else if (isNew) {
-      store.resetBuilder();
+      actions.loadDefinition(definition);
     }
-  }, [definition, isNew]);
+  }, [definition, actions]);
 
   // ── Unsaved changes blocker ──
   // Read isDirty directly from Zustand getState() to avoid stale closure
@@ -164,24 +217,27 @@ export function WorkflowBuilderPage() {
 
   // ── Add new stage ──
   const handleAddStage = useCallback(() => {
+    // Fresh snapshot rather than a reactive dependency — this only needs the
+    // CURRENT node count/definitionId at the moment of the click.
+    const { nodes, definitionId: defId } = useWorkflowBuilderStore.getState();
     const stageId = `stage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const newStage: StageDefinition = {
       id: stageId,
-      workflowDefinitionId: store.definitionId ?? '',
-      name: `Stage ${store.nodes.length + 1}`,
-      order: store.nodes.length,
+      workflowDefinitionId: defId ?? '',
+      name: `Stage ${nodes.length + 1}`,
+      order: nodes.length,
       prompts: [],
       variables: {},
       hooks: [],
       createdAt: new Date(),
     };
-    store.addStage(newStage);
-    store.selectNode(stageId);
-  }, [store]);
+    actions.addStage(newStage);
+    actions.selectNode(stageId);
+  }, [actions]);
 
   // ── Validate ──
   const handleValidate = useCallback((announce = false) => {
-    const errors = store.validate();
+    const errors = actions.validate();
     if (errors.length === 0) {
       setSaveSuccess(false);
       if (announce) {
@@ -192,12 +248,14 @@ export function WorkflowBuilderPage() {
       setValidateOk(false);
     }
     return errors;
-  }, [store]);
+  }, [actions]);
 
   // ── Save ──
   const buildOrchestratorConfig = useCallback(() => {
-    const hasCodebases = store.selectedCodebases.length > 0;
-    const hasGitRepos = store.gitRepositories.length > 0;
+    // Fresh snapshot — these are only needed at Save/Run time, not reactively.
+    const { selectedCodebases: codebases, gitRepositories, autoCommit, autoCreatePR } = useWorkflowBuilderStore.getState();
+    const hasCodebases = codebases.length > 0;
+    const hasGitRepos = gitRepositories.length > 0;
     if (!hasCodebases && !hasGitRepos) return undefined;
     return {
       category: 'custom' as const,
@@ -208,23 +266,27 @@ export function WorkflowBuilderPage() {
       // and the codebase selection silently vanished on every save, leaving
       // project-linked workflows with `requiresCodebase: true` and no repo to
       // build a worktree from.
-      codebaseAliases: store.selectedCodebases,
-      gitRepositories: store.gitRepositories,
+      codebaseAliases: codebases,
+      gitRepositories,
       // No preprocessingSteps needed — worktree creation is handled by the orchestrator
       // when projectId + selectedCodebases are present
       preprocessingSteps: [] as Array<{ type: 'clone_repo'; name: string; config: { type: 'clone_repo'; repoAlias: string }; failOnError: boolean; order: number }>,
       postProcessingSteps: [],
       resultValidations: [],
       requiresCodebase: true,
-      autoCommit: store.autoCommit,
-      autoCreatePR: store.autoCreatePR,
+      autoCommit,
+      autoCreatePR,
     };
-  }, [store.selectedCodebases, store.gitRepositories, store.autoCommit, store.autoCreatePR]);
+  }, []);
 
   const handleSave = useCallback(async () => {
     const errors = handleValidate();
     if (errors.length > 0) return;
 
+    // Fresh snapshot for the whole save — an imperative action, not display
+    // state, so it reads the CURRENT store rather than depending on it
+    // reactively (which would rebuild this callback on every keystroke).
+    const store = useWorkflowBuilderStore.getState();
     store.markSaving(true);
     try {
       if (isNew || !store.definitionId) {
@@ -376,7 +438,6 @@ export function WorkflowBuilderPage() {
   }, [
     handleValidate,
     isNew,
-    store,
     definition,
     createDefinition,
     updateDefinition,
@@ -394,13 +455,13 @@ export function WorkflowBuilderPage() {
     const errors = handleValidate();
     if (errors.length > 0) return;
 
-    if (!store.definitionId) {
+    if (!useWorkflowBuilderStore.getState().definitionId) {
       setSaveError('Please save the workflow before running it.');
       return;
     }
 
     setVariableModalOpen(true);
-  }, [handleValidate, store.definitionId]);
+  }, [handleValidate]);
 
   const executeRun = useCallback(
     async (
@@ -408,6 +469,8 @@ export function WorkflowBuilderPage() {
       uploads?: UploadedFileSet,
       stageOverrides?: StageOverrideEntry[],
     ) => {
+      // Fresh snapshot — imperative action, not display state.
+      const store = useWorkflowBuilderStore.getState();
       if (!store.definitionId) return;
       setIsRunning(true);
 
@@ -469,7 +532,7 @@ export function WorkflowBuilderPage() {
         setIsRunning(false);
       }
     },
-    [store.definitionId, store.projectId, store.selectedCodebases, store.gitRepositories, createRun, startRun, startOrchestratedRun, uploadRunFiles, navigate],
+    [createRun, startRun, startOrchestratedRun, uploadRunFiles, navigate],
   );
 
   // ── Keyboard shortcuts ──
@@ -489,6 +552,33 @@ export function WorkflowBuilderPage() {
     return (
       <div className="flex h-full items-center justify-center">
         <Spinner size="lg" className="text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // ── Error state ──
+  // Previously a failed load fell straight through to the editor below —
+  // `useWorkflowDefinition` only destructured `{ data, isLoading }`, so the
+  // canvas rendered fully editable with nothing loaded into it. The
+  // reset-on-every-id-change effect above already cleared whatever the PREVIOUS
+  // workflow left behind, so what would otherwise show is an empty, saveable
+  // canvas that silently overwrites the workflow the user meant to open.
+  if (!isNew && definitionError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <AlertTriangle className="h-8 w-8 text-danger" />
+        <p className="text-sm font-medium text-foreground">Failed to load this workflow.</p>
+        <p className="max-w-sm text-xs text-muted-foreground">
+          {definitionError instanceof Error ? definitionError.message : 'The workflow definition could not be loaded.'}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => void refetchDefinition()}>
+            Retry
+          </Button>
+          <Button variant="ghost" onClick={() => navigate('/workflows')}>
+            Back to workflows
+          </Button>
+        </div>
       </div>
     );
   }
@@ -520,7 +610,7 @@ export function WorkflowBuilderPage() {
           <Button
             variant="ghost"
             size="icon-sm"
-            onClick={() => navigate(store.definitionId ? `/workflows/${store.definitionId}` : '/workflows')}
+            onClick={() => navigate(definitionId ? `/workflows/${definitionId}` : '/workflows')}
             aria-label="Back to workflow list"
             title="Back"
           >
@@ -532,13 +622,13 @@ export function WorkflowBuilderPage() {
           {/* Workflow name inline */}
           <input
             type="text"
-            value={store.name}
-            onChange={(e) => store.setName(e.target.value)}
+            value={name}
+            onChange={(e) => actions.setName(e.target.value)}
             placeholder="Untitled Workflow"
             className="bg-transparent text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground border-b border-transparent focus:border-primary transition-colors duration-200 max-w-[300px]"
           />
 
-          {store.isDirty && (
+          {isDirty && (
             <span className="text-xs text-muted-foreground">(unsaved)</span>
           )}
           {saveSuccess && (
@@ -563,8 +653,8 @@ export function WorkflowBuilderPage() {
           <Button
             variant="ghost"
             size="icon-sm"
-            onClick={() => store.undo()}
-            disabled={!store.canUndo()}
+            onClick={() => actions.undo()}
+            disabled={!canUndo}
             title="Undo (Ctrl+Z)"
           >
             <Undo2 className="h-4 w-4" />
@@ -572,8 +662,8 @@ export function WorkflowBuilderPage() {
           <Button
             variant="ghost"
             size="icon-sm"
-            onClick={() => store.redo()}
-            disabled={!store.canRedo()}
+            onClick={() => actions.redo()}
+            disabled={!canRedo}
             title="Redo (Ctrl+Shift+Z)"
           >
             <Redo2 className="h-4 w-4" />
@@ -615,12 +705,14 @@ export function WorkflowBuilderPage() {
 
           <div className="h-5 w-px bg-border" />
 
-          {/* Save */}
+          {/* Save — also disabled while an existing workflow's definition
+              has not finished loading yet, so a race between the reset and
+              the fetch can never save a blank canvas over real content. */}
           <Button
             variant="secondary"
             onClick={handleSave}
-            disabled={store.isSaving}
-            loading={store.isSaving}
+            disabled={isSaving || (!isNew && !definition)}
+            loading={isSaving}
             leftIcon={<Save className="h-4 w-4" />}
           >
             Save
@@ -630,7 +722,7 @@ export function WorkflowBuilderPage() {
           <Button
             variant="primary"
             onClick={handleRun}
-            disabled={isRunning || !store.definitionId}
+            disabled={isRunning || !definitionId}
             loading={isRunning}
             leftIcon={<Play className="h-4 w-4" />}
           >
@@ -640,16 +732,16 @@ export function WorkflowBuilderPage() {
       </div>
 
       {/* ── Validation Errors Banner ── */}
-      {store.validationErrors.length > 0 && (
+      {validationErrors.length > 0 && (
         <div className="border-b border-warning/30 bg-warning-muted px-4 py-2">
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
             <div className="text-sm">
               <span className="font-medium text-warning">
-                {store.validationErrors.length} validation {store.validationErrors.length === 1 ? 'error' : 'errors'}
+                {validationErrors.length} validation {validationErrors.length === 1 ? 'error' : 'errors'}
               </span>
               <ul className="mt-1 space-y-0.5 text-warning">
-                {store.validationErrors.map((err, i) => (
+                {validationErrors.map((err, i) => (
                   <li key={i} className="flex items-center gap-1.5">
                     <ChevronRight className="h-3 w-3" />
                     {err.message}
@@ -737,11 +829,11 @@ export function WorkflowBuilderPage() {
         open={variableModalOpen}
         onClose={() => setVariableModalOpen(false)}
         onSubmit={executeRun}
-        variables={store.variables}
-        workflowName={store.name || 'Untitled Workflow'}
+        variables={variables}
+        workflowName={name || 'Untitled Workflow'}
         isSubmitting={isRunning}
         linkedCodebases={linkedCodebases}
-        stageNames={store.nodes.map((n) => n.data.stage.name)}
+        stageNames={stageNames}
       />
     </div>
   );

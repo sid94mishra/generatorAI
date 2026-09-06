@@ -83,13 +83,22 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
     }
   });
 
-  // DELETE /workflow-definitions/:id — Delete a definition (cascade)
+  /**
+   * DELETE /workflow-definitions/:id — Delete a definition (cascade).
+   *
+   * Item 9 — refuses with 409 when the definition still has runs, naming how
+   * many. `?force=true` deletes those runs too. Without `force`, the client
+   * error message names the exact blocker so the UI can offer "delete the
+   * N runs first" instead of a generic failure.
+   */
   router.delete('/:id', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
-      await workflowDefinitionService.deleteDefinition(id);
+      const force = String(req.query['force'] ?? '').toLowerCase() === 'true';
+      await workflowDefinitionService.deleteDefinition(id, { force });
       logger.info(`[WorkflowDefRoutes] Deleted definition ${id}`, {
         requestId: req.requestId,
+        force,
       });
       res.status(204).send();
     } catch (err) {

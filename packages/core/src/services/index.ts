@@ -4,13 +4,17 @@ export { ArtifactService } from './ArtifactService.js';
 export { WebhookService } from './WebhookService.js';
 export type { WebhookConfig } from './WebhookService.js';
 export { HookExecutor } from './HookExecutor.js';
-export type { HookContext } from './HookExecutor.js';
+export type { HookContext, HookDryRunPlan, HookDryRunEntry } from './HookExecutor.js';
 export { HookInterceptor } from './HookInterceptor.js';
 export type { SDKHookContext, StageHookContext } from './HookInterceptor.js';
 export { ConfigResolver } from './ConfigResolver.js';
 export type { ResolvedWorkflowConfig, SessionWorkflowOverrides, ResolvedStageConfig } from './ConfigResolver.js';
 export { TemplateRegistry } from './TemplateRegistry.js';
 export { StartupRecoveryService } from './StartupRecoveryService.js';
+export { InterruptedTurnRecoveryService, INTERRUPTED_BY_RESTART_CODE } from './InterruptedTurnRecoveryService.js';
+export { OrphanProcessReaper, selectOrphans } from './OrphanProcessReaper.js';
+export type { OsProcess, OrphanProcessReaperOptions, ReapSummary } from './OrphanProcessReaper.js';
+export type { InterruptedTurnRecoverySummary } from './InterruptedTurnRecoveryService.js';
 export { ErrorHandler } from './ErrorHandler.js';
 
 // Workflow execution services
@@ -60,9 +64,11 @@ export type {
 } from './StreamBroker.js';
 
 // Automation services
-export { AutomationService } from './AutomationService.js';
-export type { IAutomationRepository, IAutomationExecutionRepository } from './AutomationService.js';
+export { AutomationService, hashWebhookToken, toPublicAutomation } from './AutomationService.js';
+export type { IAutomationRepository, IAutomationExecutionRepository, ResolvedWebhook } from './AutomationService.js';
 export { DataSourceResolver } from './DataSourceResolver.js';
+export type { SecretResolver } from './DataSourceResolver.js';
+export { splitShellWords, ShellWordsError } from './shellWords.js';
 export { planIterations, previewIterations } from './IterationPlanner.js';
 export type { PlanArgs } from './IterationPlanner.js';
 export { AutomationRecoveryService } from './AutomationRecoveryService.js';
@@ -102,6 +108,12 @@ export { CodebaseService } from './CodebaseService.js';
 export { WorktreeService } from './WorktreeService.js';
 export { ProjectConfigService } from './ProjectConfigService.js';
 export { WorktreeCleanupService } from './WorktreeCleanupService.js';
+export { WorkspaceRetentionService } from './WorkspaceRetentionService.js';
+export type {
+  WorkspaceRetentionResult,
+  WorkspaceRetentionServiceOptions,
+  WorkspaceRetentionPrefs,
+} from './WorkspaceRetentionService.js';
 export { SystemArtifactService } from './SystemArtifactService.js';
 export type { ISystemConfigRepository } from './SystemArtifactService.js';
 
@@ -136,8 +148,8 @@ export type { SafeSourceControlConfig, SourceControlConfigDeps } from './SourceC
 export { PathResolver, PathEscapeError, SymlinkEscapeError } from './PathResolver.js';
 
 // Workflow Script services
-export { WorkflowScriptLoader } from './WorkflowScriptLoader.js';
-export type { ScriptMetadata, LoadedScript } from './WorkflowScriptLoader.js';
+export { WorkflowScriptLoader, WORKFLOW_SCRIPTS_DISABLED_MESSAGE, ScriptSecurityError } from './WorkflowScriptLoader.js';
+export type { ScriptMetadata, LoadedScript, WorkflowScriptLoaderOptions } from './WorkflowScriptLoader.js';
 
 // Integrated Browser service (v13)
 export { BrowserService } from './BrowserService.js';

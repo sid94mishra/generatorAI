@@ -24,6 +24,8 @@ import type { WidgetSurface } from '@generatorai/shared';
 import type { ToolDefinition } from '../domain/ports/IAgentHarness.js';
 import type { WidgetService } from '../services/WidgetService.js';
 import type { IWidgetRegistry } from '../domain/ports/IWidgetRegistry.js';
+import { createContext, Script } from 'node:vm';
+import { WIDGET_USAGE_REFERENCE } from '../services/chatSystemHints.js';
 
 export interface WidgetToolBinding {
   /** Session id owning the conversation. Required. */
@@ -464,6 +466,11 @@ function searchWidgetHandler(ctx: WidgetToolFactoryContext) {
       })),
       totalInstalled: all.length,
       hint: 'Call render_widget with the chosen descriptor to render.',
+      // The full driving contract travels HERE rather than in every system
+      // prompt (review 3.7). The model has to call search_widget before it can
+      // render anything, so this is the first moment the detail is useful — and
+      // chats that never touch a widget never pay for it.
+      usage: WIDGET_USAGE_REFERENCE,
     };
   };
 }
@@ -710,14 +717,37 @@ export function buildWidgetExecTool(
   };
 }
 
+/** Wall-clock budget for one agent-authored widget script. */
+const WIDGET_SCRIPT_TIMEOUT_MS = 5_000;
+
+/**
+ * Ceiling on what one script may DO, not just how long it may take.
+ *
+ * Time alone is not a bound: a tight `while (true) { await widget.act() }`
+ * completes millions of iterations inside the deadline, and every one appends
+ * to the call and log arrays — enough to exhaust memory before the clock runs
+ * out. A real script drives a widget a few dozen times.
+ */
+const WIDGET_SCRIPT_MAX_CALLS = 1_000;
+const WIDGET_SCRIPT_MAX_LOGS = 1_000;
+
 /**
  * Execute an agent-authored widget-control script. Each `widget.<action>()`
  * call is dispatched through `WidgetService.invokeAction`, which round-trips
- * to the live iframe. The script runs in a restricted async function with no
- * access to require/process/globals — only the injected `widget`, `read`,
- * and `log`. This matches the local/self-hosted trust posture: the code is
- * authored by the same agent the user is already trusting, and it can only
- * reach the widget's declared actions (never the network or filesystem).
+ * to the live iframe.
+ *
+ * The script runs in a FRESH `node:vm` context whose global object holds only
+ * the injected `widget`, `read` and `log`, under a wall-clock timeout. The vm
+ * timeout alone would bound only synchronous work — an awaiting loop escapes
+ * it — so the deadline also disarms every injected function, which is what
+ * stops an async loop rather than merely stopping the wait for it.
+ *
+ * It previously ran through `new Function`, whose body compiles in the global
+ * scope — so this comment claimed "no access to require/process/globals"
+ * while `process`, `globalThis` and `global` were all reachable. One line
+ * could read every API key in the environment into the transcript, and
+ * another could block the only thread forever. The isolated context and the
+ * timeout are what make the sentence above true (review 6.1).
  */
 async function runWidgetExec(
   ctx: WidgetToolFactoryContext,
@@ -729,9 +759,38 @@ async function runWidgetExec(
   const calls: Array<{ action: string; ok: boolean; error?: string }> = [];
 
   const widget: Record<string, (a?: unknown) => Promise<unknown>> = {};
+  /**
+   * Tripped when the script outlives its budget.
+   *
+   * The vm's own `timeout` only bounds SYNCHRONOUS execution: the moment the
+   * script awaits, control returns to the event loop and that budget stops
+   * applying. So `while (true) { await widget.act() }` would keep running —
+   * and keep driving the real widget — long after the caller had been handed a
+   * timeout error. Every injected function refuses once this is set, which
+   * makes the next `await` throw and unwinds the loop for real.
+   */
+  let deadlineExceeded = false;
+  const assertWithinBudget = (): void => {
+    if (deadlineExceeded) {
+      throw new Error(`Widget script exceeded ${WIDGET_SCRIPT_TIMEOUT_MS} ms and was stopped.`);
+    }
+    if (calls.length >= WIDGET_SCRIPT_MAX_CALLS) {
+      deadlineExceeded = true;
+      throw new Error(
+        `Widget script exceeded ${WIDGET_SCRIPT_MAX_CALLS} widget calls and was stopped.`,
+      );
+    }
+    if (logs.length >= WIDGET_SCRIPT_MAX_LOGS) {
+      deadlineExceeded = true;
+      throw new Error(`Widget script exceeded ${WIDGET_SCRIPT_MAX_LOGS} log lines and was stopped.`);
+    }
+  };
+
   for (const name of actionNames) {
     widget[name] = async (a?: unknown) => {
+      assertWithinBudget();
       const res = await ctx.widgetService.invokeAction(instanceId, name, a ?? {});
+      assertWithinBudget();
       calls.push({ action: name, ok: res.ok, error: res.error });
       if (!res.ok) {
         throw new Error(`widget.${name} failed: ${res.error ?? 'unknown error'}`);
@@ -739,28 +798,61 @@ async function runWidgetExec(
       return res.result;
     };
   }
-  const read = async () => {
+  /**
+   * The state read WE do when assembling the result. Not budget-checked: it
+   * runs after the script has finished (or been stopped), and a refusal here
+   * would make the error path throw instead of reporting the error.
+   */
+  const readState = async () => {
     const inst = await ctx.widgetService.getInstance(instanceId);
     return inst?.state ?? null;
   };
+  /** The `read()` handed to the SCRIPT — budget-checked like every injected call. */
+  const read = async () => {
+    assertWithinBudget();
+    return readState();
+  };
   const log = (...xs: unknown[]) => {
+    assertWithinBudget();
     logs.push(xs.length === 1 ? xs[0] : xs);
   };
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const fn = new Function(
-      'widget',
-      'read',
-      'log',
-      `"use strict"; return (async () => { ${code}\n })();`,
-    ) as (
-      w: typeof widget,
-      r: typeof read,
-      l: typeof log,
-    ) => Promise<unknown>;
-    const returned = await fn(widget, read, log);
-    const finalState = await read();
+    // A bare object as the context global: no `process`, no `require`, no
+    // `globalThis` inherited from this realm. Only what we put in it.
+    const sandbox: Record<string, unknown> = { widget, read, log };
+    const context = createContext(sandbox, { name: 'widget-script' });
+    const script = new Script(`"use strict"; (async () => { ${code}
+ })();`, { filename: 'widget-script.js' });
+    // Two different budgets, because one is not enough:
+    //   • the vm's `timeout` stops a purely SYNCHRONOUS spin (`while (true) {}`)
+    //     from wedging the only thread;
+    //   • the race below bounds how long the CALLER waits, and — crucially —
+    //     trips `deadlineExceeded`, which is what actually halts an async loop.
+    //     Without that a script could keep driving the widget forever after
+    //     this function had already returned an error.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const started = script.runInContext(context, {
+      timeout: WIDGET_SCRIPT_TIMEOUT_MS,
+    }) as Promise<unknown>;
+    // Once a budget trips we report immediately, but the script's own promise
+    // rejects a moment later when its next injected call refuses. Nothing is
+    // awaiting it by then, so without this it surfaces as an unhandled
+    // rejection — which, with Node's default, can take the process down.
+    void Promise.resolve(started).catch(() => undefined);
+    const returned = await Promise.race([
+      Promise.resolve(started),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          deadlineExceeded = true;
+          reject(new Error(`Widget script exceeded ${WIDGET_SCRIPT_TIMEOUT_MS} ms and was stopped.`));
+        }, WIDGET_SCRIPT_TIMEOUT_MS);
+        timer.unref?.();
+      }),
+    ]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+    const finalState = await readState();
     return {
       ok: true,
       calls,
@@ -770,7 +862,7 @@ async function runWidgetExec(
       hint: `Ran ${calls.length} action(s). Final state attached.`,
     };
   } catch (err) {
-    const finalState = await read();
+    const finalState = await readState();
     return {
       ok: false,
       error: err instanceof Error ? err.message : String(err),

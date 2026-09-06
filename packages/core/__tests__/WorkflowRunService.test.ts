@@ -580,4 +580,204 @@ describe('WorkflowRunService', () => {
       expect(validateStageResult).toHaveBeenCalledTimes(1);
     });
   });
+
+  // ── WS-D1: stale-heartbeat reaper ──
+
+  describe('stale-heartbeat reaper', () => {
+    it('fails a running stage via the reconciler once its heartbeat goes stale', async () => {
+      // A generous 3s stale window (still far shorter than the 60s-old beat
+      // below) so the "fresh" counterpart test isn't flaky against normal
+      // test-runner scheduling overhead between setting the timestamp and
+      // the reconciler's first tick.
+      service.setHeartbeatPolicy({ heartbeatIntervalMs: 1_000, staleMultiplier: 3, reconcileIntervalMs: 15 });
+
+      const run = await service.createRun({ workflowDefinitionId: DEF_ID });
+      await runRepo.updateStatus(run.id, 'running');
+      const stageRuns = await stageRunRepo.getByRunId(run.id);
+      const srA = stageRuns.find((sr) => sr.stageDefinitionId === 's-a')!;
+      // A "running" stage whose last beat is far older than the 3s stale
+      // window (heartbeatIntervalMs 1000 * staleMultiplier 3).
+      await stageRunRepo.update(srA.id, {
+        status: 'running',
+        heartbeatAt: new Date(Date.now() - 60_000),
+      });
+
+      // redriveRun registers the run with the process-wide reconciler; the
+      // reconciler itself ticks on a real setInterval, so wait past a few
+      // real ticks for it to observe the stale beat.
+      await service.redriveRun(run.id);
+      await new Promise((r) => setTimeout(r, 100));
+
+      const after = await stageRunRepo.getById(srA.id);
+      expect(after.status).toBe('failed');
+      expect(after.error).toContain('heartbeat stale');
+
+      service.shutdown();
+    });
+
+    it('leaves a fresh (non-stale) running stage alone', async () => {
+      service.setHeartbeatPolicy({ heartbeatIntervalMs: 1_000, staleMultiplier: 3, reconcileIntervalMs: 15 });
+
+      const run = await service.createRun({ workflowDefinitionId: DEF_ID });
+      await runRepo.updateStatus(run.id, 'running');
+      const stageRuns = await stageRunRepo.getByRunId(run.id);
+      const srA = stageRuns.find((sr) => sr.stageDefinitionId === 's-a')!;
+      await stageRunRepo.update(srA.id, { status: 'running', heartbeatAt: new Date() });
+
+      await service.redriveRun(run.id);
+      await new Promise((r) => setTimeout(r, 100));
+
+      const after = await stageRunRepo.getById(srA.id);
+      expect(after.status).toBe('running');
+
+      service.shutdown();
+    });
+  });
+
+  // ── WS-D1: operator skip overrides honoured on failure branches ──
+
+  describe('operator skip overrides on failure branches', () => {
+    it('honours a run-time skip override for a stage reached via on_failure', async () => {
+      const RECOVERY_DEF = 'def-recovery-skip';
+      await defRepo.create({
+        id: RECOVERY_DEF, name: 'Recovery Skip', version: 1, sessionMode: 'per-stage',
+        variables: [], tags: [], createdAt: new Date(), updatedAt: new Date(),
+      });
+      await stageDefRepo.create(makeStageDef('rs-a', RECOVERY_DEF, 0));
+      await stageDefRepo.create(makeStageDef('rs-recover', RECOVERY_DEF, 1));
+      await edgeRepo.create({
+        id: 'rs-edge-failure', workflowDefinitionId: RECOVERY_DEF,
+        fromStageId: 'rs-a', toStageId: 'rs-recover', edgeType: 'on_failure',
+      });
+
+      const run = await service.createRun({
+        workflowDefinitionId: RECOVERY_DEF,
+        variables: { __stageOverrides: [{ stageName: 'Stage rs-recover', skip: true }] },
+      });
+      await runRepo.updateStatus(run.id, 'running');
+
+      const stageRuns = await stageRunRepo.getByRunId(run.id);
+      const srA = stageRuns.find((sr) => sr.stageDefinitionId === 'rs-a')!;
+      await stageRunRepo.update(srA.id, { status: 'failed', error: 'boom' });
+
+      await service.onStageFailed(run.id, srA.id, new Error('boom'));
+      await new Promise((r) => setTimeout(r, 10));
+
+      const srRecover = (await stageRunRepo.getByRunId(run.id)).find(
+        (sr) => sr.stageDefinitionId === 'rs-recover',
+      )!;
+      expect(srRecover.status).toBe('skipped');
+      expect(srRecover.error).toContain('run-time stage override');
+
+      // The override must have PREVENTED the launch outright, not merely
+      // raced one that already fired.
+      const launchedIds = (stageExec.executeStage as ReturnType<typeof vi.fn>).mock.calls.map(
+        (c) => (c[0] as StageRun).stageDefinitionId,
+      );
+      expect(launchedIds).not.toContain('rs-recover');
+    });
+  });
+
+  // ── W23/X-24: retryRun gets a fresh workspace + inherits predecessor outputs ──
+
+  describe('retryRun', () => {
+    it('gives the retry a fresh working directory and inherits predecessor outputs', async () => {
+      const run = await service.createRun({ workflowDefinitionId: DEF_ID });
+      // Simulate the ancestor having actually executed: dirty execution
+      // context on the run, plus a completed stage A with real output.
+      await runRepo.update(run.id, {
+        variables: {
+          ...run.variables,
+          __workingDirectory: '/ancestor/dirty/workspace',
+          __artifactsDirectory: '/ancestor/dirty/artifacts',
+          __workspaceId: 'ws-ancestor',
+          topic: 'keep-me',
+        },
+      });
+      const stageRuns = await stageRunRepo.getByRunId(run.id);
+      const srA = stageRuns.find((sr) => sr.stageDefinitionId === 's-a')!;
+      const srB = stageRuns.find((sr) => sr.stageDefinitionId === 's-b')!;
+      await stageRunRepo.update(srA.id, {
+        status: 'completed',
+        summary: 'A summary',
+        outputText: 'A output text',
+        outputData: { key: 'value' },
+        completedAt: new Date(),
+      });
+      await stageRunRepo.update(srB.id, { status: 'failed', error: 'boom', completedAt: new Date() });
+      await runRepo.updateStatus(run.id, 'failed');
+
+      const retried = await service.retryRun(run.id);
+
+      // Fresh workspace: the dirty ancestor directories must NOT carry over
+      // (startRun's workspace-creation branch triggers only when absent).
+      expect(retried.variables?.['__workingDirectory']).toBeUndefined();
+      expect(retried.variables?.['__artifactsDirectory']).toBeUndefined();
+      expect(retried.variables?.['__workspaceId']).toBeUndefined();
+      // Ordinary variables DO carry over.
+      expect(retried.variables?.['topic']).toBe('keep-me');
+      expect(retried.ancestorRunId).toBe(run.id);
+
+      // Predecessor OUTPUTS, not just status, are inherited.
+      const newStageRuns = await stageRunRepo.getByRunId(retried.id);
+      const newA = newStageRuns.find((sr) => sr.stageDefinitionId === 's-a')!;
+      const newB = newStageRuns.find((sr) => sr.stageDefinitionId === 's-b')!;
+      expect(newA.status).toBe('completed');
+      expect(newA.summary).toBe('A summary');
+      expect(newA.outputText).toBe('A output text');
+      expect(newA.outputData).toEqual({ key: 'value' });
+      // The stage that actually failed starts fresh, not copied.
+      expect(newB.status).toBe('pending');
+    });
+  });
+
+  // ── WS-D1: definition snapshot pins an in-flight run's DAG ──
+
+  describe('definition snapshot pinning', () => {
+    it('does not let a mid-run definition edit change the running DAG', async () => {
+      // The outer `dagScheduler` (from beforeEach) has no `runRepo` wired, so
+      // `DAGScheduler.loadRun` always returns undefined and reconciliation
+      // silently falls back to the LIVE definition — masking exactly the bug
+      // this test exists to catch. Build a fresh pair with `runRepo` wired,
+      // matching real composition-root wiring.
+      const pinnedDag = new DAGScheduler(stageDefRepo, edgeRepo, stageRunRepo, runRepo);
+      const pinnedService = new WorkflowRunService(
+        runRepo, stageRunRepo, stageDefRepo, defRepo, eventBus, pinnedDag, stageExec, sessionAllocator,
+      );
+
+      const run = await pinnedService.createRun({ workflowDefinitionId: DEF_ID });
+      await pinnedService.startRun(run.id);
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Edit the definition WHILE the run is in flight: wire a brand-new
+      // successor stage s-c after s-b.
+      await stageDefRepo.create(makeStageDef('s-c', DEF_ID, 2));
+      await edgeRepo.create({
+        id: 'edge-mid-run-edit', workflowDefinitionId: DEF_ID,
+        fromStageId: 's-b', toStageId: 's-c', edgeType: 'on_success',
+      });
+
+      // Complete the run's two ORIGINAL stages.
+      const stageRuns = await stageRunRepo.getByRunId(run.id);
+      const srA = stageRuns.find((sr) => sr.stageDefinitionId === 's-a')!;
+      const srB = stageRuns.find((sr) => sr.stageDefinitionId === 's-b')!;
+      await stageRunRepo.update(srA.id, { status: 'completed' });
+      await pinnedService.onStageCompleted(run.id, srA.id);
+      await new Promise((r) => setTimeout(r, 10));
+      await stageRunRepo.update(srB.id, { status: 'completed' });
+      await pinnedService.onStageCompleted(run.id, srB.id);
+      await new Promise((r) => setTimeout(r, 10));
+
+      // The run must finish WITHOUT ever launching the newly-added s-c —
+      // proving the DAG it executed against was frozen at start time.
+      const updated = await runRepo.getById(run.id);
+      expect(updated.status).toBe('completed');
+      const launchedIds = (stageExec.executeStage as ReturnType<typeof vi.fn>).mock.calls.map(
+        (c) => (c[0] as StageRun).stageDefinitionId,
+      );
+      expect(launchedIds).not.toContain('s-c');
+
+      pinnedService.shutdown();
+    });
+  });
 });

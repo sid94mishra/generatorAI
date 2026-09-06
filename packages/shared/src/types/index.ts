@@ -126,6 +126,10 @@ export type {
   AgentQuestion,
   AgentQuestionResponse,
   QuestionCardSummary,
+  ToolPermissionType,
+  ToolPermissionRequestPayload,
+  ToolPermissionResolution,
+  PermissionCardSummary,
   AgentInteractionKind,
   AgentInteractionStatus,
   AgentInteraction,
@@ -178,6 +182,7 @@ export type {
   WorkflowRunWithStages,
   CreateWorkflowRunParams,
   WorkflowRunPermissionMode,
+  WorkflowDefinitionSnapshot,
   RunScratchpad,
   RunScratchpadEntry,
 } from './WorkflowRun.js';
@@ -205,6 +210,8 @@ export type {
   AutomationExecutionStatus,
   AutomationRunItemStatus,
   AutomationRetryPolicy,
+  AutomationMissedRunPolicy,
+  AutomationOverlapPolicy,
   BatchDataFormat,
   ParsedBatchData,
   CreateAutomationParams,
@@ -260,6 +267,35 @@ export type {
   McpServerEntry,
   FileEntry,
 } from './Project.js';
+
+// ── MCP servers (config forwarding, credentials, startup status) ──
+export type {
+  McpTransport,
+  McpServerSource,
+  McpCredentialRefs,
+  McpCredentialInput,
+  SystemMcpCatalogInput,
+  SystemMcpCatalogCredential,
+  SystemMcpCatalogEntry,
+  SystemMcpServerPrefs,
+  CustomMcpServerRecord,
+  McpSettings,
+  McpNeedsConfiguration,
+  McpServerStartupStatus,
+  McpStartupWarning,
+} from './McpServer.js';
+export {
+  MCP_SECRET_REF_PREFIX,
+  MCP_REDACTED_VALUE,
+  MCP_PLACEHOLDER_RE,
+  mcpCredentialNamespace,
+  mcpCredentialSecretName,
+  mcpSecretRef,
+  isMcpSecretRef,
+  parseMcpSecretRef,
+  redactMcpValues,
+  mcpStartupWarnings,
+} from './McpServer.js';
 
 // ── Orchestrator Types ──
 export type {

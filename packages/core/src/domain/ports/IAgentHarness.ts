@@ -533,11 +533,39 @@ export interface IHarnessConversationLifecycle {
    */
   resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void>;
   /**
+   * Bring a conversation's execution context to readiness before a prompt
+   * arrives. OPTIONAL — declare `capabilities().prewarm` when implemented.
+   *
+   * Every provider measured builds the process or session backing a new
+   * conversation on the FIRST PROMPT, with the user waiting: 12.8 s for
+   * `claude-agent` and 7.1 s for `copilot` on this machine, against warm turns
+   * of 2.2 s and 3.9 s. There is usually ample lead time — the workspace and
+   * the conversation both exist while the user is still typing — so the work
+   * can be done off the critical path.
+   *
+   * Contract:
+   *   - Best-effort and idempotent. Calling it twice, or on a conversation
+   *     that is already warm, must be harmless.
+   *   - MUST NOT send a message, and therefore MUST NOT bill tokens.
+   *   - MUST NOT throw. A provider that cannot warm right now returns and the
+   *     first prompt pays what it pays today.
+   */
+  prewarmConversation?(conversationId: string, turnOptions?: SendPromptOptions): Promise<void>;
+  /**
    * Whether the conversation is currently live in the adapter's memory (its
    * tool handlers are registered). `false` after a server restart or eviction,
    * signalling the caller to resume WITH `params` so tools are re-registered.
    */
   hasLiveConversation(conversationId: string): boolean;
+  /**
+   * What this harness is holding in memory right now: conversations it knows
+   * about, live provider sessions (each a CLI process on the persistent-session
+   * providers, ~230 MB for Claude), and pre-warmed handles nobody has claimed
+   * yet. Surfaced on `/api/health` so a server holding two gigabytes of child
+   * processes no longer looks identical to an idle one. Optional: a provider
+   * without a process per conversation may omit it.
+   */
+  runtimeDiagnostics?(): HarnessRuntimeDiagnostics;
   /**
    * W12 — the provider-side session id backing `conversationId`, when the
    * provider has one and it is known.
@@ -611,3 +639,17 @@ export interface IAgentHarness
     IHarnessMessaging,
     IHarnessEvents {}
 
+
+/** See `IAgentHarness.runtimeDiagnostics`. */
+export interface HarnessRuntimeDiagnostics {
+  /** Conversations the harness has bookkeeping for. */
+  liveConversations: number;
+  /** Live provider sessions — a running CLI/runtime process each. */
+  liveSessions: number;
+  /** Pre-warmed sessions not yet claimed by a turn. */
+  warmSessions: number;
+  /** The configured cap on live sessions, when the provider has one. */
+  maxLiveSessions?: number;
+  /** Per-provider breakdown when the harness fronts several providers. */
+  providers?: Record<string, Omit<HarnessRuntimeDiagnostics, 'providers'>>;
+}

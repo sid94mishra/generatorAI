@@ -10,6 +10,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Bot } from 'lucide-react';
+import { Button } from '@/components/ui/index.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useResolveAgentPreview, useSelectableAgents } from '@/hooks/agentQueries.js';
 import { AgentPicker } from '@/components/agents/AgentPicker.js';
@@ -91,14 +92,16 @@ export function AgentBindingSection({ stage, onUpdate }: AgentBindingSectionProp
         </p>
       </div>
 
-      <button
+      <Button
         type="button"
         onClick={() => setShowCapabilities((v) => !v)}
         data-testid="stage-customize-capabilities"
-        className="text-xs font-medium text-primary hover:underline"
+        variant="ghost"
+        size="sm"
+        className="h-auto bg-transparent p-0 text-xs font-medium text-primary hover:bg-transparent hover:underline"
       >
         {showCapabilities ? 'Hide capabilities' : 'Customize capabilities'}
-      </button>
+      </Button>
 
       {showCapabilities && (
         <div className="rounded-lg border border-border">

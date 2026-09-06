@@ -9,6 +9,8 @@ export interface IChatRepository {
   getById(id: string): Promise<Chat>;
   getAll(): Promise<Chat[]>;
   getByStatus(status: ChatStatus): Promise<Chat[]>;
+  /** `COUNT(*)` of chats in `status` — for health/dashboard tiles that only need the number. */
+  countByStatus(status: ChatStatus): Promise<number>;
   getByProjectId(projectId: string): Promise<Chat[]>;
   update(id: string, updates: Partial<Chat>): Promise<Chat>;
   updateStatus(id: string, status: ChatStatus): Promise<void>;

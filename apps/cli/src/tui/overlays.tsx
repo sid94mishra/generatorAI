@@ -4,6 +4,14 @@
 // Ink has no z-index, so an overlay replaces the content beneath it rather
 // than floating over it. Faking a float with absolute positioning produces
 // frames where both layers are half-drawn.
+//
+// Close-key rule (one rule, every overlay):
+//   • Escape closes every overlay.
+//   • `q` ALSO closes an overlay that has no text input — help, validation,
+//     blocked-work queue, stage detail. It never closes one that is typing
+//     into a field (palette, tab navigator, input, form), where `q` is a
+//     letter the user meant to type. `ErrorOverlay` dismisses on any key.
+// `overlays.closeKeys.test.tsx` pins this; add a new overlay to that table.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
@@ -336,8 +344,8 @@ function ValidationOverlay({
   const selection = useSelection(overlay.issues.length);
   const selected = overlay.issues[selection.index];
 
-  useKeys((_input, key) => {
-    if (key.escape) return onClose();
+  useKeys((input, key) => {
+    if (key.escape || input === 'q') return onClose();
     if (key.upArrow) return selection.move(-1);
     if (key.downArrow) return selection.move(1);
     if (key.return) {
@@ -351,7 +359,7 @@ function ValidationOverlay({
   return (
     <Overlay
       title={overlay.title}
-      footer="↑↓ move · ⏎ jump to stage · Esc close"
+      footer="↑↓ move · ⏎ jump to stage · q / Esc close"
       height={18}
     >
       <Box marginBottom={1}>
@@ -454,13 +462,20 @@ function CommandPalette({
         height={16}
         emptyMessage="No command matches."
         renderItem={(entry, _index, selected) => (
-          <Text color={selected ? theme.c('primary') : undefined} wrap="truncate-end">
+          <Text
+            color={entry.shellOnlyHint ? theme.c('muted') : selected ? theme.c('primary') : undefined}
+            dimColor={Boolean(entry.shellOnlyHint)}
+            wrap="truncate-end"
+          >
             {selected ? theme.glyphs.arrowRight : ' '}
             {/* Own gutter: trailing the description made it read as prose
                 ("Forget a server !") instead of a warning. */}
             {entry.destructive ? <Text color={theme.c('danger')}>{'!'}</Text> : ' '}
             {` ${entry.title.padEnd(34)}`}
-            <Text color={theme.c('muted')}>{entry.subtitle}</Text>
+            {/* A shell-only command is listed (so it is discoverable) but
+                disabled: the hint replaces the summary so the row itself
+                says where the command works, before anyone presses ⏎. */}
+            <Text color={theme.c('muted')}>{entry.shellOnlyHint ?? entry.subtitle}</Text>
             {keymap.chordFor(entry.id) ? (
               <Text color={theme.c('muted')}>{`  ${prettyChord(keymap.chordFor(entry.id))}`}</Text>
             ) : null}
@@ -580,15 +595,15 @@ function NotificationQueue({ onClose }: { onClose: () => void }): React.JSX.Elem
     actions.jumpToPane(item.paneId);
   };
 
-  useKeys((_input, key) => {
-    if (key.escape) return onClose();
+  useKeys((input, key) => {
+    if (key.escape || input === 'q') return onClose();
     if (key.upArrow) return selection.move(-1);
     if (key.downArrow) return selection.move(1);
     if (key.return) return jumpTo(items[selection.index]);
   });
 
   return (
-    <Overlay title="Blocked work" footer="↑↓ move · ⏎ jump to pane · Esc close">
+    <Overlay title="Blocked work" footer="↑↓ move · ⏎ jump to pane · q / Esc close">
       <VirtualList
         items={items}
         selectedIndex={selection.index}
@@ -643,8 +658,8 @@ function StageDetailOverlay({
   // a specific stage run) — shown once, not per selected stage.
   const hooks = useMemo(() => (timeline?.items ?? []).filter((item) => item.kind === 'hook'), [timeline]);
 
-  useKeys((_input, key) => {
-    if (key.escape) return onClose();
+  useKeys((input, key) => {
+    if (key.escape || input === 'q') return onClose();
     if (key.upArrow) return selection.move(-1);
     if (key.downArrow) return selection.move(1);
   });
@@ -657,7 +672,7 @@ function StageDetailOverlay({
   };
 
   return (
-    <Overlay title="Stage detail" footer="↑↓ select stage · Esc close" height={22}>
+    <Overlay title="Stage detail" footer="↑↓ select stage · q / Esc close" height={22}>
       <Box flexDirection="column">
         <VirtualList
           items={overlay.stages}
@@ -772,7 +787,7 @@ function HelpOverlay({
   });
 
   return (
-    <Overlay title="Keyboard shortcuts" footer={`←→ page ${page + 1}/${pages} · Esc close`}>
+    <Overlay title="Keyboard shortcuts" footer={`←→ page ${page + 1}/${pages} · q / Esc close`}>
       <Box flexDirection="row">
         {visible.map((category) => (
           <Box key={category.category} flexDirection="column" width="50%" paddingRight={2}>

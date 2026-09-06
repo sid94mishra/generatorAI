@@ -28,6 +28,7 @@ import {
   type PaneContent,
   type PaneNode,
   type SettingRow,
+  type PendingChatInteraction,
   type Tab,
   type TerminalCapabilities,
 } from '@generatorai/cli-core';
@@ -54,6 +55,7 @@ import {
 } from '@generatorai/tui-kit';
 import { findTranscriptMatch, Pane, terminalActivityLabel, type WorkspaceRow } from './panes.js';
 import { OverlayHost, Toasts } from './overlays.js';
+import { connectionTone } from './connectionStatus.js';
 import {
   dataKeysFor,
   getStore,
@@ -158,6 +160,33 @@ export function decideClosePane(content: PaneContent | undefined): ClosePaneDeci
     };
   }
   return { kind: 'closeOnly' };
+}
+
+/**
+ * Review finding 5.1 — the `confirm` overlay's message for a pending
+ * tool-permission gate. Pulled out of `respondToChatGate` for the same
+ * reason `decideClosePane` was: directly unit-testable without mounting the
+ * overlay host.
+ */
+export function permissionConfirmMessage(
+  pending: Extract<PendingChatInteraction, { kind: 'permission' }>,
+): string {
+  const parts = [`${pending.toolName} — ${pending.description}`];
+  if (pending.inputSummary) parts.push(pending.inputSummary);
+  return parts.join('\n\n');
+}
+
+/**
+ * The `POST .../permission` body for a decision. A blank reason is treated
+ * as no reason — same "Enter to skip" rule the plan-reject flow already
+ * uses just below.
+ */
+export function permissionResponseBody(
+  behavior: 'allow' | 'deny',
+  reason: string,
+): { behavior: 'allow' | 'deny'; message?: string } {
+  const trimmed = reason.trim();
+  return trimmed ? { behavior, message: trimmed } : { behavior };
 }
 
 /** Pure cycle order for `run.verbosity` (Phase 6 item 4) — pulled out for the same reason `decideClosePane` was. */
@@ -3146,11 +3175,12 @@ export function App({
   }
 
   /**
-   * Answers whichever chat-scoped HITL gate is pending (Phase 6 item 3) —
-   * a plan review or a clarifying question. Distinct from `approveGate`
-   * above, which answers a WORKFLOW STAGE gate; these are two genuinely
-   * separate subsystems (`AgentInteractionService` vs `HitlService`) with
-   * different backing commands.
+   * Answers whichever chat-scoped HITL gate is pending (Phase 6 item 3;
+   * permission gate added for review finding 5.1) — a plan review, a
+   * clarifying question, or a blocking tool-permission prompt. Distinct
+   * from `approveGate` above, which answers a WORKFLOW STAGE gate; these
+   * are two genuinely separate subsystems (`AgentInteractionService` vs
+   * `HitlService`) with different backing commands.
    *
    * Plan review reuses the existing, tested `chat.plan` command's
    * `--approve`/`--reject` flags rather than the full 3-way
@@ -3163,7 +3193,8 @@ export function App({
    * A clarifying question has no wrapping registry command at all (only
    * `ctx.api.chats.respond` exists) — answered directly through the `api`
    * prop, the same way `pickModel` reaches for `api.copilot.models()`
-   * directly when no command wraps a lookup either.
+   * directly when no command wraps a lookup either. The permission gate is
+   * the same story, through the sibling `api.chats.respondPermission`.
    */
   function respondToChatGate(): void {
     const pending = getStoreApi().getState().timelines[focusedPane?.id ?? '']?.pendingInteraction;
@@ -3194,6 +3225,33 @@ export function App({
                 { chat: chatId, planId },
                 { reject: true, ...(note.trim() ? { note: note.trim() } : {}) },
               ),
+          });
+        },
+      });
+      return;
+    }
+
+    // Review finding 5.1 — a blocking tool-permission prompt. Reuses the
+    // same `confirm` overlay the plan-review branch above does (y = allow,
+    // n = deny), and on deny offers the same optional-reason `input`
+    // overlay the plan-reject path already uses.
+    if (pending.kind === 'permission') {
+      const { interactionId } = pending;
+      actions.showOverlay({
+        kind: 'confirm',
+        message: permissionConfirmMessage(pending),
+        danger: false,
+        onAnswer: (allow) => {
+          if (allow) {
+            void api.chats.respondPermission(chatId, interactionId, permissionResponseBody('allow', ''));
+            return;
+          }
+          actions.showOverlay({
+            kind: 'input',
+            message: 'Why deny? (optional, Enter to skip)',
+            initial: '',
+            onSubmit: (note) =>
+              void api.chats.respondPermission(chatId, interactionId, permissionResponseBody('deny', note)),
           });
         },
       });
@@ -3356,7 +3414,8 @@ export function App({
   const left: StatusSegment[] = [
     {
       text: connection ? `${theme.glyphs.bullet} ${connection.label}` : 'not connected',
-      tone: connection?.state === 'authenticated' ? 'success' : 'warning',
+      // Red for unreachable, yellow for merely unpaired — see connectionStatus.ts.
+      tone: connectionTone(connection?.state),
       priority: 0,
     },
     { text: connection?.endpoint ?? '', tone: 'idle', priority: 4 },

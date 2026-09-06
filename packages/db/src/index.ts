@@ -18,7 +18,8 @@ const dbQueryDuration = meter.createHistogram('db.query.duration_ms', {
 });
 
 export * from './schema.js';
-export { safeJsonColumn } from './utils/safeJsonColumn.js';
+export { safeJsonColumn, setInvalidJsonColumnReporter } from './utils/safeJsonColumn.js';
+export type { InvalidJsonColumnReporter } from './utils/safeJsonColumn.js';
 export { validateJsonColumn, JsonColumnValidationError } from './utils/validateJsonColumn.js';
 export {
   jsonRecord,
@@ -334,7 +335,77 @@ function createSqliteDB(dbPath: string) {
   if (Number.isFinite(mmapBytes) && mmapBytes > 0) {
     sqlite.pragma(`mmap_size = ${Math.floor(mmapBytes)}`);
   }
+  const slowMs = Number(process.env['GENERATORAI_SQL_SLOW_MS'] ?? '');
+  if (Number.isFinite(slowMs) && slowMs > 0) instrumentSlowStatements(sqlite, slowMs);
   return drizzle(sqlite, { schema });
+}
+
+// ── Slow-statement tripwire ─────────────────────────────────────────────────
+//
+// better-sqlite3 runs on the event loop, so one slow statement is one stall
+// for every request. `/api/health` was observed at >10 s under chat load with
+// nothing to say which statement. With `GENERATORAI_SQL_SLOW_MS=<n>` every
+// prepared statement's `run`/`get`/`all` is timed; anything over the threshold
+// is logged once with its SQL and kept in a bounded top list that the health
+// route exposes as `db.slowStatements`. Off by default: the wrapper costs a
+// `performance.now()` pair per statement.
+
+export interface SlowStatementStat {
+  sql: string;
+  count: number;
+  maxMs: number;
+  totalMs: number;
+  lastMs: number;
+}
+
+const slowStatements = new Map<string, SlowStatementStat>();
+const MAX_TRACKED_SLOW_STATEMENTS = 50;
+
+/** Slowest statements seen since boot (empty unless `GENERATORAI_SQL_SLOW_MS` is set). */
+export function getSlowStatementStats(limit = 10): SlowStatementStat[] {
+  return [...slowStatements.values()].sort((a, b) => b.maxMs - a.maxMs).slice(0, limit);
+}
+
+function recordSlow(sql: string, ms: number, thresholdMs: number): void {
+  const key = sql.replace(/\s+/g, ' ').trim().slice(0, 240);
+  const existing = slowStatements.get(key);
+  if (existing) {
+    existing.count += 1;
+    existing.totalMs += ms;
+    existing.lastMs = ms;
+    if (ms > existing.maxMs) existing.maxMs = ms;
+    return;
+  }
+  if (slowStatements.size >= MAX_TRACKED_SLOW_STATEMENTS) {
+    // Evict the least severe so a new, worse statement is never lost.
+    let victim: string | undefined;
+    let victimMax = Number.POSITIVE_INFINITY;
+    for (const [k, v] of slowStatements) if (v.maxMs < victimMax) { victimMax = v.maxMs; victim = k; }
+    if (victim && victimMax < ms) slowStatements.delete(victim); else return;
+  }
+  slowStatements.set(key, { sql: key, count: 1, maxMs: ms, totalMs: ms, lastMs: ms });
+  console.warn(`[db] slow statement ${ms.toFixed(1)}ms (threshold ${thresholdMs}ms): ${key}`);
+}
+
+function instrumentSlowStatements(sqlite: Database.Database, thresholdMs: number): void {
+  const originalPrepare = sqlite.prepare.bind(sqlite);
+  const timed = <T extends (...args: unknown[]) => unknown>(sql: string, fn: T): T =>
+    ((...args: unknown[]) => {
+      const start = performance.now();
+      try {
+        return fn(...args);
+      } finally {
+        const ms = performance.now() - start;
+        if (ms >= thresholdMs) recordSlow(sql, ms, thresholdMs);
+      }
+    }) as T;
+  (sqlite as { prepare: typeof sqlite.prepare }).prepare = ((sql: string) => {
+    const stmt = originalPrepare(sql);
+    stmt.run = timed(sql, stmt.run.bind(stmt));
+    stmt.get = timed(sql, stmt.get.bind(stmt));
+    stmt.all = timed(sql, stmt.all.bind(stmt));
+    return stmt;
+  }) as typeof sqlite.prepare;
 }
 
 /**

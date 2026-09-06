@@ -114,6 +114,9 @@ export type {
   SourceControlProviderId,
 } from '@generatorai/source-control';
 export { FetchHttpClient } from './FetchHttpClient.js';
+export type { FetchHttpClientOptions } from './FetchHttpClient.js';
+export { safeFetch, isPrivateAddress, parseTargetUrl, SsrfBlockedError } from './safeFetch.js';
+export type { SafeFetchOptions, SafeFetchResponse } from './safeFetch.js';
 export { DockerSandboxProvider } from './DockerSandboxProvider.js';
 export { HostProcessSandboxProvider } from './HostProcessSandboxProvider.js';
 export { SandboxScriptRunner } from './SandboxScriptRunner.js';
@@ -184,6 +187,20 @@ export { VoiceWorkerPool, sharedVoiceWorkerPool, disposeSharedVoiceWorkerPool } 
 export { MoonshineSttEngine } from './voice/MoonshineSttEngine.js';
 export { NemotronSttEngine } from './voice/NemotronSttEngine.js';
 export type { NemotronSttEngineOptions } from './voice/NemotronSttEngine.js';
+export { NemotronOnnxSttEngine } from './voice/NemotronOnnxSttEngine.js';
+export {
+  nemotronModelDir,
+  nemotronModelStatus,
+  isNemotronModelPresent,
+  isNemotronModelPresentSync,
+  downloadNemotronModel,
+  deleteNemotronModel,
+  NEMOTRON_REPO,
+  NEMOTRON_FILES,
+  NEMOTRON_APPROX_BYTES,
+} from './voice/NemotronModelStore.js';
+export type { NemotronModelStatus, DownloadProgress } from './voice/NemotronModelStore.js';
+export type { NemotronOnnxSttEngineOptions } from './voice/NemotronOnnxSttEngine.js';
 export {
   createSttEngine,
   createTtsEngine,
@@ -191,6 +208,8 @@ export {
   sttEngineDescriptor,
   STT_ENGINES,
   ALL_STT_ENGINE_IDS,
+  defaultPreferredSttEngine,
+  nemotronWeightsPresent,
 } from './voice/VoiceEngineFactory.js';
 export type {
   SttEngineId,

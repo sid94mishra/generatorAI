@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { EmptyState, ConfirmDialog, Button, Spinner, Badge, PageHeader } from '@/components/ui/index.js';
+import { formatNextRun } from '@/lib/nextRun.js';
 import { EntityListRow } from '@/components/data/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import type { Automation } from '@generatorai/shared';
@@ -131,7 +132,7 @@ export function AutomationsPage() {
           {automations.map((automation) => (
             <EntityListRow
               key={automation.id}
-              onClick={() => navigate(`/automations/${automation.id}`)}
+              href={`/automations/${automation.id}`}
               leading={
                 <div className={cn(
                   'h-2.5 w-2.5 rounded-full',
@@ -182,6 +183,18 @@ export function AutomationsPage() {
                   <span className="mt-1 flex gap-4">
                     <span>{automation.workflowIds.length} workflow{automation.workflowIds.length !== 1 ? 's' : ''}</span>
                     <span>Last run: {formatDate(automation.lastRunAt)}</span>
+                    {automation.triggerType === 'schedule' && (
+                      <span
+                        className={
+                          formatNextRun(automation.nextRunAt, { enabled: automation.enabled }).none
+                            ? 'text-muted-foreground'
+                            : 'text-foreground'
+                        }
+                      >
+                        Next run:{' '}
+                        {formatNextRun(automation.nextRunAt, { enabled: automation.enabled }).short}
+                      </span>
+                    )}
                     {automation.triggerType === 'schedule' && automation.cronExpression && (
                       <span>Cron: {automation.cronExpression}</span>
                     )}

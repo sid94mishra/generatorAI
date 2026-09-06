@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Settings, FolderGit2, Variable, Tag, Webhook } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { Modal } from '@/components/ui/index.js';
+import { Modal, Button } from '@/components/ui/index.js';
 import { GeneralTab } from './settings/GeneralTab.js';
 import { ProjectCodebasesTab } from './settings/ProjectCodebasesTab.js';
 import { VariablesTab } from './settings/VariablesTab.js';
@@ -55,14 +55,16 @@ export function WorkflowConfigPanel({ open, onClose }: WorkflowConfigPanelProps)
           {/* Tab buttons */}
           <nav className="flex-1 p-2 space-y-0.5">
             {TABS.map(({ key, label, icon }) => (
-              <button
+              <Button
                 key={key}
                 onClick={() => setActiveTab(key)}
+                variant="ghost"
+                size="sm"
                 className={cn(
-                  'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-medium transition-all duration-150',
+                  'h-auto flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-medium transition-all duration-150',
                   activeTab === key
-                    ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-                    : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]',
+                    ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10'
+                    : 'bg-transparent text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]',
                 )}
               >
                 <span className={cn(
@@ -72,18 +74,20 @@ export function WorkflowConfigPanel({ open, onClose }: WorkflowConfigPanelProps)
                   {icon}
                 </span>
                 {label}
-              </button>
+              </Button>
             ))}
           </nav>
 
           {/* Sidebar footer */}
           <div className="border-t border-[var(--color-border)] p-3">
-            <button
+            <Button
               onClick={onClose}
-              className="w-full rounded-lg bg-[var(--color-primary)] px-3 py-2 text-xs font-medium text-[var(--color-primary-foreground)] transition-all hover:brightness-110"
+              variant="ghost"
+              size="sm"
+              className="h-auto w-full rounded-lg bg-[var(--color-primary)] px-3 py-2 text-xs font-medium text-[var(--color-primary-foreground)] transition-all hover:brightness-110"
             >
               Done
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -94,13 +98,15 @@ export function WorkflowConfigPanel({ open, onClose }: WorkflowConfigPanelProps)
             <h3 className="text-base font-semibold text-[var(--color-foreground)]">
               {TABS.find((t) => t.key === activeTab)?.label}
             </h3>
-            <button
+            <Button
               onClick={onClose}
               aria-label="Close settings"
-              className="rounded-md p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+              variant="ghost"
+              size="icon-sm"
+              className="h-auto w-auto rounded-md p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)]"
             >
               <X className="h-4 w-4" />
-            </button>
+            </Button>
           </div>
 
           {/* Scrollable content */}

@@ -88,7 +88,10 @@ describe('resumeFromInterrupt — destination status (P0-a)', () => {
     const row = await repo.getById('s1');
     expect(row.status).toBe('running');
     expect(row.interruptData).toBeUndefined();
-    expect(row.version).toBe(1);
+    // Two mutations since the row was created at version 0: `interrupt` parked
+    // it, `resumeFromInterrupt` released it. Every status write bumps the
+    // version now, which is what makes the optimistic-lock checks meaningful.
+    expect(row.version).toBe(2);
   });
 
   it('parks the stage in `pending` when asked, so the DAG scheduler can relaunch it', async () => {

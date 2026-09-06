@@ -65,7 +65,7 @@ describe('X-21 — the trigger reaches the workflow run', () => {
 
     const automationRepo = {
       getById: async (id: string) => automations.get(id)!,
-      getByWebhookToken: async () => [...automations.values()][0]!,
+      getByWebhookTokenHash: async () => [...automations.values()][0]!,
       update: async (id: string, u: Partial<Automation>) => {
         const next = { ...automations.get(id)!, ...u } as Automation;
         automations.set(id, next);

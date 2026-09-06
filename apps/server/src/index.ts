@@ -48,6 +48,7 @@ import { resolveAdvertisedEndpoints } from './network/advertisedEndpoints.js';
 import { readExposureMode, resolveBindHost } from './network/exposure.js';
 import { readComputerUsePreferences } from './settings/computerUse.js';
 import { publishLocalAdminToken, removeLocalAdminToken } from './composition/localAdminToken.js';
+import { exitAfterBoundedFlush } from './boundedFlush.js';
 import {
   killOwnDescendants,
   reapOrphanedHarnessChildren,
@@ -122,6 +123,16 @@ function describeFault(value: unknown): { message: string; stack?: string; code?
 let requestShutdown: ((reason: string) => void) | undefined;
 
 /**
+ * Set as soon as the container exists. The three `handleFault` paths that
+ * cannot run a graceful shutdown (fault during shutdown, fault before listen,
+ * fault storm with no handler) race THIS against a 2 s deadline before they
+ * exit, so the EventBus persist queue and the StreamBroker write batcher get
+ * one bounded chance to commit instead of being discarded — see
+ * `boundedFlush.ts`. Undefined before the container exists: nothing to flush.
+ */
+let faultFlush: (() => Promise<unknown>) | undefined;
+
+/**
  * True once shutdown has begun. Faults raised DURING shutdown must not be
  * swallowed: the whole point of continuing after a fault is that the process is
  * still serving requests, and once it is not, "log and carry on" leaves it
@@ -167,8 +178,9 @@ function handleFault(kind: 'unhandledRejection' | 'uncaughtException', value: un
   reportFault(kind, value);
 
   if (shuttingDown) {
-    console.error('[Server] fault during shutdown — exiting immediately');
-    process.exit(1);
+    console.error('[Server] fault during shutdown — exiting after a bounded flush');
+    void exitAfterBoundedFlush(1, { flush: faultFlush });
+    return;
   }
   if (isFaultStorm(Date.now())) {
     console.error(
@@ -176,7 +188,7 @@ function handleFault(kind: 'unhandledRejection' | 'uncaughtException', value: un
         'the process is not making progress; shutting down',
     );
     if (requestShutdown) requestShutdown('fault-storm');
-    else process.exit(1);
+    else void exitAfterBoundedFlush(1, { flush: faultFlush });
     return;
   }
   if (!isFatalFault(value)) return;
@@ -185,8 +197,9 @@ function handleFault(kind: 'unhandledRejection' | 'uncaughtException', value: un
   if (requestShutdown) {
     requestShutdown(kind);
   } else {
-    // Faulted before the server was listening; there is nothing to unwind.
-    process.exit(1);
+    // Faulted before the server was listening; there is no listener to
+    // drain, but the container (if it exists) may already hold queued writes.
+    void exitAfterBoundedFlush(1, { flush: faultFlush });
   }
 }
 
@@ -284,7 +297,12 @@ async function startServer(): Promise<void> {
     }),
     logLevel: process.env['LOG_LEVEL'] ?? 'info',
     copilot: {
-      defaultModel: process.env['COPILOT_MODEL'] ?? 'claude-sonnet-4.6',
+      // `auto` — the provider chooses — rather than a pinned version.
+      // A hardcoded model name goes stale: on an account whose catalogue had
+      // moved on, EVERY new chat failed at creation with `Model
+      // "claude-sonnet-4.6" is not available`, so "New Chat" was simply broken
+      // until the user set COPILOT_MODEL by hand. `auto` is always offered.
+      defaultModel: process.env['COPILOT_MODEL'] ?? 'auto',
       useStdio: process.env['COPILOT_USE_STDIO'] !== 'false',
       autoRestart: process.env['COPILOT_AUTO_RESTART'] !== 'false',
       // Only read ambient tokens when no GHEC host is configured — VS Code's
@@ -367,6 +385,15 @@ async function startServer(): Promise<void> {
       ...(process.env['SANDBOX_STARTUP_TIMEOUT_MS'] ? { startupTimeoutMs: parseInt(process.env['SANDBOX_STARTUP_TIMEOUT_MS'], 10) } : {}),
       ...(process.env['SANDBOX_AUTO_DESTROY'] != null ? { autoDestroy: process.env['SANDBOX_AUTO_DESTROY'] !== 'false' } : {}),
     },
+    scripts: {
+      workflowScriptsEnabled:
+        process.env['GENERATORAI_ALLOW_WORKFLOW_SCRIPTS'] === 'true' ||
+        process.env['GENERATORAI_ALLOW_SCRIPT_UPLOAD'] === 'true',
+      extraAllowlist: (process.env['GENERATORAI_SCRIPT_EXTRA_ALLOWLIST'] ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    },
     otel: {
       enabled: process.env['OTEL_ENABLED'] === 'true',
       ...(process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ? { endpoint: process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] } : {}),
@@ -400,6 +427,8 @@ async function startServer(): Promise<void> {
 
   // 2. Create DI container
   const container: Container = await createContainer(config);
+  // From here on a fault exit gets one bounded chance to commit queued writes.
+  faultFlush = () => Promise.all([container.eventBus.flush(), container.streamBroker.flushWrites()]);
 
   // P0-14 / X-22 — before anything spawns a provider CLI, clean up after a
   // previous server that died without running its shutdown path, and start

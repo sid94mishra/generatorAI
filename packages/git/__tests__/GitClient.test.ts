@@ -428,3 +428,97 @@ describe('GitClient error handling', () => {
     expect(await git.getRemoteUrl(dir)).toBeNull();
   });
 });
+
+// ────────────────────────────────────────────────────────────────
+// isGitRepo caching.
+//
+// The checkpoint path calls `isGitRepo` twice per chat turn against the same
+// directory, and each call spawned a `git rev-parse --is-inside-work-tree`
+// process. On a live server 25 of the git processes spawned during a short
+// chat session were this probe — a third of them — each ~300 ms of process
+// start on Windows, for an answer that cannot change.
+// ────────────────────────────────────────────────────────────────
+
+/** Counts what actually reached git, so caching is observable. */
+class CountingRunner implements IGitProcessRunner {
+  readonly calls: string[] = [];
+  constructor(private readonly inner: IGitProcessRunner) {}
+  async run(
+    command: string,
+    args: string[],
+    options: GitProcessRunOptions,
+  ): Promise<GitProcessRunResult> {
+    this.calls.push(args.join(' '));
+    return this.inner.run(command, args, options);
+  }
+  probeCount(): number {
+    return this.calls.filter((c) => c.includes('--is-inside-work-tree')).length;
+  }
+}
+
+describe('GitClient.isGitRepo caching', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gitclient-probe-'));
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  function countingClient(): { client: GitClient; runner: CountingRunner } {
+    const runner = new CountingRunner(new NodeGitRunner());
+    const client = new GitClient(runner, silentLogger, { workspacesDir: dir, defaultTimeoutMs: 60_000 });
+    return { client, runner };
+  }
+
+  it('asks git once for a repo and reuses the answer', async () => {
+    const { client, runner } = countingClient();
+    await client.initIfNeeded(dir);
+    const probesAfterInit = runner.probeCount();
+
+    expect(await client.isGitRepo(dir)).toBe(true);
+    expect(await client.isGitRepo(dir)).toBe(true);
+    expect(await client.isGitRepo(dir)).toBe(true);
+
+    // `initIfNeeded` primes the cache, so none of the three calls spawn git.
+    expect(runner.probeCount()).toBe(probesAfterInit);
+  });
+
+  it('does NOT cache a negative answer, so a later init is still seen', async () => {
+    const { client } = countingClient();
+    const plain = path.join(dir, 'not-a-repo');
+    await fs.mkdir(plain, { recursive: true });
+
+    expect(await client.isGitRepo(plain)).toBe(false);
+    await client.initIfNeeded(plain);
+    // Caching `false` would make this still report false and break every
+    // caller that inits on demand.
+    expect(await client.isGitRepo(plain)).toBe(true);
+  });
+
+  it('re-probes after the cached answer is forgotten', async () => {
+    const { client, runner } = countingClient();
+    await client.initIfNeeded(dir);
+    await client.isGitRepo(dir);
+    const before = runner.probeCount();
+
+    client.forgetRepoProbe(dir);
+    await client.isGitRepo(dir);
+
+    expect(runner.probeCount()).toBe(before + 1);
+  });
+
+  it('keeps separate answers per directory', async () => {
+    const { client } = countingClient();
+    const a = path.join(dir, 'a');
+    const b = path.join(dir, 'b');
+    await fs.mkdir(a, { recursive: true });
+    await fs.mkdir(b, { recursive: true });
+    await client.initIfNeeded(a);
+
+    expect(await client.isGitRepo(a)).toBe(true);
+    // `b` is inside `a`'s parent but is not itself a work tree, and a cached
+    // answer for `a` must not leak into it.
+    expect(await client.isGitRepo(b)).toBe(false);
+  });
+});

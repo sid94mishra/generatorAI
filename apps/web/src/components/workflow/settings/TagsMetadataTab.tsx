@@ -80,13 +80,15 @@ export function TagsMetadataTab() {
                 className="inline-flex items-center gap-1 rounded-full bg-subtle px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-emphasis"
               >
                 {tag}
-                <button
+                <Button
                   onClick={() => removeTag(tag)}
                   aria-label={`Remove tag ${tag}`}
-                  className="rounded-full p-0.5 hover:bg-background"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="h-auto w-auto rounded-full p-0.5 hover:bg-background"
                 >
                   <X className="h-3 w-3" />
-                </button>
+                </Button>
               </span>
             ))}
           </div>

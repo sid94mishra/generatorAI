@@ -4,9 +4,11 @@
 //
 // This is intentionally minimal: it owns a Map<workspaceId, WebContentsView>
 // and positions each view as a floating child of the main BrowserWindow at
-// coordinates supplied by the renderer via IPC. All expensive concerns
-// (agent CDP attach, popup gating, cert overrides, per-workspace session
-// partitioning) are deferred to Phase 3.
+// coordinates supplied by the renderer via IPC. Each tab has its own
+// persistent session partition with a deny-all permission policy
+// (session-hardening.ts) and same-origin/OAuth-only popup gating; agent CDP
+// attach goes through a per-tab ScopedCdpProxy. Cert overrides for loopback
+// live in index.ts.
 //
 // Feature flag: see `nativeBrowserEnabled()` below. ON by default in the
 // desktop app; set `GENERATORAI_DESKTOP_NATIVE_BROWSER=0` to opt out. When
@@ -22,6 +24,7 @@ import { log } from './logger';
 import { ScopedCdpProxy } from './cdp/ScopedCdpProxy';
 import { getIpcToken } from './cdp/ipc-token';
 import { getServerManager } from './server-manager';
+import { hardenBrowserTabSession } from './session-hardening';
 import type {
   BrowserBounds,
   BrowserEmulationParams,
@@ -239,9 +242,15 @@ export class NativeBrowserHost extends EventEmitter {
     // Per-TAB persistent partition so cookies + local storage survive across
     // sessions but stay isolated between tabs of the same workspace.
     const partition = `persist:browser-${tabId}`;
+    const tabSession = electronSession.fromPartition(partition);
+    // Electron GRANTS every permission request on a session with no handler.
+    // A site the agent lands on must not get the camera, microphone,
+    // location, screen capture or notifications without anyone asking — the
+    // policy is deny-all, with an allow-list hook in session-hardening.ts.
+    hardenBrowserTabSession(tabSession);
     const view = new WebContentsView({
       webPreferences: {
-        session: electronSession.fromPartition(partition),
+        session: tabSession,
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,

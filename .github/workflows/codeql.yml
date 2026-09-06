@@ -1,0 +1,52 @@
+# Static analysis (review §6.7 / Phase 4: "no dependency or static-analysis
+# scanning"). CodeQL's JavaScript/TypeScript extractor works from source with
+# `build-mode: none`, so no pnpm install or turbo build is needed here — the
+# whole monorepo is scanned as checked in. Results land in the repository's
+# Security → Code scanning tab; Dependabot (.github/dependabot.yml) covers the
+# dependency half.
+name: CodeQL
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  schedule:
+    # Weekly, Monday 06:00 UTC — catches newly published queries against
+    # unchanged code.
+    - cron: '0 6 * * 1'
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+      # Required for the action to read workflow-run metadata on private repos.
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          # security-extended adds the lower-precision-but-relevant queries
+          # (SSRF, path injection, prototype pollution) that the review's
+          # interior-boundary findings are about.
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          category: '/language:javascript-typescript'

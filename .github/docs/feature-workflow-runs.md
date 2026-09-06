@@ -190,7 +190,18 @@ After a stage completes (success or failure), `sessionAllocator.releaseSession(s
 - If `per-stage`: `harness.deleteConversation(sessionId)`.
 - If `single`: decrement `sharedRefCount`. When zero (run terminal), `harness.deleteConversation`.
 
-> **Edge case:** if `executeStage` hangs and never releases, the polling loop will eventually mark the stage failed but the session leak can persist. Use `run cancel` then `workspace cleanup` to recover.
+> **Edge case:** if `executeStage` hangs and never releases, the stage-liveness reconciler (below) marks the stage failed once its heartbeat goes stale, but the session leak can persist. Use `run cancel` then `workspace cleanup` to recover.
+
+### Stage liveness (heartbeat reaper)
+
+`StageExecutionService` beats `stage_runs.heartbeat_at` roughly every 10s for as long as a stage is `queued`/`running` (an immediate beat at start, then on an interval; the interval is cleared the moment the stage leaves that state — success, failure, pause, or cancel). This is a real signal of "this stage's executor is still alive," independent of any individual prompt's own timeout (§ feature-stages.md "Timeout").
+
+The existing 3s process-wide reconciler (`WorkflowRunService.ensureReconciler` — the same `setInterval` that drives event-driven DAG routing as a backstop) gains one more check per tick: a `queued`/`running` stage whose last beat is older than `heartbeatIntervalMs * heartbeatStaleMultiplier` (default 10s × 3 = 30s) is judged stuck. The reconciler:
+1. best-effort asks `StageExecutionService.abortStage()` to cancel the wedged call (aborts the tracked `AbortSignal` for the in-flight turn, and separately asks the harness to abort the conversation) — so a relaunch never races a still-writing agent in the same working directory;
+2. marks the stage `failed` with an error explaining the stale beat;
+3. routes it through the normal `onStageFailed` path, so `on_failure`/`on_completion`/`always` edges and operator skip overrides apply exactly as for any other failure.
+
+No second polling interval was added — this extends the existing one.
 
 ---
 

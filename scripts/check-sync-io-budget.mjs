@@ -65,7 +65,7 @@ try {
   raw = execFileSync(
     process.execPath,
     [join(repoRoot, 'node_modules', 'eslint', 'bin', 'eslint.js'), '.', '--format', 'json'],
-    { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] },
+    { cwd: repoRoot, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 /* the JSON report exceeded 64 MB once (68 MB) and was silently truncated */, stdio: ['ignore', 'pipe', 'pipe'] },
   );
 } catch (err) {
   raw = err.stdout;

@@ -27,6 +27,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { ArrowDown, Copy, PanelRightOpen, Share2, Square, Volume2 } from 'lucide-react-native';
 import {
+  ApiError,
   messageToolCalls,
   queryKeys,
   type AgentMode,
@@ -45,6 +46,7 @@ import { useVoiceInput } from '../../src/voice/useVoiceInput';
 import { useTextToSpeech } from '../../src/voice/useTextToSpeech';
 import { BlockView, ToolRow } from '../../src/components/chat/BlockView';
 import { Composer } from '../../src/components/chat/Composer';
+import { PermissionCard } from '../../src/components/chat/PermissionCard';
 import { PlanCard } from '../../src/components/chat/PlanCard';
 import { toPlanDecision } from '../../src/components/chat/gateActions';
 import { QuestionCard } from '../../src/components/chat/QuestionCard';
@@ -367,6 +369,27 @@ export default function ChatScreen(): React.ReactElement {
     },
   });
 
+  const resolvePermission = useMutation({
+    mutationFn: ({
+      interactionId,
+      behavior,
+    }: {
+      interactionId: string;
+      behavior: 'allow' | 'deny';
+    }) => api.chats.respondPermission(chatId!, interactionId, { behavior }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatInteractions(chatId!) });
+    },
+    onError: (error) => {
+      // 409 means another device (or the web app) already answered this
+      // prompt — not a failure. The stream's own update settles the card,
+      // so surfacing a toast here would just contradict what the user sees.
+      if (error instanceof ApiError && error.status === 409) return;
+      haptics.error();
+      toast({ message: 'Could not send that decision. Try again.', tone: 'error' });
+    },
+  });
+
   /**
    * Merge history with live blocks.
    *
@@ -531,7 +554,13 @@ export default function ChatScreen(): React.ReactElement {
     (b): b is Extract<StreamBlock, { type: 'question' }> =>
       b.type === 'question' && b.status === 'pending',
   );
-  const blocked = Boolean(blockingPlan || blockingQuestion);
+  // Most urgent of the three gates: the agent is stopped mid-tool-call, not
+  // merely waiting for input, so it takes priority in the render chain below.
+  const blockingPermission = stream?.blocks.find(
+    (b): b is Extract<StreamBlock, { type: 'permission' }> =>
+      b.type === 'permission' && b.status === 'pending',
+  );
+  const blocked = Boolean(blockingPermission || blockingPlan || blockingQuestion);
 
   const renderRow = useCallback(
     ({ item }: { item: Row }) => {
@@ -665,7 +694,17 @@ export default function ChatScreen(): React.ReactElement {
         </View>
       )}
 
-      {blockingQuestion ? (
+      {blockingPermission ? (
+        <PermissionCard
+          block={blockingPermission}
+          onDecide={async (behavior) => {
+            await resolvePermission.mutateAsync({
+              interactionId: blockingPermission.interactionId,
+              behavior,
+            });
+          }}
+        />
+      ) : blockingQuestion ? (
         <QuestionCard
           block={blockingQuestion}
           onSubmit={async (answers, freeform) => {

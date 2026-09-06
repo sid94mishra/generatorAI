@@ -719,6 +719,10 @@ export function terminalCommands(): CommandSpec[] {
       requiresServer: true,
       inPalette: false,
       inRpc: false,
+      // Declared as well as hidden: should a future spec need the raw TTY
+      // and forget `inPalette: false`, the TUI still shows the shell hint
+      // instead of a generic failure (see `shellOnlyHint`).
+      requires: ['terminal'],
       sinceVersion: '0.2.0',
       args: [
         { name: 'workspace', description: 'Workspace reference', required: true, completes: 'workspace' },

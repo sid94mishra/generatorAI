@@ -45,8 +45,12 @@ function isAllowedEndpoint(value: string): boolean {
   try {
     const parsed = new URL(value);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-    // Plain http is only meaningful for a loopback/LAN endpoint that will be
-    // protected by the message-level E2EE layer; anything else must be https.
+    // Plain http is only accepted for loopback/LAN/.local hosts, where the
+    // network hop is assumed to be the user's own. There is NO message-level
+    // encryption above it today: the E2EE layer in `e2ee.ts` is not wired
+    // into any transport, so an http endpoint is protected by the server's
+    // request authentication (DPoP-bound tokens) and nothing else. Anything
+    // reachable from a public network must be https.
     if (parsed.protocol === 'http:') {
       const host = parsed.hostname;
       const isPrivate =

@@ -61,6 +61,19 @@ export interface OutputSpec {
   columns?: ColumnSpec[];
   /** Key/value order for `record`; unlisted keys follow in insertion order. */
   fields?: ColumnSpec[];
+  /**
+   * For `record`: show ONLY the declared `fields` in human output, instead of
+   * appending every remaining key.
+   *
+   * The default spill is right for payloads whose shape the spec cannot know.
+   * It is wrong for an endpoint that returns a deep diagnostic object — the
+   * one this was added for, `system status`, printed the whole health payload
+   * with `harness`, `memory`, `admission` and `otel` dumped as raw indented
+   * JSON, so the answer to "is my server healthy?" was buried in a page of
+   * machine output. Structured output (`--json`, `--yaml`, `--ndjson`) is
+   * unaffected and still carries the complete payload.
+   */
+  fieldsOnly?: boolean;
   /** Human line printed for `void` results. Supports `{field}` interpolation. */
   successMessage?: string;
   /** For `list`: dot-path to the array when the payload is an envelope. */
@@ -203,6 +216,15 @@ export interface CommandSpec<A = any, F = any, R = any> {
   hidden?: boolean;
   /** Present in the palette (TUI) — defaults to true for non-hidden commands. */
   inPalette?: boolean;
+  /**
+   * Surface capabilities the handler cannot do without: `'secret'` when it
+   * reads through `ctx.prompt.password`, `'terminal'` when it hands the raw
+   * TTY to `ctx.terminalAttach`. The TUI provides neither (its prompt port
+   * refuses secrets by design and its attach happens through a pane, not a
+   * command), so it lists such commands disabled with a "run this in your
+   * shell" hint instead of letting them fail with a generic error.
+   */
+  requires?: ReadonlyArray<ShellOnlyRequirement>;
   /** Exposed over companion RPC — defaults to true for non-hidden commands. */
   inRpc?: boolean;
   /** Semver of the CLI in which this command first appeared. */
@@ -217,6 +239,21 @@ export interface CommandSpec<A = any, F = any, R = any> {
 /** Narrow helper so `defineCommand` infers arg/flag types from the schema. */
 export function defineCommand<A, F, R>(spec: CommandSpec<A, F, R>): CommandSpec<A, F, R> {
   return spec;
+}
+
+/** What a command needs from its surface that only a plain shell provides. */
+export type ShellOnlyRequirement = 'secret' | 'terminal';
+
+/**
+ * The one sentence every surface shows for a command it cannot host. Kept in
+ * one place so the palette row, the refusal toast and the port
+ * implementations that back them cannot drift apart.
+ *
+ * `command` is the `generatorai …` path when known; the ports that have no
+ * spec in hand pass nothing and get the placeholder form.
+ */
+export function shellOnlyHint(command?: string): string {
+  return `Run \`generatorai ${command ?? '<cmd>'}\` in your shell — needs a secret/terminal`;
 }
 
 /** `run.start` → `run start`; used for help, docs and error messages. */

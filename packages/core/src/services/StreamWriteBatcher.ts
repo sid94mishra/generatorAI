@@ -214,14 +214,38 @@ export class StreamWriteBatcher {
     });
   }
 
+  /**
+   * Schedule a delta flush.
+   *
+   * Deltas are coalesced to the END OF THE CURRENT TICK, not to a fixed
+   * wall-clock delay. Everything emitted in the same tick — including from
+   * other sessions — still lands in one transaction, which is where the
+   * amortisation comes from; but a lone delta no longer sits waiting for a
+   * timer that cannot bring it company.
+   *
+   * That distinction was worth a lot: `EventBus` serialises emits per session,
+   * so for a single active conversation there was only ever ONE delta pending.
+   * It waited out the full window, the batch never filled, and every event paid
+   * the delay while getting none of the batching benefit — a ceiling of about
+   * 1000/`deltaBatchMs` events per second per conversation (review 3.4).
+   *
+   * The timer is kept as a backstop for the case the tick never drains.
+   */
   private flushAfterWindow(): void {
     if (this.timer || this.flushScheduled) return;
     if (this.deltaBatchMs <= 0) {
       this.flushSoon();
       return;
     }
+    // End of tick: same-tick producers have all been given their chance.
+    const immediate = setImmediate(() => {
+      this.clearTimer();
+      this.run();
+    });
+    immediate.unref?.();
     this.timer = setTimeout(() => {
       this.timer = undefined;
+      clearImmediate(immediate);
       this.run();
     }, this.deltaBatchMs);
     // Never the reason the process cannot exit; shutdown calls `flush()`.

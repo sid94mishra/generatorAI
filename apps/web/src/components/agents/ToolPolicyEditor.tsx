@@ -17,7 +17,7 @@ import React from 'react';
 import { RotateCcw } from 'lucide-react';
 import { AGENT_TOOL_GROUPS, DEFAULT_AGENT_TOOL_POLICY } from '@generatorai/shared';
 import type { AgentToolPolicy } from '@generatorai/shared';
-import { Badge } from '@/components/ui/index.js';
+import { Badge, Button } from '@/components/ui/index.js';
 import { Switch } from '@/components/ui/primitives/switch.js';
 import { TOOL_GROUP_LABELS, TOOL_GROUP_HINTS } from '@/lib/agentCopy.js';
 import { cn } from '@/lib/utils.js';
@@ -88,16 +88,18 @@ export function ToolPolicyEditor({
               </Badge>
             )}
             {!isInherited && !locked && !disabled && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => setGroup(group, undefined)}
                 title="Reset to inherited"
                 aria-label={`Reset ${TOOL_GROUP_LABELS[group]} to inherited`}
                 data-testid={`tool-policy-${group}-reset`}
-                className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                className="shrink-0"
               >
                 <RotateCcw className="h-3 w-3" />
-              </button>
+              </Button>
             )}
 
             <Switch

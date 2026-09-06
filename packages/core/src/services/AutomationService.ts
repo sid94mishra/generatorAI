@@ -10,6 +10,7 @@ import type {
   Automation,
   AutomationExecution,
   AutomationExecutionRun,
+  AutomationExecutionStatus,
   AutomationTriggerType,
   AutomationDataset,
   AutomationRetryPolicy,
@@ -22,21 +23,75 @@ import type {
   ParsedBatchData,
   ILogger,
 } from '@generatorai/shared';
+import { hashWebhookToken } from '@generatorai/shared/node';
 import {
   generateId,
   parseBatchData,
   resolveIterationVariables,
   buildIterationLabel,
   ValidationError,
+  SECRET_MASK,
+  isSensitiveKey,
+  getNextCronRun,
+  countCronRunsBetween,
 } from '@generatorai/shared';
 import type { WorkflowRunService } from './WorkflowRunService.js';
-import type * as NodeCron from 'node-cron';
 import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
 import type { DataSourceResolver } from './DataSourceResolver.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import { planIterations } from './IterationPlanner.js';
 import type { DurableExecutionEngine } from './DurableExecutionEngine.js';
+
+export { hashWebhookToken };
+
+/**
+ * A webhook delivery that was matched to an automation, with everything the
+ * route needs to verify it. The raw token never leaves the request.
+ */
+export interface ResolvedWebhook {
+  automation: Automation;
+  /** Per-automation HMAC secret, when one is configured. */
+  signingSecret?: string;
+}
+
+/**
+ * An automation as the API is allowed to return it.
+ *
+ * The webhook token and every credential-shaped value inside the data-source
+ * configuration are replaced with a mask. Both were previously echoed in full
+ * to any read-scoped caller — which includes a paired phone — so redaction
+ * belongs at the projection every read path shares, not at each route.
+ */
+export function toPublicAutomation(automation: Automation): Automation {
+  const redacted: Automation = { ...automation };
+
+  // The raw token exists only in the create/rotate response. A stored one is
+  // legacy data the migration has not yet hashed away.
+  if (redacted.webhookToken) redacted.webhookToken = SECRET_MASK;
+
+  const config = redacted.dataSourceConfig as Record<string, unknown> | undefined;
+  if (config) {
+    redacted.dataSourceConfig = redactSecretBag(config) as unknown as typeof redacted.dataSourceConfig;
+  }
+
+  return redacted;
+}
+
+/** Mask credential-shaped entries in a data-source config, at any depth. */
+function redactSecretBag(value: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      out[key] = redactSecretBag(entry as Record<string, unknown>);
+    } else if (isSensitiveKey(key) && entry !== undefined && entry !== null && entry !== '') {
+      out[key] = SECRET_MASK;
+    } else {
+      out[key] = entry;
+    }
+  }
+  return out;
+}
 
 /** Interface for automation repository */
 export interface IAutomationRepository {
@@ -45,31 +100,33 @@ export interface IAutomationRepository {
   getAll(): Promise<Automation[]>;
   getEnabled(): Promise<Automation[]>;
   getByTriggerType(triggerType: AutomationTriggerType): Promise<Automation[]>;
-  getByWebhookToken(token: string): Promise<Automation | null>;
+  /**
+   * Look an automation up by the SHA-256 of its webhook token. The raw token
+   * is never stored, so this is the only lookup a delivery can use.
+   */
+  getByWebhookTokenHash(tokenHash: string): Promise<Automation | null>;
   getByProjectId(projectId: string): Promise<Automation[]>;
   update(id: string, updates: Partial<Automation>): Promise<Automation>;
   delete(id: string): Promise<void>;
 
   /**
-   * Phase 1, 1.23 — cross-process cron lease.
+   * Item 38 — DB-backed due-row scheduler.
    *
-   * Atomically claim ownership of a scheduled automation for `leaseMs`.
-   * Returns true if this process now owns the lease, false if another
-   * process already holds it (and our tick should be skipped).
-   *
-   * Implementation is a conditional UPDATE:
-   *   UPDATE automations
-   *      SET locked_until = now+leaseMs, locked_by_process = ?
-   *    WHERE id = ? AND (locked_until IS NULL OR locked_until < now)
+   * Atomically claim every enabled schedule-triggered automation whose
+   * `nextRunAt` has passed and whose lease is free or expired, stamping
+   * the lease (`locked_until` / `locked_by_process`) in the SAME
+   * conditional UPDATE that selects the rows — the pattern
+   * `DurableExecutionEngine.claimNextIteration` uses, not the old
+   * acquire-then-release-on-start cron lease. The caller releases the
+   * lease only after the run has been dispatched.
    */
-  tryAcquireCronLease(
-    automationId: string,
-    processId: string,
-    leaseMs: number,
-  ): Promise<boolean>;
+  claimDueSchedules(now: Date, processId: string, leaseMs: number): Promise<Automation[]>;
 
-  /** Release a previously-acquired lease (called on tick completion). */
-  releaseCronLease(automationId: string, processId: string): Promise<void>;
+  /** Heartbeat: push the lease forward while this process still owns it. */
+  extendScheduleLease(automationId: string, processId: string, leaseMs: number): Promise<boolean>;
+
+  /** Release the lease (on dispatch completion). No-op if another process owns it now. */
+  releaseScheduleLease(automationId: string, processId: string): Promise<void>;
 }
 
 /** Interface for automation execution repository */
@@ -82,12 +139,6 @@ export interface IAutomationExecutionRepository {
   createExecutionRun(run: AutomationExecutionRun): Promise<AutomationExecutionRun>;
   getExecutionRunsByExecutionId(executionId: string): Promise<AutomationExecutionRun[]>;
   updateExecutionRun(id: string, updates: Partial<AutomationExecutionRun>): Promise<AutomationExecutionRun>;
-}
-
-/** Cron job handle for scheduling */
-interface CronJobHandle {
-  automationId: string;
-  stop: () => void;
 }
 
 /**
@@ -105,17 +156,19 @@ interface IterationWorkItem {
 }
 
 export class AutomationService {
-  private cronJobs = new Map<string, CronJobHandle>();
-  private cronModule: typeof NodeCron | null = null;
+  /** The due-row poller's interval timer, or null while stopped. */
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
   /** Unique per-process identifier used as the `locked_by_process` value
-   *  on cron lease rows. Lets operators tell at a glance which replica
+   *  on schedule lease rows. Lets operators tell at a glance which replica
    *  owns a given lease. */
   private readonly processId: string = `${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
-  /** Default cron lease duration. Long enough to cover a typical
-   *  automation tick without another replica stealing the slot, short
-   *  enough that a crashed owner's lease expires before the next tick
-   *  (cron runs are usually at-least-a-minute cadence). */
-  private readonly cronLeaseMs: number = 60_000;
+  /** How often the due-row poller ticks. Configurable via the constructor
+   *  `schedulerOptions` so tests can run it fast. */
+  private readonly pollIntervalMs: number;
+  /** Lease duration stamped on a claimed row. Long enough to comfortably
+   *  cover claim → dispatch → recompute-and-release, short enough that a
+   *  crashed owner's lease expires before the next replica's tick. */
+  private readonly leaseMs: number;
   /** Tracks execution IDs that have been cancelled so background loops can bail out */
   private cancelledExecutions = new Set<string>();
   /**
@@ -152,11 +205,43 @@ export class AutomationService {
      * (P0-41 fix). When absent, the legacy in-memory iteration loop runs.
      */
     private durableEngine?: DurableExecutionEngine,
-  ) {}
+    /**
+     * Item 38 — due-row poller tuning. Optional so existing embedders (and
+     * the composition-root call site, which constructs this positionally)
+     * keep working unchanged; defaults match production cadence.
+     */
+    schedulerOptions?: { pollIntervalMs?: number; leaseMs?: number },
+  ) {
+    this.pollIntervalMs = schedulerOptions?.pollIntervalMs ?? 15_000;
+    this.leaseMs = schedulerOptions?.leaseMs ?? 60_000;
+  }
 
   // ═══════════════════════════════════════════════════════════════
   // CRUD Operations
   // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Item 38 — compute the next scheduled firing for an automation,
+   * honouring its timezone. Returns undefined when the automation isn't
+   * an enabled schedule with a valid cron expression — the due-row
+   * poller only ever claims rows with a non-null `nextRunAt`, so leaving
+   * it undefined is how a disabled / non-schedule / malformed automation
+   * opts out of being claimed.
+   */
+  private computeNextRunAt(automation: Automation, from: Date = new Date()): Date | undefined {
+    if (automation.triggerType !== 'schedule' || !automation.enabled || !automation.cronExpression) {
+      return undefined;
+    }
+    try {
+      return getNextCronRun(automation.cronExpression, from, automation.timezone);
+    } catch (err) {
+      this.logger.warn(
+        `[AutomationService] Could not compute next run for ${automation.id}: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
+  }
 
   async createAutomation(params: CreateAutomationParams): Promise<Automation> {
     const now = new Date();
@@ -167,9 +252,12 @@ export class AutomationService {
       enabled: true,
       triggerType: params.triggerType,
       cronExpression: params.cronExpression,
-      webhookToken: params.triggerType === 'webhook'
-        ? randomBytes(32).toString('hex')
-        : undefined,
+      // The RAW token is returned to the caller exactly once, in this
+      // response; only its hash is persisted, and the hash is what a delivery
+      // is matched against. Writing the raw value and no hash — which is what
+      // this did — left every new webhook automation unreachable, because the
+      // lookup is `getByWebhookTokenHash`.
+      ...(params.triggerType === 'webhook' ? this.mintWebhookToken() : {}),
       workflowIds: params.workflowIds,
       inputMode: params.inputMode,
       loopVariable: params.loopVariable,
@@ -192,13 +280,11 @@ export class AutomationService {
       createdAt: now,
       updatedAt: now,
     };
+    // Item 38 — a newly-saved schedule automation needs a due time or the
+    // poller will never claim it.
+    automation.nextRunAt = this.computeNextRunAt(automation, now);
 
     const created = await this.automationRepo.create(automation);
-
-    // Register cron if schedule type
-    if (created.triggerType === 'schedule' && created.cronExpression && created.enabled) {
-      await this.registerCronJob(created);
-    }
 
     this.logger.info(`[AutomationService] Created automation: ${created.id} (${created.name})`);
     return created;
@@ -236,21 +322,22 @@ export class AutomationService {
       }
     }
     if (params.triggerType === 'webhook' && existing.triggerType !== 'webhook') {
-      updates.webhookToken = randomBytes(32).toString('hex');
+      Object.assign(updates, this.mintWebhookToken());
     }
 
     const updated = await this.automationRepo.update(id, updates);
 
-    // Re-register cron if schedule parameters changed
-    if (updated.triggerType === 'schedule' && updated.enabled) {
-      this.unregisterCronJob(id);
-      await this.registerCronJob(updated);
-    } else {
-      this.unregisterCronJob(id);
-    }
+    // Item 38 — recompute nextRunAt whenever schedule-relevant fields may
+    // have changed (cronExpression, timezone, enabled, triggerType).
+    const nextRunAt = this.computeNextRunAt(updated);
+    const final = nextRunAt
+      ? await this.automationRepo.update(id, { nextRunAt })
+      : updated.nextRunAt
+        ? await this.automationRepo.update(id, { nextRunAt: null } as unknown as Partial<Automation>)
+        : updated;
 
     this.logger.info(`[AutomationService] Updated automation: ${id}`);
-    return updated;
+    return final;
   }
 
   /**
@@ -265,15 +352,28 @@ export class AutomationService {
         `Automation ${id} is not webhook-triggered (triggerType=${existing.triggerType})`,
       );
     }
-    const newToken = randomBytes(32).toString('hex');
-    const updated = await this.automationRepo.update(id, { webhookToken: newToken });
+    const minted = this.mintWebhookToken();
+    const updated = await this.automationRepo.update(id, minted);
+    // The caller needs the raw token this once; it is never readable again.
+    updated.webhookToken = minted.webhookToken;
     this.logger.info(`[AutomationService] Rotated webhook token for automation ${id}`);
     return updated;
   }
 
-  async deleteAutomation(id: string): Promise<void> {
-    this.unregisterCronJob(id);
+  /**
+   * A new webhook credential: the raw token for the caller, the hash for the
+   * database.
+   *
+   * Deliveries are matched by `getByWebhookTokenHash`, so a row written with
+   * only a raw token can never be triggered. Keeping both halves in one place
+   * is what stops the two from drifting apart again.
+   */
+  private mintWebhookToken(): { webhookToken: string; webhookTokenHash: string } {
+    const raw = randomBytes(32).toString('hex');
+    return { webhookToken: raw, webhookTokenHash: hashWebhookToken(raw) };
+  }
 
+  async deleteAutomation(id: string): Promise<void> {
     // Cancel any running executions before deleting
     const executions = await this.executionRepo.getExecutionsByAutomationId(id);
     for (const exec of executions) {
@@ -292,18 +392,22 @@ export class AutomationService {
 
   async enableAutomation(id: string): Promise<Automation> {
     const updated = await this.automationRepo.update(id, { enabled: true });
-    if (updated.triggerType === 'schedule' && updated.cronExpression) {
-      await this.registerCronJob(updated);
-    }
+    const nextRunAt = this.computeNextRunAt(updated);
+    const final = nextRunAt ? await this.automationRepo.update(id, { nextRunAt }) : updated;
     this.logger.info(`[AutomationService] Enabled automation: ${id}`);
-    return updated;
+    return final;
   }
 
   async disableAutomation(id: string): Promise<Automation> {
-    this.unregisterCronJob(id);
     const updated = await this.automationRepo.update(id, { enabled: false });
+    // A disabled automation is already excluded by claimDueSchedules'
+    // `enabled = true` filter, but clearing nextRunAt keeps "next run" UI
+    // honest and avoids a stale due time resurfacing on re-enable races.
+    const final = updated.nextRunAt
+      ? await this.automationRepo.update(id, { nextRunAt: null } as unknown as Partial<Automation>)
+      : updated;
     this.logger.info(`[AutomationService] Disabled automation: ${id}`);
-    return updated;
+    return final;
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -371,7 +475,7 @@ export class AutomationService {
     payload: unknown,
     contentType?: string,
   ): Promise<AutomationExecution> {
-    const automation = await this.automationRepo.getByWebhookToken(token);
+    const automation = await this.automationRepo.getByWebhookTokenHash(hashWebhookToken(token));
     if (!automation || !automation.enabled || automation.triggerType !== 'webhook') {
       throw new Error('Invalid or disabled webhook');
     }
@@ -599,9 +703,11 @@ export class AutomationService {
     });
 
     // Emit execution started event
-    this.eventBus.emitGlobal({
+    void this.eventBus.emitGlobal({
       kind: 'automation_execution.started',
       data: { executionId: execution.id, automationId: automation.id },
+    }).catch((err) => {
+      this.logger.warn(`[AutomationService] Failed to emit started event for ${execution.id}: ${err instanceof Error ? err.message : String(err)}`);
     });
 
     await this.driveIterations(automation, execution, { completed: 0, failed: 0 }, () =>
@@ -857,7 +963,7 @@ export class AutomationService {
         });
 
         // Emit progress event
-        this.eventBus.emitGlobal({
+        void this.eventBus.emitGlobal({
           kind: 'automation_execution.progress',
           data: {
             executionId: execution.id,
@@ -866,6 +972,8 @@ export class AutomationService {
             failedRuns: failedCount,
             totalRuns: execution.totalIterations,
           },
+        }).catch((err) => {
+          this.logger.warn(`[AutomationService] Failed to emit progress event for ${execution.id}: ${err instanceof Error ? err.message : String(err)}`);
         });
       }
 
@@ -875,7 +983,17 @@ export class AutomationService {
         return;
       }
 
-      const finalStatus = failedCount > 0 && completedCount === 0 ? 'failed' : 'completed';
+      // Item 28 — three-way outcome. The previous `else → completed` branch
+      // reported a batch with 999 failures and 1 success as `completed`,
+      // silently suppressing the failure alert.
+      let finalStatus: AutomationExecutionStatus;
+      if (failedCount > 0 && completedCount === 0) {
+        finalStatus = 'failed';
+      } else if (failedCount > 0) {
+        finalStatus = 'partial';
+      } else {
+        finalStatus = 'completed';
+      }
       await this.executionRepo.updateExecution(execution.id, {
         status: finalStatus,
         completedIterations: completedCount,
@@ -883,9 +1001,23 @@ export class AutomationService {
         completedAt: new Date(),
       });
 
-      this.eventBus.emitGlobal({
-        kind: `automation_execution.${finalStatus}` as 'automation_execution.completed' | 'automation_execution.failed',
-        data: { executionId: execution.id, automationId: automation.id },
+      const finalEvent =
+        finalStatus === 'partial'
+          ? {
+              kind: 'automation_execution.partial' as const,
+              data: {
+                executionId: execution.id,
+                automationId: automation.id,
+                completedRuns: completedCount,
+                failedRuns: failedCount,
+              },
+            }
+          : {
+              kind: `automation_execution.${finalStatus}` as 'automation_execution.completed' | 'automation_execution.failed',
+              data: { executionId: execution.id, automationId: automation.id },
+            };
+      void this.eventBus.emitGlobal(finalEvent).catch((err) => {
+        this.logger.warn(`[AutomationService] Failed to emit ${finalEvent.kind} event for ${execution.id}: ${err instanceof Error ? err.message : String(err)}`);
       });
 
     } catch (err) {
@@ -903,13 +1035,15 @@ export class AutomationService {
         completedAt: new Date(),
       });
 
-      this.eventBus.emitGlobal({
+      void this.eventBus.emitGlobal({
         kind: 'automation_execution.failed',
         data: {
           executionId: execution.id,
           automationId: automation.id,
           error: err instanceof Error ? err.message : String(err),
         },
+      }).catch((emitErr) => {
+        this.logger.warn(`[AutomationService] Failed to emit failed event for ${execution.id}: ${emitErr instanceof Error ? emitErr.message : String(emitErr)}`);
       });
     } finally {
       this.executionAborts.delete(execution.id);
@@ -961,9 +1095,11 @@ export class AutomationService {
     const automation = await this.automationRepo.getById(execution.automationId);
 
     await this.executionRepo.updateExecution(executionId, { status: 'running' });
-    this.eventBus.emitGlobal({
+    void this.eventBus.emitGlobal({
       kind: 'automation_execution.started',
       data: { executionId, automationId: automation.id },
+    }).catch((err) => {
+      this.logger.warn(`[AutomationService] Failed to emit resume-started event for ${executionId}: ${err instanceof Error ? err.message : String(err)}`);
     });
     this.logger.info(
       `[AutomationService] Resuming execution ${executionId}: ${remaining} iteration(s) left ` +
@@ -1175,14 +1311,14 @@ export class AutomationService {
     attempt: number,
     maxAttempts: number,
   ): void {
-    try {
-      this.eventBus.emitGlobal({
-        kind: 'automation_execution.iteration_retried',
-        data: { executionId, iterationIndex, attempt, maxAttempts },
-      });
-    } catch {
+    // A synchronous try/catch around an async call can never catch its
+    // rejection — attach the handler to the promise instead.
+    void this.eventBus.emitGlobal({
+      kind: 'automation_execution.iteration_retried',
+      data: { executionId, iterationIndex, attempt, maxAttempts },
+    }).catch(() => {
       /* observability is best-effort */
-    }
+    });
   }
 
   /**
@@ -1238,107 +1374,184 @@ export class AutomationService {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Cron Scheduling
+  // Due-Row Scheduler (item 38)
+  //
+  // Replaces the old in-process node-cron timers (one JS timer per
+  // schedule automation, alive only in whichever process registered it,
+  // rediscovered only via `initializeCronJobs()` at boot) with a single
+  // periodic tick that claims whatever `automations` rows are due from
+  // the DB. `claimDueSchedules` is one atomic conditional UPDATE, so two
+  // replicas racing the same tick can never both take the same row — the
+  // lease is released only once this process has dispatched the run and
+  // written the next `nextRunAt`, not merely acquired.
   // ═══════════════════════════════════════════════════════════════
 
-  /** Initialize cron scheduler — load enabled scheduled automations */
+  /**
+   * Boot hook — starts the due-row poller. Kept under its historical name
+   * because apps/server/src/composition-root.ts calls it by this name; the
+   * implementation is no longer node-cron in-process timers.
+   */
   async initializeCronJobs(): Promise<void> {
+    this.startPoller();
+  }
+
+  /** Idempotent — a second call is a no-op. */
+  private startPoller(): void {
+    if (this.pollTimer) return;
+    this.pollTimer = setInterval(() => {
+      void this.runSchedulerTick().catch((err) => {
+        this.logger.error(`[AutomationService] Scheduler tick failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }, this.pollIntervalMs);
+    // Don't hold the process open just for the poller.
+    (this.pollTimer as unknown as { unref?: () => void }).unref?.();
+    this.logger.info(
+      `[AutomationService] Started due-row scheduler (interval=${this.pollIntervalMs}ms, lease=${this.leaseMs}ms)`,
+    );
+  }
+
+  private stopPoller(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+      this.logger.info('[AutomationService] Stopped due-row scheduler');
+    }
+  }
+
+  /**
+   * One poller tick: claim every due row and handle each. Public so tests
+   * (and, potentially, an operator "run scheduler now" trigger) can drive
+   * it deterministically instead of waiting on the interval.
+   */
+  async runSchedulerTick(): Promise<void> {
+    let due: Automation[];
     try {
-      this.cronModule = await import('node-cron');
-    } catch {
-      this.logger.warn('[AutomationService] node-cron not available, cron scheduling disabled');
+      due = await this.automationRepo.claimDueSchedules(new Date(), this.processId, this.leaseMs);
+    } catch (err) {
+      this.logger.warn(`[AutomationService] claimDueSchedules failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
+    if (due.length === 0) return;
 
-    const scheduledAutomations = await this.automationRepo.getByTriggerType('schedule');
-    for (const automation of scheduledAutomations) {
-      if (automation.enabled && automation.cronExpression) {
-        await this.registerCronJob(automation);
-      }
-    }
-    this.logger.info(`[AutomationService] Initialized ${this.cronJobs.size} cron jobs`);
+    await Promise.allSettled(due.map((automation) => this.handleDueAutomation(automation)));
   }
 
-  /** Register a cron job for a scheduled automation */
-  private async registerCronJob(automation: Automation): Promise<void> {
-    if (!this.cronModule || !automation.cronExpression) return;
+  /**
+   * Handle one claimed row: honour missed-run / overlap policy, dispatch
+   * (or skip), recompute `nextRunAt`, and release the lease LAST — after
+   * dispatch, not at the start, so another replica can't claim the same
+   * slot again while this one is still mid-dispatch.
+   */
+  private async handleDueAutomation(automation: Automation): Promise<void> {
+    const now = new Date();
+    const scheduledFor = automation.nextRunAt ?? now;
 
-    // Unregister existing if any
-    this.unregisterCronJob(automation.id);
+    try {
+      // ── Missed-run policy ──────────────────────────────────────
+      // "Far in the past" = at least one MORE scheduled instant elapsed
+      // between the due slot and now (a single tick running a little
+      // late from poll cadence is not a miss).
+      const additionalMissed = automation.cronExpression
+        ? countCronRunsBetween(automation.cronExpression, scheduledFor, now, automation.timezone)
+        : 0;
+      const missedRunPolicy = automation.missedRunPolicy ?? 'skip';
 
-    const cron = this.cronModule;
-    if (!cron.validate(automation.cronExpression)) {
-      this.logger.warn(`[AutomationService] Invalid cron expression for ${automation.id}: ${automation.cronExpression}`);
-      return;
-    }
-
-    const task = cron.schedule(automation.cronExpression, () => {
-      // Phase 1, 1.23 — try to acquire the row-level lease before running.
-      // If another process owns it (multi-pod deployment, or a zombie lease
-      // from a prior crash still inside the grace period), skip this tick.
-      // The lease covers ~typical automation duration; cron-bound jobs that
-      // legitimately run >60s should set a longer lease.
-      const leaseMs = this.cronLeaseMs;
-      void (async () => {
-        let haveLease = false;
-        try {
-          haveLease = await this.automationRepo.tryAcquireCronLease(
-            automation.id,
-            this.processId,
-            leaseMs,
-          );
-        } catch (err) {
-          this.logger.warn(
-            `[AutomationService] Cron lease check failed for ${automation.id}: ` +
-            `${err instanceof Error ? err.message : String(err)}`,
-          );
-          return;
-        }
-        if (!haveLease) {
-          this.logger.debug(
-            `[AutomationService] Skipping cron tick for ${automation.id}; lease held by another process`,
-          );
-          return;
-        }
-
-        this.logger.info(
-          `[AutomationService] Cron triggered automation: ${automation.id} (${automation.name})`,
+      if (additionalMissed > 0 && missedRunPolicy === 'skip') {
+        const totalMissed = additionalMissed + 1; // + the due slot itself
+        const nextRunAt = this.computeNextRunAt(automation, now);
+        await this.automationRepo.update(automation.id, { nextRunAt } as Partial<Automation>);
+        this.logger.warn(
+          `[AutomationService] Skipped ${totalMissed} missed run(s) for "${automation.name}" ` +
+          `(${automation.id}); missedRunPolicy=skip`,
         );
-        try {
-          await this.executeAutomation(automation, 'schedule');
-        } catch (err) {
-          this.logger.error(
-            `[AutomationService] Cron execution failed for ${automation.id}: ` +
-            `${err instanceof Error ? err.message : String(err)}`,
-          );
-        } finally {
-          // Release so the next tick window is eligible. Fire-and-forget —
-          // if the release fails the lease will expire naturally.
-          this.automationRepo.releaseCronLease(automation.id, this.processId).catch((err) => {
-            this.logger.warn(
-              `[AutomationService] Failed to release cron lease for ${automation.id}: ` +
-              `${err instanceof Error ? err.message : String(err)}`,
-            );
-          });
-        }
-      })();
-    });
+        void this.eventBus.emitGlobal({
+          kind: 'automation.schedule_skipped',
+          data: {
+            automationId: automation.id,
+            reason: 'missed',
+            scheduledFor: scheduledFor.toISOString(),
+            missedCount: totalMissed,
+            nextRunAt: nextRunAt?.toISOString(),
+            note: `Skipped ${totalMissed} missed run(s) for "${automation.name}" while the scheduler was unavailable (missedRunPolicy=skip)`,
+          },
+        }).catch((err) => {
+          this.logger.warn(`[AutomationService] Failed to emit schedule_skipped(missed) for ${automation.id}: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        return; // lease released in finally — nothing was dispatched
+      }
+      // `run_once` (or no backlog) falls through to the normal dispatch
+      // path below: exactly one run, then recompute forward.
 
-    this.cronJobs.set(automation.id, {
-      automationId: automation.id,
-      stop: () => task.stop(),
-    });
+      // ── Overlap policy ──────────────────────────────────────────
+      const overlapPolicy = automation.overlapPolicy ?? 'skip';
+      const existingExecutions = await this.executionRepo.getExecutionsByAutomationId(automation.id);
+      const hasActiveExecution = existingExecutions.some(
+        (e) => e.status === 'running' || e.status === 'pending',
+      );
 
-    this.logger.info(`[AutomationService] Registered cron job for ${automation.id}: ${automation.cronExpression}`);
-  }
+      if (hasActiveExecution && overlapPolicy === 'skip') {
+        const nextRunAt = this.computeNextRunAt(automation, now);
+        await this.automationRepo.update(automation.id, { nextRunAt } as Partial<Automation>);
+        this.logger.warn(
+          `[AutomationService] Skipped scheduled run for "${automation.name}" (${automation.id}): ` +
+          `a previous execution is still running (overlapPolicy=skip)`,
+        );
+        void this.eventBus.emitGlobal({
+          kind: 'automation.schedule_skipped',
+          data: {
+            automationId: automation.id,
+            reason: 'overlap',
+            scheduledFor: scheduledFor.toISOString(),
+            nextRunAt: nextRunAt?.toISOString(),
+            note: `Skipped scheduled run for "${automation.name}": a previous execution is still running (overlapPolicy=skip)`,
+          },
+        }).catch((err) => {
+          this.logger.warn(`[AutomationService] Failed to emit schedule_skipped(overlap) for ${automation.id}: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        return; // lease released in finally — nothing was dispatched
+      }
 
-  /** Unregister a cron job */
-  private unregisterCronJob(automationId: string): void {
-    const job = this.cronJobs.get(automationId);
-    if (job) {
-      job.stop();
-      this.cronJobs.delete(automationId);
-      this.logger.info(`[AutomationService] Unregistered cron job for ${automationId}`);
+      if (hasActiveExecution && overlapPolicy === 'queue') {
+        void this.eventBus.emitGlobal({
+          kind: 'automation.schedule_deferred',
+          data: {
+            automationId: automation.id,
+            scheduledFor: scheduledFor.toISOString(),
+            note: `Running scheduled "${automation.name}" alongside an already-active execution (overlapPolicy=queue)`,
+          },
+        }).catch((err) => {
+          this.logger.warn(`[AutomationService] Failed to emit schedule_deferred for ${automation.id}: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+
+      // ── Dispatch ─────────────────────────────────────────────────
+      // `executeAutomation` returns once the execution row exists and its
+      // iteration count is resolved; the iterations themselves continue
+      // in the background via `runExecution`. That's "dispatched" — the
+      // lease only needs to cover this synchronous part, not the whole
+      // (possibly long) run.
+      try {
+        this.logger.info(`[AutomationService] Scheduler triggered automation: ${automation.id} (${automation.name})`);
+        await this.executeAutomation(automation, 'schedule');
+      } catch (err) {
+        this.logger.error(
+          `[AutomationService] Scheduled dispatch failed for ${automation.id}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      // ── Recompute nextRunAt AFTER dispatch ─────────────────────────
+      const nextRunAt = this.computeNextRunAt(automation, now);
+      await this.automationRepo.update(automation.id, { nextRunAt } as Partial<Automation>);
+    } finally {
+      // Release so the row is eligible for its next due time. Fire-and-
+      // forget — if the release fails the lease will expire naturally.
+      this.automationRepo.releaseScheduleLease(automation.id, this.processId).catch((err) => {
+        this.logger.warn(
+          `[AutomationService] Failed to release schedule lease for ${automation.id}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     }
   }
 
@@ -1390,18 +1603,17 @@ export class AutomationService {
       completedAt: new Date(),
     });
 
-    this.eventBus.emitGlobal({
+    void this.eventBus.emitGlobal({
       kind: 'automation_execution.cancelled',
       data: { executionId, automationId: execution.automationId },
+    }).catch((err) => {
+      this.logger.warn(`[AutomationService] Failed to emit cancelled event for ${executionId}: ${err instanceof Error ? err.message : String(err)}`);
     });
   }
 
-  /** Shut down all cron jobs */
+  /** Stop the due-row poller. Kept as `shutdown()` — the historical name
+   *  apps/server/src/composition-root.ts calls on graceful shutdown. */
   shutdown(): void {
-    for (const [id, job] of this.cronJobs) {
-      job.stop();
-      this.logger.info(`[AutomationService] Stopped cron job: ${id}`);
-    }
-    this.cronJobs.clear();
+    this.stopPoller();
   }
 }

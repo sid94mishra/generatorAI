@@ -10,7 +10,7 @@ import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import { useSlashCommands, useWorkspaceFileIndex } from '@/hooks/composerQueries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { fuzzyMatch } from './composer/builtins.js';
-import { CaretInsertionSequencer } from '@generatorai/shared';
+import { CaretInsertionSequencer, stitchDictation, splitScratchCommand, continueCase } from '@generatorai/shared';
 import { ComposerMenu, type ComposerMenuItem } from './composer/ComposerMenu.js';
 import type {
   SlashCommand,
@@ -23,7 +23,7 @@ import type { ChatModel } from '@/platform/HttpPlatformClient.js';
 import type { AgentMode } from '@generatorai/shared';
 import { AGENT_MODES, AGENT_MODE_REGISTRY, DEFAULT_AGENT_MODE } from '@generatorai/shared';
 import {
-  Paperclip, X, Loader2, Plus,
+  Paperclip, X, Plus,
   FolderOpen, FolderGit2, GitBranch, ChevronDown, ChevronUp,
   Square, ArrowUp, Gauge, Search, Check, Info,
   Eye, Globe, Cpu, SlidersHorizontal, Lock,
@@ -33,6 +33,7 @@ import {
 import { cn } from '@/lib/utils.js';
 import { ModelPicker, ProviderIcon, formatTokens, DetailRow } from '@/components/shared/ModelPicker.js';
 import { ContextUsageGauge } from '@/components/shared/ContextUsageGauge.js';
+import { Button, Textarea, Spinner } from '@/components/ui/index.js';
 import { resolveModelLimit } from '@generatorai/client-core';
 import { VoiceRecorder } from './VoiceRecorder.js';
 import { useSpeechToText } from '@/hooks/useSpeechToText.js';
@@ -629,7 +630,10 @@ export function ChatInput({
     }
 
     setText((prev) => {
-      const result = caretSequencerRef.current.insert(prev, el.selectionStart, el.selectionEnd, raw);
+      // A batch engine's segment starts with a capital whether or not it
+      // continues the previous sentence; decide from what precedes it.
+      const cased = continueCase(prev.slice(0, el.selectionStart), raw);
+      const result = caretSequencerRef.current.insert(prev, el.selectionStart, el.selectionEnd, cased);
       return result ? result.text : prev;
     });
 
@@ -654,11 +658,27 @@ export function ChatInput({
   //
   // The span is cleared whenever the user touches the composer, so a manual
   // edit is never overwritten by a partial that lands a moment later.
-  // The live region is described by the composer text WITHOUT it (`base`) plus
-  // the offset it sits at. Storing the base rather than a length is what makes
-  // each revision a pure recomputation instead of a patch applied to whatever
-  // the previous patch happened to leave behind.
-  const dictationRef = useRef<{ base: string; start: number } | null>(null);
+  // The live region is described by the composer text WITHOUT it — what sits
+  // `before` and `after` the utterance. Storing those rather than a length is
+  // what makes each revision a pure recomputation instead of a patch applied
+  // to whatever the previous patch happened to leave behind, and it is what
+  // lets the separator between `before` and the utterance be decided per
+  // revision (see `stitchDictation`): "source" + "/server" needs no space,
+  // "source" + "server" does.
+  const dictationRef = useRef<{ before: string; after: string } | null>(null);
+  /**
+   * Where the last COMMITTED utterance sits in the composer text, so a
+   * spoken "scratch that" can take it back out. Cleared by any manual edit,
+   * because the offsets describe text the user has not touched since.
+   */
+  const lastCommittedRef = useRef<{ start: number; end: number } | null>(null);
+  /**
+   * The live region as it was when a manual edit detached it — see
+   * `onSegment`. Lets the flushed, formatted segment replace the raw partial
+   * that is still on screen, so the last half-second of what was said before
+   * the keystroke is not lost.
+   */
+  const detachedRef = useRef<{ start: number; shown: string } | null>(null);
   /**
    * The committed composer text, readable synchronously.
    *
@@ -691,6 +711,15 @@ export function ChatInput({
   }, []);
 
   /**
+   * Compute the composer text with `incoming` written into `region`, joined
+   * to its surroundings the way a dictation product would (spacing, sentence
+   * case, symbols that attach). Pure: nothing here touches React state.
+   */
+  const composeRegion = useCallback((region: { before: string; after: string }, incoming: string) => {
+    return stitchDictation(region.before, incoming, region.after);
+  }, []);
+
+  /**
    * Replace the live region with `incoming`; create it at the caret if absent.
    *
    * CRITICAL: everything is computed BEFORE `setText`, and the updater it
@@ -700,30 +729,41 @@ export function ChatInput({
    * composer ended up reading "…schedule a meeting. Hello, how are you today?
    * I would like to schedule a meeting.CCan you help me…".
    */
-  const writeDictationRegion = useCallback((incoming: string, commit: boolean) => {
+  const writeDictationRegion = useCallback((raw: string, commit: boolean) => {
+    // "scratch that" on its own retracts the PREVIOUS utterance. It is acted
+    // on the moment it is recognised (as Dragon and Windows do) rather than
+    // at commit, so the retracted words disappear while the speaker is still
+    // talking, and whatever follows the command takes their place.
+    const { scratch, rest } = splitScratchCommand(raw);
+    const incoming = scratch ? rest : raw;
+
     let region = dictationRef.current;
     if (!region) {
       const el = textareaRef.current;
       const prev = textRef.current;
-      const at = el ? Math.min(el.selectionStart, prev.length) : prev.length;
-      // Space off the preceding word so dictation never runs into it.
-      const needsSpace = at > 0 && !/\s$/.test(prev.slice(0, at));
-      region = {
-        base: needsSpace ? `${prev.slice(0, at)} ${prev.slice(at)}` : prev,
-        start: at + (needsSpace ? 1 : 0),
-      };
+      const last = lastCommittedRef.current;
+      if (scratch && last && last.end <= prev.length) {
+        // Open the region where the retracted utterance was, without it.
+        region = { before: prev.slice(0, last.start).replace(/[ \t]+$/, ''), after: prev.slice(last.end) };
+        lastCommittedRef.current = null;
+      } else {
+        const at = el ? Math.min(el.selectionStart, prev.length) : prev.length;
+        region = { before: prev.slice(0, at), after: prev.slice(at) };
+      }
       dictationRef.current = region;
     }
 
-    const next = region.base.slice(0, region.start) + incoming + region.base.slice(region.start);
-    const caret = region.start + incoming.length;
+    const { text: next, start, end } = composeRegion(region, incoming);
+    const caret = end;
     if (commit) {
-      // Committed text becomes the base the NEXT utterance is written into.
+      // Committed text becomes what the NEXT utterance is written into.
       dictationRef.current = null;
+      lastCommittedRef.current = incoming ? { start, end } : null;
     }
     textRef.current = next;
     utteranceShownRef.current = !commit;
     shownTextRef.current = commit ? '' : incoming;
+    detachedRef.current = null;
     setText(next);
 
     requestAnimationFrame(() => {
@@ -732,7 +772,61 @@ export function ChatInput({
       const pos = Math.min(caret, el.value.length);
       el.selectionStart = el.selectionEnd = pos;
     });
+  }, [composeRegion]);
+
+  // ── Live reveal ──────────────────────────────────────────────
+  // The streaming decoder hands over a revised partial every ~560ms (one
+  // encoder chunk), typically two or three words at a time, so writing each
+  // partial straight into the composer made the text lurch: nothing for half
+  // a second, then a clump. This paces the reveal one word every REVEAL_MS
+  // instead, so the words arrive at a typing-like cadence and the composer
+  // reads as continuous rather than jittery. A retraction (the decoder
+  // rewrote an earlier word) keeps the common prefix and re-reveals from
+  // there; a backlog of more than a few words is flushed at once so the
+  // display never falls behind the speaker. Commits bypass it entirely.
+  const REVEAL_MS = 70;
+  const REVEAL_CATCH_UP_WORDS = 6;
+  const revealRef = useRef<{ target: string; shown: string; timer: ReturnType<typeof setInterval> | null }>({
+    target: '', shown: '', timer: null,
+  });
+
+  const stopReveal = useCallback(() => {
+    const r = revealRef.current;
+    if (r.timer) clearInterval(r.timer);
+    r.timer = null;
+    r.target = '';
+    r.shown = '';
   }, []);
+
+  const revealStep = useCallback(() => {
+    const r = revealRef.current;
+    if (r.shown === r.target) {
+      if (r.timer) clearInterval(r.timer);
+      r.timer = null;
+      return;
+    }
+    const rest = r.target.slice(r.shown.length);
+    const backlog = rest.split(/\s+/).filter(Boolean).length;
+    let end = r.target.indexOf(' ', r.shown.length + 1);
+    if (end === -1 || backlog > REVEAL_CATCH_UP_WORDS) end = r.target.length;
+    r.shown = r.target.slice(0, end);
+    writeDictationRegion(r.shown, false);
+  }, [writeDictationRegion]);
+
+  const revealPartial = useCallback((t: string) => {
+    const r = revealRef.current;
+    let common = 0;
+    const n = Math.min(r.shown.length, t.length);
+    while (common < n && r.shown[common] === t[common]) common += 1;
+    if (common < r.shown.length) r.shown = t.slice(0, common);
+    r.target = t;
+    if (!r.timer) {
+      revealStep();
+      if (r.shown !== r.target) r.timer = setInterval(revealStep, REVEAL_MS);
+    }
+  }, [revealStep]);
+
+  useEffect(() => () => { const r = revealRef.current; if (r.timer) clearInterval(r.timer); }, []);
 
   const {
     isSupported: voiceSupported,
@@ -748,8 +842,9 @@ export function ChatInput({
     // Partials go into the composer itself. On an engine with a native
     // streaming decoder these arrive every ~190ms, sub-word; on a batch
     // engine the server sends none and only the segments below appear.
-    onInterim: (t) => writeDictationRegion(t, false),
+    onInterim: (t) => revealPartial(t),
     onSegment: (t) => {
+      stopReveal();
       if (dictationRef.current) {
         // Normal case: refine the live region in place and commit it.
         writeDictationRegion(t, true);
@@ -757,18 +852,39 @@ export function ChatInput({
         // The user edited the composer while this utterance was still open,
         // which detached the region. Its words are already on screen — and
         // already filler-stripped, because partials go through the
-        // interim-safe formatter too — so re-inserting the whole segment here
+        // interim-safe formatter too — so re-inserting the whole segment
         // would duplicate them somewhere the user did not put them.
         //
-        // The segment is NOT spliced back in, even though it usually contains
-        // a few more words than the last partial (whatever was still being
-        // spoken as the keystroke landed). Splicing was tried and reverted:
-        // by the time a flushed segment arrives, the resumed stream may have
-        // already opened a fresh region, and the late segment then lands
-        // against the wrong anchor — which is the duplicated-sentence bug
-        // this whole branch exists to prevent. Losing the half-word you were
-        // mid-way through when you started typing is the cheaper, predictable
-        // failure.
+        // The flushed segment usually carries a few more words than the last
+        // partial (whatever was being spoken as the keystroke landed), so it
+        // replaces the partial IN PLACE — but only if that partial is still
+        // exactly where it was. If the user's edit moved or changed it, the
+        // segment is dropped: losing the half-word you were mid-way through
+        // is the cheaper, predictable failure. The caret is shifted by the
+        // difference when it sits after the region, so the keystrokes the
+        // user is typing right now are not displaced.
+        const detached = detachedRef.current;
+        const current = textRef.current;
+        if (detached && current.slice(detached.start, detached.start + detached.shown.length) === detached.shown) {
+          const region = { before: current.slice(0, detached.start), after: current.slice(detached.start + detached.shown.length) };
+          const { text: next, end } = composeRegion(region, splitScratchCommand(t).rest);
+          const el = textareaRef.current;
+          const selStart = el?.selectionStart ?? next.length;
+          const selEnd = el?.selectionEnd ?? next.length;
+          const delta = next.length - current.length;
+          textRef.current = next;
+          lastCommittedRef.current = null;
+          setText(next);
+          requestAnimationFrame(() => {
+            const el2 = textareaRef.current;
+            if (!el2) return;
+            const oldEnd = detached.start + detached.shown.length;
+            const shift = (pos: number): number => (pos >= oldEnd ? pos + delta : Math.min(pos, end));
+            el2.selectionStart = shift(selStart);
+            el2.selectionEnd = shift(selEnd);
+          });
+        }
+        detachedRef.current = null;
         utteranceShownRef.current = false;
         shownTextRef.current = '';
       } else {
@@ -778,7 +894,10 @@ export function ChatInput({
       }
     },
     onFinal: (t) => {
+      stopReveal();
       clearDictationRegion();
+      lastCommittedRef.current = null;
+      detachedRef.current = null;
       utteranceShownRef.current = false;
       shownTextRef.current = '';
       if (t) insertAtCaret(t);
@@ -787,9 +906,10 @@ export function ChatInput({
   });
 
   const handleVoiceStart = useCallback(() => {
+    stopReveal();
     clearDictationRegion();
     void startVoice();
-  }, [startVoice, clearDictationRegion]);
+  }, [startVoice, clearDictationRegion, stopReveal]);
 
   // Part C.3: EDITING the composer while dictation is live pauses it, so a
   // manual correction and an incoming segment can't fight over the caret.
@@ -807,11 +927,20 @@ export function ChatInput({
   // that actually matters for a click.
   const noteManualCaretMove = useCallback(() => {
     caretSequencerRef.current.clearPending();
+    stopReveal();
     // The live region's offsets describe the text as it was; once the user has
     // moved or edited around it, the next partial must start a fresh span
-    // rather than overwrite whatever now sits at those offsets.
+    // rather than overwrite whatever now sits at those offsets. Remember
+    // where the partial was, so the flushed segment can still refine it.
+    const region = dictationRef.current;
+    if (region && utteranceShownRef.current && shownTextRef.current) {
+      const { start } = composeRegion(region, shownTextRef.current);
+      detachedRef.current = { start, shown: shownTextRef.current };
+    }
     clearDictationRegion();
-  }, [clearDictationRegion]);
+    // "scratch that" must never remove text the user has since edited.
+    lastCommittedRef.current = null;
+  }, [clearDictationRegion, composeRegion, stopReveal]);
 
   const pauseVoiceIfListening = useCallback(() => {
     noteManualCaretMove();
@@ -951,7 +1080,7 @@ export function ChatInput({
 
   return (
     <div
-      className="bg-[var(--color-background)] px-4 pt-3 pb-3"
+      className="bg-[var(--color-background)] px-2 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:pb-3"
       onDrop={handleDrop}
       onDragOver={handleDragOver}
     >
@@ -971,13 +1100,14 @@ export function ChatInput({
             <span className="truncate">{pendingInteractionLabel}</span>
           </span>
           {onCancelPendingInteraction && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={onCancelPendingInteraction}
-              className="flex-shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+              className="h-auto flex-shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
             >
               Cancel and send
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -1018,7 +1148,7 @@ export function ChatInput({
                 </p>
                 {codebasesLoading ? (
                   <div className="flex items-center gap-1.5 text-[11px] text-[var(--color-muted-foreground)]">
-                    <Loader2 className="h-3 w-3 animate-spin" /> Loading...
+                    <Spinner size="xs" /> Loading...
                   </div>
                 ) : !projectCodebases?.length ? (
                   <p className="text-[11px] text-[var(--color-muted-foreground)]">No codebases in project.</p>
@@ -1084,19 +1214,22 @@ export function ChatInput({
                 >
                   {isMention ? <AtSign className="h-3 w-3" /> : <Paperclip className="h-3 w-3" />}
                   <span className="max-w-[140px] truncate">{label}</span>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => removeAttachment(att.id)}
-                    className="rounded-full p-0.5 hover:bg-[var(--color-primary)]/15 transition-colors"
+                    className="h-auto w-auto rounded-full p-0.5 hover:bg-[var(--color-primary)]/15"
                     title="Remove"
+                    aria-label={`Remove ${label}`}
                   >
                     <X className="h-2.5 w-2.5" />
-                  </button>
+                  </Button>
                 </div>
               );
             })}
             {mentionLoading && (
               <div className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11px] text-[var(--color-muted-foreground)]">
-                <Loader2 className="h-3 w-3 animate-spin" /> Attaching…
+                <Spinner size="xs" /> Attaching…
               </div>
             )}
             {(pendingCaptures ?? []).map((cap) => {
@@ -1111,13 +1244,16 @@ export function ChatInput({
                   <Icon className="h-3 w-3" />
                   <span className="max-w-[140px] truncate">{label}</span>
                   {onRemovePendingCapture && (
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
                       onClick={() => onRemovePendingCapture(cap.id)}
-                      className="rounded-full p-0.5 hover:bg-[var(--color-background)] transition-colors"
+                      className="h-auto w-auto rounded-full p-0.5 hover:bg-[var(--color-background)]"
                       title="Remove"
+                      aria-label={`Remove ${label}`}
                     >
                       <X className="h-2.5 w-2.5" />
-                    </button>
+                    </Button>
                   )}
                 </div>
               );
@@ -1126,20 +1262,23 @@ export function ChatInput({
         )}
 
         {/* ── Textarea ── */}
-        <div className="px-4 pt-3.5 pb-1.5">
+        <div className="px-2.5 pt-3.5 pb-1.5 sm:px-4">
           {/* Active command pill — the selected `/command` runs as a mode; the
               textarea then holds its arguments. Backspace on empty removes it. */}
           {activeCommand && (
             <div className="mb-2 inline-flex items-center gap-1.5 rounded-md bg-[var(--color-primary)]/12 border border-[var(--color-primary)]/30 px-2 py-1 text-[11px] font-medium text-[var(--color-primary)]">
               <span className="opacity-70">{commandIcon(activeCommand)}</span>
               <span>/{activeCommand.name}</span>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => { setActiveCommand(null); requestAnimationFrame(() => textareaRef.current?.focus()); }}
-                className="rounded-full p-0.5 hover:bg-[var(--color-primary)]/15 transition-colors"
+                className="h-auto w-auto rounded-full p-0.5 hover:bg-[var(--color-primary)]/15"
                 title="Remove command"
+                aria-label={`Remove /${activeCommand.name} command`}
               >
                 <X className="h-2.5 w-2.5" />
-              </button>
+              </Button>
             </div>
           )}
           {/* No interim preview. Part C.2 rendered a dimmed running transcript
@@ -1151,7 +1290,7 @@ export function ChatInput({
               entirely (see `useSpeechToText`'s `interim: false`), which is
               what buys back the headroom for an accurate engine. */
           }
-          <textarea
+          <Textarea
             ref={textareaRef}
             value={text}
             onChange={handleTextChange}
@@ -1165,10 +1304,13 @@ export function ChatInput({
             onBlur={() => { setIsFocused(false); setTimeout(() => setMenu(null), 120); }}
             disabled={disabled}
             placeholder={activeCommand?.argHint ?? placeholder}
+            aria-label="Message"
             rows={1}
             className={cn(
-              'w-full resize-none bg-transparent text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)]/70 focus:outline-none disabled:cursor-not-allowed',
-              'leading-relaxed min-h-[64px] max-h-[200px] outline-none',
+              'w-full resize-none border-0 bg-transparent px-0 py-0 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)]/70 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-100',
+              'leading-relaxed min-h-[64px] max-h-[200px] outline-none rounded-none',
+              // Dictation grows the box a line at a time; ease it rather than snap.
+              'transition-[height] duration-150 ease-out',
             )}
           />
         </div>
@@ -1180,14 +1322,17 @@ export function ChatInput({
             {/* Attach — W29: absent, not disabled, on a surface that declares
                 no file attachment. A dead control is worse than no control. */}
             {COMPOSER.attachments && (
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={handleFileSelect}
                 disabled={disabled}
-                className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-50 transition-colors"
+                className="h-7 w-7 flex-shrink-0 rounded-full text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
                 title="Attach file"
+                aria-label="Attach file"
               >
                 <Plus className="h-4 w-4" />
-              </button>
+              </Button>
             )}
 
             {/* Model Selector — the shared canonical picker (same control the
@@ -1221,19 +1366,19 @@ export function ChatInput({
                 per-turn choice after the model itself. */}
             {showAgentModePicker && (
               <div className="relative flex-shrink-0" ref={modeDropdownRef}>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => {
                     setShowModeDropdown((p) => !p);
                     setShowReasoningDropdown(false);
                     setShowToolsMenu(false);
-                   
                   }}
                   aria-haspopup="listbox"
                   aria-expanded={showModeDropdown}
                   aria-label={`Agent mode: ${AGENT_MODE_REGISTRY[activeAgentMode].label}`}
                   className={cn(
-                    'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                    'h-auto gap-1 rounded-md px-2 py-1 text-xs font-medium',
                     activeAgentMode === 'plan'
                       ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                       : showModeDropdown
@@ -1249,7 +1394,7 @@ export function ChatInput({
                   )}
                   <span>{AGENT_MODE_REGISTRY[activeAgentMode].label}</span>
                   <ChevronDown className="h-3 w-3 opacity-60" />
-                </button>
+                </Button>
                 {showModeDropdown && (
                   <div
                     role="listbox"
@@ -1260,9 +1405,10 @@ export function ChatInput({
                       Agent mode
                     </p>
                     {AGENT_MODE_OPTIONS.map((option) => (
-                      <button
+                      <Button
                         key={option.mode}
                         type="button"
+                        variant="ghost"
                         role="option"
                         aria-selected={activeAgentMode === option.mode}
                         onClick={() => {
@@ -1270,7 +1416,7 @@ export function ChatInput({
                           setShowModeDropdown(false);
                         }}
                         className={cn(
-                          'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                          'h-auto w-full items-start justify-start gap-2 rounded-md px-2 py-1.5 text-left font-normal',
                           activeAgentMode === option.mode
                             ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                             : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
@@ -1287,7 +1433,7 @@ export function ChatInput({
                             {option.description}
                           </span>
                         </span>
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 )}
@@ -1302,10 +1448,13 @@ export function ChatInput({
                 {/* Reasoning-effort inline pill */}
                 {hasReasoning && (
                   <div className="relative" ref={reasoningDropdownRef}>
-                    <button
+                    <Button
+                      variant="ghost"
                       onClick={() => { setShowReasoningDropdown((p) => !p); setShowToolsMenu(false); }}
+                      aria-haspopup="listbox"
+                      aria-expanded={showReasoningDropdown}
                       className={cn(
-                        'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors',
+                        'h-auto gap-1 rounded-md px-2 py-1 text-xs font-medium capitalize',
                         showReasoningDropdown
                           ? 'text-[var(--color-foreground)] bg-[var(--color-accent)]'
                           : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent)]/60',
@@ -1314,22 +1463,25 @@ export function ChatInput({
                     >
                       <span>{effectiveEffort ?? 'Reasoning'}</span>
                       <ChevronDown className="h-3 w-3 opacity-60" />
-                    </button>
+                    </Button>
                     {showReasoningDropdown && (
                       <div className="absolute bottom-full left-0 mb-1.5 z-[100] w-44 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-2xl p-1.5 animate-in fade-in-0 zoom-in-95 duration-150">
                         <p className="px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">Reasoning effort</p>
                         {reasoningLevels.map((level) => (
-                          <button
+                          <Button
                             key={level}
+                            variant="ghost"
+                            role="option"
+                            aria-selected={effectiveEffort === level}
                             onClick={() => { onReasoningEffortChange?.(level); setShowReasoningDropdown(false); }}
                             className={cn(
-                              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs capitalize transition-colors',
+                              'h-auto w-full items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-xs font-normal capitalize',
                               effectiveEffort === level ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
                             )}
                           >
                             {effectiveEffort === level ? <Check className="h-3 w-3" /> : <span className="w-3" />}
                             {level}
-                          </button>
+                          </Button>
                         ))}
                       </div>
                     )}
@@ -1339,10 +1491,13 @@ export function ChatInput({
                 {/* Context-window inline pill */}
                 {hasContext && (
                   <div className="relative" ref={toolsMenuRef}>
-                    <button
+                    <Button
+                      variant="ghost"
                       onClick={() => { setShowToolsMenu((p) => !p); setShowReasoningDropdown(false); }}
+                      aria-haspopup="listbox"
+                      aria-expanded={showToolsMenu}
                       className={cn(
-                        'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                        'h-auto gap-1 rounded-md px-2 py-1 text-xs font-medium',
                         showToolsMenu
                           ? 'text-[var(--color-foreground)] bg-[var(--color-accent)]'
                           : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent)]/60',
@@ -1351,16 +1506,19 @@ export function ChatInput({
                     >
                       <span>{activeTierTokens ? formatTokens(activeTierTokens) : 'Context'}</span>
                       <ChevronDown className="h-3 w-3 opacity-60" />
-                    </button>
+                    </Button>
                     {showToolsMenu && (
                       <div className="absolute bottom-full left-0 mb-1.5 z-[100] w-48 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-2xl p-1.5 animate-in fade-in-0 zoom-in-95 duration-150">
                         <p className="px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">Context window</p>
                         {contextTiers.map((t) => (
-                          <button
+                          <Button
                             key={t.tier}
+                            variant="ghost"
+                            role="option"
+                            aria-selected={effectiveTier === t.tier}
                             onClick={() => { onContextTierChange?.(t.tier); setShowToolsMenu(false); }}
                             className={cn(
-                              'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                              'h-auto w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs font-normal',
                               effectiveTier === t.tier ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
                             )}
                           >
@@ -1369,7 +1527,7 @@ export function ChatInput({
                               {t.tier === 'long_context' ? 'Long context' : 'Standard'}
                             </span>
                             <span className="font-mono text-[10px] text-[var(--color-muted-foreground)]">{formatTokens(t.tokens)}</span>
-                          </button>
+                          </Button>
                         ))}
                       </div>
                     )}
@@ -1382,35 +1540,41 @@ export function ChatInput({
                 the reasoning + context controls inline. Holds both. */}
             {showModelSelector && activeModel && collapseControls && (hasReasoning || hasContext) && (
               <div className="relative" ref={toolsMenuRef}>
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={() => { setShowToolsMenu((p) => !p); setShowReasoningDropdown(false); }}
+                  aria-haspopup="menu"
+                  aria-expanded={showToolsMenu}
                   className={cn(
-                    'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md transition-colors',
+                    'h-7 w-7 flex-shrink-0 rounded-md',
                     showToolsMenu
                       ? 'text-[var(--color-foreground)] bg-[var(--color-accent)]'
                       : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent)]/60',
                   )}
                   title="More options"
+                  aria-label="More options"
                 >
                   <SlidersHorizontal className="h-3.5 w-3.5" />
-                </button>
+                </Button>
                 {showToolsMenu && (
                   <div className="absolute bottom-full left-0 mb-1.5 z-[100] w-52 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-2xl p-1.5 animate-in fade-in-0 zoom-in-95 duration-150">
                     {hasReasoning && (
                       <>
                         <p className="px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">Reasoning effort</p>
                         {reasoningLevels.map((level) => (
-                          <button
+                          <Button
                             key={level}
+                            variant="ghost"
                             onClick={() => { onReasoningEffortChange?.(level); }}
                             className={cn(
-                              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs capitalize transition-colors',
+                              'h-auto w-full items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-xs font-normal capitalize',
                               effectiveEffort === level ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
                             )}
                           >
                             {effectiveEffort === level ? <Check className="h-3 w-3" /> : <span className="w-3" />}
                             {level}
-                          </button>
+                          </Button>
                         ))}
                       </>
                     )}
@@ -1418,11 +1582,12 @@ export function ChatInput({
                       <>
                         <p className={cn('px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]', hasReasoning && 'mt-1 border-t border-[var(--color-border)]/60 pt-2')}>Context window</p>
                         {contextTiers.map((t) => (
-                          <button
+                          <Button
                             key={t.tier}
+                            variant="ghost"
                             onClick={() => { onContextTierChange?.(t.tier); }}
                             className={cn(
-                              'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                              'h-auto w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs font-normal',
                               effectiveTier === t.tier ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
                             )}
                           >
@@ -1431,7 +1596,7 @@ export function ChatInput({
                               {t.tier === 'long_context' ? 'Long context' : 'Standard'}
                             </span>
                             <span className="font-mono text-[10px] text-[var(--color-muted-foreground)]">{formatTokens(t.tokens)}</span>
-                          </button>
+                          </Button>
                         ))}
                       </>
                     )}
@@ -1479,44 +1644,50 @@ export function ChatInput({
                 shift on every ordinary stop. */}
             {isStreaming && onStop ? (
               stopState?.forceAvailable ? (
-                <button
+                <Button
+                  variant="ghost"
                   onClick={onStop}
-                  className="flex h-8 items-center justify-center gap-1.5 rounded-full bg-[var(--color-danger,var(--color-primary))] px-3 text-[11px] font-semibold text-[var(--color-primary-foreground,#fff)] hover:opacity-90 active:scale-[0.93] transition-all"
+                  className="h-8 gap-1.5 rounded-full bg-[var(--color-danger,var(--color-primary))] px-3 text-[11px] font-semibold text-[var(--color-primary-foreground,#fff)] hover:bg-[var(--color-danger,var(--color-primary))] hover:opacity-90 active:scale-[0.93]"
                   title="The turn did not stop gracefully — reset it"
                 >
                   <Square className="h-3 w-3 fill-current" />
                   {stopState.label}
-                </button>
+                </Button>
               ) : (
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={onStop}
                   disabled={stopState ? !stopState.enabled : false}
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-primary)] text-[var(--color-primary-foreground,#fff)] hover:opacity-90 active:scale-[0.93] disabled:opacity-50 disabled:active:scale-100 transition-all"
+                  className="h-8 w-8 rounded-full bg-[var(--color-primary)] text-[var(--color-primary-foreground,#fff)] hover:bg-[var(--color-primary)] hover:opacity-90 active:scale-[0.93] disabled:active:scale-100"
                   title={stopState?.label ?? 'Stop generation'}
                   aria-label={stopState?.label ?? 'Stop generation'}
                 >
                   <Square className="h-3.5 w-3.5 fill-current" />
-                </button>
+                </Button>
               )
             ) : (
               /* Send button — circular */
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={handleSend}
                 disabled={!canSend}
                 className={cn(
-                  'flex h-8 w-8 items-center justify-center rounded-full transition-all duration-150',
+                  'h-8 w-8 rounded-full',
                   canSend
-                    ? 'bg-[var(--color-primary)] text-[var(--color-primary-foreground,#fff)] hover:opacity-90 active:scale-[0.93]'
+                    ? 'bg-[var(--color-primary)] text-[var(--color-primary-foreground,#fff)] hover:bg-[var(--color-primary)] hover:opacity-90 active:scale-[0.93]'
                     : 'bg-[var(--color-muted)] text-[var(--color-muted-foreground)]/50',
                 )}
                 title="Send (Enter)"
+                aria-label="Send message"
               >
                 {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Spinner size="md" className="text-current" />
                 ) : (
                   <ArrowUp className="h-4 w-4" />
                 )}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -1525,13 +1696,15 @@ export function ChatInput({
       {/* ── Separate row below the input: project / codebase context ── */}
       {(projectId || showGitConnector) && (
         <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
-          <button
+          <Button
+            variant="ghost"
             onClick={() => setShowCodebasePanel((p) => !p)}
             disabled={disabled}
+            aria-expanded={showCodebasePanel}
             className={cn(
-              'flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50',
+              'h-auto gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium',
               showCodebasePanel || connectedRepoCount > 0
-                ? 'border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+                ? 'border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10'
                 : 'border-[var(--color-border)] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent)]/60',
             )}
           >
@@ -1542,7 +1715,7 @@ export function ChatInput({
               <span>Codebase</span>
             )}
             {showCodebasePanel ? <ChevronUp className="h-3 w-3 opacity-60" /> : <ChevronDown className="h-3 w-3 opacity-60" />}
-          </button>
+          </Button>
         </div>
       )}
 

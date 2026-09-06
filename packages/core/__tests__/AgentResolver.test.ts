@@ -147,6 +147,7 @@ describe('AgentResolver — capability union', () => {
       config: { type: 'http', url: `https://example.test/${id}` },
       source: 'system' as const,
       enabled: true,
+      userEnabled: true,
     }));
     const agent = makeAgent({ mcpServerIds: ['mcp-a', 'mcp-b'] });
     const resolver = new AgentResolver(makeRepo([agent]), makeCatalog([], servers), logger);
@@ -159,6 +160,26 @@ describe('AgentResolver — capability union', () => {
     });
 
     expect(Object.keys(p.mcpServers)).toEqual(['mcp-a']);
+  });
+
+  // W48 — `AgentResolver.empty()` (no MCP servers at all) is a synchronous
+  // fallback for callers with no resolver wired; a caller that HAS a
+  // resolver must call `resolve()` even with no `agentRef`, and the baseline
+  // (every enabled system/custom + project server) must still come back.
+  // This was the exact bug: a chat with no agent bound forwarded nothing.
+  it('a chat with NO agent bound still receives the enabled project + system baseline', async () => {
+    const servers: CatalogMcpServer[] = [
+      { id: 'sys-1', name: 'system-server', config: { type: 'http', url: 'https://sys.test' }, source: 'system', enabled: true, userEnabled: true },
+      { id: 'proj-1', name: 'project-server', config: { type: 'http', url: 'https://proj.test' }, source: 'project', enabled: true, userEnabled: true },
+      // A DISABLED entry must never reach the map, agent-bound or not.
+      { id: 'off-1', name: 'off-server', config: { type: 'http', url: 'https://off.test' }, source: 'system', enabled: false, userEnabled: false },
+    ];
+    const resolver = new AgentResolver(makeRepo([]), makeCatalog([], servers), logger);
+
+    const p = await resolver.resolve({ projectId: 'p1', harnessType: 'copilot', scope: 'chat' });
+
+    expect(p.driving).toBeNull();
+    expect(Object.keys(p.mcpServers).sort()).toEqual(['project-server', 'system-server']);
   });
 
   // The stage passes its delta ONCE (as runtimeOverrides). If it were also

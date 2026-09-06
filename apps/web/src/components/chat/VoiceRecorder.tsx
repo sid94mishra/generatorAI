@@ -17,8 +17,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from 'react';
-import { Mic, X, Check, Loader2, Pause } from 'lucide-react';
+import { Mic, X, Check, Pause } from 'lucide-react';
 import type { SttStatus } from '@/hooks/useSpeechToText.js';
+import { Button, Spinner } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 
 const BAR_COUNT = 18;
@@ -103,22 +104,23 @@ export function VoiceRecorder({
       >
         {status === 'connecting' || status === 'transcribing' ? (
           <span className="flex items-center gap-1.5 text-xs text-[var(--color-muted-foreground)]">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner size="sm" label={status === 'connecting' ? 'Listening' : 'Transcribing'} />
             {status === 'connecting' ? 'Listening…' : 'Transcribing…'}
           </span>
         ) : (
           <div className="flex items-center gap-1.5">
             {status === 'paused' && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={onResume}
-                className="flex items-center gap-1 text-[10px] font-medium text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] transition-colors"
+                className="h-auto w-auto gap-1 p-0 text-[10px] font-medium text-[var(--color-muted-foreground)] hover:bg-transparent hover:text-[var(--color-foreground)] transition-colors"
                 title="Paused — speak again, or click to resume"
                 aria-label="Resume dictation"
               >
                 <Pause className="h-3 w-3" />
                 Paused
-              </button>
+              </Button>
             )}
             {/* Dimmed rather than replaced while paused: the meter is how the
                 user can tell the mic is still live and that speaking will pick
@@ -139,27 +141,31 @@ export function VoiceRecorder({
         )}
 
         {/* Cancel */}
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={onCancel}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] transition-colors"
+          className="rounded-full hover:bg-[var(--color-accent)]"
           title="Cancel voice input"
           aria-label="Cancel voice input"
         >
           <X className="h-4 w-4" />
-        </button>
+        </Button>
 
         {/* Accept / stop */}
-        <button
+        <Button
           type="button"
+          variant="primary"
+          size="icon-sm"
           onClick={onStop}
           disabled={status !== 'listening' && status !== 'paused'}
-          className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--color-primary)] text-[var(--color-primary-foreground,#fff)] hover:opacity-90 active:scale-[0.93] disabled:opacity-50 transition-all"
+          className="rounded-full bg-[var(--color-primary)] active:scale-[0.93]"
           title="Stop and insert text"
           aria-label="Stop and insert text"
         >
           <Check className="h-4 w-4" />
-        </button>
+        </Button>
       </div>
     );
   }
@@ -168,20 +174,20 @@ export function VoiceRecorder({
   if (!isSupported) return null;
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon"
       onClick={onStart}
       disabled={disabled}
       className={cn(
-        'flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-50',
-        status === 'error'
-          ? 'text-[var(--color-destructive,#ef4444)] hover:bg-[var(--color-accent)]'
-          : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]',
+        'h-8 w-8 rounded-full hover:bg-[var(--color-accent)]',
+        status === 'error' && 'text-[var(--color-destructive,#ef4444)] hover:text-[var(--color-destructive,#ef4444)]',
       )}
       title={error ?? 'Voice input'}
       aria-label="Start voice input"
     >
       <Mic className="h-4 w-4" />
-    </button>
+    </Button>
   );
 }

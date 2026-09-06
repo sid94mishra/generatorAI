@@ -118,6 +118,8 @@ export class KokoroTtsEngine implements ITextToSpeechEngine {
 
   private readonly modelId: string;
   private readonly configuredVoice: string;
+  /** Playback rate used when a caller does not ask for one. */
+  private readonly defaultSpeed: number;
   private readonly dtype: string;
   private readonly logger?: ILogger;
   /**
@@ -138,9 +140,20 @@ export class KokoroTtsEngine implements ITextToSpeechEngine {
   private availableVoices: string[] = [];
   private sampleRateWarned = false;
 
-  constructor(opts: { modelId?: string; defaultVoice?: string; dtype?: string; logger?: ILogger; workerPool?: VoiceWorkerPool } = {}) {
+  constructor(
+    opts: {
+      modelId?: string;
+      defaultVoice?: string;
+      /** Playback rate (0.5-2.0) used when a caller does not pass one. */
+      defaultSpeed?: number;
+      dtype?: string;
+      logger?: ILogger;
+      workerPool?: VoiceWorkerPool;
+    } = {},
+  ) {
     this.modelId = opts.modelId ?? process.env['KOKORO_MODEL'] ?? DEFAULT_MODEL;
     this.configuredVoice = opts.defaultVoice ?? process.env['KOKORO_VOICE'] ?? DEFAULT_VOICE;
+    this.defaultSpeed = opts.defaultSpeed ?? Number(process.env['KOKORO_SPEED'] ?? '1');
     const requestedDtype = opts.dtype ?? process.env['KOKORO_DTYPE'] ?? DEFAULT_DTYPE;
     // An unrecognised dtype would otherwise surface as an opaque 404 for a
     // model file that doesn't exist. Fail soft to the default instead.
@@ -247,7 +260,7 @@ export class KokoroTtsEngine implements ITextToSpeechEngine {
     // A per-call voice override goes through the same validation as the
     // configured default, for the same reason.
     const voice = opts?.voice ? this.resolveVoice(this.availableVoices, opts.voice) : this.resolvedVoice;
-    const speed = opts?.speed ?? 1.0;
+    const speed = opts?.speed ?? this.defaultSpeed;
 
     let audio: Float32Array;
     let samplingRate: number;

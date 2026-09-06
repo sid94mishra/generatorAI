@@ -31,17 +31,46 @@ export function systemCommands(version = '0.0.0-dev'): CommandSpec[] {
       schema: inputSchema({}, {}),
       output: {
         kind: 'record',
+        // `fieldsOnly` because `/api/health` is a diagnostic payload, not a
+        // status line: it carries `harness`, `memory`, `admission` and `otel`
+        // as nested objects, and the default record renderer appended every
+        // one of them as raw indented JSON. The question this command answers
+        // is "is my server up and busy?", so it now answers exactly that.
+        // `--json` still returns the whole payload untouched.
+        fieldsOnly: true,
         fields: [
           { key: 'status', header: 'Status', format: 'status' },
           { key: 'version', header: 'Version' },
           { key: 'uptime', header: 'Uptime', format: 'duration' },
+          { key: 'harness.type', header: 'Harness' },
+          { key: 'harness.healthy', header: 'Harness OK', format: 'boolean' },
+          { key: 'db', header: 'Database', format: 'boolean' },
+          { key: 'activeChats', header: 'Active chats' },
+          { key: 'activeWorkflowRuns', header: 'Active runs' },
+          { key: 'runningChats', header: 'Generating now' },
+          { key: 'memory.rss', header: 'Memory (RSS)', format: 'bytes' },
+          { key: 'admissionSummary', header: 'Admission' },
         ],
       },
       async handler(ctx) {
         const health = await ctx.api.health();
-        // `/api/health` reports uptime in seconds; the duration formatter
-        // takes milliseconds, so a two-minute-old server read as "120ms".
-        return record({ ...health, uptime: health.uptime * 1000 });
+        const lanes = (health as { admission?: Array<Record<string, unknown>> }).admission ?? [];
+        // One line rather than a JSON array: a lane matters when something is
+        // queued or parked, and that reads at a glance in this form.
+        const admissionSummary = lanes.length
+          ? lanes
+              .map((l) => `${String(l['lane'])} ${Number(l['running'] ?? 0)}/${Number(l['concurrencyLimit'] ?? 0)}`)
+              .join('  ')
+          : undefined;
+        const running = (health as { runningChatIds?: string[] }).runningChatIds ?? [];
+        return record({
+          ...health,
+          // `/api/health` reports uptime in seconds; the duration formatter
+          // takes milliseconds, so a two-minute-old server read as "120ms".
+          uptime: health.uptime * 1000,
+          runningChats: running.length,
+          ...(admissionSummary ? { admissionSummary } : {}),
+        });
       },
     }),
 

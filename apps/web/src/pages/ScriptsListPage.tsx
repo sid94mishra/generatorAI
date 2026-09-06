@@ -8,11 +8,8 @@ import {
   FileCode2,
   Play,
   RefreshCw,
-  Loader2,
   AlertCircle,
-  Tag,
   Layers,
-  Zap,
 } from 'lucide-react';
 
 import { useScripts, useReloadScripts, useRunScript } from '@/hooks/scriptQueries.js';
@@ -22,6 +19,16 @@ import { EntityCard } from '@/components/data/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { Toolbar } from '@/components/layout/Toolbar.js';
 import { cn } from '@/lib/utils.js';
+
+/** Shape of a row from GET /api/workflow-scripts (the platform client is untyped here). */
+interface ScriptListItem {
+  id: string;
+  name?: string;
+  description?: string;
+  tags?: string[];
+  stageCount?: number;
+  profileCount?: number;
+}
 
 export function ScriptsListPage() {
   const navigate = useNavigate();
@@ -38,7 +45,7 @@ export function ScriptsListPage() {
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
-        (s: any) =>
+        (s: ScriptListItem) =>
           s.name?.toLowerCase().includes(q) ||
           s.description?.toLowerCase().includes(q) ||
           s.tags?.some((t: string) => t.toLowerCase().includes(q)),
@@ -83,7 +90,8 @@ export function ScriptsListPage() {
           value={search}
           onChange={setSearch}
           placeholder="Search scripts by name, description, or tag…"
-          className="flex-1"
+          aria-label="Search scripts"
+          className="min-w-0 flex-1"
         />
       </Toolbar>
 
@@ -96,7 +104,7 @@ export function ScriptsListPage() {
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((script: any) => (
+          {filtered.map((script: ScriptListItem) => (
             <EntityCard
               key={script.id}
               icon={<FileCode2 className="w-5 h-5" />}
@@ -104,16 +112,19 @@ export function ScriptsListPage() {
               description={script.description}
               onClick={() => navigate(`/scripts/${script.id}`)}
               actions={
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={(e) => {
                     e.stopPropagation();
                     runScript.mutate({ id: script.id });
                   }}
-                  className="rounded-lg bg-success-muted p-2 text-success transition-colors hover:bg-success/20"
+                  className="h-auto w-auto rounded-lg bg-success-muted p-2 text-success transition-colors hover:bg-success/20 hover:text-success"
                   title="Run with defaults"
+                  aria-label={`Run ${script.name ?? 'script'} with defaults`}
                 >
                   <Play className="w-4 h-4" />
-                </button>
+                </Button>
               }
               meta={
                 <>
@@ -121,7 +132,7 @@ export function ScriptsListPage() {
                     <Layers className="w-3 h-3" />
                     {script.stageCount ?? 0} stages
                   </span>
-                  {script.profileCount > 0 && (
+                  {(script.profileCount ?? 0) > 0 && (
                     <span className="flex items-center gap-1">
                       <Play className="w-3 h-3" />
                       {script.profileCount} profiles
@@ -130,9 +141,9 @@ export function ScriptsListPage() {
                 </>
               }
             >
-              {script.tags?.length > 0 && (
+              {(script.tags?.length ?? 0) > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-3">
-                  {script.tags.slice(0, 4).map((tag: string) => (
+                  {script.tags!.slice(0, 4).map((tag: string) => (
                     <Badge key={tag} tone="neutral" size="sm">
                       {tag}
                     </Badge>

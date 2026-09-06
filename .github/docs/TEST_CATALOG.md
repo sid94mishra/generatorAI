@@ -604,9 +604,9 @@ Ran the live Web UI (Playwright) + CLI against the running server (copilot harne
 **Verified via CLI (HTTP mode, against the same server — web↔CLI parity):**
 - `system health`, `run show <fed43ae0>` (full run + all 4 stage runs `completed`, **every stage `version:1`** = atomic claim ran once each), `run messages` — all read the same data created in the UI.
 
-**`--local` in-process mode (P0#3, NEW):** `--local system health` → `mode:local-embedded`; `--local proj list` → clear "not available in --local mode" error. **Found + fixed a real bug** (`'then' is not available in --local mode` — Proxy treated the client as a broken thenable; fixed to not trap `then`/`catch`/`finally`/symbols). See CLI catalog §P.
+~~**`--local` in-process mode (P0#3, NEW):** `--local system health` → `mode:local-embedded`; `--local proj list` → clear "not available in --local mode" error. Found + fixed a real bug (`'then' is not available in --local mode`).~~ **Retracted (September 2026 review):** no `--local` mode, `DirectPlatformClient`, or `createClient.ts` exists in the tree; the CLI is HTTP/WS-only. See CLI catalog §P for the retained-as-history rows.
 
-**Net:** No regressions from the P0/P1 changes; the durability/claim/concurrency code works in a real multi-stage run; web + CLI streaming intact; one `--local` bug found and fixed during testing.
+**Net:** No regressions from the P0/P1 changes; the durability/claim/concurrency code works in a real multi-stage run; web + CLI streaming intact.
 
 ### Stage-to-stage handoff (browser-verified) + HANDOFF-1 fix
 

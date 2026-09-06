@@ -45,6 +45,7 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'harness.tool_complete': 'item',
   'harness.idle': 'item',
   'harness.error': 'item',
+  'harness.warning': 'item', // a dropped warning is a silent failure — exactly what it exists to prevent
   'harness.cancelled': 'item', // W13 / X-4 — semantic cancellation, not an error
   'harness.session_start': 'item',
   'harness.usage': 'item',
@@ -107,6 +108,12 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'chat.question.asked': 'item',
   'chat.question.answered': 'item',
   'chat.question.expired': 'item',
+
+  // chat.permission — a tool call blocked on the user's allow/deny. Same gate
+  // semantics as plan/question: losing one strands the turn.
+  'chat.permission.requested': 'item',
+  'chat.permission.resolved': 'item',
+  'chat.permission.expired': 'item',
 
   // agent
   'agent.created': 'item',
@@ -252,8 +259,11 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'automation_execution.progress': 'delta',
   'automation_execution.completed': 'item',
   'automation_execution.failed': 'item',
+  'automation_execution.partial': 'item',
   'automation_execution.cancelled': 'item',
   'automation_execution.recovered': 'item',
+  'automation.schedule_skipped': 'item',
+  'automation.schedule_deferred': 'item',
   'automation_execution.iteration_started': 'item',
   'automation_execution.iteration_completed': 'item',
   'automation_execution.iteration_failed': 'item',

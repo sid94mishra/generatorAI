@@ -780,11 +780,20 @@ export class WorkspaceManager {
    */
   async cleanupExpiredWorkspaces(policy: WorkspaceRetentionPolicy): Promise<number> {
     const allWorkspaces = await this.workspaceRepo.list({ status: 'completed' });
+    // `includeStaleActive`: chat-owned workspaces never reach `completed`
+    // (only WorkflowRunService calls completeWorkspace), so considering just
+    // that status exempts the bulk of what accumulates for ever. These are
+    // judged on `updatedAt` — untouched for the retention period — because
+    // they have no `completedAt` to judge them by.
+    if (policy.includeStaleActive) {
+      allWorkspaces.push(...(await this.workspaceRepo.list({ status: 'active' })));
+    }
     const cutoff = Date.now() - (policy.completedRetentionHours * 60 * 60 * 1000);
     let deleted = 0;
 
     for (const ws of allWorkspaces) {
-      if (ws.completedAt && ws.completedAt.getTime() < cutoff) {
+      const expiredAt = ws.completedAt ?? (policy.includeStaleActive ? ws.updatedAt : undefined);
+      if (expiredAt && expiredAt.getTime() < cutoff) {
         if (policy.protectUnpushed) {
           const worktrees = await this.worktreeRepo.findByWorkspace(ws.id);
           const hasUnpushed = worktrees.some(w => w.status === 'active' && w.hasUncommittedChanges);

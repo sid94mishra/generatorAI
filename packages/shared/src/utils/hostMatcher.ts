@@ -28,10 +28,86 @@ export function matchesHostPattern(host: string, pattern: string): boolean {
 /**
  * `patterns` empty/undefined means "allow all" (BrowserConfig's documented
  * default). Otherwise `host` must match at least one pattern.
+ *
+ * This is host matching ONLY. Navigation decisions go through
+ * {@link isNavigationAllowed}, which also refuses non-http(s) schemes and, when
+ * no allow-list is configured, the hosts that must never be reachable by
+ * default (loopback, link-local, cloud metadata).
  */
 export function matchesAnyHostPattern(host: string, patterns: string[] | undefined): boolean {
   if (!patterns || patterns.length === 0) return true;
   return patterns.some((pattern) => matchesHostPattern(host, pattern));
+}
+
+/** Well-known cloud metadata endpoints — reading them hands out the host's credentials. */
+const METADATA_HOSTS = new Set([
+  '169.254.169.254',
+  'metadata.google.internal',
+  'metadata',
+  '100.100.100.200', // Alibaba Cloud
+  'fd00:ec2::254', // AWS IMDS over IPv6
+]);
+
+/** Link-local: IPv4 169.254.0.0/16, IPv6 fe80::/10. */
+export function isLinkLocalHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (v4) return Number(v4[1]) === 169 && Number(v4[2]) === 254;
+  return /^fe[89ab][0-9a-f]:/i.test(h);
+}
+
+/** Hosts that are blocked unless an allow-list names them explicitly. */
+export function isDefaultBlockedHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h.length === 0) return true;
+  if (h === '0.0.0.0' || h === '::' ) return true;
+  return METADATA_HOSTS.has(h) || isLoopbackHost(h) || isLinkLocalHost(h);
+}
+
+export type NavigationVerdict = { ok: true } | { ok: false; reason: string };
+
+/**
+ * The single navigation-policy decision for the integrated browser.
+ *
+ *  1. Only `http:` / `https:` (and `about:blank`, which is what a blocked
+ *     page is replaced with) may load. `file:`, `data:`, `javascript:`,
+ *     `chrome:` … are refused regardless of configuration — `file:///etc/passwd`
+ *     has no host, so a host allow-list alone could never catch it.
+ *  2. With an allow-list configured, the host must match an explicit pattern.
+ *     A bare `*` is treated as "no list" for the purpose of step 3 — writing
+ *     `*` should not silently unlock the metadata service.
+ *  3. Without an allow-list every public host is reachable, but loopback,
+ *     link-local and cloud-metadata hosts are blocked; naming them (e.g.
+ *     `localhost`, `127.0.0.1`) in `allowedHosts` is how a user opts a local
+ *     dev server in.
+ */
+export function isNavigationAllowed(url: string, allowedHosts: string[] | undefined): NavigationVerdict {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, reason: `not a valid URL: ${url}` };
+  }
+  if (parsed.protocol === 'about:' && parsed.href === 'about:blank') return { ok: true };
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { ok: false, reason: `scheme "${parsed.protocol}" is not allowed; only http(s) pages may load` };
+  }
+  const host = parsed.hostname.toLowerCase();
+  const patterns = (allowedHosts ?? []).filter((p) => p.trim().length > 0);
+  const explicit = patterns.filter((p) => p.trim() !== '*');
+  if (explicit.some((p) => matchesHostPattern(host, p))) return { ok: true };
+  if (explicit.length > 0) {
+    return { ok: false, reason: `host "${host}" is not in browserConfig.allowedHosts` };
+  }
+  if (isDefaultBlockedHost(host)) {
+    return {
+      ok: false,
+      reason:
+        `host "${host}" is loopback, link-local or a cloud metadata endpoint and is blocked by default; ` +
+        'add it to browserConfig.allowedHosts to allow it',
+    };
+  }
+  return { ok: true };
 }
 
 /**

@@ -214,15 +214,37 @@ export class LocalFileKeyProvider implements KeyProvider {
     if (this.cached) return this.cached;
     if (fs.existsSync(this.keyPath)) {
       const key = fs.readFileSync(this.keyPath);
-      if (key.length === KEY_BYTES) {
-        this.cached = key;
-        return key;
+      if (key.length !== KEY_BYTES) {
+        // A key file of the wrong length is ALWAYS an error — a crash mid-write,
+        // an interrupted copy, a partial restore. This used to fall through to
+        // `rotateKey()`, which generated a fresh key and overwrote the file, so
+        // every secret in the vault became permanently unreadable with no error
+        // (APPLICATION-REVIEW 5.11). Mirrors `OsProtectedKeyProvider`, which has
+        // always refused here. `__tests__/KeyProvider.test.ts` pins that the
+        // file is left untouched.
+        throw new Error(
+          `Key file ${this.keyPath} has an unexpected length (${key.length} bytes, expected ${KEY_BYTES}) — ` +
+            'refusing to re-key. Restore the file from backup, or delete it deliberately to start a new ' +
+            'vault (every existing secret becomes unreadable).',
+        );
       }
+      this.cached = key;
+      return key;
     }
-    return this.rotateKey();
+    return this.writeFreshKey();
   }
 
+  /**
+   * Explicit rotation only — never reached implicitly from `getKey()`.
+   * Overwrites the key file; the caller (`EncryptedFileSecretStore`) is
+   * responsible for re-encrypting the vault under the new key.
+   */
   async rotateKey(): Promise<Buffer> {
+    this.cached = null;
+    return this.writeFreshKey();
+  }
+
+  private writeFreshKey(): Buffer {
     const key = crypto.randomBytes(KEY_BYTES);
     fs.mkdirSync(path.dirname(this.keyPath), { recursive: true });
     writeFileAtomicRestricted(this.keyPath, key);
@@ -272,6 +294,70 @@ function readOrCreateSalt(saltPath: string): Buffer {
 }
 
 /**
+ * `fs.renameSync` with a short retry, for Windows' transient EPERM/EBUSY.
+ *
+ * Deliberately synchronous and bounded: this sits on the boot path, so it must
+ * not become a place the process can hang. A failure that outlives the budget
+ * is a real one and is rethrown with the original cause.
+ */
+export function renameWithRetry(
+  from: string,
+  to: string,
+  attempts = 10,
+  delayMs = 30,
+  /** Injectable purely so the retry can be tested; ESM exports cannot be spied on. */
+  rename: (a: string, b: string) => void = fs.renameSync,
+): void {
+  for (let i = 0; ; i += 1) {
+    try {
+      rename(from, to);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const transient = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES';
+      if (transient && i >= attempts - 1) {
+        // Not transient after all: something holds the DESTINATION open for as
+        // long as it likes. A file-syncing client (OneDrive — and this repo
+        // lives under a synced Desktop) or an endpoint scanner both do this,
+        // and a rename can never replace a directory entry whose target is
+        // held. Observed for real: months of orphaned `.tmp` files next to the
+        // vault, and a FATAL boot failure every time the server restarted.
+        //
+        // Copy the bytes into the existing file instead. That gives up the
+        // rename's atomicity — a crash mid-copy can leave a short file — which
+        // is why it is the fallback and not the path: the alternative here is
+        // not "atomic write", it is "the server does not start".
+        try {
+          fs.copyFileSync(from, to);
+          try {
+            fs.unlinkSync(from);
+          } catch {
+            /* best effort */
+          }
+          return;
+        } catch {
+          // Fall through and report the original rename failure.
+        }
+      }
+      if (!transient || i >= attempts - 1) {
+        // Leave no stray temp file behind on a genuine failure.
+        try {
+          fs.unlinkSync(from);
+        } catch {
+          /* best effort */
+        }
+        throw err;
+      }
+      // Busy-wait: there is no synchronous sleep, and the window is milliseconds.
+      const until = Date.now() + delayMs;
+      while (Date.now() < until) {
+        /* spin briefly */
+      }
+    }
+  }
+}
+
+/**
  * Atomic, permission-restricted write: temp file in the same directory →
  * fsync → rename → fsync(dir). `mode: 0o600` is applied at creation time so
  * there is never a window where the file is world-readable.
@@ -295,7 +381,13 @@ export function writeFileAtomicRestricted(filePath: string, data: Buffer | strin
   } catch {
     /* Windows / unsupported FS */
   }
-  fs.renameSync(tmp, filePath);
+  // Windows fails an otherwise-valid rename with EPERM/EBUSY whenever anything
+  // else holds the destination open for even a moment — a virus scanner, the
+  // search indexer, or the previous server process on a fast restart. It is
+  // transient, and it was FATAL here: a dev-server restart killed the whole
+  // process with `EPERM: operation not permitted, rename …secrets.vault.json`
+  // before it finished booting. Retry briefly, then report honestly.
+  renameWithRetry(tmp, filePath);
   try {
     const dirFd = fs.openSync(dir, 'r');
     try {

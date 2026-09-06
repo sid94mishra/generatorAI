@@ -9,9 +9,8 @@
 import React from 'react';
 import {
   Settings2, Cpu, Sparkles, Server, LayoutTemplate,
-  GitPullRequest, SquareTerminal, Blocks, HeartPulse, ShieldCheck, X, Bot, MonitorCog, Palette,
-} from 'lucide-react';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/index.js';
+  GitPullRequest, SquareTerminal, Blocks, HeartPulse, ShieldCheck, X, Bot, MonitorCog, Palette, HardDrive, Mic } from 'lucide-react';
+import { Dialog, DialogContent, DialogTitle, Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { useSettingsUiStore, type SettingsSectionId } from '@/stores/settingsUiStore.js';
 
@@ -26,6 +25,8 @@ import { ComputerUseSection } from './sections/ComputerUse.js';
 import { ExtensionsSection } from './sections/Extensions.js';
 import { SecuritySection } from './sections/Security.js';
 import { DiagnosticsSection } from './sections/Diagnostics.js';
+import { WorkspaceRetentionSection } from './sections/WorkspaceRetention.js';
+import { AudioSection } from './sections/Audio.js';
 
 interface NavEntry {
   id: SettingsSectionId;
@@ -62,6 +63,7 @@ const NAV: NavGroup[] = [
       { id: 'source-control', label: 'Source Control', icon: GitPullRequest },
       { id: 'browser-terminal', label: 'Browser & Terminal', icon: SquareTerminal },
       { id: 'computer-use', label: 'Computer Use', icon: MonitorCog },
+      { id: 'audio', label: 'Audio', icon: Mic },
       { id: 'extensions', label: 'Extensions', icon: Blocks },
     ],
   },
@@ -69,6 +71,7 @@ const NAV: NavGroup[] = [
     heading: 'System',
     items: [
       { id: 'security', label: 'Security & Devices', icon: ShieldCheck },
+      { id: 'storage', label: 'Storage', icon: HardDrive },
       { id: 'diagnostics', label: 'Diagnostics', icon: HeartPulse },
     ],
   },
@@ -85,8 +88,10 @@ const SECTIONS: Record<SettingsSectionId, React.ReactNode> = {
   'source-control': <SourceControlSection />,
   'browser-terminal': <BrowserTerminalSection />,
   'computer-use': <ComputerUseSection />,
+  audio: <AudioSection />,
   extensions: <ExtensionsSection />,
   security: <SecuritySection />,
+  storage: <WorkspaceRetentionSection />,
   diagnostics: <DiagnosticsSection />,
 };
 
@@ -109,14 +114,16 @@ export function SettingsModal() {
             </span>
             <h2 className="text-sm font-semibold text-foreground">Settings</h2>
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             type="button"
             onClick={closeSettings}
             aria-label="Close"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-8 w-8 rounded-md text-muted-foreground transition-colors hover:bg-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X className="h-4 w-4" />
-          </button>
+          </Button>
         </header>
 
         <div className="shrink-0 border-b border-border bg-subtle/40 px-4 py-2.5 sm:hidden">
@@ -151,11 +158,12 @@ export function SettingsModal() {
                   {group.items.map(({ id, label, icon: Icon }) => {
                     const active = id === section;
                     return (
-                      <button
+                      <Button
                         key={id}
+                        variant="ghost"
                         onClick={() => setSection(id)}
                         className={cn(
-                          'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors',
+                          'h-auto flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors',
                           active
                             ? 'bg-primary/10 font-medium text-primary'
                             : 'text-muted-foreground hover:bg-subtle hover:text-foreground',
@@ -164,7 +172,7 @@ export function SettingsModal() {
                       >
                         <Icon className={cn('h-4 w-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
                         <span className="truncate">{label}</span>
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>

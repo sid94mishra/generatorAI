@@ -9,10 +9,11 @@
 import React, { useMemo, useState } from 'react';
 import {
   BookOpen, Search, FileEdit, Play, Wrench, Brain, Bot,
-  Database, StickyNote, AlertCircle, CheckCircle2, Loader2, ChevronRight, Circle, PauseCircle,
+  Database, StickyNote, AlertCircle, CheckCircle2, ChevronRight, Circle, PauseCircle,
   FileDiff, SquareTerminal,
 } from 'lucide-react';
 import { useStreamActions } from '@/components/agent/streamActions.js';
+import { Button, Spinner } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import type { StepKind, StepStatus, TimelineStep } from '@/components/chat/redesign/types.js';
 
@@ -31,7 +32,7 @@ const KIND_ICON: Record<StepKind, React.ComponentType<{ className?: string }>> =
 
 function StatusDot({ status }: { status: StepStatus }) {
   if (status === 'running') {
-    return <Loader2 className="h-3 w-3 animate-spin text-[var(--color-primary)]" />;
+    return <Spinner size="xs" className="text-[var(--color-primary)]" />;
   }
   if (status === 'waiting') {
     return <PauseCircle className="h-3 w-3 text-[var(--color-primary)]" />;
@@ -78,10 +79,12 @@ export const StepRow = React.memo(function StepRow({ step, nested }: StepRowProp
 
   return (
     <div className={cn('group', nested && 'ml-6')}>
-      <button
+      <Button
+        type="button"
+        variant="ghost"
         onClick={() => hasExpandable && setExpanded((v) => !v)}
         className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors',
+          'h-auto w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors',
           hasExpandable && 'cursor-pointer hover:bg-[var(--color-subtle)]/60',
           !hasExpandable && 'cursor-default',
         )}
@@ -186,7 +189,7 @@ export const StepRow = React.memo(function StepRow({ step, nested }: StepRowProp
             />
           )}
         </span>
-      </button>
+      </Button>
 
       {/* running shimmer — only when this row is the tail of an active step */}
       {isRunning && !expanded && (

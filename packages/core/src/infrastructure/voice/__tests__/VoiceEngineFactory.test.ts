@@ -9,7 +9,11 @@
 // The model libraries are mocked — these tests must never download weights.
 // ────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NEMOTRON_FILES } from '../NemotronModelStore.js';
 
 vi.mock('@huggingface/transformers', () => ({
   pipeline: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue({ text: '' })),
@@ -26,6 +30,8 @@ import {
   createTtsEngine,
   resolveSttEngineId,
   sttEngineDescriptor,
+  defaultPreferredSttEngine,
+  nemotronWeightsPresent,
   type SttEngineId,
 } from '../VoiceEngineFactory.js';
 
@@ -37,6 +43,14 @@ function fakeLogger() {
 describe('VoiceEngineFactory — STT construction', () => {
   beforeEach(() => {
     for (const k of ['PARAKEET_MODEL', 'STT_MODEL', 'MOONSHINE_MODEL', 'STT_DTYPE']) delete process.env[k];
+    // `auto`'s default preference now depends on whether Nemotron's weights
+    // are on the machine, and those weights are commonly present (VS Code
+    // ships the same model for its own dictation). Pin BOTH discovery inputs
+    // so these assertions describe the code rather than the developer's
+    // laptop: an override that does not point at a model directory resolves
+    // to "not present", which is exactly the CI case.
+    delete process.env['GENERATORAI_NEMO_SPEECH_BIN'];
+    process.env['GENERATORAI_NEMOTRON_ONNX_DIR'] = join(tmpdir(), 'generatorai-no-nemotron-here');
   });
 
   it.each(['parakeet', 'moonshine', 'whisper', 'disabled', 'auto'] as SttEngineId[])(
@@ -62,6 +76,63 @@ describe('VoiceEngineFactory — STT construction', () => {
     expect(createSttEngine('auto').name).toBe(
       'cascading:moonshine:onnx-community/moonshine-base-ONNX|whisper:Xenova/whisper-base.en',
     );
+  });
+
+  describe('when Nemotron weights are present on the machine', () => {
+    let modelDir: string;
+
+    beforeEach(() => {
+      // Presence is a file-existence check, so a directory holding the real
+      // file list is indistinguishable from real weights — and lets this run
+      // without 790MB of model. Driven off NEMOTRON_FILES rather than a
+      // hand-copied list, so adding a required file cannot silently leave
+      // this fixture describing a model layout that no longer exists.
+      modelDir = mkdtempSync(join(tmpdir(), 'nemotron-model-'));
+      for (const f of NEMOTRON_FILES) writeFileSync(join(modelDir, f), 'x');
+      process.env['GENERATORAI_NEMOTRON_ONNX_DIR'] = modelDir;
+    });
+
+    afterEach(() => {
+      rmSync(modelDir, { recursive: true, force: true });
+    });
+
+    it('reports Nemotron as available and prefers it', () => {
+      expect(nemotronWeightsPresent()).toBe(true);
+      expect(defaultPreferredSttEngine()).toBe('nemotron');
+    });
+
+    it('keeps Moonshine between Nemotron and Whisper in the cascade', () => {
+      // Nemotron is the only candidate whose weights are optional, so its
+      // failure is expected rather than exceptional. Dropping straight to
+      // Whisper would make the default ~12x slower per preview than the
+      // previous Moonshine default — a regression wearing a fallback's
+      // clothes.
+      expect(createSttEngine('auto').name).toBe(
+        'cascading:nemotron-onnx:nvidia/nemotron-3.5-asr-streaming-0.6b' +
+          '|moonshine:onnx-community/moonshine-base-ONNX' +
+          '|whisper:Xenova/whisper-base.en',
+      );
+    });
+
+    it('uses the in-process ONNX adapter, not the native-binary one', () => {
+      expect(createSttEngine('nemotron').name).toContain('nemotron-onnx');
+    });
+
+    it('defers to NeMo-Speech.cpp when an operator has installed it', () => {
+      // Installing the binary is a deliberate act (and the only route to GPU
+      // execution), so it wins over the in-process path.
+      process.env['GENERATORAI_NEMO_SPEECH_BIN'] = join(modelDir, 'nemo-speech');
+      try {
+        expect(createSttEngine('nemotron').name).not.toContain('nemotron-onnx');
+      } finally {
+        delete process.env['GENERATORAI_NEMO_SPEECH_BIN'];
+      }
+    });
+  });
+
+  it('falls back to Moonshine when Nemotron weights are absent', () => {
+    expect(nemotronWeightsPresent()).toBe(false);
+    expect(defaultPreferredSttEngine()).toBe('moonshine');
   });
 
   it('does NOT default to an engine that cannot punctuate', () => {

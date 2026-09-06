@@ -17,6 +17,7 @@
 import React, { useState } from 'react';
 import { Check, X, Hand, Ban } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button, Textarea } from '@/components/ui/index.js';
 
 interface InlineHitlControlsProps {
   reason: string;
@@ -72,7 +73,7 @@ export function InlineHitlControls({
         </div>
       </div>
 
-      <textarea
+      <Textarea
         value={feedback}
         onChange={(e) => setFeedback(e.target.value)}
         rows={2}
@@ -81,60 +82,70 @@ export function InlineHitlControls({
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <button
+        <Button
           type="button"
           onClick={() => onApprove?.(undefined)}
-          className="flex items-center gap-1.5 rounded-md bg-[var(--color-success)] px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110"
+          variant="ghost"
+          size="sm"
+          className="h-auto flex items-center gap-1.5 rounded-md bg-[var(--color-success)] px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110"
         >
           <Check className="h-3.5 w-3.5" />
           Approve &amp; continue
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={() => onReject?.(trimmed.length > 0 ? trimmed : undefined)}
           disabled={trimmed.length === 0}
           title={trimmed.length === 0 ? 'Enter feedback above to request changes' : 'Send feedback as a follow-up prompt'}
-          className="flex items-center gap-1.5 rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-1 text-[11.5px] font-semibold text-[var(--color-warning)] hover:bg-[var(--color-warning)]/20 disabled:cursor-not-allowed disabled:opacity-50"
+          variant="ghost"
+          size="sm"
+          className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-1 text-[11.5px] font-semibold text-[var(--color-warning)] hover:bg-[var(--color-warning)]/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <X className="h-3.5 w-3.5" />
           Request changes
-        </button>
+        </Button>
 
         {/* Terminal reject — two-step because it fails the stage and blocks
             every downstream stage. There is no undo. */}
         {onTerminalReject && !confirmingReject && (
-          <button
+          <Button
             type="button"
             onClick={() => setConfirmingReject(true)}
             title="Reject this stage and stop the workflow run"
-            className="ml-auto flex items-center gap-1.5 rounded-md border border-[var(--color-danger)]/40 px-3 py-1 text-[11.5px] font-semibold text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10"
+            variant="ghost"
+            size="sm"
+            className="h-auto ml-auto flex items-center gap-1.5 rounded-md border border-[var(--color-danger)]/40 px-3 py-1 text-[11.5px] font-semibold text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10"
           >
             <Ban className="h-3.5 w-3.5" />
             Reject
-          </button>
+          </Button>
         )}
         {onTerminalReject && confirmingReject && (
           <div className="ml-auto flex items-center gap-2">
             <span className="text-[11px] text-[var(--color-danger)]">
               Stops the run. Downstream stages will not execute.
             </span>
-            <button
+            <Button
               type="button"
               onClick={() => {
                 setConfirmingReject(false);
                 onTerminalReject(trimmed.length > 0 ? trimmed : undefined);
               }}
-              className="rounded-md bg-[var(--color-danger)] px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110"
+              variant="ghost"
+              size="sm"
+              className="h-auto rounded-md bg-[var(--color-danger)] px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110"
             >
               Confirm reject
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => setConfirmingReject(false)}
-              className="rounded-md px-2 py-1 text-[11.5px] font-medium text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+              variant="ghost"
+              size="sm"
+              className="h-auto rounded-md px-2 py-1 text-[11.5px] font-medium text-[var(--color-muted-foreground)] hover:bg-transparent hover:text-[var(--color-foreground)]"
             >
               Cancel
-            </button>
+            </Button>
           </div>
         )}
       </div>

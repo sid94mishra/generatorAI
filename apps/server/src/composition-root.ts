@@ -10,6 +10,8 @@ import { resolve, dirname } from 'node:path';
 import * as path from 'node:path';
 import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
+import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
+import { readAudioPreferences } from './settings/audio.js';
 import { AgentHostClient, HostSupervisor } from '@generatorai/core';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
 import { registerHarnessInstances } from './composition/harnessInstances.js';
@@ -25,7 +27,15 @@ import {
   PushDispatcher,
   type PushTarget,
 } from '@generatorai/core';
-import { createDB, migrateDB, closeDB, withTransaction, EventRetentionService, PushTokenRepository } from '@generatorai/db';
+import {
+  createDB,
+  migrateDB,
+  closeDB,
+  withTransaction,
+  setInvalidJsonColumnReporter,
+  EventRetentionService,
+  PushTokenRepository,
+} from '@generatorai/db';
 import type { AppDatabase } from '@generatorai/db';
 import {
   DrizzleSessionRepository,
@@ -79,6 +89,8 @@ import {
   // Bootstrap — shared core services factory
   createCoreServices,
   StartupRecoveryService,
+  InterruptedTurnRecoveryService,
+  OrphanProcessReaper,
   SandboxedScriptRunner,
   FetchHttpClient,
   GitManager,
@@ -108,6 +120,8 @@ import {
   // Section 8 — custom tool layer + MCP hub (harness-agnostic)
   CustomToolRegistry,
   InMemoryMcpHub,
+  McpCredentialVault,
+  McpSettingsStore,
   // DUR-05 — durable step.sleep sweeper
   DurableSleepService,
   // Project & Codebase Management services
@@ -116,6 +130,7 @@ import {
   WorktreeService,
   ProjectConfigService,
   WorktreeCleanupService,
+  WorkspaceRetentionService,
   SystemArtifactService,
   ArtifactCatalog,
   AgentService,
@@ -210,6 +225,18 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // because createDB throws first for other drivers.
   const db: AppDatabase = createDB(process.env['GENERATORAI_DATABASE_URL'] ?? config.dbPath);
   migrateDB(db);
+
+  // Review 6.6 — a stored JSON column that fails validation is replaced by a
+  // default, and the next unrelated save persists that default over the real
+  // value. Route those substitutions into the real log so the loss is visible
+  // instead of silent. Installed once, covers every repository read.
+  setInvalidJsonColumnReporter((error, rawValue) => {
+    logger.warn('[db] stored JSON column failed validation — substituting the default', {
+      error: error instanceof Error ? error.message : String(error),
+      // Bounded: a corrupt column can be large, and this is a log line.
+      rawValue: JSON.stringify(rawValue)?.slice(0, 500),
+    });
+  });
 
   // ── Security (Phase 0–2) ──
   // Built immediately after the schema exists and BEFORE any harness, route or
@@ -309,11 +336,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // every turn with a hardcoded `{content: ''}` (it listened for the wrong event
   // kind — 'chat.message_complete', which nothing ever emits, instead of the
   // real 'harness.message_complete') and `getMessages()` read from a map nothing
-  // ever populated. Both are fixed (see AgentHostClient.ts), but `getModels()`,
-  // `selectAgent()` and `listAgents()` are still explicit Phase-B stubs, and the
-  // host process's own resource-bounding (age/RSS recycling, bounded spawn
-  // concurrency — W12's other acceptance criteria) is unimplemented scaffolding,
-  // not merely untested. Opt-in until that Phase B work lands.
+  // ever populated. Both are fixed (see AgentHostClient.ts); `getModels()`,
+  // `selectAgent()` and `listAgents()` now round-trip to the host too (A12,
+  // 2026-09-05). What still keeps this opt-in: enabling the host bypasses
+  // `MultiHarness`, the instance registry and the ownership store, so
+  // multi-provider routing is lost, and the host path has not been soaked
+  // under real load. Flip the default once `MultiHarness` runs inside the
+  // host and a restart mid-turn has been drilled through it.
   //
   // The agent-host dist path is resolved relative to this package's location.
   // In a monorepo pnpm install the symlink structure ensures the built artifact
@@ -501,7 +530,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     harness = multiHarness;
   }
 
-  const scriptRunner = new SandboxedScriptRunner(logger);
+  const scriptRunner = new SandboxedScriptRunner(logger, {
+    extraAllowlist: config.scripts.extraAllowlist,
+  });
   const httpClient = new FetchHttpClient();
   const gitManager = new GitManager(scriptRunner, logger, {
     workspacesDir: config.workspacesDir,
@@ -672,7 +703,19 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // through MCP hub keep behaviour identical to pre-rollout until a
   // module registers a tool or overrides an MCP server.
   const customToolRegistry = new CustomToolRegistry();
-  const mcpHub: IMcpHub = new InMemoryMcpHub();
+  // W48 — resolve `secretref:` pointers to real values right before a run's
+  // MCP config reaches the harness adapter (see packages/core/src/mcp). Every
+  // upstream projection (catalog, resolver, chat snapshot, DB row) only ever
+  // holds the pointer; this is the one place a value is read back out.
+  const mcpCredentialVault = new McpCredentialVault(security.secretStore);
+  const mcpHub: IMcpHub = new InMemoryMcpHub({
+    vault: mcpCredentialVault,
+    logger: { warn: (m) => logger.warn(m) },
+  });
+  // W48 — server-side settings (bundled catalog on/off + inputs + custom
+  // servers) live in mcp-settings.json next to the DB file, same convention
+  // as `settings/computerUse.ts`'s computer-use.json.
+  const mcpSettingsStore = new McpSettingsStore(path.dirname(resolve(config.dbPath)));
 
   // Chat extensions object — passed by reference to createCoreServices.
   // `worktreeService` is set later after project services are created.
@@ -783,13 +826,31 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // ring buffers + module-level `streamSubscriptions` fan-out were all
   // deleted once the web migration landed.
   const streamCursorRepo = new DrizzleStreamCursorRepository(db);
-  // W07 — sibling of the other `~/.generatorai/*` directories, keyed off the
-  // same "next to the DB" convention already used for `harnesses/<id>/home`.
-  const deltaLog = new DeltaLog({
-    dir: path.join(path.dirname(resolve(config.dbPath)), 'delta-logs'),
-    logger,
-  });
-  const streamBroker = new StreamBroker(streamCursorRepo, logger, { deltaLog });
+  // W07 — the file-backed delta log. OPT-IN (`GENERATORAI_DELTA_LOG=true`),
+  // and off by default, because as shipped it was a write-only duplicate:
+  // `StreamBroker.publish` still committed every delta to `stream_cursors`
+  // (batched) and THEN appended it here, and `DeltaLog.readTail` had no
+  // production caller — replay, crash recovery and retention all read SQL.
+  // Every token therefore cost a SQL row plus an `appendFile` to a file
+  // nothing read, plus a sweeper to delete it. Architecture law L1 ("tokens
+  // never reach the relational store") is NOT met by this code path; what
+  // holds today is honest batching (`StreamWriteBatcher`). Finishing the
+  // design means routing deltas ONLY here and merging them back into replay
+  // by `seq` — until that lands, the flag exists so the implementation can be
+  // exercised without taxing every deployment.
+  const deltaLogEnabled = process.env['GENERATORAI_DELTA_LOG'] === 'true';
+  const deltaLog = deltaLogEnabled
+    ? new DeltaLog({
+        // Sibling of the other `~/.generatorai/*` directories, keyed off the
+        // same "next to the DB" convention already used for `harnesses/<id>/home`.
+        dir: path.join(path.dirname(resolve(config.dbPath)), 'delta-logs'),
+        logger,
+      })
+    : undefined;
+  if (deltaLogEnabled) {
+    logger.info('[Container] GENERATORAI_DELTA_LOG=true — deltas are dual-written to the file delta log (experimental)');
+  }
+  const streamBroker = new StreamBroker(streamCursorRepo, logger, deltaLog ? { deltaLog } : {});
 
   // P1-4 / EVT-01 — the durable stream log is now the event bus's commit point
   // AND its sequence source. `emit()` awaits `append` before broadcasting, so a
@@ -835,6 +896,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     deleteSessionEvents: async (sessionId) => {
       const { scope, id } = primaryScopeFor(sessionId);
       await streamCursorRepo.deleteScope(scope, id);
+    },
+    lastSeq: async (sessionId) => {
+      const { scope, id } = primaryScopeFor(sessionId);
+      return streamCursorRepo.getLastSeq(scope, id);
     },
   });
 
@@ -920,9 +985,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // per tick, matching every other sweeper's contract) — the extension point
   // (built for "future EVT-04 blob store, artifact retention, etc.") already
   // fits a filesystem sweeper without touching `EventRetentionService` itself.
-  eventRetentionService.registerSweeper('deltaLog', async (_cutoffTs, limit) =>
-    deltaLog.enforceGlobalCeiling(limit),
-  );
+  if (deltaLog) {
+    eventRetentionService.registerSweeper('deltaLog', async (_cutoffTs, limit) =>
+      deltaLog.enforceGlobalCeiling(limit),
+    );
+  }
 
   // DUR-05 — durable step.sleep sweeper. Flips `sleeping → queued` for
   // stage rows whose `wake_at` has passed and then invokes `onWake` to
@@ -1017,6 +1084,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     projectConfigRepo,
     resolve(config.templatesDir, 'system'),
     logger,
+    {
+      mcpSettings: mcpSettingsStore,
+      // W48 fix: `ProjectConfig.filePath` is stored relative to the
+      // project's config dir (see ArtifactCatalogOptions.resolveProjectConfigPath
+      // doc) — without this a project MCP server's file never resolved and
+      // the server was silently dropped from the catalog.
+      resolveProjectConfigPath: (c) => path.join(projectService.getProjectConfigTypeDir(c.projectId, c.type), c.filePath),
+    },
   );
   const agentRepo = new DrizzleAgentRepository(db);
   const agentResolver = new AgentResolver(agentRepo, artifactCatalog, logger);
@@ -1063,6 +1138,26 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // worktree stays registered in its parent clone forever.
     worktreeRepo,
   );
+
+  // ── Workspace retention (nightly) ──
+  //
+  // Execution workspaces were the one thing nothing ever reclaimed: three
+  // sweepers start below (events, durable sleep, worktrees) and this was not
+  // among them, so `cleanupExpiredWorkspaces` only ran when someone POSTed to
+  // /api/workspaces/cleanup by hand. Measured on a developer machine after a
+  // few months: 1,136 directories, 6.3GB, ~50 more per day.
+  //
+  // OFF by default — it deletes the user's files on a timer, so it waits for
+  // an explicit opt-in in Settings. Preferences are read per tick, not
+  // captured here, so a change applies without a restart.
+  const workspaceRetentionService = new WorkspaceRetentionService({
+    workspaceManager,
+    workspaceRepo: executionWorkspaceRepo,
+    workspacesDir: config.workspacesDir,
+    readPreferences: () =>
+      readWorkspaceRetentionPreferences(path.dirname(resolve(config.dbPath))),
+    logger,
+  });
 
   // ── Checkpoints (workspace snapshots via private git refs) ──
   //
@@ -1661,6 +1756,25 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     },
   );
   terminalService.start();
+  // Warm the terminal hosts at boot.
+  //
+  // `NodePtyHost.isAvailable()` lazily `require`s the node-pty NATIVE addon on
+  // its first call, and `TerminalService.selectHost` is the first caller — so
+  // the very first terminal a user opened paid that load while they waited.
+  // Measured: the first `terminal create` cost ~1.1 s more than every one
+  // after it, against a raw node-pty spawn of 285 ms.
+  //
+  // `isAvailable()` is idempotent and synchronous, so probing each host here
+  // simply moves the load into startup. Wrapped because a host that cannot
+  // load must degrade to the next one, exactly as it does today — this is a
+  // warm-up, not a new failure point.
+  for (const host of terminalHosts) {
+    try {
+      host.isAvailable();
+    } catch (err) {
+      logger.debug?.(`[Container] terminal host warm-up skipped: ${String(err)}`);
+    }
+  }
   // On workspace deletion, kill any orphaned PTYs first (see R-3).
   workspaceManager.registerBeforeDelete(async (workspaceId) => {
     await terminalService.killAllForWorkspace(workspaceId);
@@ -1683,10 +1797,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   //                no fallback. 'nemotron' additionally needs
   //                GENERATORAI_NEMO_SPEECH_BIN — see NemotronSttEngine.ts.
   //   'disabled' — same as GENERATORAI_STT=0.
-  // GENERATORAI_STT_PREFERRED overrides which engine 'auto' tries first
-  // (default: moonshine — it is the only one of the three that both
-  // punctuates and never drops a sentence; see VoiceEngineFactory.ts's
-  // measured head-to-head).
+  // GENERATORAI_STT_PREFERRED overrides which engine 'auto' tries first.
+  // The default is now decided per machine by `defaultPreferredSttEngine()`:
+  // Nemotron when its weights are present (the best engine in the table, and
+  // the only one with a native streaming decoder, so words appear as they are
+  // spoken rather than in blocks after each pause), otherwise Moonshine —
+  // which was the previous unconditional default. See VoiceEngineFactory.ts's
+  // measured head-to-head.
   // Whisper is never removed, per VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md
   // Part E Phase 1 ("Keep Whisper registered as a fallback engine").
   //
@@ -1724,12 +1841,17 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   }
   const voiceEngineOpts = { logger, ...(voiceWorkerPool ? { workerPool: voiceWorkerPool } : {}) };
 
+  // Settings -> Audio. The ENVIRONMENT still wins: an operator who pinned an
+  // engine for a deployment must not be overridden from a UI, which is why
+  // the env var is consulted first and the stored choice only fills the gap.
+  const audioPrefs = readAudioPreferences(path.dirname(resolve(config.dbPath)));
   const sttEngineId = sttDisabled
     ? 'disabled'
-    : resolveSttEngineId(process.env['GENERATORAI_STT_ENGINE'], logger);
+    : resolveSttEngineId(process.env['GENERATORAI_STT_ENGINE'] ?? audioPrefs.sttEngine, logger);
   const preferred = process.env['GENERATORAI_STT_PREFERRED'];
   const sttEngine = createSttEngine(sttEngineId, {
     ...voiceEngineOpts,
+    endpointSilenceMs: audioPrefs.endpointSilenceMs,
     ...(preferred === 'nemotron' || preferred === 'parakeet' || preferred === 'moonshine' || preferred === 'whisper'
       ? { preferred }
       : {}),
@@ -1766,7 +1888,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   //   GENERATORAI_VOICE_TEXT_FORMATTER=llm
   //   GENERATORAI_VOICE_TEXT_FORMATTER_BASE_URL=https://api.anthropic.com/v1/chat/completions
   //   GENERATORAI_VOICE_TEXT_FORMATTER_MODEL=claude-haiku-4-5-20251001
-  const textFormatterMode = process.env['GENERATORAI_VOICE_TEXT_FORMATTER'] ?? 'rule-based';
+  const textFormatterMode = process.env['GENERATORAI_VOICE_TEXT_FORMATTER'] ?? audioPrefs.textFormatter;
   const formatterBaseUrl = process.env['GENERATORAI_VOICE_TEXT_FORMATTER_BASE_URL'];
   const formatterModel = process.env['GENERATORAI_VOICE_TEXT_FORMATTER_MODEL'];
   const voiceTextFormatter =
@@ -1786,7 +1908,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // GENERATORAI_TTS=0 disables voice output entirely (attachTtsWebSocket
   // checks the same flag) — no point constructing/warming an engine that
   // no route will ever reach.
-  const ttsEngine = createTtsEngine(process.env['GENERATORAI_TTS'] === '0' ? 'disabled' : 'kokoro', voiceEngineOpts);
+  const ttsEngine = createTtsEngine(
+    process.env['GENERATORAI_TTS'] === '0' || !audioPrefs.ttsEnabled ? 'disabled' : 'kokoro',
+    { ...voiceEngineOpts, defaultVoice: audioPrefs.ttsVoice, defaultSpeed: audioPrefs.ttsSpeed },
+  );
 
   // GENERATORAI_STT_VAD picks how utterances are segmented:
   //   'silero' (default) — neural VAD. Measured on the reference clip it
@@ -1833,7 +1958,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     resolve(config.templatesDir, 'scripts'),
     resolve(config.templatesDir),
   ];
-  const workflowScriptLoader = new WorkflowScriptLoader(logger, scriptDirs, hookExecutor);
+  const workflowScriptLoader = new WorkflowScriptLoader(logger, scriptDirs, hookExecutor, {
+    // The gate lives IN the loader, so the boot-time scan below and the
+    // reload/validate/upload routes are all refused together when scripts are
+    // not opted in — not just the upload route.
+    enabled: config.scripts.workflowScriptsEnabled,
+  });
 
   // Late-bind script loader into DataSourceResolver for 'workflow_script' data source support
   dataSourceResolver.setScriptLoader(workflowScriptLoader);
@@ -1872,10 +2002,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   chatExtensions.widgetRegistry = widgetRegistry;
   chatExtensions.widgetAssetsBase = widgetOrigin;
 
-  // Extension-authoring tools — register on the process-wide custom tool
-  // registry so every chat conversation gets them automatically. The
-  // agent uses these together with the "extension-author" skill to
-  // scaffold, install, and reload user extensions from a chat prompt.
+  // Extension-authoring tools.
+  //
+  // Registered on the process-wide registry, but NOT handed to every
+  // conversation: `ChatManagementService.selectCustomTools` filters them out
+  // unless the chat's agent grants the `extensionAuthoring` capability, which
+  // is false by default (review 5.3). These two tools write a file tree and
+  // import it into THIS process, so they are host code execution — a chat has
+  // to be given that, never assumed to have it.
   customToolRegistry.register(
     buildWriteExtensionTool({ extensionManager, widgetRegistry }),
   );
@@ -1933,6 +2067,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     worktreeService,
     projectConfigService,
     worktreeCleanupService,
+    workspaceRetentionService,
     systemArtifactService,
 
     // Agents (first-class agent entity)
@@ -1999,6 +2134,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     streamBroker,
     customToolRegistry,
     mcpHub,
+    mcpSettingsStore,
+    mcpCredentialVault,
     durableSleepService,
     templateRegistry,
     hookExecutor,
@@ -2117,6 +2254,43 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // sequence counters from DB via restoreCounters()).
       await recoveryService.recover();
 
+      // Chat turns the previous process died in: persist what streamed and
+      // write the terminal events a reconnecting client is waiting for.
+      // Runs after `recover()` so sequence counters are already restored.
+      try {
+        const interrupted = await new InterruptedTurnRecoveryService(
+          chatEntityRepo,
+          chatMessageRepo,
+          eventBus,
+          logger,
+        ).recover();
+        if (interrupted.interrupted > 0) {
+          logger.warn(
+            `[Container] closed ${interrupted.interrupted} chat turn(s) interrupted by the last shutdown ` +
+              `(${interrupted.persistedPartials} partial message(s) persisted)`,
+          );
+        }
+      } catch (err) {
+        logger.warn(`[Container] interrupted-turn recovery failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Child processes a previous run left behind (Windows does not end a
+      // process's descendants with it): rg scans and CLI sessions whose parent
+      // is gone and whose command line names one of OUR directories. Scoped
+      // that way so nothing else on the machine is touched. Fire-and-forget —
+      // boot must not wait on a process listing. `GENERATORAI_REAP_ORPHANS=false`
+      // opts out.
+      if (process.env['GENERATORAI_REAP_ORPHANS'] !== 'false') {
+        void new OrphanProcessReaper({
+          ownedDirs: [config.artifactsDir, config.workspacesDir, path.dirname(resolve(config.dbPath))],
+          logger,
+        })
+          .reap()
+          .catch((err: unknown) => {
+            logger.warn(`[Container] orphan process reap failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      }
+
       // Track A1 — reconcile automation executions left in a non-terminal
       // state by the previous process, and start the idempotency-key
       // sweeper. Only runs when the recovery service is wired
@@ -2137,6 +2311,22 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         automationRecoveryService.startIdempotencySweeper();
       }
 
+      // Re-arm workflow post-processing that a restart interrupted.
+      //
+      // Auto-commit and auto-PR were attached to a run only as an in-memory
+      // event subscription, so a restart lost them silently: the run reported
+      // success and never opened its pull request. The intent is persisted on
+      // the run now, and this is what picks it back up (review 6.2).
+      if (workflowOrchestrator) {
+        try {
+          await workflowOrchestrator.reArmPendingPostProcessing();
+        } catch (err) {
+          logger.warn(
+            `[Container] Re-arming workflow post-processing failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       // Initialize automation cron scheduler AFTER recovery so the two
       // don't race on the same execution row.
       await automationService.initializeCronJobs();
@@ -2153,6 +2343,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // and start the background retention sweep timer.
       await worktreeCleanupService.recoverOnStartup();
       worktreeCleanupService.start();
+
+      // Workspace retention: the nightly execution-workspace sweep. A no-op
+      // until the user opts in from Settings.
+      workspaceRetentionService.start();
 
       // Load system-level artifacts (skills, prompts, agents)
       await systemArtifactService.loadSystemArtifacts();
@@ -2200,6 +2394,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // them on the next sweep.
       durableSleepService.stop();
       worktreeCleanupService.stop();
+      workspaceRetentionService.stop();
       // Stop run poll loops + unsubscribe EventBus listeners + close run loggers
       // so no new events are produced and no setInterval handles are orphaned.
       workflowRunService.shutdown();
@@ -2231,6 +2426,16 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // any live driver sessions.
       computerConsentStore.cancelAll();
       await computerService.dispose();
+
+      // Stop every live Integrated Browser session through its normal path
+      // (bridge stop, row → terminated, `browser.session_stopped`). Before
+      // this the browser service was the one live-process owner missing from
+      // this sequence, so each graceful restart force-killed its Chromiums
+      // via the descendant reaper instead. Ordered before `harness.shutdown()`
+      // because the agent's browser tools reach these sessions.
+      await browserService.dispose().catch((err: unknown) => {
+        logger.warn(`[Container] browser service dispose failed: ${String(err)}`);
+      });
 
       // Destroy any active sandboxes
       if (sandboxLifecycleManager) {
@@ -2320,6 +2525,7 @@ export interface Container {
   codebaseService: CodebaseService;
   worktreeService: WorktreeService;
   worktreeCleanupService: WorktreeCleanupService;
+  workspaceRetentionService: WorkspaceRetentionService;
   projectConfigService: ProjectConfigService;
   systemArtifactService: SystemArtifactService;
   agentRepo: DrizzleAgentRepository;
@@ -2401,6 +2607,10 @@ export interface Container {
   customToolRegistry: CustomToolRegistry;
   /** TOL-06 — MCP server configuration hub. Pass-through by default. */
   mcpHub: IMcpHub;
+  /** W48 — server-side settings for the bundled MCP catalog + custom servers. */
+  mcpSettingsStore: McpSettingsStore;
+  /** W48 — the only place MCP credential VALUES are read/written. */
+  mcpCredentialVault: McpCredentialVault;
   /** DUR-05 — durable step.sleep sweeper. Stage code calls `sleep(...)` to park. */
   durableSleepService: DurableSleepService;
   templateRegistry: TemplateRegistry;

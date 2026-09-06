@@ -6,6 +6,8 @@
  * tmp+rename, mode 0600) so the gateway can locate the driver without IPC.
  */
 
+import type { HostHelloFrame } from '../protocol/hostProtocol.js';
+
 // ─── Shared payload types ───────────────────────────────────────────────────
 
 /**
@@ -124,6 +126,8 @@ export interface CuaPongResponse {
 }
 
 export type CuaHostResponse =
+  /** Plan item 43 — always the FIRST frame the host sends; see protocol/hostProtocol.ts. */
+  | HostHelloFrame
   | CuaActionResultResponse
   | CuaCaptureResultResponse
   | CuaStateResponse

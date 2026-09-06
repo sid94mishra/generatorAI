@@ -5,6 +5,7 @@
 import React, { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 
 interface CollapsibleSectionProps {
   title: string;
@@ -19,13 +20,15 @@ export function CollapsibleSection({ title, icon, defaultOpen = true, badge, chi
 
   return (
     <div className="border-b border-border last:border-b-0">
-      <button
+      <Button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-controls={`collapsible-${title.replace(/\s+/g, '-')}`}
+        variant="ghost"
+        size="sm"
         className={cn(
-          'flex w-full items-center justify-between px-4 py-2.5',
+          'h-auto flex w-full items-center justify-between rounded-none bg-transparent px-4 py-2.5',
           'text-xs font-semibold uppercase tracking-wider',
           'text-muted-foreground',
           'hover:bg-subtle/50',
@@ -44,7 +47,7 @@ export function CollapsibleSection({ title, icon, defaultOpen = true, badge, chi
         <ChevronRight
           className={cn('h-3.5 w-3.5 transition-transform duration-200', open && 'rotate-90')}
         />
-      </button>
+      </Button>
       <div
         id={`collapsible-${title.replace(/\s+/g, '-')}`}
         className={cn(

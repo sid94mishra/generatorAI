@@ -10,11 +10,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ThemePreference } from '../shared/ipc';
 import { log } from './logger';
-import {
-  DEFAULT_CONNECTION_STATE,
-  sanitizeConnectionState,
-  type ServerConnectionState,
-} from './serverConnections';
+import { DEFAULT_CONNECTION_STATE, type ServerConnectionState } from './serverConnections';
+import { sanitizeSettings, type SanitizeReport } from './settings-schema';
 
 export interface WindowState {
   width: number;
@@ -39,7 +36,7 @@ export interface DesktopSettings {
   servers: ServerConnectionState;
 }
 
-const DEFAULTS: DesktopSettings = {
+export const DEFAULTS: DesktopSettings = {
   theme: 'system',
   window: { width: 1440, height: 900 },
   serverPort: 0,
@@ -54,21 +51,27 @@ function settingsFile(): string {
   return path.join(app.getPath('userData'), 'settings.json');
 }
 
+/** Test seam: forget the cached settings so the next read hits disk. */
+export function resetSettingsCache(): void {
+  cache = null;
+}
+
 export function loadSettings(): DesktopSettings {
   if (cache) return cache;
+  let parsed: unknown = {};
   try {
-    const raw = fs.readFileSync(settingsFile(), 'utf8');
-    const parsed = JSON.parse(raw) as Partial<DesktopSettings>;
-    cache = {
-      ...DEFAULTS,
-      ...parsed,
-      window: { ...DEFAULTS.window, ...(parsed.window ?? {}) },
-      // Repaired on every read: a half-written file must not be able to point
-      // the window at a server with no way back.
-      servers: sanitizeConnectionState(parsed.servers),
-    };
+    parsed = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
   } catch {
-    cache = { ...DEFAULTS, window: { ...DEFAULTS.window }, servers: { ...DEFAULT_CONNECTION_STATE } };
+    // Missing or unreadable file: every default applies.
+  }
+  // Every VALUE is validated (settings-schema.ts). A bad one — a port that is
+  // not a number, a harness the server does not know — falls back to its
+  // default with a warning, instead of being handed to the embedded server,
+  // which used to exit on every launch until the file was hand-edited.
+  const report: SanitizeReport = { repaired: [] };
+  cache = sanitizeSettings(parsed, DEFAULTS, report);
+  for (const { key, error } of report.repaired) {
+    log.warn(`Ignoring invalid setting in settings.json — using the default (${error})`, { key });
   }
   return cache;
 }

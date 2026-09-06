@@ -1,6 +1,11 @@
 // ────────────────────────────────────────────────────────────────
 // Web test environment shims.
 //
+// The jest-dom matchers are registered here and nowhere else. Without this
+// import every `toBeInTheDocument` / `toHaveTextContent` / `toBeDisabled`
+// assertion fails as `Invalid Chai property` — 48 failures across 12 files,
+// all of them the assertion library rather than the component under test.
+//
 // jsdom does not implement `matchMedia` at all, and under Node 26 its
 // `localStorage` is shadowed by Node's own global — which is `undefined`
 // unless the process was started with `--localstorage-file`. Both surface as
@@ -10,6 +15,8 @@
 // the endpoint override from storage, and `ThemeProvider` asks for the
 // system colour scheme.
 // ────────────────────────────────────────────────────────────────
+
+import '@testing-library/jest-dom/vitest';
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>();
@@ -61,6 +68,31 @@ if (typeof window.matchMedia !== 'function') {
         dispatchEvent: () => false,
       }) as unknown as MediaQueryList,
   });
+}
+
+// jsdom implements no scrolling at all, so `scrollIntoView` is missing.
+// RightPane calls it in an effect to keep the selected tab in view, which
+// took down every case in its file with a TypeError from the effect.
+if (typeof Element !== 'undefined' && typeof Element.prototype.scrollIntoView !== 'function') {
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    configurable: true,
+    writable: true,
+    value(): void {},
+  });
+}
+
+// jsdom has no `ResizeObserver`, and RightPane constructs one to drive its
+// drag-resize. The reference error fires inside a passive effect, so React
+// reports it as a render failure and every case in the file fails at once
+// with nothing to do with what it was asserting.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  // A no-op is right here: jsdom never lays anything out, so a faithful
+  // implementation would report zero-sized boxes forever anyway.
+  globalThis.ResizeObserver = class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  } as unknown as typeof ResizeObserver;
 }
 
 // jsdom's `Blob` predates `arrayBuffer()`, which the artifact download path

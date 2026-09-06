@@ -2,7 +2,7 @@
 // DrizzleChatRepository — IChatRepository impl (v2)
 // ────────────────────────────────────────────────────────────────
 
-import { eq } from 'drizzle-orm';
+import { count, eq } from 'drizzle-orm';
 import type { IChatRepository } from '@generatorai/core';
 import type { Chat, ChatLocalFolder, ChatStatus, BackgroundTaskMeta, BackgroundTaskStatus } from '@generatorai/shared';
 import { NotFoundError, StorageError, DEFAULT_AGENT_MODE, coerceAgentMode } from '@generatorai/shared';
@@ -103,6 +103,14 @@ export class DrizzleChatRepository implements IChatRepository {
       .from(chats)
       .where(eq(chats.status, status));
     return rows.map((r) => this.mapRow(r));
+  }
+
+  async countByStatus(status: ChatStatus): Promise<number> {
+    const [row] = await this.db
+      .select({ value: count() })
+      .from(chats)
+      .where(eq(chats.status, status));
+    return row?.value ?? 0;
   }
 
   async update(id: string, updates: Partial<Chat>): Promise<Chat> {

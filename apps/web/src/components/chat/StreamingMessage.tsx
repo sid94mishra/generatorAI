@@ -18,7 +18,8 @@ import { StreamPanel } from '@/components/agent/StreamPanel.js';
 import { deriveStreamView } from '@/components/agent/deriveTimeline.js';
 import { useTextToSpeech } from '@/hooks/useTextToSpeech.js';
 import { toast } from '@/components/Toast.js';
-import { AudioLines, Loader2, Square } from 'lucide-react';
+import { AudioLines, Square } from 'lucide-react';
+import { Button, Spinner } from '@/components/ui/index.js';
 
 interface StreamingMessageProps {
   stream: StreamState;
@@ -45,6 +46,12 @@ interface StreamingMessageProps {
     answers: Record<string, string[]>,
     freeformResponse?: string,
   ) => void;
+  /** Review finding 5.1 — allow/deny a blocking tool-permission prompt. */
+  onAnswerPermission?: (
+    interactionId: string,
+    behavior: 'allow' | 'deny',
+    message?: string,
+  ) => void;
   planBusy?: boolean;
   /** Click-throughs for per-op diff icons / shell console / summary card. */
   onOpenChanges?: (filePath?: string) => void;
@@ -62,6 +69,7 @@ export function StreamingMessage({
   onApprovePlan,
   onRequestPlanChanges,
   onAnswerQuestion,
+  onAnswerPermission,
   planBusy,
 }: StreamingMessageProps) {
   const isActive = stream.status === 'streaming' || stream.status === 'thinking';
@@ -134,6 +142,7 @@ export function StreamingMessage({
           {...(onApprovePlan ? { onApprovePlan } : {})}
           {...(onRequestPlanChanges ? { onRequestPlanChanges } : {})}
           {...(onAnswerQuestion ? { onAnswerQuestion } : {})}
+          {...(onAnswerPermission ? { onAnswerPermission } : {})}
           planBusy={planBusy ?? false}
         />
       )}
@@ -142,22 +151,24 @@ export function StreamingMessage({
           the turn is actually live — once it completes, AssistantMessage's
           "Read aloud" is the right control for the finished text. */}
       {isActive && ttsSupported && sessionId && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={handleSpeakLive}
           className="mt-1.5 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] transition-colors"
           title={isSpeakingOrConnecting ? 'Stop speaking' : 'Speak this response aloud as it is written'}
           aria-label={isSpeakingOrConnecting ? 'Stop speaking' : 'Speak this response aloud as it is written'}
         >
           {ttsStatus === 'connecting' ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner size="sm" />
           ) : ttsStatus === 'speaking' ? (
             <Square className="h-3.5 w-3.5" />
           ) : (
             <AudioLines className="h-3.5 w-3.5" />
           )}
           {isSpeakingOrConnecting ? 'Stop' : 'Speak live'}
-        </button>
+        </Button>
       )}
 
       {/* Initial loading state — spinner + shimmer skeleton with contextual text */}
@@ -165,7 +176,7 @@ export function StreamingMessage({
         <div className="animate-block-in mt-4">
           <div className="flex gap-3">
             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-white">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Spinner size="md" />
             </div>
             <div className="flex-1 space-y-3 pt-1">
               {/* Status indicator with spinner */}

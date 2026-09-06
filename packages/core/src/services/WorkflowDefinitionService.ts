@@ -12,17 +12,70 @@ import type {
   CreateStageParams,
   CreateEdgeParams,
   ImportWorkflowJson,
+  OrchestratorConfig,
 } from '@generatorai/shared';
-import { generateId, ValidationError } from '@generatorai/shared';
+import { generateId, ValidationError, DAGValidationError, ConflictError } from '@generatorai/shared';
 import type { IWorkflowDefinitionRepository } from '../domain/ports/IWorkflowDefinitionRepository.js';
 import type { IStageDefinitionRepository } from '../domain/ports/IStageDefinitionRepository.js';
 import type { IStageEdgeRepository } from '../domain/ports/IStageEdgeRepository.js';
+import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import { validateDAG, buildDAG } from '../domain/dag/DAGValidator.js';
 import type { DAGValidationResult } from '../domain/dag/types.js';
 import type { TemplateRegistry } from './TemplateRegistry.js';
 import type { WorkflowTemplate, WorkflowTemplateStage } from '@generatorai/shared';
 import { templateStageToCreateParams } from '@generatorai/shared';
 import type { DAGScheduler } from './DAGScheduler.js';
+
+/** Options for `WorkflowDefinitionService.importFromTemplate`. */
+export interface ImportFromTemplateOptions {
+  /** Definition name; defaults to the template's. */
+  name?: string;
+  /** Bind the new definition to a project. */
+  projectId?: string;
+  /** Per-variable default overrides, keyed by variable name. */
+  variableOverrides?: Record<string, unknown>;
+  /** Auto-commit post-processing; default false. */
+  autoCommit?: boolean;
+}
+
+/**
+ * Template variable type → definition variable type. Template authors use
+ * `git_url`/`git_urls` for repository inputs; a definition only knows the
+ * five primitive kinds.
+ */
+function templateVariableType(type: string): 'string' | 'number' | 'boolean' | 'choice' | 'text' {
+  switch (type) {
+    case 'choice':
+      return 'choice';
+    case 'text':
+      return 'text';
+    case 'number':
+      return 'number';
+    case 'boolean':
+      return 'boolean';
+    default:
+      return 'string';
+  }
+}
+
+/**
+ * Map a template's configurable variables onto definition variables, applying
+ * caller-supplied default overrides. Shared by every template import path.
+ */
+export function templateVariablesToDefinitions(
+  variables: ReadonlyArray<Record<string, unknown>>,
+  overrides?: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  return variables.map((cv) => ({
+    name: cv['name'],
+    type: templateVariableType(String(cv['type'] ?? 'string')),
+    label: cv['label'],
+    description: cv['description'],
+    required: cv['required'],
+    defaultValue: overrides?.[String(cv['name'])] ?? cv['defaultValue'],
+    options: cv['options'],
+  }));
+}
 
 export class WorkflowDefinitionService {
   constructor(
@@ -40,9 +93,40 @@ export class WorkflowDefinitionService {
      * network/fs — so it is safe to run inside the SQLite write transaction.
      */
     private withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>,
+    /**
+     * Item 9 — optional so every existing construction site keeps compiling;
+     * when omitted, `deleteDefinition` falls back to the old unconditional
+     * cascade (no run-count guard) rather than throwing on a missing
+     * dependency. Wire it up wherever runs can actually exist.
+     */
+    private workflowRunRepo?: IWorkflowRunRepository,
   ) {}
 
   // ── Definition CRUD ──
+
+  /**
+   * Item 8 — throws `DAGValidationError` (422, `validationErrors` carries the
+   * structured list) when `stages`/`edges` (or, if omitted, the definition's
+   * CURRENT persisted stages/edges) do not form a valid DAG. Every write path
+   * that can change the graph's shape — create, addStage, updateStage,
+   * addEdge — runs this before persisting, so a cycle is rejected at save
+   * time instead of surfacing only when the workflow runs.
+   */
+  private async assertValidDAG(
+    workflowDefinitionId: string,
+    stages?: StageDefinition[],
+    edges?: StageEdge[],
+  ): Promise<void> {
+    const resolvedStages = stages ?? (await this.stageRepo.getByDefinitionId(workflowDefinitionId));
+    const resolvedEdges = edges ?? (await this.edgeRepo.getByDefinitionId(workflowDefinitionId));
+    const result = validateDAG(resolvedStages, resolvedEdges);
+    if (!result.valid) {
+      throw new DAGValidationError(
+        `Workflow definition is not a valid DAG: ${result.errors.join('; ')}`,
+        result.errors,
+      );
+    }
+  }
 
   async createDefinition(params: CreateWorkflowDefinitionParams): Promise<WorkflowDefinition> {
     const now = new Date();
@@ -63,7 +147,13 @@ export class WorkflowDefinitionService {
       createdAt: now,
       updatedAt: now,
     };
-    return this.definitionRepo.create(definition);
+    const created = await this.definitionRepo.create(definition);
+    // A brand-new definition has no stages/edges yet, so this is trivially
+    // valid today — it exists so this path can't silently diverge from
+    // addStage/updateStage/addEdge if `createDefinition` ever grows the
+    // ability to seed initial stages.
+    await this.assertValidDAG(created.id, [], []);
+    return created;
   }
 
   async getDefinition(id: string): Promise<WorkflowDefinition> {
@@ -104,11 +194,46 @@ export class WorkflowDefinitionService {
     return updated;
   }
 
-  async deleteDefinition(id: string): Promise<void> {
-    // Cascade: edges first, then stages, then definition
-    await this.edgeRepo.deleteByDefinitionId(id);
-    await this.stageRepo.deleteByDefinitionId(id);
-    await this.definitionRepo.delete(id);
+  /**
+   * Item 9 — deletes a definition and its stages/edges atomically.
+   *
+   * Previously this ran three unguarded deletes with no transaction: when
+   * the workflow had runs, the second delete (stages) failed on a foreign
+   * key, leaving edges already deleted and everything else intact —
+   * silently corrupting the definition instead of refusing the operation.
+   *
+   * Now: when runs reference this definition, refuse with a `ConflictError`
+   * (409) naming how many, UNLESS `opts.force` is set, in which case the
+   * runs are deleted too — all inside one transaction (when the caller
+   * supplied `withTransaction`), so a mid-delete failure can't leave a
+   * partially-deleted definition.
+   */
+  async deleteDefinition(id: string, opts?: { force?: boolean }): Promise<void> {
+    const runs = this.workflowRunRepo ? await this.workflowRunRepo.getByDefinitionId(id) : [];
+    if (runs.length > 0 && !opts?.force) {
+      throw new ConflictError(
+        `Cannot delete workflow definition ${id}: ${runs.length} run${runs.length === 1 ? '' : 's'} ` +
+        `still reference it. Delete the run${runs.length === 1 ? '' : 's'} first, or pass force:true to remove ${runs.length === 1 ? 'it' : 'them'} too.`,
+      );
+    }
+
+    const doDelete = async (): Promise<void> => {
+      if (runs.length > 0 && opts?.force && this.workflowRunRepo) {
+        for (const run of runs) {
+          await this.workflowRunRepo.delete(run.id);
+        }
+      }
+      // Cascade: edges first, then stages, then definition
+      await this.edgeRepo.deleteByDefinitionId(id);
+      await this.stageRepo.deleteByDefinitionId(id);
+      await this.definitionRepo.delete(id);
+    };
+
+    if (this.withTransaction) {
+      await this.withTransaction(doDelete);
+    } else {
+      await doDelete();
+    }
   }
 
   // ── Stage CRUD ──
@@ -154,12 +279,29 @@ export class WorkflowDefinitionService {
       browserConfig: params.browserConfig,
       createdAt: new Date(),
     };
+
+    // Item 8 — validate the DAG as it WOULD be with this stage added, before
+    // persisting.
+    const edges = await this.edgeRepo.getByDefinitionId(params.workflowDefinitionId);
+    await this.assertValidDAG(params.workflowDefinitionId, [...existing, stage], edges);
+
     const created = await this.stageRepo.create(stage);
     this.dagScheduler?.clearCache(params.workflowDefinitionId);
     return created;
   }
 
   async updateStage(id: string, updates: Partial<StageDefinition>): Promise<StageDefinition> {
+    // Item 8 — validate the DAG as it WOULD be with these updates applied,
+    // before persisting. Most stage edits (prompt text, timeouts, ...) can't
+    // affect DAG shape, but this stays correct even for the ones that could
+    // in the future without needing to know which fields those are.
+    const current = await this.stageRepo.getById(id);
+    const merged: StageDefinition = { ...current, ...updates };
+    const siblings = await this.stageRepo.getByDefinitionId(current.workflowDefinitionId);
+    const nextStages = siblings.map((s) => (s.id === id ? merged : s));
+    const edges = await this.edgeRepo.getByDefinitionId(current.workflowDefinitionId);
+    await this.assertValidDAG(current.workflowDefinitionId, nextStages, edges);
+
     const updated = await this.stageRepo.update(id, updates);
     if (updated.workflowDefinitionId) {
       this.dagScheduler?.clearCache(updated.workflowDefinitionId);
@@ -193,6 +335,13 @@ export class WorkflowDefinitionService {
       toStageId: params.toStageId,
       edgeType: params.edgeType ?? 'on_success',
     };
+
+    // Item 8 — this is the edit that actually CAN close a cycle, so this is
+    // the one check that must run before the edge is persisted, not after.
+    const stages = await this.stageRepo.getByDefinitionId(params.workflowDefinitionId);
+    const existingEdges = await this.edgeRepo.getByDefinitionId(params.workflowDefinitionId);
+    await this.assertValidDAG(params.workflowDefinitionId, stages, [...existingEdges, edge]);
+
     const created = await this.edgeRepo.create(edge);
     this.dagScheduler?.clearCache(params.workflowDefinitionId);
     return created;
@@ -226,39 +375,79 @@ export class WorkflowDefinitionService {
 
   // ── Template Import/Export ──
 
-  async importFromTemplate(templateId: string, nameOverride?: string): Promise<WorkflowDefinition> {
+  /**
+   * THE template importer. `WorkflowOrchestrator.createFromTemplate` (used by
+   * Settings → Templates) and the `/workflow-definitions/import-template`
+   * route both come through here.
+   *
+   * There used to be two: this one and a copy in the orchestrator that was
+   * not transactional (a stage-insert failure left a half-built definition),
+   * hardcoded `sessionMode: 'auto'` where this honoured the template's, forced
+   * `autoCommit: true`, and dropped the `imported` tag — the "fixed in one
+   * path, left in its duplicate" pattern. The orchestrator's extra inputs
+   * (project binding, per-variable default overrides, auto-commit) are options
+   * here so there is exactly one mapping.
+   *
+   * `opts` accepts a bare string for backward compatibility (`nameOverride`).
+   */
+  async importFromTemplate(
+    templateId: string,
+    opts?: string | ImportFromTemplateOptions,
+  ): Promise<WorkflowDefinition> {
+    const options: ImportFromTemplateOptions = typeof opts === 'string' ? { name: opts } : (opts ?? {});
     const template = this.templateRegistry.getWorkflowTemplate(templateId);
     if (!template) throw new ValidationError(`Template not found: ${templateId}`);
 
     // P0#4 — definition + stages + edges commit atomically (or roll back).
     const build = async (): Promise<WorkflowDefinition> => {
       const definition = await this.createDefinition({
-        name: nameOverride ?? template.name,
+        name: options.name ?? template.name,
         description: template.description,
         sessionMode: template.sessionMode ?? 'auto',
         harnessConfig: template.harnessConfig,
         tags: ['imported', `template:${templateId}`, ...(template.tags ?? [])],
+        ...(options.projectId ? { projectId: options.projectId } : {}),
+        // Item 7 — these were silently dropped on every template import: a
+        // template's declared variables/hooks never reached the definition,
+        // and its preprocessing/result-validation/codebase-requirement
+        // settings (`orchestratorConfig`) never reached the run at all.
+        variables: templateVariablesToDefinitions(
+          (template.variables ?? []) as unknown as ReadonlyArray<Record<string, unknown>>,
+          options.variableOverrides,
+        ) as unknown as CreateWorkflowDefinitionParams['variables'],
+        hooks: (template.hooks ?? []) as unknown as CreateWorkflowDefinitionParams['hooks'],
+        orchestratorConfig: {
+          category: 'derived',
+          parentTemplateId: templateId,
+          gitRepositories: [],
+          requiresCodebase: template.requiresCodebase ?? false,
+          preprocessingSteps: (template.preprocessingSteps ?? []) as unknown as OrchestratorConfig['preprocessingSteps'],
+          postProcessingSteps: [],
+          resultValidations: (template.resultValidations ?? []) as unknown as OrchestratorConfig['resultValidations'],
+          autoCommit: options.autoCommit ?? false,
+          autoCreatePR: false,
+        } satisfies OrchestratorConfig,
       });
 
       try {
-        // Create stages from template stages
+        // Create stages from template stages.
+        //
+        // Item 7 — this used to hand-pick six fields off each template stage
+        // (name/order/prompts/hooks/harnessConfigOverrides/variables), which
+        // silently dropped retryPolicy, timeoutMs, condition, contextFilter,
+        // agentName, resultValidation, expectedOutput, outputSchema,
+        // agentRef, contextSources and outputFormat — including
+        // `approvalRequired`, so an approval-gated template ran unattended.
+        // `templateStageToCreateParams` is the SAME mapper `importFromJSON`
+        // (below) already uses; using it here too means there is exactly one
+        // template-stage → CreateStageParams mapping in the codebase instead
+        // of two that can drift apart.
         const createdStages: Array<{ id: string }> = [];
         for (let i = 0; i < template.stages.length; i++) {
           const tplStage = template.stages[i]!;
-          const stage = await this.addStage({
-            workflowDefinitionId: definition.id,
-            name: tplStage.name,
-            order: i,
-            prompts: tplStage.prompts.map((p) => ({
-              label: p.label ?? tplStage.name,
-              text: p.text,
-              waitForCompletion: p.waitForCompletion ?? true,
-              attachments: p.attachments?.map((a) => typeof a === 'string' ? a : a),
-            })),
-            hooks: tplStage.hooks,
-            harnessConfigOverrides: tplStage.harnessConfigOverrides,
-            variables: tplStage.variables,
-          });
+          const stage = await this.addStage(
+            templateStageToCreateParams(tplStage, definition.id, i) as unknown as CreateStageParams,
+          );
           createdStages.push(stage);
         }
 

@@ -1,0 +1,69 @@
+# ────────────────────────────────────────────────────────────────
+# GeneratorAI — the server, as a container.
+#
+# `server.Dockerfile` existed with nothing that ran it; this is the missing
+# service. Single-tenant by design: one container, one SQLite database on a
+# named volume, bound to loopback. Put a TLS-terminating proxy in front of it
+# to reach it from anywhere else — see .github/docs/operations.md.
+#
+# Usage:
+#   cd docker
+#   GENERATORAI_SECRET_KEY='<64 hex chars — keep it; it encrypts the vault>' docker compose up -d --build
+#
+# The secret key is REQUIRED (`:?` below): the server refuses to boot without
+# one, and the same key must be presented on every start or the encrypted
+# secrets vault becomes unreadable. Generate one with
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+#
+# Observability is a separate, optional stack: docker/observability/.
+# ────────────────────────────────────────────────────────────────
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: docker/server.Dockerfile
+    image: generatorai/server:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3100:3100"
+    environment:
+      NODE_ENV: production
+      PORT: "3100"
+      # Bind to every interface INSIDE the container; the `ports:` entry above
+      # is what limits reachability to this host.
+      GENERATORAI_BIND_HOST: 0.0.0.0
+      DB_PATH: /data/data.db
+      WORKSPACES_DIR: /data/workspaces
+      ARTIFACTS_DIR: /data/artifacts
+      GENERATORAI_SECRET_KEY: ${GENERATORAI_SECRET_KEY:?set GENERATORAI_SECRET_KEY — it encrypts the secrets vault and must be stable across restarts}
+      # Provider credentials are read from the environment the CLIs expect;
+      # pass through whichever you use.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GH_TOKEN: ${GH_TOKEN:-}
+      # Memory bounds (see ARCH_PERF_AUDIT_2026-09-05.md §6). Each live Claude
+      # session is a ~230 MB CLI process; these are the defaults, spelled out
+      # so an operator sizing the container sees them.
+      GENERATORAI_MAX_CONCURRENT_AGENT_TURNS: "4"
+      GENERATORAI_CLAUDE_MAX_LIVE_SESSIONS: "8"
+      GENERATORAI_CLAUDE_SESSION_IDLE_MINUTES: "10"
+      LOG_LEVEL: info
+      # Rotating file log inside the data volume, in addition to stdout.
+      GENERATORAI_LOG_FILE: /data/logs/server.log
+      GENERATORAI_LOG_MAX_SIZE: 50m
+      GENERATORAI_LOG_MAX_FILES: "5"
+    volumes:
+      - generatorai-data:/data
+    # The image's own HEALTHCHECK (15 s timeout, 5 retries) is deliberately
+    # generous: /api/health shares the single Node thread with synchronous
+    # SQLite work and has been observed to take >10 s under load. A tighter
+    # check would restart a merely BUSY container mid-turn.
+    deploy:
+      resources:
+        limits:
+          # Node heap (~400 MB) + up to 8 Claude sessions (~230 MB each) +
+          # Copilot pool + one Chromium. Raise together with the session caps.
+          memory: 4g
+
+volumes:
+  generatorai-data:

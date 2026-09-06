@@ -77,6 +77,8 @@ const APPEARANCE_VARS: Array<[keyof AppearanceTokens, string]> = [
   ['overlay', '--overlay'],
   ['subtle', '--subtle'],
   ['emphasis', '--emphasis'],
+  ['surface', '--surface'],
+  ['surfaceHover', '--surface-hover'],
   ['primaryForeground', '--primary-foreground'],
   ['secondary', '--secondary'],
   ['secondaryForeground', '--secondary-foreground'],
@@ -138,6 +140,8 @@ const THEME_COLOR_VARS = [
   'overlay',
   'subtle',
   'emphasis',
+  'surface',
+  'surface-hover',
   'primary',
   'primary-emphasis',
   'primary-foreground',
@@ -184,7 +188,7 @@ function appearanceBlock(theme: ThemeDef, appearance: Appearance, selector: stri
   const lines: string[] = [`${selector} {`, `  color-scheme: ${appearance};`, ''];
 
   lines.push('  /* Surfaces */');
-  for (const key of ['background', 'foreground', 'card', 'cardForeground', 'popover', 'popoverForeground', 'raised', 'overlay', 'subtle', 'emphasis'] as const) {
+  for (const key of ['background', 'foreground', 'card', 'cardForeground', 'popover', 'popoverForeground', 'raised', 'overlay', 'subtle', 'emphasis', 'surface', 'surfaceHover'] as const) {
     lines.push(`  ${varName(key)}: ${t[key]};`);
   }
 

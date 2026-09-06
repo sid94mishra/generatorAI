@@ -3,14 +3,26 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import { validateCronExpression, isValidTimezone } from '../utils/cron.js';
 
-// Cron expression validator — supports standard 5-field cron format:
-// minute hour day-of-month month day-of-week
-// Each field allows: *, ranges (1-5), lists (1,3,5), steps (*/5), and plain numbers.
-const cronFieldPattern = '(\\*|[0-9]{1,2}(-[0-9]{1,2})?)(((\\/[0-9]{1,2})|(,[0-9]{1,2}(-[0-9]{1,2})?))*)';
-const cronExpressionRegex = new RegExp(
-  `^${cronFieldPattern}(\\s+${cronFieldPattern}){4}$`,
-);
+// Cron expression validator. Delegates to the SAME parser the scheduler
+// fires from (`utils/cron.ts`) so "accepted here" and "fires there" can
+// never disagree again: field ranges are checked (`99 * * * *` is
+// refused) and month / weekday names are accepted (`0 9 * * MON-FRI`).
+const cronExpressionSchema = z.string().min(1).max(100).superRefine((value, ctx) => {
+  const result = validateCronExpression(value);
+  if (!result.ok) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Invalid cron expression: ${result.error}` });
+  }
+});
+
+/** IANA zone name, e.g. `Europe/Berlin`. Validated against the runtime's tz data. */
+const timezoneSchema = z.string().min(1).max(64).refine(isValidTimezone, {
+  message: 'timezone must be a valid IANA zone name (e.g. "America/New_York")',
+});
+
+const missedRunPolicySchema = z.enum(['skip', 'run_once']);
+const overlapPolicySchema = z.enum(['skip', 'queue']);
 
 // ── Data Source Config Schemas (E1) ──
 
@@ -44,6 +56,8 @@ const FileDataSourceSchema = z.object({
   type: z.literal('file'),
   filePath: z.string().min(1).max(500),
   format: z.enum(['json_array', 'csv', 'jsonl']).optional(),
+  /** Hidden files (`.env`, `.git/…`) are refused unless explicitly allowed. */
+  allowHidden: z.boolean().optional(),
   schema: DataSourceSchemaValidator,
 });
 
@@ -174,7 +188,10 @@ export const CreateAutomationSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
   triggerType: z.enum(['manual', 'schedule', 'webhook']),
-  cronExpression: z.string().regex(cronExpressionRegex, 'Invalid cron expression').optional(),
+  cronExpression: cronExpressionSchema.optional(),
+  timezone: timezoneSchema.optional(),
+  missedRunPolicy: missedRunPolicySchema.optional(),
+  overlapPolicy: overlapPolicySchema.optional(),
   workflowIds: z.array(z.string().uuid()).min(1, 'At least one workflow is required'),
   inputMode: z.enum(['single', 'loop', 'batch', 'script']).default('single'),
   loopVariable: z.string().max(100).optional(),
@@ -278,7 +295,11 @@ export const UpdateAutomationSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional(),
   triggerType: z.enum(['manual', 'schedule', 'webhook']).optional(),
-  cronExpression: z.string().regex(cronExpressionRegex, 'Invalid cron expression').optional(),
+  cronExpression: cronExpressionSchema.optional(),
+  // Nullable so a caller can fall back to the server zone.
+  timezone: timezoneSchema.nullable().optional(),
+  missedRunPolicy: missedRunPolicySchema.optional(),
+  overlapPolicy: overlapPolicySchema.optional(),
   workflowIds: z.array(z.string().uuid()).min(1).optional(),
   inputMode: z.enum(['single', 'loop', 'batch', 'script']).optional(),
   loopVariable: z.string().max(100).optional(),

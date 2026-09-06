@@ -29,6 +29,7 @@ import { PairingOfferSchema, encodePairingOffer, pairingOfferUrl } from '@genera
 import { formatPairingCode } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 import { isLoopbackRequest } from '../middleware/auth.js';
+import { createRateLimitMiddleware } from '../middleware/rateLimit.js';
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -36,9 +37,34 @@ function safeEqual(a: string, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
-export function createInternalDesktopRoutes(container: Container): Router {
+/**
+ * Rate limit for the pairing mint. `/api` has its own limiter in app.ts; this
+ * prefix is mounted outside `/api` and used to have none, so a compromised
+ * renderer that found a way past the shell could mint all-scope grants as
+ * fast as it liked. One real caller mints once per launch; a handful per
+ * minute is generous.
+ */
+export interface InternalDesktopRateLimit {
+  perKeyLimit: number;
+  globalLimit: number;
+  windowMs: number;
+}
+
+// NOTE: deliberately NOT `as const` — that would type this object's fields as
+// the literal numbers 10/20/60000, and a caller (tests included) overriding
+// with a different budget — e.g. `{ perKeyLimit: 3, ... }` — would fail to
+// typecheck against `typeof INTERNAL_DESKTOP_RATE_LIMIT` even though any
+// `number` is functionally valid here (see `RateLimitOptions`).
+export const INTERNAL_DESKTOP_RATE_LIMIT: InternalDesktopRateLimit = { perKeyLimit: 10, globalLimit: 20, windowMs: 60_000 };
+
+export function createInternalDesktopRoutes(
+  container: Container,
+  rateLimit: InternalDesktopRateLimit = INTERNAL_DESKTOP_RATE_LIMIT,
+): Router {
   const router = Router();
   const { logger } = container;
+
+  router.use(createRateLimitMiddleware({ ...rateLimit, logger }));
 
   router.use((req, res, next) => {
     if (!isLoopbackRequest(req)) {

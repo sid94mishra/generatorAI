@@ -19,21 +19,18 @@ import type {
   StageValidationResult,
   StageResultValidation,
   PreprocessingResult,
-  PreprocessingStep,
   PostProcessingStep,
   WorkflowRun,
   WorkflowDefinition,
   GitRepositoryConfig,
   ILogger,
   CreateWorkflowDefinitionParams,
-  VariableDefinition,
   WorkflowTemplate,
   HookDefinition,
   WorkflowHookDefinition,
   HookPhaseResult,
 } from '@generatorai/shared';
-import type { CreateStageParams, WorkflowTemplateStage } from '@generatorai/shared';
-import { generateId, ValidationError, templateStageToCreateParams } from '@generatorai/shared';
+import { generateId, ValidationError } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { WorkflowRunService } from './WorkflowRunService.js';
@@ -53,6 +50,19 @@ import type { ProjectConfigService } from './ProjectConfigService.js';
 import type { WorkspaceManager } from './WorkspaceManager.js';
 import type { TemplateRegistry } from './TemplateRegistry.js';
 import type { HookExecutor, HookContext } from './HookExecutor.js';
+
+/**
+ * Item 10 — shape persisted under `run.variables.__postProcessingIntent`.
+ * Just enough to rebuild a minimal `OrchestratorContext` and re-run
+ * `setupCompletionCleanup` after a restart; see `reArmPendingPostProcessing`.
+ */
+interface PersistedPostProcessingIntent {
+  pending: boolean;
+  runWorkspaceDir: string;
+  gitRepositories: GitRepositoryConfig[];
+  clonedRepositories: Record<string, string>;
+  featureBranches: Record<string, string>;
+}
 
 export class WorkflowOrchestrator {
   /** Track active orchestration contexts for cleanup on cancel */
@@ -267,86 +277,18 @@ export class WorkflowOrchestrator {
       projectId?: string;
     },
   ): Promise<WorkflowDefinition> {
-    const template = this.templateRegistry.getWorkflowTemplate(templateId);
-    if (!template) {
-      throw new ValidationError(`Workflow template not found: ${templateId}`);
-    }
-
-    // Map configurable variables to VariableDefinition
-    const variableDefs: VariableDefinition[] = template.variables.map(
-      (cv) => ({
-        name: cv.name,
-        type: this.mapConfigVarType(cv.type),
-        label: cv.label,
-        description: cv.description,
-        required: cv.required,
-        defaultValue: params.variables?.[cv.name] ?? cv.defaultValue,
-        options: cv.options,
-      }),
-    );
-
-    // Build orchestrator config
-    const orchestratorConfig: OrchestratorConfig = {
-      category: 'derived',
-      parentTemplateId: templateId,
-      gitRepositories: [],
-      preprocessingSteps: template.preprocessingSteps as unknown as PreprocessingStep[],
-      postProcessingSteps: [],
-      resultValidations: template.resultValidations as unknown as StageResultValidation[],
-      requiresCodebase: template.requiresCodebase,
-      autoCommit: true,
-      autoCreatePR: false,
-    };
-
-    // Create definition
-    const createParams: CreateWorkflowDefinitionParams = {
-      name: params.name ?? template.name,
-      description: template.description,
-      sessionMode: 'auto',
-      harnessConfig: template.harnessConfig,
-      variables: variableDefs,
-      tags: [`template:${templateId}`, ...template.tags],
-      orchestratorConfig,
+    // One importer. This used to be a second copy of
+    // `WorkflowDefinitionService.importFromTemplate` that was not
+    // transactional, hardcoded `sessionMode: 'auto'` and `autoCommit: true`,
+    // and dropped the `imported` tag — see the note on the service method.
+    // Auto-commit stays on for orchestrated (Settings → Templates) imports,
+    // which is what that path always did.
+    return this.definitionService.importFromTemplate(templateId, {
+      name: params.name,
       projectId: params.projectId,
-      // Workflow-level hooks are part of the template (the exporter writes
-      // them and `importFromJSON` reads them); dropping them here meant a
-      // template's run-lifecycle hooks silently never fired in workflows
-      // created through Settings → Templates.
-      hooks: template.hooks as CreateWorkflowDefinitionParams['hooks'],
-    };
-
-    const definition = await this.definitionService.createDefinition(createParams);
-
-    // Create stages from template. This used to pass only name/description/
-    // order/prompts, so creating a workflow from a template silently threw
-    // away every retry policy, timeout, run condition, context filter,
-    // validation rule, approval gate, hook and model override the template
-    // declared — the same mapping the JSON importer uses is required here.
-    for (const stageTemplate of template.stages) {
-      await this.definitionService.addStage(
-        templateStageToCreateParams(
-          stageTemplate as unknown as WorkflowTemplateStage,
-          definition.id,
-        ) as unknown as CreateStageParams,
-      );
-    }
-
-    // Create edges from template
-    const stages = await this.definitionService.getDefinitionWithStages(definition.id);
-    for (const edgeTemplate of template.edges) {
-      const fromStage = stages.stages[edgeTemplate.fromStageIndex];
-      const toStage = stages.stages[edgeTemplate.toStageIndex];
-      if (fromStage && toStage) {
-        await this.definitionService.addEdge({
-          workflowDefinitionId: definition.id,
-          fromStageId: fromStage.id,
-          toStageId: toStage.id,
-          edgeType: edgeTemplate.edgeType as 'on_success' | 'on_failure' | 'on_completion' | 'always',
-        });
-      }
-    }
-
-    return definition;
+      variableOverrides: params.variables,
+      autoCommit: true,
+    });
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -734,17 +676,22 @@ export class WorkflowOrchestrator {
         }
       }
 
-      // ── Phase 5: Start the DAG execution ──
-      await this.workflowRunService.startRun(run.id);
-
-      // ── Workflow Hook: on_all_stages_scheduled ──
-      const schedHookCtx = this.buildWorkflowHookContext(run.id, definition.id, context);
-      await this.executeWorkflowHooks('on_all_stages_scheduled', definition.hooks, schedHookCtx);
-
-      // ── Phase 5: Wait for completion and validate results ──
-      // The WorkflowRunService handles DAG execution asynchronously.
-      // We set up a listener to validate results after each stage completes.
-      // Validation runs if: workflow-level resultValidations exist OR any stage has per-stage rules.
+      // ── Phase 5: Attach listeners BEFORE starting the DAG execution ──
+      //
+      // Item 10 — this used to happen AFTER `startRun()`, which raced a fast
+      // run to zero: a run that completes before `startRun()` even returns
+      // fired its completion event into a listener that did not exist yet,
+      // so the run reported success and never ran auto-commit/auto-PR
+      // post-processing. The listener itself also lived only in
+      // `activeContexts` (memory) — a server restart mid-run lost it
+      // entirely. Attaching first (and persisting the intent to the run's
+      // `variables` column) closes both holes: `setupCompletionCleanup`
+      // checks for an already-terminal run before subscribing, and
+      // `reArmPendingPostProcessing()` (called once at boot) re-arms any run
+      // whose persisted intent is still `pending`.
+      //
+      // Validation runs if: workflow-level resultValidations exist OR any
+      // stage has per-stage rules.
       const hasWorkflowValidations = orchestratorConfig?.resultValidations && orchestratorConfig.resultValidations.length > 0;
       const stages = await this.stageDefRepo.getByDefinitionId(definition.id);
       const hasStageValidations = stages.some((s) => s.resultValidation && s.resultValidation.length > 0);
@@ -752,8 +699,15 @@ export class WorkflowOrchestrator {
         this.setupResultValidation(run.id, orchestratorConfig ?? { category: 'custom', gitRepositories: [], preprocessingSteps: [], postProcessingSteps: [], resultValidations: [], requiresCodebase: false, autoCommit: false, autoCreatePR: false });
       }
 
-      // Set up post-processing and cleanup hooks for when the run completes
-      this.setupCompletionCleanup(run.id, context, definition, gitRepos, runWorkspaceDir);
+      await this.persistPostProcessingIntent(run.id, context, gitRepos, runWorkspaceDir);
+      await this.setupCompletionCleanup(run.id, context, definition, gitRepos, runWorkspaceDir);
+
+      // ── Phase 5: Start the DAG execution ──
+      await this.workflowRunService.startRun(run.id);
+
+      // ── Workflow Hook: on_all_stages_scheduled ──
+      const schedHookCtx = this.buildWorkflowHookContext(run.id, definition.id, context);
+      await this.executeWorkflowHooks('on_all_stages_scheduled', definition.hooks, schedHookCtx);
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -895,18 +849,169 @@ export class WorkflowOrchestrator {
   }
 
   /**
-   * Setup cleanup when the workflow run completes.
-   * Includes a safety timeout to prevent memory leaks.
+   * Item 10 — the actual "run finished" handling (post-processing / PR
+   * creation / sandbox cleanup / completion hooks), factored out of the
+   * event-listener callback so it can ALSO be invoked directly:
+   *   - when `setupCompletionCleanup` discovers the run is already terminal
+   *     at subscribe time (the completion event already fired and was
+   *     missed — the race this item exists to close), and
+   *   - from `reArmPendingPostProcessing()` on boot, for a run whose
+   *     persisted intent (`__postProcessingIntent`) is still `pending`.
+   *
+   * Always clears the persisted intent when it finishes, success or not —
+   * post-processing is best-effort and logged on failure, same as before;
+   * this method does not retry.
    */
-  private setupCompletionCleanup(
+  private async handleRunTerminal(
+    status: 'completed' | 'failed' | 'cancelled',
     runId: string,
     context: OrchestratorContext,
     definition: WorkflowDefinition,
     gitRepos: GitRepositoryConfig[],
     runWorkspaceDir: string,
-  ): void {
-    const MAX_LISTENER_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+  ): Promise<void> {
     const orchestratorConfig = definition.orchestratorConfig;
+
+    // ── Post-Processing Phase ──
+    // Only run post-processing on successful completion
+    if (status === 'completed') {
+      const postSteps = this.buildPostProcessingSteps(
+        orchestratorConfig,
+        gitRepos,
+        context.clonedRepositories,
+      );
+
+      if (postSteps.length > 0) {
+        try {
+          // ── Workflow Hook: on_postprocessing_start ──
+          const ppHookCtx = this.buildWorkflowHookContext(runId, definition.id, context);
+          await this.executeWorkflowHooks('on_postprocessing_start', definition.hooks, ppHookCtx);
+
+          // ── Workflow Hook: pre_commit ── (before auto-commit/PR steps)
+          await this.executeWorkflowHooks('pre_commit', definition.hooks, ppHookCtx);
+
+          await this.eventBus.emitGlobal({
+            kind: 'workflow_run.postprocessing_started',
+            data: { workflowRunId: runId, stepCount: postSteps.length },
+          });
+
+          context.postProcessingResults = await this.preprocessor.executePostProcessing(
+            postSteps,
+            {
+              workflowRunId: runId,
+              variables: context.resolvedVariables,
+              gitRepositories: gitRepos,
+              clonedPaths: context.clonedRepositories,
+              featureBranches: context.featureBranches,
+              runWorkspaceDir,
+            },
+          );
+
+          await this.eventBus.emitGlobal({
+            kind: 'workflow_run.postprocessing_completed',
+            data: {
+              workflowRunId: runId,
+              results: context.postProcessingResults.map((r: PreprocessingResult) => ({
+                stepName: r.stepName,
+                success: r.success,
+                durationMs: r.durationMs,
+              })),
+            },
+          });
+
+          // ── Workflow Hook: post_commit ── (after auto-commit/PR steps)
+          const postCommitHookCtx = this.buildWorkflowHookContext(runId, definition.id, context);
+          await this.executeWorkflowHooks('post_commit', definition.hooks, postCommitHookCtx);
+
+          // ── Workflow Hook: on_pr_created ── (HOOK-1: previously dormant)
+          // Fire only when a create_pr post-processing step actually ran and
+          // succeeded, so the phase reflects a real PR being opened.
+          const prStep = postSteps.find((s) => s.config.type === 'create_pr');
+          if (prStep) {
+            const prResult = context.postProcessingResults?.find(
+              (r: PreprocessingResult) => r.stepName === prStep.name,
+            );
+            if (prResult?.success) {
+              await this.executeWorkflowHooks('on_pr_created', definition.hooks, postCommitHookCtx);
+            }
+          }
+        } catch (postErr) {
+          this.logger.error(`[Orchestrator] Post-processing failed for run ${runId}: ${postErr}`);
+        }
+      }
+    }
+
+    // Note: We do NOT cleanup per-run clones — they contain the generated code
+    // that the user needs to review. The workspace is kept for inspection.
+
+    // ── Sandbox Cleanup ──
+    if (this.sandboxLifecycleManager) {
+      try {
+        await this.sandboxLifecycleManager.destroyForRun(runId);
+        await this.eventBus.emitGlobal({
+          kind: 'workflow_run.sandbox_destroyed',
+          data: { workflowRunId: runId },
+        });
+        this.logger.info(`[Orchestrator] Sandbox destroyed for completed run ${runId}`);
+      } catch (sandboxErr) {
+        this.logger.warn(`[Orchestrator] Sandbox cleanup failed for run ${runId}: ${sandboxErr}`);
+      }
+    }
+
+    // ── Workflow Hooks: on_run_complete / on_run_failed / on_run_cancelled ──
+    const completionHookCtx = this.buildWorkflowHookContext(runId, definition.id, context);
+    if (status === 'completed') {
+      await this.executeWorkflowHooks('on_run_complete', definition.hooks, completionHookCtx);
+    } else if (status === 'failed') {
+      await this.executeWorkflowHooks('on_run_failed', definition.hooks, completionHookCtx);
+    } else if (status === 'cancelled') {
+      await this.executeWorkflowHooks('on_run_cancelled', definition.hooks, completionHookCtx);
+    }
+
+    await this.eventBus.emitGlobal({
+      kind: 'workflow_run.orchestration_completed',
+      data: {
+        workflowRunId: runId,
+        preprocessingResults: context.preprocessingResults,
+        postProcessingResults: context.postProcessingResults,
+        stageValidationResults: context.stageValidationResults,
+      },
+    });
+
+    this.activeContexts.delete(runId);
+    await this.clearPostProcessingIntent(runId);
+  }
+
+  private isTerminalRunStatus(status: WorkflowRun['status']): status is 'completed' | 'failed' | 'cancelled' {
+    return status === 'completed' || status === 'failed' || status === 'cancelled';
+  }
+
+  /**
+   * Setup cleanup when the workflow run completes.
+   * Includes a safety timeout to prevent memory leaks.
+   *
+   * Item 10 — checks whether the run is ALREADY terminal before subscribing:
+   * this is called BEFORE `startRun()` now (see the caller), so in the
+   * normal case it never is, but a restart re-arming a run via
+   * `reArmPendingPostProcessing()` very much can find one — the whole point
+   * of that path is "the completion event already fired and was missed."
+   * When that happens, post-process immediately instead of subscribing to
+   * an event that will never come again.
+   */
+  private async setupCompletionCleanup(
+    runId: string,
+    context: OrchestratorContext,
+    definition: WorkflowDefinition,
+    gitRepos: GitRepositoryConfig[],
+    runWorkspaceDir: string,
+  ): Promise<void> {
+    const MAX_LISTENER_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+    const current = await this.runRepo.getById(runId).catch(() => undefined);
+    if (current && this.isTerminalRunStatus(current.status)) {
+      await this.handleRunTerminal(current.status, runId, context, definition, gitRepos, runWorkspaceDir);
+      return;
+    }
 
     const unsubscribe = this.eventBus.subscribeGlobal(async (event) => {
       const eventRunId = this.getEventRunId(event);
@@ -917,113 +1022,11 @@ export class WorkflowOrchestrator {
         event.kind === 'workflow_run.failed' ||
         event.kind === 'workflow_run.cancelled'
       ) {
-        // ── Post-Processing Phase ──
-        // Only run post-processing on successful completion
-        if (event.kind === 'workflow_run.completed') {
-          const postSteps = this.buildPostProcessingSteps(
-            orchestratorConfig,
-            gitRepos,
-            context.clonedRepositories,
-          );
-
-          if (postSteps.length > 0) {
-            try {
-              // ── Workflow Hook: on_postprocessing_start ──
-              const ppHookCtx = this.buildWorkflowHookContext(runId, definition.id, context);
-              await this.executeWorkflowHooks('on_postprocessing_start', definition.hooks, ppHookCtx);
-
-              // ── Workflow Hook: pre_commit ── (before auto-commit/PR steps)
-              await this.executeWorkflowHooks('pre_commit', definition.hooks, ppHookCtx);
-
-              await this.eventBus.emitGlobal({
-                kind: 'workflow_run.postprocessing_started',
-                data: { workflowRunId: runId, stepCount: postSteps.length },
-              });
-
-              context.postProcessingResults = await this.preprocessor.executePostProcessing(
-                postSteps,
-                {
-                  workflowRunId: runId,
-                  variables: context.resolvedVariables,
-                  gitRepositories: gitRepos,
-                  clonedPaths: context.clonedRepositories,
-                  featureBranches: context.featureBranches,
-                  runWorkspaceDir,
-                },
-              );
-
-              await this.eventBus.emitGlobal({
-                kind: 'workflow_run.postprocessing_completed',
-                data: {
-                  workflowRunId: runId,
-                  results: context.postProcessingResults.map((r: PreprocessingResult) => ({
-                    stepName: r.stepName,
-                    success: r.success,
-                    durationMs: r.durationMs,
-                  })),
-                },
-              });
-
-              // ── Workflow Hook: post_commit ── (after auto-commit/PR steps)
-              const postCommitHookCtx = this.buildWorkflowHookContext(runId, definition.id, context);
-              await this.executeWorkflowHooks('post_commit', definition.hooks, postCommitHookCtx);
-
-              // ── Workflow Hook: on_pr_created ── (HOOK-1: previously dormant)
-              // Fire only when a create_pr post-processing step actually ran and
-              // succeeded, so the phase reflects a real PR being opened.
-              const prStep = postSteps.find((s) => s.config.type === 'create_pr');
-              if (prStep) {
-                const prResult = context.postProcessingResults?.find(
-                  (r: PreprocessingResult) => r.stepName === prStep.name,
-                );
-                if (prResult?.success) {
-                  await this.executeWorkflowHooks('on_pr_created', definition.hooks, postCommitHookCtx);
-                }
-              }
-            } catch (postErr) {
-              this.logger.error(`[Orchestrator] Post-processing failed for run ${runId}: ${postErr}`);
-            }
-          }
-        }
-
-        // Note: We do NOT cleanup per-run clones — they contain the generated code
-        // that the user needs to review. The workspace is kept for inspection.
-
-        // ── Sandbox Cleanup ──
-        if (this.sandboxLifecycleManager) {
-          try {
-            await this.sandboxLifecycleManager.destroyForRun(runId);
-            await this.eventBus.emitGlobal({
-              kind: 'workflow_run.sandbox_destroyed',
-              data: { workflowRunId: runId },
-            });
-            this.logger.info(`[Orchestrator] Sandbox destroyed for completed run ${runId}`);
-          } catch (sandboxErr) {
-            this.logger.warn(`[Orchestrator] Sandbox cleanup failed for run ${runId}: ${sandboxErr}`);
-          }
-        }
-
-        // ── Workflow Hooks: on_run_complete / on_run_failed / on_run_cancelled ──
-        const completionHookCtx = this.buildWorkflowHookContext(runId, definition.id, context);
-        if (event.kind === 'workflow_run.completed') {
-          await this.executeWorkflowHooks('on_run_complete', definition.hooks, completionHookCtx);
-        } else if (event.kind === 'workflow_run.failed') {
-          await this.executeWorkflowHooks('on_run_failed', definition.hooks, completionHookCtx);
-        } else if (event.kind === 'workflow_run.cancelled') {
-          await this.executeWorkflowHooks('on_run_cancelled', definition.hooks, completionHookCtx);
-        }
-
-        await this.eventBus.emitGlobal({
-          kind: 'workflow_run.orchestration_completed',
-          data: {
-            workflowRunId: runId,
-            preprocessingResults: context.preprocessingResults,
-            postProcessingResults: context.postProcessingResults,
-            stageValidationResults: context.stageValidationResults,
-          },
-        });
-
-        this.activeContexts.delete(runId);
+        const status =
+          event.kind === 'workflow_run.completed' ? 'completed'
+          : event.kind === 'workflow_run.failed' ? 'failed'
+          : 'cancelled';
+        await this.handleRunTerminal(status, runId, context, definition, gitRepos, runWorkspaceDir);
         unsubscribe();
         clearTimeout(safetyTimeout);
       }
@@ -1035,6 +1038,107 @@ export class WorkflowOrchestrator {
       unsubscribe();
       this.activeContexts.delete(runId);
     }, MAX_LISTENER_TTL_MS);
+  }
+
+  /**
+   * Item 10 — persists enough of the post-processing intent onto the run's
+   * EXISTING `variables` JSON column (no migration) that a restarted process
+   * can rebuild a minimal `OrchestratorContext` and re-arm
+   * `setupCompletionCleanup` for it via `reArmPendingPostProcessing()`.
+   * Namespaced with the same `__`-prefix convention as other
+   * orchestrator-internal variables (see `setSystemVariable`) — the web UI
+   * and CLI already filter those out of what they show the user.
+   */
+  private async persistPostProcessingIntent(
+    runId: string,
+    context: OrchestratorContext,
+    gitRepos: GitRepositoryConfig[],
+    runWorkspaceDir: string,
+  ): Promise<void> {
+    const intent: PersistedPostProcessingIntent = {
+      pending: true,
+      runWorkspaceDir,
+      gitRepositories: gitRepos,
+      clonedRepositories: context.clonedRepositories,
+      featureBranches: context.featureBranches,
+    };
+    try {
+      const run = await this.runRepo.getById(runId);
+      await this.runRepo.update(runId, {
+        variables: { ...run.variables, __postProcessingIntent: intent },
+      });
+    } catch (err) {
+      this.logger.warn(`[Orchestrator] Failed to persist post-processing intent for run ${runId}: ${err}`);
+    }
+  }
+
+  /** Item 10 — best-effort; a stale leftover intent is harmless (re-arm just re-checks a terminal run and no-ops if already handled). */
+  private async clearPostProcessingIntent(runId: string): Promise<void> {
+    try {
+      const run = await this.runRepo.getById(runId);
+      const variables = { ...(run.variables as Record<string, unknown>) };
+      delete variables['__postProcessingIntent'];
+      await this.runRepo.update(runId, { variables });
+    } catch (err) {
+      this.logger.warn(`[Orchestrator] Failed to clear post-processing intent for run ${runId}: ${err}`);
+    }
+  }
+
+  /**
+   * Item 10 — call once at boot, AFTER any run-recovery step, to re-arm
+   * post-processing for every run whose intent is still `pending`: either
+   * the process died between "run finished" and "post-processing ran", or
+   * between attaching-before-start and the run actually finishing. A run
+   * that is already terminal is post-processed immediately (via
+   * `setupCompletionCleanup`'s own terminal check); one still in flight
+   * gets its listener re-attached so a later completion is still caught.
+   */
+  async reArmPendingPostProcessing(): Promise<void> {
+    let runs: WorkflowRun[];
+    try {
+      runs = await this.runRepo.getAll();
+    } catch (err) {
+      this.logger.warn(`[Orchestrator] reArmPendingPostProcessing: failed to list runs: ${err}`);
+      return;
+    }
+
+    for (const run of runs) {
+      const intent = (run.variables as Record<string, unknown> | undefined)?.[
+        '__postProcessingIntent'
+      ] as PersistedPostProcessingIntent | undefined;
+      if (!intent?.pending) continue;
+
+      try {
+        const definition = await this.definitionService.getDefinition(run.workflowDefinitionId);
+        let context = this.activeContexts.get(run.id);
+        if (!context) {
+          context = {
+            workflowRunId: run.id,
+            workflowDefinitionId: run.workflowDefinitionId,
+            clonedRepositories: intent.clonedRepositories ?? {},
+            featureBranches: intent.featureBranches ?? {},
+            resolvedVariables: { ...run.variables },
+            preprocessingResults: [],
+            postProcessingResults: [],
+            stageValidationResults: [],
+          };
+          this.activeContexts.set(run.id, context);
+        }
+
+        this.logger.info(
+          `[Orchestrator] Re-arming post-processing for run ${run.id} (status=${run.status})`,
+        );
+        await this.setupCompletionCleanup(
+          run.id,
+          context,
+          definition,
+          intent.gitRepositories ?? [],
+          intent.runWorkspaceDir ?? '',
+        );
+      } catch (err) {
+        this.logger.warn(`[Orchestrator] Failed to re-arm post-processing for run ${run.id}: ${err}`);
+      }
+    }
   }
 
   /**
@@ -1228,23 +1332,6 @@ export class WorkflowOrchestrator {
     context.resolvedVariables[key] = value;
   }
 
-  private mapConfigVarType(type: string): 'string' | 'number' | 'boolean' | 'choice' | 'text' {
-    switch (type) {
-      case 'git_url':
-      case 'git_urls':
-        return 'string';
-      case 'choice':
-        return 'choice';
-      case 'text':
-        return 'text';
-      case 'number':
-        return 'number';
-      case 'boolean':
-        return 'boolean';
-      default:
-        return 'string';
-    }
-  }
 
   /**
    * Wire project-level agents/prompts/skills into the run's uploads directory.

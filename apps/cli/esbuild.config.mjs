@@ -20,17 +20,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const { version } = JSON.parse(fs.readFileSync(path.join(here, 'package.json'), 'utf8'));
 
 /**
- * Left out of the bundle.
+ * Nothing is left out of the bundle.
  *
- *   better-sqlite3   Native `.node` addon, reached through `@generatorai/db`
- *                    when the CLI runs in `--local` (in-process) mode.
- *   node-pty         Native `.node` addon.
- *   playwright       Resolves its driver through package-relative paths.
- *
- * These stay real npm dependencies so a consumer's install fetches the right
- * prebuilt binary for their platform.
+ * The CLI is a pure HTTP/WebSocket client of a running server: it never opens
+ * the database, spawns a PTY or launches a browser itself, so it needs no
+ * native `.node` addon and no browser download. An earlier build kept
+ * `better-sqlite3`, `node-pty` and `playwright` external "for `--local`
+ * (in-process) mode" — a mode that never existed in this tree. Should a future
+ * import reach one of them, esbuild fails to resolve it against
+ * `apps/cli/package.json`, which is the failure we want.
  */
-const EXTERNAL = ['better-sqlite3', 'node-pty', 'playwright', 'playwright-core'];
+const EXTERNAL = [];
 
 /**
  * `react-devtools-core` is a DEVELOPMENT dependency of Ink: it is imported
@@ -116,4 +116,6 @@ const result = await build({
 
 const bytes = Object.values(result.metafile.outputs).reduce((sum, o) => sum + o.bytes, 0);
 console.log(`[bundle] generatorai.mjs v${version} — ${(bytes / 1024 / 1024).toFixed(2)} MB`);
-console.log(`[bundle] external (real npm deps): ${EXTERNAL.join(', ')}`);
+console.log(
+  `[bundle] external (real npm deps): ${EXTERNAL.length === 0 ? 'none — self-contained' : EXTERNAL.join(', ')}`,
+);

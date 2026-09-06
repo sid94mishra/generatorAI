@@ -14,6 +14,7 @@
 import React, { useState } from 'react';
 import type { ChatMessage } from '@generatorai/shared';
 import { Wrench, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { Button } from '@/components/ui/index.js';
 
 interface ToolMessageProps {
   message: ChatMessage;
@@ -25,7 +26,10 @@ export function ToolMessage({ message }: ToolMessageProps) {
   return (
     <div className="mx-2">
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-warning-muted)] overflow-hidden">
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="md"
           onClick={() => setExpanded(!expanded)}
           className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-warning)]/10"
         >
@@ -44,7 +48,7 @@ export function ToolMessage({ message }: ToolMessageProps) {
               <ChevronRight className="h-3.5 w-3.5 text-[var(--color-warning)]" />
             )}
           </div>
-        </button>
+        </Button>
 
         {expanded && (
           <div className="border-t border-[var(--color-warning)]/20 px-4 py-3 space-y-2">

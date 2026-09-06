@@ -5,6 +5,7 @@
 import { sqliteTable, text, integer, blob, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import type {
   ChatMessageMetadata,
+  WorkflowDefinitionSnapshot,
   DataSourceConfig,
   ProjectSettings,
   CodebaseSettings,
@@ -504,6 +505,12 @@ export const workflowRuns = sqliteTable(
      * runs. A terminal run is NEVER mutated; retry always creates a new run.
      */
     ancestorRunId: text('ancestor_run_id'),
+    /**
+     * WS-D1 — the stage definitions + edges frozen at `startRun`. The
+     * scheduler builds an in-flight run's DAG from this rather than the live
+     * definition, so a mid-run edit cannot change what has not executed yet.
+     */
+    definitionSnapshot: text('definition_snapshot', { mode: 'json' }).$type<WorkflowDefinitionSnapshot>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
     startedAt: integer('started_at', { mode: 'timestamp' }),
@@ -567,6 +574,15 @@ export const stageRuns = sqliteTable(
      * on resume. Persisted so late-connecting UIs see the same queue.
      */
     interruptData: text('interrupt_data', { mode: 'json' }).$type<unknown>(),
+    /**
+     * WS-D1 — liveness beat written every ~10 s by the executor while the
+     * stage is `queued`/`running`. The run reconciler fails a stage whose
+     * beat is older than the stale window; that reaper works even when the
+     * process that owned the stage is gone.
+     */
+    heartbeatAt: integer('heartbeat_at', { mode: 'timestamp' }),
+    /** WS-D1 — executor identity that last claimed the stage (diagnostics). */
+    leaseOwner: text('lease_owner'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),
@@ -630,7 +646,19 @@ export const automations = sqliteTable(
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
     triggerType: text('trigger_type', { enum: ['manual', 'schedule', 'webhook'] }).notNull(),
     cronExpression: text('cron_expression'),
+    /** IANA zone the cron expression is evaluated in (v47). Null = server zone. */
+    timezone: text('timezone'),
+    /** v47 — catch-up policy for slots missed while offline. */
+    missedRunPolicy: text('missed_run_policy', { enum: ['skip', 'run_once'] }).notNull().default('skip'),
+    /** v47 — what to do when a slot is due while an execution is still running. */
+    overlapPolicy: text('overlap_policy', { enum: ['skip', 'queue'] }).notNull().default('skip'),
+    /**
+     * LEGACY plaintext webhook token. Always null after v47's boot-time
+     * backfill; kept only so the backfill can read it. Never written.
+     */
     webhookToken: text('webhook_token'),
+    /** sha256(raw token), hex. The only persisted form of the token (v47). */
+    webhookTokenHash: text('webhook_token_hash'),
     workflowIds: text('workflow_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
     inputMode: text('input_mode', { enum: ['single', 'loop', 'batch', 'script'] }).notNull().default('single'),
     loopVariable: text('loop_variable'),
@@ -644,12 +672,16 @@ export const automations = sqliteTable(
     maxConcurrency: integer('max_concurrency').notNull().default(1),
     onError: text('on_error', { enum: ['continue', 'stop'] }).notNull().default('continue'),
     lastRunAt: integer('last_run_at', { mode: 'timestamp' }),
+    /**
+     * Next due instant for schedule triggers. Written on create / update /
+     * enable / fire; the poller claims rows with `next_run_at <= now`.
+     */
     nextRunAt: integer('next_run_at', { mode: 'timestamp' }),
     /**
-     * Row-level lease (1.23). Set when a cron-driven process picks this
-     * automation up; cleared when the run completes or the lease expires.
-     * Used together with `lockedByProcess` so one process can see it owns
-     * the lease and release it on shutdown / recover.
+     * Row-level lease. Stamped by the SAME conditional UPDATE that claims a
+     * due row, extended by heartbeat while the execution runs, and cleared
+     * when the execution finishes (not when it starts). A crashed owner's
+     * lease expires and the row becomes claimable again.
      */
     lockedUntil: integer('locked_until', { mode: 'timestamp' }),
     lockedByProcess: text('locked_by_process'),
@@ -671,6 +703,8 @@ export const automations = sqliteTable(
     triggerTypeIdx: index('idx_automations_trigger_type').on(table.triggerType),
     createdAtIdx: index('idx_automations_created_at').on(table.createdAt),
     lockIdx: index('idx_automations_lock').on(table.lockedUntil),
+    webhookTokenHashIdx: index('idx_automations_webhook_token_hash').on(table.webhookTokenHash),
+    dueIdx: index('idx_automations_due').on(table.triggerType, table.enabled, table.nextRunAt),
   }),
 );
 
@@ -684,7 +718,7 @@ export const automationExecutions = sqliteTable(
       .notNull()
       .references(() => automations.id, { onDelete: 'cascade' }),
     status: text('status', {
-      enum: ['pending', 'running', 'completed', 'failed', 'cancelled'],
+      enum: ['pending', 'running', 'completed', 'partial', 'failed', 'cancelled'],
     }).notNull().default('pending'),
     triggeredBy: text('triggered_by', { enum: ['manual', 'schedule', 'webhook'] }).notNull(),
     webhookPayload: text('webhook_payload'),
@@ -827,6 +861,11 @@ export const projectConfigs = sqliteTable(
     description: text('description'),
     filePath: text('file_path').notNull(),
     metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().default({}),
+    /**
+     * v48 — MCP configs only: NAMES of the credentials stored in the secrets
+     * vault under `mcp/project/<id>` (`McpCredentialVault`). Never values.
+     */
+    credentialRefs: text('credential_refs', { mode: 'json' }).$type<{ headers?: string[]; env?: string[] }>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   },

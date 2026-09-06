@@ -74,7 +74,7 @@ const REALTIME_PATH = '/v1/realtime';
  * end to end, the final lands ~190ms after the audio stops regardless, so this
  * is the dominant term in "how long until my sentence is committed".
  */
-const ENDPOINTING_MS = Number(process.env['GENERATORAI_NEMO_SPEECH_ENDPOINTING_MS'] ?? '500');
+const ENDPOINTING_MS = Number(process.env['GENERATORAI_NEMO_SPEECH_ENDPOINTING_MS'] ?? '800');
 
 /**
  * Decoder boost for the phrases that mean a symbol.

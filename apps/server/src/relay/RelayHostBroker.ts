@@ -10,10 +10,17 @@
 //     origin, the cell's ephemeral key, the challenge nonce, the assignment
 //     epoch and the previous generation — so a captured signature cannot be
 //     replayed at a different relay or rolled back to an earlier epoch.
-//   * Blind forwarding. Everything the broker pipes is already E2EE-sealed by
-//     the client and this server; the cell only ever sees ciphertext.
+//   * Bound identity. `host_hello` carries a signature tying `relayHostId` to
+//     the Ed25519 key that answers the challenge (`hostBinding.ts`), so the
+//     id cannot be asserted by a key that never claimed it.
 //   * Durable revocation. Revocations go through the outbox and are only
 //     removed once the relay ACKs them.
+//   * Routes come from `RELAY_ROUTES` in @generatorai/relay-protocol — the
+//     same table `apps/relay` serves — so the two cannot silently diverge.
+//
+// NOT a property today: end-to-end encryption. `e2ee.ts` is not wired into
+// `RelayStreamBridge` or any client, so the cell sees plain HTTP. See the
+// header of `packages/relay-protocol/src/e2ee.ts`.
 // ────────────────────────────────────────────────────────────────
 
 import { WebSocket } from 'ws';
@@ -24,8 +31,12 @@ import {
   RELAY_MAX_CONTROL_MESSAGE_BYTES,
   RELAY_PROTOCOL_VERSION,
   RelayAssignmentSchema,
+  canonicalRelayOrigin,
+  createHostBinding,
   encodeHostProofTranscript,
   parseControlMessage,
+  relayAssignmentUrl,
+  relayHostSocketUrl,
   type RelayAssignment,
   type RelayControlMessage,
 } from '@generatorai/relay-protocol';
@@ -309,18 +320,20 @@ export class RelayHostBroker {
     }
   }
 
-  /** Director registration — returns the assigned cell for this host. */
+  /**
+   * Director assignment — returns the assigned cell for this host.
+   *
+   * `GET /relay/assignment?relayHostId=…`, the route the relay actually
+   * serves. (This used to `POST /v1/hosts/register`, a path no relay ever
+   * registered — the two processes had been built against different route
+   * tables and never run together.)
+   */
   private async register(): Promise<RelayAssignment> {
     const fetchImpl = this.options.fetchImpl ?? fetch;
     const directorUrl = this.options.directorUrl!;
-    const response = await fetchImpl(`${directorUrl.replace(/\/$/, '')}/v1/hosts/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        v: RELAY_PROTOCOL_VERSION,
-        relayHostId: this.relayHostId,
-        hostPublicKey: this.hostPublicKeyBase64Url(),
-      }),
+    const response = await fetchImpl(relayAssignmentUrl(directorUrl, this.relayHostId), {
+      method: 'GET',
+      headers: { accept: 'application/json' },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {
@@ -337,7 +350,7 @@ export class RelayHostBroker {
 
   private openControlChannel(assignment: RelayAssignment): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const wsUrl = `${assignment.cellUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/v1/host`;
+      const wsUrl = relayHostSocketUrl(assignment.cellUrl);
       const socket = this.options.createSocket
         ? this.options.createSocket(wsUrl)
         : new WebSocket(wsUrl, { maxPayload: RELAY_MAX_CONTROL_MESSAGE_BYTES, handshakeTimeout: 10_000 });
@@ -364,6 +377,7 @@ export class RelayHostBroker {
           v: RELAY_PROTOCOL_VERSION,
           relayHostId: this.relayHostId,
           hostPublicKey: this.hostPublicKeyBase64Url(),
+          hostBinding: this.hostBinding(),
           assignmentEpoch: assignment.assignmentEpoch,
           previousGeneration: this.generation,
           resumeIntent: this.generation > 0,
@@ -410,7 +424,9 @@ export class RelayHostBroker {
     switch (message.type) {
       case 'challenge': {
         // Bind the proof to THIS relay, THIS ephemeral key and THIS epoch.
-        if (message.relayOrigin !== new URL(assignment.cellUrl).origin) {
+        // Both sides compare canonical http(s) origins, so a cell configured
+        // as `wss://…` and an assignment saying `https://…` still agree.
+        if (canonicalRelayOrigin(message.relayOrigin) !== canonicalRelayOrigin(assignment.cellUrl)) {
           settle(new Error('Relay challenge origin does not match the assigned cell'));
           socket.close(1008, 'origin mismatch');
           return;
@@ -581,5 +597,13 @@ export class RelayHostBroker {
 
   private hostPublicKeyBase64Url(): string {
     return this.options.signingKey.publicJwk.x!;
+  }
+
+  /** Signature tying this server's `relayHostId` to its relay signing key. */
+  private hostBinding(): string {
+    return createHostBinding(
+      { relayHostId: this.relayHostId, hostPublicKey: this.hostPublicKeyBase64Url() },
+      (message) => signBytes('EdDSA', this.options.signingKey.privateKey, Buffer.from(message)),
+    );
   }
 }

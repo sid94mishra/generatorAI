@@ -9,7 +9,7 @@ import { Wand2 } from 'lucide-react';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useAvailableArtifacts } from '@/hooks/projectQueries.js';
 import { cn } from '@/lib/utils.js';
-import { Badge } from '@/components/ui/index.js';
+import { Badge, Button } from '@/components/ui/index.js';
 import type { StageDefinition, HarnessConfig } from '@generatorai/shared';
 
 interface SkillSelectorProps {
@@ -105,23 +105,27 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
           {enabledCount}/{allSkills.length} enabled
         </span>
         <div className="flex items-center gap-2">
-          <button
+          <Button
             type="button"
             onClick={selectAll}
             disabled={allEnabled}
-            className="text-[10px] font-medium text-primary hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+            variant="ghost"
+            size="sm"
+            className="h-auto bg-transparent p-0 text-[10px] font-medium text-primary hover:bg-transparent hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Select all
-          </button>
+          </Button>
           <span className="text-[10px] text-muted-foreground">·</span>
-          <button
+          <Button
             type="button"
             onClick={deselectAll}
             disabled={noneEnabled}
-            className="text-[10px] font-medium text-muted-foreground hover:text-foreground hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+            variant="ghost"
+            size="sm"
+            className="h-auto bg-transparent p-0 text-[10px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Deselect all
-          </button>
+          </Button>
         </div>
       </div>
 

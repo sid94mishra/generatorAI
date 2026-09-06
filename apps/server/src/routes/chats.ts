@@ -14,6 +14,8 @@ import {
   CreatePlanCommentSchema,
   PlanDecisionSchema,
   AnswerQuestionSchema,
+  ResolveToolPermissionSchema,
+  UpdateChatSchema,
   SetChatPermissionModeSchema,
   coerceAgentMode,
 } from '@generatorai/shared';
@@ -28,6 +30,22 @@ const upload = multer({
 // ring-buffer subscription bridge were removed. Web clients now use the
 // unified `/api/stream?scope=chat&id=<chatId>` endpoint backed by the
 // persistent `stream_cursors` log.
+
+/**
+ * May this caller turn a chat's tool approvals OFF?
+ *
+ * `write:chats` is the default grant for every paired device, and until the
+ * approval gate existed it was already equivalent to running code on the host
+ * (review 5.2). Now that the gate is real, dropping it is the privileged act
+ * and needs an administrative scope; entering a gated mode does not.
+ */
+function canBypassPermissions(req: { principal?: { scopes?: readonly string[] } }): boolean {
+  const scopes = req.principal?.scopes;
+  // No principal at all is unauthenticated-loopback development mode, which
+  // is already fully trusted by design.
+  if (!scopes) return true;
+  return scopes.includes('admin:settings');
+}
 
 export function createChatApiRoutes(container: Container): Router {
   const router = Router();
@@ -75,6 +93,27 @@ export function createChatApiRoutes(container: Container): Router {
         params.harnessConfig.streaming = true;
       }
 
+      // Creation is the front door, and it takes `permissionMode` directly.
+      // Gating only the two update routes left a caller free to ask for
+      // approvals-off on the way in, which is the same escalation by another
+      // name. Same rule: raising needs the admin scope, lowering is free.
+      if (params.permissionMode === 'bypassPermissions' && !canBypassPermissions(req)) {
+        res.status(403).json({
+          error: {
+            code: 'FORBIDDEN',
+            message:
+              'Creating a chat with tool approvals off requires the admin:settings scope.',
+          },
+        });
+        return;
+      }
+      // No mode asked for: choose the gated default rather than inheriting
+      // the service's historical `bypassPermissions`. A caller that wants
+      // unattended execution has to say so, and hold the scope to say it.
+      if (params.permissionMode === undefined && !canBypassPermissions(req)) {
+        params.permissionMode = 'default';
+      }
+
       const chat = await chatManagementService.createChat(params);
       logger.info(`[ChatRoutes] Created chat ${chat.id}`, { requestId: req.requestId });
       res.status(201).json(chat);
@@ -86,19 +125,46 @@ export function createChatApiRoutes(container: Container): Router {
   // GET /chats — List chats with optional ?status and ?projectId filter
   router.get('/', async (req, res, next) => {
     try {
-      const statusFilter = req.query['status'] as string | undefined;
       const projectId = req.query['projectId'] as string | undefined;
+
+      // Two spellings of the same filter reach this route. The shared client
+      // (web, mobile, CLI) sends `archived=true|false`; older callers and the
+      // OpenAPI surface send `status=active|archived`. The route understood
+      // only `status`, so every `--status` filter from the terminal was
+      // silently ignored and the full list came back regardless.
+      let statusFilter = req.query['status'] as string | undefined;
+      const archivedParam = req.query['archived'];
+      if (statusFilter === undefined && archivedParam !== undefined) {
+        statusFilter = String(archivedParam) === 'true' ? 'archived' : 'active';
+      }
       if (statusFilter && !['active', 'archived'].includes(statusFilter)) {
         res.status(400).json({
           error: { code: 'VALIDATION_ERROR', message: 'Invalid status. Must be "active" or "archived"' },
         });
         return;
       }
+
+      // `limit` was documented on the terminal's `chat list`, accepted by the
+      // client, and dropped here — so "give me 3" returned all 343, and every
+      // client paid for the whole table on every list.
+      const limitParam = req.query['limit'];
+      let limit: number | undefined;
+      if (limitParam !== undefined) {
+        const parsed = Number(limitParam);
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          res.status(400).json({
+            error: { code: 'VALIDATION_ERROR', message: '`limit` must be a positive integer' },
+          });
+          return;
+        }
+        limit = Math.min(parsed, 500);
+      }
+
       const chats = await chatManagementService.listChats(
         statusFilter as 'active' | 'archived' | undefined,
         projectId,
       );
-      res.json(chats);
+      res.json(limit === undefined ? chats : chats.slice(0, limit));
     } catch (err) {
       next(err);
     }
@@ -128,7 +194,7 @@ export function createChatApiRoutes(container: Container): Router {
   });
 
   // PATCH /chats/:id — Update chat metadata (name, description, model, tags, status, projectId, harnessConfig)
-  router.patch('/:id', async (req, res, next) => {
+  router.patch('/:id', validate(UpdateChatSchema), async (req, res, next) => {
     try {
       const chatId = String(req.params['id']);
       const {
@@ -169,12 +235,23 @@ export function createChatApiRoutes(container: Container): Router {
       if (coercedMode) {
         updates.defaultAgentMode = coercedMode;
       }
-      if (
-        permissionMode === 'bypassPermissions' ||
-        permissionMode === 'default' ||
-        permissionMode === 'acceptEdits' ||
-        permissionMode === 'plan'
-      ) {
+      if (permissionMode !== undefined) {
+        // Raising a chat to `bypassPermissions` turns the approval gate OFF
+        // for every later tool call, so it needs more than `write:chats` —
+        // which is the DEFAULT grant on every paired device, phones included.
+        // Lowering into a gated mode stays free: making a chat safer must
+        // never need an administrator.
+        if (permissionMode === 'bypassPermissions' && !canBypassPermissions(req)) {
+          res.status(403).json({
+            error: {
+              code: 'FORBIDDEN',
+              message:
+                'Turning off tool approvals requires the admin:settings scope. ' +
+                'This device can lower a chat into a gated mode, but not raise it.',
+            },
+          });
+          return;
+        }
         updates.permissionMode = permissionMode;
       }
       // Binding an agent is a RUN-TIME act (covered by `write:chats`), unlike
@@ -277,6 +354,21 @@ export function createChatApiRoutes(container: Container): Router {
               message:
                 'This chat is waiting on your response. Resolve or cancel it before sending a new message.',
               details: { interactionId: openGate.id, kind: openGate.kind },
+            },
+          });
+          return;
+        }
+
+        // Review 6.1 — one turn at a time. A second prompt used to detach the
+        // first turn's listener without aborting it, so the first response was
+        // produced, had nowhere to go, and was lost. The web client disables
+        // Send while streaming; the API, terminal and SDK did not.
+        if (chatManagementService.isTurnActive(chatId)) {
+          res.status(409).json({
+            error: {
+              code: 'CHAT_BUSY',
+              message:
+                'This chat is still generating a response. Wait for it to finish, or stop it first.',
             },
           });
           return;
@@ -419,8 +511,18 @@ export function createChatApiRoutes(container: Container): Router {
   // GET /chats/:id/plans/:planId — one plan with all revisions + comments.
   router.get('/:id/plans/:planId', async (req, res, next) => {
     try {
+      const chatId = String(req.params['id']);
       const plan = await plans!.findById(String(req.params['planId']));
       if (!plan) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
+        return;
+      }
+      // The plan must belong to THIS chat. Without this, any caller holding
+      // `read:chats`/`write:chats` — the default grant for every paired
+      // device, phones included — could read, comment on, overwrite or export
+      // another chat's plan just by naming its id under a different chat.
+      // 404 rather than 403: a wrong-chat id must not confirm the plan exists.
+      if (plan.chatId !== chatId) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
       }
@@ -433,8 +535,18 @@ export function createChatApiRoutes(container: Container): Router {
   // GET /chats/:id/plans/:planId/content?revision=n — raw markdown.
   router.get('/:id/plans/:planId/content', async (req, res, next) => {
     try {
+      const chatId = String(req.params['id']);
       const plan = await plans!.findById(String(req.params['planId']));
       if (!plan) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
+        return;
+      }
+      // The plan must belong to THIS chat. Without this, any caller holding
+      // `read:chats`/`write:chats` — the default grant for every paired
+      // device, phones included — could read, comment on, overwrite or export
+      // another chat's plan just by naming its id under a different chat.
+      // 404 rather than 403: a wrong-chat id must not confirm the plan exists.
+      if (plan.chatId !== chatId) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
       }
@@ -462,6 +574,15 @@ export function createChatApiRoutes(container: Container): Router {
       const planId = String(req.params['planId']);
       const plan = await plans!.findById(planId);
       if (!plan) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
+        return;
+      }
+      // The plan must belong to THIS chat. Without this, any caller holding
+      // `read:chats`/`write:chats` — the default grant for every paired
+      // device, phones included — could read, comment on, overwrite or export
+      // another chat's plan just by naming its id under a different chat.
+      // 404 rather than 403: a wrong-chat id must not confirm the plan exists.
+      if (plan.chatId !== chatId) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
       }
@@ -501,6 +622,15 @@ export function createChatApiRoutes(container: Container): Router {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
       }
+      // The plan must belong to THIS chat. Without this, any caller holding
+      // `read:chats`/`write:chats` — the default grant for every paired
+      // device, phones included — could read, comment on, overwrite or export
+      // another chat's plan just by naming its id under a different chat.
+      // 404 rather than 403: a wrong-chat id must not confirm the plan exists.
+      if (plan.chatId !== chatId) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
+        return;
+      }
       const body = req.body as {
         body: string;
         revision: number;
@@ -533,6 +663,15 @@ export function createChatApiRoutes(container: Container): Router {
 
       const plan = await plans!.findById(planId);
       if (!plan) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
+        return;
+      }
+      // The plan must belong to THIS chat. Without this, any caller holding
+      // `read:chats`/`write:chats` — the default grant for every paired
+      // device, phones included — could read, comment on, overwrite or export
+      // another chat's plan just by naming its id under a different chat.
+      // 404 rather than 403: a wrong-chat id must not confirm the plan exists.
+      if (plan.chatId !== chatId) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
       }
@@ -570,6 +709,15 @@ export function createChatApiRoutes(container: Container): Router {
       const planId = String(req.params['planId']);
       const plan = await plans!.findById(planId);
       if (!plan) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
+        return;
+      }
+      // The plan must belong to THIS chat. Without this, any caller holding
+      // `read:chats`/`write:chats` — the default grant for every paired
+      // device, phones included — could read, comment on, overwrite or export
+      // another chat's plan just by naming its id under a different chat.
+      // 404 rather than 403: a wrong-chat id must not confirm the plan exists.
+      if (plan.chatId !== chatId) {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Plan not found' } });
         return;
       }
@@ -641,11 +789,59 @@ export function createChatApiRoutes(container: Container): Router {
     },
   );
 
+  // POST /chats/:id/interactions/:interactionId/permission — allow or deny a
+  // tool call the agent is blocked on (review finding 5.1).
+  router.post(
+    '/:id/interactions/:interactionId/permission',
+    validate(ResolveToolPermissionSchema),
+    async (req, res, next) => {
+      try {
+        // Delegated for the same reason as the question gate: the service owns
+        // the ownership check and emits the resolution event, so a reconnecting
+        // client replays a settled card rather than a pending one.
+        const result = await chatManagementService.resolveToolPermission(
+          String(req.params['id']),
+          String(req.params['interactionId']),
+          req.body as { behavior: 'allow' | 'deny'; message?: string },
+        );
+        if (!result.ok) {
+          const reason = result.reason ?? 'Already resolved';
+          if (/not enabled/i.test(reason)) {
+            res.status(503).json({ error: { code: 'UNAVAILABLE', message: reason } });
+            return;
+          }
+          const status = /not found/i.test(reason) ? 404 : 409;
+          res.status(status).json({
+            error: { code: status === 404 ? 'NOT_FOUND' : 'INTERACTION_CONFLICT', message: reason },
+          });
+          return;
+        }
+        res.status(202).json({ ok: true });
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
   // PATCH /chats/:id/permission-mode — change the chat's permission policy.
   router.patch('/:id/permission-mode', validate(SetChatPermissionModeSchema), async (req, res, next) => {
     try {
       const chatId = String(req.params['id']);
       const { mode } = req.body as { mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan' };
+      // Same rule as the general PATCH: the schema validates the SHAPE, it
+      // cannot say who may choose which value. Turning approvals off is the
+      // privileged direction; turning them on is not.
+      if (mode === 'bypassPermissions' && !canBypassPermissions(req)) {
+        res.status(403).json({
+          error: {
+            code: 'FORBIDDEN',
+            message:
+              'Turning off tool approvals requires the admin:settings scope. ' +
+              'This device can lower a chat into a gated mode, but not raise it.',
+          },
+        });
+        return;
+      }
       const chat = await container.chatEntityRepo.update(chatId, { permissionMode: mode });
       res.json({ chatId, mode: chat.permissionMode });
     } catch (err) {

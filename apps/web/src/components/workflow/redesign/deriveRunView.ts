@@ -12,9 +12,9 @@ import type {
   StageDefinition, StageEdge, WorkflowRunPermissionMode,
 } from '@generatorai/shared';
 import { interpolateVariables } from '@generatorai/shared';
-import type { StreamState } from '@/stores/streamStore.js';
+import type { StreamState, StreamHookInvocation } from '@/stores/streamStore.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
-import type { RunView, StageView, StageStatus, RunStatus, FileChange } from './types.js';
+import type { RunView, StageView, StageStatus, RunStatus, FileChange, HookInvocation } from './types.js';
 import { deriveTimeline, deriveAnswer, deriveSegments, countTools } from '@/components/agent/deriveTimeline.js';
 
 // ── Status normalizers ────────────────────────────────────────
@@ -167,6 +167,30 @@ function stageDuration(sr: StageRun): number | undefined {
   const start = new Date(sr.startedAt).getTime();
   const end = sr.completedAt ? new Date(sr.completedAt).getTime() : Date.now();
   return end - start;
+}
+
+const HOOK_TYPES = new Set<HookInvocation['type']>(['script', 'http', 'function']);
+
+/**
+ * Map a stage's stream-level hook records to `HookInvocation`s.
+ *
+ * Only records carrying THIS stage's `stageRunId` are kept — a hook without
+ * one landed here via the router's stage-fallback key and cannot be
+ * attributed with confidence (see `eventRouter.ts`'s `note`/`key` comment).
+ * `hookType` is a free-form optional string on the wire, so anything outside
+ * the known set narrows to 'function' rather than widening the UI's union.
+ */
+function hooksFrom(stream: StreamState | undefined, stageRunId: string): HookInvocation[] | undefined {
+  const records = stream?.hooks?.filter((h: StreamHookInvocation) => h.stageRunId === stageRunId);
+  if (!records || records.length === 0) return undefined;
+  return records.map((h) => ({
+    id: h.id,
+    phase: h.phase,
+    type: HOOK_TYPES.has(h.hookType as HookInvocation['type']) ? (h.hookType as HookInvocation['type']) : 'function',
+    name: h.hookName,
+    status: h.status,
+    ...(h.durationMs !== undefined ? { durationMs: h.durationMs } : {}),
+  }));
 }
 
 function usageFrom(stream: StreamState | undefined): UsageInfo | undefined {
@@ -331,7 +355,7 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
       summary: sr.summary,
       outputData: sr.outputData,
       files,
-      hooks: undefined,
+      hooks: hooksFrom(stream, sr.id),
       usage: usageFrom(stream),
       contextUsage: stream?.contextUsage ?? undefined,
       sharedContext: !!sr.sessionId && (stageCountBySession.get(sr.sessionId) ?? 0) > 1,

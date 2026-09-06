@@ -4,6 +4,10 @@
 // Registration is idempotent and retried on every foreground, because the OS
 // rotates push tokens without warning and a stale token silently stops
 // delivering. Re-registering an unchanged token is a cheap no-op upsert.
+//
+// Every outcome is reported to `usePushStatusStore` so Settings ›
+// Notifications can say WHY nothing arrives — a build without an EAS project
+// id used to be indistinguishable from a working one.
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef } from 'react';
@@ -13,10 +17,13 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 
 import { useAuth } from '../auth/AuthProvider';
+import { prefs } from '../storage/prefs';
 import { requestPushToken } from './push';
 import { safeRoute } from './routeGuard';
+import { usePushStatusStore } from './pushStatus';
+import { readNotifyPrefs, SERVER_MUTE_HORIZON_MS, shouldMuteOnServer } from './notificationFilter';
 
-function projectId(): string | null {
+export function projectId(): string | null {
   const value =
     (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId ??
     (Constants as { easConfig?: { projectId?: string } }).easConfig?.projectId;
@@ -27,22 +34,39 @@ export function usePushNotifications(): void {
   const { state, fetch: authFetch } = useAuth();
   const authenticated = state.status === 'authenticated';
   const registeredToken = useRef<string | null>(null);
+  const setStatus = usePushStatusStore((s) => s.setStatus);
+  const preferencesVersion = usePushStatusStore((s) => s.preferencesVersion);
 
   // ── Registration ────────────────────────────────────────────────
   useEffect(() => {
-    if (!authenticated) return;
+    if (!authenticated) {
+      setStatus({ kind: 'idle' });
+      return;
+    }
 
     let cancelled = false;
 
     const register = async (): Promise<void> => {
+      if (Platform.OS === 'web') {
+        setStatus({ kind: 'disabled', reason: 'web' });
+        return;
+      }
       const id = projectId();
       // Without an EAS project id `getExpoPushTokenAsync` cannot mint a
-      // token. Bail quietly: a dev build without EAS configured must still
-      // run, just without notifications.
-      if (!id) return;
+      // token. The app must still run — but the reason is surfaced, not
+      // swallowed: this is the single setting that silently disabled push
+      // in every build to date.
+      if (!id) {
+        setStatus({ kind: 'disabled', reason: 'eas-project-id-missing' });
+        return;
+      }
 
       const registration = await requestPushToken(id);
-      if (!registration || cancelled) return;
+      if (cancelled) return;
+      if (!registration) {
+        setStatus({ kind: 'no-permission' });
+        return;
+      }
       if (registeredToken.current === registration.token) return;
 
       try {
@@ -51,13 +75,23 @@ export function usePushNotifications(): void {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(registration),
         });
+        if (cancelled) return;
         // 501 means the server has push disabled. That is a deployment
         // choice, not an error — stop trying rather than retrying forever.
-        if (response.ok || response.status === 501) {
+        if (response.status === 501) {
           registeredToken.current = registration.token;
+          setStatus({ kind: 'server-disabled' });
+          return;
         }
+        if (response.ok) {
+          registeredToken.current = registration.token;
+          setStatus({ kind: 'registered' });
+          return;
+        }
+        setStatus({ kind: 'rejected', httpStatus: response.status });
       } catch {
         // Offline. The next foreground retries.
+        setStatus({ kind: 'offline' });
       }
     };
 
@@ -78,7 +112,25 @@ export function usePushNotifications(): void {
       tokenSub.remove();
       appStateSub.remove();
     };
-  }, [authenticated, authFetch]);
+  }, [authenticated, authFetch, setStatus]);
+
+  // ── Preference sync ─────────────────────────────────────────────
+  //
+  // The server cannot filter per category, but it can mute the two
+  // non-approval categories outright. Engage that when the user has turned
+  // both "Run outcomes" and "Chat replies" off, so those pushes are never
+  // sent rather than merely hidden in the foreground.
+  useEffect(() => {
+    if (!authenticated || Platform.OS === 'web') return;
+    const mute = shouldMuteOnServer(readNotifyPrefs((k) => prefs.getString(k)));
+    void authFetch('/api/auth/push-token/mute', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mutedUntil: mute ? Date.now() + SERVER_MUTE_HORIZON_MS : null }),
+    }).catch(() => {
+      // Offline. The foreground filter still applies; re-synced next change.
+    });
+  }, [authenticated, authFetch, preferencesVersion]);
 
   // ── Tap routing ─────────────────────────────────────────────────
   useEffect(() => {

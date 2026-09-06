@@ -448,10 +448,12 @@ export function VariableInputModal({
           {/* Stage Overrides section */}
           {stageNames && stageNames.length > 0 && (
             <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
-              <button
+              <Button
                 type="button"
                 onClick={() => setShowStageOverrides(!showStageOverrides)}
-                className="flex w-full items-center gap-2 text-sm font-medium text-foreground"
+                variant="ghost"
+                size="sm"
+                className="h-auto flex w-full items-center gap-2 bg-transparent p-0 text-sm font-medium text-foreground hover:bg-transparent"
               >
                 {showStageOverrides ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 <Settings2 className="h-4 w-4 text-primary" />
@@ -461,7 +463,7 @@ export function VariableInputModal({
                     {stageOverrides.filter(o => o.skip).length} skipped
                   </Badge>
                 )}
-              </button>
+              </Button>
 
               {showStageOverrides && (
                 <div className="space-y-2 pt-1">
@@ -557,20 +559,22 @@ function UploadSection({
       {/* Category tabs */}
       <div className="flex gap-1">
         {(['prompts', 'skills', 'agents'] as UploadCategory[]).map((cat) => (
-          <button
+          <Button
             key={cat}
             type="button"
             onClick={() => setUploadCategory(cat)}
+            variant="ghost"
+            size="sm"
             className={cn(
-              'rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors',
+              'h-auto rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors',
               uploadCategory === cat
-                ? 'bg-primary text-primary-foreground'
+                ? 'bg-primary text-primary-foreground hover:bg-primary'
                 : 'bg-subtle text-muted-foreground hover:bg-subtle',
             )}
           >
             {cat}
             {uploadedFiles[cat].length > 0 && ` (${uploadedFiles[cat].length})`}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -580,7 +584,7 @@ function UploadSection({
 
       {/* File picker */}
       <div>
-        <input
+        <Input
           ref={fileInputRef}
           type="file"
           multiple
@@ -588,14 +592,16 @@ function UploadSection({
           onChange={handleFilesSelected}
           className="hidden"
         />
-        <button
+        <Button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-subtle"
+          variant="ghost"
+          size="sm"
+          className="h-auto flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-subtle"
         >
           <Upload className="h-3.5 w-3.5" />
           Add {uploadCategory} files
-        </button>
+        </Button>
       </div>
 
       {/* File list for selected category */}
@@ -605,9 +611,9 @@ function UploadSection({
             <li key={`${file.name}-${i}`} className="flex items-center gap-2 rounded px-2 py-1 text-xs bg-subtle">
               <FileText className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="flex-1 truncate text-foreground">{file.name}</span>
-              <button type="button" onClick={() => removeFile(uploadCategory, i)} className="text-muted-foreground hover:text-danger">
+              <Button type="button" onClick={() => removeFile(uploadCategory, i)} variant="ghost" size="icon-sm" aria-label={`Remove ${file.name}`} className="h-auto w-auto p-0 text-muted-foreground hover:bg-transparent hover:text-danger">
                 <Trash2 className="h-3 w-3" />
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

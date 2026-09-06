@@ -163,9 +163,15 @@ export class StreamBroker {
       return { seq: -1, id: -1, ts: Date.now() };
     }
     const row = await this.writer.write(scope, scopeId, kind, data);
-    // W07 — dual-write. Fire-and-forget from the caller's perspective: the
-    // delta log buffers and flushes asynchronously on its own schedule (see
-    // `DeltaLog.append`), so it must never be awaited on the token path.
+    // W07 — dual-write, present only when the composition root opted in
+    // (`GENERATORAI_DELTA_LOG=true`). NOTE: nothing reads the delta log yet —
+    // replay is served from `stream_cursors` above — so with the flag on every
+    // delta costs a SQL row AND a file append. The design this was meant to
+    // implement (deltas only in the log, merged into replay by `seq`) is
+    // still open; see ARCH_PERF_AUDIT_2026-09-05.md F2 / A11. Fire-and-forget
+    // from the caller's perspective: the delta log buffers and flushes on its
+    // own schedule (see `DeltaLog.append`) and must never be awaited on the
+    // token path.
     if (this.deltaLog && classifyEvent(kind, data) === 'delta') {
       this.deltaLog.append(scope, scopeId, { seq: row.seq, kind, payload: data, ts: row.ts });
     }

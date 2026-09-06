@@ -244,7 +244,10 @@ describe('W34 — migration 44 back-fill (B2)', () => {
     ]) {
       sqlite.exec(`ALTER TABLE conversation_instance_ownership DROP COLUMN ${col};`);
     }
-    sqlite.prepare(`DELETE FROM _schema_versions WHERE version = 44`).run();
+    // Every version from 44 up, not just 44: the runner replays from the
+    // highest applied version, so leaving a later one recorded would make it
+    // skip 44 and this rewind would silently test nothing.
+    sqlite.prepare(`DELETE FROM _schema_versions WHERE version >= 44`).run();
   }
 
   it('back-fills a pre-existing legacy row at the LOWEST trust level, not `explicit`', () => {
@@ -273,7 +276,10 @@ describe('W34 — migration 44 back-fill (B2)', () => {
   it('is re-runnable: replaying migration 44 on an already-migrated DB is a no-op', async () => {
     await repo.saveBinding({ ...FULL_BINDING });
     const sqlite = sqliteHandle(db);
-    sqlite.prepare(`DELETE FROM _schema_versions WHERE version = 44`).run();
+    // Every version from 44 up, not just 44: the runner replays from the
+    // highest applied version, so leaving a later one recorded would make it
+    // skip 44 and this rewind would silently test nothing.
+    sqlite.prepare(`DELETE FROM _schema_versions WHERE version >= 44`).run();
 
     expect(() => migrateDB(db)).not.toThrow(); // duplicate-column tolerance
 

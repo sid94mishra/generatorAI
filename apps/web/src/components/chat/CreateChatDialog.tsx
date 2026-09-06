@@ -7,8 +7,8 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCreateChat } from '@/hooks/queries.js';
 import { useProjects, useProjectCodebases } from '@/hooks/projectQueries.js';
-import { X, MessageSquarePlus, Loader2, Tag, Plus, GitBranch, FolderGit2, FolderOpen, Boxes, Bot, Network } from 'lucide-react';
-import { Select, Modal, Button, Input, Textarea, Badge } from '@/components/ui/index.js';
+import { X, MessageSquarePlus, Tag, Plus, GitBranch, FolderGit2, FolderOpen, Boxes, Bot, Network } from 'lucide-react';
+import { Select, Modal, Button, Input, Textarea, Badge, Spinner } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { getDefaultChatModel } from '@/lib/appPreferences.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
@@ -16,7 +16,7 @@ import { AgentPicker } from '@/components/agents/AgentPicker.js';
 import { AgentOverridesEditor } from '@/components/agents/AgentOverridesEditor.js';
 import { EffectiveCapabilitiesPanel } from '@/components/agents/EffectiveCapabilitiesPanel.js';
 import { useResolveAgentPreview } from '@/hooks/agentQueries.js';
-import type { Agent, AgentOverrides, ResolvedAgentProjection } from '@generatorai/shared';
+import type { Agent, AgentOverrides, CreateChatParams, ResolvedAgentProjection } from '@generatorai/shared';
 import {
   BrowserVisibilityPicker,
   DEFAULT_BROWSER_PICKER_VALUE,
@@ -146,7 +146,7 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
     if (!name.trim()) return;
 
     try {
-      const params: Record<string, unknown> = {
+      const params: CreateChatParams = {
         name: name.trim(),
         description: description.trim() || undefined,
         model: model || undefined,
@@ -168,7 +168,7 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
       const bc = pickerValueToBrowserConfig(browserPicker);
       if (bc) params.browserConfig = bc;
 
-      const chat = await createMutation.mutateAsync(params as any);
+      const chat = await createMutation.mutateAsync(params);
       onOpenChange(false);
       navigate(`/chats/${chat.id}`);
     } catch {
@@ -286,14 +286,15 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
               </p>
             )}
 
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setShowCapabilities((v) => !v)}
               data-testid="create-chat-customize-capabilities"
-              className="mt-2 text-xs font-medium text-primary hover:underline"
+              className="mt-2 h-auto p-0 text-xs font-medium text-primary hover:underline"
             >
               {showCapabilities ? 'Hide capabilities' : 'Customize capabilities'}
-            </button>
+            </Button>
 
             {projection && !showCapabilities && (
               <div className="mt-2 flex flex-wrap gap-1.5" data-testid="create-chat-capability-chips">
@@ -372,11 +373,13 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
 
           {/* Project & Codebase Selection */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-foreground flex items-center gap-1.5">
+            <label htmlFor="chat-project" className="mb-1.5 block text-sm font-medium text-foreground flex items-center gap-1.5">
               <FolderGit2 className="h-4 w-4 text-primary" />
               Project & Codebases
             </label>
             <Select
+              id="chat-project"
+              aria-label="Project"
               value={selectedProjectId}
               onChange={(v) => {
                 setSelectedProjectId(v);
@@ -391,7 +394,7 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
               <div className="mt-2 space-y-1.5">
                 {codebasesLoading ? (
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading codebases...
+                    <Spinner size="sm" label="Loading codebases" /> Loading codebases...
                   </div>
                 ) : !codebases || codebases.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
@@ -447,11 +450,12 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
 
           {/* Local Folder Path (alternative to project codebases) */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-foreground flex items-center gap-1.5">
+            <label htmlFor="chat-local-folder" className="mb-1.5 block text-sm font-medium text-foreground flex items-center gap-1.5">
               <FolderOpen className="h-4 w-4 text-primary" />
               Local Folder Path
             </label>
             <Input
+              id="chat-local-folder"
               type="text"
               value={localFolderPath}
               onChange={(e) => setLocalFolderPath(e.target.value)}
@@ -465,25 +469,27 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
           </div>
 
           {/* Advanced toggle */}
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="text-xs font-medium text-primary hover:underline"
+            className="h-auto p-0 text-xs font-medium text-primary hover:underline"
           >
             {showAdvanced ? 'Hide advanced options' : 'Show advanced options'}
-          </button>
+          </Button>
 
           {showAdvanced && (
             <>
               {/* Tags */}
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">
+                <label htmlFor="chat-tags" className="mb-1.5 block text-sm font-medium text-foreground">
                   Tags
                 </label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Tag className="absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
+                      id="chat-tags"
                       type="text"
                       value={tagInput}
                       onChange={(e) => setTagInput(e.target.value)}
@@ -512,12 +518,16 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
                         className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
                       >
                         {tag}
-                        <button
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
                           onClick={() => handleRemoveTag(tag)}
-                          className="rounded-full p-0.5 hover:bg-primary/20"
+                          aria-label={`Remove tag ${tag}`}
+                          className="h-auto w-auto rounded-full p-0.5 hover:bg-primary/20"
                         >
                           <X className="h-3 w-3" />
-                        </button>
+                        </Button>
                       </span>
                     ))}
                   </div>

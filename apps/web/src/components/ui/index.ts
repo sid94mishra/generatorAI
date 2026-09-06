@@ -36,6 +36,8 @@ export { SearchableSelect, type SearchableSelectProps } from './SearchableSelect
 export { NumberStepper } from '@/components/workflow/NumberStepper.js';
 export { CollapsibleSection } from '@/components/workflow/CollapsibleSection.js';
 export { ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog.js';
+export { Drawer, type DrawerProps, type DrawerSide } from './Drawer.js';
+export { useConfirm, type ConfirmOptions, type UseConfirmResult } from './useConfirm.js';
 
 // Vendored shadcn/ui parts (low-level; prefer the primitives above)
 export * from './primitives/dialog.js';

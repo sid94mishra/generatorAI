@@ -4,6 +4,9 @@
 
 import { Router } from 'express';
 import multer from 'multer';
+import { McpServerBodySchema, mcpCredentialNamespace } from '@generatorai/shared';
+import { McpCredentialVault, toMcpServerEntry } from '@generatorai/core';
+import type { CatalogMcpServer } from '@generatorai/core';
 import type { Container } from '../composition-root.js';
 
 const upload = multer({
@@ -20,8 +23,12 @@ export function createProjectRoutes(container: Container): Router {
     worktreeCleanupService,
     projectConfigService,
     systemArtifactService,
+    artifactCatalog,
+    security,
     logger,
   } = container;
+
+  const mcpVault = new McpCredentialVault(security.secretStore);
 
   // ════════════════════════════════════════════════════════════════
   // Project CRUD
@@ -348,85 +355,99 @@ export function createProjectRoutes(container: Container): Router {
   // MCP Server Configs (project-level)
   // ════════════════════════════════════════════════════════════════
 
-  // GET /projects/:id/mcp-servers — List project MCP server configs
+  // GET /projects/:id/mcp-servers — List project MCP server configs.
+  // Routed through ArtifactCatalog + toMcpServerEntry so a project server
+  // gets the same needsConfiguration gating and credential REDACTION as
+  // every other registry — a GET here must never be able to return a value,
+  // only the redaction marker + which credential names are stored.
   router.get('/:id/mcp-servers', async (req, res, next) => {
     try {
-      const configs = await projectConfigService.listConfigs(String(req.params['id']), 'mcp');
-      // Parse JSON content to return structured McpServerEntry objects
-      const entries = await Promise.all(
-        configs.map(async (cfg) => {
-          try {
-            const content = await projectConfigService.getConfigContent(cfg.id);
-            const parsed = JSON.parse(content) as Record<string, unknown>;
-            return {
-              id: cfg.id,
-              name: cfg.name,
-              description: cfg.description,
-              serverType: parsed['serverType'] ?? parsed['type'] ?? 'http',
-              url: parsed['url'],
-              command: parsed['command'],
-              args: parsed['args'],
-              source: 'project',
-              enabled: parsed['enabled'] !== false,
-            };
-          } catch {
-            return { id: cfg.id, name: cfg.name, source: 'project', serverType: 'http', enabled: true };
-          }
-        }),
-      );
+      const servers = await artifactCatalog.listMcpServers(String(req.params['id']));
+      const entries = servers.filter((s) => s.source === 'project').map(toMcpServerEntry);
       res.json(entries);
     } catch (err) {
       next(err);
     }
   });
 
-  // POST /projects/:id/mcp-servers — Create a project MCP server config
+  // POST /projects/:id/mcp-servers — Create a project MCP server config.
+  // `headers` (http/sse) / `env` (stdio) credential VALUES are written to the
+  // secrets vault under mcp/project/<id>; only their NAMES land on the row
+  // (`credential_refs`, migration 48) and in the JSON file on disk.
   router.post('/:id/mcp-servers', async (req, res, next) => {
     try {
-      const { name, description, serverType, url, command, args } = req.body;
-      if (!name || typeof name !== 'string') {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'name is required' } });
+      const parsed = McpServerBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid MCP server' } });
         return;
       }
-      if (serverType === 'http' && !url) {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'url required for http type' } });
-        return;
-      }
-      if (serverType === 'stdio' && !command) {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'command required for stdio type' } });
-        return;
-      }
-      const content = JSON.stringify({ serverType, url, command, args: args ?? [], enabled: true });
+      const { name, description, serverType, url, command, args, timeoutMs, headers, env } = parsed.data;
+      const projectId = String(req.params['id']);
+      const content = JSON.stringify({
+        serverType,
+        ...(url ? { url } : {}),
+        ...(command ? { command } : {}),
+        args: args ?? [],
+        ...(timeoutMs ? { timeoutMs } : {}),
+        enabled: true,
+      });
       const cfg = await projectConfigService.createJsonConfig(
-        String(req.params['id']),
+        projectId,
         { type: 'mcp', name, description, filePath: `${name.replace(/[^a-z0-9-_]/gi, '_')}.json` },
         content,
       );
-      res.status(201).json({ id: cfg.id, name: cfg.name, description, serverType, url, command, args, source: 'project', enabled: true });
+      if ((headers && Object.keys(headers).length) || (env && Object.keys(env).length)) {
+        const refs = await mcpVault.save(mcpCredentialNamespace('project', cfg.id), { headers, env });
+        await projectConfigService.setCredentialRefs(cfg.id, refs);
+      }
+      const servers = await artifactCatalog.listMcpServers(projectId);
+      const created = servers.find((s) => s.id === cfg.id) as CatalogMcpServer | undefined;
+      res.status(201).json(created ? toMcpServerEntry(created) : { id: cfg.id, name, source: 'project' });
     } catch (err) {
       next(err);
     }
   });
 
-  // PUT /projects/:id/mcp-servers/:mid — Update MCP server config
+  // PUT /projects/:id/mcp-servers/:mid — Replace a project MCP server config.
+  // Same shared schema as POST, so a token submitted here is vaulted the same
+  // way; `McpCredentialVault.save` treats the body as the FULL desired
+  // credential set (a stored key omitted from the body is deleted, and the
+  // redaction marker echoed back for an untouched field keeps its value).
   router.put('/:id/mcp-servers/:mid', async (req, res, next) => {
     try {
-      const { name, description, serverType, url, command, args, enabled } = req.body;
-      const content = JSON.stringify({ serverType, url, command, args: args ?? [], enabled: enabled !== false });
-      await projectConfigService.updateConfigContent(String(req.params['mid']), content);
-      if (name !== undefined || description !== undefined) {
-        await projectConfigService.patchConfigMeta(String(req.params['mid']), { name, description });
+      const parsed = McpServerBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid MCP server' } });
+        return;
       }
+      const { name, description, serverType, url, command, args, timeoutMs, enabled, headers, env } = parsed.data;
+      const mid = String(req.params['mid']);
+      const content = JSON.stringify({
+        serverType,
+        ...(url ? { url } : {}),
+        ...(command ? { command } : {}),
+        args: args ?? [],
+        ...(timeoutMs ? { timeoutMs } : {}),
+        enabled: enabled !== false,
+      });
+      await projectConfigService.updateConfigContent(mid, content);
+      await projectConfigService.patchConfigMeta(mid, { name, description });
+
+      const existing = await projectConfigService.getConfig(mid);
+      const refs = await mcpVault.save(mcpCredentialNamespace('project', mid), { headers, env }, existing.credentialRefs ?? {});
+      await projectConfigService.setCredentialRefs(mid, refs);
       res.status(204).send();
     } catch (err) {
       next(err);
     }
   });
 
-  // DELETE /projects/:id/mcp-servers/:mid — Delete MCP server config
+  // DELETE /projects/:id/mcp-servers/:mid — Delete MCP server config + its vaulted credentials.
   router.delete('/:id/mcp-servers/:mid', async (req, res, next) => {
     try {
-      await projectConfigService.deleteConfig(String(req.params['mid']));
+      const mid = String(req.params['mid']);
+      await mcpVault.remove(mcpCredentialNamespace('project', mid));
+      await projectConfigService.deleteConfig(mid);
       res.status(204).send();
     } catch (err) {
       next(err);

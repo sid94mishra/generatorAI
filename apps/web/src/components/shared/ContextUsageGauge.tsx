@@ -14,6 +14,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 import {
   contextRingColor,
   formatPctLabel,
@@ -122,7 +123,8 @@ export function ContextUsageGauge({
 
   return (
     <div ref={ref} className={cn('relative inline-flex', className)} data-testid="context-usage-gauge">
-      <button
+      <Button
+        variant="ghost"
         type="button"
         onClick={(e) => {
           e.stopPropagation();
@@ -139,7 +141,7 @@ export function ContextUsageGauge({
         data-context-used={resolved.used ?? ''}
         data-context-limit={resolved.limit ?? ''}
         data-context-source={resolved.source}
-        className="flex items-center gap-1 rounded-md px-1 py-1 transition-colors hover:bg-[var(--color-accent)]/60"
+        className="h-auto flex items-center gap-1 rounded-md px-1 py-1 transition-colors hover:bg-[var(--color-accent)]/60"
       >
         <ContextRing pct={resolved.pct} />
         {showLabel && (
@@ -147,7 +149,7 @@ export function ContextUsageGauge({
             {pctLabel}%
           </span>
         )}
-      </button>
+      </Button>
 
       {open && (
         <ContextUsagePopover

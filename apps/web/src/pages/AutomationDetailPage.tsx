@@ -25,16 +25,19 @@ import {
   ChevronRight,
   XCircle,
   Repeat,
-  Copy,
   FileCode,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { formatNextRun } from '@/lib/nextRun.js';
 import { ConfirmDialog, Button, Spinner, StatusBadge, PageHeader } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { TriggerAutomationModal } from '@/components/automation/TriggerAutomationModal.js';
+import { WebhookCredentialsDialog, type WebhookCredentials } from '@/components/automation/WebhookCredentialsDialog.js';
 import { ChangesSurface } from '@/components/diff/ChangesSurface.js';
 import { useWorkflowRun } from '@/hooks/workflowQueries.js';
 import { useAutomationExecutionStream } from '@/hooks/useAutomationExecutionStream.js';
+import { usePlatform } from '@/providers/PlatformProvider.js';
+import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
 import type { AutomationExecution, AutomationExecutionWithRuns } from '@generatorai/shared';
 
 function formatDate(date: Date | string | undefined): string {
@@ -56,8 +59,17 @@ export function AutomationDetailPage() {
   const deleteMutation = useDeleteAutomation();
   const cancelMutation = useCancelAutomationExecution();
 
+  const platform = usePlatform() as HttpPlatformClient;
+
   const [expandedExecId, setExpandedExecId] = useState<string | null>(null);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
+  // Item A5 — GET /:id no longer returns the raw token (only SECRET_MASK),
+  // so there is nothing to display on reload. Rotating mints a fresh
+  // one-time token + signing secret, shown exactly once in this dialog —
+  // same rule as create.
+  const [webhookCredentials, setWebhookCredentials] = useState<WebhookCredentials | null>(null);
+  const [rotating, setRotating] = useState(false);
+  const [rotateError, setRotateError] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -78,9 +90,30 @@ export function AutomationDetailPage() {
     );
   }
 
-  const webhookUrl = automation.triggerType === 'webhook' && automation.webhookToken
-    ? `${window.location.origin}/api/automations/webhooks/${automation.webhookToken}`
-    : null;
+  const isWebhook = automation.triggerType === 'webhook';
+  // Computed once per render rather than live-ticking: the value only moves a
+  // minute at a time, and a re-rendering clock on a detail page is noise.
+  const nextRun = formatNextRun(automation.nextRunAt, { enabled: automation.enabled });
+
+  const handleRotateWebhookToken = async () => {
+    setRotateError(null);
+    setRotating(true);
+    try {
+      const result = await platform.rotateWebhookToken(automation.id) as {
+        token: string;
+        signingSecret?: string;
+      };
+      setWebhookCredentials({
+        webhookUrl: `${window.location.origin}/api/automations/webhooks/${result.token}`,
+        token: result.token,
+        signingSecret: result.signingSecret,
+      });
+    } catch (err) {
+      setRotateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRotating(false);
+    }
+  };
 
   // Schema-driven automations need the trigger modal to collect per-run
   // dataset input. Legacy modes (single/loop/batch/script) have nothing
@@ -177,28 +210,49 @@ export function AutomationDetailPage() {
           <div className="text-xs font-medium text-muted-foreground">Last Run</div>
           <div className="mt-1 text-sm font-semibold text-foreground">{formatDate(automation.lastRunAt)}</div>
         </div>
+        {automation.triggerType === 'schedule' && (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs font-medium text-muted-foreground">Next Run</div>
+            <div
+              className={cn(
+                'mt-1 text-sm font-semibold',
+                nextRun.none ? 'text-muted-foreground' : 'text-foreground',
+              )}
+            >
+              {nextRun.full}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Webhook URL */}
-      {webhookUrl && (
+      {/* Webhook trigger */}
+      {isWebhook && (
         <div className="mb-8 rounded-lg border border-border bg-card p-4">
-          <div className="text-xs font-medium text-muted-foreground">Webhook URL</div>
-          <div className="mt-2 flex items-center gap-2">
-            <code className="flex-1 rounded-lg bg-muted px-3 py-2 text-xs text-foreground">
-              {webhookUrl}
-            </code>
+          <div className="text-xs font-medium text-muted-foreground">Webhook trigger</div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            The token and signing secret are shown once, right when the webhook is created or
+            rotated — this page never displays them again. Send a signed POST to the URL you
+            saved then (or with the token in an <code className="font-mono">X-Webhook-Token</code>{' '}
+            header instead), with a valid{' '}
+            <code className="font-mono">X-Signature-256: sha256=&lt;hex&gt;</code> HMAC over the raw
+            body when a signing secret is configured. The endpoint doesn't require any other
+            credential — deliveries are authenticated by the token and, when set, the signature
+            alone.
+          </p>
+          {rotateError && (
+            <p className="mt-2 text-xs text-danger">{rotateError}</p>
+          )}
+          <div className="mt-3">
             <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => navigator.clipboard.writeText(webhookUrl)}
-              title="Copy webhook URL"
+              variant="secondary"
+              size="sm"
+              onClick={handleRotateWebhookToken}
+              disabled={rotating}
+              loading={rotating}
             >
-              <Copy className="h-4 w-4" />
+              Rotate token &amp; secret
             </Button>
           </div>
-          <p className="mt-2 text-xs text-warning">
-            Keep this URL secret — anyone with this URL can trigger the automation. Send a POST request with a JSON body to trigger; fields will be merged as variables.
-          </p>
         </div>
       )}
 
@@ -356,6 +410,11 @@ export function AutomationDetailPage() {
         open={triggerModalOpen}
         onClose={() => setTriggerModalOpen(false)}
         automation={automation}
+      />
+      <WebhookCredentialsDialog
+        open={webhookCredentials !== null}
+        credentials={webhookCredentials}
+        onClose={() => setWebhookCredentials(null)}
       />
     </PageContainer>
   );

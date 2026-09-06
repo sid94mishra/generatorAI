@@ -187,11 +187,9 @@ In production, the server statically serves `apps/web/dist`.
 
 **Path:** [apps/cli/](../../apps/cli/)
 
-Single-binary CLI installed via `pnpm --filter @generatorai/cli build` then run as `generatorai <command>`. Two modes:
+Single-binary CLI installed via `pnpm --filter @generatorai/cli build` then run as `generatorai <command>`. One mode:
 
-- **`http`** (default) — calls a running server via REST + SSE.
-- **`direct`** (in-process) — uses `createCoreServices()` directly without HTTP.  
-  Status: framework present but currently always uses HTTP.
+- **HTTP + WebSocket client** of a running server (`createCliClient()` in `packages/cli-core`). There is no in-process / `direct` / `--local` mode: the CLI never imports `@generatorai/core`, `@generatorai/db` or a harness provider, and its bundle (`apps/cli/esbuild.config.mjs`) is fully self-contained with no native addons. Earlier revisions of this doc described a `direct` mode "framework"; it was never in the tree.
 
 ### Top-level commands (18)
 
@@ -316,7 +314,7 @@ The relay is a byte pipe: it reads no application payloads. Identity and authori
 
 ## `apps/mobile` — Expo / React Native companion
 
-**Path:** [apps/mobile/](../../apps/mobile/)
+**Path:** [apps/mobile/](../../apps/mobile/) · see [apps/mobile/README.md](../../apps/mobile/README.md) for the EAS build profiles (`eas.json`), the `EAS_PROJECT_ID` requirement for push, and the Android cleartext rationale.
 
 A companion client for chats and run monitoring, reaching the server directly on the LAN or through `apps/relay`. It shares `packages/client-core`'s stream reducer and types, but has its own transport (`src/stream/SseClient.ts`) and event router (`src/stream/useChatStream.ts`).
 

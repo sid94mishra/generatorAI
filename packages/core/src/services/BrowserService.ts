@@ -33,7 +33,7 @@ import type {
   WorkspaceArtifactRecord,
   WorkspaceArtifactType,
 } from '@generatorai/shared';
-import { matchesAnyHostPattern, readBoundedInt } from '@generatorai/shared';
+import { isNavigationAllowed, readBoundedInt, type NavigationVerdict } from '@generatorai/shared';
 import { importBrowserCookies, type SupportedCookieBrowser } from '../infrastructure/browser/CookieImport.js';
 import { redactPii, flagPromptInjection } from '../infrastructure/ContentSafety.js';
 import type {
@@ -388,6 +388,37 @@ export class BrowserService {
       kind: 'browser.session_stopped',
       data: { workspaceId, reason: reason ?? 'user' },
     });
+  }
+
+  /**
+   * Whole-service shutdown — APPLICATION-REVIEW-2026-09 §6.7.
+   *
+   * Until this existed the browser service was the one live-process owner
+   * absent from the composition root's shutdown sequence, so every graceful
+   * restart left its Chromium instances to be force-killed by the descendant
+   * reaper (or orphaned outright when the reaper could not see them). This
+   * runs the normal per-session `stop()` path — bridge stop, FSM transition,
+   * workspace row → `terminated`, `browser.session_stopped` event — for every
+   * session, best-effort: one session's failure must not keep the others
+   * alive. Starts that are still in flight are awaited first so a Chromium
+   * that finishes launching mid-shutdown is stopped rather than leaked.
+   */
+  async dispose(): Promise<void> {
+    if (this.pendingStarts.size > 0) {
+      await Promise.allSettled([...this.pendingStarts.values()]);
+    }
+    const ids = [...this.sessions.keys()];
+    await Promise.all(
+      ids.map(async (workspaceId) => {
+        try {
+          await this.stop(workspaceId, 'server-shutdown');
+        } catch (err) {
+          this.logger.warn?.(
+            `[BrowserService] dispose: stop failed for ${workspaceId}: ${(err as Error).message}`,
+          );
+        }
+      }),
+    );
   }
 
   // ── User-driven actions (called by the /api/browser routes) ──
@@ -1194,19 +1225,31 @@ export class BrowserService {
     };
   }
 
+  /**
+   * The navigation decision, for every path that can move the browser.
+   *
+   * Host-pattern matching alone was not a policy: with no `allowedHosts`
+   * configured — the default — it returned true for everything, and it only
+   * looked at the host, so `file:///…` (whose host is empty) passed too. A
+   * page could therefore be pointed at local credentials or at the cloud
+   * metadata address, and the result read back through the agent's own tools.
+   * `isNavigationAllowed` refuses non-http(s) schemes outright and, when no
+   * allow-list is configured, still blocks loopback, link-local and metadata
+   * hosts. An explicit allow-list naming those hosts continues to win, so
+   * driving a local development server remains possible on purpose.
+   */
+  private navigationVerdict(cfg: BrowserConfig, url: string): NavigationVerdict {
+    return isNavigationAllowed(url, cfg.allowedHosts);
+  }
+
   private isHostAllowed(cfg: BrowserConfig, url: string): boolean {
-    let host: string;
-    try {
-      host = new URL(url).host;
-    } catch {
-      return false;
-    }
-    return matchesAnyHostPattern(host, cfg.allowedHosts);
+    return this.navigationVerdict(cfg, url).ok;
   }
 
   private async assertHostAllowed(cfg: BrowserConfig, url: string): Promise<void> {
-    if (!this.isHostAllowed(cfg, url)) {
-      throw new Error(`URL blocked by browserConfig.allowedHosts: ${url}`);
+    const verdict = this.navigationVerdict(cfg, url);
+    if (!verdict.ok) {
+      throw new Error(`Navigation blocked: ${verdict.reason}`);
     }
   }
 
@@ -1227,6 +1270,40 @@ export class BrowserService {
   }
 
   private async finaliseAction(record: SessionRecord, action: BrowserAction, outcome: PageOutcome): Promise<void> {
+    // Where the page ACTUALLY ended up, whatever moved it.
+    //
+    // `navigate` checks its target before going, but that only covers the one
+    // action that names a URL. A click on a link, a redirect, a form
+    // submission or page script setting `location` all move the page too, and
+    // every one of them lands here — so this is the only place that can see
+    // the real destination. Without it the agent could click through to a
+    // `file://` path or the cloud metadata address and read the result back in
+    // the screenshot, which is the exact hole the allow-list exists to close.
+    if (outcome.url) {
+      const verdict = this.navigationVerdict(record.config, outcome.url);
+      if (!verdict.ok) {
+        this.logger.warn(
+          `[BrowserService] blocked destination after ${action.kind}: ${verdict.reason}`,
+        );
+        // Leave the page somewhere harmless before anything is captured or
+        // returned, then report it rather than failing silently.
+        try {
+          await record.bridge.navigate(record.handle, 'about:blank');
+        } catch {
+          // Best effort — the refusal below is what matters.
+        }
+        await this.emitBrowserEvent(record.workspaceId, {
+          kind: 'browser.error',
+          data: {
+            workspaceId: record.workspaceId,
+            kind: 'blocked',
+            error: `Blocked after ${action.kind}: ${verdict.reason}`,
+          },
+        });
+        return;
+      }
+    }
+
     let artifactId: string | undefined;
     if (outcome.ok && outcome.artifactPath && outcome.artifactType) {
       const stats = await fs

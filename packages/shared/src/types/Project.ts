@@ -109,6 +109,11 @@ export interface ProjectConfig {
   description?: string;
   filePath: string;
   metadata: Record<string, unknown>;
+  /**
+   * MCP configs only — names of the credentials held in the secrets vault
+   * under `mcp/project/<id>` (migration v48, `credential_refs`). Never values.
+   */
+  credentialRefs?: { headers?: string[]; env?: string[] };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -174,16 +179,42 @@ export interface ArtifactWithSource {
 
 // ── MCP Server Entry ──
 
+/**
+ * Wire shape of an MCP server as returned by every list endpoint
+ * (`/system/mcp-servers`, `/projects/:id/mcp-servers`).
+ *
+ * Credential VALUES are never on the wire: `headers` / `env` carry the
+ * redaction marker per key, and `hasCredentials` says whether any are stored.
+ */
 export interface McpServerEntry {
   id: string;
   name: string;
   description?: string;
-  serverType: 'http' | 'stdio';
+  serverType: 'http' | 'sse' | 'stdio';
   url?: string;
   command?: string;
   args?: string[];
-  source: ArtifactSource;
+  timeoutMs?: number;
+  source: ArtifactSource | 'custom';
+  /** Effective on/off: the user's toggle AND fully configured. */
   enabled: boolean;
+  /** The user's toggle alone (system/custom scope), before configuration gating. */
+  userEnabled?: boolean;
+  /** Redacted credential map — every value is the redaction marker. */
+  headers?: Record<string, string>;
+  env?: Record<string, string>;
+  hasCredentials?: boolean;
+  /** Present when the server cannot be sent to a harness yet. */
+  needsConfiguration?: { missingInputs: string[]; missingCredentials: string[] };
+  /** Bundled-catalog metadata the Settings form renders (system scope only). */
+  inputs?: Array<{ key: string; label: string; description?: string; kind?: 'path' | 'text' | 'url'; required?: boolean; placeholder?: string }>;
+  /** Values the user has supplied for `inputs` (system scope only). */
+  inputValues?: Record<string, string>;
+  credentials?: {
+    env?: Array<{ name: string; label: string; description?: string; required?: boolean }>;
+    headers?: Array<{ name: string; label: string; description?: string; required?: boolean }>;
+  };
+  category?: string;
 }
 
 // ── File Entries ──

@@ -267,3 +267,45 @@ describe('StreamBroker with batching', () => {
     expect(seen).toEqual([1]);
   });
 });
+
+// ────────────────────────────────────────────────────────────────
+// Review 3.4 — a lone delta must not wait out the whole window.
+//
+// `EventBus` serialises emits per session, so for one active conversation
+// there is only ever ONE delta pending. It used to wait the full 8 ms batching
+// window, which the batch could never fill, so every event paid the delay and
+// got none of the batching benefit — a ceiling of roughly 125 events per
+// second per conversation, which is what made long answers fall progressively
+// further behind the model.
+// ────────────────────────────────────────────────────────────────
+
+describe('delta flush latency (review 3.4)', () => {
+  it('writes a single delta without waiting out the full batching window', async () => {
+    // A deliberately long window: if the flush waited for it, this test would
+    // time out rather than merely be slow.
+    const w = new StreamWriteBatcher(repo, mockLogger(), { deltaBatchMs: 10_000 });
+
+    const started = Date.now();
+    await w.write('chat', 'c1', 'harness.token', { text: 'hi' });
+    const elapsed = Date.now() - started;
+
+    expect(elapsed).toBeLessThan(1_000);
+    expect(rowCount()).toBe(1);
+  });
+
+  it('still batches deltas emitted in the same tick into one transaction', async () => {
+    const w = new StreamWriteBatcher(repo, mockLogger(), { deltaBatchMs: 10_000 });
+    const spy = vi.spyOn(repo, 'appendBatch');
+
+    await Promise.all([
+      w.write('chat', 'c1', 'harness.token', { text: 'a' }),
+      w.write('chat', 'c1', 'harness.token', { text: 'b' }),
+      w.write('chat', 'c1', 'harness.token', { text: 'c' }),
+    ]);
+
+    // Three events, ONE transaction: the amortisation the window exists for is
+    // preserved. Only the dead waiting is gone.
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(rowCount()).toBe(3);
+  });
+});

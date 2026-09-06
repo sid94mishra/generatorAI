@@ -958,10 +958,46 @@ export class CopilotProvider implements IAgentHarness {
     return registered;
   }
 
+  /**
+   * Route the SDK's permission callback to the domain handler.
+   *
+   * Used by BOTH session creation and session resume. The resume path used to
+   * hardcode `approveAll`, so a chat that prompted before a restart silently
+   * stopped prompting after one — the same class of defect as review 5.1,
+   * just reachable only after a reconnect. One bridge, both paths.
+   */
+  private bridgePermissionHandler(
+    conversationId: string,
+    handler: NonNullable<CreateConversationParams['onPermissionRequest']>,
+  ) {
+    return async (sdkRequest: { kind: string }, _invocation?: unknown): Promise<PermissionRequestResult> => {
+      // HITL-07 — mark the conversation as "waiting on human" so
+      // sendPromptAndWait's watchdog timer pauses. Increment/decrement rather
+      // than a boolean so nested/concurrent requests all track.
+      const prev = this.permissionPending.get(conversationId) ?? 0;
+      this.permissionPending.set(conversationId, prev + 1);
+      try {
+        const result = await handler({
+          type: mapPermissionKind(sdkRequest.kind as Parameters<typeof mapPermissionKind>[0]),
+          description: String(sdkRequest.kind),
+          details: sdkRequest as unknown as Record<string, unknown>,
+        });
+        // SDK 1.0: PermissionDecision uses 'approve-once' / 'reject' kinds.
+        return (
+          result.granted ? { kind: 'approve-once' as const } : { kind: 'reject' as const }
+        ) satisfies PermissionRequestResult;
+      } finally {
+        const cur = this.permissionPending.get(conversationId) ?? 1;
+        if (cur <= 1) this.permissionPending.delete(conversationId);
+        else this.permissionPending.set(conversationId, cur - 1);
+      }
+    };
+  }
+
   async createConversation(params: CreateConversationParams): Promise<string> {
     return withSpan('copilot-bridge', 'copilot.createConversation', async (span) => {
       span.setAttribute('copilot.conversation_id', params.conversationId);
-      span.setAttribute('copilot.model', params.model ?? 'claude-sonnet-4.6');
+      span.setAttribute('copilot.model', params.model ?? 'auto');
 
     const warnings: ConversationWarning[] = [];
     // W41 — dynamic: tool-factory pulls in the Copilot SDK.
@@ -1163,31 +1199,10 @@ export class CopilotProvider implements IAgentHarness {
     // `PermissionRequest['kind']` union, so adding a new SDK kind without a
     // mapping fails at build time. See `permissionMap.ts` for the rationale.
     if (params.onPermissionRequest) {
-      const capturedConvId = params.conversationId;
-      sessionConfig.onPermissionRequest = async (sdkRequest, _invocation) => {
-        // HITL-07 — mark the conversation as "waiting on human" so
-        // sendPromptAndWait's watchdog timer pauses. Increment/decrement
-        // rather than a boolean so nested/concurrent requests all track.
-        const prev = this.permissionPending.get(capturedConvId) ?? 0;
-        this.permissionPending.set(capturedConvId, prev + 1);
-        try {
-          const result = await params.onPermissionRequest!({
-            type: mapPermissionKind(sdkRequest.kind),
-            description: String(sdkRequest.kind),
-            details: sdkRequest as unknown as Record<string, unknown>,
-          });
-          // SDK 1.0: PermissionDecision uses new 'approve-once' / 'reject' kinds
-          return (
-            result.granted
-              ? { kind: 'approve-once' as const }
-              : { kind: 'reject' as const }
-          ) satisfies PermissionRequestResult;
-        } finally {
-          const cur = this.permissionPending.get(capturedConvId) ?? 1;
-          if (cur <= 1) this.permissionPending.delete(capturedConvId);
-          else this.permissionPending.set(capturedConvId, cur - 1);
-        }
-      };
+      sessionConfig.onPermissionRequest = this.bridgePermissionHandler(
+        params.conversationId,
+        params.onPermissionRequest,
+      );
     }
 
     if (this.verbose) console.log(`[CopilotAdapter] Creating session ${params.conversationId} with workingDirectory=${params.workingDirectory ?? '(not set)'}`);
@@ -1200,7 +1215,30 @@ export class CopilotProvider implements IAgentHarness {
     // the cwd matches the default, returning null (→ use this.client).
     const workspaceEntry = await this.getOrCreateWorkspaceEntry(params.workingDirectory); /* W36 */
     const createClient = workspaceEntry ? workspaceEntry.client : await this.ensureClient(); /* W36, W41 */
-    const session = await createClient.createSession(sessionConfig);
+    let session;
+    try {
+      session = await createClient.createSession(sessionConfig);
+    } catch (err) {
+      // A model the account cannot use is a CONFIGURATION problem, not a
+      // server fault. It used to surface as a bare 502 `UNKNOWN_ERROR` saying
+      // only `Model "x" is not available`, which told the user nothing about
+      // what they could pick instead. Name the alternatives.
+      const message = err instanceof Error ? err.message : String(err);
+      if (/is not available|unknown model|model .* not found/i.test(message)) {
+        const available = await this.getModels()
+          .then((ms) => ms.map((m) => m.id))
+          .catch(() => [] as string[]);
+        throw new HarnessSessionError(
+          `Model "${resolvedModel}" is not available on this account. ` +
+            (available.length > 0
+              ? `Available models: ${available.slice(0, 12).join(', ')}. Use "auto" to let the provider choose.`
+              : 'Use "auto" to let the provider choose.'),
+          'copilot',
+          err as Error,
+        );
+      }
+      throw err;
+    }
     // W36 — record which workspace owns this conversation
     const wsKey = params.workingDirectory && workspaceEntry ? params.workingDirectory : '__default__'; /* W36 */
     this.conversationClientKey.set(params.conversationId, wsKey); /* W36 */
@@ -1303,10 +1341,20 @@ export class CopilotProvider implements IAgentHarness {
     // W41 — dynamic: both the SDK helper and tool-factory are loaded on demand.
     const { approveAll } = await loadCopilotSdk();
     const { buildSdkTools } = await import('./tool-factory.js');
+    // Default only until we know whether this conversation gates permissions;
+    // replaced below when the caller supplies a handler.
     const resumeConfig: ResumeSessionConfig = { onPermissionRequest: approveAll };
     const warnings: ConversationWarning[] = [];
     let registeredAgents: HarnessAgentInfo[] = [];
     if (params) {
+      // Review 5.1 — carry the approval gate across the resume. Without this a
+      // restart turned "ask me before each tool" into approve-everything.
+      if (params.onPermissionRequest) {
+        resumeConfig.onPermissionRequest = this.bridgePermissionHandler(
+          conversationId,
+          params.onPermissionRequest,
+        );
+      }
       /* W13-B1 */ resumeConfig.tools = buildSdkTools(params.tools ?? [], this.toolSemaphore, conversationId);
       if (params.systemMessage) {
         resumeConfig.systemMessage = { mode: params.systemMessage.mode, content: params.systemMessage.content };

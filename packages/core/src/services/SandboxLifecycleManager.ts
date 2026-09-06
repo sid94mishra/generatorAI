@@ -7,14 +7,10 @@
 import type { ISandboxProvider, SandboxConfig } from '../domain/ports/ISandboxProvider.js';
 import type { ILogger } from '@generatorai/shared';
 
-export interface SandboxSession {
-  sandboxName: string;
-  /** cliUrl for the SDK to connect to; undefined if CLI not started in sandbox */
-  cliUrl?: string;
-  cliPort: number;
-  /** Whether this is using the Docker sandbox or the host fallback */
-  isDockerSandbox: boolean;
-}
+// `SandboxSession` is declared in the domain port so infrastructure adapters
+// (`SandboxPtyHost`) can depend on it without importing this service.
+import type { SandboxSession } from '../domain/ports/ISandboxProvider.js';
+export type { SandboxSession } from '../domain/ports/ISandboxProvider.js';
 
 export interface SandboxLifecycleConfig {
   image: string;

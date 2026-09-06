@@ -139,16 +139,19 @@ function Field({
   label,
   hint,
   required,
+  htmlFor,
   children,
 }: {
   label: string;
   hint?: string;
   required?: boolean;
+  /** id of the control this label names (for click-to-focus + screen readers) */
+  htmlFor?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="block text-xs font-medium text-foreground">
+      <label htmlFor={htmlFor} className="block text-xs font-medium text-foreground">
         {label}
         {required && <span className="ml-0.5 text-danger">*</span>}
       </label>
@@ -508,8 +511,9 @@ export function AgentEditorPage() {
           <SectionCard icon={Bot} title="Identity">
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Name" required>
+                <Field label="Name" required htmlFor="agent-name">
                   <Input
+                    id="agent-name"
                     value={form.name}
                     disabled={readOnly}
                     data-testid="agent-name-input"
@@ -523,8 +527,10 @@ export function AgentEditorPage() {
                 <Field
                   label="Slug"
                   hint={`Permanent id used to bind this agent from chats, stages and scripts — "${form.scope}:${effectiveSlug}". Auto-derived from the name and fixed once saved.`}
+                  htmlFor="agent-slug"
                 >
                   <Input
+                    id="agent-slug"
                     value={form.slug}
                     disabled={readOnly || !isNew}
                     data-testid="agent-slug-input"
@@ -541,8 +547,10 @@ export function AgentEditorPage() {
                 label="Description"
                 required
                 hint="Both SDKs use this to decide when to delegate to the agent. Be specific about when it should be chosen."
+                htmlFor="agent-description"
               >
                 <Textarea
+                  id="agent-description"
                   value={form.description}
                   disabled={readOnly}
                   rows={2}
@@ -555,6 +563,7 @@ export function AgentEditorPage() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Scope">
                   <Select
+                    aria-label="Scope"
                     value={form.scope}
                     disabled={readOnly || !isNew}
                     onChange={(v) =>
@@ -572,6 +581,7 @@ export function AgentEditorPage() {
                 {form.scope === 'project' && (
                   <Field label="Project" required>
                     <Select
+                      aria-label="Project"
                       value={form.projectId}
                       disabled={readOnly || !isNew}
                       onChange={(v) => patch({ projectId: v })}
@@ -588,19 +598,21 @@ export function AgentEditorPage() {
                     <Badge key={tag} tone="neutral" size="sm">
                       {tag}
                       {!readOnly && (
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
                           aria-label={`Remove tag ${tag}`}
                           onClick={() => patch({ tags: form.tags.filter((t) => t !== tag) })}
-                          className="ml-0.5 text-muted-foreground hover:text-foreground"
+                          className="ml-0.5 h-auto w-auto rounded-none p-0 text-[10px] font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
                         >
                           ×
-                        </button>
+                        </Button>
                       )}
                     </Badge>
                   ))}
                   {!readOnly && (
-                    <input
+                    <Input
+                      aria-label="Add tag"
                       value={tagInput}
                       onChange={(e) => setTagInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -612,7 +624,7 @@ export function AgentEditorPage() {
                         }
                       }}
                       placeholder="Add tag…"
-                      className="w-24 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+                      className="h-auto w-24 rounded-none border-0 bg-transparent p-0 text-xs text-foreground placeholder:text-muted-foreground focus:border-0 focus:outline-none focus:ring-0"
                     />
                   )}
                 </div>
@@ -637,6 +649,7 @@ export function AgentEditorPage() {
           >
             <div className="space-y-3">
               <Textarea
+                aria-label="Instructions"
                 value={form.instructions}
                 disabled={readOnly}
                 rows={12}
@@ -672,6 +685,7 @@ export function AgentEditorPage() {
                 }
               >
                 <Select
+                  aria-label="How these instructions combine with the built-in prompt"
                   value={form.projection}
                   disabled={readOnly}
                   onChange={(v) => patch({ projection: v as 'append' | 'replace' })}
@@ -850,8 +864,9 @@ export function AgentEditorPage() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Max concurrent workers">
+                  <Field label="Max concurrent workers" htmlFor="agent-max-workers">
                     <Input
+                      id="agent-max-workers"
                       type="number"
                       min={1}
                       max={20}
@@ -870,6 +885,7 @@ export function AgentEditorPage() {
                   </Field>
                   <Field label="Default worker model">
                     <Select
+                      aria-label="Default worker model"
                       value={form.orchestration.defaultWorkerModel ?? ''}
                       disabled={readOnly}
                       onChange={(v) =>
@@ -896,6 +912,7 @@ export function AgentEditorPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Provider">
                 <Select
+                  aria-label="Provider"
                   value={form.runtime.harnessType ?? ''}
                   disabled={readOnly}
                   onChange={(v) =>
@@ -915,6 +932,7 @@ export function AgentEditorPage() {
               </Field>
               <Field label="Model">
                 <Select
+                  aria-label="Model"
                   value={form.runtime.model ?? ''}
                   disabled={readOnly}
                   onChange={(v) => patch({ runtime: { ...form.runtime, model: v || undefined } })}
@@ -923,6 +941,7 @@ export function AgentEditorPage() {
               </Field>
               <Field label="Reasoning effort">
                 <Select
+                  aria-label="Reasoning effort"
                   value={form.runtime.reasoningEffort ?? ''}
                   disabled={readOnly}
                   onChange={(v) =>
@@ -941,6 +960,7 @@ export function AgentEditorPage() {
               </Field>
               <Field label="Context tier">
                 <Select
+                  aria-label="Context tier"
                   value={form.runtime.contextTier ?? ''}
                   disabled={readOnly}
                   onChange={(v) =>
@@ -956,8 +976,9 @@ export function AgentEditorPage() {
               {/* Permission mode is intentionally not editable here: the chat or
                   workflow the agent runs in owns approvals, and a second control
                   only creates a conflict the user cannot see. */}
-              <Field label="Max turns" hint="Copilot ignores this; Claude enforces it.">
+              <Field label="Max turns" hint="Copilot ignores this; Claude enforces it." htmlFor="agent-max-turns">
                 <Input
+                  id="agent-max-turns"
                   type="number"
                   min={1}
                   disabled={readOnly}

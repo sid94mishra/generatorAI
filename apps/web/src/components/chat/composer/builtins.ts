@@ -60,8 +60,6 @@ export function skillToCommand(a: {
   };
 }
 
-const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
-
 /**
  * The Computer Use skill command.
  *

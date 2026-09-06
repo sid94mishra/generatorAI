@@ -74,3 +74,24 @@ export interface ISandboxProvider {
    */
   list(prefix?: string): Promise<SandboxInfo[]>;
 }
+
+/**
+ * A live sandbox attached to a workflow run. Declared here (not in
+ * `services/SandboxLifecycleManager.ts`, which re-exports it) so that
+ * infrastructure adapters such as `SandboxPtyHost` can depend on the shape
+ * without importing the application layer — see the boundary lint in
+ * eslint.config.mjs (APPLICATION-REVIEW-2026-09 plan item 30).
+ */
+export interface SandboxSession {
+  sandboxName: string;
+  /** cliUrl for the SDK to connect to; undefined if CLI not started in sandbox */
+  cliUrl?: string;
+  cliPort: number;
+  /** Whether this is using the Docker sandbox or the host fallback */
+  isDockerSandbox: boolean;
+}
+
+/** The one capability `SandboxPtyHost` needs from the lifecycle manager. */
+export interface ISandboxSessionLookup {
+  getSession(runId: string): SandboxSession | undefined;
+}

@@ -5,9 +5,8 @@
 
 import type { IWorktreeRepository, IProjectRepository, IChatRepository } from '../domain/ports/index.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
-import type { ILogger, Project, WorktreeRunType } from '@generatorai/shared';
+import type { ILogger, Project, WorktreeInfo, WorktreeRunType } from '@generatorai/shared';
 import type { WorktreeService } from './WorktreeService.js';
-import * as fs from 'node:fs/promises';
 
 const RETENTION_MS: Record<string, number> = {
   immediate: 0,
@@ -112,8 +111,20 @@ export class WorktreeCleanupService {
     return { cleaned, orphaned };
   }
 
-  /** Clean up worktrees for a single project (stale-record deletion + smart
-   *  orphan detection + age-based retention). */
+  /**
+   * Clean up worktrees for a single project: orphan detection + age-based
+   * retention, with ONE removal path.
+   *
+   * Retention is measured from the moment the worktree stopped being live
+   * (`cleanedUpAt` when the owner marked it, else `createdAt`) and applies to
+   * every non-active status. The previous shape had a "stale record" fast
+   * path at the top of the loop that `fs.rm`'d + deleted any `completed` /
+   * `orphaned` / `cleanup-pending` row with no age check at all — so a
+   * worktree flagged `orphaned` on one sweep was raw-deleted on the next,
+   * and the configured 24/72-hour retention collapsed to one sweep interval.
+   * It also bypassed `git worktree remove` / `prune`, leaving stale entries
+   * in the parent clone's `.git/worktrees` forever.
+   */
   private async _cleanupProject(project: Project): Promise<{ cleaned: number; orphaned: number }> {
     let cleaned = 0;
     let orphaned = 0;
@@ -126,47 +137,50 @@ export class WorktreeCleanupService {
     const worktrees = await this.worktreeRepo.getByProjectId(project.id);
 
     for (const wt of worktrees) {
-      // Delete stale DB records (already removed worktrees that weren't deleted from DB)
-      if (wt.status === 'completed' || wt.status === 'orphaned' || wt.status === 'cleanup-pending') {
-        try {
-          try { await fs.rm(wt.worktreePath, { recursive: true, force: true }); } catch { /* best effort */ }
-          await this.worktreeRepo.delete(wt.id);
-          cleaned++;
-        } catch (err) {
-          this.logger.warn(`[WorktreeCleanup] Failed to delete stale record ${wt.id}`, {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-        continue;
-      }
+      let eligible = wt.status === 'completed' || wt.status === 'orphaned' || wt.status === 'cleanup-pending';
 
-      if (wt.status !== 'active') continue;
-
-      // Check if the associated owner (run OR chat) has reached a terminal state
-      const isOrphaned = await this.isWorktreeOrphaned(wt);
-      if (isOrphaned) {
-        await this.worktreeRepo.updateStatus(wt.id, 'orphaned');
-        orphaned++;
-      }
-
-      // Check age-based retention
-      const age = Date.now() - wt.createdAt.getTime();
-      const isExpired = age >= maxAgeMs;
-      const shouldClean = isOrphaned && isExpired;
-
-      if (shouldClean) {
-        try {
-          await this.worktreeService.removeWorktree(wt.id);
-          cleaned++;
-        } catch (err) {
-          this.logger.warn(`[WorktreeCleanup] Failed to clean worktree ${wt.id}`, {
-            error: err instanceof Error ? err.message : String(err),
-          });
+      if (wt.status === 'active') {
+        // Check if the associated owner (run OR chat) has reached a terminal state
+        const isOrphaned = await this.isWorktreeOrphaned(wt);
+        if (isOrphaned) {
+          await this.worktreeRepo.updateStatus(wt.id, 'orphaned');
+          orphaned++;
+          eligible = true;
         }
       }
+
+      if (!eligible) continue;
+
+      if (!WorktreeCleanupService.isExpired(wt, maxAgeMs)) continue;
+
+      if (await this.remove(wt.id)) cleaned++;
     }
 
     return { cleaned, orphaned };
+  }
+
+  /** Retention clock: from when the worktree stopped being live, else creation. */
+  private static isExpired(wt: WorktreeInfo, maxAgeMs: number, now = Date.now()): boolean {
+    const since = wt.cleanedUpAt?.getTime() ?? wt.createdAt.getTime();
+    return now - since >= maxAgeMs;
+  }
+
+  /**
+   * The single removal path: `WorktreeService.removeWorktree` runs
+   * `git worktree remove` + `prune` against the parent clone, removes the
+   * directory, and deletes the row. A raw `fs.rm` here would leave git
+   * metadata behind.
+   */
+  private async remove(worktreeId: string): Promise<boolean> {
+    try {
+      await this.worktreeService.removeWorktree(worktreeId);
+      return true;
+    } catch (err) {
+      this.logger.warn(`[WorktreeCleanup] Failed to clean worktree ${worktreeId}`, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
   }
 
   /**
@@ -204,14 +218,7 @@ export class WorktreeCleanupService {
         }
 
         if (retention === 'immediate') {
-          try {
-            await this.worktreeService.removeWorktree(wt.id);
-            cleaned++;
-          } catch (err) {
-            this.logger.warn(`[WorktreeCleanup] Startup cleanup failed for ${wt.id}`, {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+          if (await this.remove(wt.id)) cleaned++;
         }
       }
     }

@@ -187,6 +187,14 @@ export interface AppearanceTokens {
   overlay: string;
   subtle: string;
   emphasis: string;
+  /**
+   * Generic panel fill for embedded/third-party content (widgets, iframes,
+   * inline previews) and its hover state. Aliases of `card` / `subtle`, kept
+   * as named tokens so consumers that cannot know which surface they sit on
+   * still follow the theme instead of falling back to white.
+   */
+  surface: string;
+  surfaceHover: string;
 
   // Interactive (accent-independent parts)
   primaryForeground: string;
@@ -201,6 +209,11 @@ export interface AppearanceTokens {
   // Borders
   border: string;
   borderMuted: string;
+  /**
+   * Form-control border. Unlike `border` (decorative dividers), an input's
+   * outline is the only thing telling a user where the field is, so it is
+   * held to WCAG 1.4.11's 3:1 non-text bar against `background` and `card`.
+   */
   input: string;
 
   // Status — semantic, never accent-controlled
@@ -358,6 +371,25 @@ export function resolveAccentTokens(
   };
 }
 
+const NON_TEXT_AA = 3;
+
+/**
+ * Form-control border: the theme's `border`, pushed toward the foreground
+ * only as far as it must go to clear 3:1 (WCAG 1.4.11) on both the page
+ * background and a card. Decorative dividers keep the softer `border`; a
+ * field whose edge is invisible is not "subtle", it is missing.
+ *
+ * Before this derivation 32 of 34 theme variants shipped input borders
+ * between 1.3:1 and 2.4:1.
+ */
+export function inputBorder(spec: ThemeAppearanceSpec) {
+  let colour = ensureContrast(spec.border, spec.background, NON_TEXT_AA);
+  colour = ensureContrast(colour, spec.card, NON_TEXT_AA);
+  // The second pass can, in principle, drop the first surface back under
+  // the bar; one more pass against the background settles it.
+  return ensureContrast(colour, spec.background, NON_TEXT_AA);
+}
+
 /** Expand a theme's authored spec into the full flat token set. */
 export function resolveAppearanceTokens(
   theme: ThemeDef,
@@ -378,6 +410,8 @@ export function resolveAppearanceTokens(
     overlay: s.popover,
     subtle: s.subtle,
     emphasis: s.emphasis,
+    surface: s.card,
+    surfaceHover: s.subtle,
 
     primaryForeground: s.onAccent,
     secondary: s.subtle,
@@ -390,7 +424,7 @@ export function resolveAppearanceTokens(
 
     border: s.border,
     borderMuted: s.borderMuted,
-    input: s.border,
+    input: toHex(inputBorder(s)),
 
     success: s.hues.green,
     successMuted: tint(s.hues.green),

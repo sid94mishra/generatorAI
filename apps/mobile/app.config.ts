@@ -8,6 +8,19 @@ import type { ExpoConfig } from 'expo/config';
 // lives here rather than in an Xcode project that drifts.
 // ────────────────────────────────────────────────────────────────
 
+// ── EAS project id ─────────────────────────────────────────────────
+// `getExpoPushTokenAsync` cannot mint a token without it, so a build made
+// without this variable ships with push notifications silently off. Sourced
+// from the environment (EAS build profile `env`, an EAS secret, or the shell)
+// rather than committed, because the id is per-Expo-account.
+const easProjectId = process.env['EAS_PROJECT_ID']?.trim() || undefined;
+if (!easProjectId) {
+  console.warn(
+    '[app.config] EAS_PROJECT_ID is not set — this build will have push notifications ' +
+      'DISABLED (no `extra.eas.projectId`). Set EAS_PROJECT_ID at build time (see eas.json / README).',
+  );
+}
+
 const config: ExpoConfig = {
   name: 'GeneratorAI',
   slug: 'generatorai',
@@ -32,8 +45,10 @@ const config: ExpoConfig = {
         'Dictate prompts to your agent. Audio is transcribed on your own server, never in the cloud.',
       NSFaceIDUsageDescription:
         'Unlock GeneratorAI and confirm sensitive actions such as granting terminal access.',
-      // Loopback/LAN endpoints are plain HTTP by design; the payload is
-      // still end-to-end encrypted above the transport.
+      // Loopback/LAN endpoints are plain HTTP by design. There is NO
+      // message-level encryption above the transport (relay-protocol's
+      // e2ee.ts is unwired); requests are DPoP-signed, which authenticates
+      // them but does not hide their contents from the local network.
       NSAppTransportSecurity: {
         NSAllowsLocalNetworking: true,
       },
@@ -53,6 +68,8 @@ const config: ExpoConfig = {
     // IME opens; `pan` (the other option) slides the whole window and hides
     // the transcript instead.
     softwareKeyboardLayoutMode: 'resize',
+    // Cleartext (`http://`) is enabled by `./plugins/withCleartextTraffic`
+    // below — see that file and README "Android cleartext".
     permissions: [
       'android.permission.CAMERA',
       'android.permission.RECORD_AUDIO',
@@ -89,11 +106,26 @@ const config: ExpoConfig = {
       'expo-audio',
       { microphonePermission: 'Dictate prompts to your agent, transcribed on your own server.' },
     ],
+    // Android 9+ blocks cleartext (`http://`) by default, and the pairing
+    // offer for a server on the same LAN is `http://<lan-ip>:<port>`. A
+    // release build without this rejects every request after a QR scan that
+    // appeared to succeed. Android's network-security-config cannot express
+    // CIDR ranges (only exact hosts / domain suffixes), so the
+    // loopback/RFC1918/`.local`-only rule is enforced at the application
+    // layer instead: `PairingEndpointSchema` in @generatorai/relay-protocol
+    // refuses an `http:` endpoint that is not private, and every request the
+    // app makes goes to a paired endpoint. SDK 57 dropped the
+    // `android.usesCleartextTraffic` config key, hence a plugin.
+    './plugins/withCleartextTraffic',
   ],
 
   experiments: {
     typedRoutes: true,
   },
+
+  // Omitted entirely (not written as undefined/empty) when unset, so
+  // `usePushNotifications` can tell "not configured" from "configured".
+  ...(easProjectId ? { extra: { eas: { projectId: easProjectId } } } : {}),
 };
 
 export default config;

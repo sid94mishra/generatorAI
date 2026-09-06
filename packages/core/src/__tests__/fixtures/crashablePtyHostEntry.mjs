@@ -58,4 +58,15 @@ process.on('message', (req) => {
   }
 });
 
+// Plan item 43 — the real host sends its hello FIRST; `PtyHostClient` refuses a
+// host that does not. The version is pinned by hand (no workspace imports here,
+// see the header): if `HOST_PROTOCOL_VERSIONS['pty-host']` moves, this fixture
+// fails loudly at start, which is exactly the behaviour the handshake exists for.
+// The build stamp only ever produces a warning, so a placeholder is fine.
+process.send({
+  type: 'hello',
+  host: 'pty-host',
+  protocolVersion: 1,
+  buildStamp: process.env.GENERATORAI_BUILD_STAMP ?? 'test-fixture',
+});
 process.send({ type: 'pong', reqId: '__ready__' });

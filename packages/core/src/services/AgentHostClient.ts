@@ -159,8 +159,12 @@ export class AgentHostClient implements IAgentHarness {
   // ── IHarnessModelDiscovery ────────────────────────────────────────────────
 
   async getModels(): Promise<HarnessModel[]> {
-    // Models are resolved on the host side; for now return empty — Phase B wires this
-    return [];
+    // Was a Phase-B stub returning `[]`, which emptied the model picker the
+    // moment the host was turned on. The host owns the provider; ask it.
+    const resp = await this.supervisor.send({ type: 'list_models' });
+    if (resp.type === 'models') return resp.models as unknown as HarnessModel[];
+    if (resp.type === 'error') throw new Error(`AgentHostClient.getModels failed: ${resp.message}`);
+    throw new Error(`AgentHostClient.getModels: unexpected response ${resp.type}`);
   }
 
   // ── IHarnessConversationLifecycle ─────────────────────────────────────────
@@ -252,12 +256,18 @@ export class AgentHostClient implements IAgentHarness {
     return this.conversationWarnings.get(conversationId) ?? [];
   }
 
-  async selectAgent(_conversationId: string, _agentName: string): Promise<void> {
-    // Phase B: forward to host
+  async selectAgent(conversationId: string, agentName: string): Promise<void> {
+    const resp = await this.supervisor.send({ type: 'select_agent', sessionId: conversationId, agentName });
+    if (resp.type === 'ack') return;
+    if (resp.type === 'error') throw new Error(`AgentHostClient.selectAgent failed: ${resp.message}`);
+    throw new Error(`AgentHostClient.selectAgent: unexpected response ${resp.type}`);
   }
 
-  async listAgents(_conversationId: string): Promise<HarnessAgentInfo[]> {
-    return [];
+  async listAgents(conversationId: string): Promise<HarnessAgentInfo[]> {
+    const resp = await this.supervisor.send({ type: 'list_agents', sessionId: conversationId });
+    if (resp.type === 'agents') return resp.agents as HarnessAgentInfo[];
+    if (resp.type === 'error') throw new Error(`AgentHostClient.listAgents failed: ${resp.message}`);
+    throw new Error(`AgentHostClient.listAgents: unexpected response ${resp.type}`);
   }
 
   // ── IHarnessMessaging ─────────────────────────────────────────────────────

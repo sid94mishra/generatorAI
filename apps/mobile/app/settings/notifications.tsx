@@ -16,6 +16,7 @@ import * as Notifications from 'expo-notifications';
 import { BellOff, BellRing, CircleHelp, MessageSquare, Workflow } from 'lucide-react-native';
 
 import { prefs } from '../../src/storage/prefs';
+import { describePushStatus, usePushStatusStore } from '../../src/notifications/pushStatus';
 import { Badge, Card, SectionHeader } from '../../src/components/ui/primitives';
 import { Button } from '../../src/components/ui/Button';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
@@ -58,6 +59,11 @@ export default function NotificationsScreen(): React.ReactElement {
   const [values, setValues] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(CATEGORIES.map((c) => [c.key, read(c.key, c.defaultOn)])),
   );
+  // Why push is or is not working — the hook used to bail silently, so a
+  // build without an EAS project id was indistinguishable from a quiet one.
+  const pushStatus = usePushStatusStore((s) => s.status);
+  const bumpPreferences = usePushStatusStore((s) => s.bumpPreferences);
+  const pushExplanation = describePushStatus(pushStatus);
 
   const refresh = useCallback(async () => {
     try {
@@ -119,6 +125,23 @@ export default function NotificationsScreen(): React.ReactElement {
         ) : null}
       </Card>
 
+      {pushExplanation && pushExplanation.tone !== 'success' ? (
+        <Card
+          className={`gap-1 p-4 ${
+            pushExplanation.tone === 'danger'
+              ? 'border-danger bg-danger-muted'
+              : pushExplanation.tone === 'warning'
+                ? 'border-warning bg-warning-muted'
+                : ''
+          }`}
+        >
+          <Text className="text-sm font-medium text-foreground">{pushExplanation.title}</Text>
+          <Text className="text-xs leading-relaxed text-muted-foreground">
+            {pushExplanation.detail}
+          </Text>
+        </Card>
+      ) : null}
+
       <SectionHeader title="Wake me for" />
       <ListGroup>
         {CATEGORIES.map(({ key, title, help, Icon }) => (
@@ -137,6 +160,9 @@ export default function NotificationsScreen(): React.ReactElement {
                 onValueChange={(next) => {
                   prefs.setString(key, next ? '1' : '0');
                   setValues((prev) => ({ ...prev, [key]: next }));
+                  // Re-syncs the server-side mute (see notificationFilter.ts);
+                  // the foreground filter reads prefs directly on each push.
+                  bumpPreferences();
                 }}
               />
             }
@@ -145,7 +171,9 @@ export default function NotificationsScreen(): React.ReactElement {
       </ListGroup>
 
       <Text className="px-1 pt-2 text-xs leading-relaxed text-muted-foreground">
-        These preferences apply to this device only.
+        These preferences apply to this device only. While the app is open, a switched-off
+        category is not shown. In the background, run outcomes and chat replies are muted on the
+        server only when both are off; approvals are always delivered.
         {Platform.OS === 'web'
           ? ' Web previews do not receive push notifications; install the app to test them.'
           : ''}

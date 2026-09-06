@@ -97,6 +97,47 @@ export function verifyGitHubSignature(secret: string) {
 }
 
 /**
+ * Header an automation webhook signs its raw body with. Matches the
+ * `Automation.webhookSecret` doc comment ("HMAC key for X-Signature-256").
+ * Deliberately NOT `x-hub-signature-256` — that header is reserved for the
+ * GitHub-keyed `/api/webhooks/github` route and its GLOBAL secret; automation
+ * webhooks are keyed per-automation, so they get their own header name to
+ * make the two impossible to confuse.
+ */
+export const AUTOMATION_SIGNATURE_HEADER = 'x-signature-256';
+
+/**
+ * Verifies an HMAC signature against an explicit secret + raw body.
+ *
+ * Unlike `verifyGitHubSignature`, this is not an Express middleware bound to
+ * one GLOBAL secret read from config — automation webhooks are keyed
+ * per-automation, resolved at request time (after the route looks the
+ * automation up by its token), so the caller passes the secret in directly.
+ * Reuses the same allowlisted-algorithm parsing and constant-time comparison
+ * as `verifyGitHubSignature` — do not reimplement either half separately.
+ *
+ * Returns `false` (never throws) for any parsing/verification failure —
+ * callers should treat that uniformly as "reject with 401".
+ */
+export function verifySignedPayload(
+  secret: string,
+  signatureHeader: string | undefined,
+  body: Buffer,
+): boolean {
+  if (!signatureHeader) return false;
+  const parsed = parseSignatureHeader(signatureHeader);
+  if (!parsed) return false;
+
+  const hmac = crypto.createHmac(parsed.algo, secret);
+  const expectedHex = hmac.update(body).digest('hex');
+
+  const sigBuf = Buffer.from(parsed.hex, 'hex');
+  const expectedBuf = Buffer.from(expectedHex, 'hex');
+  if (sigBuf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expectedBuf);
+}
+
+/**
  * Verifies custom webhook token from `Authorization: Bearer <token>` header.
  * Uses constant-time comparison via `timingSafeEqual`.
  *

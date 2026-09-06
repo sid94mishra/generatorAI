@@ -403,6 +403,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     templateRegistry,
     dagScheduler,
     withTransaction, // P0#4 — atomic template/JSON import
+    workflowRunRepo, // Item 9 — refuse (409) / force-delete a definition with runs
   );
 
   // W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix).

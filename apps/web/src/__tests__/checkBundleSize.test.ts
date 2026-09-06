@@ -84,12 +84,42 @@ describe('check-bundle-size.mjs', () => {
       const { status, stdout } = runScript(root);
       expect(status).toBe(0);
       expect(stdout).toContain('[check-bundle-size] OK');
-      // The heavy lazy chunk must never appear in the report.
-      expect(stdout).not.toContain('lazy-route-xyz.js');
+      // The heavy lazy chunk must not be counted in the initial-load report...
+      const initialSection = stdout.split('largest lazy chunk')[0]!;
+      expect(initialSection).not.toContain('lazy-route-xyz.js');
+      // ...but it IS graded on its own: 2 MB of 'x' gzips to a few KB, so it
+      // is the largest lazy chunk and well under the per-chunk budget.
+      expect(stdout).toContain('largest lazy chunk');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('fails when a lazy chunk on its own exceeds the per-chunk budget', () => {
+    // The regression this guards: a 9.6 MB (1.68 MB gzip) syntax-highlighting
+    // chunk shipped for months because it was lazy and the initial-load budget
+    // could not see it. Random bytes are incompressible, so 400 KB stays above
+    // the 300 KB gzip cap.
+    const heavyLazyChunk = randomBytes(400 * 1024);
+    const root = makeFixture({
+      indexHtml: `<!doctype html><html><head>
+        <script type="module" crossorigin src="/assets/entry-abc.js"></script>
+      </head><body></body></html>`,
+      assets: {
+        'entry-abc.js': 'console.log("entry");',
+        'vendor-highlight-xyz.js': heavyLazyChunk,
+      },
+    });
+
+    try {
+      const { status, stdout } = runScript(root);
+      expect(status).toBe(1);
+      expect(stdout).toContain('lazy chunk(s) exceed');
+      expect(stdout).toContain('vendor-highlight-xyz.js');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20_000);
 
   it('fails when the initial-load payload itself exceeds budget', () => {
     // Random bytes are incompressible, so gzip can't shrink this below the

@@ -1060,7 +1060,7 @@ export class CodexProvider implements IAgentHarness {
     switch (options?.permissionMode) {
       case 'bypassPermissions':
       case 'dontAsk':
-        return { approvalPolicy: 'never' };
+        return { approvalPolicy: 'never' }; // security-ok: not a default — translates the caller's EXPLICIT bypass request into Codex's vocabulary
       case 'acceptEdits':
       case 'default':
         return { approvalPolicy: 'on-request' };

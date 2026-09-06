@@ -8,7 +8,17 @@
     "args": ["-y", "@modelcontextprotocol/server-github"],
     "source": "system",
     "enabled": true,
-    "category": "version-control"
+    "category": "version-control",
+    "credentials": {
+      "env": [
+        {
+          "name": "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "label": "Personal access token",
+          "description": "A GitHub token with repo scope. Stored in the secrets vault, never in this config.",
+          "required": true
+        }
+      ]
+    }
   },
   {
     "id": "system-mcp-filesystem",
@@ -16,10 +26,20 @@
     "description": "Read and write local files with configurable allowed directories",
     "serverType": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "{{allowedDirectory}}"],
     "source": "system",
     "enabled": true,
-    "category": "storage"
+    "category": "storage",
+    "inputs": [
+      {
+        "key": "allowedDirectory",
+        "label": "Allowed directory",
+        "description": "The only directory this server may read or write. It never ships enabled with a default path.",
+        "kind": "path",
+        "required": true,
+        "placeholder": "D:/work/my-project"
+      }
+    ]
   },
   {
     "id": "system-mcp-postgres",
@@ -27,10 +47,20 @@
     "description": "Query and explore PostgreSQL databases",
     "serverType": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
+    "args": ["-y", "@modelcontextprotocol/server-postgres", "{{connectionString}}"],
     "source": "system",
     "enabled": true,
-    "category": "database"
+    "category": "database",
+    "inputs": [
+      {
+        "key": "connectionString",
+        "label": "Connection string",
+        "description": "postgresql://user:password@host:5432/database — this server never ships pointed at a default database.",
+        "kind": "url",
+        "required": true,
+        "placeholder": "postgresql://user:password@host:5432/database"
+      }
+    ]
   },
   {
     "id": "system-mcp-sqlite",
@@ -38,10 +68,20 @@
     "description": "Query and manage SQLite databases",
     "serverType": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/tmp/mydb.sqlite"],
+    "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "{{dbPath}}"],
     "source": "system",
     "enabled": true,
-    "category": "database"
+    "category": "database",
+    "inputs": [
+      {
+        "key": "dbPath",
+        "label": "Database file",
+        "description": "Path to the .sqlite file this server should open (created if it does not exist).",
+        "kind": "path",
+        "required": true,
+        "placeholder": "D:/work/my-project/data.sqlite"
+      }
+    ]
   },
   {
     "id": "system-mcp-slack",
@@ -52,7 +92,13 @@
     "args": ["-y", "@modelcontextprotocol/server-slack"],
     "source": "system",
     "enabled": true,
-    "category": "communication"
+    "category": "communication",
+    "credentials": {
+      "env": [
+        { "name": "SLACK_BOT_TOKEN", "label": "Bot token", "description": "xoxb- token for the Slack app.", "required": true },
+        { "name": "SLACK_TEAM_ID", "label": "Team ID", "description": "The Slack workspace's team ID.", "required": true }
+      ]
+    }
   },
   {
     "id": "system-mcp-web-search",
@@ -63,7 +109,12 @@
     "args": ["-y", "@modelcontextprotocol/server-brave-search"],
     "source": "system",
     "enabled": true,
-    "category": "search"
+    "category": "search",
+    "credentials": {
+      "env": [
+        { "name": "BRAVE_API_KEY", "label": "Brave Search API key", "required": true }
+      ]
+    }
   },
   {
     "id": "system-mcp-puppeteer",
@@ -85,6 +136,13 @@
     "args": ["-y", "@modelcontextprotocol/server-aws-kb-retrieval"],
     "source": "system",
     "enabled": true,
-    "category": "cloud"
+    "category": "cloud",
+    "credentials": {
+      "env": [
+        { "name": "AWS_ACCESS_KEY_ID", "label": "AWS access key ID", "required": true },
+        { "name": "AWS_SECRET_ACCESS_KEY", "label": "AWS secret access key", "required": true },
+        { "name": "AWS_REGION", "label": "AWS region", "description": "e.g. us-east-1", "required": true }
+      ]
+    }
   }
 ]

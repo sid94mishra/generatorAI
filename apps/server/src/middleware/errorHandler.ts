@@ -14,6 +14,26 @@ import {
 } from '@generatorai/shared';
 
 /**
+ * Matches `/api/automations/webhooks/<token>` — the one path shape in this
+ * app where the identifying segment IS a bearer credential rather than an
+ * opaque id. Every other route's `req.path` is safe to log verbatim (ids,
+ * not secrets); this one is not, and it is logged on EVERY failed delivery —
+ * i.e. every real one, since a webhook sender retries on error.
+ */
+const AUTOMATION_WEBHOOK_PATH_RE = /^(\/api\/automations\/webhooks\/)[^/]+/;
+
+/**
+ * Redacts the token segment of an automation webhook path, leaving every
+ * other path unchanged. `req.path`/`req.url` never carry secrets elsewhere in
+ * this app (see the file-level comment on auth.ts) — this route is the one
+ * exception that comment doesn't cover, because the credential travels in
+ * the PATH rather than a header.
+ */
+export function redactWebhookPath(path: string): string {
+  return path.replace(AUTOMATION_WEBHOOK_PATH_RE, '$1[REDACTED]');
+}
+
+/**
  * Express error-handling middleware.
  * Normalizes any thrown error to a GeneratorAIError, maps its category
  * to an HTTP status code, and returns a structured JSON error response.
@@ -48,7 +68,7 @@ export function createErrorMiddleware(logger: ILogger) {
       status,
       category: normalized.category,
       code: normalized.code,
-      path: req.path,
+      path: redactWebhookPath(req.path),
       method: req.method,
       stack: normalized.stack,
     });

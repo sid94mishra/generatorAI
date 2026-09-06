@@ -28,9 +28,33 @@ function normalizeSha(sha: string | undefined): string | undefined {
   return /^0+$/.test(sha) ? undefined : sha;
 }
 
+/**
+ * How long a positive `isGitRepo` answer is trusted without re-asking git.
+ *
+ * A directory that is inside a work tree does not stop being one; the TTL is
+ * only a guard against a workspace that is deleted or moved out from under a
+ * long-lived process, where a stale `true` would turn into a failed git
+ * command rather than a wrong answer.
+ */
+const REPO_PROBE_TTL_MS = 5 * 60_000;
+
 export class GitClient implements IGitClient {
   private readonly workspacesDir: string;
   private readonly timeout: number;
+  /**
+   * Directories already known to be inside a work tree.
+   *
+   * `isGitRepo` spawned a `git rev-parse --is-inside-work-tree` process on
+   * EVERY call, and the checkpoint path calls it twice per chat turn (once
+   * before the turn, once after) against the same directory. Measured on a
+   * live server that was 25 of the git processes spawned during a short chat
+   * session — a third of them — each costing ~300 ms of process start on
+   * Windows, for an answer that cannot change.
+   *
+   * Only positive answers are cached: a directory that is NOT a repo becomes
+   * one as soon as `initIfNeeded` runs, so caching `false` would defeat it.
+   */
+  private readonly repoProbeCache = new Map<string, number>();
 
   constructor(
     private readonly runner: IGitProcessRunner,
@@ -237,15 +261,29 @@ export class GitClient implements IGitClient {
 
   /** Whether `dir` is inside a git working tree. */
   async isGitRepo(dir: string): Promise<boolean> {
+    const cachedAt = this.repoProbeCache.get(dir);
+    if (cachedAt !== undefined && Date.now() - cachedAt < REPO_PROBE_TTL_MS) return true;
+    if (cachedAt !== undefined) this.repoProbeCache.delete(dir);
+
     try {
       const result = await this.runner.run('git', ['rev-parse', '--is-inside-work-tree'], {
         cwd: dir,
         timeout: 5_000,
       });
-      return result.exitCode === 0 && result.stdout.trim() === 'true';
+      const isRepo = result.exitCode === 0 && result.stdout.trim() === 'true';
+      if (isRepo) this.repoProbeCache.set(dir, Date.now());
+      return isRepo;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Forget a cached `isGitRepo` answer. Call when a workspace directory is
+   * removed, so a later directory reusing that path is probed afresh.
+   */
+  forgetRepoProbe(dir: string): void {
+    this.repoProbeCache.delete(dir);
   }
 
   /**
@@ -265,6 +303,9 @@ export class GitClient implements IGitClient {
         this.logger.warn(`[Git] init failed at ${dir}: ${initResult.stderr}`);
         return false;
       }
+      // `git init` just made this a work tree, so the next probe already knows
+      // the answer and need not spawn a process to learn it.
+      this.repoProbeCache.set(dir, Date.now());
 
       const gitignorePath = path.join(dir, '.gitignore');
       try {

@@ -7,6 +7,11 @@
 // vite.config.ts (injected as a <meta> in dev and a response header in prod
 // via the static-files middleware).
 //
+// This file sets ONLY the Content-Security-Policy header. The other
+// hardening headers (X-Content-Type-Options, Referrer-Policy,
+// Permissions-Policy, Strict-Transport-Security) live in the sibling
+// `securityHeaders.ts`, wired immediately after this one in app.ts.
+//
 // △ Fixed during end-to-end review — `script-src` used to carry a blanket
 // 'unsafe-inline', justified in a comment as "required by inline Vite HMR
 // runtime in dev" — which does not apply to this process at all (Vite's dev

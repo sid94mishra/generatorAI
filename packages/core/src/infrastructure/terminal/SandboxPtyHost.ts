@@ -23,7 +23,7 @@ import type {
   ITerminalHost,
   TerminalSpawnOptions,
 } from '../../domain/ports/ITerminalHost.js';
-import type { SandboxLifecycleManager } from '../../services/SandboxLifecycleManager.js';
+import type { ISandboxSessionLookup } from '../../domain/ports/ISandboxProvider.js';
 import { NodePtyHost } from './NodePtyHost.js';
 
 const execFileAsync = promisify(execFile);
@@ -36,7 +36,9 @@ export class SandboxPtyHost implements ITerminalHost {
 
   constructor(
     private readonly logger: ILogger,
-    private readonly sandboxes: SandboxLifecycleManager,
+    // The port, not the concrete `SandboxLifecycleManager`: infrastructure
+    // must not import the application layer (boundary lint, plan item 30).
+    private readonly sandboxes: ISandboxSessionLookup,
   ) {
     // Delegates the PTY plumbing to node-pty — env sanitisation logic reused.
     this.inner = new NodePtyHost(logger);

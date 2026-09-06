@@ -75,3 +75,4 @@ apps/desktop/resources/cua-driver/
 # Frame captures written by the TUI probe and command-sweep tests.
 chat-probe.txt
 tui-sweep-gallery.txt
+.cache

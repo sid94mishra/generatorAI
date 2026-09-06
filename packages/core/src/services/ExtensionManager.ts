@@ -17,7 +17,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { promises as fs } from 'node:fs';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { resolve, isAbsolute, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -71,7 +71,15 @@ export interface ExtensionManagerDeps {
 
 const MANIFEST_FILE = 'extension.json';
 
+/** Hot reloads of one extension entry per process before we refuse (A14). */
+const MAX_ENTRY_HOT_RELOADS = 100;
+/** Warn every N reloads so the retained-module cost is visible before the cap. */
+const HOT_RELOAD_WARN_EVERY = 25;
+
 export class ExtensionManager implements IExtensionRegistry {
+  /** Loaded entry modules by extension id — see `entryModuleVersion`. */
+  private readonly entryModules = new Map<string, { entryAbs: string; mtimeMs: number; url: string; reloads: number }>();
+
   private readonly installed = new Map<string, InstalledExtension>();
   private readonly logger: ILogger | undefined;
   /** Disposers returned by extension `loadExtension()` factories. Called
@@ -259,6 +267,40 @@ export class ExtensionManager implements IExtensionRegistry {
    * commits the staged contributions into the runtime registries.
    * Failures leave no residue.
    */
+  /**
+   * Module URL for an extension's entry file, keyed on the file's mtime so
+   * re-activating an unchanged file reuses the already-loaded module. Returns
+   * `undefined` once the reload cap is reached — see `activateEntryFile`.
+   */
+  private entryModuleVersion(
+    extensionId: string,
+    entryAbs: string,
+  ): { url: string; reloads: number } | undefined {
+    let mtimeMs = 0;
+    try {
+      mtimeMs = statSync(entryAbs).mtimeMs;
+    } catch {
+      mtimeMs = Date.now();
+    }
+    const prev = this.entryModules.get(extensionId);
+    if (prev && prev.mtimeMs === mtimeMs && prev.entryAbs === entryAbs) return { url: prev.url, reloads: prev.reloads };
+    const reloads = prev ? prev.reloads + 1 : 0;
+    if (reloads >= MAX_ENTRY_HOT_RELOADS) {
+      this.logger?.warn?.(
+        `[ExtensionManager] ${extensionId} reached the hot-reload cap (${MAX_ENTRY_HOT_RELOADS}); refusing further reloads until restart`,
+      );
+      return undefined;
+    }
+    if (reloads > 0 && reloads % HOT_RELOAD_WARN_EVERY === 0) {
+      this.logger?.warn?.(
+        `[ExtensionManager] ${extensionId} hot-reloaded ${reloads} times; each reload retains the previous module until the server restarts`,
+      );
+    }
+    const url = pathToFileURL(entryAbs).href + `?v=${Math.round(mtimeMs)}`;
+    this.entryModules.set(extensionId, { entryAbs, mtimeMs, url, reloads });
+    return { url, reloads };
+  }
+
   private async activateEntryFile(ext: InstalledExtension): Promise<void> {
     const entryRel = ext.manifest.entry!;
     const entryAbs = safeResolveInside(ext.rootPath, entryRel);
@@ -271,8 +313,25 @@ export class ExtensionManager implements IExtensionRegistry {
       return;
     }
 
-    // Cache-bust the URL so hot reload gets a fresh module instance.
-    const url = pathToFileURL(entryAbs).href + `?v=${Date.now()}`;
+    // ESM modules are never unloaded. Cache-busting with `Date.now()` meant
+    // EVERY activation — including re-activating an unchanged file after a
+    // settings save or a restart of the extension — imported a fresh copy
+    // that lived for the life of the server. Key the module URL on the entry
+    // file's mtime instead: an unchanged file reuses its module, a changed
+    // one gets exactly one new instance. Count those, because a developer
+    // saving a file in a loop can still grow the module cache without bound;
+    // past the cap the operator is told to restart rather than silently
+    // leaking.
+    const entryVersion = this.entryModuleVersion(ext.manifest.id, entryAbs);
+    if (!entryVersion) {
+      ext.errors = [
+        ...(ext.errors ?? []),
+        `entry ${entryRel} has been hot-reloaded ${MAX_ENTRY_HOT_RELOADS} times in this process; ` +
+          'each reload keeps the previous module in memory — restart the server to continue reloading',
+      ];
+      return;
+    }
+    const url = entryVersion.url;
     let mod: Record<string, unknown>;
     try {
       mod = (await import(url)) as Record<string, unknown>;

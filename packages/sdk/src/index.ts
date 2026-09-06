@@ -1,17 +1,28 @@
 // ────────────────────────────────────────────────────────────────
 // @generatorai/sdk — Main Entry Point
 //
-// The simplest way to use GeneratorAI:
+// INTERNAL / UNPUBLISHED. This package embeds the whole server dependency
+// graph in-process (`createCoreServices` + `createDB` + a harness provider);
+// it does not talk to a running `apps/server`. It has no importers in this
+// repository and cannot be installed outside it — see README.md.
+//
+// Usage from inside the monorepo:
 //
 //   import { createGeneratorAI } from '@generatorai/sdk';
-//   const ai = await createGeneratorAI({ provider: 'copilot' });
+//   const ai = await createGeneratorAI({ harness: 'copilot' }); // HarnessType
 //   const run = await ai.workflows.run(defId, { variables: { code: '...' } });
 //
 // ────────────────────────────────────────────────────────────────
 
 // ── Main Entry ──
 export { GeneratorAI, createGeneratorAI } from './GeneratorAI.js';
-export type { GeneratorAIConfig, ResolvedConfig, LoggerConfig, SandboxConfig } from './config.js';
+export type {
+  GeneratorAIConfig,
+  HarnessSelection,
+  ResolvedConfig,
+  LoggerConfig,
+  SandboxConfig,
+} from './config.js';
 // Database driver seam (DB-01) — config-level, part of the stable surface.
 export type { DatabaseConfig, DatabaseDriver } from '@generatorai/db';
 
@@ -98,7 +109,7 @@ export {
 
 // ── Harness extension point (bring-your-own-harness) ──
 // `IAgentHarness` is part of the STABLE surface: an integrator can implement it
-// and pass the instance as `config.provider` to run on any harness they like.
+// and pass the instance as `config.harness` to run on any harness they like.
 // See ./internal for the repository ports / service classes used for deeper,
 // non-stable composition.
 export type { IAgentHarness } from '@generatorai/core';

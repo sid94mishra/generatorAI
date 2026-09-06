@@ -10,8 +10,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useMemo, useState } from 'react';
-import { HelpCircle, Check, Loader2, AlertTriangle, Send, ChevronLeft, ChevronRight } from 'lucide-react';
+import { HelpCircle, Check, AlertTriangle, Send, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button, Input } from '@/components/ui/index.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import type { QuestionBlock } from '@/stores/streamStore.js';
 
@@ -131,27 +132,29 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
         {/* Pager — only when the agent asked more than one question. */}
         {total > 1 && (
           <span className="ml-auto flex items-center gap-1">
-            <button
+            <Button
               type="button"
+              variant="ghost"
               aria-label="Previous question"
               disabled={current === 0}
               onClick={() => setIndex(current - 1)}
-              className="rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
+              className="h-auto rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
+            </Button>
             <span className="tabular-nums text-[11px] text-[var(--color-muted-foreground)]">
               {current + 1} / {total}
             </span>
-            <button
+            <Button
               type="button"
+              variant="ghost"
               aria-label="Next question"
               disabled={current >= total - 1}
               onClick={() => setIndex(current + 1)}
-              className="rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
+              className="h-auto rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
             >
               <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           </span>
         )}
       </div>
@@ -249,7 +252,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
                           Other…
                         </span>
                         {picked.includes(OTHER) && (
-                          <input
+                          <Input
                             type="text"
                             autoFocus
                             value={customText[q.id] ?? ''}
@@ -257,7 +260,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
                               setCustomText((prev) => ({ ...prev, [q.id]: e.target.value }))
                             }
                             placeholder="Type your own answer"
-                            className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-xs text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)]/40"
+                            className="mt-1 h-auto w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-xs text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)]/40"
                           />
                         )}
                       </span>
@@ -271,8 +274,9 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
 
         {isAnswerable && (
           <div className="flex items-center justify-between gap-2 pt-1">
-            <button
+            <Button
               type="button"
+              variant="ghost"
               disabled={busy}
               onClick={() =>
                 onSubmit?.(
@@ -281,32 +285,36 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
                   'Skip the questions and use your best judgement.',
                 )
               }
-              className="rounded-md px-2 py-1.5 text-[11px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-50"
+              className="h-auto rounded-md px-2 py-1.5 text-[11px] font-normal text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
             >
               Skip &amp; let the agent decide
-            </button>
+            </Button>
             {/* With several questions the Submit stays disabled until they are
                 all answered, so send the user to the next gap rather than
                 leaving a dead button and no explanation. */}
             {nextUnanswered >= 0 ? (
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={() => setIndex(nextUnanswered)}
-                className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+                className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
               >
                 Next question
                 <ChevronRight className="h-3 w-3" />
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
                 type="button"
+                variant="primary"
+                size="sm"
                 disabled={!canSubmit}
+                loading={busy}
                 onClick={() => onSubmit?.(question.interactionId, buildAnswers())}
-                className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="h-auto flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90"
               >
-                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                {!busy && <Send className="h-3 w-3" />}
                 Submit answers
-              </button>
+              </Button>
             )}
           </div>
         )}

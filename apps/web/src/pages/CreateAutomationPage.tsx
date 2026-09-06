@@ -13,6 +13,7 @@ import { PageContainer } from '@/components/layout/PageContainer.js';
 import { cn } from '@/lib/utils.js';
 import type { CreateAutomationParams, AutomationTriggerType, AutomationInputMode, BatchDataFormat, DataSourceConfig, DataSourceOutputFormat } from '@generatorai/shared';
 import { parseBatchData } from '@generatorai/shared';
+import { WebhookCredentialsDialog, type WebhookCredentials } from '@/components/automation/WebhookCredentialsDialog.js';
 
 export function CreateAutomationPage() {
   const navigate = useNavigate();
@@ -44,6 +45,12 @@ export function CreateAutomationPage() {
   const [maxConcurrency, setMaxConcurrency] = useState(1);
   const [onError, setOnError] = useState<'continue' | 'stop'>('continue');
   const [error, setError] = useState<string | null>(null);
+  // Item A5 — one-time reveal of the webhook token + signing secret after
+  // a webhook automation is created. Navigation to the detail page is held
+  // until the dialog is dismissed, since this is the only moment either
+  // value is ever visible again.
+  const [webhookCredentials, setWebhookCredentials] = useState<WebhookCredentials | null>(null);
+  const [createdAutomationId, setCreatedAutomationId] = useState<string | null>(null);
   // ── Track C — schema-driven pipeline (optional, advanced) ──
   const [schemaEnabled, setSchemaEnabled] = useState(false);
   const [dataSchemaText, setDataSchemaText] = useState(
@@ -254,6 +261,19 @@ export function CreateAutomationPage() {
 
     try {
       const automation = await createMutation.mutateAsync(params);
+      // The server shows the raw webhook token + signing secret ONLY in this
+      // create response — never again on any GET/list/update. If we don't
+      // capture it here, the user can never see it (short of rotating).
+      const created = automation as typeof automation & { webhookSigningSecret?: string };
+      if (created.triggerType === 'webhook' && created.webhookToken) {
+        setWebhookCredentials({
+          webhookUrl: `${window.location.origin}/api/automations/webhooks/${created.webhookToken}`,
+          token: created.webhookToken,
+          signingSecret: created.webhookSigningSecret,
+        });
+        setCreatedAutomationId(automation.id);
+        return;
+      }
       navigate(`/automations/${automation.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1065,6 +1085,14 @@ export function CreateAutomationPage() {
           </Button>
         </div>
       </form>
+      <WebhookCredentialsDialog
+        open={webhookCredentials !== null}
+        credentials={webhookCredentials}
+        onClose={() => {
+          setWebhookCredentials(null);
+          if (createdAutomationId) navigate(`/automations/${createdAutomationId}`);
+        }}
+      />
     </PageContainer>
   );
 }

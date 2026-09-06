@@ -7,7 +7,19 @@ import prettierConfig from 'eslint-config-prettier';
 /** @type {import('eslint').Linter.Config[]} */
 export default [
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/.turbo/**', '**/coverage/**'],
+    ignores: [
+      '**/dist/**',
+      '**/dist-bundle/**',
+      '**/node_modules/**',
+      '**/.turbo/**',
+      '**/coverage/**',
+      // Claude Code's own skill scripts and sub-agent worktrees (gitignored).
+      // Linting them added ~30 MB of files to every run and pushed the JSON
+      // report past the sync-IO budget script's buffer, which then failed with
+      // "did not produce parseable JSON output". Same exclusion vitest uses.
+      '**/.claude/**',
+      '**/.expo/**',
+    ],
   },
   {
     files: ['**/*.ts', '**/*.tsx'],

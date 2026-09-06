@@ -58,6 +58,23 @@ describe('route policy — resolution', () => {
     expect(resolveRoutePolicy('/workspaces/any-id-at-all/browser').read).toEqual(['exec:browser']);
   });
 
+  it('exposes the webhook delivery endpoint publicly without opening automations admin', () => {
+    // A webhook sender (GitHub, Stripe, a cron pinger) can never hold
+    // `write:workflows` + `exec:agent` — the route authenticates itself via
+    // the per-automation token (path or header) and an optional HMAC
+    // signature, not the caller's scopes.
+    expect(resolveRoutePolicy('/automations/webhooks/abc123').public).toBe(true);
+    expect(allowed([], '/automations/webhooks/abc123', 'POST')).toBe(true);
+
+    // ...but the surrounding automations admin API stays scope-gated. If
+    // longest-prefix matching ever regressed, '/automations' would inherit
+    // the public policy and let an unauthenticated caller list/create them.
+    expect(resolveRoutePolicy('/automations').public).toBeFalsy();
+    expect(resolveRoutePolicy('/automations/a1').public).toBeFalsy();
+    expect(allowed([], '/automations', 'GET')).toBe(false);
+    expect(allowed([], '/automations', 'POST')).toBe(false);
+  });
+
   it('only lists scopes that actually exist', () => {
     // A typo'd scope silently becomes unsatisfiable, locking everyone out of
     // the route with a 403 that looks like a permissions bug.

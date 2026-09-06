@@ -16,6 +16,7 @@ import React from 'react';
 import { LayoutGrid, ExternalLink } from 'lucide-react';
 import { useStreamStore, type StreamBlock } from '@/stores/streamStore.js';
 import { WidgetFrame } from '@/components/widgets/WidgetFrame.js';
+import { Button } from '@/components/ui/index.js';
 
 type WidgetBlock = Extract<StreamBlock, { type: 'widget' }>;
 
@@ -75,11 +76,12 @@ export function WidgetHost({ sessionId, instanceId, onOpenWidget }: WidgetHostPr
           own tab.
         </p>
         {widgets.map((w) => (
-          <button
+          <Button
             key={w.instanceId}
+            variant="ghost"
             type="button"
             onClick={() => onOpenWidget(w.instanceId)}
-            className="flex items-center gap-2.5 rounded-lg border border-[var(--color-border)]/60 px-3 py-2 text-left transition-colors hover:bg-[var(--color-accent)]/50"
+            className="h-auto flex items-center gap-2.5 rounded-lg border border-[var(--color-border)]/60 px-3 py-2 text-left transition-colors hover:bg-[var(--color-accent)]/50"
           >
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--color-primary)]/10 text-[var(--color-primary)]">
               <LayoutGrid className="h-3.5 w-3.5" />
@@ -93,7 +95,7 @@ export function WidgetHost({ sessionId, instanceId, onOpenWidget }: WidgetHostPr
               </span>
             </span>
             <ExternalLink className="h-3.5 w-3.5 shrink-0 text-[var(--color-muted-foreground)]" />
-          </button>
+          </Button>
         ))}
       </div>
     );

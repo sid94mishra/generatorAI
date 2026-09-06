@@ -22,6 +22,13 @@ import { readFileSync } from 'fs';
  */
 const devHttps = process.env['GENERATORAI_DEV_HTTPS'] === '1';
 
+/**
+ * Where `/api` is proxied in dev. Hardcoding 3100 meant a second server — a
+ * different harness, a scratch database, a perf run — could not be reached
+ * from the dev SPA at all without editing this file.
+ */
+const apiTarget = process.env['GENERATORAI_DEV_API_TARGET'] ?? 'http://localhost:3100';
+
 // Read once at config time so the About panel can show the shipped version
 // instead of a hardcoded literal that silently goes stale.
 const { version: APP_VERSION } = JSON.parse(
@@ -79,7 +86,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3100',
+        target: apiTarget,
         // NOT `changeOrigin: true`. DPoP proofs bind the request URI, and the
         // server reconstructs it from the Host header. Rewriting Host to the
         // proxy target makes every signed request fail HTU_MISMATCH, which
@@ -115,7 +122,7 @@ export default defineConfig({
     port: 4173,
     proxy: {
       '/api': {
-        target: 'http://localhost:3100',
+        target: apiTarget,
         changeOrigin: true,
         ws: true,
       },
@@ -197,10 +204,17 @@ export default defineConfig({
               id.includes('packages/review/')) {
             return 'lazy-diff';
           }
-          // ── Syntax highlighting (CodeMirror + Shiki grammars) ────────────
-          if (id.includes('node_modules/@codemirror/') ||
-              id.includes('node_modules/shiki/') ||
-              id.includes('node_modules/@shikijs/')) {
+          // ── Syntax highlighting (CodeMirror) ─────────────────────────────
+          //
+          // Shiki is deliberately NOT here. `shiki`'s bundle entry registers
+          // every grammar through a dynamic `import()` so Rollup can emit one
+          // small chunk per language and load only the ones a diff needs.
+          // Grouping `node_modules/shiki/` and `@shikijs/` into this chunk
+          // collapsed all ~200 grammars into a single 9.6 MB (1.68 MB gzip)
+          // file that the first diff view downloaded and parsed whole — the
+          // curated-grammar fix for highlight.js never reached the diff path
+          // because of this one rule. Let Rollup split it.
+          if (id.includes('node_modules/@codemirror/')) {
             return 'vendor-highlight';
           }
           // ── Heavy markdown libs (rarely change) ──────────────────────────

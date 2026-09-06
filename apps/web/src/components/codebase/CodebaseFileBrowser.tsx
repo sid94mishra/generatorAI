@@ -3,7 +3,8 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
-import { Loader2, ChevronRight, ChevronDown } from 'lucide-react';
+import { ChevronRight, ChevronDown } from 'lucide-react';
+import { Spinner, Button } from '@/components/ui/index.js';
 import { useCodebaseFiles } from '@/hooks/projectQueries.js';
 import { FileTypeIcon, FolderTypeIcon } from '@/components/shared/fileIcons.js';
 import { cn } from '@/lib/utils.js';
@@ -34,7 +35,7 @@ export function CodebaseFileBrowser({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-5 w-5 animate-spin text-[var(--color-muted-foreground)]" />
+        <Spinner size="lg" className="text-[var(--color-muted-foreground)]" label="Loading files" />
       </div>
     );
   }
@@ -138,10 +139,11 @@ function FileTreeNode({
 
   return (
     <div>
-      <button
+      <Button
+        variant="ghost"
         onClick={handleClick}
         className={cn(
-          'flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-xs transition-colors hover:bg-[var(--color-accent)]',
+          'h-auto flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-xs transition-colors hover:bg-[var(--color-accent)]',
           !isDir && 'cursor-pointer',
           !isDir && selectedFile === entry.path &&
             'bg-[var(--color-primary)]/15 text-[var(--color-primary)] font-medium',
@@ -169,13 +171,13 @@ function FileTreeNode({
             {formatSize(entry.size)}
           </span>
         )}
-      </button>
+      </Button>
 
       {isDir && expanded && (
         <div>
           {isLoading ? (
             <div className="flex items-center gap-1.5 py-1" style={{ paddingLeft: `${(depth + 1) * 16 + 6}px` }}>
-              <Loader2 className="h-3 w-3 animate-spin text-[var(--color-muted-foreground)]" />
+              <Spinner size="xs" className="text-[var(--color-muted-foreground)]" />
               <span className="text-[10px] text-[var(--color-muted-foreground)]">Loading...</span>
             </div>
           ) : children && children.length > 0 ? (

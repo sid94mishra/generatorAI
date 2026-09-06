@@ -28,6 +28,7 @@ import {
   findDeepLinkInArgv,
 } from './deep-link';
 import { initAutoUpdates, checkForUpdatesInteractive } from './updater';
+import { repointTarget } from './repoint';
 
 const DEV_SERVER_URL = process.env['DESKTOP_DEV_SERVER_URL'] || null;
 const mode: 'dev' | 'standalone' = DEV_SERVER_URL ? 'dev' : 'standalone';
@@ -79,8 +80,12 @@ function main(): void {
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0 && appUrl) {
-      getWindowManager().createMainWindow(appUrl);
+    const wm = getWindowManager();
+    // The WindowManager's URL, not the boot-time local: a restart or a
+    // backend switch may have moved the app since launch.
+    const url = wm.getAppUrl() ?? appUrl;
+    if (BrowserWindow.getAllWindows().length === 0 && url) {
+      wm.createMainWindow(url, { cspFloor: mode !== 'dev' });
     }
   });
 
@@ -96,6 +101,8 @@ function main(): void {
     event.preventDefault();
     quitHandled = true;
     isQuitting = true;
+    // Let the minimise-to-tray `close` interception stand aside.
+    getWindowManager().setQuitting(true);
     log.info('Quitting — shutting down embedded server');
     try {
       // Before the server: the driver holds OS-level input grants, and
@@ -155,6 +162,21 @@ async function onReady(): Promise<void> {
   //   embedded  — this shell's own child server (the default)
   const target = resolveTarget(settings.servers, null);
 
+  // "Restart Server" (menu, tray, renderer) stops and starts the child, which
+  // may come back on a different port. The window used to keep the old URL
+  // and every request died until the user quit; now a ready status on a new
+  // origin repoints it. Only while the shell is showing the embedded server —
+  // a remote backend is unaffected by the local one restarting.
+  sm.on('status', (status) => {
+    refreshTrayMenu();
+    if (mode === 'dev') return;
+    const next = repointTarget(status, wm.getAppUrl(), loadSettings().servers.serverMode);
+    if (next && wm.getMainWindow()) {
+      log.info('Embedded server moved — repointing the window', { from: wm.getAppUrl(), to: next });
+      wm.repointMainWindow(next);
+    }
+  });
+
   if (mode === 'dev') {
     appUrl = DEV_SERVER_URL;
     log.info('Dev mode — attaching to external dev server', { appUrl });
@@ -164,12 +186,10 @@ async function onReady(): Promise<void> {
     // The embedded server still starts, so switching back is instant and any
     // work already running locally keeps going. A failure here is not fatal:
     // the window is pointed somewhere else entirely.
-    sm.on('status', () => refreshTrayMenu());
     void sm.start().catch((err: unknown) => {
       log.warn('Embedded server did not start while in remote mode', err);
     });
   } else {
-    sm.on('status', () => refreshTrayMenu());
     try {
       await sm.start();
       appUrl = sm.url;
@@ -200,7 +220,10 @@ async function onReady(): Promise<void> {
     });
   }
 
-  wm.createMainWindow(appUrl);
+  // The CSP floor mirrors the server's policy onto any document this session
+  // renders without one. Off in dev: Vite's responses carry no CSP and rely on
+  // inline HMR scripts plus a cross-origin API.
+  wm.createMainWindow(appUrl, { cspFloor: mode !== 'dev' });
 
   // Handle a deep link passed on first launch (Windows/Linux).
   const initialLink = findDeepLinkInArgv(process.argv);

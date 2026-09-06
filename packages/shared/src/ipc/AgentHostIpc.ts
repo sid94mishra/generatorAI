@@ -11,6 +11,8 @@
  */
 
 import type { AgentEvent } from '../types/index.js';
+import type { HostHelloFrame } from '../protocol/hostProtocol.js';
+import { isHostHelloFrame } from '../protocol/hostProtocol.js';
 
 /**
  * Serialized conversation parameters for IPC transport.
@@ -60,13 +62,34 @@ export interface PingRequest {
   reqId: string;
 }
 
+/** Model catalog of the host's primary provider (`IAgentHarness.getModels`). */
+export interface ListModelsRequest {
+  type: 'list_models';
+  reqId: string;
+}
+/** `IAgentHarness.selectAgent` for one session. */
+export interface SelectAgentRequest {
+  type: 'select_agent';
+  reqId: string;
+  sessionId: string;
+  agentName: string;
+}
+/** `IAgentHarness.listAgents` for one session. */
+export interface ListAgentsRequest {
+  type: 'list_agents';
+  reqId: string;
+  sessionId: string;
+}
 export type AgentHostRequest =
   | SpawnSessionRequest
   | SendTurnRequest
   | AbortSessionRequest
   | DeleteSessionRequest
   | GetStatsRequest
-  | PingRequest;
+  | PingRequest
+  | ListModelsRequest
+  | SelectAgentRequest
+  | ListAgentsRequest;
 
 // ─── Responses (host → gateway) ────────────────────────────────────────────
 
@@ -136,13 +159,49 @@ export interface PongResponse {
   reqId: string;
 }
 
+/**
+ * Wire shape of a provider model. Structurally identical to the core port's
+ * `HarnessModel`; declared here because `@generatorai/shared` cannot import
+ * from core (layering rule).
+ */
+export interface HostModelInfo {
+  id: string;
+  name: string;
+  provider?: string;
+  description?: string;
+  category?: string;
+  promptTokenLimit?: number;
+  supportsReasoning?: boolean;
+  [key: string]: unknown;
+}
+export interface ModelsResponse {
+  type: 'models';
+  reqId: string;
+  models: HostModelInfo[];
+}
+/** Wire shape of `HarnessAgentInfo`. */
+export interface HostAgentInfo {
+  name: string;
+  description?: string;
+  model?: string;
+  source?: string;
+}
+export interface AgentsResponse {
+  type: 'agents';
+  reqId: string;
+  agents: HostAgentInfo[];
+}
 export type AgentHostResponse =
+  /** Plan item 43 — always the FIRST frame the host sends; see protocol/hostProtocol.ts. */
+  | HostHelloFrame
   | RequestAck
   | RequestError
   | AgentEventNotification
   | SessionEndedNotification
   | HostStats
-  | PongResponse;
+  | PongResponse
+  | ModelsResponse
+  | AgentsResponse;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -159,15 +218,21 @@ const REQUEST_TYPES: ReadonlySet<AgentHostRequest['type']> = new Set([
   'delete_session',
   'get_stats',
   'ping',
+  'list_models',
+  'select_agent',
+  'list_agents',
 ] satisfies AgentHostRequest['type'][]);
 
 const RESPONSE_TYPES: ReadonlySet<AgentHostResponse['type']> = new Set([
+  'hello',
   'ack',
   'error',
   'agent_event',
   'session_ended',
   'stats',
   'pong',
+  'models',
+  'agents',
 ] satisfies AgentHostResponse['type'][]);
 
 /**
@@ -194,6 +259,8 @@ export function isAgentHostResponse(msg: unknown): msg is AgentHostResponse {
   if (typeof type !== 'string' || !RESPONSE_TYPES.has(type as AgentHostResponse['type'])) return false;
   // Notifications are keyed by sessionId; everything else by reqId.
   const record = msg as Record<string, unknown>;
+  // The handshake frame carries neither; it has its own structural guard.
+  if (type === 'hello') return isHostHelloFrame(msg);
   if (type === 'agent_event' || type === 'session_ended') {
     return typeof record['sessionId'] === 'string';
   }

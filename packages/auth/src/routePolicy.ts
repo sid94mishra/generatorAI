@@ -99,6 +99,15 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   },
   { prefix: '/workflow-runs', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
   { prefix: '/workflow-scripts', read: ['read:workflows'], write: ['write:workflows'] },
+  // Webhook deliveries are the whole point of this trigger type: GitHub,
+  // Stripe, a cron pinger — none of them hold `write:workflows` / `exec:agent`,
+  // and none of them ever will. The route authenticates itself, per-delivery,
+  // via the unguessable token (path or `X-Webhook-Token` header) plus an
+  // optional per-automation HMAC signature — see webhookAuth.ts and
+  // routes/automations.ts. Longest-prefix matching keeps this ahead of the
+  // admin-scoped '/automations' below, the same precedent as
+  // '/auth/pair/preview' ahead of '/auth/pair'.
+  { prefix: '/automations/webhooks', read: [], write: [], public: true },
   { prefix: '/automations', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
   { prefix: '/templates', read: ['read:workflows'], write: ['write:workflows'] },
   { prefix: '/hooks', read: ['read:workflows'], write: ['write:workflows'] },

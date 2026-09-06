@@ -56,7 +56,36 @@ export const COMPUTER_USE_SYSTEM_HINT =
   `installing software, or changing OS security settings. Do not ask early — ` +
   `complete all safe work first, then pause at the exact risky action.`;
 
-export const WIDGET_SYSTEM_HINT =  `\n\n[Widgets]\n` +
+/**
+ * The standing widget hint — deliberately SHORT.
+ *
+ * This block used to be ~8,100 characters (about 2,000 tokens) and was sent on
+ * EVERY message of every chat, because widgets default to on. Most chats never
+ * render one, so that was fixed latency and money paid for nothing (review
+ * 3.7). The detail now lives in `WIDGET_USAGE_REFERENCE`, which `search_widget`
+ * returns — the model must call that before it can render anything, so the full
+ * contract arrives exactly when it becomes relevant.
+ */
+export const WIDGET_SYSTEM_HINT =
+  `
+
+[Widgets]
+` +
+  `You can render interactive UI for the user. Start with ` +
+  `search_widget("<what you want>") — its result lists the installed widgets ` +
+  `AND the full usage contract (surfaces, how to drive a widget with ` +
+  `update_widget / widget_action / widget_exec, and the mounted-vs-not rules). ` +
+  `Do not guess a descriptor id or a driving call without it. Never use ` +
+  `run_playwright_code / open_browser_page to click widget buttons — the iframe ` +
+  `is null-origin and unreachable, so the widget tools are the only path.`;
+
+/**
+ * The full widget-driving contract. Returned by `search_widget` rather than
+ * carried in every system prompt — see `WIDGET_SYSTEM_HINT`.
+ */
+export const WIDGET_USAGE_REFERENCE =
+  `[Widgets — full usage]
+` +
   `You can render interactive UI for the user. First use search_widget with a ` +
   `natural-language query to discover installed widgets, then call ` +
   `render_widget(descriptor: "<extensionId>/<component>", props: {...}) to ` +
@@ -89,8 +118,18 @@ export const WIDGET_SYSTEM_HINT =  `\n\n[Widgets]\n` +
   `user refers to "the widget" without giving you an id, call list_widgets() ` +
   `first to see what's open in this chat, then read_widget on the one you need. ` +
   `NEVER use run_playwright_code / open_browser_page to click widget buttons — the ` +
-  `iframe is null-origin and unreachable; the widget tools are the only path.` +
-  `\n\n[Authoring Extensions From Chat]\n` +
+  `iframe is null-origin and unreachable; the widget tools are the only path.`;
+
+/**
+ * Extension-authoring instructions.
+ *
+ * Appended only when the chat actually HAS the extension-authoring tools:
+ * they are opt-in per agent now (review 5.3), so describing them to every chat
+ * spent ~2,500 characters a message explaining a capability the model could
+ * not exercise.
+ */
+export const EXTENSION_AUTHORING_HINT =
+`\n\n[Authoring Extensions From Chat]\n` +
   `When the user asks to build/create/scaffold a NEW widget or extension, do ` +
   `NOT invoke any generic "skill" tool — go directly through this authoring ` +
   `flow. You have TWO custom tools registered for you:\n` +

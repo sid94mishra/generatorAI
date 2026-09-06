@@ -96,7 +96,7 @@ function automationRepo(stores: Stores): IAutomationRepository {
     getAll: async () => [...stores.automations.values()],
     getEnabled: async () => [...stores.automations.values()],
     getByTriggerType: async () => [],
-    getByWebhookToken: async () => null,
+    getByWebhookTokenHash: async () => null,
     getByProjectId: async () => [],
     update: async (id, updates) => {
       const next = { ...stores.automations.get(id)!, ...updates } as Automation;
@@ -104,8 +104,9 @@ function automationRepo(stores: Stores): IAutomationRepository {
       return next;
     },
     delete: async (id) => { stores.automations.delete(id); },
-    tryAcquireCronLease: async () => true,
-    releaseCronLease: async () => {},
+    claimDueSchedules: async () => [],
+    extendScheduleLease: async () => true,
+    releaseScheduleLease: async () => {},
   };
 }
 

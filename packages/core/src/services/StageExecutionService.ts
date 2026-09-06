@@ -240,6 +240,31 @@ export class StageRejectedError extends Error {
  */
 const MIN_TIMEOUT_MS = 1_000;
 
+/**
+ * WS-D1 — default step timeout applied when a stage definition sets no
+ * explicit `timeoutMs`. Previously that case (`else if (prompt.waitForCompletion)`)
+ * awaited the harness call with NO timeout at all — the docs claimed a
+ * "default if unset: 300s" that was never true. Matches
+ * `AppConfigSchema.workflow.stageTimeoutMs`'s own default so the two stay in
+ * step; overridable per-instance via `setDefaultStageTimeoutMs` (mirrors
+ * `WorkflowRunService.setHeartbeatPolicy`) for a composition root that wires
+ * the live AppConfig value through.
+ */
+const DEFAULT_STAGE_TIMEOUT_MS = 300_000;
+
+/**
+ * WS-D1 — how often `executeStage` beats `stage_runs.heartbeat_at` while a
+ * stage is queued/running. Matches
+ * `AppConfigSchema.workflow.heartbeatIntervalMs`'s default; overridable via
+ * `setHeartbeatIntervalMs`. `WorkflowRunService`'s reconciler treats a
+ * queued/running stage as stuck once its last beat is older than
+ * `heartbeatIntervalMs * heartbeatStaleMultiplier` (default 3x — see
+ * `WorkflowRunService.heartbeatPolicy`), so the two must stay compatible:
+ * beating here slower than the reconciler assumes reintroduces false
+ * "stuck stage" failures on perfectly healthy runs.
+ */
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
+
 /** Language extension map for persisting code blocks */
 const LANG_EXTENSIONS: Record<string, string> = {
   typescript: 'ts', javascript: 'js', python: 'py', rust: 'rs',
@@ -520,6 +545,127 @@ export class StageExecutionService {
   /** Late-wire browser service (set after construction to break DI cycles). */
   setBrowserService(bs: BrowserService): void {
     this.browserService = bs;
+  }
+
+  // ── WS-D1: step timeout defaults + liveness heartbeat ──
+
+  /** Default step timeout when a stage sets no explicit `timeoutMs` (task 1). */
+  private defaultStageTimeoutMs = DEFAULT_STAGE_TIMEOUT_MS;
+
+  /** Override the default step timeout (wire `AppConfig.workflow.stageTimeoutMs`). */
+  setDefaultStageTimeoutMs(ms: number): void {
+    this.defaultStageTimeoutMs = ms;
+  }
+
+  /** How often a running stage beats `stage_runs.heartbeat_at` (task 4). */
+  private heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
+
+  /** Override the heartbeat interval (wire `AppConfig.workflow.heartbeatIntervalMs`). */
+  setHeartbeatIntervalMs(ms: number): void {
+    this.heartbeatIntervalMs = ms;
+  }
+
+  /** Live heartbeat timers, keyed by stage-run id. */
+  private activeHeartbeats = new Map<string, ReturnType<typeof setInterval>>();
+
+  /**
+   * Start beating `stage_runs.heartbeat_at` for a running stage. Idempotent
+   * (clears any prior timer for the same id first) so a resume/retry that
+   * re-enters `executeStage` never doubles the interval. Beats once
+   * synchronously before arming the timer so a reconcile tick that lands in
+   * the first `heartbeatIntervalMs` window still sees a fresh timestamp
+   * rather than judging the row stale for having no beat yet.
+   */
+  private startHeartbeat(stageRunId: string): void {
+    this.stopHeartbeat(stageRunId);
+    this.stageRunRepo.heartbeat(stageRunId).catch(() => {/* best-effort */});
+    const timer = setInterval(() => {
+      this.stageRunRepo.heartbeat(stageRunId).catch(() => {/* best-effort */});
+    }, this.heartbeatIntervalMs);
+    timer.unref?.();
+    this.activeHeartbeats.set(stageRunId, timer);
+  }
+
+  /** Stop beating a stage's heartbeat (stage reached a terminal/paused state). */
+  private stopHeartbeat(stageRunId: string): void {
+    const timer = this.activeHeartbeats.get(stageRunId);
+    if (timer !== undefined) {
+      clearInterval(timer);
+      this.activeHeartbeats.delete(stageRunId);
+    }
+  }
+
+  /**
+   * AbortController backing the in-flight, timed harness call for a stage's
+   * CURRENT turn, keyed by stage-run id. Populated only while `withStageTimeout`
+   * has a call in flight; consumed by the timeout handler itself and by
+   * `abortStage` (below) so a stale-heartbeat reap actually cancels the
+   * wedged call instead of merely abandoning it (task 3 / task 4).
+   */
+  private activeTurnControllers = new Map<string, AbortController>();
+
+  /**
+   * Race a timed harness call against a deadline. Fixes two bugs the
+   * previous `Promise.race([sendPromptAndWait(...), createTimeout(...)])`
+   * had:
+   *  - the timer is ALWAYS cleared (`finally`), so a step that finishes
+   *    before its deadline no longer leaves a live `setTimeout` running for
+   *    the rest of its configured duration (previously up to 30 minutes per
+   *    the docs' own example, for every successful timed step);
+   *  - the loser is actually cancelled. `fn` receives an `AbortSignal` tied
+   *    to the same deadline; when the timer fires we abort that signal
+   *    BEFORE rejecting, so the harness call underneath is told to stop
+   *    rather than being abandoned to keep running (and keep writing to the
+   *    stage's working directory) while a retry starts a second agent there.
+   */
+  private async withStageTimeout<T>(
+    ms: number,
+    stageRunId: string,
+    fn: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const controller = new AbortController();
+    this.activeTurnControllers.set(stageRunId, controller);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new HarnessTimeoutError(`Stage ${stageRunId} timed out after ${ms}ms`));
+      }, ms);
+    });
+    try {
+      return await Promise.race([fn(controller.signal), deadline]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      if (this.activeTurnControllers.get(stageRunId) === controller) {
+        this.activeTurnControllers.delete(stageRunId);
+      }
+    }
+  }
+
+  /**
+   * Abort a stage's in-flight work. Called (duck-typed, `exec.abortStage?.`)
+   * by `WorkflowRunService.failStaleStage` BEFORE it marks a stale-heartbeat
+   * stage failed, so a relaunch never runs beside a still-wedged agent in
+   * the same working directory. Best-effort on both fronts: aborts the
+   * tracked turn controller (works when the stall is inside a
+   * `withStageTimeout`-wrapped call) and separately asks the harness to
+   * abort the conversation outright (works for providers/paths that don't
+   * go through `withStageTimeout` at all). Never throws.
+   */
+  async abortStage(stageRunId: string, reason: string): Promise<void> {
+    try {
+      this.activeTurnControllers.get(stageRunId)?.abort(reason);
+    } catch {
+      // best-effort
+    }
+    const session = await this.getSessionForStageRun(stageRunId);
+    if (session?.conversationId) {
+      try {
+        await this.harness.abortConversation(session.conversationId);
+      } catch {
+        // May not be active
+      }
+    }
   }
 
   /**
@@ -1218,6 +1364,13 @@ export class StageExecutionService {
       data: { stageRunId: stageRun.id, workflowRunId, sessionId: session.id, name: stageRun.name },
     });
 
+    // WS-D1 (task 4) — start beating stage_runs.heartbeat_at now that the
+    // stage is actually running. Stopped in the `finally` below, and
+    // restarted (idempotently) on every resume/retry re-entry into
+    // executeStage, so the reconciler's stale check has a live signal for
+    // as long as — and only as long as — this stage is doing work.
+    this.startHeartbeat(stageRun.id);
+
     // Subscribe to conversation events
     let unsubscribe: (() => void) | undefined;
     // Idempotency guard: prevents double-persistence per turn.
@@ -1830,29 +1983,33 @@ export class StageExecutionService {
             // permission policy exactly as a chat's per-turn mode does. Resolved
             // through the shared registry so a new mode needs no change here.
             const stageTurnOptions = this.resolveStageTurnOptions(stageDef);
-            if (stageDef.timeoutMs) {
-              const effectiveTimeout = Math.max(stageDef.timeoutMs, MIN_TIMEOUT_MS);
-              promptResponse = await Promise.race([
-                this.harness.sendPromptAndWait(
-                  session.conversationId,
-                  promptText,
-                  undefined,
-                  undefined,
-                  stageTurnOptions,
-                ),
-                this.createTimeout(effectiveTimeout, stageRun.id),
-              ]) as { content: string } | undefined;
-            } else if (prompt.waitForCompletion) {
-              promptResponse = await this.harness.sendPromptAndWait(
-                session.conversationId,
-                promptText,
-                undefined,
-                undefined,
-                stageTurnOptions,
+            const conversationId = session.conversationId;
+            // FEAT-3 / WS-D1 — every waited turn now runs under a real
+            // deadline: an explicit `stageDef.timeoutMs` is honoured
+            // (floored at MIN_TIMEOUT_MS, same as before), and a stage with
+            // none gets the documented default instead of running
+            // unbounded. `withStageTimeout` clears its timer on the common
+            // path and actually aborts the harness call on the timeout path
+            // — see its own doc comment.
+            if (stageDef.timeoutMs || prompt.waitForCompletion) {
+              const effectiveTimeout = stageDef.timeoutMs
+                ? Math.max(stageDef.timeoutMs, MIN_TIMEOUT_MS)
+                : this.defaultStageTimeoutMs;
+              promptResponse = await this.withStageTimeout(
+                effectiveTimeout,
+                stageRun.id,
+                (signal) =>
+                  this.harness.sendPromptAndWait(
+                    conversationId,
+                    promptText,
+                    undefined,
+                    signal,
+                    stageTurnOptions,
+                  ),
               );
             } else {
               await this.harness.sendPrompt(
-                session.conversationId,
+                conversationId,
                 promptText,
                 undefined,
                 stageTurnOptions,
@@ -2545,6 +2702,14 @@ export class StageExecutionService {
         // Release session — fire-and-forget with timeout
         this.releaseSessionSafe(stageRun.id);
       }
+    } finally {
+      // WS-D1 (task 4) — stop beating this stage's heartbeat on every exit
+      // from the main execution block: normal completion, an early return
+      // (pause/cancel detected mid-loop), or the catch above (retry/fail).
+      // A `finally` on this try covers all three uniformly, including the
+      // `return` inside the step loop (line ~1670-ish) that `unsubscribe?.()`
+      // already relied on the same guarantee for.
+      this.stopHeartbeat(stageRun.id);
     }
 
     stageDuration.record(Date.now() - start, { stage_name: stageRun.name });
@@ -3220,16 +3385,6 @@ export class StageExecutionService {
       agentMode,
       permissionMode: resolveTurnPermissionMode(agentMode, undefined),
     };
-  }
-
-  private createTimeout(ms: number, stageRunId: string): Promise<never> {
-    return new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new HarnessTimeoutError(
-          `Stage ${stageRunId} timed out after ${ms}ms`,
-        ));
-      }, ms);
-    });
   }
 
   /**

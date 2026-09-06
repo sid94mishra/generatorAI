@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { EventBus, type ISessionEventStore } from '../src/events/EventBus.js';
+import { EventBus, isNoiseEventKind, type ISessionEventStore } from '../src/events/EventBus.js';
 import type { AgentEvent, PersistedEvent } from '@generatorai/shared';
 
 /** A durable store that records what it was asked to commit. */
@@ -339,5 +339,49 @@ describe('EventBus', () => {
     await new Promise((r) => setTimeout(r, 10));
     // If we got here, the recursion guard held.
     expect(true).toBe(true);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────
+// Empty streaming deltas — the largest writer into `stream_cursors`.
+//
+// On a month-old database EVERY ONE of the 201,189 `assistant_streaming_delta`
+// rows had `message: ''`, 21,870 of them in the last week. They are duplicate
+// frames of the `harness.token` stream with the text removed, so they cost an
+// INSERT each and render nothing. Suppression is on EMPTINESS, not on the type,
+// so a delta that does carry text keeps flowing.
+// ────────────────────────────────────────────────────────────────
+
+describe('isNoiseEventKind — empty streaming deltas', () => {
+  it('suppresses an assistant streaming delta with no text', () => {
+    expect(isNoiseEventKind('harness.session_info', { infoType: 'assistant_streaming_delta', message: '' })).toBe(true);
+  });
+
+  it('suppresses one whose message is missing entirely', () => {
+    expect(isNoiseEventKind('harness.session_info', { infoType: 'assistant_streaming_delta' })).toBe(true);
+  });
+
+  it('KEEPS a streaming delta that carries text', () => {
+    expect(
+      isNoiseEventKind('harness.session_info', { infoType: 'assistant_streaming_delta', message: 'hello' }),
+    ).toBe(false);
+  });
+
+  it('keeps a non-empty tool_input_delta and drops an empty one', () => {
+    expect(isNoiseEventKind('harness.session_info', { infoType: 'tool_input_delta', message: '"}' })).toBe(false);
+    expect(isNoiseEventKind('harness.session_info', { infoType: 'tool_input_delta', message: '' })).toBe(true);
+  });
+
+  it('leaves lifecycle session_info alone even when it has no message', () => {
+    // `subagent_started`, `status`, `task_completed` and friends are items that
+    // must never be dropped; they simply have no `message` field.
+    for (const infoType of ['subagent_started', 'status', 'task_completed', 'rate_limit']) {
+      expect(isNoiseEventKind('harness.session_info', { infoType })).toBe(false);
+    }
+  });
+
+  it('still suppresses the chunk-carrier types outright', () => {
+    expect(isNoiseEventKind('harness.session_info', { infoType: 'tool_partial_result', message: 'x' })).toBe(true);
+    expect(isNoiseEventKind('harness.unknown', {})).toBe(true);
   });
 });

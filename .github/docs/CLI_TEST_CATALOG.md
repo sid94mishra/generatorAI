@@ -4,13 +4,9 @@
 
 ## Modes
 
-The CLI client factory `createClient()` ([apps/cli/src/platform/createClient.ts](../../apps/cli/src/platform/createClient.ts)) supports three `ClientMode` values:
+There is exactly one mode. The CLI is a client of a running GeneratorAI server over HTTP + WebSocket (`createCliClient()` in `packages/cli-core`); every command in this catalog runs that way.
 
-- **`http`** (indirect): REST + SSE against a running server. Default.
-- **`direct`** (in-process): **IMPLEMENTED** (P0#3 — `--local` flag). Boots the GeneratorAI SDK in-process via `DirectPlatformClient` so the CLI runs workflows/chats/automations without a separate server. Covers the core run/chat/workflow/streaming/HITL/health surface; server-only admin methods (orchestrator file mgmt, projects, codebases, webhooks, workspaces) throw a clear "not available in --local mode" error.
-- **`auto`**: Tries HTTP; errors with guidance if the server is unreachable. (No silent direct fallback — use `--local` for in-process.)
-
-> **Update (this session):** "Direct mode" is now real. `generatorai --local <command>` boots the engine in-process (SDK-backed `DirectPlatformClient`, with a Proxy that throws actionable errors for unimplemented methods). See section P for `--local` coverage. HTTP mode remains the default and the bulk of this catalog.
+> **Correction (September 2026 application review, §6.5):** earlier revisions of this catalog described a `--local` / "direct" in-process mode backed by `apps/cli/src/platform/DirectPlatformClient.ts` and `createClient.ts`. Neither file exists in the tree, `--local` is not a flag the CLI accepts, and no source references it. The mode was prototyped in a session and never landed. The build no longer carries the native dependencies (`better-sqlite3`, `node-pty`, `playwright`) that were kept "for `--local`". Section P below is retained as history only.
 
 ## Invocation surface used during testing
 
@@ -234,7 +230,7 @@ The CLI client factory `createClient()` ([apps/cli/src/platform/createClient.ts]
 
 | # | Scenario | Expected | Result |
 |---|---|---|---|
-| O1 | `--local` (in-process / direct mode) | Boots the engine via the SDK; runs commands without a server | 🔄 (NOW IMPLEMENTED — P0#3; see section P) |
+| O1 | ~~`--local` (in-process / direct mode)~~ | ~~Boots the engine via the SDK; runs commands without a server~~ | ❌ NEVER SHIPPED — not in the tree; the CLI is HTTP/WS-only (see section P note) |
 | O2 | Server down + `--server http://localhost:9999` | Connection error with `pnpm dev:server` guidance | ✅ |
 | O3 | Invalid UUID (`wf show not-a-uuid`) | "No workflow found with ID prefix: not-a-uuid" | ✅ — error correct, but exits with libuv assertion crash (see O8) |
 | O4 | Non-existent prefix | Same as O3 | ✅ |
@@ -245,28 +241,22 @@ The CLI client factory `createClient()` ([apps/cli/src/platform/createClient.ts]
 | O9 | `--var bad-no-equals` | **FIXED** in this session: now errors `✗ Invalid --var "bad-no-equals": expected format key=value`. Previously silently created `{"bad-no-equals":""}`. | ✅ (after Polish 6 fix) |
 | O10 | Long output (>1MB) | Streams or paginates | ⏭️ (not specifically tested) |
 
-## P. `--local` in-process mode (P0#3 — NEW)
+## P. ~~`--local` in-process mode~~ — HISTORICAL, NEVER SHIPPED
 
-> `generatorai --local <command>` boots the SDK in-process (no server). Backed by `DirectPlatformClient`. The DB defaults to `~/.generatorai/data.db` (override via `GENERATORAI_DB_PATH`); harness from `HARNESS_TYPE` (default copilot).
+> **Status: not in the tree.** The rows below record a prototype exercised in one session. `apps/cli/src/platform/DirectPlatformClient.ts` (and the `createClient.ts` it was wired through) does not exist on any branch, the CLI accepts no `--local` flag, and `grep -r "local-embedded\|DirectPlatformClient" apps/cli/src` returns nothing. The section is kept so the numbering above stays stable and so nobody re-adds the native dependencies on the strength of it. The CLI has one mode: HTTP + WebSocket against a running server.
 
 | # | Command | Expected | Result |
 |---|---|---|---|
-| P1 | `generatorai --local system health` | Synthetic local health `{status:ok, mode:'local-embedded', harness}` | ✅ (session — returned `{"status":"ok","mode":"local-embedded","harness":"copilot"}` with isolated `GENERATORAI_DB_PATH`) |
-| P2 | `generatorai --local wf create/list` | Lists/creates definitions in the local SQLite DB in-process | ⚠️ (engine boots & reads work via P1's path, but one `--local wf create` run appeared to hang on a second consecutive boot — see observation below; needs follow-up) |
-| P3 | `generatorai --local wf show <id>` | Definition with stages/edges (in-process read) | ✅ (in-process read repo path; same boot as P1) |
-| P4 | `generatorai --local run start <defId> --var k=v` | Creates + starts a run in-process | 🔄 (path wired via SDK facades; not run live this session) |
-| P5 | `generatorai --local run list` / `run show <id>` | Reads run + stageRuns via the in-process read repo | ✅ (DirectPlatformClient builds a read repo set on the same DB) |
-| P6 | `generatorai --local chat create/list/send/messages` | Chat lifecycle in-process; streaming via in-process EventBus | 🔄 |
-| P7 | `generatorai --local <server-only cmd>` (e.g. `proj list`) | Clear error: "'<m>' is not available in --local mode yet. Run against a server …" | ✅ (session — `proj list` → `✗ 'listProjects' is not available in --local mode yet. Run against a server …`, exit 1) |
-| P8 | `--local` boots without a running server | No HTTP connection attempted; engine starts in-process | ✅ (session — boots with isolated temp DB, no HTTP; harness starts or falls back to degraded mode) |
+| P1 | ~~`generatorai --local system health`~~ | ~~Synthetic local health `{status:ok, mode:'local-embedded', harness}`~~ | ❌ NEVER SHIPPED |
+| P2 | ~~`generatorai --local wf create/list`~~ | ~~Lists/creates definitions in the local SQLite DB in-process~~ | ❌ NEVER SHIPPED |
+| P3 | ~~`generatorai --local wf show <id>`~~ | ~~Definition with stages/edges (in-process read)~~ | ❌ NEVER SHIPPED |
+| P4 | ~~`generatorai --local run start <defId> --var k=v`~~ | ~~Creates + starts a run in-process~~ | ❌ NEVER SHIPPED |
+| P5 | ~~`generatorai --local run list` / `run show <id>`~~ | ~~Reads run + stageRuns via the in-process read repo~~ | ❌ NEVER SHIPPED |
+| P6 | ~~`generatorai --local chat create/list/send/messages`~~ | ~~Chat lifecycle in-process; streaming via in-process EventBus~~ | ❌ NEVER SHIPPED |
+| P7 | ~~`generatorai --local <server-only cmd>`~~ | ~~Clear "not available in --local mode" error~~ | ❌ NEVER SHIPPED |
+| P8 | ~~`--local` boots without a running server~~ | ~~No HTTP connection attempted; engine starts in-process~~ | ❌ NEVER SHIPPED |
 
-> **🐛 Bug found + fixed this session (P0#3 follow-up): `--local` always crashed with `'then' is not available in --local mode`.** The `createDirectClient` Proxy's `get` trap returned a throwing stub for *every* unknown property — including `then`. That made the client look like a (broken) thenable, so resolving it through any Promise (`await getClient()`) called `.then(...)` and threw. **Fix:** the Proxy now returns `undefined` for `then`/`catch`/`finally` and symbol keys (only string method names that are genuinely part of `CLIPlatformClient` get the throwing stub). Found via live `--local` testing; typecheck/unit tests could not catch it. `apps/cli/src/platform/DirectPlatformClient.ts`.
->
-> **⚠️ Observation (follow-up):** In one run, `--local wf create` produced no output after ~6 min (apparent hang), while two *fresh single* `--local` invocations (`system health`, `proj list`) completed normally. Possibly a second-consecutive-boot / harness-init / Windows libuv-shutdown (O8) interaction rather than a `wf create` logic bug. Needs isolated repro: run a single `--local wf create` against a clean temp DB and confirm whether it completes.
->
-> **⚠️ Observation:** `--local` boots the **full engine per invocation** (DB + repos + harness subprocess + recovery + sweepers + cron), so each `--local` command has a multi-second startup cost. Acceptable for `run`/`chat` sessions, heavy for one-shot reads. A future optimization could skip harness/sweeper startup for pure read/CRUD commands.
->
-> **⚠️ Caveat:** Running `--local` against the **same DB a server is actively using** boots a second engine whose crash-recovery would try to re-drive the server's in-flight runs (two engines driving the same rows). `--local` is for standalone use; point it at its own `GENERATORAI_DB_PATH` (tested here with an isolated temp DB).
+> The "`'then' is not available in --local mode`" bug narrative that used to sit here described a file that is not in the repository and has been removed rather than preserved as if it were a fix to shipped code.
 
 ---
 

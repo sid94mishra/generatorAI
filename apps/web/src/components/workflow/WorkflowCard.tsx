@@ -17,7 +17,9 @@ import {
   CheckSquare,
   Square,
 } from 'lucide-react';
-import { Card, Badge } from '@/components/ui/index.js';
+import { Link } from 'react-router-dom';
+
+import { Card, Badge, Button } from '@/components/ui/index.js';
 import { EntityListRow } from '@/components/data/index.js';
 import { cn } from '@/lib/utils.js';
 import type { WorkflowDefinition } from '@generatorai/shared';
@@ -51,27 +53,45 @@ export function WorkflowCard({
   showFooter = true,
 }: WorkflowCardProps) {
   const hasActions = !selectionMode && (onEdit || onRun || onDelete);
+  // Outside selection mode the card is a navigation, so it gets a real
+  // stretched anchor (see `EntityListRow`): a `div role="button"` that calls
+  // `navigate()` supports no middle-click, no ctrl-click, no copy-link and
+  // announces itself as a button rather than a link. In selection mode the
+  // card toggles a checkbox and goes nowhere, so it stays a button.
+  const asLink = !selectionMode;
   return (
     <Card
       interactive
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onClick();
-        }
-      }}
+      role={asLink ? undefined : 'button'}
+      tabIndex={asLink ? undefined : 0}
+      onClick={asLink ? undefined : onClick}
+      onKeyDown={
+        asLink
+          ? undefined
+          : (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+      }
       className={cn(
-        'group flex h-full flex-col p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'group flex h-full flex-col p-4',
+        asLink ? 'relative' : 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selectionMode && selected && 'ring-2 ring-primary bg-primary/5',
       )}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           {selectionMode ? (
-            <button onClick={(e) => { e.stopPropagation(); onToggleSelect?.(); }} className="shrink-0">
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={selected}
+              aria-label={`${selected ? 'Deselect' : 'Select'} ${definition.name}`}
+              onClick={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
+              className="shrink-0"
+            >
               {selected
                 ? <CheckSquare className="h-5 w-5 text-primary" />
                 : <Square className="h-5 w-5 text-muted-foreground" />}
@@ -79,27 +99,43 @@ export function WorkflowCard({
           ) : (
             <GitBranch className="h-5 w-5 shrink-0 text-primary" />
           )}
-          <h3 className="truncate text-sm font-semibold text-foreground">{definition.name}</h3>
+          {asLink ? (
+            // `after:absolute after:inset-0` stretches the hit area over the
+            // whole card while leaving the title's layout untouched.
+            <Link
+              to={`/workflows/${definition.id}`}
+              className="min-w-0 after:absolute after:inset-0 after:rounded-[inherit] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
+            >
+              <h3 className="truncate text-sm font-semibold text-foreground">{definition.name}</h3>
+            </Link>
+          ) : (
+            <h3 className="truncate text-sm font-semibold text-foreground">{definition.name}</h3>
+          )}
         </div>
         {hasActions && (
-          <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-all group-hover:opacity-100 focus-within:opacity-100">
+          // `relative` keeps these above the stretched link overlay so their
+          // own clicks land on the button rather than navigating the card.
+          <div className="relative flex shrink-0 items-center gap-0.5 opacity-0 transition-all group-hover:opacity-100 focus-within:opacity-100">
             {onEdit && (
-              <button onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit"
-                className="rounded p-1 text-muted-foreground hover:bg-subtle hover:text-foreground">
+              <Button onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit"
+                variant="ghost" size="icon-sm"
+                className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-subtle hover:text-foreground">
                 <Edit3 className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
             {onRun && (
-              <button onClick={(e) => { e.stopPropagation(); onRun(); }} title="Run"
-                className="rounded p-1 text-muted-foreground hover:bg-success-muted hover:text-success">
+              <Button onClick={(e) => { e.stopPropagation(); onRun(); }} title="Run"
+                variant="ghost" size="icon-sm"
+                className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-success-muted hover:text-success">
                 <Play className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
             {onDelete && (
-              <button onClick={onDelete} title="Delete"
-                className="rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger">
+              <Button onClick={onDelete} title="Delete"
+                variant="ghost" size="icon-sm"
+                className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger">
                 <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -150,11 +186,21 @@ export function WorkflowListRow({
 }: WorkflowListRowProps) {
   return (
     <EntityListRow
-      onClick={onClick}
+      // A real link when the row navigates, so middle-click, ctrl-click and
+      // "copy link address" work; a click handler in selection mode, where
+      // the row toggles a checkbox and goes nowhere.
+      {...(selectionMode ? { onClick } : { href: `/workflows/${definition.id}` })}
       className={cn(selectionMode && selected && 'ring-2 ring-ring bg-primary/5')}
       leading={
         selectionMode ? (
-          <button onClick={(e) => { e.stopPropagation(); onToggleSelect?.(); }} className="shrink-0">
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={selected}
+            aria-label={`${selected ? 'Deselect' : 'Select'} ${definition.name}`}
+            onClick={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
+            className="shrink-0"
+          >
             {selected
               ? <CheckSquare className="h-5 w-5 text-primary" />
               : <Square className="h-5 w-5 text-muted-foreground" />}
@@ -186,16 +232,18 @@ export function WorkflowListRow({
         !selectionMode && (onEdit || onDelete) ? (
           <>
             {onEdit && (
-              <button onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit"
-                className="rounded p-1 text-muted-foreground hover:bg-subtle hover:text-foreground">
+              <Button onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit"
+                variant="ghost" size="icon-sm"
+                className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-subtle hover:text-foreground">
                 <Edit3 className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
             {onDelete && (
-              <button onClick={onDelete} title="Delete"
-                className="rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger">
+              <Button onClick={onDelete} title="Delete"
+                variant="ghost" size="icon-sm"
+                className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger">
                 <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
           </>
         ) : undefined

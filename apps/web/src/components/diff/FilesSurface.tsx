@@ -24,11 +24,11 @@ import {
   Code2,
   Eye,
   ListTree,
-  Loader2,
   RefreshCw,
   WrapText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button, Spinner } from '@/components/ui/index.js';
 import { ApiError } from '@/platform/apiFetch.js';
 import { useWorkspaceTree, useWorkspaceTreeFile } from '@/hooks/queries.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
@@ -192,19 +192,21 @@ export function FilesSurface({
     >
       {/* ── Breadcrumb / action bar ────────────────────────────── */}
       <div className="flex items-center gap-1.5 border-b px-2 py-1.5">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={() => setShowTree((v) => !v)}
           aria-label={showTree ? 'Hide file tree' : 'Show file tree'}
           aria-pressed={showTree}
           title={showTree ? 'Hide file tree' : 'Show file tree'}
           className={cn(
-            'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded hover:bg-accent',
+            'h-6 w-6 shrink-0 text-foreground hover:bg-accent hover:text-foreground',
             showTree && 'bg-accent',
           )}
         >
           <ListTree className="h-3.5 w-3.5" />
-        </button>
+        </Button>
 
         {selection ? (
           <>
@@ -303,7 +305,7 @@ export function FilesSurface({
           <div className="w-60 shrink-0 border-r">
             {treeQuery.isLoading ? (
               <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading files…
+                <Spinner size="sm" /> Loading files…
               </div>
             ) : treePaths.length === 0 ? (
               <div className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground">
@@ -375,7 +377,7 @@ function FilePreview({
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+        <Spinner size="sm" /> Loading…
       </div>
     );
   }
@@ -441,19 +443,23 @@ function ModeButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="sm"
       onClick={onClick}
       aria-label={label}
       aria-pressed={active}
       title={label}
       className={cn(
-        'inline-flex h-[18px] items-center rounded-sm px-1.5',
-        active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50',
+        'h-[18px] rounded-sm px-1.5',
+        active
+          ? 'bg-accent text-foreground hover:bg-accent'
+          : 'text-muted-foreground hover:bg-accent/50 hover:text-muted-foreground',
       )}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -471,20 +477,22 @@ function IconButton({
   disabled?: boolean;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-sm"
       title={title}
       aria-label={title}
       aria-pressed={active}
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent disabled:opacity-50',
+        'h-6 w-6 text-foreground hover:bg-accent hover:text-foreground',
         active && 'bg-accent',
       )}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 

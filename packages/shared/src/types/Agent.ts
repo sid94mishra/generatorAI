@@ -66,7 +66,11 @@ export const AGENT_TOOL_GROUPS: readonly (keyof AgentToolPolicy)[] = [
 export const DEFAULT_AGENT_TOOL_POLICY: AgentToolPolicy = {
   browser: true,
   widgets: true,
-  extensionAuthoring: true,
+  // OFF by default: `write_extension` writes a file tree under the user's
+  // extension directory and hot-loads it INTO THE SERVER PROCESS. That is
+  // host code execution, so it is a capability an agent must be granted
+  // explicitly (agent tool policy → extensionAuthoring), never inherited.
+  extensionAuthoring: false,
   orchestration: false,
   fileRead: true,
   fileWrite: true,
@@ -174,6 +178,8 @@ export type ResolutionWarningCode =
   | 'FIELD_UNSUPPORTED_BY_PROVIDER'
   | 'SKILL_NOT_FOUND'
   | 'MCP_SERVER_NOT_FOUND'
+  | 'MCP_SERVER_NEEDS_CONFIGURATION'
+  | 'MCP_SERVER_DISABLED'
   | 'AGENT_NOT_FOUND'
   | 'AGENT_DISABLED'
   | 'STAGING_BUDGET_EXCEEDED'

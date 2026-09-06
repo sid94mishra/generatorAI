@@ -19,7 +19,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --build --force",
     "test": "vitest run",
     "lint": "eslint src/",
     "db:generate": "drizzle-kit generate --config ./drizzle.config.ts",

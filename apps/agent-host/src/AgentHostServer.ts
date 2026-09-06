@@ -28,8 +28,11 @@ import type {
   AgentEventNotification,
   SessionEndedNotification,
   ILogger,
+  HostModelInfo,
+  HostAgentInfo,
 } from '@generatorai/shared';
-import { isAgentHostRequest } from '@generatorai/shared';
+import { HOST_PROTOCOL_VERSIONS, isAgentHostRequest } from '@generatorai/shared';
+import { makeHostHello } from '@generatorai/shared/node';
 import type { IAgentHarness } from '@generatorai/core';
 import {
   RuntimeSupervisor,
@@ -164,8 +167,14 @@ export class AgentHostServer {
     // that never started has nothing to recycle.
     this.supervisor.startRecycleTimer();
 
+    // Plan item 43 — the hello is the FIRST frame on the channel, ahead of the
+    // ready pong. `HostSupervisor` validates it when the pong arrives and
+    // refuses a stale dist loudly instead of letting it misbehave later.
+    this.sendControl(makeHostHello('agent-host', import.meta.url));
     this.sendControl({ type: 'pong', reqId: '__ready__' });
-    this.logger.info('[AgentHostServer] Agent host ready');
+    this.logger.info(
+      `[AgentHostServer] Agent host ready (protocol v${HOST_PROTOCOL_VERSIONS['agent-host']})`,
+    );
   }
 
   /** Exposed so tests can drive the IPC path without a real child process. */
@@ -343,6 +352,59 @@ export class AgentHostServer {
 
       case 'spawn_session':
         return this.handleSpawn(req.reqId, req.sessionId, req.params);
+
+      // Phase-B stubs closed (A12): before these three, `AgentHostClient`
+      // answered `getModels()` with `[]` and `selectAgent()` with nothing, so
+      // turning the host on emptied the model picker and silently ignored
+      // agent selection. The host has the provider; ask it.
+      case 'list_models': {
+        const runtime = (await this.ensureRuntime()) ?? undefined;
+        if (!runtime) {
+          this.sendControl({ type: 'error', reqId: req.reqId, ok: false, message: 'No provider runtime available', code: 'NO_RUNTIME' });
+          return;
+        }
+        try {
+          const models = await runtime.harness.getModels();
+          this.sendControl({ type: 'models', reqId: req.reqId, models: models as unknown as HostModelInfo[] });
+        } catch (err: unknown) {
+          this.sendControl({ type: 'error', reqId: req.reqId, ok: false, message: String(err), code: 'MODELS_FAILED' });
+        }
+        return;
+      }
+
+      case 'select_agent': {
+        const { reqId, sessionId, agentName } = req;
+        const session = this.sessions.get(sessionId);
+        const runtime = session ? this.supervisor.get(session.runtimeId) : undefined;
+        if (!session || !runtime) {
+          this.sendControl({ type: 'error', reqId, ok: false, message: `No runtime for session ${sessionId}`, code: 'SESSION_NOT_FOUND' });
+          return;
+        }
+        try {
+          await runtime.harness.selectAgent(session.conversationId, agentName);
+          this.sendControl({ type: 'ack', reqId, ok: true });
+        } catch (err: unknown) {
+          this.sendControl({ type: 'error', reqId, ok: false, message: String(err), code: 'SELECT_AGENT_FAILED' });
+        }
+        return;
+      }
+
+      case 'list_agents': {
+        const { reqId, sessionId } = req;
+        const session = this.sessions.get(sessionId);
+        const runtime = session ? this.supervisor.get(session.runtimeId) : undefined;
+        if (!session || !runtime) {
+          this.sendControl({ type: 'error', reqId, ok: false, message: `No runtime for session ${sessionId}`, code: 'SESSION_NOT_FOUND' });
+          return;
+        }
+        try {
+          const agents = await runtime.harness.listAgents(session.conversationId);
+          this.sendControl({ type: 'agents', reqId, agents: agents as unknown as HostAgentInfo[] });
+        } catch (err: unknown) {
+          this.sendControl({ type: 'error', reqId, ok: false, message: String(err), code: 'LIST_AGENTS_FAILED' });
+        }
+        return;
+      }
 
       case 'send_turn': {
         const { reqId, sessionId, prompt, attachments } = req;

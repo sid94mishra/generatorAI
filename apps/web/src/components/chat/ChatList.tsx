@@ -7,7 +7,8 @@
 import React, { useState, useMemo } from 'react';
 import { useChats } from '@/hooks/queries.js';
 import { cn } from '@/lib/utils.js';
-import { MessageSquare, Search, Archive, Loader2 } from 'lucide-react';
+import { MessageSquare, Search, Archive } from 'lucide-react';
+import { Button, Input, Spinner } from '@/components/ui/index.js';
 import type { Chat } from '@generatorai/shared';
 
 interface ChatListProps {
@@ -62,7 +63,7 @@ export function ChatList({ activeChatId, onSelectChat }: ChatListProps) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-4 w-4 animate-spin text-[var(--color-muted-foreground)]" />
+        <Spinner size="md" className="text-[var(--color-muted-foreground)]" label="Loading chats" />
       </div>
     );
   }
@@ -81,12 +82,13 @@ export function ChatList({ activeChatId, onSelectChat }: ChatListProps) {
       {(chats?.length ?? 0) > 3 && (
         <div className="relative px-2 pt-1 pb-2">
           <Search className="absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-muted-foreground)] pointer-events-none" />
-          <input
+          <Input
             type="text"
             placeholder="Search chats..."
+            aria-label="Search chats"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-lg border border-[var(--color-input)] bg-[var(--color-background)] py-2 pl-9 pr-3 text-xs text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] focus:border-[var(--color-primary)] focus:outline-none"
+            className="h-auto rounded-lg py-2 pl-9 pr-3 text-xs"
           />
         </div>
       )}
@@ -118,10 +120,12 @@ interface ChatListItemProps {
 
 function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
   return (
-    <button
+    <Button
+      type="button"
+      variant="ghost"
       onClick={onClick}
       className={cn(
-        'flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors',
+        'h-auto w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors',
         isActive
           ? 'bg-[var(--color-sidebar-accent)] text-[var(--color-sidebar-accent-foreground)]'
           : 'text-[var(--color-sidebar-foreground)] hover:bg-[var(--color-sidebar-accent)]/50',
@@ -178,6 +182,6 @@ function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
           </div>
         )}
       </div>
-    </button>
+    </Button>
   );
 }

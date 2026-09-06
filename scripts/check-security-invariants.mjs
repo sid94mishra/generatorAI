@@ -14,7 +14,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { readFileSync } from 'node:fs';
-// Not `globSync` from node:fs — that is Node 22+, and CI pins Node 20, so
+// Not `globSync` from node:fs — it only landed in Node 22 and the engine floor was Node 20 when this was written, so
 // every checker in the root `lint` chain died at import before its first rule.
 import { globFiles } from './lib/globFiles.mjs';
 import { resolve, relative, dirname } from 'node:path';
@@ -38,6 +38,7 @@ const GLOBAL_ALLOWLIST = [
  *   globs: string[],
  *   pattern: RegExp,
  *   allow?: string[],
+ *   knownDebt?: Array<{ file: string, line: RegExp, reason: string, hit?: boolean }>,
  * }} Rule
  */
 
@@ -97,8 +98,45 @@ const RULES = [
     description: 'An agent permission mode must never default to bypassing approvals.',
     remedy: 'Default to `workspace-write` + `on-request`; require explicit opt-in.',
     globs: ['packages/**/src/**/*.ts', 'apps/server/src/**/*.ts'],
+    // Three shapes, all of which set a default:
+    //   permissionMode: 'bypassPermissions'                 (literal assignment)
+    //   x.permissionMode ?? 'bypassPermissions'             (nullish fallback)
+    //   x.permissionMode || 'bypassPermissions'             (falsy fallback)
+    // and the key is matched as a case-insensitive SUFFIX, so
+    // `defaultChatPermissionMode: ChatPermissionMode = 'bypassPermissions'`
+    // is caught too. The original rule only knew the first shape with a bare
+    // lowercase key, which is why it stayed green while all three real
+    // default sites in the codebase used the `?? 'bypassPermissions'` idiom.
+    // A comparison (`=== '…'`, `!== '…'`) does not match: `[:=]` consumes one
+    // `=` and the next character must then be a quote. A union TYPE whose
+    // first member happens to be the literal (`type Mode = 'bypassPermissions'
+    // | 'default'`) is excluded by the trailing `(?!\s*\|)` — it declares the
+    // vocabulary, it does not pick a default.
     pattern:
-      /(?:permissionMode|approvalPolicy|sandboxMode)\s*[:=]\s*['"](?:bypassPermissions|never|full-access)['"]/,
+      /(?:permissionMode|approvalPolicy|sandboxMode)\w*\s*(?:[:=]|\?\?|\|\|)\s*['"](?:bypassPermissions|never|full-access)['"](?!\s*\|)/i,
+    // ── Known debt — APPLICATION-REVIEW-2026-09 §5.1/§6.7 ──────────────
+    // Every entry below is a REAL fail-open default that the review found and
+    // that WS-A is flipping to a safe mode. They are listed here, not waived
+    // inline, because (a) the lines are being rewritten by that work and an
+    // inline `security-ok` on each would be stale the moment it lands, and
+    // (b) a ledger that prints its own size on every run cannot be forgotten
+    // the way sixteen scattered comments can. An entry silences ONLY a line
+    // that still matches its `line` regex in its `file`; once the default is
+    // fixed the entry stops matching and the run prints a "stale entry —
+    // remove it" notice. Do NOT add to this list to make CI green: use a
+    // truthful inline `// security-ok:` for a site that is not a default.
+    knownDebt: [
+      { file: 'packages/core/src/services/agentModePolicy.ts', line: /defaultChatPermissionMode: ChatPermissionMode = 'bypassPermissions'/, reason: 'module-level chat default; WS-A flips to a safe mode' },
+      { file: 'packages/shared/src/types/Chat.ts', line: /DEFAULT_CHAT_PERMISSION_MODE: ChatPermissionMode = 'bypassPermissions'/, reason: 'shared chat default constant; WS-A' },
+      { file: 'packages/shared/src/types/WorkflowRun.ts', line: /DEFAULT_WORKFLOW_RUN_PERMISSION_MODE: WorkflowRunPermissionMode = 'bypassPermissions'/, reason: 'shared run default constant; WS-A' },
+      { file: 'apps/server/src/composition-root.ts', line: /defaultPermissionMode: config\.harness\?\.claudeAgent\?\.permissionMode \?\? 'bypassPermissions'/, reason: 'provider default when config is silent; WS-A' },
+      { file: 'packages/core/src/services/ChatManagementService.ts', line: /permissionMode: params\.permissionMode \?\? 'bypassPermissions'/, reason: 'new-chat default; WS-A' },
+      { file: 'packages/core/src/services/StageExecutionService.ts', line: /run\.permissionMode \?\? 'bypassPermissions'/, reason: 'legacy run rows with a NULL column read as bypass; WS-A decides the read default' },
+      { file: 'packages/core/src/services/WorkflowRunService.ts', line: /run\.permissionMode \?\? 'bypassPermissions'/, reason: 'legacy run rows with a NULL column read as bypass; WS-A' },
+      { file: 'packages/db/src/repositories/ChatRepository.ts', line: /chat\.permissionMode \?\? 'bypassPermissions'/, reason: 'legacy chat rows with a NULL column read as bypass; WS-A' },
+      { file: 'packages/agent-harness-providers/src/providers/claude-agent/ClaudeAgentProvider.ts', line: /(?:defaultPermissionMode|config\.permissionMode) \?\? 'bypassPermissions'/, reason: 'provider-level fallback when neither turn nor options set a mode; WS-A' },
+      { file: 'packages/agent-harness-providers/src/providers/codex/CodexProvider.ts', line: /approvalPolicy: opts\.approvalPolicy \?\? 'never'/, reason: 'Codex approval policy default; WS-A' },
+    ],
   },
   {
     id: 'no-secret-fields-in-config-schemas',
@@ -136,6 +174,10 @@ const RULES = [
 const WAIVER = /\/\/\s*security-ok:/;
 
 let failures = 0;
+/** Lines silenced by a rule's knownDebt ledger this run. */
+let debtTolerated = 0;
+/** Ledger entries whose line no longer exists — the debt was paid; remove the entry. */
+const staleDebt = [];
 
 for (const rule of RULES) {
   const allow = new Set([...(rule.allow ?? []), ...GLOBAL_ALLOWLIST]);
@@ -170,9 +212,19 @@ for (const rule of RULES) {
         const line = lines[i];
         if (!rule.pattern.test(line)) continue;
         if (WAIVER.test(line)) continue;
+        const debt = (rule.knownDebt ?? []).find((d) => d.file === normalized && d.line.test(line));
+        if (debt) {
+          debtTolerated += 1;
+          debt.hit = true;
+          continue;
+        }
         offenders.push(`${normalized}:${i + 1}  ${line.trim().slice(0, 110)}`);
       }
     }
+  }
+
+  for (const d of rule.knownDebt ?? []) {
+    if (!d.hit) staleDebt.push(`[${rule.id}] ${d.file} — ${d.reason}`);
   }
 
   if (offenders.length > 0) {
@@ -187,6 +239,16 @@ for (const rule of RULES) {
 if (failures > 0) {
   console.error(`\n${failures} security invariant(s) violated.\n`);
   process.exit(1);
+}
+
+if (debtTolerated > 0) {
+  console.warn(
+    `⚠  ${debtTolerated} known fail-open default(s) tolerated via the knownDebt ledger ` +
+      '(APPLICATION-REVIEW-2026-09 §5.1/§6.7). They are debt, not exceptions.',
+  );
+}
+for (const s of staleDebt) {
+  console.warn(`ℹ  stale knownDebt entry — the site no longer matches; remove it: ${s}`);
 }
 
 console.log(`✅ All ${RULES.length} security invariants hold.`);

@@ -42,6 +42,11 @@ export type AgentEvent =
   | { kind: 'harness.tool_complete'; data: { tool: string; result: unknown; callId?: string | null; success?: boolean; parentToolCallId?: string; fileOp?: FileOpStat } }
   | { kind: 'harness.idle'; data: Record<string, never> }
   | { kind: 'harness.error'; data: { message: string; provider?: string } }
+  /**
+   * Non-fatal problem the user must see (an MCP server that failed to start,
+   * a credential that could not be resolved). The turn continues.
+   */
+  | { kind: 'harness.warning'; data: { message: string; code?: string; provider?: string; details?: Record<string, unknown> } }
   /** W13 / X-4 — semantic cancellation outcome. Not an error: the user pressed Stop. */
   | { kind: 'harness.cancelled'; data: { reason: 'user_abort' | 'timeout' | 'budget_exceeded'; provider?: string } }
   | { kind: 'harness.session_start'; data: { provider?: string } }
@@ -130,6 +135,10 @@ export type AgentEvent =
   | { kind: 'chat.question.asked'; data: { chatId: string; interactionId: string; turnId?: string; questions: unknown[] } }
   | { kind: 'chat.question.answered'; data: { chatId: string; interactionId: string; answers: Record<string, string[]>; freeformResponse?: string } }
   | { kind: 'chat.question.expired'; data: { chatId: string; interactionId: string; reason: string } }
+  // chat.permission — a tool call is waiting on the user's allow/deny (chat permission modes `default` / `acceptEdits`).
+  | { kind: 'chat.permission.requested'; data: { chatId: string; interactionId: string; turnId?: string; toolName: string; type: string; description: string; inputSummary: string; permissionMode: string } }
+  | { kind: 'chat.permission.resolved'; data: { chatId: string; interactionId: string; behavior: 'allow' | 'deny'; message?: string } }
+  | { kind: 'chat.permission.expired'; data: { chatId: string; interactionId: string; reason: string } }
 
   // ── Agents (first-class agent entity) ──
   | { kind: 'agent.created'; data: { agentId: string; ref: string; name: string; scope: string } }
@@ -273,9 +282,11 @@ export type AgentEvent =
   // `workflowRunId` (when present) lets the EventBus→StreamBroker bridge
   // republish these to scope='run', so workflow- and stage-level hook
   // lifecycle is visible in the run-scoped SSE stream / run timeline UI.
-  | { kind: 'hook.started'; data: { hookName: string; phase: HookPhase; workflowRunId?: string } }
-  | { kind: 'hook.completed'; data: { hookName: string; phase: HookPhase; result?: unknown; workflowRunId?: string } }
-  | { kind: 'hook.failed'; data: { hookName: string; phase: HookPhase; error: string; workflowRunId?: string } }
+  // `hookId`/`hookType`/`stageRunId`/`sessionId`/`durationMs` let the run
+  // inspector pair started/completed and attribute the hook to its stage.
+  | { kind: 'hook.started'; data: { hookName: string; phase: HookPhase; workflowRunId?: string; hookId?: string; hookType?: string; stageRunId?: string; sessionId?: string } }
+  | { kind: 'hook.completed'; data: { hookName: string; phase: HookPhase; result?: unknown; workflowRunId?: string; hookId?: string; hookType?: string; stageRunId?: string; sessionId?: string; durationMs?: number } }
+  | { kind: 'hook.failed'; data: { hookName: string; phase: HookPhase; error: string; workflowRunId?: string; hookId?: string; hookType?: string; stageRunId?: string; sessionId?: string; durationMs?: number } }
   | { kind: 'hook.skipped'; data: { hookName: string; phase: HookPhase; reason: string; workflowRunId?: string } }
   // ── Artifact Events ──
   | { kind: 'artifact.created'; data: { artifactId: string; name: string; mimeType: string } }
@@ -511,8 +522,14 @@ export type AgentEvent =
   | { kind: 'automation_execution.progress'; data: { executionId: string; automationId: string; completedRuns: number; failedRuns: number; totalRuns: number } }
   | { kind: 'automation_execution.completed'; data: { executionId: string; automationId: string } }
   | { kind: 'automation_execution.failed'; data: { executionId: string; automationId: string; error?: string } }
+  /** Some iterations succeeded and some failed. Alerted like `.failed`. */
+  | { kind: 'automation_execution.partial'; data: { executionId: string; automationId: string; completedRuns: number; failedRuns: number; error?: string } }
   | { kind: 'automation_execution.cancelled'; data: { executionId: string; automationId: string } }
-  | { kind: 'automation_execution.recovered'; data: { executionId: string; automationId: string; finalStatus: 'completed' | 'failed' | 'cancelled'; error?: string } }
+  | { kind: 'automation_execution.recovered'; data: { executionId: string; automationId: string; finalStatus: 'completed' | 'failed' | 'cancelled' | 'partial'; error?: string } }
+  /** The scheduler decided NOT to run a due slot (missed while offline, or overlap). */
+  | { kind: 'automation.schedule_skipped'; data: { automationId: string; reason: 'missed' | 'overlap'; scheduledFor: string; missedCount?: number; nextRunAt?: string; note: string } }
+  /** Overlap policy `queue`: the due slot is held until the in-flight execution finishes. */
+  | { kind: 'automation.schedule_deferred'; data: { automationId: string; scheduledFor: string; note: string } }
   | { kind: 'automation_execution.iteration_started'; data: { executionId: string; iterationIndex: number; label?: string } }
   | { kind: 'automation_execution.iteration_completed'; data: { executionId: string; iterationIndex: number; workflowRunId: string } }
   | { kind: 'automation_execution.iteration_failed'; data: { executionId: string; iterationIndex: number; error?: string } }

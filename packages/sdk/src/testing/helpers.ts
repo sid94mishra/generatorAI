@@ -18,7 +18,7 @@ export async function createTestGeneratorAI(
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'generatorai-test-'));
 
   return createGeneratorAI({
-    provider: overrides?.provider ?? 'copilot',
+    harness: overrides?.harness ?? overrides?.provider ?? 'copilot',
     database: path.join(tmpDir, 'test.db'),
     artifactsDir: path.join(tmpDir, 'artifacts'),
     scriptsDir: path.join(tmpDir, 'scripts'),

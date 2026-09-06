@@ -5,8 +5,65 @@
 import type Database from 'better-sqlite3';
 import type { AppDatabase } from '../index.js';
 
+/**
+ * One versioned migration. `sql` runs inside a single transaction.
+ *
+ * `disableForeignKeys` is the documented SQLite table-rebuild procedure
+ * (https://sqlite.org/lang_altertable.html#otheralter, step 1 and step 10):
+ * `PRAGMA foreign_keys=OFF` before the transaction, rebuild, `PRAGMA
+ * foreign_key_check`, then ON again. It exists because v23 dropped
+ * `plan_documents` with foreign keys ON, and SQLite's implicit
+ * `DELETE FROM` before `DROP TABLE` cascaded into `plan_revisions` and
+ * `plan_comments` — every saved plan's text and every comment were wiped on
+ * the upgrade path. Any migration that DROPs and re-creates a table other
+ * tables reference MUST set this flag.
+ */
+export interface Migration {
+  version: number;
+  name: string;
+  sql: string[];
+  disableForeignKeys?: boolean;
+}
+
+export interface MigrateOptions {
+  /**
+   * Stop after this version (inclusive). Tests use it to build a database at
+   * an intermediate schema so an upgrade path can be exercised end to end.
+   * Production callers never pass it.
+   */
+  targetVersion?: number;
+}
+
+/**
+ * `ALTER TABLE … ADD COLUMN` for the pre-versioned bootstrap section. Only
+ * three SQLite error messages are swallowed, and only because each means the
+ * post-condition already holds or will be established by a later CREATE:
+ *   - "duplicate column"  — the column exists (already-upgraded DB)
+ *   - "already exists"    — same, older SQLite wording
+ *   - "no such table"     — the table is created by a LATER versioned
+ *                           migration, which must then own the column too.
+ * That third case is exactly how 5.10 shipped: a column added here for a
+ * table created in v8 silently no-ops on a fresh database. Never add a
+ * column here for a table that the bootstrap block above does not create —
+ * use a versioned migration. `__tests__/safeAddColumn.test.ts` pins these
+ * three strings against the real SQLite build so a wording change cannot
+ * silently turn "swallowed" into "thrown" (or vice versa).
+ */
+export const SAFE_ADD_COLUMN_SWALLOWED = ['duplicate column', 'already exists', 'no such table'] as const;
+
+export function safeAddColumnOn(sqlite: Database.Database, sql: string): void {
+  try {
+    sqlite.exec(sql);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (SAFE_ADD_COLUMN_SWALLOWED.some((needle) => msg.includes(needle))) return;
+    // Re-throw unexpected errors (permissions, disk full, etc.)
+    throw err;
+  }
+}
+
 /** Run migrations — creates tables if they don't exist */
-export function migrateDB(db: AppDatabase): void {
+export function migrateDB(db: AppDatabase, opts?: MigrateOptions): void {
   const sqlite = (db as unknown as { session: { client: Database.Database } }).session.client;
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -134,20 +191,9 @@ export function migrateDB(db: AppDatabase): void {
   `);
 
   // ── Incremental migrations (safe to run multiple times) ──
-  // Helper: only ignore "duplicate column" errors from ALTER TABLE
-  function safeAddColumn(sql: string): void {
-    try {
-      sqlite.exec(sql);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('duplicate column') || msg.includes('already exists') || msg.includes('no such table')) {
-        // Column already exists or table doesn't exist yet (will be created with the column)
-        return;
-      }
-      // Re-throw unexpected errors (permissions, disk full, etc.)
-      throw err;
-    }
-  }
+  // Helper: see `safeAddColumnOn` above for exactly which errors it ignores
+  // and why adding a column here for a table created LATER is a bug.
+  const safeAddColumn = (sql: string): void => safeAddColumnOn(sqlite, sql);
 
   // Add model column to sessions if it doesn't exist (for existing databases)
   safeAddColumn(`ALTER TABLE sessions ADD COLUMN model TEXT`);
@@ -526,9 +572,11 @@ export function migrateDB(db: AppDatabase): void {
   safeAddColumn(`ALTER TABLE workflow_definitions ADD COLUMN default_agent_ref TEXT`);
   safeAddColumn(`ALTER TABLE workflow_runs ADD COLUMN agent_snapshot TEXT`);
 
-  // Where the agent works, when that differs from the managed root. NULL means
-  // "same as root_path", which is every workspace created before this column.
-  safeAddColumn(`ALTER TABLE execution_workspaces ADD COLUMN code_root TEXT`);
+  // `execution_workspaces.code_root` used to be added here. The table is
+  // created by v8, so on a fresh database this ran against a table that did
+  // not exist yet, `safeAddColumn` swallowed "no such table", and every new
+  // installation had a schema without the column (review 5.10). It is now
+  // migration 45, below, like the browser columns in the next note.
 
   // NOTE: Integrated Browser columns (browser_config, browser_status, ...)
   // are added inside the versioned v13 migration below so they run AFTER
@@ -537,13 +585,22 @@ export function migrateDB(db: AppDatabase): void {
   // hasn't been created yet, leaving v13's index creation to fail on the
   // missing browser_status column.
 
-  /**
-   * Each migration is a numbered, idempotent block. Adding a new Phase N
-   * migration: pick the next version number, add the object below, do
-   * NOT modify older ones. Statements run in a single SQLite transaction
-   * so a mid-block failure rolls back.
-   */
-  const migrations: Array<{ version: number; name: string; sql: string[] }> = [
+  applyVersionedMigrations(sqlite, currentVersion, opts?.targetVersion);
+}
+
+/**
+ * Each migration is a numbered, idempotent block. Adding a new Phase N
+ * migration: pick the next version number, add the object below, do
+ * NOT modify older ones. Statements run in a single SQLite transaction
+ * so a mid-block failure rolls back.
+ *
+ * The `sql` of every entry is pinned by `packages/db/migrations.lock.json`
+ * (checked by `scripts/check-migrations-lock.mjs` in `pnpm lint`). Editing
+ * an entry that has shipped fails CI: v27 was edited in place once and broke
+ * every already-upgraded database (see the v28 comment), and 5.10's
+ * fresh-vs-upgraded divergence has the same root cause.
+ */
+export const MIGRATIONS: readonly Migration[] = [
     {
       version: 1,
       name: 'phase1_schema_and_indexes',
@@ -1290,6 +1347,10 @@ export function migrateDB(db: AppDatabase): void {
       // but no gate was ever opened, so it must never render approve buttons.
       version: 23,
       name: 'plan_status_recorded',
+      // Rebuilds a table that `plan_revisions` and `plan_comments` reference.
+      // Without this, `DROP TABLE plan_documents` under foreign_keys=ON
+      // cascades and wipes both child tables (review 6.6 / plan item 7).
+      disableForeignKeys: true,
       sql: [
         `CREATE TABLE plan_documents_v23 (
           id                 TEXT PRIMARY KEY,
@@ -2189,11 +2250,158 @@ export function migrateDB(db: AppDatabase): void {
         `ALTER TABLE conversation_instance_ownership ADD COLUMN binding_origin TEXT NOT NULL DEFAULT 'migrated-ambiguous';`,
       ],
     },
+    {
+      // ── v45 — execution_workspaces.code_root (review 5.10) ──
+      //
+      // Where the agent works, when that differs from the managed root. NULL
+      // means "same as root_path", which is every workspace created before
+      // this column. Previously a bootstrap `safeAddColumn`, which ran before
+      // v8 created the table on a fresh install and silently did nothing —
+      // creating a workspace then failed with "no column named code_root".
+      // Already-upgraded databases have the column; the runner tolerates the
+      // resulting "duplicate column" on ADD COLUMN.
+      version: 45,
+      name: 'execution_workspaces_code_root',
+      sql: [`ALTER TABLE execution_workspaces ADD COLUMN code_root TEXT;`],
+    },
+    // ── v46 — WS-D1: stage heartbeat lease + pinned definition snapshot ──
+    //
+    // `stage_runs.heartbeat_at` is written by the executor every ~10 s while a
+    // stage is queued/running; `WorkflowRunService`'s reconciler fails a
+    // stage whose beat is stale. `lease_owner` records which process claimed
+    // it (diagnostics only). `workflow_runs.definition_snapshot` freezes the
+    // stages + edges at run start so the scheduler never re-reads a live
+    // definition for an in-flight run. All three are nullable, additive
+    // `ADD COLUMN`s and therefore re-runnable under the duplicate-column
+    // tolerance below.
+    {
+      version: 46,
+      name: 'stage_run_heartbeat_and_run_definition_snapshot',
+      sql: [
+        `ALTER TABLE stage_runs ADD COLUMN heartbeat_at INTEGER;`,
+        `ALTER TABLE stage_runs ADD COLUMN lease_owner TEXT;`,
+        `ALTER TABLE workflow_runs ADD COLUMN definition_snapshot TEXT;`,
+      ],
+    },
+    // v47 — automations: DB-backed scheduler + hashed webhook tokens.
+    //
+    // `webhook_token_hash` replaces the plaintext `webhook_token` column as
+    // the lookup key (sha256; the raw token is shown once at create/rotate
+    // and never persisted). SQLite has no sha256, so existing plaintext
+    // rows are hashed by `DrizzleAutomationRepository.hashLegacyWebhookTokens`
+    // on the first scheduler start and the raw column is nulled.
+    // `timezone` / `missed_run_policy` / `overlap_policy` are the three
+    // scheduler controls; `idx_automations_due` backs the due-row poller's
+    // `WHERE trigger_type='schedule' AND enabled=1 AND next_run_at <= ?`.
+    // `automation_executions.status` was already an unconstrained TEXT, so
+    // the new `partial` value needs no DDL.
+    {
+      version: 47,
+      name: 'automations_scheduler_and_webhook_hash',
+      sql: [
+        `ALTER TABLE automations ADD COLUMN webhook_token_hash TEXT;`,
+        `ALTER TABLE automations ADD COLUMN timezone TEXT;`,
+        `ALTER TABLE automations ADD COLUMN missed_run_policy TEXT NOT NULL DEFAULT 'skip';`,
+        `ALTER TABLE automations ADD COLUMN overlap_policy TEXT NOT NULL DEFAULT 'skip';`,
+        `CREATE INDEX IF NOT EXISTS idx_automations_webhook_token_hash ON automations(webhook_token_hash);`,
+        `CREATE INDEX IF NOT EXISTS idx_automations_due ON automations(trigger_type, enabled, next_run_at);`,
+      ],
+    },
+    // v48 — MCP credential references on project-scoped servers.
+    //
+    // `project_configs.credential_refs` holds the NAMES of the headers/env
+    // keys a project-level `type='mcp'` row has stored in the secrets vault
+    // (`McpCredentialVault`, namespace `mcp/project/<id>`) — never values.
+    // `ArtifactCatalog.buildProjectServer` reads this column (not the config
+    // JSON file on disk) to build the `secretref:` pointers a harness config
+    // carries. Nullable/additive; every other config type just leaves it null.
+    {
+      version: 48,
+      name: 'project_configs_credential_refs',
+      sql: [`ALTER TABLE project_configs ADD COLUMN credential_refs TEXT;`],
+    },
+    {
+      version: 49,
+      name: 'stream_cursors_kind_ts_index',
+      // Retention sweeps `stream_cursors` by (kind, ts): deltas on a short
+      // TTL, items on the long one. Neither existing index covers `kind`
+      // (`idx_stream_cursors_ts` is ts alone, `..._scope_id_seq` is the replay
+      // path), so the sweep's candidate query degraded into a scan of the
+      // largest table in the database — measured at 258 ms per statement on a
+      // 527k-row table, run twice a sweep, SYNCHRONOUSLY on the only thread.
+      // That is what tripped the event-loop wedge detector at boot.
+      //
+      // With this index the same query is 3 ms.
+      sql: [
+        `CREATE INDEX IF NOT EXISTS idx_stream_cursors_kind_ts
+           ON stream_cursors(kind, ts);`,
+      ],
+    },
+    {
+      version: 50,
+      name: 'drop_usage_ledger',
+      // `usage_ledger` (v47) shipped with no writer and no reader — nothing in
+      // the tree ever inserted into or selected from it, and it is not in the
+      // Drizzle schema, so the ORM did not know it existed either. A table
+      // that exists only in migrations is a phantom that every future schema
+      // audit trips over. Dropping it loses nothing (it was always empty).
+      // Cost accounting, when it is built, gets a table designed for its
+      // reader.
+      sql: [
+        `DROP INDEX IF EXISTS idx_usage_ledger_recorded_at;`,
+        `DROP INDEX IF EXISTS idx_usage_ledger_session;`,
+        `DROP INDEX IF EXISTS idx_usage_ledger_scope;`,
+        `DROP TABLE IF EXISTS usage_ledger;`,
+      ],
+    },
   ];
 
 
-  for (const m of migrations) {
+/** A row from `PRAGMA foreign_key_check`. */
+interface FkViolation { table: string; rowid: number | null; parent: string; fkid: number }
+
+function foreignKeyViolations(sqlite: Database.Database): Set<string> {
+  const rows = sqlite.pragma('foreign_key_check') as FkViolation[];
+  return new Set(rows.map((r) => `${r.table}:${r.rowid ?? 'null'}:${r.parent}:${r.fkid}`));
+}
+
+/**
+ * Apply every migration above `currentVersion` (and at or below
+ * `targetVersion`, when given), each in its own transaction, in version
+ * order. Duplicate version numbers are a programming error and fail before
+ * anything runs — two agents appending to the array at once must not be able
+ * to produce a database whose `_schema_versions` lies about what ran.
+ */
+function applyVersionedMigrations(
+  sqlite: Database.Database,
+  currentVersion: number,
+  targetVersion?: number,
+): void {
+  const ordered = [...MIGRATIONS].sort((a, b) => a.version - b.version);
+  for (let i = 1; i < ordered.length; i += 1) {
+    if (ordered[i]!.version === ordered[i - 1]!.version) {
+      throw new Error(`Duplicate migration version ${ordered[i]!.version} (${ordered[i - 1]!.name}, ${ordered[i]!.name})`);
+    }
+  }
+
+  for (const m of ordered) {
     if (m.version <= currentVersion) continue;
+    if (targetVersion !== undefined && m.version > targetVersion) break;
+
+    // Table-rebuild migrations: foreign keys OFF for the duration, then verify.
+    // `PRAGMA foreign_keys` is a no-op inside a transaction, so it has to
+    // bracket the BEGIN/COMMIT rather than sit inside it. Violations are
+    // compared before/after rather than required to be zero, so a database
+    // with a pre-existing orphan (there are unconstrained ID columns all over
+    // this schema) does not become un-upgradeable — only violations the
+    // migration itself INTRODUCED fail it.
+    const fkWasOn = Number(sqlite.pragma('foreign_keys', { simple: true })) === 1;
+    let before: Set<string> | undefined;
+    if (m.disableForeignKeys) {
+      before = foreignKeyViolations(sqlite);
+      sqlite.pragma('foreign_keys = OFF');
+    }
+
     sqlite.exec('BEGIN');
     try {
       for (const stmt of m.sql) {
@@ -2209,7 +2417,7 @@ export function migrateDB(db: AppDatabase): void {
         // Tolerating ONLY "duplicate column" keeps this narrow: the column
         // already exists, which is precisely the post-condition the statement
         // was trying to establish. Every other error still aborts and rolls
-        // back. Mirrors `safeAddColumn` above, which does the same for the
+        // back. Mirrors `safeAddColumnOn` above, which does the same for the
         // pre-versioned section.
         try {
           sqlite.exec(stmt);
@@ -2217,6 +2425,14 @@ export function migrateDB(db: AppDatabase): void {
           const msg = err instanceof Error ? err.message : String(err);
           const additive = /\bADD\s+COLUMN\b/i.test(stmt);
           if (!(additive && msg.includes('duplicate column'))) throw err;
+        }
+      }
+      if (before) {
+        const introduced = [...foreignKeyViolations(sqlite)].filter((v) => !before!.has(v));
+        if (introduced.length > 0) {
+          throw new Error(
+            `table rebuild introduced ${introduced.length} foreign-key violation(s): ${introduced.slice(0, 5).join(', ')}`,
+          );
         }
       }
       sqlite
@@ -2228,6 +2444,8 @@ export function migrateDB(db: AppDatabase): void {
       throw new Error(
         `Migration ${m.version} (${m.name}) failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    } finally {
+      if (m.disableForeignKeys && fkWasOn) sqlite.pragma('foreign_keys = ON');
     }
   }
 }

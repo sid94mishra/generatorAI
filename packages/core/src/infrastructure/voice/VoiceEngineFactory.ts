@@ -33,6 +33,8 @@ import type { ITextToSpeechEngine } from '../../domain/ports/ITextToSpeechEngine
 import type { VoiceWorkerPool } from './VoiceWorkerPool.js';
 import { ParakeetSttEngine } from './ParakeetSttEngine.js';
 import { NemotronSttEngine } from './NemotronSttEngine.js';
+import { NemotronOnnxSttEngine } from './NemotronOnnxSttEngine.js';
+import { isNemotronModelPresentSync } from './NemotronModelStore.js';
 import { MoonshineSttEngine } from './MoonshineSttEngine.js';
 import { WhisperSttEngine } from './WhisperSttEngine.js';
 import { DisabledSttEngine } from './DisabledSttEngine.js';
@@ -170,11 +172,40 @@ export interface SttEngineFactoryOptions {
   /** Shared inference worker. Omit only in tests that mock the model libraries. */
   workerPool?: VoiceWorkerPool;
   /**
-   * Which engine `auto` prefers before falling back to Whisper. Defaults to
-   * `moonshine` — see the measured comparison above STT_ENGINES. Exists so
-   * the cascade's preference is configurable without giving up the fallback.
+   * Which engine `auto` prefers before falling back. Defaults to whatever
+   * {@link defaultPreferredSttEngine} decides for this machine. Exists so the
+   * cascade's preference is configurable without giving up the fallback.
    */
   preferred?: Exclude<SttEngineId, 'auto' | 'disabled'>;
+  /** Silence (ms) that ends an utterance on the streaming path. */
+  endpointSilenceMs?: number;
+}
+
+/** True when Nemotron can actually run here — see {@link defaultPreferredSttEngine}. */
+export function nemotronWeightsPresent(): boolean {
+  const override = process.env['GENERATORAI_NEMOTRON_ONNX_DIR'];
+  return isNemotronModelPresentSync(override || undefined);
+}
+
+/**
+ * What `auto` prefers, decided per machine rather than fixed.
+ *
+ * Nemotron is the best engine in the table on every axis that matters for
+ * dictation — it is the only one that is multilingual, the only one with a
+ * native streaming decoder (so words appear as they are spoken instead of a
+ * block landing after each pause), and the most accurate of the four. It is
+ * not an unconditional default only because its weights are large and
+ * optional, so this asks whether they are actually here.
+ *
+ * The check is a handful of `existsSync` calls at composition time, and it is
+ * the difference between "Nemotron is available" being true of the code and
+ * true of the running install: before this, `auto` named a preference that
+ * could not be satisfied without someone first hand-installing a native
+ * binary, so in practice it always fell through to Moonshine.
+ */
+export function defaultPreferredSttEngine(): Exclude<SttEngineId, 'auto' | 'disabled'> {
+  if (process.env['GENERATORAI_NEMO_SPEECH_BIN'] || nemotronWeightsPresent()) return 'nemotron';
+  return 'moonshine';
 }
 
 /**
@@ -189,15 +220,31 @@ export function createSttEngine(
 ): ISpeechToTextEngine {
   const { logger, workerPool } = opts;
   const engineOpts = { ...(logger ? { logger } : {}), ...(workerPool ? { workerPool } : {}) };
+  const nemotronOpts = {
+    ...engineOpts,
+    ...(opts.endpointSilenceMs ? { endpointSilenceMs: opts.endpointSilenceMs } : {}),
+  };
 
   switch (id) {
     case 'disabled':
       return new DisabledSttEngine();
     case 'nemotron':
-      // Out-of-process by necessity — see NemotronSttEngine.ts. It takes no
-      // `workerPool`: it does not use transformers.js or onnxruntime-node at
-      // all, so handing it the shared ONNX worker would be meaningless.
-      return new NemotronSttEngine({ ...(logger ? { logger } : {}) });
+      // ONE id, TWO adapters. Which one runs depends on what the machine
+      // actually has, because the difference is an implementation detail to
+      // everyone upstream: same model, same weights, same transcripts.
+      //
+      // In-process ONNX is preferred when the weights are present because it
+      // needs nothing else — no native binary to install, no second process
+      // to supervise. NeMo-Speech.cpp is used when someone has deliberately
+      // installed it (GENERATORAI_NEMO_SPEECH_BIN), which is also the only
+      // way to get GPU execution.
+      return nemotronWeightsPresent() && !process.env['GENERATORAI_NEMO_SPEECH_BIN']
+        ? new NemotronOnnxSttEngine(nemotronOpts)
+        : // Out-of-process by necessity — see NemotronSttEngine.ts. It takes
+          // no `workerPool`: it does not use transformers.js or
+          // onnxruntime-node at all, so handing it the shared ONNX worker
+          // would be meaningless.
+          new NemotronSttEngine({ ...(logger ? { logger } : {}) });
     case 'parakeet':
       return new ParakeetSttEngine(engineOpts);
     case 'moonshine':
@@ -205,14 +252,25 @@ export function createSttEngine(
     case 'whisper':
       return new WhisperSttEngine(engineOpts);
     case 'auto': {
-      const preferred = opts.preferred ?? 'moonshine';
+      const preferred = opts.preferred ?? defaultPreferredSttEngine();
       // Whisper is always the last resort, and is never stacked behind
       // itself — a cascade of [whisper, whisper] would just double the load
       // attempt on failure.
       const candidates: ISpeechToTextEngine[] =
         preferred === 'whisper'
           ? [new WhisperSttEngine(engineOpts)]
-          : [createSttEngine(preferred, opts), new WhisperSttEngine(engineOpts)];
+          : [
+              createSttEngine(preferred, opts),
+              // Nemotron is the only candidate whose weights are genuinely
+              // optional, so it is the only one whose failure is EXPECTED
+              // rather than exceptional. Dropping straight to Whisper on a
+              // machine that simply has not downloaded them would make the
+              // default slower than it was before Nemotron existed (1717ms
+              // against Moonshine's 146ms), which is a regression disguised
+              // as a fallback. Keep the previous default in between.
+              ...(preferred === 'nemotron' ? [new MoonshineSttEngine(engineOpts)] : []),
+              new WhisperSttEngine(engineOpts),
+            ];
       // One candidate is not a cascade. Returning it bare keeps `name` (and
       // therefore `describe()` and the telemetry that reads it) honest about
       // what is actually running, instead of reporting a fallback chain of
@@ -233,6 +291,10 @@ export function createSttEngine(
 export interface TtsEngineFactoryOptions {
   logger?: ILogger;
   workerPool?: VoiceWorkerPool;
+  /** Voice name; falls back to KOKORO_VOICE then the model's default. */
+  defaultVoice?: string;
+  /** Playback rate (0.5-2.0). */
+  defaultSpeed?: number;
 }
 
 /**
@@ -252,7 +314,11 @@ export function createTtsEngine(
     case 'disabled':
       return undefined;
     case 'kokoro':
-      return new KokoroTtsEngine(engineOpts);
+      return new KokoroTtsEngine({
+        ...engineOpts,
+        ...(opts.defaultVoice ? { defaultVoice: opts.defaultVoice } : {}),
+        ...(opts.defaultSpeed ? { defaultSpeed: opts.defaultSpeed } : {}),
+      });
     default: {
       const never: never = id;
       throw new Error(`Unknown TTS engine "${String(never)}". Expected one of: kokoro, disabled`);

@@ -9,7 +9,7 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 import { Settings, Zap, MessageSquare, GitBranch, LayoutDashboard, RefreshCw, FolderKanban, FileCode2, PanelLeftClose, Bot } from 'lucide-react';
-import { Kbd } from '@/components/ui/index.js';
+import { Kbd, Button } from '@/components/ui/index.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { useUiStore } from '@/stores/uiStore.js';
@@ -34,8 +34,9 @@ export function Sidebar() {
     Icon: React.ElementType,
     isActive: boolean,
   ) => (
-    <button
+    <Button
       key={path}
+      variant="ghost"
       onClick={() => navigate(path)}
       className={cn(
         'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
@@ -46,14 +47,15 @@ export function Sidebar() {
     >
       <Icon className="h-4 w-4 shrink-0" />
       {label}
-    </button>
+    </Button>
   );
 
   return (
     <div className="flex h-full flex-col">
       {/* Header — logo + collapse toggle (lives on the left pane) */}
       <div className="flex h-10 items-center justify-between border-b border-[var(--color-sidebar-border)] px-3">
-        <button
+        <Button
+          variant="ghost"
           onClick={() => navigate('/')}
           className="flex items-center gap-2.5 transition-opacity hover:opacity-90 active:scale-[0.97]"
         >
@@ -61,9 +63,11 @@ export function Sidebar() {
             <Zap className="h-3.5 w-3.5 text-white" />
           </div>
           <span className="text-sm font-semibold text-[var(--color-foreground)]">GeneratorAI</span>
-        </button>
+        </Button>
         <Tooltip content="Hide sidebar">
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={toggleSidebar}
             aria-pressed
             aria-label="Hide sidebar"
@@ -71,7 +75,7 @@ export function Sidebar() {
             className="rounded-md border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 p-1 text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/20"
           >
             <PanelLeftClose className="h-4 w-4" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 
@@ -88,7 +92,8 @@ export function Sidebar() {
 
       {/* Bottom Navigation */}
       <div className="border-t border-[var(--color-sidebar-border)] px-2 py-2 space-y-0.5">
-        <button
+        <Button
+          variant="ghost"
           onClick={() => openSettings()}
           className={cn(
             'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
@@ -97,7 +102,7 @@ export function Sidebar() {
         >
           <Settings className="h-4 w-4 shrink-0" />
           Settings
-        </button>
+        </Button>
         <div className="flex items-center justify-between px-3 pb-0.5 pt-1.5 text-[11px] text-[var(--color-muted-foreground)]">
           <span>Command palette</span>
           <Kbd keys={['mod', 'K']} />

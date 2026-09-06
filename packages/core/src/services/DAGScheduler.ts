@@ -1,8 +1,27 @@
 // ────────────────────────────────────────────────────────────────
-// DAGScheduler — schedules stage execution based on DAG structure
+// DAGScheduler — decides which stages of a run launch, which are skipped,
+// and when the run is finished.
+//
+// WS-D1 / review §5.5 — there is exactly ONE readiness predicate
+// (`resolveStageReadiness`) and exactly ONE reconcile (`reconcileDAG`) here.
+// Every public entry point — `getReadyStages`, `getSkippableStages`,
+// `onStageCompleted/Failed/Skipped`, `scheduleNext`, the run service's
+// reconciler tick and crash re-drive — goes through them. The previous
+// version had four answers to "is this stage ready?" (a router that looked
+// only at the just-finished predecessor, a skipper that asked whether ANY
+// inbound edge was active, an edge-blind restart path, and a terminal-status
+// computation that ignored `cancelled`), and the most common branching shape
+// — a diamond with one failed branch — hung forever in the gap between them.
 // ────────────────────────────────────────────────────────────────
 
-import type { StageRun, StageRunStatus } from '@generatorai/shared';
+import type {
+  ILogger,
+  StageDefinition,
+  StageEdge,
+  StageRunStatus,
+  WorkflowDefinitionSnapshot,
+  WorkflowRun,
+} from '@generatorai/shared';
 import type { IStageDefinitionRepository } from '../domain/ports/IStageDefinitionRepository.js';
 import type { IStageEdgeRepository } from '../domain/ports/IStageEdgeRepository.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
@@ -13,31 +32,250 @@ import { evaluateCondition } from '../domain/dag/ConditionEvaluator.js';
 import type { DAG } from '../domain/dag/types.js';
 import { createHash } from 'node:crypto';
 
+// ── Pure scheduling semantics ──────────────────────────────────────
+//
+// Everything in this section is a pure function of (DAG, status map,
+// variables). Keeping it free of repositories is what lets the run service,
+// the tests and the scheduler class itself share one definition of "ready".
+
+/** What a single pending stage should do right now. */
+export type StageReadiness = 'ready' | 'skip' | 'blocked';
+
+/** Terminal status of a run whose every stage is terminal. */
+export type TerminalRunStatus = 'completed' | 'failed' | 'cancelled';
+
+/** The full answer for one run after any change. */
+export interface RunReconciliation {
+  /** Stage definition ids that are `pending` and may be launched now. */
+  toLaunch: string[];
+  /**
+   * Stage definition ids that are `pending` and can never run — every
+   * predecessor is terminal but no inbound edge is active (or one vetoes,
+   * or the stage's own condition is false). Already cascaded: a stage whose
+   * only path runs through another entry here is included too.
+   */
+  toSkip: string[];
+  /**
+   * Set when, once `toSkip` is applied, every stage in the DAG is terminal
+   * and nothing is left to launch. Undefined while anything is still
+   * pending, queued, running, paused, sleeping or awaiting input.
+   */
+  runTerminal?: TerminalRunStatus;
+}
+
+const TERMINAL_STAGE_STATUSES: ReadonlySet<StageRunStatus> = new Set<StageRunStatus>([
+  'completed',
+  'failed',
+  'skipped',
+  'cancelled',
+]);
+
 /**
- * Per-run FIFO queue entry. W33/P1-19 — defined here (not as a module global)
- * so two DAGScheduler instances each get their own isolated queue state.
+ * A predecessor stops blocking its successors once it is terminal. This is
+ * the ONLY place that set is defined — `cancelled` used to be missing from
+ * the readiness copy while present in the completion copy, which is the
+ * second hang mode §5.5 describes.
  */
-interface QueuedOp<T> {
-  fn: () => Promise<T>;
-  resolve: (v: T) => void;
-  reject: (err: Error) => void;
+export function isTerminalStageStatus(status: StageRunStatus | undefined): boolean {
+  return status !== undefined && TERMINAL_STAGE_STATUSES.has(status);
+}
+
+/**
+ * Whether an edge lets control flow through, given its source's status.
+ *  - on_success    → only when the predecessor completed
+ *  - on_failure    → only when it failed
+ *  - on_completion → completed or failed
+ *  - always        → any terminal status, including skipped and cancelled
+ * Missing `edgeType` on legacy rows means on_success.
+ */
+export function isEdgeActiveForStatus(
+  edgeType: string | undefined,
+  predStatus: StageRunStatus | undefined,
+): boolean {
+  if (!predStatus) return false;
+  const type = edgeType ?? 'on_success';
+  if (type === 'always') return isTerminalStageStatus(predStatus);
+  if (type === 'on_completion') return predStatus === 'completed' || predStatus === 'failed';
+  if (type === 'on_success') return predStatus === 'completed';
+  if (type === 'on_failure') return predStatus === 'failed';
+  return false;
+}
+
+/**
+ * THE readiness predicate.
+ *
+ *  1. Only a `pending` stage can be ready or skipped; anything else is
+ *     `blocked` (it is running, or already decided).
+ *  2. Every predecessor must be terminal, else `blocked`.
+ *  3. Inbound edges are gates. An edge from a predecessor that reached a real
+ *     outcome (completed / failed / cancelled) but is NOT active for that
+ *     outcome vetoes the stage — an `on_success` edge from a failed branch is
+ *     exactly "this stage required that branch to succeed, and it did not".
+ *     An inactive edge from a *skipped* predecessor neither vetoes nor
+ *     activates: that path simply never happened. At least one inbound edge
+ *     must be active, otherwise the stage is unreachable. Both cases → `skip`.
+ *  4. The stage's own `condition`, if any, is evaluated against the status of
+ *     each activating predecessor (a root uses `completed`); false → `skip`.
+ *
+ * With A → (B, C) → D on default edges and C failed, step 3 skips D and the
+ * run ends `failed` instead of hanging. With A → R on `on_failure` and A → B
+ * on `on_success`, A failing skips B and runs R — the recovery shape.
+ */
+export function resolveStageReadiness(
+  nodeId: string,
+  dag: DAG,
+  statusMap: ReadonlyMap<string, StageRunStatus>,
+  variables?: Record<string, unknown>,
+): StageReadiness {
+  const node = dag.nodes.get(nodeId);
+  if (!node) return 'blocked';
+  if (statusMap.get(nodeId) !== 'pending') return 'blocked';
+
+  for (const predId of node.dependencyIds) {
+    if (!isTerminalStageStatus(statusMap.get(predId))) return 'blocked';
+  }
+
+  const activatingParents: StageRunStatus[] = [];
+  if (node.incomingEdges.length > 0) {
+    for (const edge of node.incomingEdges) {
+      const predStatus = statusMap.get(edge.fromStageId);
+      if (isEdgeActiveForStatus(edge.edgeType, predStatus)) {
+        activatingParents.push(predStatus!);
+        continue;
+      }
+      if (predStatus === 'completed' || predStatus === 'failed' || predStatus === 'cancelled') {
+        return 'skip';
+      }
+    }
+    if (activatingParents.length === 0) return 'skip';
+  }
+
+  const condition = node.stage.condition;
+  if (condition) {
+    const parents: StageRunStatus[] =
+      activatingParents.length > 0 ? activatingParents : ['completed'];
+    const met = parents.some((parentStatus) =>
+      evaluateCondition(condition, { parentStatus, variables }),
+    );
+    if (!met) return 'skip';
+  }
+
+  return 'ready';
+}
+
+/**
+ * Terminal status of a run whose stages are all terminal.
+ *
+ * A failed (or cancelled) stage is "handled" when one of its outgoing edges
+ * that is active for that status leads to a stage that completed — or to
+ * another failed stage that is itself, transitively, handled. Recovery DAGs
+ * (the headline use of `on_failure`) therefore report `completed` when the
+ * recovery branch succeeds. Any unhandled failure → `failed`; otherwise any
+ * unhandled cancellation → `cancelled` (previously a cancelled leaf reported
+ * `completed`); otherwise `completed`.
+ */
+export function computeTerminalRunStatusFor(
+  dag: DAG,
+  statusMap: ReadonlyMap<string, StageRunStatus>,
+): TerminalRunStatus {
+  const unresolved = new Map<string, StageRunStatus>();
+  for (const nodeId of dag.nodes.keys()) {
+    const status = statusMap.get(nodeId);
+    if (status === 'failed' || status === 'cancelled') unresolved.set(nodeId, status);
+  }
+  if (unresolved.size === 0) return 'completed';
+
+  const resolved = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [nodeId, status] of unresolved) {
+      if (resolved.has(nodeId)) continue;
+      const node = dag.nodes.get(nodeId);
+      const handled = (node?.outgoingEdges ?? []).some((edge) => {
+        if (!isEdgeActiveForStatus(edge.edgeType, status)) return false;
+        const targetStatus = statusMap.get(edge.toStageId);
+        return (
+          targetStatus === 'completed' ||
+          (unresolved.has(edge.toStageId) && resolved.has(edge.toStageId))
+        );
+      });
+      if (handled) {
+        resolved.add(nodeId);
+        changed = true;
+      }
+    }
+  }
+
+  let sawCancelled = false;
+  for (const [nodeId, status] of unresolved) {
+    if (resolved.has(nodeId)) continue;
+    if (status === 'failed') return 'failed';
+    sawCancelled = true;
+  }
+  return sawCancelled ? 'cancelled' : 'completed';
+}
+
+/**
+ * THE reconcile. Re-evaluates every pending stage against the current
+ * statuses, cascading skips in memory until nothing changes, and reports
+ * what to launch, what to skip and whether the run is now finished.
+ *
+ * Pure: callers persist `toSkip`, launch `toLaunch` (the DUR-06 atomic
+ * `pending → queued` claim makes a duplicate launch a no-op, so two
+ * concurrent reconciles are safe) and finalize on `runTerminal`.
+ */
+export function reconcileDAG(
+  dag: DAG,
+  statusMap: ReadonlyMap<string, StageRunStatus>,
+  variables?: Record<string, unknown>,
+): RunReconciliation {
+  const working = new Map(statusMap);
+  const toLaunch: string[] = [];
+  const toSkip: string[] = [];
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const nodeId of dag.nodes.keys()) {
+      if (working.get(nodeId) !== 'pending') continue;
+      const readiness = resolveStageReadiness(nodeId, dag, working, variables);
+      if (readiness === 'skip') {
+        working.set(nodeId, 'skipped');
+        toSkip.push(nodeId);
+        changed = true;
+      } else if (readiness === 'ready') {
+        toLaunch.push(nodeId);
+        // Mark it so this pass does not report it twice; `queued` is
+        // non-terminal, so successors stay blocked as they should.
+        working.set(nodeId, 'queued');
+      }
+    }
+  }
+
+  let runTerminal: TerminalRunStatus | undefined;
+  if (toLaunch.length === 0) {
+    let allTerminal = true;
+    for (const nodeId of dag.nodes.keys()) {
+      if (!isTerminalStageStatus(working.get(nodeId))) {
+        allTerminal = false;
+        break;
+      }
+    }
+    if (allTerminal) runTerminal = computeTerminalRunStatusFor(dag, working);
+  }
+
+  return runTerminal ? { toLaunch, toSkip, runTerminal } : { toLaunch, toSkip };
 }
 
 // ── Definition cache validation (P1-19) ──
 //
 // △ The cache used to be validated by SHA-1'ing EVERY stage and EVERY edge on
-// every call — i.e. on every stage completion, since every scheduler entry
-// point funnels through `buildDAGForDefinition`. That is two array copies, two
-// O(n log n) `localeCompare` sorts, a `JSON.stringify` per stage and a crypto
-// digest over the whole definition, just to answer "did anything change?".
-//
-// Validation is now two-tier. Tier 1 (`structuralSignature`) is an integer
-// fold — no allocation, no sort, no crypto — that catches everything except an
-// edit to the *body* of a stage condition. Tier 2 (`conditionSignature`) is
-// the old digest, but restricted to the stages that actually carry a condition
-// and reached only when tier 1 already matched, so the invalidation guarantee
-// is unchanged while the common case (no conditions, nothing edited) touches
-// crypto zero times.
+// every call. Validation is two-tier: tier 1 (`structuralSignature`) is an
+// integer fold — no allocation, no sort, no crypto — that catches everything
+// except an edit to the *body* of a stage condition; tier 2
+// (`conditionSignature`) digests only the stages that carry a condition and
+// is reached only when tier 1 already matched.
 
 const FNV_PRIME = 0x01000193;
 const FNV_OFFSET = 0x811c9dc5;
@@ -50,11 +288,8 @@ function foldString(h: number, s: string): number {
   return h;
 }
 
-// Scratch view used to fold a number by its exact IEEE-754 bits, so two
-// distinct `order` values can never collide the way a truncating bit-shift
-// would. Module-scoped and reused rather than allocated per row; it is only
-// ever written and read back within one synchronous statement, so the
-// single-threaded event loop cannot interleave another folder into it.
+// Scratch view used to fold a number by its exact IEEE-754 bits. Only ever
+// written and read back within one synchronous statement.
 const numberScratch = new Float64Array(1);
 const numberBits = new Uint32Array(numberScratch.buffer);
 
@@ -66,12 +301,9 @@ function foldNumber(h: number, n: number): number {
 }
 
 /**
- * Tier 1: cheap signature of (stage ids + order + condition presence) and
- * (edge tuples). Per-row hashes are combined with sum AND xor, which is
- * order-independent — that is deliberate: the repositories make no ordering
- * promise, and combining this way removes the need to sort (the old digest
- * sorted purely to be stable against row order). Counts are included so that
- * duplicate rows, which xor cancels in pairs, still shift the signature.
+ * Tier 1: cheap, order-independent signature of (stage ids + order +
+ * condition presence) and (edge tuples). Counts are included so duplicate
+ * rows, which xor cancels in pairs, still shift the signature.
  */
 function structuralSignature(
   stages: Array<{ id: string; order: number; condition?: unknown }>,
@@ -100,12 +332,7 @@ function structuralSignature(
   return `${stages.length}:${stageSum}:${stageXor}|${edges.length}:${edgeSum}:${edgeXor}`;
 }
 
-/**
- * Tier 2: digest of the condition bodies only. A condition is an arbitrary
- * object, so nothing cheaper than serialising it can prove it is unchanged —
- * but only conditional stages need paying for, and a definition with no
- * conditions never reaches `createHash` at all.
- */
+/** Tier 2: digest of the condition bodies only. */
 function conditionSignature(stages: Array<{ id: string; condition?: unknown }>): string {
   const conditional = stages.filter((s) => s.condition != null);
   if (conditional.length === 0) return '';
@@ -118,80 +345,50 @@ function conditionSignature(stages: Array<{ id: string; condition?: unknown }>):
 }
 
 /**
- * Snapshot of one run's scheduling frontier. P1-19 — instance state, keyed by
- * runId, so `scheduleNext` can answer from the successors of the stage that
- * just finished instead of re-scanning every node of the DAG.
- *
- * `statuses` is what the last full scan saw. The next call compares it against
- * freshly-read statuses: if nothing but the completed stage moved, the only
- * stages that can have become newly ready are that stage's successors — every
- * other ready stage must already be in `ready`. Anything else (a concurrent
- * status change, a rebuilt DAG, a different definition) falls back to the full
- * scan, because a stranded stage hangs the run.
+ * Per-run FIFO queue entry. W33/P1-19 — defined here (not as a module global)
+ * so two DAGScheduler instances each get their own isolated queue state.
  */
-interface RunFrontier {
-  workflowDefinitionId: string;
-  /** Identity of the DAG the snapshot was taken against — a mid-run edit
-   *  replaces the cached DAG object, which invalidates the snapshot. */
-  dag: DAG;
-  statuses: Map<string, StageRunStatus>;
-  /** Exactly what the last scan returned, in `dag.nodes` order. */
-  ready: string[];
+interface QueuedOp<T> {
+  fn: () => Promise<T>;
+  resolve: (v: T) => void;
+  reject: (err: Error) => void;
 }
 
 export class DAGScheduler implements IDAGScheduler {
   /**
-   * Cached DAG per workflow definition (keyed by definitionId). The stored
-   * signatures of (stages, edges) are compared on every build; a mismatch —
-   * e.g. the definition was edited mid-run — rebuilds and replaces the entry,
-   * so a stale topology is never reused (resolves the old DAG-01 stale-cache
-   * risk). See the two-tier note above `structuralSignature`.
+   * Cached DAG per workflow definition (keyed by definitionId), validated by
+   * the two signatures on every build so a mid-run edit of a definition is
+   * never served stale. Used for runs that have no snapshot (created before
+   * the column landed) and for definition-level questions.
    */
   private dagCache = new Map<string, { signature: string; conditions: string; dag: DAG }>();
 
   /**
-   * Position of each node in `dag.nodes` iteration order, filled lazily and
-   * keyed by the DAG object so a rebuilt DAG drops its entry automatically.
-   * The incremental frontier visits nodes out of order and has to re-sort its
-   * result into the order a full scan would have produced.
+   * WS-D1 — DAG per in-flight run, built from the run's frozen
+   * `definitionSnapshot`. The snapshot never changes once written, so the
+   * entry is valid for the life of the run; `forgetRun` drops it when the
+   * run is finished and the map is capped so a long-lived scheduler does not
+   * grow by one entry per run it has ever seen.
    */
-  private dagNodeOrder = new WeakMap<DAG, Map<string, number>>();
+  private runDagCache = new Map<string, { capturedAt: string; dag: DAG }>();
+  private static readonly MAX_TRACKED_RUNS = 512;
 
   // W33 / P1-19 — per-run FIFO lock queues as INSTANCE state.
-  // Module-level globals caused all DAGScheduler instances to share one lock
-  // table, making two schedulers in the same process contend on the same runId
-  // keys. Instance fields give each scheduler its own isolated queue state.
   private runQueues = new Map<string, Array<QueuedOp<unknown>>>();
   private runQueueActive = new Set<string>();
 
-  /** P1-19 — per-run frontier snapshots (see {@link RunFrontier}). */
-  private runFrontiers = new Map<string, RunFrontier>();
-
   /**
-   * Frontier state is a pure cache — dropping an entry only costs one full
-   * scan — so a long-lived scheduler evicts the oldest entries rather than
-   * growing a map keyed by every run it has ever seen.
-   */
-  private static readonly MAX_TRACKED_FRONTIERS = 512;
-
-  /**
-   * △ Diagnostics counters for the P1-19 work-avoidance paths. Not part of
-   * `IDAGScheduler`; nothing in production reads them. They exist because the
-   * cost this optimisation removes (nodes walked, digests computed) is
-   * otherwise invisible from the outside, so a regression test could not tell
-   * an incremental scan from a full one.
+   * △ Diagnostics counters. Not part of `IDAGScheduler`; nothing in
+   * production reads them. They let a test see whether the cache and the
+   * crypto digest were touched.
    */
   readonly stats = {
-    /** DAGs built from scratch, i.e. cache misses. */
+    /** DAGs built from scratch, i.e. cache misses (definition or snapshot). */
     dagBuilds: 0,
     /** Tier-2 digests actually computed with crypto. */
     conditionDigests: 0,
-    /** Readiness computations that walked every node. */
-    fullScans: 0,
-    /** `scheduleNext` calls answered from the frontier. */
-    incrementalScans: 0,
-    /** Nodes whose readiness predicate was evaluated, across both paths. */
-    nodesExamined: 0,
+    /** Reconciles performed. */
+    reconciles: 0,
   };
 
   constructor(
@@ -200,15 +397,17 @@ export class DAGScheduler implements IDAGScheduler {
     private stageRunRepo: IStageRunRepository,
     /**
      * Optional run repository. When provided, the run's `variables` are passed
-     * into edge-condition evaluation so `expression` conditions referencing
-     * `variables.*` resolve to real values instead of always `undefined`
-     * (SCHEMA-3). Without it, `variables.*` references resolve to undefined
-     * (the prior behaviour) — status/parentStatus conditions are unaffected.
+     * into condition evaluation so `variables.*` expressions resolve to real
+     * values (SCHEMA-3), and the run's `definitionSnapshot` is used to build
+     * its DAG (WS-D1). Without it, `variables.*` resolve to undefined and the
+     * live definition is used.
      */
     private runRepo?: IWorkflowRunRepository,
+    /** Optional logger — a run that cannot be read is reported, not swallowed. */
+    private logger?: ILogger,
   ) {}
 
-  // ── Per-run FIFO lock (W33/P1-19 — instance state, not module globals) ──
+  // ── Per-run FIFO lock ──
 
   private async processQueue(runId: string): Promise<void> {
     if (this.runQueueActive.has(runId)) return;
@@ -240,25 +439,29 @@ export class DAGScheduler implements IDAGScheduler {
         reject,
       });
       this.runQueues.set(runId, queue);
-      // Kick off processing asynchronously so the caller's try/await path
-      // completes before we start draining the queue.
       void this.processQueue(runId);
     });
   }
 
+  // ── Run access ──
+
   /**
-   * Fetch the run's variables for condition evaluation. Returns undefined when
-   * no run repo is wired or the run can't be read (conditions then fall back to
-   * status-only evaluation). SCHEMA-3.
+   * Read the run for its variables and snapshot. Returns undefined when no
+   * run repo is wired or the run cannot be read — and in the latter case
+   * SAYS SO. This used to be a bare `catch { return undefined }`, so a
+   * transient DB error silently evaluated every `variables.*` condition as
+   * false and took the wrong branch with no trace anywhere.
    */
-  private async getRunVariables(
-    workflowRunId: string,
-  ): Promise<Record<string, unknown> | undefined> {
+  private async loadRun(workflowRunId: string): Promise<WorkflowRun | undefined> {
     if (!this.runRepo) return undefined;
     try {
-      const run = await this.runRepo.getById(workflowRunId);
-      return run.variables ?? undefined;
-    } catch {
+      return await this.runRepo.getById(workflowRunId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger?.warn(
+        `[DAGScheduler] Could not read run ${workflowRunId} for scheduling; ` +
+          `variables.* conditions evaluate as undefined and the live definition is used: ${message}`,
+      );
       return undefined;
     }
   }
@@ -270,11 +473,11 @@ export class DAGScheduler implements IDAGScheduler {
     return signature;
   }
 
+  // ── DAG construction ──
+
   /**
-   * Build the DAG for a workflow definition, reusing the cached value only
-   * when both signatures match. This replaces the old
-   * "cache-forever-until-explicit-clearCache" behaviour that left runs
-   * using a stale topology when the definition was edited mid-run.
+   * Build the DAG for a workflow definition from its LIVE stages and edges,
+   * reusing the cached value only when both signatures match.
    */
   async buildDAGForDefinition(workflowDefinitionId: string): Promise<DAG> {
     const stages = await this.stageDefRepo.getByDefinitionId(workflowDefinitionId);
@@ -282,9 +485,6 @@ export class DAGScheduler implements IDAGScheduler {
     const signature = structuralSignature(stages, edges);
 
     const cached = this.dagCache.get(workflowDefinitionId);
-    // Tier 2 is evaluated only once tier 1 has already matched, so a structural
-    // edit costs no digest and an unchanged condition-free definition costs no
-    // crypto at all — while a condition body edit is still caught.
     if (
       cached &&
       cached.signature === signature &&
@@ -304,25 +504,49 @@ export class DAGScheduler implements IDAGScheduler {
   }
 
   /**
-   * Get the root stages (no incoming edges) — first to execute.
+   * WS-D1 — the topology a run executes against. A run carrying a
+   * `definitionSnapshot` gets a DAG built from that snapshot, so editing the
+   * definition while the run is in flight changes nothing about it. Runs
+   * without a snapshot fall back to the live definition.
    */
-  async getRootStages(workflowRunId: string, workflowDefinitionId: string): Promise<string[]> {
-    const dag = await this.buildDAGForDefinition(workflowDefinitionId);
-    return [...dag.rootIds];
+  async buildDAGForRun(run: WorkflowRun): Promise<DAG> {
+    const snapshot = run.definitionSnapshot;
+    if (!snapshot) return this.buildDAGForDefinition(run.workflowDefinitionId);
+
+    const cached = this.runDagCache.get(run.id);
+    if (cached && cached.capturedAt === snapshot.capturedAt) return cached.dag;
+
+    const dag = buildDAG(snapshot.stages, snapshot.edges);
+    this.stats.dagBuilds++;
+    if (!this.runDagCache.has(run.id) && this.runDagCache.size >= DAGScheduler.MAX_TRACKED_RUNS) {
+      const oldest = this.runDagCache.keys().next();
+      if (!oldest.done) this.runDagCache.delete(oldest.value);
+    }
+    this.runDagCache.set(run.id, { capturedAt: snapshot.capturedAt, dag });
+    return dag;
   }
 
   /**
-   * Get stages that are ready to execute (all predecessors completed).
+   * WS-D1 — read the definition's current stages + edges as a snapshot to
+   * freeze onto a run at creation.
    */
-  async getReadyStages(workflowRunId: string, workflowDefinitionId: string): Promise<string[]> {
-    return this.withLock(workflowRunId, async () => {
-      const dag = await this.buildDAGForDefinition(workflowDefinitionId);
-      const statusMap = await this.loadStatusMap(workflowRunId);
-      return this.fullScan(workflowRunId, workflowDefinitionId, dag, statusMap);
-    });
+  async captureDefinitionSnapshot(workflowDefinitionId: string): Promise<WorkflowDefinitionSnapshot> {
+    const [stages, edges]: [StageDefinition[], StageEdge[]] = await Promise.all([
+      this.stageDefRepo.getByDefinitionId(workflowDefinitionId),
+      this.edgeRepo.getByDefinitionId(workflowDefinitionId),
+    ]);
+    return { stages, edges, capturedAt: new Date().toISOString() };
   }
 
-  // ── Readiness (P1-19: full scan vs incremental frontier) ──
+  /** DAG for a run id: snapshot when the run has one, live definition otherwise. */
+  private async dagForRun(
+    workflowRunId: string,
+    workflowDefinitionId: string,
+    run?: WorkflowRun,
+  ): Promise<DAG> {
+    if (run) return this.buildDAGForRun(run);
+    return this.buildDAGForDefinition(workflowDefinitionId);
+  }
 
   /** Build status map: stageDefinitionId → status. */
   private async loadStatusMap(workflowRunId: string): Promise<Map<string, StageRunStatus>> {
@@ -334,487 +558,119 @@ export class DAGScheduler implements IDAGScheduler {
     return statusMap;
   }
 
-  /** A predecessor no longer blocks its successors once it is terminal. */
-  private isTerminalForReadiness(status: StageRunStatus | undefined): boolean {
-    return status === 'completed' || status === 'failed' || status === 'skipped';
-  }
+  // ── The one reconcile ──
 
   /**
-   * The readiness predicate — pending, with every predecessor terminal. Shared
-   * so the incremental path can never drift from the full scan's definition of
-   * "ready"; `routeFromTerminalStage` applies the same rule to the successors
-   * it routes.
+   * Re-evaluate every pending stage of a run. Serialized per run so two
+   * callers (an event and the poll backstop) never interleave their reads.
+   * See {@link reconcileDAG} for the semantics.
    */
-  private isReady(
-    nodeId: string,
-    dag: DAG,
-    statusMap: Map<string, StageRunStatus>,
-  ): boolean {
-    const node = dag.nodes.get(nodeId);
-    if (!node) return false;
-    this.stats.nodesExamined++;
-    if (statusMap.get(nodeId) !== 'pending') return false;
-    return node.dependencyIds.every((predId: string) =>
-      this.isTerminalForReadiness(statusMap.get(predId)),
-    );
-  }
-
-  /** Walk every node. The authoritative answer, and the fallback whenever the
-   *  frontier cannot prove it would produce the same set. */
-  private fullScan(
-    workflowRunId: string,
-    workflowDefinitionId: string,
-    dag: DAG,
-    statusMap: Map<string, StageRunStatus>,
-  ): string[] {
-    this.stats.fullScans++;
-    const ready: string[] = [];
-    for (const nodeId of dag.nodes.keys()) {
-      if (this.isReady(nodeId, dag, statusMap)) ready.push(nodeId);
-    }
-    this.rememberFrontier(workflowRunId, workflowDefinitionId, dag, statusMap, ready);
-    return ready;
-  }
-
-  private rememberFrontier(
-    workflowRunId: string,
-    workflowDefinitionId: string,
-    dag: DAG,
-    statuses: Map<string, StageRunStatus>,
-    ready: string[],
-  ): void {
-    if (
-      !this.runFrontiers.has(workflowRunId) &&
-      this.runFrontiers.size >= DAGScheduler.MAX_TRACKED_FRONTIERS
-    ) {
-      // Map iteration is insertion-ordered, so this drops the oldest entry.
-      const oldest = this.runFrontiers.keys().next();
-      if (!oldest.done) this.runFrontiers.delete(oldest.value);
-    }
-    // Copy: the same array is handed to the caller, and the snapshot's
-    // correctness argument collapses if a caller mutates it.
-    this.runFrontiers.set(workflowRunId, {
-      workflowDefinitionId,
-      dag,
-      statuses,
-      ready: [...ready],
+  async reconcileRun(workflowRunId: string, workflowDefinitionId: string): Promise<RunReconciliation> {
+    return this.withLock(workflowRunId, async () => {
+      const run = await this.loadRun(workflowRunId);
+      const dag = await this.dagForRun(workflowRunId, workflowDefinitionId, run);
+      const statusMap = await this.loadStatusMap(workflowRunId);
+      this.stats.reconciles++;
+      return reconcileDAG(dag, statusMap, run?.variables ?? undefined);
     });
   }
 
-  /** Node index in `dag.nodes` iteration order, computed once per DAG. */
-  private nodeOrderFor(dag: DAG): Map<string, number> {
-    let order = this.dagNodeOrder.get(dag);
-    if (!order) {
-      order = new Map<string, number>();
-      let i = 0;
-      for (const nodeId of dag.nodes.keys()) order.set(nodeId, i++);
-      this.dagNodeOrder.set(dag, order);
-    }
-    return order;
+  // ── IDAGScheduler surface — every method below is a view of reconcileRun ──
+
+  /** Root stages (no incoming edges) — first to execute. */
+  async getRootStages(workflowRunId: string, workflowDefinitionId: string): Promise<string[]> {
+    const run = await this.loadRun(workflowRunId);
+    const dag = await this.dagForRun(workflowRunId, workflowDefinitionId, run);
+    return [...dag.rootIds];
+  }
+
+  /** Stages that may be launched now. */
+  async getReadyStages(workflowRunId: string, workflowDefinitionId: string): Promise<string[]> {
+    return (await this.reconcileRun(workflowRunId, workflowDefinitionId)).toLaunch;
   }
 
   /**
-   * Schedule next stages after a stage completes.
-   * Returns the stageDefinitionIds that should be enqueued.
-   *
-   * △ This used to discard `completedStageDefId` and re-scan the whole DAG, so
-   * a 200-stage workflow paid O(stages + edges) on every single completion.
-   * The completed stage is exactly the information needed to avoid that: when
-   * nothing else has moved since the last scan, the newly-ready stages can
-   * only be its successors, and everything else that is ready was already
-   * reported. The result is identical to the full scan — provably so, see the
-   * guard below — and any doubt falls back to the full scan.
+   * Stages that may be launched after a stage finished. The finished stage's
+   * id is accepted for interface compatibility; the answer is the whole-run
+   * reconcile, which is what a completion must trigger anyway (a fan-in's
+   * readiness depends on every predecessor, not the one that just moved).
    */
   async scheduleNext(
     workflowRunId: string,
     workflowDefinitionId: string,
-    completedStageDefId: string,
+    _completedStageDefId: string,
   ): Promise<string[]> {
-    return this.withLock(workflowRunId, async () => {
-      const dag = await this.buildDAGForDefinition(workflowDefinitionId);
-      const statusMap = await this.loadStatusMap(workflowRunId);
-      const frontier = this.runFrontiers.get(workflowRunId);
-
-      // The frontier only holds if the previous snapshot was taken against
-      // this same DAG object (a mid-run definition edit rebuilds it) and the
-      // only stage whose status moved since then is the one that just
-      // finished. Given that, a stage that is ready now but is neither the
-      // completed stage nor one of its successors had the same status, and the
-      // same predecessor statuses, at snapshot time — so it is already in
-      // `frontier.ready`. Anything else and we cannot make that argument.
-      const usable =
-        frontier !== undefined &&
-        frontier.workflowDefinitionId === workflowDefinitionId &&
-        frontier.dag === dag &&
-        frontier.statuses.size === statusMap.size &&
-        this.onlyChangedStage(frontier.statuses, statusMap, completedStageDefId);
-
-      if (!usable) {
-        return this.fullScan(workflowRunId, workflowDefinitionId, dag, statusMap);
-      }
-
-      this.stats.incrementalScans++;
-
-      // The completed stage itself is a candidate too: a retry can put it back
-      // to `pending`, and it is not its own successor.
-      const candidates = new Set<string>(frontier.ready);
-      candidates.add(completedStageDefId);
-      const completedNode = dag.nodes.get(completedStageDefId);
-      if (completedNode) {
-        for (const successorId of completedNode.dependentIds) candidates.add(successorId);
-      }
-
-      const ready: string[] = [];
-      for (const candidateId of candidates) {
-        if (this.isReady(candidateId, dag, statusMap)) ready.push(candidateId);
-      }
-
-      // Callers compare against `getReadyStages`, so the order must match the
-      // full scan's `dag.nodes` order rather than candidate discovery order.
-      const nodeOrder = this.nodeOrderFor(dag);
-      ready.sort((a, b) => (nodeOrder.get(a) ?? 0) - (nodeOrder.get(b) ?? 0));
-
-      this.rememberFrontier(workflowRunId, workflowDefinitionId, dag, statusMap, ready);
-      return ready;
-    });
+    return this.getReadyStages(workflowRunId, workflowDefinitionId);
   }
 
-  /**
-   * True when `fresh` differs from `snapshot` at `exemptStageDefId` and
-   * nowhere else. Walking the freshly-read rows is O(rows) — the same order as
-   * reading them — so this guard costs nothing the read did not already.
-   */
-  private onlyChangedStage(
-    snapshot: Map<string, StageRunStatus>,
-    fresh: Map<string, StageRunStatus>,
-    exemptStageDefId: string,
-  ): boolean {
-    for (const [stageDefId, status] of fresh) {
-      if (stageDefId === exemptStageDefId) continue;
-      if (snapshot.get(stageDefId) !== status) return false;
-    }
-    return true;
-  }
-
-  /**
-   * Determine whether an edge is "active" given the source predecessor's status.
-   *  - on_success    → only when pred completed
-   *  - on_failure    → only when pred failed
-   *  - on_completion → completed or failed
-   *  - always        → any terminal status (incl. skipped/cancelled)
-   * Defaults to on_success semantics when edgeType is missing on legacy data.
-   */
-  private isEdgeActiveForStatus(
-    edgeType: string | undefined,
-    predStatus: StageRunStatus | undefined,
-  ): boolean {
-    if (!predStatus) return false;
-    const type = edgeType ?? 'on_success';
-    if (type === 'always') return true;
-    if (type === 'on_completion') return predStatus === 'completed' || predStatus === 'failed';
-    if (type === 'on_success') return predStatus === 'completed';
-    if (type === 'on_failure') return predStatus === 'failed';
-    return false;
-  }
-
-  /**
-   * Handle stage completion — evaluate edge conditions and determine next stages.
-   */
+  /** Alias of {@link getReadyStages} kept for the `IDAGScheduler` contract. */
   async onStageCompleted(
     workflowRunId: string,
     workflowDefinitionId: string,
-    completedStageDefId: string,
+    _completedStageDefId: string,
   ): Promise<string[]> {
-    return this.routeFromTerminalStage(
-      workflowRunId,
-      workflowDefinitionId,
-      completedStageDefId,
-      'completed',
-    );
+    return this.getReadyStages(workflowRunId, workflowDefinitionId);
   }
 
-  /**
-   * Handle stage failure — evaluate on_failure / on_completion / always edges
-   * outgoing from the failed stage. Unlike previous versions which delegated
-   * to onStageCompleted, this now correctly filters by edge type so that
-   * on_success edges do NOT fire when the stage failed.
-   */
+  /** Alias of {@link getReadyStages} kept for the `IDAGScheduler` contract. */
   async onStageFailed(
     workflowRunId: string,
     workflowDefinitionId: string,
-    failedStageDefId: string,
+    _failedStageDefId: string,
   ): Promise<string[]> {
-    return this.routeFromTerminalStage(
-      workflowRunId,
-      workflowDefinitionId,
-      failedStageDefId,
-      'failed',
-    );
+    return this.getReadyStages(workflowRunId, workflowDefinitionId);
   }
 
-  /**
-   * Shared implementation for onStageCompleted and onStageFailed.
-   * Filters outgoing edges by predecessor status so the correct branch fires.
-   */
-  private async routeFromTerminalStage(
-    workflowRunId: string,
-    workflowDefinitionId: string,
-    sourceStageDefId: string,
-    sourceStatus: StageRunStatus,
-  ): Promise<string[]> {
-    const dag = await this.buildDAGForDefinition(workflowDefinitionId);
-    const stageRuns = await this.stageRunRepo.getByRunId(workflowRunId);
-    const edges = await this.edgeRepo.getByDefinitionId(workflowDefinitionId);
-    const stages = await this.stageDefRepo.getByDefinitionId(workflowDefinitionId);
-    const runVariables = await this.getRunVariables(workflowRunId);
-
-    // Build status map; ensure the just-finished stage carries the new status
-    // even if the DB write hasn't fully propagated to subsequent reads yet.
-    const statusMap = new Map<string, StageRunStatus>();
-    for (const sr of stageRuns) {
-      statusMap.set(sr.stageDefinitionId, sr.status);
-    }
-    statusMap.set(sourceStageDefId, sourceStatus);
-
-    // Find outgoing edges from the source stage that are ACTIVE for this status.
-    const outEdges = edges.filter(
-      (e) =>
-        e.fromStageId === sourceStageDefId &&
-        this.isEdgeActiveForStatus(e.edgeType, sourceStatus),
-    );
-
-    const toSchedule: string[] = [];
-
-    for (const edge of outEdges) {
-      const targetStageDefId = edge.toStageId;
-      const targetStatus = statusMap.get(targetStageDefId);
-      if (targetStatus !== 'pending') continue;
-
-      // Check if ALL predecessors of the target are done
-      const targetNode = dag.nodes.get(targetStageDefId);
-      if (!targetNode) continue;
-
-      const allPredsReady = targetNode.dependencyIds.every((predId: string) =>
-        this.isTerminalForReadiness(statusMap.get(predId)),
-      );
-      if (!allPredsReady) continue;
-
-      // Evaluate edge condition
-      const targetStageDef = stages.find((s) => s.id === targetStageDefId);
-      if (targetStageDef?.condition) {
-        const predStatus = statusMap.get(sourceStageDefId) ?? sourceStatus;
-        const shouldRun = evaluateCondition(
-          targetStageDef.condition,
-          { parentStatus: predStatus as StageRunStatus, variables: runVariables },
-        );
-        if (!shouldRun) continue;
-      }
-
-      toSchedule.push(targetStageDefId);
-    }
-
-    return toSchedule;
-  }
-
-  /**
-   * Handle stage skip — route the `always` edges outgoing from a skipped
-   * stage. on_success / on_failure / on_completion edges are NOT activated by
-   * a skip (their terminal status was never "reached"), but `always` edges
-   * must still fire so a fan-in/convergence stage downstream of a skipped
-   * branch is not stranded. Previously skipped stages dropped ALL outgoing
-   * edges, so an `always` fan-in after a skipped branch never ran.
-   */
+  /** Alias of {@link getReadyStages}: `always` edges out of a skipped stage are part of the reconcile. */
   async onStageSkipped(
     workflowRunId: string,
     workflowDefinitionId: string,
-    skippedStageDefId: string,
+    _skippedStageDefId: string,
   ): Promise<string[]> {
-    return this.routeFromTerminalStage(
-      workflowRunId,
-      workflowDefinitionId,
-      skippedStageDefId,
-      'skipped',
-    );
+    return this.getReadyStages(workflowRunId, workflowDefinitionId);
   }
 
-  /**
-   * Compute the terminal status for a run whose DAG is complete.
-   *
-   * A run is `failed` only when it contains an *unhandled* failure. A failed
-   * stage's failure is considered "handled" (recovered) when it has at least
-   * one outgoing edge that is active for the `failed` status
-   * (on_failure | on_completion | always) whose target reached a non-failed
-   * terminal state (`completed`) — or whose target is itself a failed stage
-   * that was, transitively, handled. This makes recovery DAGs (the headline
-   * use of on_failure / on_completion edges) report `completed` when the
-   * recovery branch succeeds, and makes the run status deterministic
-   * regardless of which handler (onStageCompleted vs onStageFailed) observes
-   * DAG completion first.
-   */
+  /** Stages that can never run (cascaded). */
+  async getSkippableStages(workflowRunId: string, workflowDefinitionId: string): Promise<string[]> {
+    return (await this.reconcileRun(workflowRunId, workflowDefinitionId)).toSkip;
+  }
+
+  /** Terminal status for a run whose DAG is complete. */
   async computeTerminalRunStatus(
     workflowRunId: string,
     workflowDefinitionId: string,
-  ): Promise<'completed' | 'failed'> {
-    const stageRuns = await this.stageRunRepo.getByRunId(workflowRunId);
-    const edges = await this.edgeRepo.getByDefinitionId(workflowDefinitionId);
-
-    const statusMap = new Map<string, StageRunStatus>();
-    for (const sr of stageRuns) {
-      statusMap.set(sr.stageDefinitionId, sr.status);
-    }
-
-    const failedIds = stageRuns
-      .filter((sr) => sr.status === 'failed')
-      .map((sr) => sr.stageDefinitionId);
-    if (failedIds.length === 0) return 'completed';
-
-    // Iterate to a fixpoint so multi-level recovery (A fails → R fails → R2
-    // completes) resolves correctly.
-    const resolved = new Set<string>();
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const fid of failedIds) {
-        if (resolved.has(fid)) continue;
-        const outEdges = edges.filter(
-          (e) =>
-            e.fromStageId === fid &&
-            this.isEdgeActiveForStatus(e.edgeType, 'failed'),
-        );
-        const handled = outEdges.some((e) => {
-          const targetStatus = statusMap.get(e.toStageId);
-          return (
-            targetStatus === 'completed' ||
-            (targetStatus === 'failed' && resolved.has(e.toStageId))
-          );
-        });
-        if (handled) {
-          resolved.add(fid);
-          changed = true;
-        }
-      }
-    }
-
-    return failedIds.every((fid) => resolved.has(fid)) ? 'completed' : 'failed';
+  ): Promise<TerminalRunStatus> {
+    const run = await this.loadRun(workflowRunId);
+    const dag = await this.dagForRun(workflowRunId, workflowDefinitionId, run);
+    const statusMap = await this.loadStatusMap(workflowRunId);
+    return computeTerminalRunStatusFor(dag, statusMap);
   }
 
-  /**
-   * Check if the entire DAG is complete (all stages in terminal state).
-   */
+  /** True when every stage of the DAG has a terminal status. */
   async isDAGComplete(workflowRunId: string, workflowDefinitionId: string): Promise<boolean> {
-    const dag = await this.buildDAGForDefinition(workflowDefinitionId);
-    const stageRuns = await this.stageRunRepo.getByRunId(workflowRunId);
-
-    const statusMap = new Map<string, StageRunStatus>();
-    for (const sr of stageRuns) {
-      statusMap.set(sr.stageDefinitionId, sr.status);
-    }
-
+    const run = await this.loadRun(workflowRunId);
+    const dag = await this.dagForRun(workflowRunId, workflowDefinitionId, run);
+    const statusMap = await this.loadStatusMap(workflowRunId);
     for (const nodeId of dag.nodes.keys()) {
-      const status = statusMap.get(nodeId);
-      if (!status) return false;
-      if (
-        status !== 'completed' &&
-        status !== 'failed' &&
-        status !== 'cancelled' &&
-        status !== 'skipped'
-      ) {
-        return false;
-      }
+      if (!isTerminalStageStatus(statusMap.get(nodeId))) return false;
     }
-
-    // The run has nothing left to schedule, so its frontier snapshot is dead
-    // weight; dropping it here keeps a long-lived scheduler from accumulating
-    // one entry per run it has ever advanced.
-    this.runFrontiers.delete(workflowRunId);
     return true;
   }
 
-  /**
-   * Get stages that should be skipped — all predecessors are terminal
-   * but the stage's condition is not met by any predecessor.
-   */
-  async getSkippableStages(
-    workflowRunId: string,
-    workflowDefinitionId: string,
-  ): Promise<string[]> {
-    const dag = await this.buildDAGForDefinition(workflowDefinitionId);
-    const stageRuns = await this.stageRunRepo.getByRunId(workflowRunId);
-    const stages = await this.stageDefRepo.getByDefinitionId(workflowDefinitionId);
-    const edges = await this.edgeRepo.getByDefinitionId(workflowDefinitionId);
-    const runVariables = await this.getRunVariables(workflowRunId);
-
-    const statusMap = new Map<string, StageRunStatus>();
-    for (const sr of stageRuns) {
-      statusMap.set(sr.stageDefinitionId, sr.status);
-    }
-
-    const toSkip: string[] = [];
-
-    for (const [nodeId, node] of dag.nodes) {
-      const status = statusMap.get(nodeId);
-      if (status !== 'pending') continue;
-
-      // All predecessors must be in terminal state
-      const allPredsDone = node.dependencyIds.every((predId: string) =>
-        this.isTerminalForReadiness(statusMap.get(predId)),
-      );
-      if (!allPredsDone) continue;
-
-      // Skip when no inbound edge from any predecessor is active for that
-      // predecessor's status. `isEdgeActiveForStatus` already encodes the
-      // correct semantics per edge type — in particular an `always` edge IS
-      // active even when its predecessor was skipped (so the target must run,
-      // not be skipped), whereas on_success/on_failure/on_completion edges are
-      // never activated by a skipped predecessor. See onStageSkipped, which
-      // routes those `always` edges forward.
-      const inboundEdges = edges.filter((e) => e.toStageId === nodeId);
-      const anyEdgeActive = inboundEdges.some((edge) => {
-        const predStatus = statusMap.get(edge.fromStageId);
-        return this.isEdgeActiveForStatus(edge.edgeType, predStatus);
-      });
-      if (inboundEdges.length > 0 && !anyEdgeActive) {
-        toSkip.push(nodeId);
-        continue;
-      }
-
-      // Check if the stage has a condition (legacy behaviour preserved)
-      const stageDef = stages.find((s) => s.id === nodeId);
-      if (!stageDef?.condition) continue; // No condition = unconditional, should run not skip
-
-      // Check if the condition is met by ANY predecessor
-      const anyConditionMet = node.dependencyIds.some((predId: string) => {
-        const predStatus = statusMap.get(predId) ?? 'completed';
-        const result = evaluateCondition(stageDef.condition!, {
-          parentStatus: predStatus as StageRunStatus,
-          variables: runVariables,
-        });
-        return result;
-      });
-
-      if (!anyConditionMet) {
-        toSkip.push(nodeId);
-      }
-    }
-
-    return toSkip;
-  }
+  // ── Cache management ──
 
   /**
-   * Clear cached DAG for a definition. With hash-based invalidation the
-   * cache now self-corrects on the next `buildDAGForDefinition` call, but
-   * this remains useful for explicit "I know the DB state changed outside
-   * my process" resets.
+   * Clear the cached live DAG for a definition. With signature-based
+   * validation the cache self-corrects on the next build; this remains useful
+   * for an explicit "the DB changed outside my process" reset. Run snapshots
+   * are unaffected — they are frozen by design.
    */
   clearCache(workflowDefinitionId: string): void {
     this.dagCache.delete(workflowDefinitionId);
-    // Frontier snapshots are taken against a specific DAG object. Rebuilding
-    // produces a new one, which the identity check would reject anyway, but
-    // dropping them here means an explicit reset leaves no state behind.
-    for (const [runId, frontier] of this.runFrontiers) {
-      if (frontier.workflowDefinitionId === workflowDefinitionId) {
-        this.runFrontiers.delete(runId);
-      }
-    }
+  }
+
+  /** Drop the per-run DAG once the run is terminal. */
+  forgetRun(workflowRunId: string): void {
+    this.runDagCache.delete(workflowRunId);
   }
 }

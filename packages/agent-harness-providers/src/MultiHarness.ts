@@ -27,6 +27,7 @@ import type {
   ConversationWarning,
   HarnessAgentInfo,
   ProviderCapabilities,
+  HarnessRuntimeDiagnostics,
 } from '@generatorai/core';
 import type { HarnessRegistry } from './HarnessRegistry.js';
 import { ALL_HARNESS_TYPES } from './HarnessRegistry.js';
@@ -444,6 +445,25 @@ export class MultiHarness implements IAgentHarness {
     return id;
   }
 
+  /**
+   * Route a pre-warm to whichever provider owns the conversation.
+   *
+   * Never resolves a target the way `resumeConversation` does: warming is
+   * best-effort, and a conversation whose owner is not yet known has nothing
+   * to warm. Binding one here would let a warm-up decide routing, which is the
+   * owner map's job.
+   */
+  async prewarmConversation(conversationId: string, turnOptions?: SendPromptOptions): Promise<void> {
+    const owner = this.owners.get(conversationId);
+    if (!owner) return;
+    try {
+      const adapter = await this.registry.get(owner);
+      await adapter.prewarmConversation?.(conversationId, turnOptions);
+    } catch {
+      // Best-effort by contract: the first turn pays what it pays today.
+    }
+  }
+
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
     const current = this.owners.get(conversationId);
     // `current` is passed so a model-name inference cannot silently move an
@@ -729,6 +749,27 @@ export class MultiHarness implements IAgentHarness {
       }),
     );
     return results.some(Boolean);
+  }
+
+  runtimeDiagnostics(): HarnessRuntimeDiagnostics {
+    // Same rule as `ping()`: never `registry.get()` here — this is on the
+    // health path and must not boot a CLI. Only adapters that already exist.
+    const total: HarnessRuntimeDiagnostics = { liveConversations: 0, liveSessions: 0, warmSessions: 0, providers: {} };
+    for (const type of ALL_HARNESS_TYPES) {
+      const adapter = this.registry.peek(type);
+      const diag = adapter?.runtimeDiagnostics?.();
+      if (!diag) continue;
+      total.liveConversations += diag.liveConversations;
+      total.liveSessions += diag.liveSessions;
+      total.warmSessions += diag.warmSessions;
+      total.providers![type] = {
+        liveConversations: diag.liveConversations,
+        liveSessions: diag.liveSessions,
+        warmSessions: diag.warmSessions,
+        ...(diag.maxLiveSessions !== undefined ? { maxLiveSessions: diag.maxLiveSessions } : {}),
+      };
+    }
+    return total;
   }
 
   async shutdown(): Promise<void> {

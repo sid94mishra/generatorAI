@@ -28,6 +28,7 @@ import type {
   ConversationWarning,
   HarnessAgentInfo,
   ProviderCapabilities,
+  HarnessRuntimeDiagnostics,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
 import type { HarnessType } from './types.js';
@@ -104,8 +105,19 @@ export class HarnessProxy implements IAgentHarness {
   resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
     return this._adapter.resumeConversation(conversationId, params);
   }
+  /**
+   * Optional on the port, so it is forwarded only when the wrapped adapter
+   * actually has it. Returning `undefined` for a provider that cannot warm is
+   * what lets the caller skip it without a capability check.
+   */
+  prewarmConversation(conversationId: string, turnOptions?: SendPromptOptions): Promise<void> {
+    return this._adapter.prewarmConversation?.(conversationId, turnOptions) ?? Promise.resolve();
+  }
   hasLiveConversation(conversationId: string): boolean {
     return this._adapter.hasLiveConversation(conversationId);
+  }
+  runtimeDiagnostics(): HarnessRuntimeDiagnostics {
+    return this._adapter.runtimeDiagnostics?.() ?? { liveConversations: 0, liveSessions: 0, warmSessions: 0 };
   }
   listConversations(): Promise<string[]> {
     return this._adapter.listConversations();

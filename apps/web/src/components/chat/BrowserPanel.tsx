@@ -28,10 +28,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, ArrowLeft, ArrowRight, RotateCw, Play, Square,
-  MousePointerClick, Loader2, AlertTriangle,
+  MousePointerClick, AlertTriangle,
   Share2, Link2Off, Crop, MoreVertical, Wrench, Activity, Terminal,
   Smartphone, RotateCcw, MessageSquare, Trash2, Send, Globe,
 } from 'lucide-react';
+import { Button, Input, Spinner } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { countFallback } from '@/lib/clientMetrics.js';
 import { isRestorableBrowserUrl, readBrowserTabUrl, writeBrowserTabUrl } from '@/lib/browserTabUrls.js';
@@ -171,7 +172,7 @@ export function BrowserTabIcon({ state }: { state: BrowserTabState | null | unde
   const [broken, setBroken] = useState(false);
   const favicon = state?.favicon ?? null;
   useEffect(() => { setBroken(false); }, [favicon]);
-  if (state?.loading) return <Loader2 className="h-3.5 w-3.5 animate-spin" />;
+  if (state?.loading) return <Spinner size="sm" label="Page loading" />;
   if (favicon && !broken) {
     return (
       <img
@@ -208,9 +209,22 @@ function useWebBrowserInteractivity(): boolean {
 
 // ── HTTP helpers ─────────────────────────────────────────────
 
+/** Carries the HTTP status so a caller can tell a hiccup from a verdict. */
+class DescriptorError extends Error {
+  constructor(readonly status: number) {
+    super(`descriptor ${status}`);
+    this.name = 'DescriptorError';
+  }
+}
+
+/** 401/403 are settled answers: retrying cannot change them. */
+function isAuthDenial(err: unknown): boolean {
+  return err instanceof DescriptorError && (err.status === 401 || err.status === 403);
+}
+
 async function fetchDescriptor(workspaceId: string): Promise<DescriptorState> {
   const res = await fetch(`/api/workspaces/${workspaceId}/browser/descriptor`);
-  if (!res.ok) throw new Error(`descriptor ${res.status}`);
+  if (!res.ok) throw new DescriptorError(res.status);
   return (await res.json()) as DescriptorState;
 }
 
@@ -333,6 +347,9 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
   // this the URL bar would blank out and then flash the address back.
   const restorePendingRef = useRef<boolean>(Boolean(restoreUrlRef.current));
   const [descriptor, setDescriptor] = useState<DescriptorState | null>(null);
+  /** Set when the server has refused this device browser authority, which is
+   *  a different empty state from "the browser is simply not running". */
+  const [browserDenied, setBrowserDenied] = useState(false);
   const [urlInput, setUrlInput] = useState(() => restoreUrlRef.current ?? '');
   const [loading, setLoading] = useState<'start' | 'stop' | 'navigate' | 'action' | 'share' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -400,10 +417,24 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
       try {
         const d = await fetchDescriptor(workspaceId);
         if (cancelled) return;
+        setBrowserDenied(false);
         setDescriptor(d);
         const transient = d.status === 'starting' || d.status === 'stopping' || (d.status === 'active' && !d.ready);
         timer = setTimeout(tick, transient ? 400 : 4000);
-      } catch {
+      } catch (err) {
+        if (cancelled) return;
+        // A 401/403 is a verdict, not a hiccup: this device is missing
+        // `exec:browser` and no amount of retrying changes that. Polling on
+        // regardless turned one missing scope into ~1,900 denied requests an
+        // hour, EACH writing a 'critical' audit row — `/workspaces/:id/browser`
+        // is riskLevel 'high' — so an idle chat tab quietly flooded the
+        // security log. Stop, and let the empty state say why. The effect
+        // re-runs (and so re-tries) when the workspace, `open` or `nowKey`
+        // change, which is when the answer could actually differ.
+        if (isAuthDenial(err)) {
+          setBrowserDenied(true);
+          return;
+        }
         timer = setTimeout(tick, 2000);
       }
     };
@@ -597,6 +628,21 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
     if (!workspaceId) return;
     const url = urlInput.trim();
     if (!url) return;
+    // Enter on a browser that has not been started yet.
+    //
+    // Auto-start is deliberately desktop-only (the effect above is gated on
+    // `nativeAvailable`), so in the web UI the session genuinely is not
+    // running until someone presses Start. Submitting the address bar still
+    // POSTed a navigate at that missing session, and the server's internal
+    // answer — "[BrowserService] No active browser session for workspace
+    // <uuid>" — was rendered verbatim next to a hint telling the user to
+    // press Start. Typing a URL and hitting Enter plainly means "go there",
+    // and `handleStart` already accepts the address bar's contents, so take
+    // that path instead of failing.
+    if (descriptor?.ready !== true) {
+      await handleStart({ useUrlInput: true });
+      return;
+    }
     setLoading('navigate'); setError(null);
     try {
       const normalised = /^https?:\/\//.test(url) ? url : `https://${url}`;
@@ -610,7 +656,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
       setDescriptor(d);
     } catch (err) { setError((err as Error).message); }
     finally { setLoading(null); }
-  }, [workspaceId, urlInput, nativeAvailable, nativeTabId]);
+  }, [workspaceId, urlInput, nativeAvailable, nativeTabId, descriptor?.ready, handleStart]);
 
   const handleAction = useCallback(async (kind: 'back' | 'forward' | 'reload') => {
     if (!workspaceId) return;
@@ -724,7 +770,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
     };
     void tick();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [annotateOn, workspaceId, nativeAvailable, nativeTabId]);
+  }, [annotateOn, workspaceId, nativeAvailable, nativeTabId, attachAnnotation]);
 
   // Send annotations to chat: drain the given keys (or all commented ones),
   // which removes them from the page so they can't be added twice, then
@@ -1512,9 +1558,9 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
               </span>
             )}
           </div>
-          <button onClick={onClose} className="rounded p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]" aria-label="Close browser panel">
+          <Button type="button" variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close browser panel">
             <X className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1525,26 +1571,26 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
       >
         {showNavControls && (
           <>
-            <button type="button" onClick={() => handleAction('back')} className="rounded p-1 text-[var(--color-foreground)] hover:bg-[var(--color-subtle)] disabled:opacity-40" disabled={!isOn} aria-label="Back">
+            <Button type="button" variant="ghost" size="icon-sm" onClick={() => handleAction('back')} className="text-[var(--color-foreground)] disabled:opacity-40" disabled={!isOn} aria-label="Back">
               <ArrowLeft className="h-4 w-4" />
-            </button>
-            <button type="button" onClick={() => handleAction('forward')} className="rounded p-1 text-[var(--color-foreground)] hover:bg-[var(--color-subtle)] disabled:opacity-40" disabled={!isOn} aria-label="Forward">
+            </Button>
+            <Button type="button" variant="ghost" size="icon-sm" onClick={() => handleAction('forward')} className="text-[var(--color-foreground)] disabled:opacity-40" disabled={!isOn} aria-label="Forward">
               <ArrowRight className="h-4 w-4" />
-            </button>
-            <button type="button" onClick={() => handleAction('reload')} className="rounded p-1 text-[var(--color-foreground)] hover:bg-[var(--color-subtle)] disabled:opacity-40" disabled={!isOn} aria-label="Reload">
+            </Button>
+            <Button type="button" variant="ghost" size="icon-sm" onClick={() => handleAction('reload')} className="text-[var(--color-foreground)] disabled:opacity-40" disabled={!isOn} aria-label="Reload">
               <RotateCw className={cn('h-4 w-4', loading === 'action' && 'animate-spin')} />
-            </button>
+            </Button>
           </>
         )}
         {showNavControls ? (
-          <input
+          <Input
             type="text"
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
             onFocus={() => setUrlInputFocused(true)}
             onBlur={() => setUrlInputFocused(false)}
             placeholder={nativeAvailable ? 'Search or enter address' : (isOn ? 'https://example.com' : 'https://…  (press Start)')}
-            className="min-w-0 flex-1 rounded-full border border-[var(--color-input)] bg-[var(--color-background)] px-3 py-1 text-xs text-[var(--color-foreground)] outline-none placeholder:text-[var(--color-muted-foreground)] focus:border-[var(--color-primary)]"
+            className="h-auto min-w-0 flex-1 rounded-full border-[var(--color-input)] bg-[var(--color-background)] px-3 py-1 text-xs text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] focus:border-[var(--color-primary)]"
           />
         ) : (
           // Restricted mode — the user sees the current URL as a read-only pill.
@@ -1558,15 +1604,16 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
         {/* Right cluster: Share / Inspect / Capture / Start-Stop */}
         <div className="flex items-center gap-0.5">
           {isOn && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={handleToggleShare}
               disabled={agentBusy || loading === 'share'}
               title={shareTitle}
               aria-label={shareTitle}
               aria-pressed={attachedToChat}
               className={cn(
-                'flex items-center gap-1 rounded px-2 py-1 text-xs font-medium',
+                'h-auto gap-1 rounded px-2 py-1 text-xs font-medium',
                 attachedToChat
                   ? 'bg-[var(--color-primary-emphasis)] text-[var(--color-primary-foreground)] hover:bg-[var(--color-primary)]'
                   : 'bg-[var(--color-subtle)] text-[var(--color-foreground)] hover:bg-[var(--color-emphasis)]',
@@ -1575,29 +1622,32 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
             >
               {attachedToChat ? <Share2 className="h-3.5 w-3.5" /> : <Link2Off className="h-3.5 w-3.5" />}
               <span>{attachedToChat ? 'Sharing' : 'Share'}</span>
-            </button>
+            </Button>
           )}
           {isOn && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={handleToggleInspector}
               className={cn(
-                'flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-foreground)] hover:bg-[var(--color-subtle)]',
+                'h-auto gap-1 rounded px-2 py-1 text-xs text-[var(--color-foreground)] hover:bg-[var(--color-subtle)]',
                 (inspectorOn || annotateOn) && 'bg-[color-mix(in_srgb,var(--color-done)_25%,transparent)] text-[var(--color-done)] hover:bg-[color-mix(in_srgb,var(--color-done)_30%,transparent)]',
               )}
               title={annotateOn ? 'Commenting — click elements to leave notes; click to exit' : 'Comment — click elements to leave notes and attach them to chat'}
               aria-pressed={inspectorOn || annotateOn}
             >
               <MousePointerClick className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           )}
           {isOn && nativeAvailable && annotateOn && (
             <DropdownMenu open={commentsOpen} onOpenChange={setCommentsOpen}>
               <DropdownMenuTrigger asChild>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   className={cn(
-                    'flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-foreground)] hover:bg-[var(--color-subtle)]',
+                    'gap-1 px-2 text-[var(--color-foreground)]',
                     annotateItems.length > 0 && 'text-[var(--color-primary)]',
                   )}
                   title="Comments — view all notes and send to chat"
@@ -1609,7 +1659,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
                       {annotateItems.length}
                     </span>
                   )}
-                </button>
+                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[300px] p-0">
                 <div className="flex items-center justify-between px-3 py-2">
@@ -1617,13 +1667,15 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
                     Comments {annotateItems.length > 0 ? `(${annotateItems.length})` : ''}
                   </span>
                   {annotateItems.length > 0 && (
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => void clearAnnotations()}
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
+                      className="h-6 gap-1 px-1.5 text-[11px] font-normal"
                     >
                       <Trash2 className="h-3 w-3" /> Clear
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <DropdownMenuSeparator className="my-0" />
@@ -1645,23 +1697,29 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
                           </div>
                         </div>
                         <div className="flex flex-shrink-0 items-center gap-0.5 opacity-60 group-hover:opacity-100">
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
+                            size="icon-sm"
                             onClick={() => void sendAnnotations([it.key])}
                             disabled={!it.comment}
                             title="Send this comment to chat"
-                            className="rounded p-1 text-[var(--color-primary)] hover:bg-[color-mix(in_srgb,var(--color-primary)_15%,transparent)] disabled:opacity-30"
+                            aria-label="Send this comment to chat"
+                            className="h-5 w-5 text-[var(--color-primary)] hover:bg-[color-mix(in_srgb,var(--color-primary)_15%,transparent)] hover:text-[var(--color-primary)] disabled:opacity-30"
                           >
                             <Send className="h-3 w-3" />
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
+                            variant="ghost"
+                            size="icon-sm"
                             onClick={() => void removeAnnotation(it.key)}
                             title="Delete this comment"
-                            className="rounded p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-danger)]"
+                            aria-label="Delete this comment"
+                            className="h-5 w-5 hover:text-[var(--color-danger)]"
                           >
                             <Trash2 className="h-3 w-3" />
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     ))}
@@ -1671,14 +1729,16 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
                   <>
                     <DropdownMenuSeparator className="my-0" />
                     <div className="p-2">
-                      <button
+                      <Button
                         type="button"
+                        variant="primary"
+                        size="sm"
                         onClick={() => void sendAnnotations()}
-                        className="flex w-full items-center justify-center gap-1.5 rounded bg-[var(--color-primary-emphasis)] px-2 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] hover:bg-[var(--color-primary)]"
+                        className="w-full justify-center px-2"
                       >
                         <Send className="h-3.5 w-3.5" />
                         Send all to chat
-                      </button>
+                      </Button>
                     </div>
                   </>
                 )}
@@ -1686,44 +1746,48 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
             </DropdownMenu>
           )}
           {isOn && showNavControls && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={handleToggleCapture}
               className={cn(
-                'flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-foreground)] hover:bg-[var(--color-subtle)]',
+                'h-auto gap-1 rounded px-2 py-1 text-xs text-[var(--color-foreground)] hover:bg-[var(--color-subtle)]',
                 captureMode && 'bg-[var(--color-success-muted)] text-[var(--color-success)] hover:bg-[color-mix(in_srgb,var(--color-success)_25%,transparent)]',
               )}
               title={nativeAvailable ? 'Comment on a region — drag to select an area, add a note, and send to chat' : 'Capture region — drag to select an area and attach it to chat'}
               aria-pressed={captureMode}
             >
               {nativeAvailable ? <Crop className="h-3.5 w-3.5" /> : <Crop className="h-3.5 w-3.5" />}
-            </button>
+            </Button>
           )}
           {nativeAvailable && isOn && workspaceId && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={handleToggleEmulation}
               className={cn(
-                'flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-foreground)] hover:bg-[var(--color-subtle)]',
+                'h-auto gap-1 rounded px-2 py-1 text-xs text-[var(--color-foreground)] hover:bg-[var(--color-subtle)]',
                 emulationOn && 'bg-[color-mix(in_srgb,var(--color-primary)_20%,transparent)] text-[var(--color-primary)] hover:bg-[color-mix(in_srgb,var(--color-primary)_28%,transparent)]',
               )}
               title="Toggle device toolbar — responsive dimensions, zoom & mobile emulation"
               aria-pressed={emulationOn}
             >
               <Smartphone className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           )}
           {nativeAvailable && isOn && workspaceId && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button
+                <Button
                   type="button"
-                  className="flex items-center gap-1 rounded px-1.5 py-1 text-xs text-[var(--color-foreground)] hover:bg-[var(--color-subtle)]"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-[var(--color-foreground)]"
                   title="More — open browser DevTools"
                   aria-label="Browser options"
                 >
                   <MoreVertical className="h-3.5 w-3.5" />
-                </button>
+                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[190px]">
                 <DropdownMenuLabel>Developer Tools</DropdownMenuLabel>
@@ -1757,24 +1821,29 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
           )}
           {showNavControls && (
             !isOn ? (
-              <button
+              <Button
                 type="button"
+                variant="primary"
+                size="sm"
                 onClick={() => void handleStart()}
                 disabled={loading === 'start'}
-                className="ml-1 flex items-center gap-1 rounded bg-[var(--color-primary-emphasis)] px-2 py-1 text-xs font-medium text-[var(--color-primary-foreground)] hover:bg-[var(--color-primary)] disabled:opacity-50"
+                className="ml-1 gap-1 px-2"
               >
-                {loading === 'start' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                {loading === 'start' ? <Spinner size="xs" label="Starting" /> : <Play className="h-3 w-3" />}
                 Start
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={handleStop}
                 disabled={loading === 'stop'}
-                className="ml-1 flex items-center gap-1 rounded bg-[var(--color-danger)] px-2 py-1 text-xs font-medium text-white hover:bg-[color-mix(in_srgb,var(--color-danger)_85%,black)]"
+                title="Stop browser"
+                aria-label="Stop browser"
+                className="ml-1 h-auto gap-1 rounded bg-[var(--color-danger)] px-2 py-1 text-xs font-medium text-white hover:bg-[color-mix(in_srgb,var(--color-danger)_85%,black)]"
               >
-                {loading === 'stop' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-              </button>
+                {loading === 'stop' ? <Spinner size="xs" label="Stopping" /> : <Square className="h-3 w-3" />}
+              </Button>
             )
           )}
         </div>
@@ -1788,6 +1857,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
             onChange={(e) => handlePickPreset(e.target.value)}
             className="rounded border border-[var(--color-input)] bg-[var(--color-card)] px-1.5 py-1 text-[11px] outline-none focus:border-[var(--color-primary)]"
             title="Device preset"
+            aria-label="Device preset"
           >
             {DEVICE_PRESETS.map((p) => (
               <option key={p.id} value={p.id}>{p.label}</option>
@@ -1796,37 +1866,41 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
           </select>
 
           <div className="flex items-center gap-1">
-            <input
+            <Input
               type="number"
               min={100}
               max={4096}
               value={emuWidth}
               onChange={(e) => handleEmuDimChange(Math.max(100, Number(e.target.value) || 0), emuHeight)}
               disabled={emuPreset === 'responsive'}
-              className="w-16 rounded border border-[var(--color-input)] bg-[var(--color-card)] px-1.5 py-1 text-[11px] outline-none focus:border-[var(--color-primary)] disabled:opacity-40"
+              className="h-auto w-16 rounded bg-[var(--color-card)] px-1.5 py-1 text-[11px] disabled:opacity-40"
               title="Width (px)"
+              aria-label="Width (px)"
             />
             <span className="text-[var(--color-muted-foreground)]">×</span>
-            <input
+            <Input
               type="number"
               min={100}
               max={4096}
               value={emuHeight}
               onChange={(e) => handleEmuDimChange(emuWidth, Math.max(100, Number(e.target.value) || 0))}
               disabled={emuPreset === 'responsive'}
-              className="w-16 rounded border border-[var(--color-input)] bg-[var(--color-card)] px-1.5 py-1 text-[11px] outline-none focus:border-[var(--color-primary)] disabled:opacity-40"
+              className="h-auto w-16 rounded bg-[var(--color-card)] px-1.5 py-1 text-[11px] disabled:opacity-40"
               title="Height (px)"
+              aria-label="Height (px)"
             />
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               onClick={handleEmuRotate}
               disabled={emuPreset === 'responsive'}
-              className="rounded p-1 hover:bg-[var(--color-subtle)] disabled:opacity-40"
+              className="text-[var(--color-foreground)] disabled:opacity-40"
               title="Rotate (swap width/height)"
               aria-label="Rotate viewport"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           </div>
 
           <label className="flex items-center gap-1" title="Device pixel ratio">
@@ -1835,6 +1909,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
               value={String(emuDpr)}
               onChange={(e) => handleEmuDpr(Number(e.target.value))}
               disabled={emuPreset === 'responsive'}
+              aria-label="Device pixel ratio"
               className="rounded border border-[var(--color-input)] bg-[var(--color-card)] px-1 py-1 text-[11px] outline-none focus:border-[var(--color-primary)] disabled:opacity-40"
             >
               {[1, 1.5, 2, 3].map((d) => <option key={d} value={d}>{d}×</option>)}
@@ -1859,6 +1934,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
             <select
               value={String(emuZoom)}
               onChange={(e) => handleEmuZoom(Number(e.target.value))}
+              aria-label="Page zoom"
               className="rounded border border-[var(--color-input)] bg-[var(--color-card)] px-1 py-1 text-[11px] outline-none focus:border-[var(--color-primary)]"
             >
               {ZOOM_LEVELS.map((z) => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
@@ -1884,9 +1960,9 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
         <div className="flex items-center gap-1 border-b border-[color-mix(in_srgb,var(--color-danger)_40%,transparent)] bg-[var(--color-danger-muted)] px-3 py-1 text-[11px] text-[var(--color-danger)]">
           <AlertTriangle className="h-3 w-3 flex-shrink-0" />
           <span className="truncate" title={error}>{error}</span>
-          <button className="ml-auto rounded px-1 hover:bg-[color-mix(in_srgb,var(--color-danger)_20%,transparent)]" onClick={() => setError(null)} aria-label="Dismiss">
+          <Button type="button" variant="ghost" size="icon-sm" className="ml-auto h-5 w-5 text-[var(--color-danger)] hover:bg-[color-mix(in_srgb,var(--color-danger)_20%,transparent)] hover:text-[var(--color-danger)]" onClick={() => setError(null)} aria-label="Dismiss">
             <X className="h-3 w-3" />
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1936,8 +2012,22 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
           {!(isOn && hasFrame) && (
             <div className="absolute inset-0 flex h-full items-center justify-center text-center text-sm text-[var(--color-muted-foreground)]">
               <div>
-                {status === 'starting' && (<><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /><div>Starting Chromium…</div></>)}
-                {isOn && !hasFrame && (<><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /><div>Loading live view…</div></>)}
+                {/* A refused device is NOT "not running": pointing it at the
+                    interactive-browser setting sends the user to a control
+                    that cannot fix it. The fix is a scope grant, so say so. */}
+                {browserDenied ? (
+                  <div className="mx-auto max-w-xs">
+                    <div className="mb-1">Browser control isn’t granted to this device.</div>
+                    <div className="text-xs opacity-80">
+                      Grant it{' '}
+                      <span className="text-[var(--color-foreground)]">Settings → Security → Devices</span>{' '}
+                      on a device that is already connected. The agent can still browse on its own.
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                {status === 'starting' && (<><Spinner size="lg" className="mx-auto mb-2" label="Starting Chromium" /><div>Starting Chromium…</div></>)}
+                {isOn && !hasFrame && (<><Spinner size="lg" className="mx-auto mb-2" label="Loading live view" /><div>Loading live view…</div></>)}
                 {(status === 'off' || status === 'terminated') && (
                   <div>
                     <div className="mb-1">Browser is not running.</div>
@@ -1963,6 +2053,8 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
                     <AlertTriangle className="mx-auto mb-2 h-6 w-6" />
                     Browser error. Try Start again.
                   </div>
+                )}
+                  </>
                 )}
               </div>
             </div>

@@ -19,34 +19,64 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, X, Maximize2, Minimize2, MoreHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { useResizablePane } from '@/hooks/useResizablePane.js';
+import { useIsNarrowViewport } from '@/hooks/useMediaQuery.js';
+
+/**
+ * What the pane tells a panel about the tab instance it is rendering.
+ *
+ * `id` is the stable per-tab id assigned by the RightPane (e.g.
+ * `terminal-1`, `browser-1`). Panels that need to persist per-tab state (like
+ * TerminalPanel's server-side session id) key off it. `index` is the 1-based
+ * ordinal among tabs of the same type.
+ *
+ * `active` is false for every tab except the selected one. EVERY tab is
+ * mounted (see the body below — that is what keeps a terminal's scrollback
+ * and a browser's page alive across tab switches), so a panel that holds an
+ * open socket or decodes frames MUST gate that work on this flag. P1-50:
+ * without it, five browser tabs each ran a live screencast socket and decoded
+ * every frame while four of them were invisible.
+ */
+export interface RightPanePanelProps {
+  id: string;
+  type: string;
+  index: number;
+  active: boolean;
+}
+
+/**
+ * How a tab kind renders its body. Two forms:
+ *
+ *  • `Component` — PREFERRED. A real component type (wrap it in `React.memo`),
+ *    rendered as JSX with exactly the `RightPanePanelProps` above. Because it
+ *    is a component, React has a fiber boundary to bail out on: while the
+ *    parent page re-renders — every streamed token, say — a panel whose props
+ *    have not changed does no work. Anything else the panel needs (workspace
+ *    id, callbacks) comes from a context or a store the panel reads itself,
+ *    never from a closure, which is what would defeat the memo.
+ *
+ *  • `render` — legacy. A closure called with the same props. It still gets a
+ *    component boundary (the pane wraps the call), but since the closure is
+ *    usually recreated by the parent's render, the memo cannot hold and the
+ *    body re-runs whenever the parent does. Review 6.4 / plan item 18: this
+ *    used to be a bare function call inlined into JSX, so EVERY mounted panel
+ *    (the 2,000-line browser view, the changes tree, each terminal — visible
+ *    or not) rebuilt on every stream frame for the whole turn.
+ */
+type RightPaneTabBody =
+  | { Component: React.ComponentType<RightPanePanelProps>; render?: never }
+  | { render: (ctx: RightPanePanelProps) => React.ReactNode; Component?: never };
 
 /**
  * Descriptor for a single tab kind (e.g. `changes`, `browser`, `inspector`).
- * Parents provide the render function; the pane owns the chrome.
+ * Parents provide the body; the pane owns the chrome.
  */
-export interface RightPaneTabDef {
+export type RightPaneTabDef = RightPaneTabBody & {
   /** Human-readable label shown in the tab strip and the "+" menu. */
   label: string;
   /** Short tooltip / long label shown in the "+" menu. */
   description?: string;
   /** Lucide icon element. */
   icon: React.ReactNode;
-  /**
-   * Renders the tab body.
-   *
-   * `ctx.id` is the stable per-tab id assigned by the RightPane (e.g.
-   * `terminal-1`, `browser-1`). Panels that need to persist per-tab
-   * state (like TerminalPanel's server-side session id) key off it.
-   * `ctx.index` is the 1-based ordinal among tabs of the same type.
-   *
-   * `ctx.active` is false for every tab except the selected one. EVERY tab
-   * is mounted (see the body below — that is what keeps a terminal's
-   * scrollback and a browser's page alive across tab switches), so a panel
-   * that holds an open socket or decodes frames MUST gate that work on this
-   * flag. P1-50: without it, five browser tabs each ran a live screencast
-   * socket and decoded every frame while four of them were invisible.
-   */
-  render: (ctx: { id: string; type: string; index: number; active: boolean }) => React.ReactNode;
   /** When true, the tab may appear multiple times. Default: singleton. */
   allowMultiple?: boolean;
   /** Cap on concurrent instances of this tab kind (only meaningful with
@@ -62,7 +92,43 @@ export interface RightPaneTabDef {
   disabled?: boolean;
   /** Tooltip shown in the "+" menu when `disabled` is true. */
   disabledReason?: string;
+};
+
+interface RightPanePanelHostProps extends RightPanePanelProps {
+  def: RightPaneTabDef;
 }
+
+/**
+ * One mounted tab body. `React.memo` so an inactive panel whose `def` and
+ * ctx are unchanged is skipped entirely when the pane re-renders; `def`
+ * compares by identity, which is why pages memoise their tab definitions.
+ */
+const RightPanePanel = React.memo(function RightPanePanel({
+  def,
+  id,
+  type,
+  index,
+  active,
+}: RightPanePanelHostProps) {
+  const Body = def.Component;
+  return (
+    <div
+      role="tabpanel"
+      aria-hidden={!active}
+      data-testid={`right-pane-panel-${type}`}
+      className={cn(
+        'absolute inset-0 flex min-h-0 flex-col overflow-hidden',
+        !active && 'pointer-events-none invisible',
+      )}
+    >
+      {Body ? (
+        <Body id={id} type={type} index={index} active={active} />
+      ) : (
+        def.render?.({ id, type, index, active })
+      )}
+    </div>
+  );
+});
 
 interface StoredState {
   tabs: Array<{ id: string; type: string }>;
@@ -211,6 +277,13 @@ export function RightPane({
   );
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  // Below the `md` breakpoint a 320 px+ side column would take 85 % of a
+  // phone's width and leave the transcript a sliver; the pane then behaves as
+  // a full-width sheet over the content instead, the same treatment the
+  // sidebar already gets in AppLayout. The user's own fullscreen toggle is
+  // meaningless there, so it is hidden and the resize handle with it.
+  const isNarrow = useIsNarrowViewport();
+  const effectiveFullscreen = fullscreen || isNarrow;
   // N7 — a cap that refuses in silence reads as a bug. Both cap paths (the
   // "+" menu and an imperative focus request) route through `capNotice`, so
   // the user is told why no new tab appeared instead of clicking again.
@@ -472,7 +545,7 @@ export function RightPane({
       list.removeEventListener('scroll', measureOverflow);
       window.removeEventListener('resize', measureOverflow);
     };
-  }, [measureOverflow, fullscreen]);
+  }, [measureOverflow, effectiveFullscreen]);
 
   // Keep the active tab visible — selecting from the "…" menu (or an
   // imperative focus request) scrolls it into view.
@@ -516,23 +589,27 @@ export function RightPane({
     if (!open && fullscreen) setFullscreen(false);
   }, [open, fullscreen]);
 
-  // Exit fullscreen on Escape for quick keyboard dismissal.
+  // Escape for quick keyboard dismissal: leaves fullscreen on desktop; on a
+  // narrow viewport the sheet IS the pane, so Escape closes it.
   useEffect(() => {
-    if (!fullscreen) return;
+    if (!effectiveFullscreen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setFullscreen(false);
+      if (e.key !== 'Escape') return;
+      if (isNarrow) onOpenChange(false);
+      else setFullscreen(false);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [fullscreen]);
+  }, [effectiveFullscreen, isNarrow, onOpenChange]);
 
   if (!open) return null;
 
   return (
     <>
       {/* Drag handle — 6px wide vertical strip on the boundary. Hidden in
-          fullscreen (the pane covers the whole area). */}
-      {!fullscreen && (
+          fullscreen (the pane covers the whole area) and on narrow viewports
+          (there is no side column to resize). */}
+      {!effectiveFullscreen && (
         <div
           {...resize.handleProps}
           aria-label="Resize right pane"
@@ -554,15 +631,16 @@ export function RightPane({
         ref={setPaneRef}
         aria-label="Right side pane"
         data-testid="right-pane"
-        data-fullscreen={fullscreen || undefined}
+        data-fullscreen={effectiveFullscreen || undefined}
+        data-narrow={isNarrow || undefined}
         className={cn(
           'flex min-h-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-card)]/40',
-          fullscreen
-            ? 'absolute inset-0 z-30 w-full bg-[var(--color-card)]'
+          effectiveFullscreen
+            ? 'absolute inset-0 z-30 w-full border-l-0 bg-[var(--color-card)]'
             : 'shrink-0',
           className,
         )}
-        style={fullscreen ? undefined : { width: `${resize.width}px` }}
+        style={effectiveFullscreen ? undefined : { width: `${resize.width}px` }}
       >
         {/* Tab strip */}
         <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-[var(--color-border)] bg-[var(--color-card)] px-1.5">
@@ -708,22 +786,24 @@ export function RightPane({
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
-            <button
-              type="button"
-              aria-label={fullscreen ? 'Exit full screen' : 'Expand to full screen'}
-              aria-pressed={fullscreen}
-              data-testid="right-pane-fullscreen"
-              onClick={() => setFullscreen((v) => !v)}
-              className={cn(
-                'rounded-md p-1 transition-colors',
-                fullscreen
-                  ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-                  : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]',
-              )}
-              title={fullscreen ? 'Exit full screen' : 'Expand to full screen'}
-            >
-              {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-            </button>
+            {!isNarrow && (
+              <button
+                type="button"
+                aria-label={fullscreen ? 'Exit full screen' : 'Expand to full screen'}
+                aria-pressed={fullscreen}
+                data-testid="right-pane-fullscreen"
+                onClick={() => setFullscreen((v) => !v)}
+                className={cn(
+                  'rounded-md p-1 transition-colors',
+                  fullscreen
+                    ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+                    : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]',
+                )}
+                title={fullscreen ? 'Exit full screen' : 'Expand to full screen'}
+              >
+                {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              </button>
+            )}
             <button
               type="button"
               aria-label="Close right pane"
@@ -790,26 +870,22 @@ export function RightPane({
 
         {/* Body — mount every tab once, hide inactive ones. Keeps stateful
             children (e.g. Browser stream) alive across tab switches. Panels
-            gate live work on `ctx.active`; see `RightPaneTabDef.render`. */}
+            gate live work on `active`; see `RightPanePanelProps`. Each body is
+            a memoised component (`RightPanePanel`), so a re-render of this pane
+            reaches only the panels whose def or ctx actually changed. */}
         <div className="relative min-h-0 flex-1">
           {state.tabs.map((t) => {
             const def = tabs[t.type];
             if (!def) return null;
-            const isActive = t.id === activeTab?.id;
-            const index = tabIndexById.get(t.id) ?? 1;
             return (
-              <div
+              <RightPanePanel
                 key={t.id}
-                role="tabpanel"
-                aria-hidden={!isActive}
-                data-testid={`right-pane-panel-${t.type}`}
-                className={cn(
-                  'absolute inset-0 flex min-h-0 flex-col overflow-hidden',
-                  !isActive && 'pointer-events-none invisible',
-                )}
-              >
-                {def.render({ id: t.id, type: t.type, index, active: isActive })}
-              </div>
+                def={def}
+                id={t.id}
+                type={t.type}
+                index={tabIndexById.get(t.id) ?? 1}
+                active={t.id === activeTab?.id}
+              />
             );
           })}
         </div>

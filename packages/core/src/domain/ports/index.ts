@@ -34,6 +34,7 @@ export type {
   QuestionRequest,
   QuestionRequestHandler,
   ConversationWarning,
+  HarnessRuntimeDiagnostics,
   ConversationResult,
   HarnessAgentInfo,
   ToolBinaryAttachment,
@@ -114,6 +115,8 @@ export type {
   SandboxExecOptions,
   SandboxExecResult,
   SandboxInfo,
+  SandboxSession,
+  ISandboxSessionLookup,
 } from './ISandboxProvider.js';
 
 // ── Project & Codebase Management Ports ──
@@ -182,6 +185,12 @@ export type {
   ElementAddressedRequest,
 } from './IComputerBridge.js';
 export { isElementAddressed } from './IComputerBridge.js';
+export type {
+  ComputerConsentPrompt,
+  ComputerConsentScope,
+  ComputerStoredGrant,
+  IComputerConsentStore,
+} from './IComputerConsentStore.js';
 
 // ── Extensions & Widgets Ports ──
 export type { IExtensionRegistry } from './IExtensionRegistry.js';

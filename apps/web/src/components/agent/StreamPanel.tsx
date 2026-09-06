@@ -16,6 +16,7 @@
 
 import React from 'react';
 import { AlertTriangle, FileDiff, FilePlus2, FilePen } from 'lucide-react';
+import { Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import { IncrementalMarkdown } from '@/components/chat/IncrementalMarkdown.js'; // P0-47
@@ -24,6 +25,7 @@ import { UsageChip } from '@/components/agent/UsageChip.js';
 import { WidgetFrame } from '@/components/widgets/WidgetFrame.js';
 import { PlanCard } from '@/components/chat/PlanCard.js';
 import { QuestionCard } from '@/components/chat/QuestionCard.js';
+import { PermissionCard } from '@/components/chat/PermissionCard.js';
 import type { StreamBlock } from '@/stores/streamStore.js';
 import type { StreamSegment } from '@/components/agent/deriveTimeline.js';
 import type { TimelineStep, UsageInfo } from '@/components/chat/redesign/types.js';
@@ -96,7 +98,13 @@ export interface StreamPanelProps {
     answers: Record<string, string[]>,
     freeformResponse?: string,
   ) => void;
-  /** True while a plan/question decision request is in flight. */
+  /** Review finding 5.1 — allow/deny a blocking tool-permission prompt. */
+  onAnswerPermission?: (
+    interactionId: string,
+    behavior: 'allow' | 'deny',
+    message?: string,
+  ) => void;
+  /** True while a plan/question/permission decision request is in flight. */
   planBusy?: boolean;
   /** Open the Changes tab (optionally at one file). Enables the per-op diff
    *  icons and the end-of-turn changed-files summary card. */
@@ -108,7 +116,7 @@ export interface StreamPanelProps {
 export function StreamPanel({
   segments, steps, answer, widgets, streamKey, answerStreaming = false, active, loading = false,
   usage, prevUsage, prevCompletedAt, error, className,
-  onOpenPlan, onApprovePlan, onRequestPlanChanges, onAnswerQuestion, planBusy,
+  onOpenPlan, onApprovePlan, onRequestPlanChanges, onAnswerQuestion, onAnswerPermission, planBusy,
   onOpenChanges, onOpenShell,
 }: StreamPanelProps) {
   const isActive = active ?? answerStreaming;
@@ -147,7 +155,8 @@ export function StreamPanel({
     const awaitingUser = segments.some(
       (s) =>
         (s.type === 'plan' && s.plan.status === 'awaiting_review') ||
-        (s.type === 'question' && s.question.status === 'pending'),
+        (s.type === 'question' && s.question.status === 'pending') ||
+        (s.type === 'permission' && s.permission.status === 'pending'),
     );
 
     return (
@@ -206,6 +215,16 @@ export function StreamPanel({
                 key={seg.id}
                 question={seg.question}
                 {...(onAnswerQuestion ? { onSubmit: onAnswerQuestion } : {})}
+                busy={planBusy ?? false}
+              />
+            );
+          }
+          if (seg.type === 'permission') {
+            return (
+              <PermissionCard
+                key={seg.id}
+                permission={seg.permission}
+                {...(onAnswerPermission ? { onAnswer: onAnswerPermission } : {})}
                 busy={planBusy ?? false}
               />
             );
@@ -427,26 +446,28 @@ function TurnChangesSummary({
           <span className="text-[var(--color-danger)]">−{totalDel}</span>
         </span>
         {onOpenChanges && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
             title="Open the diff view"
             aria-label="Open the diff view"
-            className="ml-auto rounded p-0.5 text-[var(--color-muted-foreground)]/70 hover:bg-[var(--color-subtle)] hover:text-[var(--color-primary)]"
+            className="ml-auto h-auto w-auto rounded p-0.5 text-[var(--color-muted-foreground)]/70 hover:bg-[var(--color-subtle)] hover:text-[var(--color-primary)]"
             onClick={() => onOpenChanges()}
           >
             <FileDiff className="h-3.5 w-3.5" />
-          </button>
+          </Button>
         )}
       </div>
       <div className="max-h-48 overflow-y-auto px-1.5 py-1">
         {files.map((f) => (
-          <button
+          <Button
             key={f.filePath}
             type="button"
+            variant="ghost"
             disabled={!onOpenChanges}
             onClick={() => onOpenChanges?.(f.filePath)}
             className={cn(
-              'flex w-full items-center gap-2 rounded px-1.5 py-[3px] text-left',
+              'h-auto w-full items-center gap-2 rounded px-1.5 py-[3px] text-left',
               onOpenChanges && 'cursor-pointer hover:bg-[var(--color-subtle)]/70',
             )}
           >
@@ -462,7 +483,7 @@ function TurnChangesSummary({
               <span className="text-[var(--color-success)]">+{f.additions}</span>{' '}
               <span className="text-[var(--color-danger)]">−{f.deletions}</span>
             </span>
-          </button>
+          </Button>
         ))}
       </div>
     </div>

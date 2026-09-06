@@ -18,8 +18,10 @@ export type SettingsSectionId =
   | 'source-control'
   | 'browser-terminal'
   | 'computer-use'
+  | 'audio'
   | 'extensions'
   | 'security'
+  | 'storage'
   | 'diagnostics';
 
 interface SettingsUiState {

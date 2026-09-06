@@ -935,9 +935,11 @@ generatorai completions powershell | Out-File -Encoding utf8 $PROFILE.CurrentUse
 
 ---
 
-## 9. Direct mode (in-process)
+## 9. Connection model (there is no in-process mode)
 
-Future feature: `--mode direct` would skip HTTP and instantiate `createCoreServices()` in-process. The plumbing is present ([apps/cli/src/platform/createClient.ts](../../apps/cli/src/platform/createClient.ts) supports `'http' | 'direct' | 'auto'`) but the direct path is not currently used; all commands go through HTTP.
+Every command talks to a running GeneratorAI server over HTTP + WebSocket through `createCliClient()` in `packages/cli-core`. There is no `--mode direct`, `--local`, or in-process fallback, and no `apps/cli/src/platform/createClient.ts` — earlier revisions of this page described plumbing that was never committed. Pick the server with `--server <url>` or a saved connection (`connect add` / `--connection`); if it is unreachable the command fails with a connection error rather than silently doing anything locally.
+
+Two operations are deliberately shell-only and are hidden from the TUI palette: anything that collects a secret, and `terminal attach` (raw PTY takeover). Inside the TUI the palette shows them disabled with the hint *"Run `generatorai <cmd>` in your shell — needs a secret/terminal"*.
 
 ---
 

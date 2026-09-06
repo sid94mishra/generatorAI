@@ -43,6 +43,9 @@ export class MockChatRepository implements IChatRepository {
       .filter((c) => c.status === status)
       .map((c) => ({ ...c }));
   }
+  async countByStatus(status: ChatStatus): Promise<number> {
+    return (await this.getByStatus(status)).length;
+  }
 
   async update(id: string, updates: Partial<Chat>): Promise<Chat> {
     const existing = this.store.get(id);
@@ -268,6 +271,9 @@ export class MockWorkflowRunRepository implements IWorkflowRunRepository {
       .filter((r) => statuses.includes(r.status))
       .map((r) => ({ ...r }));
   }
+  async countByStatus(statuses: WorkflowRunStatus[]): Promise<number> {
+    return (await this.getByStatus(statuses)).length;
+  }
 
   async update(id: string, updates: Partial<WorkflowRun>): Promise<WorkflowRun> {
     const existing = this.store.get(id);
@@ -365,6 +371,21 @@ export class MockStageRunRepository implements IStageRunRepository {
         existing.status = status;
       }
     }
+  }
+
+  /**
+   * WS-D1 — liveness beat, mirroring `DrizzleStageRunRepository.heartbeat`:
+   * only writes while the row is `queued`/`running`, returns whether it did.
+   * Exists on the mock so `StageExecutionService`'s heartbeat timer (task 4)
+   * has something real to assert against in tests instead of silently
+   * hitting a missing method.
+   */
+  async heartbeat(id: string, leaseOwner?: string): Promise<boolean> {
+    const existing = this.store.get(id);
+    if (!existing || (existing.status !== 'queued' && existing.status !== 'running')) return false;
+    existing.heartbeatAt = new Date();
+    if (leaseOwner !== undefined) existing.leaseOwner = leaseOwner;
+    return true;
   }
 
   async delete(id: string): Promise<void> {

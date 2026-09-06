@@ -18,8 +18,10 @@ import {
   streamReducer as r,
   type ContextUsageSnapshot,
   type StreamEffect,
+  type PermissionBlock,
   type PlanBlock,
   type QuestionBlock,
+  type StreamHookInvocation,
   type StreamState,
   type StreamUsage,
   type ToolFileOp,
@@ -30,9 +32,11 @@ import {
 
 // Re-exported so existing `@/stores/streamStore.js` imports keep working.
 export type {
+  PermissionBlock,
   PlanBlock,
   QuestionBlock,
   StreamBlock,
+  StreamHookInvocation,
   StreamState,
   StreamStatus,
   StreamToolCall,
@@ -129,6 +133,23 @@ interface StreamStore {
 
   /** Mark a question card expired/cancelled. */
   expireQuestion: (sessionId: string, interactionId: string) => void;
+
+  /** Insert or merge a tool-permission card (de-duped by interactionId). */
+  upsertPermission: (
+    sessionId: string,
+    permission: Omit<PermissionBlock, 'type' | 'blockId'>,
+  ) => void;
+
+  /** Record the user's allow/deny decision on a permission card. */
+  resolvePermission: (
+    sessionId: string,
+    interactionId: string,
+    behavior: 'allow' | 'deny',
+    message?: string,
+  ) => void;
+
+  /** Mark a permission card expired (the turn ended before it was answered). */
+  expirePermission: (sessionId: string, interactionId: string) => void;
 
   /** Begin a new turn (user sent a message, awaiting the agent). */
   startPending: (sessionId: string, userMessage?: string) => void;
@@ -255,6 +276,9 @@ const useStreamStoreImpl = create<StreamStore>((set, get) => {
     upsertQuestion: apply(r.upsertQuestion),
     answerQuestion: apply(r.answerQuestion),
     expireQuestion: apply(r.expireQuestion),
+    upsertPermission: apply(r.upsertPermission),
+    resolvePermission: apply(r.resolvePermission),
+    expirePermission: apply(r.expirePermission),
     startPending: apply(r.startPending),
     setServerTurnId: apply(r.setServerTurnId),
     setUsage: apply(r.setUsage),

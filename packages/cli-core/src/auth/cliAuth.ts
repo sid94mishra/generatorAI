@@ -24,9 +24,11 @@ import {
   SecretSinkDeviceKeyStore,
   SecretSinkSessionStore,
   parsePairingCode,
+  resolveShortPairingCode,
   type AuthState,
   type SecretSink,
 } from '@generatorai/client-runtime';
+import { isPairingCode } from '@generatorai/shared';
 import { createSecretStore, type SecretStore } from '@generatorai/secrets';
 import { getUserConfigDir } from '../config/paths.js';
 import { CliError } from '../errors/CliError.js';
@@ -146,11 +148,34 @@ export function defaultCliDeviceName(): string {
  *
  * The shared parser throws a terse error; a user who mistyped one character
  * of a short code needs to be told that is what happened.
+ *
+ * `origin` is the server this CLI is pointed at. It is only used for the SHORT
+ * code form (`4H7K-2M9P-XQ3T`), which carries no endpoint of its own and must
+ * be resolved against the host that issued it. Without this the CLI rejected
+ * the exact form its own `--help` advertises — `generatorai device pair
+ * XXXX-XXXX-XXXX` — with "That does not look like a pairing code", because
+ * only the web app had ever implemented the short-code path.
  */
-export function parseCliPairingCode(code: string): ReturnType<typeof parsePairingCode> {
+export async function parseCliPairingCode(
+  code: string,
+  origin?: string,
+): Promise<ReturnType<typeof parsePairingCode>> {
+  const trimmed = code.trim();
   try {
-    return parsePairingCode(code.trim());
+    if (isPairingCode(trimmed)) {
+      if (!origin) {
+        throw new CliError('VALIDATION', 'A short pairing code needs a server to resolve it against.', {
+          suggestions: [
+            'Pass --server https://host:port, or run `generatorai connect add <url>` first',
+            'Or paste the full pairing code, which carries its own endpoint',
+          ],
+        });
+      }
+      return await resolveShortPairingCode(origin, trimmed);
+    }
+    return parsePairingCode(trimmed);
   } catch (error) {
+    if (error instanceof CliError) throw error;
     throw new CliError('VALIDATION', 'That does not look like a pairing code.', {
       hint: error instanceof Error ? error.message : String(error),
       suggestions: [

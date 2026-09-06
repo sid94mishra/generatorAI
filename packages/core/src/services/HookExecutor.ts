@@ -46,6 +46,12 @@ export interface HookContext {
    */
   workflowRunId?: string;
   /**
+   * Owning stage run id, when the hook executes inside a stage. Stamped onto
+   * the `hook.*` events so the run inspector can attribute a hook execution
+   * to the stage that fired it without guessing from session ids.
+   */
+  stageRunId?: string;
+  /**
    * ORC-01/02 — external cancellation signal plumbed from the caller
    * (StageExecutionService / WorkflowRunService). When this fires BEFORE
    * the hook's own timeout we cancel the hook's work immediately and
@@ -78,6 +84,39 @@ export interface FunctionHookHandlerContext {
 }
 
 export type FunctionHookHandler = (ctx: FunctionHookHandlerContext) => Promise<HookResult | void>;
+
+/**
+ * What a dry run reports for one hook: exactly what `executePhase` would have
+ * dispatched, after variable interpolation and policy checks, with nothing
+ * actually spawned, fetched or invoked.
+ */
+export interface HookDryRunEntry {
+  hookId: string;
+  name: string;
+  phase: HookPhase;
+  type: HookDefinition['type'];
+  priority: number;
+  timeoutMs: number;
+  retries: number;
+  failurePolicy: HookDefinition['failurePolicy'];
+  /** False when the hook would be refused before doing any work. */
+  valid: boolean;
+  errors: string[];
+  script?: { command: string; args: string[]; cwd: string; resolvedCommand?: string };
+  http?: { method: string; url: string; headers?: Record<string, string>; body?: string };
+  function?: { handlerName?: string; registered?: boolean; modulePath?: string; resolvedModulePath?: string };
+}
+
+export interface HookDryRunPlan {
+  phase: HookPhase;
+  dryRun: true;
+  /** Every hook is dispatchable. */
+  valid: boolean;
+  /** Hooks that would fire, in dispatch order. */
+  hooks: HookDryRunEntry[];
+  /** Hooks passed in that would NOT fire for this phase, and why. */
+  skipped: Array<{ hookId: string; name: string; reason: string }>;
+}
 
 export class HookExecutor {
   constructor(
@@ -145,12 +184,26 @@ export class HookExecutor {
     const mergedResult: HookResult = {};
 
     for (const hook of phaseHooks) {
+      // Identity fields shared by every lifecycle event for this invocation,
+      // so the run inspector can pair started/completed and attribute the
+      // hook to its stage (see `deriveRunView` → Hooks tab).
+      const identity = {
+        hookName: hook.name,
+        hookId: hook.id,
+        hookType: hook.type,
+        phase,
+        workflowRunId: context.workflowRunId,
+        stageRunId: context.stageRunId,
+        sessionId: context.sessionId,
+      };
+      const startedAt = Date.now();
       await this.eventBus.emit(context.sessionId, {
         kind: 'hook.started',
-        data: { hookName: hook.name, phase, workflowRunId: context.workflowRunId },
+        data: identity,
       });
 
       const result = await this.executeHookWithRetry(hook, context);
+      const durationMs = Date.now() - startedAt;
 
       if (result.success) {
         // Merge hook result data
@@ -162,7 +215,7 @@ export class HookExecutor {
         if (result.hookResult?.abort) {
           await this.eventBus.emit(context.sessionId, {
             kind: 'hook.completed',
-            data: { hookName: hook.name, phase, workflowRunId: context.workflowRunId },
+            data: { ...identity, durationMs },
           });
           return {
             shouldContinue: false,
@@ -172,12 +225,12 @@ export class HookExecutor {
 
         await this.eventBus.emit(context.sessionId, {
           kind: 'hook.completed',
-          data: { hookName: hook.name, phase, workflowRunId: context.workflowRunId },
+          data: { ...identity, durationMs },
         });
       } else {
         await this.eventBus.emit(context.sessionId, {
           kind: 'hook.failed',
-          data: { hookName: hook.name, phase, error: result.error!, workflowRunId: context.workflowRunId },
+          data: { ...identity, durationMs, error: result.error! },
         });
 
         switch (hook.failurePolicy) {
@@ -191,6 +244,118 @@ export class HookExecutor {
     }
 
     return { shouldContinue: true, mergedResult };
+  }
+
+  /**
+   * Dry run — resolve which hooks WOULD fire for `phase`, render their
+   * command lines / URLs / module paths with the context's variables, and
+   * run every policy check, without dispatching anything. No child process,
+   * no HTTP request, no in-process handler call.
+   *
+   * This backs `POST /sessions/:id/hooks/test`, which used to call
+   * `executePhase` for real and label the result "dry-run".
+   */
+  async planPhase(
+    phase: HookPhase,
+    hooks: HookDefinition[],
+    context: Omit<HookContext, 'eventBus'> & { eventBus?: EventBus },
+  ): Promise<HookDryRunPlan> {
+    const skipped: HookDryRunPlan['skipped'] = [];
+    const candidates: HookDefinition[] = [];
+    for (const hook of hooks) {
+      if (hook.phase !== phase) {
+        skipped.push({ hookId: hook.id, name: hook.name, reason: `registered for phase '${hook.phase}', not '${phase}'` });
+      } else if (!hook.enabled) {
+        skipped.push({ hookId: hook.id, name: hook.name, reason: 'disabled' });
+      } else {
+        candidates.push(hook);
+      }
+    }
+    candidates.sort((a, b) => a.priority - b.priority);
+
+    const entries: HookDryRunEntry[] = [];
+    for (const hook of candidates) {
+      const entry: HookDryRunEntry = {
+        hookId: hook.id,
+        name: hook.name,
+        phase,
+        type: hook.type,
+        priority: hook.priority,
+        timeoutMs: hook.timeoutMs,
+        retries: hook.retries,
+        failurePolicy: hook.failurePolicy,
+        valid: true,
+        errors: [],
+      };
+      if (typeof hook.timeoutMs !== 'number' || hook.timeoutMs <= 0 || !Number.isFinite(hook.timeoutMs)) {
+        entry.errors.push(`invalid timeout: ${hook.timeoutMs}`);
+      }
+
+      switch (hook.config.type) {
+        case 'script': {
+          const config = hook.config as ScriptHookConfig;
+          const { cmd, args, cwd } = HookExecutor.resolveScriptInvocation(config, context.workspacePath);
+          entry.script = { command: cmd, args, cwd };
+          if (!cmd) {
+            entry.errors.push('script hook has no command');
+          } else if (this.scriptRunner.validate) {
+            const verdict = await this.scriptRunner.validate(cmd, args);
+            if (verdict.ok) entry.script.resolvedCommand = verdict.resolvedCommand;
+            else entry.errors.push(verdict.reason ?? 'command refused by script policy');
+          }
+          break;
+        }
+        case 'http': {
+          const config = hook.config as HttpHookConfig;
+          const rendered = this.renderHttpRequest(config, context);
+          entry.http = rendered;
+          try {
+            const parsed = new URL(rendered.url);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+              entry.errors.push(`unsupported URL scheme '${parsed.protocol}'`);
+            }
+          } catch {
+            entry.errors.push(`invalid URL after interpolation: '${rendered.url}'`);
+          }
+          break;
+        }
+        case 'function': {
+          const config = hook.config as FunctionHookConfig;
+          entry.function = { handlerName: config.handlerName, modulePath: config.modulePath };
+          if (config.handlerName) {
+            entry.function.registered = this.functionHandlers.has(config.handlerName);
+            if (!entry.function.registered) {
+              entry.errors.push(`no in-process handler registered for '${config.handlerName}'`);
+            }
+          } else if (config.modulePath) {
+            const resolvedWorkspace = path.resolve(context.workspacePath);
+            const modulePath = path.resolve(resolvedWorkspace, config.modulePath);
+            const relative = path.relative(resolvedWorkspace, modulePath);
+            if (relative.startsWith('..') || path.isAbsolute(relative)) {
+              entry.errors.push(`module path ${config.modulePath} resolves outside workspace`);
+            } else {
+              entry.function.resolvedModulePath = modulePath;
+            }
+          } else {
+            entry.errors.push("function hook has neither 'handlerName' nor 'modulePath'");
+          }
+          break;
+        }
+        default:
+          entry.errors.push(`unknown hook type '${String((hook.config as { type?: unknown }).type)}'`);
+      }
+
+      entry.valid = entry.errors.length === 0;
+      entries.push(entry);
+    }
+
+    return {
+      phase,
+      dryRun: true,
+      valid: entries.every((e) => e.valid),
+      hooks: entries,
+      skipped,
+    };
   }
 
   /** Merge a single HookResult into an accumulator. Later hooks win for conflicting variable keys. */
@@ -301,19 +466,7 @@ export class HookExecutor {
     context: HookContext,
     abortSignal: AbortSignal,
   ): Promise<HookResult | void> {
-    const cwd = config.cwd
-      ? path.resolve(context.workspacePath, config.cwd)
-      : context.workspacePath;
-
-    // Split command string into binary + args when args are not explicitly provided.
-    // Users type "echo hello" or "node script.js --flag" as a single command string.
-    let cmd = config.command;
-    let args = config.args ?? [];
-    if (args.length === 0 && config.command.includes(' ')) {
-      const parts = config.command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [config.command];
-      cmd = parts[0]!;
-      args = parts.slice(1).map(a => a.replace(/^["']|["']$/g, ''));
-    }
+    const { cmd, args, cwd } = HookExecutor.resolveScriptInvocation(config, context.workspacePath);
 
     // ORC-01 — forward the hook-level AbortSignal into the script runner
     // so SIGKILL fires the moment the hook times out, instead of the
@@ -338,15 +491,37 @@ export class HookExecutor {
     return HookExecutor.tryParseHookResult(result.stdout);
   }
 
-  private async executeHttp(
+  /**
+   * Split a script hook's command string into binary + args when args are not
+   * explicitly provided (users type "echo hello" or "node script.js --flag"
+   * as one string) and resolve its cwd. Shared by the real dispatch and the
+   * dry run so both see the identical command line.
+   */
+  private static resolveScriptInvocation(
+    config: ScriptHookConfig,
+    workspacePath: string,
+  ): { cmd: string; args: string[]; cwd: string } {
+    const cwd = config.cwd ? path.resolve(workspacePath, config.cwd) : workspacePath;
+    let cmd = config.command ?? '';
+    let args = config.args ?? [];
+    if (args.length === 0 && cmd.includes(' ')) {
+      const parts = cmd.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [cmd];
+      cmd = parts[0]!;
+      args = parts.slice(1).map(a => a.replace(/^["']|["']$/g, ''));
+    }
+    return { cmd, args, cwd };
+  }
+
+  /**
+   * Render an HTTP hook's URL / headers / body. Interpolation table: user
+   * variables + built-in context fields (workflowRunId, sessionId,
+   * workflowId, workspacePath) so HTTP hooks can reference the owning run
+   * without callers having to shove those into `variables` manually.
+   */
+  private renderHttpRequest(
     config: HttpHookConfig,
-    context: HookContext,
-    abortSignal: AbortSignal,
-  ): Promise<HookResult | void> {
-    // Build interpolation table: user variables + built-in context fields
-    // (workflowRunId, sessionId, workflowId, workspacePath) so HTTP hook
-    // URLs/bodies/headers can reference the owning run without callers
-    // having to shove those into `variables` manually.
+    context: Pick<HookContext, 'variables' | 'workflowRunId' | 'sessionId' | 'workflowId' | 'workspacePath'>,
+  ): { method: string; url: string; headers?: Record<string, string>; body?: string } {
     const vars: Record<string, string> = {
       ...context.variables,
       workflowRunId: context.workflowRunId ?? '',
@@ -363,6 +538,15 @@ export class HookExecutor {
     const body = config.bodyTemplate
       ? this.interpolateTemplate(config.bodyTemplate, vars)
       : undefined;
+    return { method: config.method, url, headers, body };
+  }
+
+  private async executeHttp(
+    config: HttpHookConfig,
+    context: HookContext,
+    abortSignal: AbortSignal,
+  ): Promise<HookResult | void> {
+    const { url, headers, body } = this.renderHttpRequest(config, context);
 
     // ORC-01 — forward the AbortSignal to fetch so the socket is closed
     // on hook timeout. The HTTP client already honours `signal`.
@@ -461,23 +645,22 @@ export class HookExecutor {
       args: config.args,
     });
 
+    // The runner program is OURS and fixed; only the module path (env) and
+    // the context (argv) vary. It is fed through stdin (`node -`) rather than
+    // `node -e` because the script runner refuses `-e`/`--eval` for
+    // everyone — a model-authored hook config can set command/args but never
+    // stdin, so this stays a server-only capability.
+    //
     // ORC-01 — forward AbortSignal so the subprocess is killed on timeout
     // instead of running to natural completion.
     const result = await this.scriptRunner.run(
       'node',
-      [
-        '-e',
-        `const fn = require(process.env.HOOK_MODULE_PATH); ` +
-        `const ctx = JSON.parse(process.argv[1]); ` +
-        `Promise.resolve((fn.default || fn)(ctx))` +
-        `.then(() => process.exit(0))` +
-        `.catch(e => { console.error(e.message || e); process.exit(1); })`,
-        contextJson,
-      ],
+      ['-', contextJson],
       {
         cwd: context.workspacePath,
         env: { HOOK_MODULE_PATH: modulePath },
         abortSignal,
+        stdin: HookExecutor.FUNCTION_HOOK_RUNNER,
       },
     );
 
@@ -490,6 +673,17 @@ export class HookExecutor {
     // Parse stdout as HookResult JSON
     return HookExecutor.tryParseHookResult(result.stdout);
   }
+
+  /**
+   * Fixed program for subprocess-backed function hooks. With `node -` the
+   * script arrives on stdin and `process.argv[1]` is the first user arg.
+   */
+  private static readonly FUNCTION_HOOK_RUNNER =
+    `const fn = require(process.env.HOOK_MODULE_PATH); ` +
+    `const ctx = JSON.parse(process.argv[1]); ` +
+    `Promise.resolve((fn.default || fn)(ctx))` +
+    `.then(() => process.exit(0))` +
+    `.catch(e => { console.error(e.message || e); process.exit(1); });\n`;
 
   /**
    * Try to parse a string as a HookResult JSON.

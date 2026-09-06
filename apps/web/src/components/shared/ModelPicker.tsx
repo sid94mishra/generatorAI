@@ -21,6 +21,7 @@ import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { ChevronDown, Check, Search, X, Lock, Info, Cpu, Eye, Globe, Gauge, ArrowUp, RefreshCw } from 'lucide-react';
 
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 import { ProviderBrandIcon } from './VendorIcons.js';
 import { useHarnessProviders } from '@/hooks/queries.js';
 import { resolveModelLimit } from '@generatorai/client-core';
@@ -262,7 +263,8 @@ export function ModelPicker({
     <PopoverPrimitive.Root open={open} onOpenChange={(next) => !disabled && setOpen(next)}>
       <div className={cn(variant === 'field' && 'w-full', className)}>
         <PopoverPrimitive.Trigger asChild>
-      <button
+      <Button
+        variant="ghost"
         id={id}
         type="button"
         disabled={disabled}
@@ -271,7 +273,7 @@ export function ModelPicker({
         aria-expanded={open}
         aria-label={ariaLabel}
         className={cn(
-          'flex items-center transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-60',
+          'flex h-auto items-center transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-60',
           variant === 'field'
             ? [
                 'w-full justify-between gap-2 rounded-md border border-[var(--color-input)]',
@@ -305,7 +307,7 @@ export function ModelPicker({
           </span>
         </span>
         <ChevronDown className={cn('shrink-0 opacity-60', variant === 'field' ? 'h-4 w-4' : 'h-3 w-3')} />
-      </button>
+      </Button>
         </PopoverPrimitive.Trigger>
 
       <PopoverPrimitive.Portal>
@@ -347,8 +349,10 @@ export function ModelPicker({
             {showProviderRail && (
               <div className="flex w-12 flex-col items-center gap-1 border-r border-[var(--color-border)]/60 bg-[var(--color-subtle)]/40 py-2">
                 {providers.map((p) => (
-                  <button
+                  <Button
                     key={p.id}
+                    variant="ghost"
+                    size="icon"
                     type="button"
                     // Every connected provider is selectable now; only the
                     // ones that failed their readiness probe are locked.
@@ -369,7 +373,7 @@ export function ModelPicker({
                     {!p.enabled && (
                       <Lock className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 text-[var(--color-muted-foreground)]" />
                     )}
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}
@@ -396,38 +400,43 @@ export function ModelPicker({
                   className="h-full w-full min-w-0 bg-transparent text-sm text-[var(--color-foreground)] outline-none placeholder:text-[var(--color-muted-foreground)]"
                 />
                 {search && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     type="button"
                     onClick={() => setSearch('')}
                     aria-label="Clear search"
-                    className="shrink-0 rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:text-[var(--color-foreground)]"
+                    className="h-auto w-auto shrink-0 rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:text-[var(--color-foreground)]"
                     title="Clear"
                   >
                     <X className="h-3.5 w-3.5" />
-                  </button>
+                  </Button>
                 )}
                 {/* Catalogs are cached (a cold probe spawns each provider's
                     CLI), so offer an explicit re-probe — e.g. right after
                     signing in to a provider. */}
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   type="button"
                   onClick={() => void refetchProviders()}
                   aria-label="Refresh model list"
                   title="Refresh model list"
-                  className="shrink-0 rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:text-[var(--color-foreground)]"
+                  className="h-auto w-auto shrink-0 rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:text-[var(--color-foreground)]"
                 >
                   <RefreshCw className={cn('h-3.5 w-3.5', isFetching && 'animate-spin')} />
-                </button>
+                </Button>
               </div>
               <div ref={listRef} className="max-h-80 overflow-y-auto p-1.5">
                 {/* Inherit / no-explicit-model row. Kept above the catalog and
                     outside the search filter so it's always reachable. */}
                 {allowEmpty && (
-                  <button
+                  <Button
+                    variant="ghost"
                     type="button"
                     onClick={() => select('')}
                     className={cn(
-                      'mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors',
+                      'h-auto mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors',
                       !hasValue ? 'bg-[var(--color-primary)]/10' : 'hover:bg-[var(--color-accent)]',
                     )}
                   >
@@ -444,7 +453,7 @@ export function ModelPicker({
                         </span>
                       )}
                     </span>
-                  </button>
+                  </Button>
                 )}
 
                 {providersLoading ? (
@@ -479,10 +488,11 @@ export function ModelPicker({
                         value === m.id ? 'bg-[var(--color-primary)]/10' : 'hover:bg-[var(--color-accent)]',
                       )}
                     >
-                      <button
+                      <Button
+                        variant="ghost"
                         type="button"
                         onClick={() => select(m.id)}
-                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        className="h-auto flex min-w-0 flex-1 items-center gap-2 text-left"
                       >
                         <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
                           {value === m.id && <Check className="h-4 w-4 text-[var(--color-primary)]" />}
@@ -498,16 +508,18 @@ export function ModelPicker({
                             {formatTokens(resolveModelLimit(m, 'default')!)}
                           </span>
                         ) : null}
-                      </button>
+                      </Button>
                       {/* Info icon — opens the model details popover */}
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           setInfoModelId((prev) => (prev === m.id ? null : m.id));
                         }}
                         className={cn(
-                          'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-colors',
+                          'h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-colors',
                           infoModelId === m.id
                             ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                             : 'text-[var(--color-muted-foreground)]/60 opacity-0 hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] group-hover:opacity-100',
@@ -515,7 +527,7 @@ export function ModelPicker({
                         title="Model details"
                       >
                         <Info className="h-3.5 w-3.5" />
-                      </button>
+                      </Button>
                     </div>
                   ))
                 )}

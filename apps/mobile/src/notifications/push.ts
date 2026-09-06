@@ -14,20 +14,31 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import { prefs } from '../storage/prefs';
+import { readNotifyPrefs, shouldPresent } from './notificationFilter';
+
 /**
  * Foreground presentation.
  *
  * Banners are shown even while the app is open: the user may be reading one
  * chat while a different run blocks, and silently swallowing that is exactly
- * the failure this feature exists to prevent.
+ * the failure this feature exists to prevent — unless the user turned that
+ * category off in Settings › Notifications, which is the one place the
+ * "wake me for" switches take effect while the app is open.
  */
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
+  handleNotification: async (notification) => {
+    const present = shouldPresent(
+      notification.request.content.data,
+      readNotifyPrefs((key) => prefs.getString(key)),
+    );
+    return {
+      shouldShowBanner: present,
+      shouldShowList: present,
+      shouldPlaySound: present,
+      shouldSetBadge: present,
+    };
+  },
 });
 
 export interface PushRegistration {

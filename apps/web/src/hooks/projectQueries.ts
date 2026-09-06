@@ -381,8 +381,63 @@ export function useSystemMcpServers() {
   const platform = usePlatform();
   return useQuery({
     queryKey: projectKeys.systemMcpServers,
-    queryFn: () => platform.listSystemMcpServers(),
+    queryFn: () => platform.listSystemMcpServers() as Promise<McpServerEntry[]>,
     staleTime: 5 * 60_000,
+  });
+}
+
+/** Per-bundled-server prefs: on/off, `{{input}}` values, credentials (W48). */
+export function useUpdateSystemMcpServerPrefs() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { enabled?: boolean; inputs?: Record<string, string>; headers?: Record<string, string>; env?: Record<string, string> } }) =>
+      platform.updateSystemMcpServerPrefs(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: projectKeys.systemMcpServers });
+    },
+  });
+}
+
+/** Add a custom MCP server (Settings → MCP Servers), persisted server-side (W48). */
+export function useCreateCustomMcpServer() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      name: string; description?: string; serverType: string; url?: string; command?: string; args?: string[];
+      timeoutMs?: number; headers?: Record<string, string>; env?: Record<string, string>;
+    }) => platform.createCustomMcpServer(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: projectKeys.systemMcpServers });
+    },
+  });
+}
+
+export function useUpdateCustomMcpServer() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: {
+      id: string; data: {
+        name: string; description?: string; serverType: string; url?: string; command?: string; args?: string[];
+        timeoutMs?: number; enabled?: boolean; headers?: Record<string, string>; env?: Record<string, string>;
+      };
+    }) => platform.updateCustomMcpServer(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: projectKeys.systemMcpServers });
+    },
+  });
+}
+
+export function useDeleteCustomMcpServer() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platform.deleteCustomMcpServer(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: projectKeys.systemMcpServers });
+    },
   });
 }
 

@@ -131,4 +131,37 @@ describe('device invite', () => {
     expect((result.data as { pairingCode: string }).pairingCode).toBe('FROM-API');
     expect((ctx.api as unknown as FakeApi).devices.createInvite).toHaveBeenCalledTimes(1);
   });
+
+  // `POST /api/auth/pair` requires `deviceName` (min 1, max 64) and rejects a
+  // `ttlMs` over ten minutes. The command sent neither correctly, so its
+  // authenticated path failed every single time with "deviceName: Required"
+  // while the two bootstrap paths — which never call the API — masked it.
+  it('sends deviceName and platform on the authenticated path', async () => {
+    const dir = tempDir(); // empty: no bootstrap grant, no local-admin token
+    const ctx = fakeContext();
+
+    await invite.handler(ctx, { args: {}, flags: { dataDir: dir, ttl: 10 } } as never);
+
+    const body = (ctx.api as unknown as FakeApi).devices.createInvite.mock.calls[0][0];
+    expect(body.deviceName).toBeTruthy();
+    expect(String(body.deviceName).length).toBeGreaterThan(0);
+    expect(body.platform).toBe('other');
+    expect(body.ttlMs).toBe(600_000);
+  });
+
+  it('uses the given --name and --platform', async () => {
+    const dir = tempDir();
+    const ctx = fakeContext();
+
+    await invite.handler(ctx, {
+      args: {},
+      flags: { dataDir: dir, ttl: 5, name: 'Ops laptop', platform: 'desktop' },
+    } as never);
+
+    const body = (ctx.api as unknown as FakeApi).devices.createInvite.mock.calls[0][0];
+    expect(body.deviceName).toBe('Ops laptop');
+    expect(body.platform).toBe('desktop');
+    expect(body.ttlMs).toBe(300_000);
+  });
+
 });

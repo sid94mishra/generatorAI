@@ -31,6 +31,17 @@ export class FakeHarness {
   constructor(readonly name = 'fake') {}
 
   async initialize(): Promise<void> {}
+  readonly selectedAgents = new Map<string, string>();
+  async getModels(): Promise<Array<{ id: string; name: string; provider?: string }>> {
+    return [{ id: 'fake-1', name: 'Fake One', provider: this.name }];
+  }
+  async selectAgent(conversationId: string, agentName: string): Promise<void> {
+    this.selectedAgents.set(conversationId, agentName);
+  }
+  async listAgents(conversationId: string): Promise<Array<{ name: string; description?: string }>> {
+    const selected = this.selectedAgents.get(conversationId);
+    return [{ name: 'default' }, ...(selected ? [{ name: selected, description: 'selected' }] : [])];
+  }
   async stop(): Promise<void> {
     this.stopped = true;
   }

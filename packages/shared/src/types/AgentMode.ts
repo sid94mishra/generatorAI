@@ -367,6 +367,52 @@ export interface AgentInteraction {
   expiresAt?: Date;
 }
 
+// ────────────────────────────────────────────────────────────────
+// Tool permission gates (chat)
+//
+// The `tool_permission` interaction kind. For chats it is opened by
+// `ChatManagementService.buildPermissionHandler` whenever the harness asks
+// `onPermissionRequest` and the turn's permission mode does not auto-allow the
+// call; the durable row is what lets a phone, the TUI and a second browser tab
+// all render (and any one of them answer) the same prompt.
+// ────────────────────────────────────────────────────────────────
+
+/** Domain classification of what a tool call does — mirrors `PermissionRequest.type` in core. */
+export type ToolPermissionType = 'file_write' | 'file_read' | 'shell_exec' | 'network' | 'other';
+
+/** Payload persisted on a `tool_permission` interaction and carried by `chat.permission.requested`. */
+export interface ToolPermissionRequestPayload {
+  /** Harness tool name (`Bash`, `WebFetch`, Copilot `shell`, …). */
+  toolName: string;
+  type: ToolPermissionType;
+  /** Human-readable description supplied by the harness. */
+  description: string;
+  /** Bounded, display-safe rendering of the tool input (never the raw object). */
+  inputSummary: string;
+  /** Effective permission mode of the turn that raised the prompt. */
+  permissionMode: AgentPermissionMode;
+}
+
+/** What the user posts back to `POST /chats/:id/interactions/:interactionId/permission`. */
+export interface ToolPermissionResolution {
+  behavior: 'allow' | 'deny';
+  /** Optional reason relayed to the agent when denying. */
+  message?: string;
+}
+
+/** Compact projection embedded in the chat transcript. */
+export interface PermissionCardSummary {
+  interactionId: string;
+  toolName: string;
+  type: ToolPermissionType;
+  description: string;
+  inputSummary: string;
+  status: 'pending' | 'allowed' | 'denied' | 'expired';
+  message?: string;
+  /** See {@link PlanCardSummary.sequence}. */
+  sequence?: number;
+}
+
 /** Resolution the UI posts back for a plan review gate. */
 export interface PlanReviewResolution {
   approved: boolean;

@@ -7,6 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type {
+  AgentEvent,
   AutomationExecution,
   AutomationExecutionRun,
   ILogger,
@@ -189,13 +190,20 @@ export class AutomationRecoveryService {
       }),
     );
 
-    let finalStatus: AutomationExecution['status'];
+    // Three-way outcome (item 28). The previous `else → completed` branch
+    // reported a batch with 999 failures and 1 success as `completed`, and
+    // with it suppressed the failure alert — the same inversion that lived in
+    // `AutomationService.driveIterations`.
+    let finalStatus: 'completed' | 'failed' | 'cancelled' | 'partial';
     let errorMsg: string | undefined;
     if (cancelled > 0 && completed === 0 && failed === 0) {
       finalStatus = 'cancelled';
     } else if (failed > 0 && completed === 0) {
       finalStatus = 'failed';
       errorMsg = `${failed} of ${runs.length} iterations failed after recovery`;
+    } else if (failed > 0) {
+      finalStatus = 'partial';
+      errorMsg = `${failed} of ${runs.length} iterations failed after recovery (${completed} succeeded)`;
     } else {
       finalStatus = 'completed';
     }
@@ -248,25 +256,26 @@ export class AutomationRecoveryService {
 
   private emitTerminal(
     exec: AutomationExecution,
-    status: 'completed' | 'failed' | 'cancelled',
+    status: 'completed' | 'failed' | 'cancelled' | 'partial',
     error?: string,
   ): void {
-    try {
-      this.eventBus.emitGlobal({
-        kind: 'automation_execution.recovered',
-        data: {
-          executionId: exec.id,
-          automationId: exec.automationId,
-          finalStatus: status,
-          error,
-        },
-      });
-    } catch (err) {
+    // `emitGlobal` is async — a synchronous try/catch around it caught
+    // nothing. Attach the handler to the promise instead.
+    const event: AgentEvent = {
+      kind: 'automation_execution.recovered',
+      data: {
+        executionId: exec.id,
+        automationId: exec.automationId,
+        finalStatus: status,
+        error,
+      },
+    };
+    void this.eventBus.emitGlobal(event).catch((err: unknown) => {
       this.logger.warn(
         `[AutomationRecoveryService] Failed to emit recovery event for ${exec.id}: ` +
         `${err instanceof Error ? err.message : String(err)}`,
       );
-    }
+    });
   }
 
   // ── Idempotency-key sweeper (Track A3) ─────────────────────────

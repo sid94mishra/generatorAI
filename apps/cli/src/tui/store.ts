@@ -413,9 +413,11 @@ export function blockedWorkItems(
           summary:
             pending.kind === 'plan'
               ? `Plan review: ${pending.title}`
-              : pending.questions.length === 1
-                ? pending.questions[0]?.question ?? 'Question'
-                : `${pending.questions.length} questions`,
+              : pending.kind === 'permission'
+                ? `Allow ${pending.toolName}?`
+                : pending.questions.length === 1
+                  ? pending.questions[0]?.question ?? 'Question'
+                  : `${pending.questions.length} questions`,
         });
       }
     }

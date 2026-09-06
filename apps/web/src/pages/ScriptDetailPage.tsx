@@ -11,8 +11,6 @@ import {
   ArrowLeft,
   ArrowRight,
   AlertCircle,
-  RefreshCw,
-  Tag,
   Cpu,
 } from 'lucide-react';
 
@@ -79,6 +77,7 @@ export function ScriptDetailPage() {
               variant="ghost"
               size="icon"
               onClick={() => navigate('/scripts')}
+              aria-label="Back to scripts"
             >
               <ArrowLeft className="w-5 h-5" />
             </Button>
@@ -130,7 +129,7 @@ export function ScriptDetailPage() {
             Run Profiles
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {profiles.map((profile: any) => (
+            {profiles.map((profile: { name: string; description?: string; sessionMode?: string }) => (
               <button
                 key={profile.name}
                 onClick={() => setSelectedProfile(profile.name === selectedProfile ? undefined : profile.name)}
@@ -166,7 +165,7 @@ export function ScriptDetailPage() {
           Stages ({stages.length})
         </h2>
         <div className="space-y-2">
-          {stages.map((stage: any, idx: number) => (
+          {stages.map((stage: { localId?: string; config?: { name?: string; prompt?: { content?: string } } }, idx: number) => (
             <div key={stage.localId ?? idx} className="flex items-center gap-3 p-3 bg-subtle rounded-lg border border-border">
               <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emphasis text-xs text-foreground font-mono">
                 {idx + 1}
@@ -191,7 +190,7 @@ export function ScriptDetailPage() {
         <div className="rounded-lg border border-border bg-card p-5">
           <h2 className="text-lg font-semibold text-foreground mb-3">Edges ({edges.length})</h2>
           <div className="space-y-1.5">
-            {edges.map((edge: any, idx: number) => (
+            {edges.map((edge: { from: string; to: string; edgeType?: string }, idx: number) => (
               <div key={idx} className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span className="font-mono text-foreground">{edge.from}</span>
                 <ArrowRight className="w-3 h-3" />

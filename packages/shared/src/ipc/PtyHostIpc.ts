@@ -5,6 +5,8 @@
  * All messages are JSON-serializable for Node.js IPC transport.
  */
 
+import type { HostHelloFrame } from '../protocol/hostProtocol.js';
+
 // ─── Requests (gateway → pty-host) ─────────────────────────────────────────
 
 export interface PtyCreateSessionRequest {
@@ -156,6 +158,8 @@ export interface PtyPongResponse {
 }
 
 export type PtyHostResponse =
+  /** Plan item 43 — always the FIRST frame the host sends; see protocol/hostProtocol.ts. */
+  | HostHelloFrame
   | PtySessionReadyNotification
   | PtyDataNotification
   | PtyExitNotification

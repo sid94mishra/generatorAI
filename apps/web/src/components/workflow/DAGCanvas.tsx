@@ -27,6 +27,7 @@ import { useWorkflowBuilderStore, type StageNodeData, type StageEdgeData } from 
 import { getLayoutedElements } from '@/utils/dagLayout.js';
 import { AlignHorizontalDistributeCenter, Plus, GitBranch } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip.js';
+import { Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import type { Node, Edge } from '@xyflow/react';
@@ -250,13 +251,15 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
         {!readonly && (
           <Panel position="top-right">
             <Tooltip content="Auto-layout (arrange nodes)" side="left">
-              <button
+              <Button
                 onClick={handleAutoLayout}
-                className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-sm font-medium text-[var(--color-foreground)] shadow-sm transition-colors hover:bg-[var(--color-accent)]"
+                variant="ghost"
+                size="sm"
+                className="h-auto flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-sm font-medium text-[var(--color-foreground)] shadow-sm transition-colors hover:bg-[var(--color-accent)]"
               >
                 <AlignHorizontalDistributeCenter className="h-4 w-4" />
                 Auto-Layout
-              </button>
+              </Button>
             </Tooltip>
           </Panel>
         )}
@@ -264,15 +267,17 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
         {/* Add Stage button — bottom-center, no overlap with controls */}
         {!readonly && onAddStage && (
           <Panel position="bottom-center">
-            <button
+            <Button
               onClick={onAddStage}
+              variant="ghost"
+              size="sm"
               className={cn(
-                'mb-3 flex items-center gap-2 rounded-full',
+                'h-auto mb-3 flex items-center gap-2 rounded-full',
                 'px-5 py-2.5 text-sm font-medium',
                 'bg-[var(--color-primary)] text-[var(--color-primary-foreground)]',
                 'shadow-[0_4px_14px_rgba(79,70,229,0.25)]',
                 'transition-all duration-200 ease-out',
-                'hover:shadow-[0_8px_25px_rgba(79,70,229,0.35)] hover:scale-[1.03]',
+                'hover:bg-[var(--color-primary)] hover:shadow-[0_8px_25px_rgba(79,70,229,0.35)] hover:scale-[1.03]',
                 'active:scale-[0.97]',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2',
               )}
@@ -280,7 +285,7 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
             >
               <Plus className="h-4 w-4" />
               Add Stage
-            </button>
+            </Button>
           </Panel>
         )}
 
@@ -298,13 +303,15 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
                 Click "Add Stage" below to create your first workflow stage, or drag from the sidebar
               </p>
               {onAddStage && (
-                <button
+                <Button
                   onClick={onAddStage}
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-[var(--color-primary-foreground)] shadow-sm transition-all hover:shadow-md active:scale-[0.97]"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-[var(--color-primary-foreground)] shadow-sm transition-all hover:bg-[var(--color-primary)] hover:shadow-md active:scale-[0.97]"
                 >
                   <Plus className="h-4 w-4" />
                   Add First Stage
-                </button>
+                </Button>
               )}
             </div>
           </Panel>

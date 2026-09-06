@@ -9,11 +9,11 @@ import { useChat, useArchiveChat } from '@/hooks/queries.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import { useStreamStore } from '@/stores/streamStore.js';
-import { useConnectionStore } from '@/stores/connectionStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
+import { ConnectionStatus } from '@/components/status/ConnectionStatus.js';
 import { cn } from '@/lib/utils.js';
 import { Tooltip } from '@/components/Tooltip.js';
-import { Badge, type BadgeTone } from '@/components/ui/index.js';
+import { Badge, type BadgeTone, Button } from '@/components/ui/index.js';
 import {
   Sun,
   Moon,
@@ -31,18 +31,6 @@ interface HeaderProps {
 }
 
 export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
-  // Worst state across the scopes this tab is subscribed to. 'disconnected'
-  // entries with zero received events are ignored — that is the initial
-  // record for a scope whose subscription never opened (or a stale default),
-  // not an outage.
-  const streamHealth = useConnectionStore((s) => {
-    let health: 'connected' | 'reconnecting' | 'disconnected' = 'connected';
-    for (const info of Object.values(s.connections)) {
-      if (info.state === 'reconnecting') health = 'reconnecting';
-      if (info.state === 'disconnected' && info.eventsReceived > 0) return 'disconnected';
-    }
-    return health;
-  });
   const { id: routeId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -103,14 +91,16 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
       <div className="flex items-center gap-3">
         {!sidebarOpen && (
           <Tooltip content="Show sidebar">
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={onToggleSidebar}
               aria-label="Show sidebar"
               data-testid="header-toggle-sidebar"
               className="rounded-md border border-border p-1 text-[var(--color-muted-foreground)] transition-colors hover:bg-subtle hover:text-[var(--color-foreground)]"
             >
               <PanelLeftOpen className="h-4 w-4" />
-            </button>
+            </Button>
           </Tooltip>
         )}
         <div className="flex items-center gap-2 text-sm">
@@ -147,35 +137,13 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
 
       {/* Right: actions + connection status + theme toggle */}
       <div className="flex items-center gap-2">
-        {/* Live-stream health. Quietly absent while everything is connected;
-            a server restart or dropped socket used to be completely invisible
-            (observed live: server killed mid-turn, page showed nothing). */}
-        {streamHealth !== 'connected' && (
-          <Tooltip
-            content={
-              streamHealth === 'reconnecting'
-                ? 'Live updates interrupted — reconnecting. Anything missed is replayed on reconnect.'
-                : 'Live updates disconnected. The page will keep retrying; refresh if this persists.'
-            }
-          >
-            <span
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium',
-                streamHealth === 'reconnecting'
-                  ? 'border-[var(--color-warning)]/40 text-[var(--color-warning)]'
-                  : 'border-[var(--color-danger)]/40 text-[var(--color-danger)]',
-              )}
-            >
-              <span className={cn(
-                'h-1.5 w-1.5 rounded-full',
-                streamHealth === 'reconnecting'
-                  ? 'animate-pulse bg-[var(--color-warning)]'
-                  : 'bg-[var(--color-danger)]',
-              )} />
-              {streamHealth === 'reconnecting' ? 'Reconnecting…' : 'Live updates off'}
-            </span>
-          </Tooltip>
-        )}
+        {/* Live-stream health + the "events are missing" badge (N4). Quietly
+            absent while everything is connected and complete; a server restart
+            or dropped socket used to be completely invisible (observed live:
+            server killed mid-turn, page showed nothing), and a resume that had
+            to skip past a hole was never surfaced at all. */}
+        <ConnectionStatus quietWhenHealthy />
+
         {/* Chat Actions */}
         {isChatContext && chatId && (
           <div className="flex items-center gap-1">
@@ -199,7 +167,9 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
             themes a blind rotation stops being a shortcut and starts being a
             way to lose the theme you had. That lives in Settings. */}
         <Tooltip content={`Appearance: ${mode}`}>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={() => {
               const next = mode === 'dark' ? 'light' : mode === 'light' ? 'system' : 'dark';
               setMode(next);
@@ -214,14 +184,16 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
           ) : (
             <Monitor className="h-4 w-4" />
           )}
-          </button>
+          </Button>
         </Tooltip>
 
         {/* Right side pane toggle — shown only when the current page
             registers a right pane (chat detail, workflow run). */}
         {rightPaneController && (
           <Tooltip content={rightPaneController.open ? 'Hide side pane' : 'Show side pane'}>
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={rightPaneController.toggle}
               aria-pressed={rightPaneController.open}
               aria-label={rightPaneController.open ? 'Hide side pane' : 'Show side pane'}
@@ -238,7 +210,7 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
               ) : (
                 <PanelRightOpen className="h-4 w-4" />
               )}
-            </button>
+            </Button>
           </Tooltip>
         )}
       </div>
@@ -305,7 +277,9 @@ function ActionButton({ onClick, loading, disabled, icon, label, variant }: Acti
 
   return (
     <Tooltip content={label}>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onClick}
         disabled={disabled || loading}
         className={cn(
@@ -319,7 +293,7 @@ function ActionButton({ onClick, loading, disabled, icon, label, variant }: Acti
           icon
         )}
         <span className="hidden sm:inline">{label}</span>
-      </button>
+      </Button>
     </Tooltip>
   );
 }

@@ -188,7 +188,7 @@ export class Renderer {
         if (Array.isArray(result.data)) {
           this.renderTable(result.data, spec.output.columns ?? this.inferColumns(result.data));
         } else {
-          this.renderRecord(result.data, spec.output.fields);
+          this.renderRecord(result.data, spec.output.fields, spec.output.fieldsOnly);
         }
         if (result.message) {
           this.options.write(`\n${this.colour('✓', pc.green)} ${result.message}\n`);
@@ -292,7 +292,7 @@ export class Renderer {
     return columns.filter((c) => kept.includes(c));
   }
 
-  private renderRecord(data: unknown, fields?: ColumnSpec[]): void {
+  private renderRecord(data: unknown, fields?: ColumnSpec[], fieldsOnly?: boolean): void {
     if (data === null || data === undefined) {
       this.options.write(`${this.colour('(empty)', pc.dim)}\n`);
       return;
@@ -306,9 +306,14 @@ export class Renderer {
     const declared = new Map((fields ?? []).map((f) => [f.key, f]));
     const ordered = [
       ...(fields ?? []).filter((f) => readPath(data, f.key) !== undefined),
-      ...entries
-        .filter(([key]) => !declared.has(key))
-        .map(([key]) => ({ key, header: key }) as ColumnSpec),
+      // `fieldsOnly` suppresses the spill of undeclared keys. Without it a
+      // deep diagnostic payload prints in full as indented JSON, which is
+      // what `system status` used to do.
+      ...(fieldsOnly && fields?.length
+        ? []
+        : entries
+            .filter(([key]) => !declared.has(key))
+            .map(([key]) => ({ key, header: key }) as ColumnSpec)),
     ];
 
     const labelWidth = Math.max(...ordered.map((f) => stringWidth(f.header)), 0);

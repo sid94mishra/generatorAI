@@ -73,7 +73,19 @@ import { Worker, type TransferListItem } from 'node:worker_threads';
 import type { ILogger } from '@generatorai/shared';
 
 /** Ops the worker understands. */
-type Op = 'asr.load' | 'asr.run' | 'tts.load' | 'tts.run' | 'vad.load' | 'vad.score' | 'vad.release';
+type Op =
+  | 'asr.load'
+  | 'asr.run'
+  | 'tts.load'
+  | 'tts.run'
+  | 'vad.load'
+  | 'vad.score'
+  | 'vad.release'
+  | 'nemo.load'
+  | 'nemo.open'
+  | 'nemo.push'
+  | 'nemo.flush'
+  | 'nemo.close';
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -118,6 +130,251 @@ let ttsModel = null;
 let vadSession = null;
 const vadStates = new Map();
 const VAD_STATE = 2 * 1 * 128;
+
+// Nemotron keeps its whole decode state HERE rather than returning it,
+// because the encoder's attention caches are ~6.8MB and would otherwise
+// cross the thread boundary twice per 560ms chunk. Only PCM in, text out.
+let nemo = null;
+const nemoStreams = new Map();
+
+/** In-place radix-2 complex FFT. n is a power of two (512 here). */
+function nemoFft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i += 1) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      const tr = re[i]; re[i] = re[j]; re[j] = tr;
+      const ti = im[i]; im[i] = im[j]; im[j] = ti;
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (-2 * Math.PI) / len;
+    const wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k += 1) {
+        const ur = re[i + k], ui = im[i + k];
+        const half = i + k + len / 2;
+        const vr = re[half] * cr - im[half] * ci;
+        const vi = re[half] * ci + im[half] * cr;
+        re[i + k] = ur + vr; im[i + k] = ui + vi;
+        re[half] = ur - vr; im[half] = ui - vi;
+        const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+      }
+    }
+  }
+}
+
+/**
+ * Read the CENTER-padded signal at index i.
+ * Layout: [reflect nFft/2][preemphasised audio][reflect nFft/2]. The tail
+ * half only exists once the utterance is finished; until then callers only
+ * ask for indices the audio already covers.
+ */
+function nemoPadded(st, i) {
+  const pad = nemo.cfg.nFft >> 1;
+  const n = st.audioLen;
+  if (n <= 0) return 0;
+  let j = i - pad;
+  if (j < 0) j = Math.min(-j, n - 1);
+  else if (j >= n) j = Math.max(2 * n - 2 - j, 0);
+  return st.audio[j];
+}
+
+/** One log-mel frame (frame index t), matching the offline reference exactly. */
+function nemoMelFrame(st, t) {
+  const cfg = nemo.cfg;
+  const re = st.re, im = st.im;
+  re.fill(0); im.fill(0);
+  const off = t * cfg.hopLength;
+  const winPad = (cfg.nFft - cfg.winLength) >> 1;
+  for (let i = 0; i < cfg.winLength; i += 1) {
+    re[winPad + i] = nemoPadded(st, off + winPad + i) * nemo.window[i];
+  }
+  nemoFft(re, im);
+  const bins = cfg.nFft / 2 + 1;
+  const power = st.power;
+  for (let k = 0; k < bins; k += 1) power[k] = re[k] * re[k] + im[k] * im[k];
+  const frame = new Float32Array(cfg.nMels);
+  const filters = nemo.filters;
+  for (let m = 0; m < cfg.nMels; m += 1) {
+    let sum = 0;
+    const base = m * bins;
+    for (let k = 0; k < bins; k += 1) sum += filters[base + k] * power[k];
+    frame[m] = Math.log(sum + cfg.logEpsilon);
+  }
+  return frame;
+}
+
+/** How many mel frames are computable without the end padding. */
+function nemoFramesReady(st) {
+  const cfg = nemo.cfg;
+  const pad = cfg.nFft >> 1;
+  if (st.audioLen < pad) return 0;
+  return Math.floor((st.audioLen - pad) / cfg.hopLength) + 1;
+}
+
+/** Every frame, including those needing the tail reflect. Used at flush. */
+function nemoFramesTotal(st) {
+  return 1 + Math.floor(st.audioLen / nemo.cfg.hopLength);
+}
+
+function nemoNewStream() {
+  const cfg = nemo.cfg;
+  const ort = nemo.ort;
+  const L = cfg.encoderLayers, LC = cfg.leftContext, D = cfg.hiddenSize;
+  const CC = cfg.convContext, DH = cfg.decoderHidden, DL = cfg.decoderLayers;
+  return {
+    audio: new Float32Array(cfg.sampleRate * 8),
+    audioLen: 0,
+    prevRaw: 0,
+    started: false,
+    frames: [],
+    step: 0,
+    re: new Float64Array(cfg.nFft),
+    im: new Float64Array(cfg.nFft),
+    power: new Float64Array(cfg.nFft / 2 + 1),
+    cacheChan: new ort.Tensor('float32', new Float32Array(L * LC * D), [1, L, LC, D]),
+    cacheTime: new ort.Tensor('float32', new Float32Array(L * D * CC), [1, L, D, CC]),
+    cacheLen: new ort.Tensor('int64', BigInt64Array.from([0n]), [1]),
+    h: new ort.Tensor('float32', new Float32Array(DL * DH), [DL, 1, DH]),
+    c: new ort.Tensor('float32', new Float32Array(DL * DH), [DL, 1, DH]),
+    lastToken: cfg.blankId,
+    decOut: null,
+    tokens: [],
+  };
+}
+
+function nemoAppend(st, pcm) {
+  const need = st.audioLen + pcm.length;
+  if (need > st.audio.length) {
+    let size = st.audio.length;
+    while (size < need) size *= 2;
+    const grown = new Float32Array(size);
+    grown.set(st.audio.subarray(0, st.audioLen));
+    st.audio = grown;
+  }
+  // Pre-emphasis, carried across chunk boundaries. The very first sample of
+  // an utterance passes through unchanged, matching NeMo's own front end.
+  const preemph = nemo.cfg.preemphasis;
+  for (let i = 0; i < pcm.length; i += 1) {
+    // A single NaN sample turns every logit NaN, the argmax then lands on
+    // token 0 ("<unk>") for the full symbol budget of every frame, and the
+    // encoder cache carries the poison into the next chunk. Measured: one
+    // bad frame typed 70 "<unk>"s into the composer. Zero is the only safe
+    // substitute.
+    const raw = Number.isFinite(pcm[i]) ? pcm[i] : 0;
+    st.audio[st.audioLen + i] = st.started ? raw - preemph * st.prevRaw : raw;
+    st.prevRaw = raw;
+    st.started = true;
+  }
+  st.audioLen = need;
+}
+
+async function nemoDecoderStep(st) {
+  return nemo.dec.run({
+    targets: new nemo.ort.Tensor('int64', BigInt64Array.from([BigInt(st.lastToken)]), [1, 1]),
+    h_in: st.h,
+    c_in: st.c,
+  });
+}
+
+/**
+ * Run encoder windows and greedy-RNNT decode them.
+ *
+ * \`allowPartial\` is what makes the END of an utterance survive. The encoder
+ * takes a FIXED 65-frame window, so mid-stream we may only step once a whole
+ * window is available. At flush there is almost never a whole window left —
+ * the speaker stopped mid-chunk — and requiring one silently discarded up to
+ * 560ms of the final audio. Measured: "…worried about the rate limiter"
+ * committed as "…the rate limi", and "…in Redis period" as "…peri". It looked
+ * exactly like the model dropping words.
+ *
+ * So the last window is zero-padded and decoded anyway, which is what the
+ * offline reference implementation did all along.
+ */
+async function nemoAdvance(st, upToFrames, allowPartial) {
+  const cfg = nemo.cfg;
+  const ort = nemo.ort;
+  const D = cfg.hiddenSize, DH = cfg.decoderHidden;
+  const chunkFrames = cfg.chunkFrames, windowFrames = cfg.windowFrames;
+
+  if (!st.decOut) {
+    const r0 = await nemoDecoderStep(st);
+    st.decOut = r0.decoder_output; st.h = r0.h_out; st.c = r0.c_out;
+  }
+
+  for (;;) {
+    const start = st.step * chunkFrames - cfg.preEncodeCacheFrames;
+    if (allowPartial ? start >= upToFrames : start + windowFrames > upToFrames) break;
+    const win = new Float32Array(windowFrames * cfg.nMels);
+    for (let i = 0; i < windowFrames; i += 1) {
+      const fi = start + i;
+      // Out of range stays zero: before the utterance starts, and (only on the
+      // final flush window) past its end.
+      if (fi < 0 || fi >= upToFrames) continue;
+      let frame = st.frames[fi];
+      if (!frame) { frame = nemoMelFrame(st, fi); st.frames[fi] = frame; }
+      win.set(frame, i * cfg.nMels);
+    }
+    const feeds = {
+      audio_signal: new ort.Tensor('float32', win, [1, windowFrames, cfg.nMels]),
+      length: new ort.Tensor('int64', BigInt64Array.from([BigInt(windowFrames)]), [1]),
+      cache_last_channel: st.cacheChan,
+      cache_last_time: st.cacheTime,
+      cache_last_channel_len: st.cacheLen,
+    };
+    if (nemo.usesLangId) {
+      feeds.lang_id = new ort.Tensor('int64', BigInt64Array.from([BigInt(cfg.langId || 0)]), [1]);
+    }
+    const out = await nemo.enc.run(feeds);
+    st.cacheChan = out.cache_last_channel_next;
+    st.cacheTime = out.cache_last_time_next;
+    st.cacheLen = out.cache_last_channel_len_next;
+    st.step += 1;
+
+    const encOut = out.outputs;
+    const nFrames = encOut.dims[1];
+    for (let t = 0; t < nFrames; t += 1) {
+      const frame = new Float32Array(D);
+      for (let d = 0; d < D; d += 1) frame[d] = encOut.data[t * D + d];
+      const encT = new ort.Tensor('float32', frame, [1, 1, D]);
+      for (let sym = 0; sym < cfg.maxSymbolsPerStep; sym += 1) {
+        const jr = await nemo.joint.run({
+          encoder_output: encT,
+          decoder_output: new ort.Tensor('float32', st.decOut.data, [1, 1, DH]),
+        });
+        const logits = jr.joint_output.data;
+        let best = 0, bv = -Infinity;
+        for (let k = 0; k < logits.length; k += 1) if (logits[k] > bv) { bv = logits[k]; best = k; }
+        if (best === cfg.blankId) break;
+        st.tokens.push(best);
+        st.lastToken = best;
+        const dr = await nemoDecoderStep(st);
+        st.decOut = dr.decoder_output; st.h = dr.h_out; st.c = dr.c_out;
+      }
+    }
+  }
+}
+
+function nemoText(st) {
+  let out = '';
+  for (const id of st.tokens) {
+    const piece = nemo.vocab[id] || '';
+    // "<unk>" is the vocabulary's placeholder for an unrepresentable piece;
+    // it is never something a person said.
+    if (piece !== '<unk>') out += piece;
+  }
+  out = out.split('▁').join(' ');
+  // In auto-detect mode the model appends a locale tag after each utterance's
+  // terminal punctuation ("… service. <en-US> We need to …"). That is
+  // metadata about the transcript, not part of it, and without this it gets
+  // typed straight into the user's composer.
+  out = out.replace(/<[a-z]{2}(?:-[A-Za-z]{2})?>/g, ' ');
+  return out.replace(/\\s+/g, ' ').trim();
+}
 
 // A dependency may resolve to either the ESM or the CommonJS build. Importing
 // CJS from ESM puts the exports on \`.default\` rather than on the namespace,
@@ -225,6 +482,65 @@ const handlers = {
   },
   async 'vad.release'({ sid }) {
     vadStates.delete(sid);
+    return {};
+  },
+  async 'nemo.load'({ dir, filters, window, vocab, config }) {
+    const ort = await import(ortUrl);
+    const opts = { executionProviders: ['cpu'], logSeverityLevel: 3 };
+    const enc = await ort.InferenceSession.create(dir + '/encoder.onnx', opts);
+    const dec = await ort.InferenceSession.create(dir + '/decoder.onnx', opts);
+    const joint = await ort.InferenceSession.create(dir + '/joint.onnx', opts);
+    // The multilingual 3.5 encoder takes a sixth \`lang_id\` prompt input; the
+    // English-only export does not. Ask the graph rather than assuming.
+    const usesLangId = enc.inputNames.indexOf('lang_id') !== -1;
+    nemo = { ort, enc, dec, joint, filters, window, vocab, cfg: config, usesLangId };
+    // Run one silent chunk through all three graphs now. Creating the
+    // sessions maps the weights but does not touch them; the first real
+    // inference then page-faults ~700MB in, and measured in the browser
+    // the first word of the first dictation after boot arrived ~3s later
+    // than on every session after it. Paying that here, at load, keeps it
+    // off the user's first sentence.
+    const warm = nemoNewStream();
+    nemoAppend(warm, new Float32Array(config.chunkFrames * config.hopLength));
+    await nemoAdvance(warm, nemoFramesTotal(warm), true);
+    return {};
+  },
+  async 'nemo.open'({ sid }) {
+    if (!nemo) throw new Error('nemo.open called before nemo.load');
+    nemoStreams.set(sid, nemoNewStream());
+    return {};
+  },
+  // Feed audio and decode as far as the available frames allow. Returns the
+  // CUMULATIVE text of the open utterance, which is what
+  // ISpeechToTextEngine's onPartial contract requires.
+  async 'nemo.push'({ sid, pcm }) {
+    const st = nemoStreams.get(sid);
+    if (!st) throw new Error('nemo.push for unknown stream');
+    nemoAppend(st, pcm);
+    await nemoAdvance(st, nemoFramesReady(st), false);
+    return { text: nemoText(st) };
+  },
+  // End the utterance: decode the tail (which needs the end padding), return
+  // the final text, and reset for the next utterance while KEEPING the
+  // loaded model. Encoder caches reset because utterances are independent.
+  async 'nemo.flush'({ sid }) {
+    const st = nemoStreams.get(sid);
+    if (!st) throw new Error('nemo.flush for unknown stream');
+    // A flush with no audio — a pause landing right after the endpointer
+    // already committed the utterance — used to decode one window of
+    // reflect-padding read from an EMPTY buffer: NaN features, "<unk>"
+    // tokens, and the garbage was emitted as a segment.
+    if (st.audioLen < nemo.cfg.hopLength) {
+      nemoStreams.set(sid, nemoNewStream());
+      return { text: '' };
+    }
+    await nemoAdvance(st, nemoFramesTotal(st), true);
+    const text = nemoText(st);
+    nemoStreams.set(sid, nemoNewStream());
+    return { text };
+  },
+  async 'nemo.close'({ sid }) {
+    nemoStreams.delete(sid);
     return {};
   },
 };
@@ -508,6 +824,58 @@ export class VoiceWorkerPool {
 
   releaseVad(sid: number): Promise<void> {
     return this.post<void>('vad.release', { sid });
+  }
+
+  // ── Nemotron (streaming RNNT) ──────────────────────────────────
+  //
+  // The odd one out: every other engine hands the worker a buffer and gets
+  // text back, but a cache-aware streaming encoder is a STATE MACHINE. Its
+  // attention caches are ~6.8MB (24 layers x 70 x 1024 floats) and would have
+  // to make the round trip twice per 560ms chunk to live out here — about
+  // 24MB/s of structured clone to save nothing. So the state stays in the
+  // worker and only the audio and the transcript cross.
+  //
+  // It shares the worker for the same non-negotiable reason the VAD does:
+  // onnxruntime-node permits exactly one thread per process.
+
+  /** Load the three ONNX graphs. `filters`/`window` come from nemotronFeatures. */
+  loadNemotron(payload: {
+    dir: string;
+    filters: Float32Array;
+    window: Float32Array;
+    vocab: readonly string[];
+    config: Record<string, number>;
+  }): Promise<void> {
+    return this.post<void>('nemo.load', payload);
+  }
+
+  /** Begin a stream. `sid` scopes all the state below to one dictation session. */
+  openNemotron(sid: number): Promise<void> {
+    return this.post<void>('nemo.open', { sid });
+  }
+
+  /**
+   * Feed audio; get the CUMULATIVE transcript of the open utterance.
+   *
+   * Copy-then-transfer for the same reason `runAsr` does it: detaching the
+   * caller's buffer would empty audio it legitimately still holds.
+   */
+  pushNemotron(sid: number, pcm: Float32Array): Promise<{ text: string }> {
+    const owned = new Float32Array(pcm);
+    return this.post<{ text: string }>(
+      'nemo.push',
+      { sid, pcm: owned },
+      [owned.buffer as TransferListItem],
+    );
+  }
+
+  /** End the utterance, decode its tail, and reset for the next one. */
+  flushNemotron(sid: number): Promise<{ text: string }> {
+    return this.post<{ text: string }>('nemo.flush', { sid });
+  }
+
+  releaseNemotron(sid: number): Promise<void> {
+    return this.post<void>('nemo.close', { sid });
   }
 
   /** Terminate the worker and fail anything still in flight. Idempotent. */

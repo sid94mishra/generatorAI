@@ -12,7 +12,8 @@ import type {
   BrowserHostConfig,
   BrowserFrameNotification,
 } from '@generatorai/shared';
-import { isBrowserHostRequest } from '@generatorai/shared';
+import { HOST_PROTOCOL_VERSIONS, isBrowserHostRequest } from '@generatorai/shared';
+import { makeHostHello } from '@generatorai/shared/node';
 import { BrowserContextManager } from './BrowserContextManager.js';
 
 const MAX_CONTEXTS = 10;
@@ -56,8 +57,11 @@ export class BrowserHostServer {
       });
     });
 
+    // Plan item 43 — hello FIRST, then the ready pong, so a gateway-side
+    // client can refuse a stale dist before it sends a single request.
+    this.send(makeHostHello('browser-host', import.meta.url));
     this.send({ type: 'pong', reqId: '__ready__' });
-    console.log('[BrowserHostServer] Browser host ready');
+    console.log(`[BrowserHostServer] Browser host ready (protocol v${HOST_PROTOCOL_VERSIONS['browser-host']})`);
   }
 
   private send(msg: BrowserHostResponse): void {

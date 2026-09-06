@@ -103,6 +103,14 @@ interface WorkspaceEntry {
  * All IAgentHarness methods are forwarded to the correct sub-provider.
  * Sub-providers are created and started on demand.
  */
+/**
+ * Idle Copilot CLI processes the pool will hold before evicting the
+ * least-recently-used one. Each is a real process, so this is a memory bound
+ * rather than a correctness one; a workspace with a live conversation is never
+ * evicted, so an active server simply keeps what it is using.
+ */
+const DEFAULT_MAX_WORKSPACES = 8;
+
 export class WorkspacedCopilotPool implements IAgentHarness {
   private readonly baseOptions: WorkspacedCopilotPoolOptions;
   private readonly supervisor?: AgentHostSupervisor;
@@ -120,7 +128,19 @@ export class WorkspacedCopilotPool implements IAgentHarness {
   constructor(options: WorkspacedCopilotPoolOptions) {
     this.baseOptions = options;
     this.supervisor = options.supervisor;
-    this.maxWorkspaces = options.maxWorkspaces ?? Number.POSITIVE_INFINITY;
+    // A DEFAULT cap, not `Infinity`.
+    //
+    // The pool keys a CLI process on the working directory, which was written
+    // for the case where several conversations share a workspace. In this
+    // product every chat gets its OWN execution workspace, so the key is
+    // effectively per-chat: with no cap, a server that has served N chats
+    // holds N Copilot CLI processes and never releases one, because eviction
+    // only ever runs when the cap is exceeded. Nothing set `maxWorkspaces`
+    // anywhere, so the cap was `Infinity` in every deployment.
+    //
+    // The LRU eviction below already refuses to evict a workspace with a live
+    // conversation, so the cap bounds idle processes only.
+    this.maxWorkspaces = options.maxWorkspaces ?? DEFAULT_MAX_WORKSPACES;
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────

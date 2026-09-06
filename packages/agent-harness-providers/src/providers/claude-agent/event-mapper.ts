@@ -12,8 +12,8 @@
 // two-phase pipeline.
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
-import { createAgentEvent } from '@generatorai/shared';
+import type { AgentEvent, AgentEventKind, McpServerStartupStatus } from '@generatorai/shared';
+import { createAgentEvent, mcpStartupWarnings } from '@generatorai/shared';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
 // Helper type for narrowing system messages
@@ -555,9 +555,27 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
       const kind = SYSTEM_SUBTYPE_TO_KIND[sys.subtype] ?? 'harness.session_info';
 
       switch (sys.subtype) {
-        case 'init':
+        case 'init': {
           events.push(createAgentEvent('harness.session_start', { provider: 'claude-agent' }));
+          // The init frame is the ONLY place the SDK reports how each MCP
+          // server actually started. Discarding it is why a user who
+          // configured a server watched it fail with no explanation
+          // anywhere — the documentation claimed this was surfaced, and
+          // nothing surfaced it (review 2.4).
+          for (const warning of mcpStartupWarnings(
+            sys['mcp_servers'] as McpServerStartupStatus[] | undefined,
+          )) {
+            events.push(
+              createAgentEvent('harness.warning', {
+                message: warning.message,
+                code: warning.code,
+                provider: 'claude-agent',
+                details: warning.details,
+              }),
+            );
+          }
           break;
+        }
 
         case 'compact_boundary': {
           // The gauge must DROP after compaction. `post_tokens` is the

@@ -9,7 +9,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Check,
-  Loader2,
   MessageSquarePlus,
   Pencil,
   Save,
@@ -20,6 +19,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button, Spinner, Textarea } from '@/components/ui/index.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import {
   usePlan,
@@ -87,7 +87,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-[var(--color-muted-foreground)]">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner size="md" />
       </div>
     );
   }
@@ -214,21 +214,25 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
           </div>
           <div className="flex flex-shrink-0 items-center gap-1">
             {!editing && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => {
                   setDraft(revision.content);
                   setEditing(true);
                 }}
                 title="Edit plan"
                 aria-label="Edit plan"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+                className="rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
               >
                 <Pencil className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               onClick={() => {
                 void saveToWorkspace
                   .mutateAsync(plan.id)
@@ -241,10 +245,10 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
               }}
               title="Save a tracked copy into the workspace"
               aria-label="Save plan to workspace"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+              className="rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
             >
               <Download className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -254,12 +258,13 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
             <History className="h-3 w-3 flex-shrink-0 text-[var(--color-muted-foreground)]" />
             <div className="flex flex-wrap gap-1">
               {plan.revisions.map((r) => (
-                <button
+                <Button
                   key={r.revision}
                   type="button"
+                  variant="ghost"
                   onClick={() => setViewRevision(r.revision)}
                   className={cn(
-                    'rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors',
+                    'h-auto rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors',
                     r.revision === revision.revision
                       ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                       : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]',
@@ -268,7 +273,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
                 >
                   v{r.revision}
                   {r.authoredBy === 'user' ? ' ✎' : ''}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -284,34 +289,33 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {editing ? (
           <div className="flex h-full flex-col p-3">
-            <textarea
+            <Textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               className="min-h-0 flex-1 resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 font-mono text-xs leading-relaxed text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
               spellCheck={false}
+              aria-label="Edit plan document"
             />
             <div className="mt-2 flex items-center justify-end gap-1.5">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={() => setEditing(false)}
-                className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+                className="flex h-auto items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-normal text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)]"
               >
                 <X className="h-3 w-3" />
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                disabled={updateContent.isPending}
+                variant="primary"
+                loading={updateContent.isPending}
                 onClick={() => void handleSaveEdit()}
-                className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="h-auto flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90"
               >
-                {updateContent.isPending ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Save className="h-3 w-3" />
-                )}
+                {!updateContent.isPending && <Save className="h-3 w-3" />}
                 Save as v{plan.currentRevision + 1}
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
@@ -329,7 +333,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
                 <p className="mb-1.5 line-clamp-3 border-l-2 border-[var(--color-primary)]/50 pl-2 text-[11px] italic text-[var(--color-muted-foreground)]">
                   {selection.text}
                 </p>
-                <textarea
+                <Textarea
                   value={commentDraft}
                   onChange={(e) => setCommentDraft(e.target.value)}
                   rows={2}
@@ -338,25 +342,27 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
                   className="w-full resize-none rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1.5 text-xs text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
                 />
                 <div className="mt-1.5 flex items-center justify-end gap-1.5">
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => {
                       setSelection(null);
                       setCommentDraft('');
                     }}
-                    className="rounded-md px-2 py-1 text-[11px] text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]"
+                    className="h-auto rounded-md px-2 py-1 text-[11px] font-normal text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]"
                   >
                     Cancel
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="primary"
                     disabled={!commentDraft.trim() || addComment.isPending}
                     onClick={() => void handleAddComment()}
-                    className="flex items-center gap-1 rounded-md bg-[var(--color-primary)] px-2 py-1 text-[11px] font-medium text-[var(--color-primary-foreground)] disabled:opacity-50"
+                    className="h-auto flex items-center gap-1 rounded-md bg-[var(--color-primary)] px-2 py-1 text-[11px] font-medium text-[var(--color-primary-foreground)]"
                   >
                     <MessageSquarePlus className="h-3 w-3" />
                     Comment
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -397,7 +403,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
       {/* Decision footer */}
       {isActionable && !editing && !isStale && (
         <div className="flex-shrink-0 space-y-2 border-t border-[var(--color-border)] p-3">
-          <textarea
+          <Textarea
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
             rows={2}
@@ -409,38 +415,37 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
             className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-xs text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
           />
           <div className="flex flex-wrap items-center gap-1.5">
-            <button
+            <Button
               type="button"
-              disabled={decide.isPending}
+              variant="primary"
+              loading={decide.isPending}
               onClick={() => void handleDecision(true, 'implement_interactive')}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-2 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
+              className="h-auto flex flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-2 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90"
             >
-              {decide.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Check className="h-3.5 w-3.5" />
-              )}
+              {!decide.isPending && <Check className="h-3.5 w-3.5" />}
               Approve &amp; implement
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
               disabled={decide.isPending}
               onClick={() => void handleDecision(false)}
-              className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)] disabled:opacity-50"
+              className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
             >
               <MessageSquarePlus className="h-3.5 w-3.5" />
               Request changes
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="ghost"
               disabled={decide.isPending}
               onClick={() => void handleDecision(true, 'exit_only')}
               title="Exit plan mode without implementing"
               aria-label="Discard plan"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-50"
+              className="h-8 w-8 items-center justify-center rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
             >
               <CircleSlash className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           </div>
         </div>
       )}

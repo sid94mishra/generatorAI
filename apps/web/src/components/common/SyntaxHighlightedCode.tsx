@@ -3,9 +3,16 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
-import hljs from 'highlight.js';
+// W-highlight-bundle — the FULL `highlight.js` package (~190 grammars, 9.4 MB
+// raw) used to be imported here directly. `lib/highlight/languages.ts` is the
+// same curated `highlight.js/lib/core` + ~25 grammar subset the chat worker
+// already uses (see that file's header). Anything outside the curated set
+// simply falls through to `highlightAuto` below, same as an unregistered
+// language always did — a smaller registered set, not a behavior change.
+import { hljs } from '@/lib/highlight/languages.js';
 import { Copy, Check } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 
 /** Map common file extensions to highlight.js language aliases */
 const EXT_LANG_MAP: Record<string, string> = {
@@ -93,10 +100,11 @@ export function SyntaxHighlightedCode({
     <div className={cn('relative group', className)}>
       {/* Copy button (floats top-right) */}
       {showCopyButton && (
-        <button
+        <Button
+          variant="ghost"
           onClick={handleCopy}
           className={cn(
-            'absolute right-2 top-2 z-10 flex items-center gap-1 rounded px-1.5 py-1 text-[10px] transition-all',
+            'h-auto absolute right-2 top-2 z-10 flex items-center gap-1 rounded px-1.5 py-1 text-[10px] transition-all',
             'opacity-0 group-hover:opacity-100',
             copied
               ? 'text-green-600 bg-green-50 dark:bg-green-900/20'
@@ -105,7 +113,7 @@ export function SyntaxHighlightedCode({
         >
           {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
           {copied ? 'Copied' : 'Copy'}
-        </button>
+        </Button>
       )}
 
       <div

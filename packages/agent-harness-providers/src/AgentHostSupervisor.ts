@@ -45,13 +45,19 @@ class BoundedSemaphore {
   }
 
   async acquire(): Promise<void> {
-    if (this.available > 0) {
-      this.available--;
-      return;
-    }
+    if (this.tryAcquire()) return;
     await new Promise<void>((resolve) => {
       this.waiters.push(resolve);
     });
+  }
+
+  /** Take a permit only if one is free right now. Never waits. */
+  tryAcquire(): boolean {
+    if (this.available > 0) {
+      this.available--;
+      return true;
+    }
+    return false;
   }
 
   release(): void {
@@ -79,14 +85,26 @@ class BoundedSemaphore {
   }
 }
 
+/**
+ * Default cap on concurrent agent turns. See `maxConcurrentExecutions`.
+ * Exported so the docs (`.github/docs/operations.md`) and the out-of-process
+ * agent host can quote the same number.
+ */
+export const DEFAULT_MAX_CONCURRENT_AGENT_TURNS = 4;
+
 // ── Options ────────────────────────────────────────────────────────
 
 export interface AgentHostSupervisorOptions {
   /**
-   * Maximum concurrent agent turns across all sessions (default: 16).
+   * Maximum concurrent agent turns across all sessions (default: 4).
    * When this limit is reached, new turns queue rather than reject — the
-   * admission controller (W18) decides whether to reject upstream.
+   * admission controller (W18) decides whether to reject upstream — and the
+   * provider announces the wait (`harness.session_info` / `queued`).
    * Set via `GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`.
+   *
+   * Why 4: each Claude turn is a CLI process of ~250 MB RSS. The previous
+   * default of 16 meant a worst case around 4 GB for what is, by default, a
+   * single-user desktop application (APPLICATION-REVIEW-2026-09 §4.1).
    */
   maxConcurrentExecutions?: number;
 
@@ -199,7 +217,7 @@ export class AgentHostSupervisor {
 
   constructor(opts?: AgentHostSupervisorOptions) {
     const maxExec = opts?.maxConcurrentExecutions
-      ?? Number(process.env['GENERATORAI_MAX_CONCURRENT_AGENT_TURNS'] ?? 16);
+      ?? Number(process.env['GENERATORAI_MAX_CONCURRENT_AGENT_TURNS'] ?? DEFAULT_MAX_CONCURRENT_AGENT_TURNS);
     const maxCold = opts?.maxConcurrentColdStarts
       ?? Number(process.env['GENERATORAI_MAX_CONCURRENT_COLD_STARTS'] ?? 4);
 
@@ -222,6 +240,23 @@ export class AgentHostSupervisor {
    */
   async acquireExecution(): Promise<() => void> {
     await this.executionSemaphore.acquire();
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        this.executionSemaphore.release();
+      }
+    };
+  }
+
+  /**
+   * Take an execution slot ONLY if one is free right now; `undefined` when
+   * the caller would have to wait. Lets a provider tell the user it is queued
+   * (and how many turns are ahead — `snapshot().executionQueueDepth`) before
+   * falling back to `acquireExecution()`.
+   */
+  tryAcquireExecution(): (() => void) | undefined {
+    if (!this.executionSemaphore.tryAcquire()) return undefined;
     let released = false;
     return () => {
       if (!released) {

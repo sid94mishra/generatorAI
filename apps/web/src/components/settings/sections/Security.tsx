@@ -17,7 +17,7 @@ import {
   Globe, Trash2, RefreshCw, Copy, Check, QrCode, KeyRound, AlertTriangle,
 } from 'lucide-react';
 import { SectionHeader, SettingsCard, InfoRow } from '../shared.js';
-import { ToggleSwitch } from '@/components/ui/index.js';
+import { ToggleSwitch, useConfirm, Button, Input, Spinner } from '@/components/ui/index.js';
 import { apiFetch, ApiError } from '@/platform/apiFetch.js';
 import {
   forgetConnection,
@@ -301,6 +301,7 @@ function accessLevel(scopes: string[]): { label: string; tone: 'danger' | 'warni
 }
 
 export function SecuritySection() {
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirm();
   const [posture, setPosture] = useState<SecurityPosture | null>(null);
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [pending, setPending] = useState<PendingPairing[]>([]);
@@ -426,11 +427,15 @@ export function SecuritySection() {
 
   const revokeDevice = useCallback(
     async (deviceId: string, name: string) => {
-      if (!window.confirm(
-        `Revoke "${name}"?\n\nIt will lose access immediately and must be paired again. ` +
-        `If it is currently connected through the relay, the revocation is queued and ` +
-        `delivered as soon as the relay is reachable.`,
-      )) return;
+      if (!(await confirmAction({
+        title: `Revoke "${name}"?`,
+        description:
+          'It will lose access immediately and must be paired again. If it is currently ' +
+          'connected through the relay, the revocation is queued and delivered as soon as ' +
+          'the relay is reachable.',
+        confirmLabel: 'Revoke',
+        variant: 'destructive',
+      }))) return;
       try {
         await apiFetch(`/api/auth/devices/${deviceId}`, { method: 'DELETE' });
         void refresh();
@@ -438,7 +443,7 @@ export function SecuritySection() {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [refresh],
+    [refresh, confirmAction],
   );
 
   /**
@@ -456,7 +461,11 @@ export function SecuritySection() {
           scope === 'exec:terminal'
             ? 'run shell commands on this machine'
             : 'pair and revoke other devices';
-        if (!window.confirm(`Allow "${device.name}" to ${what}?\n\nThis takes effect the next time that device refreshes its session.`)) {
+        if (!(await confirmAction({
+          title: `Allow "${device.name}" to ${what}?`,
+          description: 'This takes effect the next time that device refreshes its session.',
+          confirmLabel: 'Allow',
+        }))) {
           return;
         }
       }
@@ -477,7 +486,7 @@ export function SecuritySection() {
         setScopeBusy(null);
       }
     },
-    [refresh],
+    [refresh, confirmAction],
   );
 
   const cancelPairing = useCallback(
@@ -564,31 +573,41 @@ export function SecuritySection() {
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     {!isActive && (
-                      <button
+                      <Button
                         type="button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => switchConnection(connection.serverId)}
-                        className="rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors hover:bg-subtle"
                       >
                         Switch
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-sm"
                       title="Forget this server"
+                      aria-label={`Forget ${connection.label}`}
                       onClick={() => {
-                        if (
-                          window.confirm(
-                            `Forget ${connection.label}? This device's credential for it is deleted, ` +
-                              'and you will need a new pairing code to connect again.',
-                          )
-                        ) {
-                          forgetConnection(connection.serverId);
-                        }
+                        void (async () => {
+                          if (
+                            await confirmAction({
+                              title: `Forget ${connection.label}?`,
+                              description:
+                                "This device's credential for it is deleted, and you will need " +
+                                'a new pairing code to connect again.',
+                              confirmLabel: 'Forget',
+                              variant: 'destructive',
+                            })
+                          ) {
+                            forgetConnection(connection.serverId);
+                          }
+                        })();
                       }}
-                      className="rounded-md border border-border p-1.5 text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive"
+                      className="rounded-md border border-border text-muted-foreground hover:border-destructive/50 hover:bg-transparent hover:text-destructive"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    </Button>
                   </div>
                 </div>
               );
@@ -606,14 +625,15 @@ export function SecuritySection() {
         title="This server"
         description="What is protecting it right now."
         action={
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => void refresh()}
-            className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-subtle hover:text-foreground"
+            leftIcon={<RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />}
           >
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
             Refresh
-          </button>
+          </Button>
         }
       >
         {posture ? (
@@ -818,18 +838,21 @@ export function SecuritySection() {
                     <code className="flex-1 truncate rounded-md bg-card px-3 py-2 font-mono text-sm text-foreground">
                       {joinAddress(pairing.joinUrl, network?.endpoints)}
                     </code>
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="icon"
                       onClick={() => void copyJoinUrl()}
                       title="Copy address"
-                      className="rounded-md border border-border p-2 transition-colors hover:bg-subtle"
+                      aria-label="Copy address"
+                      className="h-9 w-9 rounded-md p-2"
                     >
                       {copiedUrl ? (
                         <Check className="h-3.5 w-3.5 text-success" />
                       ) : (
                         <Copy className="h-3.5 w-3.5" />
                       )}
-                    </button>
+                    </Button>
                   </div>
                 </li>
                 <li className="space-y-1.5">
@@ -841,18 +864,21 @@ export function SecuritySection() {
                     <code className="flex-1 rounded-md bg-card px-3 py-3 text-center font-mono text-2xl font-semibold tracking-[0.15em] text-foreground select-all">
                       {pairing.shortCode}
                     </code>
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="icon"
                       onClick={() => void copyCode()}
                       title="Copy code"
-                      className="rounded-md border border-border p-2 transition-colors hover:bg-subtle"
+                      aria-label="Copy code"
+                      className="h-9 w-9 rounded-md p-2"
                     >
                       {copied ? (
                         <Check className="h-3.5 w-3.5 text-success" />
                       ) : (
                         <Copy className="h-3.5 w-3.5" />
                       )}
-                    </button>
+                    </Button>
                   </div>
                 </li>
               </ol>
@@ -877,13 +903,14 @@ export function SecuritySection() {
               </details>
 
               <div className="flex justify-center">
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => void cancelPairing(pairing.grantId)}
-                  className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-subtle hover:text-foreground"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
@@ -896,11 +923,11 @@ export function SecuritySection() {
             <div className="grid grid-cols-2 gap-3">
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-foreground">Device name</span>
-                <input
+                <Input
                   value={deviceName}
                   onChange={(e) => setDeviceName(e.target.value)}
                   placeholder="e.g. Pixel 9"
-                  className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="h-auto bg-card px-2.5 py-1.5"
                 />
               </label>
               <label className="space-y-1.5">
@@ -946,15 +973,16 @@ export function SecuritySection() {
                 </span>
               </label>
             )}
-            <button
+            <Button
               type="button"
+              variant="primary"
               disabled={creating}
+              loading={creating}
               onClick={() => void createPairing()}
-              className="flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+              leftIcon={!creating ? <QrCode className="h-4 w-4" /> : undefined}
             >
-              <QrCode className="h-4 w-4" />
               {creating ? 'Generating…' : 'Generate pairing code'}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -967,13 +995,15 @@ export function SecuritySection() {
                   {p.deviceName ?? 'Unnamed'} · {p.platform} · {p.attempts}/{p.maxAttempts} attempts ·
                   expires {relativeTime(p.expiresAt)}
                 </span>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => void cancelPairing(p.grantId)}
-                  className="text-muted-foreground underline-offset-2 hover:text-destructive hover:underline"
+                  className="h-auto p-0 text-muted-foreground underline-offset-2 hover:bg-transparent hover:text-destructive hover:underline"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -1055,18 +1085,20 @@ export function SecuritySection() {
                           const held = d.scopes.includes(cap.scope);
                           const busy = scopeBusy === `${d.deviceId}:${cap.scope}`;
                           return (
-                            <button
+                            <Button
                               key={cap.scope}
                               type="button"
+                              variant="ghost"
                               role="switch"
                               aria-checked={held}
+                              aria-label={`${cap.label}${held ? ', granted' : ', not granted'}`}
                               disabled={busy}
                               title={`${cap.hint}${held ? '' : '\n\nNot granted.'}`}
                               onClick={() => void toggleCapability(d, cap.scope, !held)}
                               className={cn(
-                                'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+                                'h-auto gap-1 rounded-full border px-2 py-0.5 text-[11px] font-normal',
                                 held
-                                  ? 'border-primary/40 bg-primary/10 text-primary'
+                                  ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/10'
                                   : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
                               )}
                             >
@@ -1076,21 +1108,23 @@ export function SecuritySection() {
                                 <Check className="h-2.5 w-2.5" />
                               ) : null}
                               {cap.label}
-                            </button>
+                            </Button>
                           );
                         })}
                       </div>
                     </div>
                   </div>
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => void revokeDevice(d.deviceId, d.name)}
                     title="Revoke this device"
-                    className="flex shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/5 hover:text-destructive"
+                    className="shrink-0 hover:border-destructive/50 hover:bg-destructive/5 hover:text-destructive"
+                    leftIcon={<Trash2 className="h-3.5 w-3.5" />}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
                     Revoke
-                  </button>
+                  </Button>
                 </div>
               );
             })}
@@ -1114,6 +1148,7 @@ export function SecuritySection() {
           </details>
         )}
       </SettingsCard>
+      {confirmDialog}
     </div>
   );
 }

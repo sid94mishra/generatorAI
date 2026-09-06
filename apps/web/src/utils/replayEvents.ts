@@ -352,6 +352,14 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
         );
         break;
 
+      // A warning does not end the turn; it names something the user has to
+      // act on, most often an MCP server that failed to start. Without this
+      // case a page reload dropped it entirely (review 2.4).
+      case 'harness.warning':
+        if (isInternal) break;
+        store.addSystemMessage(streamKey, String(data['message'] ?? 'Warning'), 'warning');
+        break;
+
       // ── Errors ──
       case 'harness.error':
         if (isInternal) break;
@@ -536,6 +544,33 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
       case 'chat.question.expired':
         flushAll();
         store.expireQuestion(streamKey, String(data['interactionId'] ?? ''));
+        break;
+
+      // ── Tool-permission gate (review finding 5.1) ──
+      case 'chat.permission.requested':
+        flushAll();
+        store.upsertPermission(streamKey, {
+          interactionId: String(data['interactionId'] ?? ''),
+          toolName: String(data['toolName'] ?? ''),
+          permissionType: String(data['type'] ?? ''),
+          description: String(data['description'] ?? ''),
+          inputSummary: String(data['inputSummary'] ?? ''),
+          permissionMode: String(data['permissionMode'] ?? ''),
+          status: 'pending',
+        });
+        break;
+      case 'chat.permission.resolved':
+        flushAll();
+        store.resolvePermission(
+          streamKey,
+          String(data['interactionId'] ?? ''),
+          data['behavior'] === 'deny' ? 'deny' : 'allow',
+          typeof data['message'] === 'string' ? data['message'] : undefined,
+        );
+        break;
+      case 'chat.permission.expired':
+        flushAll();
+        store.expirePermission(streamKey, String(data['interactionId'] ?? ''));
         break;
 
       // ── Turn separator ──

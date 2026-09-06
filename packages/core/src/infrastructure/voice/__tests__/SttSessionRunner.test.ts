@@ -623,18 +623,52 @@ describe('SttSessionRunner', () => {
     });
   });
 
-  // ── Bounded interim window ──────────────────────────────────────
+  // ── Bounded, cumulative interim preview ─────────────────────────
   //
-  // Root cause 1 in the plan: the live preview used to re-transcribe the
-  // whole open segment on every tick, so its cost grew without limit as the
-  // user kept talking (measured: 789ms per pass over a 20s utterance vs
-  // 136ms with a 2s window). Committed segments must still see everything.
+  // Two requirements that pull against each other, and the preview has to
+  // satisfy both:
+  //
+  //   COST — the preview used to re-transcribe the whole open segment on
+  //   every tick, so its cost grew without limit as the user kept talking
+  //   (measured: 789ms per pass over a 20s utterance vs 136ms with a 2s
+  //   window). No single pass may exceed one window.
+  //
+  //   CUMULATIVE — `onInterim` is defined as "the utterance so far", and the
+  //   composer replaces its whole live region with each one. Bounding the
+  //   cost by simply transcribing the trailing window broke that: past 5s of
+  //   unbroken speech the preview started LOSING its opening words, so the
+  //   user watched text vanish from the front of the composer while still
+  //   dictating. Whole windows that scroll out of the tail are therefore
+  //   frozen into a stable prefix rather than forgotten.
+  //
+  // Committed segments must still see everything, regardless of either.
 
   /** Loud audio so EnergyVad treats it as speech and never closes the segment. */
   const speech = (samples: number): Float32Array => {
     const a = new Float32Array(samples);
     for (let i = 0; i < samples; i += 1) a[i] = Math.sin(i / 8) * 0.5;
     return a;
+  };
+
+  /**
+   * One second of speech-loud audio tagged with an index, so a stub engine
+   * can report exactly which seconds it was given. Amplitudes stay well above
+   * EnergyVad's 0.01 threshold, so a segment never closes on its own.
+   */
+  const marked = (index: number, samples = 16_000): Float32Array =>
+    new Float32Array(samples).fill(0.2 + index * 0.002);
+
+  /** The inverse of `marked`: the indices present in a buffer, in order. */
+  const wordsIn = (pcm: Float32Array): string => {
+    const words: string[] = [];
+    let previous = Number.NaN;
+    for (const v of pcm) {
+      if (v !== previous) {
+        words.push(`w${Math.round((v - 0.2) / 0.002)}`);
+        previous = v;
+      }
+    }
+    return words.join(' ');
   };
 
   it('an interim pass sees at most the trailing window, however long the segment gets', async () => {
@@ -661,6 +695,74 @@ describe('SttSessionRunner', () => {
     expect(Math.max(...seen)).toBe(cap);
   });
 
+  it('keeps the preview CUMULATIVE past the window instead of dropping the opening words', async () => {
+    // The user-visible regression this pins: dictating one unbroken sentence
+    // for more than 5 seconds used to make the composer lose its beginning.
+    // Measured on a 16s clip, consecutive previews read
+    //   "…We need to migrate 4.4 to 4.5."
+    //   "employment plan for the authentication service we need to migrate 47…"
+    //   "We need to migrate 47 endpoints to the new token format by Friday and"
+    // — the opening clause scrolled away twice while the user was still
+    // talking. Nothing was lost permanently (the committed segment is always
+    // transcribed whole) but it looked exactly like dropped words.
+    //
+    // The stub has to be a FUNCTION OF ITS AUDIO, like a real engine: each
+    // second carries a distinct amplitude and transcribes to its own word, so
+    // re-transcribing the same audio yields the same words. (A stub that just
+    // counted calls would report new text for unchanged audio and could not
+    // distinguish "cumulative" from "rewritten".)
+    const engine = fakeEngine((pcm) => ({ text: wordsIn(pcm) }));
+    const interims: string[] = [];
+    const runner = new SttSessionRunner(engine, callbacks({ onInterim: (t) => void interims.push(t) }));
+    runner.start();
+
+    for (let i = 0; i < 16; i += 1) {
+      runner.pushAudio(marked(i));
+      await vi.advanceTimersByTimeAsync(900);
+    }
+
+    expect(interims.length).toBeGreaterThan(3);
+    // Monotonic: every preview extends the one before it. This is the
+    // property the composer depends on, and the one the trailing window
+    // could not provide.
+    for (let i = 1; i < interims.length; i += 1) {
+      expect(interims[i]!.length).toBeGreaterThanOrEqual(interims[i - 1]!.length);
+    }
+    // And the very first words are still there at the end.
+    expect(interims[interims.length - 1]!.startsWith('w0')).toBe(true);
+    expect(interims[interims.length - 1]!.split(' ').length).toBeGreaterThan(2);
+  });
+
+  it('does not carry a frozen preview prefix across an utterance boundary', async () => {
+    // The prefix describes the OPEN segment's audio. Surviving a segment
+    // boundary would prepend the previous sentence to the next one's preview.
+    const engine = fakeEngine((pcm) => ({ text: wordsIn(pcm) }));
+    const interims: string[] = [];
+    const runner = new SttSessionRunner(engine, callbacks({ onInterim: (t) => void interims.push(t) }));
+    runner.start();
+
+    // Long enough to freeze at least one block, then a pause that commits it.
+    for (let i = 0; i < 8; i += 1) {
+      runner.pushAudio(marked(i));
+      await vi.advanceTimersByTimeAsync(900);
+    }
+    const beforeBoundary = interims[interims.length - 1]!;
+    expect(beforeBoundary).toContain('w0');
+    expect(beforeBoundary.split(' ').length).toBeGreaterThan(1);
+
+    runner.pushAudio(silence(HANGOVER_SAMPLES));
+    await vi.advanceTimersByTimeAsync(900);
+    const countAfterCommit = interims.length;
+
+    // A distinct marker for the new utterance: its preview must contain that
+    // and nothing from the utterance that just committed.
+    runner.pushAudio(marked(50));
+    await vi.advanceTimersByTimeAsync(900);
+    const fresh = interims.slice(countAfterCommit);
+    expect(fresh.length).toBeGreaterThan(0);
+    expect(fresh[0]).toBe('w50');
+  });
+
   it('the window takes the NEWEST audio, not the oldest', async () => {
     // A preview must show what is being said now. Taking from the front
     // would freeze the preview on the first few seconds forever.
@@ -679,11 +781,13 @@ describe('SttSessionRunner', () => {
     runner.pushAudio(marker);
     await vi.advanceTimersByTimeAsync(900);
 
+    // The LAST call of a pass is always the live tail — the earlier calls in
+    // the same pass are the frozen blocks behind it. 7s of audio against a 5s
+    // block: the first 5s is frozen, so the tail is the remaining 1s of sine
+    // plus the 1s marker. The marker landing at the tail's END proves the
+    // newest audio drives the preview; an ordinary-sine head proves the live
+    // region really did advance past the start of the segment.
     const last = seen[seen.length - 1]!;
-    // 7s of audio against a 5s window, so the window spans the last 4s of
-    // sine plus the 1s marker: the marker lands at the END of the window.
-    // Its presence there proves the newest audio was kept; the head being
-    // ordinary sine proves the window really did slide past the start.
     expect(last.tail).toBeCloseTo(0.9, 5);
     expect(Math.abs(last.head)).toBeLessThan(0.9);
   });

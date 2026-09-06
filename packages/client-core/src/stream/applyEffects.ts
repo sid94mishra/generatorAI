@@ -58,6 +58,19 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
       );
     case 'addSystemMessage':
       return r.addSystemMessage(streams, effect.key, effect.message, effect.category);
+    case 'hookStarted':
+      return r.addHookStarted(streams, effect.key, effect.hookName, effect.phase, {
+        hookId: effect.hookId,
+        hookType: effect.hookType,
+        stageRunId: effect.stageRunId,
+      });
+    case 'hookCompleted':
+      return r.completeHook(streams, effect.key, effect.status, effect.hookName, effect.phase, {
+        hookId: effect.hookId,
+        hookType: effect.hookType,
+        stageRunId: effect.stageRunId,
+        durationMs: effect.durationMs,
+      });
     case 'processInlineToolCalls':
       return r.processInlineToolCalls(streams, effect.key, effect.content);
     case 'completeStream':
@@ -88,6 +101,12 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
       );
     case 'expireQuestion':
       return r.expireQuestion(streams, effect.key, effect.interactionId);
+    case 'upsertPermission':
+      return r.upsertPermission(streams, effect.key, effect.permission);
+    case 'resolvePermission':
+      return r.resolvePermission(streams, effect.key, effect.interactionId, effect.behavior, effect.message);
+    case 'expirePermission':
+      return r.expirePermission(streams, effect.key, effect.interactionId);
     case 'addWidget':
       return r.addWidget(streams, effect.key, effect.widget);
     case 'updateWidgetState':

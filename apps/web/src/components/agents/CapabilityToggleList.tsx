@@ -11,7 +11,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Search, X } from 'lucide-react';
-import { Badge } from '@/components/ui/index.js';
+import { Badge, Button, Input } from '@/components/ui/index.js';
 import { Switch } from '@/components/ui/primitives/switch.js';
 import { cn } from '@/lib/utils.js';
 import type { CatalogEntry } from './useAgentCatalog.js';
@@ -98,34 +98,38 @@ export function CapabilityToggleList({
           {activeCount}/{entries.length} enabled
         </span>
         {!disabled && selectableIds.length > 0 && (
-          <button
+          <Button
+            variant="ghost"
             type="button"
             onClick={() => onChange(allSelected ? [] : selectableIds)}
-            className="text-[10px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+            className="h-auto px-0 py-0 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:underline"
           >
             {allSelected ? 'Turn all off' : 'Turn all on'}
-          </button>
+          </Button>
         )}
       </div>
 
       {searchable && entries.length > 6 && (
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+          <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Filter…"
-            className="w-full rounded-md border border-border bg-background py-1.5 pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+            aria-label="Filter capabilities"
+            className="h-auto py-1.5 pl-8 pr-7 text-xs"
           />
           {query && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               onClick={() => setQuery('')}
               aria-label="Clear filter"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2"
             >
               <X className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           )}
         </div>
       )}

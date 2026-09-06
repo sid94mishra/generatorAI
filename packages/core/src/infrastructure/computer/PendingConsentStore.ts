@@ -17,7 +17,7 @@ import type {
   ComputerConsentScope,
   ComputerStoredGrant,
   IComputerConsentStore,
-} from '../../services/ComputerService.js';
+} from '../../domain/ports/IComputerConsentStore.js';
 import type { EventBus } from '../../events/EventBus.js';
 
 export interface IComputerGrantRepository {

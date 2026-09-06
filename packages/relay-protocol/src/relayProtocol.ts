@@ -9,18 +9,30 @@
 //   Host     — the GeneratorAI server. Dials OUT to the cell, so no inbound
 //              firewall rule is ever required.
 //
-// The cell is a BLIND forwarder: every application byte it carries is already
-// sealed by the E2EE layer in `e2ee.ts`, whose transcript binds the transport
-// kind and host identity. A malicious relay can therefore observe metadata and
-// deny service, but cannot read, forge or redirect application traffic.
+// The cell is a forwarder of OPAQUE BYTES: it never receives a device
+// credential, an access token or a scope, and it validates nothing but its own
+// control protocol. It is NOT a blind forwarder in the cryptographic sense
+// today — the E2EE layer in `e2ee.ts` is implemented but not wired into any
+// transport, so the application bytes a cell carries are protected only by the
+// TLS hop to the cell and by the server's own request authentication (DPoP-
+// bound tokens). A malicious relay can observe those bytes. See `e2ee.ts`.
+//
+// Route paths live in `relayRoutes.ts`; every side imports them from there.
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
 import { concatBytes, uint32, utf8 } from './bytes.js';
 
 export const RELAY_PROTOCOL = 'generatorai-relay';
-export const RELAY_PROTOCOL_VERSION = 1;
-export const RELAY_HOST_PROOF_DOMAIN = 'generatorai-relay/v1/host-proof';
+/**
+ * v2: `host_hello` carries a mandatory `hostBinding` (see `hostBinding.ts`),
+ * assignments hand out canonical http(s) origins instead of `wss://…/relay/host`
+ * URLs, and stream ids are plain base64url. v1 peers cannot interoperate — the
+ * strict `v` literal rejects them at parse time rather than mid-handshake.
+ */
+export const RELAY_PROTOCOL_VERSION = 2;
+export const RELAY_HOST_PROOF_DOMAIN = `generatorai-relay/v${RELAY_PROTOCOL_VERSION}/host-proof`;
+export const RELAY_HOST_BINDING_DOMAIN = `generatorai-relay/v${RELAY_PROTOCOL_VERSION}/host-binding`;
 
 /** Ceilings that keep a hostile peer from exhausting memory. */
 export const RELAY_MAX_CONTROL_MESSAGE_BYTES = 64 * 1024;
@@ -31,6 +43,10 @@ export const RELAY_INVITE_MAX_ATTEMPTS = 5;
 
 const Base64Url43 = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 const Base64Url = z.string().regex(/^[A-Za-z0-9_-]{1,512}$/);
+/** 64-byte Ed25519 signature, base64url. */
+const Signature86 = z.string().regex(/^[A-Za-z0-9_-]{86}$/);
+/** Exported so tests and tooling check ids against the SAME rule the wire uses. */
+export const RelayStreamIdSchema = Base64Url;
 
 // ── Director API ─────────────────────────────────────────────────
 
@@ -38,7 +54,9 @@ export const RelayAssignmentSchema = z
   .object({
     v: z.literal(RELAY_PROTOCOL_VERSION),
     relayHostId: Base64Url43,
+    /** Canonical http(s) ORIGIN of the assigned cell (no path). Derive socket URLs with `relayRoutes.ts`. */
     cellUrl: z.string().url().max(2048),
+    /** Canonical http(s) ORIGIN of the director (no path). */
     directorUrl: z.string().url().max(2048),
     assignmentEpoch: z.number().int().min(0),
     /** Wall-clock expiry of this assignment; the host re-registers before it. */
@@ -56,6 +74,11 @@ export const RelayHostHelloSchema = z
     relayHostId: Base64Url43,
     /** Host's long-term Ed25519 public key (base64url, 32 bytes). */
     hostPublicKey: Base64Url43,
+    /**
+     * Ed25519 signature binding `relayHostId` to `hostPublicKey`
+     * (`hostBinding.ts`). Verified by the cell before any challenge is issued.
+     */
+    hostBinding: Signature86,
     assignmentEpoch: z.number().int().min(0),
     /** Previous connection generation, so the cell can retire a stale socket. */
     previousGeneration: z.number().int().min(0),
@@ -85,7 +108,7 @@ export const RelayChallengeResponseSchema = z
     v: z.literal(RELAY_PROTOCOL_VERSION),
     challengeId: Base64Url,
     /** Ed25519 signature over `encodeHostProofTranscript(...)`. */
-    signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
+    signature: Signature86,
   })
   .strict();
 export type RelayChallengeResponse = z.infer<typeof RelayChallengeResponseSchema>;
@@ -144,7 +167,8 @@ export const RelayStreamOpenSchema = z
   .object({
     type: z.literal('stream_open'),
     v: z.literal(RELAY_PROTOCOL_VERSION),
-    streamId: Base64Url,
+    /** Minted by the cell with `newRelayStreamId()`; opaque to the host. */
+    streamId: RelayStreamIdSchema,
     /** `invite` for first contact, `resume` for an already-paired device. */
     credentialKind: z.enum(['invite', 'resume']),
     /** Opaque binding id the host stored when the device was paired. */

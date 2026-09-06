@@ -14,7 +14,7 @@
 import { useState } from 'react';
 import { History, RotateCcw, X, AlertTriangle, Check } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { Spinner } from '@/components/ui/index.js';
+import { Button, Spinner } from '@/components/ui/index.js';
 import {
   useWorkspaceCheckpoints,
   useRestoreWorkspaceCheckpoint,
@@ -106,14 +106,17 @@ export function CheckpointTimeline({
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <History className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="font-medium text-foreground">Checkpoints</span>
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={onClose}
-          className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent"
+          className="ml-auto h-5 w-5"
           title="Close checkpoints"
           aria-label="Close checkpoints"
         >
           <X className="h-3.5 w-3.5" />
-        </button>
+        </Button>
       </div>
 
       {error && (
@@ -153,12 +156,15 @@ export function CheckpointTimeline({
               </ul>
             </div>
           )}
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => setResult(null)}
-            className="mt-1.5 text-[11px] underline"
+            className="mt-1.5 h-auto rounded-none p-0 text-[11px] font-normal normal-case text-current underline hover:bg-transparent hover:text-current"
           >
             Dismiss
-          </button>
+          </Button>
         </div>
       )}
 
@@ -205,23 +211,29 @@ export function CheckpointTimeline({
 
                   <div className="ml-auto flex items-center gap-1">
                     {onCompare && (
-                      <button
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
                         onClick={() => onCompare(c.id)}
-                        className="rounded px-1.5 py-0.5 hover:bg-accent"
+                        className="h-5 px-1.5 text-[10px]"
                         title="Use as the diff base"
                       >
                         Compare
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setConfirming(c)}
                       disabled={restore.isPending}
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent disabled:opacity-50"
+                      className="h-5 gap-1 px-1.5 text-[10px]"
                       title="Rewind the workspace to this checkpoint"
+                      leftIcon={<RotateCcw className="h-3 w-3" />}
                     >
-                      <RotateCcw className="h-3 w-3" />
                       Rewind
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
@@ -232,19 +244,25 @@ export function CheckpointTimeline({
                       &ldquo;Before rewind&rdquo; checkpoint first, so you can undo it.
                     </p>
                     <div className="mt-1.5 flex gap-1.5">
-                      <button
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
                         onClick={() => void doRestore(c)}
                         disabled={restore.isPending}
-                        className="rounded bg-amber-500 px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-50"
+                        className="h-auto rounded bg-amber-500 px-2 py-0.5 text-[11px] font-medium text-white"
                       >
                         {restore.isPending ? 'Rewinding…' : 'Confirm rewind'}
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
                         onClick={() => setConfirming(null)}
-                        className="rounded px-2 py-0.5 text-[11px] hover:bg-accent"
+                        className="h-auto rounded px-2 py-0.5 text-[11px] font-normal text-foreground hover:bg-accent hover:text-foreground"
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}

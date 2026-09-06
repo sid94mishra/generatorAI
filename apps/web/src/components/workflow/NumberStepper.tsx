@@ -5,6 +5,7 @@
 import React from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button, Input } from '@/components/ui/index.js';
 
 interface NumberStepperProps {
   value: number;
@@ -23,7 +24,7 @@ export function NumberStepper({ value, onChange, min = 0, max = Infinity, step =
         <label className="mb-1.5 block text-xs font-medium text-foreground">{label}</label>
       )}
       <div className="flex items-center rounded-lg border border-border bg-background overflow-hidden">
-        <button
+        <Button
           type="button"
           onClick={() => {
             const decimals = (step.toString().split('.')[1] || '').length;
@@ -31,6 +32,8 @@ export function NumberStepper({ value, onChange, min = 0, max = Infinity, step =
           }}
           disabled={value <= min}
           aria-label={label ? `Decrease ${label}` : 'Decrease'}
+          variant="ghost"
+          size="icon-sm"
           className={cn(
             'flex h-8 w-8 items-center justify-center',
             'text-muted-foreground',
@@ -41,23 +44,24 @@ export function NumberStepper({ value, onChange, min = 0, max = Infinity, step =
           )}
         >
           <Minus className="h-3 w-3" />
-        </button>
-        <input
+        </Button>
+        <Input
           type="number"
           value={value}
           onChange={(e) => {
             const v = parseFloat(e.target.value);
             if (!isNaN(v)) onChange(Math.min(max, Math.max(min, v)));
           }}
+          aria-label={label || 'Value'}
           className={cn(
-            'flex-1 h-8 text-center text-sm font-medium min-w-0',
+            'flex-1 h-8 min-w-0 rounded-none px-0 text-center text-sm font-medium',
             'bg-transparent text-foreground',
-            'outline-none border-none',
+            'outline-none border-none focus:ring-0',
             '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
           )}
         />
         {unit && <span className="pr-2 text-[10px] text-muted-foreground">{unit}</span>}
-        <button
+        <Button
           type="button"
           onClick={() => {
             const decimals = (step.toString().split('.')[1] || '').length;
@@ -65,6 +69,8 @@ export function NumberStepper({ value, onChange, min = 0, max = Infinity, step =
           }}
           disabled={value >= max}
           aria-label={label ? `Increase ${label}` : 'Increase'}
+          variant="ghost"
+          size="icon-sm"
           className={cn(
             'flex h-8 w-8 items-center justify-center',
             'text-muted-foreground',
@@ -75,7 +81,7 @@ export function NumberStepper({ value, onChange, min = 0, max = Infinity, step =
           )}
         >
           <Plus className="h-3 w-3" />
-        </button>
+        </Button>
       </div>
     </div>
   );

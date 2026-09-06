@@ -2,12 +2,15 @@
 // DrizzleAutomationRepository — Automation persistence
 // ────────────────────────────────────────────────────────────────
 
-import { eq, and, or, isNull, lt } from 'drizzle-orm';
+import { hashWebhookToken } from '@generatorai/shared/node';
+import { eq, and, or, isNull, isNotNull, lt, lte } from 'drizzle-orm';
 import type {
   Automation,
   AutomationTriggerType,
   AutomationInputMode,
   AutomationErrorPolicy,
+  AutomationMissedRunPolicy,
+  AutomationOverlapPolicy,
   BatchDataFormat,
   DataSourceConfig,
   DataSchema,
@@ -50,6 +53,8 @@ function validateAutomationJson(obj: {
   if (obj.retryPolicy !== undefined && obj.retryPolicy !== null) validateJsonColumn(obj.retryPolicy, jsonRecord, { column: 'retryPolicy', table });
 }
 
+export { hashWebhookToken };
+
 export class DrizzleAutomationRepository {
   constructor(private db: AppDatabase) {}
 
@@ -65,7 +70,12 @@ export class DrizzleAutomationRepository {
         enabled: automation.enabled,
         triggerType: automation.triggerType,
         cronExpression: automation.cronExpression ?? null,
-        webhookToken: automation.webhookToken ?? null,
+        timezone: automation.timezone ?? null,
+        missedRunPolicy: automation.missedRunPolicy ?? 'skip',
+        overlapPolicy: automation.overlapPolicy ?? 'skip',
+        // The raw token is NEVER persisted — only its hash (v47).
+        webhookToken: null,
+        webhookTokenHash: automation.webhookTokenHash ?? null,
         workflowIds: automation.workflowIds,
         inputMode: automation.inputMode,
         loopVariable: automation.loopVariable ?? null,
@@ -90,7 +100,7 @@ export class DrizzleAutomationRepository {
         createdAt: automation.createdAt,
         updatedAt: automation.updatedAt,
       });
-      return automation;
+      return this.getById(automation.id);
     } catch (err) {
       throw new StorageError(
         `Failed to create automation: ${err instanceof Error ? err.message : String(err)}`,
@@ -145,13 +155,35 @@ export class DrizzleAutomationRepository {
     return rows.map((r) => this.mapRow(r));
   }
 
-  async getByWebhookToken(token: string): Promise<Automation | null> {
+  /** Look an automation up by the sha256 of its webhook token. */
+  async getByWebhookTokenHash(tokenHash: string): Promise<Automation | null> {
     const rows = await this.db
       .select()
       .from(automations)
-      .where(eq(automations.webhookToken, token))
+      .where(eq(automations.webhookTokenHash, tokenHash))
       .limit(1);
     return rows[0] ? this.mapRow(rows[0]) : null;
+  }
+
+  /**
+   * v47 backfill — hash any plaintext tokens left in the legacy column and
+   * null the raw value. Idempotent; returns how many rows were converted.
+   */
+  async hashLegacyWebhookTokens(): Promise<number> {
+    const rows = await this.db
+      .select({ id: automations.id, webhookToken: automations.webhookToken })
+      .from(automations)
+      .where(isNotNull(automations.webhookToken));
+    let converted = 0;
+    for (const row of rows) {
+      if (!row.webhookToken) continue;
+      await this.db
+        .update(automations)
+        .set({ webhookTokenHash: hashWebhookToken(row.webhookToken), webhookToken: null })
+        .where(eq(automations.id, row.id));
+      converted++;
+    }
+    return converted;
   }
 
   async update(id: string, updates: Partial<Automation>): Promise<Automation> {
@@ -164,7 +196,11 @@ export class DrizzleAutomationRepository {
     if (updates.enabled !== undefined) values.enabled = updates.enabled;
     if (updates.triggerType !== undefined) values.triggerType = updates.triggerType;
     if (updates.cronExpression !== undefined) values.cronExpression = updates.cronExpression ?? null;
-    if (updates.webhookToken !== undefined) values.webhookToken = updates.webhookToken ?? null;
+    if (updates.timezone !== undefined) values.timezone = updates.timezone ?? null;
+    if (updates.missedRunPolicy !== undefined) values.missedRunPolicy = updates.missedRunPolicy;
+    if (updates.overlapPolicy !== undefined) values.overlapPolicy = updates.overlapPolicy;
+    // `webhookToken` is deliberately NOT writable — only the hash is stored.
+    if (updates.webhookTokenHash !== undefined) values.webhookTokenHash = updates.webhookTokenHash ?? null;
     if (updates.workflowIds !== undefined) values.workflowIds = updates.workflowIds;
     if (updates.inputMode !== undefined) values.inputMode = updates.inputMode;
     if (updates.loopVariable !== undefined) values.loopVariable = updates.loopVariable ?? null;
@@ -201,19 +237,72 @@ export class DrizzleAutomationRepository {
       .where(eq(automations.id, id));
   }
 
+  // ── Due-row scheduler (item 38) ──────────────────────────────────
+
   /**
-   * Cross-process cron lease (Phase 1, 1.23). Returns true iff this call
-   * atomically set the row's `locked_until` / `locked_by_process` — i.e.,
-   * another process didn't already own an unexpired lease.
+   * Atomically claim every enabled schedule-triggered automation whose
+   * `next_run_at` has passed and whose lease is free or expired. The lease
+   * (`locked_until` / `locked_by_process`) is stamped by the SAME
+   * conditional UPDATE that selects the rows, so two pollers can never
+   * both take the same slot — the pattern `DurableExecutionEngine.
+   * claimNextIteration` uses, not the old acquire-then-release-on-start
+   * cron lease. The caller extends the lease while the execution runs and
+   * releases it on completion.
    */
-  async tryAcquireCronLease(
-    automationId: string,
+  async claimDueSchedules(
+    now: Date,
     processId: string,
     leaseMs: number,
-  ): Promise<boolean> {
-    const nowMs = Date.now();
-    const until = new Date(nowMs + leaseMs);
-    const now = new Date(nowMs);
+  ): Promise<Automation[]> {
+    const until = new Date(now.getTime() + leaseMs);
+    const rows = await this.db
+      .update(automations)
+      .set({ lockedUntil: until, lockedByProcess: processId })
+      .where(
+        and(
+          eq(automations.triggerType, 'schedule'),
+          eq(automations.enabled, true),
+          isNotNull(automations.nextRunAt),
+          lte(automations.nextRunAt, now),
+          or(isNull(automations.lockedUntil), lt(automations.lockedUntil, now)),
+        ),
+      )
+      .returning();
+    return rows.map((r) => this.mapRow(r));
+  }
+
+  /** Heartbeat: push `locked_until` forward while this process still owns the lease. */
+  async extendScheduleLease(automationId: string, processId: string, leaseMs: number): Promise<boolean> {
+    const result = await this.db
+      .update(automations)
+      .set({ lockedUntil: new Date(Date.now() + leaseMs) })
+      .where(
+        and(eq(automations.id, automationId), eq(automations.lockedByProcess, processId)),
+      )
+      .returning({ id: automations.id });
+    return result.length > 0;
+  }
+
+  /** Release the lease (on execution completion). No-op if another process owns it now. */
+  async releaseScheduleLease(automationId: string, processId: string): Promise<void> {
+    await this.db
+      .update(automations)
+      .set({ lockedUntil: null, lockedByProcess: null })
+      .where(
+        and(eq(automations.id, automationId), eq(automations.lockedByProcess, processId)),
+      );
+  }
+
+  /**
+   * Phase 1, 1.23 — cross-process cron lease for the `node-cron`-driven tick
+   * path (`AutomationService.registerCronJob`), which claims one automation
+   * by id rather than a due-row batch. Same conditional-UPDATE race-free
+   * pattern as {@link claimDueSchedules}, scoped to a single row and
+   * reporting whether THIS call won the race instead of returning rows.
+   */
+  async tryAcquireCronLease(automationId: string, processId: string, leaseMs: number): Promise<boolean> {
+    const now = new Date();
+    const until = new Date(now.getTime() + leaseMs);
     const result = await this.db
       .update(automations)
       .set({ lockedUntil: until, lockedByProcess: processId })
@@ -227,6 +316,7 @@ export class DrizzleAutomationRepository {
     return result.length > 0;
   }
 
+  /** Release a previously-acquired cron lease. No-op if another process owns it now. */
   async releaseCronLease(automationId: string, processId: string): Promise<void> {
     await this.db
       .update(automations)
@@ -244,7 +334,11 @@ export class DrizzleAutomationRepository {
       enabled: row.enabled,
       triggerType: row.triggerType as AutomationTriggerType,
       cronExpression: row.cronExpression ?? undefined,
-      webhookToken: row.webhookToken ?? undefined,
+      timezone: row.timezone ?? undefined,
+      missedRunPolicy: (row.missedRunPolicy as AutomationMissedRunPolicy) ?? 'skip',
+      overlapPolicy: (row.overlapPolicy as AutomationOverlapPolicy) ?? 'skip',
+      // Raw token is never read back; the hash is the persisted identity.
+      webhookTokenHash: row.webhookTokenHash ?? undefined,
       workflowIds: safeJsonColumn(row.workflowIds, stringArray, { fallback: [] }) ?? [],
       inputMode: row.inputMode as AutomationInputMode,
       loopVariable: row.loopVariable ?? undefined,

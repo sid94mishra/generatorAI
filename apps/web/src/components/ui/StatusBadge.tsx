@@ -10,7 +10,7 @@
 
 import React from 'react';
 import {
-  CircleDot, Loader2, Play, Pause, Check, X, Clock, SkipForward, AlertCircle, Archive, Hand, Moon,
+  CircleDot, Loader2, Play, Pause, Check, X, Clock, SkipForward, AlertCircle, AlertTriangle, Archive, Hand, Moon,
 } from 'lucide-react';
 import { Badge, type BadgeTone, type BadgeSize } from './Badge.js';
 import { cn } from '@/lib/utils.js';
@@ -31,6 +31,11 @@ const STATUS: Record<string, StatusEntry> = {
   cancelling: { tone: 'danger', label: 'Cancelling', Icon: Loader2, spin: true },
   completed: { tone: 'success', label: 'Completed', Icon: Check },
   failed: { tone: 'danger', label: 'Failed', Icon: AlertCircle },
+  // An automation execution that finished with BOTH successes and failures.
+  // Without an entry here it fell through to the neutral fallback and showed
+  // as a grey "partial" pill, which reads like a benign state — the exact
+  // misreport the status exists to prevent (review 6.x / E11).
+  partial: { tone: 'warning', label: 'Partly failed', Icon: AlertTriangle },
   cancelled: { tone: 'neutral', label: 'Cancelled', Icon: X },
   // StageRun-specific
   pending: { tone: 'neutral', label: 'Pending', Icon: Clock },

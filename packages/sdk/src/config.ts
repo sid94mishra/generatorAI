@@ -2,8 +2,10 @@
 // GeneratorAI SDK Configuration
 // ────────────────────────────────────────────────────────────────
 
+import type { HarnessType } from '@generatorai/agent-harness-providers';
 import type { IAgentHarness } from '@generatorai/core';
 import type { DatabaseConfig } from '@generatorai/db';
+import { ValidationError } from '@generatorai/shared';
 
 export interface LoggerConfig {
   level?: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
@@ -15,11 +17,29 @@ export interface SandboxConfig {
   preferDocker?: boolean;
 }
 
-export interface GeneratorAIConfig {
-  /** AI provider — string shorthand or pre-built harness instance */
-  provider: 'copilot' | 'claude-agent' | IAgentHarness;
+/**
+ * Which harness runs the agents: the same `HarnessType` the server reads from
+ * `HARNESS_TYPE` / `HarnessConfig` (`'copilot'`, `'claude-agent'`, …), or a
+ * pre-built `IAgentHarness` for bring-your-own-harness.
+ */
+export type HarnessSelection = HarnessType | IAgentHarness;
 
-  /** Provider-specific options (when using string shorthand) */
+export interface GeneratorAIConfig {
+  /**
+   * Harness selection. Mirrors the server's `HarnessConfig.type` naming so an
+   * SDK example and a server `.env` describe the same thing with the same word.
+   * Either this or the deprecated `provider` alias must be set.
+   */
+  harness?: HarnessSelection;
+
+  /**
+   * @deprecated Renamed to `harness` when the server moved from
+   * `CopilotConfig` to `HarnessConfig` (June 2026). Still honoured; `harness`
+   * wins when both are given.
+   */
+  provider?: HarnessSelection;
+
+  /** Harness-specific options (when using a string `harness`). */
   providerOptions?: Record<string, unknown>;
 
   /**
@@ -71,7 +91,7 @@ export interface GeneratorAIConfig {
 }
 
 export interface ResolvedConfig {
-  provider: 'copilot' | 'claude-agent' | IAgentHarness;
+  harness: HarnessSelection;
   providerOptions: Record<string, unknown>;
   database: string | DatabaseConfig;
   artifactsDir: string;
@@ -90,8 +110,14 @@ export interface ResolvedConfig {
 }
 
 export function resolveConfig(config: GeneratorAIConfig): ResolvedConfig {
+  const harness = config.harness ?? config.provider;
+  if (harness === undefined) {
+    throw new ValidationError(
+      "GeneratorAI config needs `harness` (e.g. 'copilot', 'claude-agent', or an IAgentHarness instance).",
+    );
+  }
   return {
-    provider: config.provider,
+    harness,
     providerOptions: config.providerOptions ?? {},
     database: config.database ?? './generatorai.db',
     artifactsDir: config.artifactsDir ?? './artifacts',

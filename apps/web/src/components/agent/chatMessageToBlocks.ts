@@ -134,6 +134,29 @@ export function chatMessageToBlocks(message: ChatMessage): StreamBlock[] {
     });
   }
 
+  // Review finding 5.1 — tool-permission cards, same replay rule as
+  // plan/question above: a card persisted as 'pending' has long since had
+  // its blocking SDK callback torn down (turns only persist after they
+  // settle), so it renders as expired rather than a clickable-looking dead
+  // end.
+  for (const card of metadata?.permissionCards ?? []) {
+    ordered.push({
+      sequence: card.sequence,
+      make: (blockId) => ({
+        type: 'permission',
+        blockId,
+        interactionId: card.interactionId,
+        toolName: card.toolName,
+        permissionType: card.type,
+        description: card.description,
+        inputSummary: card.inputSummary,
+        permissionMode: '',
+        status: card.status === 'pending' ? 'expired' : card.status,
+        ...(card.message ? { message: card.message } : {}),
+      }),
+    });
+  }
+
   // Messages persisted before the ordinal existed carry no sequence at all.
   // Array#sort is stable, so those keep their append order (tools, then plans,
   // then questions) and simply trail the ones that do carry an ordinal.

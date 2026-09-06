@@ -73,17 +73,18 @@ const INTERIM_DEBOUNCE_MS = Number(process.env['GENERATORAI_STT_INTERIM_DEBOUNCE
  * cause 1; Phase 1 narrowed it from per-session to per-segment but never
  * bounded it.
  *
- * A fixed-length window over a live stream is the standard shape for this
- * (streaming ASR toolkits do the same), and it is safe HERE specifically
- * because the window feeds a preview that is thrown away — nothing is
- * stitched across windows, so none of the usual overlap/duplication handling
- * is needed. What the user loses is preview context on an unusually long
- * unbroken utterance: the preview becomes a rolling tail rather than the
- * whole segment. Segments cut at silence, so in practice most never reach it.
+ * This is now the size of a preview BLOCK rather than a rolling tail. The
+ * original form — transcribe the trailing window, emit that as the preview —
+ * bounded the cost but broke `onInterim`'s cumulative contract, so words
+ * scrolled off the front of the composer while the user was still speaking
+ * (see {@link SttSessionRunner.doInterim} for the measured symptom). Blocks
+ * that scroll out of the live tail are now frozen into a stable prefix
+ * instead of being forgotten, which keeps the same per-pass bound while the
+ * preview only ever grows.
  *
  * 5s default is a deliberate middle: it covers a typical dictated sentence
  * whole, and caps the worst pass at roughly 250ms on the reference machine.
- * Lower it toward 2s to chase latency, raise it for more preview context.
+ * Lower it toward 2s to chase latency, raise it for fewer block seams.
  */
 const INTERIM_WINDOW_SAMPLES =
   16_000 * Number(process.env['GENERATORAI_STT_INTERIM_WINDOW_S'] ?? '5');
@@ -117,6 +118,14 @@ export class SttSessionRunner {
   private stopped = false;
   private paused = false;
   private lastInterim = '';
+  /**
+   * Preview text for the blocks of the OPEN segment that have already
+   * scrolled out of the live window — see {@link doInterim}. Reset with the
+   * accumulator, because it describes that accumulator's contents.
+   */
+  private interimPrefixText = '';
+  /** How many samples of the open segment {@link interimPrefixText} covers. */
+  private interimPrefixSamples = 0;
   private readonly vad: VoiceActivityDetector;
   /** True once the MAX_SEGMENT_SAMPLES cap has been logged for the CURRENT open segment (avoids log spam). */
   private capWarned = false;
@@ -130,6 +139,14 @@ export class SttSessionRunner {
    * consults `busy` — those must always run, never be dropped/coalesced.
    */
   private queue: Promise<void> = Promise.resolve();
+
+  /**
+   * Segment emissions still being formatted on the STREAMING path.
+   *
+   * `stop()` awaits this before closing the session, so the last utterance
+   * cannot be lost to the race described in `openStream`'s `onFinal`.
+   */
+  private pendingEmits: Promise<void> = Promise.resolve();
   private busy = false;
 
   /**
@@ -246,9 +263,19 @@ export class SttSessionRunner {
           // in the composer.
           if (!current() || (this.paused && !this.flushing)) return;
           this.lastInterim = '';
-          void this.applyFormatter(text).then((formatted) => {
-            if (formatted) this.cb.onSegment(formatted);
-          });
+          // Formatting is async, and `stop()` must not race it. This used to
+          // be a bare `void`, so the LAST utterance of a session was still
+          // being formatted when stop() emitted the closing `final` frame —
+          // the client saw the session end and closed the socket, and that
+          // utterance never arrived. Measured on a 25s dictation: everything
+          // after "verify the metrics dashboard" was silently lost, roughly
+          // 40% of what was said. Tracking the promise lets stop() wait.
+          this.pendingEmits = this.pendingEmits
+            .then(() => this.applyFormatter(text))
+            .then((formatted) => {
+              if (formatted) this.cb.onSegment(formatted);
+            })
+            .catch(() => undefined);
         },
         onError: (message) => { if (current()) this.cb.onError(message); },
       },
@@ -406,19 +433,76 @@ export class SttSessionRunner {
     }
     // Snapshot synchronously (this is a non-destructive peek — interim
     // passes never reset the accumulator, only a segment boundary or
-    // stop() does), bounded to the trailing window so the cost of a preview
-    // does not grow with how long the user has been talking.
-    const pcm = this.mergedTail(INTERIM_WINDOW_SAMPLES);
-    void this.enqueue(() => this.doInterim(pcm));
+    // stop() does). Only the part of the segment not already covered by
+    // `interimPrefixText` is taken, so the cost of a preview stays bounded
+    // without the preview itself losing what came before it.
+    const from = this.interimPrefixSamples;
+    const pcm = this.mergedRange(from, this.totalSamples);
+    void this.enqueue(() => this.doInterim(pcm, from));
   }
 
-  private async doInterim(pcm: Float32Array): Promise<void> {
+  /**
+   * Produce the live preview for the open segment.
+   *
+   * `onInterim` is CUMULATIVE by contract (see ISpeechToTextEngine: "the
+   * utterance so far … callers replace what they were showing"), and the
+   * composer implements exactly that — it replaces the whole live region
+   * with each partial. A previous version transcribed only
+   * `mergedTail(INTERIM_WINDOW_SAMPLES)` and handed the result straight to
+   * `onInterim`, which broke that contract in the most visible way possible:
+   * once an unbroken utterance passed 5 seconds the window started sliding,
+   * and the user watched words disappear off the FRONT of what they had just
+   * dictated. Measured on a 16s clip, the preview went
+   *
+   *   "…We need to migrate 4.4 to 4.5."
+   *   "employment plan for the authentication service we need to migrate 47…"
+   *   "We need to migrate 47 endpoints to the new token format by Friday and"
+   *
+   * — losing the opening clause twice over. The committed segment that
+   * followed was complete, so nothing was lost permanently; it just looked
+   * like the app was dropping half of what was said.
+   *
+   * The fix keeps the cost bound and restores the contract by freezing the
+   * preview in BLOCKS: each whole window that scrolls out of the live tail is
+   * transcribed exactly once and appended to a stable prefix, and only the
+   * current partial block is re-transcribed each pass. So a pass still costs
+   * at most one window, the text only ever grows, and the extra work over a
+   * session is one transcription per completed block.
+   *
+   * A block boundary can fall mid-word, which can leave a seam in the
+   * preview. That is acceptable here and nowhere else: this text is a preview
+   * that the committed segment transcription (always run over the whole
+   * segment, never blocked) replaces wholesale.
+   */
+  private async doInterim(pcm: Float32Array, from: number): Promise<void> {
     if (this.stopped || this.paused) return;
     try {
-      const { text } = await this.engine.transcribe(pcm, { language: this.language });
-      if (!this.stopped && !this.paused && text && text !== this.lastInterim) {
-        this.lastInterim = text;
-        this.cb.onInterim(text);
+      let offset = 0;
+      while (pcm.length - offset > INTERIM_WINDOW_SAMPLES) {
+        const block = pcm.subarray(offset, offset + INTERIM_WINDOW_SAMPLES);
+        const frozen = await this.engine.transcribe(block, { language: this.language });
+        if (this.stopped || this.paused) return;
+        offset += INTERIM_WINDOW_SAMPLES;
+        // Advance the covered-sample mark in step with the text, so a pass
+        // abandoned partway never leaves the two disagreeing.
+        this.interimPrefixSamples = from + offset;
+        if (frozen.text) {
+          this.interimPrefixText = this.interimPrefixText
+            ? `${this.interimPrefixText} ${frozen.text}`
+            : frozen.text;
+        }
+      }
+      const tail = offset === 0 ? pcm : pcm.subarray(offset);
+      const { text } = await this.engine.transcribe(tail, { language: this.language });
+      // Same interim-safe cleanup the streaming path already applied to its
+      // partials — filler removal and spoken-number normalization, so
+      // "forty seven" previews as "47". Batch partials were skipping it, so
+      // the preview and the committed segment disagreed on every number and
+      // every "um" right up until the moment the segment landed.
+      const shown = this.formatInterim([this.interimPrefixText, text].filter(Boolean).join(' '));
+      if (!this.stopped && !this.paused && shown && shown !== this.lastInterim) {
+        this.lastInterim = shown;
+        this.cb.onInterim(shown);
       }
     } catch (err) {
       this.logger?.warn?.(`[stt] interim transcribe failed: ${(err as Error).message}`);
@@ -497,6 +581,10 @@ export class SttSessionRunner {
       this.stopped = false;
       try {
         await handle?.finish();
+        // Drain anything the flush queued but has not yet emitted; the
+        // closing frame below tells the client the session is over and it
+        // will stop listening the moment it arrives.
+        await this.pendingEmits;
       } finally {
         this.stopped = true;
       }
@@ -588,18 +676,30 @@ export class SttSessionRunner {
    * which takes from the front: a preview wants the most recent audio, a
    * committed segment wants all of it.
    */
-  private mergedTail(maxSamples: number): Float32Array {
-    if (this.totalSamples <= maxSamples) return this.merged();
-    const out = new Float32Array(maxSamples);
-    // Walk backwards so a long accumulator costs only the chunks we keep.
-    let needed = maxSamples;
-    let writeAt = maxSamples;
-    for (let i = this.chunks.length - 1; i >= 0 && needed > 0; i -= 1) {
-      const chunk = this.chunks[i]!;
-      const take = Math.min(chunk.length, needed);
-      writeAt -= take;
-      out.set(chunk.subarray(chunk.length - take), writeAt);
-      needed -= take;
+  /**
+   * Samples `[from, to)` of the accumulator, as one buffer.
+   *
+   * Used by the interim path to take only what the frozen prefix does not
+   * already cover. Walks forward and skips whole chunks that fall before
+   * `from`, so a long accumulator costs only the range asked for.
+   */
+  private mergedRange(from: number, to: number): Float32Array {
+    const start = Math.max(0, from);
+    const end = Math.min(to, this.totalSamples);
+    if (end <= start) return new Float32Array(0);
+    const out = new Float32Array(end - start);
+    let chunkStart = 0;
+    let writeAt = 0;
+    for (const chunk of this.chunks) {
+      const chunkEnd = chunkStart + chunk.length;
+      if (chunkEnd > start && chunkStart < end) {
+        const takeFrom = Math.max(0, start - chunkStart);
+        const takeTo = Math.min(chunk.length, end - chunkStart);
+        out.set(chunk.subarray(takeFrom, takeTo), writeAt);
+        writeAt += takeTo - takeFrom;
+      }
+      chunkStart = chunkEnd;
+      if (chunkStart >= end) break;
     }
     return out;
   }
@@ -608,6 +708,11 @@ export class SttSessionRunner {
     this.chunks = [];
     this.totalSamples = 0;
     this.lastInterim = '';
+    // The frozen preview prefix describes the accumulator that is being
+    // thrown away here. Leaving it behind would prepend the previous
+    // utterance's words to the next one's live preview.
+    this.interimPrefixText = '';
+    this.interimPrefixSamples = 0;
     this.capWarned = false;
   }
 }

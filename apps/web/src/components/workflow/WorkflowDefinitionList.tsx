@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { GitBranch, MoreHorizontal, Play, Edit3, Trash2 } from 'lucide-react';
 import { useWorkflowDefinitions, useDeleteWorkflowDefinition } from '@/hooks/workflowQueries.js';
-import { ConfirmDialog, Spinner } from '@/components/ui/index.js';
+import { ConfirmDialog, Spinner, Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import type { WorkflowDefinition } from '@generatorai/shared';
 
@@ -155,20 +155,24 @@ function DefinitionItem({
 
       {/* Actions (visible on hover) */}
       <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-        <button
+        <Button
           onClick={onEdit}
-          className="rounded p-1 text-muted-foreground hover:bg-subtle hover:text-foreground"
+          variant="ghost"
+          size="icon-sm"
+          className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-subtle hover:text-foreground"
           title="Edit workflow"
         >
           <Edit3 className="h-3.5 w-3.5" />
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={onDelete}
-          className="rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger"
+          variant="ghost"
+          size="icon-sm"
+          className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger"
           title="Delete workflow"
         >
           <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        </Button>
       </div>
     </div>
   );

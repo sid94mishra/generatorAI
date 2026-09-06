@@ -23,6 +23,7 @@ import {
   PanelRightOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 import { StreamPanel } from '@/components/agent/StreamPanel.js';
 import { UsageChip } from '@/components/agent/UsageChip.js';
 import { ContextUsageGauge } from '@/components/shared/ContextUsageGauge.js';
@@ -42,6 +43,8 @@ interface StageTimelineItemProps {
   /** Terminal rejection — fails the stage and blocks the rest of the run. */
   onTerminalRejectHitl?: (id: string, reason?: string) => void;
   onRetry?: (id: string) => void;
+  /** Wake a sleeping stage ahead of its scheduled time. */
+  onWake?: (id: string) => void;
   onSelectFiles?: (id: string) => void;
   onSelectOutput?: (id: string) => void;
   /** Open the right inspector pane focused on this stage. */
@@ -77,7 +80,7 @@ function formatCountdown(ms: number): string {
 }
 
 export const StageTimelineItem = React.memo(function StageTimelineItem({
-  stage, focused, defaultOpen, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onRetry, onSelectFiles, onSelectOutput, onOpenInspector,
+  stage, focused, defaultOpen, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onRetry, onWake, onSelectFiles, onSelectOutput, onOpenInspector,
 }: StageTimelineItemProps) {
   const v = statusVisual(stage.status);
   const isActive = stage.status === 'running' || stage.status === 'awaiting_input';
@@ -212,21 +215,25 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
             />
           )}
           {isFailed && onRetry && (
-            <button
+            <Button
               onClick={(e) => { e.stopPropagation(); onRetry(stage.id); }}
               title="Retry stage"
-              className="rounded-md border border-[var(--color-border)] p-0.5 text-[var(--color-muted-foreground)] hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)]"
+              variant="ghost"
+              size="icon-sm"
+              className="h-auto w-auto rounded-md border border-[var(--color-border)] p-0.5 text-[var(--color-muted-foreground)] hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)]"
             >
               <RefreshCw className="h-2.5 w-2.5" />
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             onClick={(e) => e.stopPropagation()}
-            className="rounded-md p-0.5 text-[var(--color-muted-foreground)]/60 hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
+            variant="ghost"
+            size="icon-sm"
+            className="h-auto w-auto rounded-md p-0.5 text-[var(--color-muted-foreground)]/60 hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
             aria-label="Stage actions"
           >
             <MoreHorizontal className="h-3 w-3" />
-          </button>
+          </Button>
           <ChevronDown className={cn('h-3.5 w-3.5 transition-transform text-[var(--color-muted-foreground)]/60', !open && '-rotate-90')} />
         </span>
       </div>
@@ -257,12 +264,18 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
               <span className="text-[var(--color-muted-foreground)]">
                 Wakes in <span className="font-mono tabular-nums text-[var(--color-foreground)]/85">{formatCountdown(stage.sleepRemainingMs)}</span>
               </span>
-              <button
-                onClick={(e) => e.stopPropagation()}
-                className="ml-auto rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2 py-0.5 text-[10.5px] font-medium text-indigo-300 hover:bg-indigo-500/20"
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onWake?.(stage.id);
+                }}
+                disabled={!onWake}
+                variant="ghost"
+                size="sm"
+                className="h-auto ml-auto rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2 py-0.5 text-[10.5px] font-medium text-indigo-300 hover:bg-indigo-500/20"
               >
                 Wake now
-              </button>
+              </Button>
             </div>
           )}
 
@@ -287,32 +300,38 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
           {isTerminal && (stage.files?.length || stage.outputData || stage.summary || stage.usage || onOpenInspector) && (
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
               {stage.files?.length ? (
-                <button
+                <Button
                   onClick={(e) => { e.stopPropagation(); onSelectFiles?.(stage.id); onOpenInspector?.(stage.id); }}
-                  className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)]/50 px-2 py-1 text-[10.5px] font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)]/50 px-2 py-1 text-[10.5px] font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
                 >
                   <FileText className="h-3 w-3" />
                   {stage.files.length} file{stage.files.length !== 1 ? 's' : ''}
-                </button>
+                </Button>
               ) : null}
               {stage.outputData && (
-                <button
+                <Button
                   onClick={(e) => { e.stopPropagation(); onSelectOutput?.(stage.id); onOpenInspector?.(stage.id); }}
-                  className="flex items-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/[0.06] px-2 py-1 text-[10.5px] font-medium text-cyan-400 hover:bg-cyan-500/[0.12]"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto flex items-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/[0.06] px-2 py-1 text-[10.5px] font-medium text-cyan-400 hover:bg-cyan-500/[0.12]"
                 >
                   <Database className="h-3 w-3" />
                   Structured output
-                </button>
+                </Button>
               )}
               {onOpenInspector && (
-                <button
+                <Button
                   onClick={(e) => { e.stopPropagation(); onOpenInspector(stage.id); }}
-                  className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)]/50 px-2 py-1 text-[10.5px] font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)]/50 px-2 py-1 text-[10.5px] font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
                   title="Open inspector for this stage"
                 >
                   <PanelRightOpen className="h-3 w-3" />
                   Details
-                </button>
+                </Button>
               )}
               {stage.usage && <UsageChip usage={stage.usage} />}
             </div>

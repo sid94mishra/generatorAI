@@ -34,7 +34,7 @@ function createAutomationRepo(rows: Automation[]): IAutomationRepository {
     getAll: async () => [...store.values()],
     getEnabled: async () => [...store.values()].filter((a) => a.enabled),
     getByTriggerType: async () => [],
-    getByWebhookToken: async () => null,
+    getByWebhookTokenHash: async () => null,
     getByProjectId: async () => [],
     update: async (id, updates) => {
       const cur = store.get(id);
@@ -44,8 +44,9 @@ function createAutomationRepo(rows: Automation[]): IAutomationRepository {
       return next;
     },
     delete: async (id) => { store.delete(id); },
-    tryAcquireCronLease: async () => true,
-    releaseCronLease: async () => {},
+    claimDueSchedules: async () => [],
+    extendScheduleLease: async () => true,
+    releaseScheduleLease: async () => {},
   };
 }
 

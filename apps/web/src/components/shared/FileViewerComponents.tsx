@@ -11,7 +11,6 @@ import {
   FolderGit2,
   ChevronRight,
   ChevronDown,
-  Loader2,
   Download,
   DownloadCloud,
   GitCommit,
@@ -20,8 +19,13 @@ import {
   Upload,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import hljs from 'highlight.js';
-import { Modal, Button } from '@/components/ui/index.js';
+// W-highlight-bundle — was the FULL `highlight.js` package (~190 grammars,
+// 9.4 MB raw). Use the same curated `highlight.js/lib/core` + ~25 grammar
+// registry the chat highlight worker already uses (`lib/highlight/languages.ts`).
+// A language outside the curated set falls through to `highlightAuto` in
+// `highlightCode()` below, matching the existing unknown-language behavior.
+import { hljs } from '@/lib/highlight/languages.js';
+import { Modal, Button, Spinner } from '@/components/ui/index.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import { FileCodeView } from '@/components/diff/FileCodeView.js';
 import { DiffProviders } from '@/components/diff/DiffProviders.js';
@@ -245,9 +249,10 @@ export const TreeNodeItem = memo(function TreeNodeItem({ node, depth, onFileClic
   if (node.isFolder) {
     return (
       <div>
-        <button
+        <Button
+          variant="ghost"
           onClick={() => setExpanded(!expanded)}
-          className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-[11px] hover:bg-[var(--color-accent)] transition-colors"
+          className="h-auto flex w-full items-center gap-1 rounded px-1 py-0.5 text-[11px] hover:bg-[var(--color-accent)] transition-colors"
           style={{ paddingLeft: `${depth * 12 + 4}px` }}
         >
           {expanded ? (
@@ -264,7 +269,7 @@ export const TreeNodeItem = memo(function TreeNodeItem({ node, depth, onFileClic
           <span className="ml-auto text-[9px] text-[var(--color-muted-foreground)]">
             {node.children.length}
           </span>
-        </button>
+        </Button>
         {expanded && (
           <div>
             {node.children.map((child) => (
@@ -305,13 +310,15 @@ export const TreeNodeItem = memo(function TreeNodeItem({ node, depth, onFileClic
         <Circle className="ml-0.5 h-2 w-2 shrink-0 fill-blue-500 text-blue-500" aria-label="Generated" />
       )}
       {onDownload && (
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={handleDownload}
           title={`Download ${node.name}`}
-          className="ml-auto hidden p-0.5 rounded hover:bg-[var(--color-muted)] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] group-hover:block"
+          className="h-auto w-auto ml-auto hidden p-0.5 rounded hover:bg-[var(--color-muted)] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] group-hover:block"
         >
           <Download className="h-3 w-3" />
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -352,27 +359,30 @@ export function FileTreeSection({
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)]">
       <div className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-[var(--color-foreground)]">
-        <button
+        <Button
+          variant="ghost"
           onClick={() => setExpanded(!expanded)}
-          className="flex flex-1 items-center gap-2 text-left hover:opacity-80"
+          className="h-auto flex flex-1 items-center gap-2 text-left hover:opacity-80"
         >
           {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           {icon}
           <span className="text-xs">{title}</span>
-        </button>
+        </Button>
         {files.length > 0 && (
           <>
             <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${badge.color}`}>
               {badge.count}
             </span>
             {onDownloadAll && (
-              <button
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={handleDownloadAll}
                 title="Download all"
-                className="p-0.5 rounded hover:bg-[var(--color-muted)] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+                className="h-auto w-auto p-0.5 rounded hover:bg-[var(--color-muted)] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
               >
                 <DownloadCloud className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
           </>
         )}
@@ -459,7 +469,7 @@ export function FileViewerModal({ filePath, source, worktreeAlias, onClose, file
       <div className="-mx-5 -my-4 h-[calc(100%+2rem)] overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-[var(--color-muted-foreground)]" />
+            <Spinner size="lg" className="h-6 w-6 text-[var(--color-muted-foreground)]" />
           </div>
         ) : error ? (
           <div className="p-6 text-center text-sm text-red-500">Failed to load file content</div>
@@ -558,7 +568,7 @@ export function ChangesViewerModal({ onClose, changeEntries, isLoading, hasGit, 
       <div className="-mx-5 -my-4 flex h-[calc(100%+2rem)] flex-col overflow-hidden">
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-[var(--color-muted-foreground)]" />
+            <Spinner size="lg" className="h-6 w-6 text-[var(--color-muted-foreground)]" />
           </div>
         ) : (
           <div className="flex flex-1 overflow-hidden">
@@ -568,11 +578,12 @@ export function ChangesViewerModal({ onClose, changeEntries, isLoading, hasGit, 
                 const name = entry.path.split(/[/\\]/).pop() ?? entry.path;
                 const badge = getStatusBadge(entry.status);
                 return (
-                  <button
+                  <Button
                     key={entry.path}
+                    variant="ghost"
                     onClick={() => setCurrentIndex(i)}
                     className={cn(
-                      'flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] transition-colors',
+                      'h-auto flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] transition-colors',
                       i === currentIndex
                         ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                         : 'hover:bg-[var(--color-accent)] text-[var(--color-foreground)]',
@@ -585,7 +596,7 @@ export function ChangesViewerModal({ onClose, changeEntries, isLoading, hasGit, 
                     ) : (
                       <Circle className={`ml-auto h-2 w-2 shrink-0 ${badge.dotColor}`} />
                     )}
-                  </button>
+                  </Button>
                 );
               })}
             </div>
@@ -699,7 +710,7 @@ export function ChangeFileContentRenderer({ entry, hasGit, fileContent, isLoadin
           </div>
         ) : isLoading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-5 w-5 animate-spin text-[var(--color-muted-foreground)]" />
+            <Spinner size="lg" className="text-[var(--color-muted-foreground)]" />
           </div>
         ) : fileContent?.truncated ? (
           <div className="p-6 text-center text-xs text-[var(--color-muted-foreground)]">

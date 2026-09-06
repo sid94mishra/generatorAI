@@ -257,10 +257,59 @@ describe('ChatManagementService', () => {
   describe('getChatHistory', () => {
     it('should return persisted messages for a chat', async () => {
       const chat = await service.createChat({ name: 'History' });
+      const session = await sessionRepo.getById(chat.sessionId);
+      const conversationId = session.conversationId;
+      // Each turn has to FINISH before the next prompt: a second prompt while
+      // one is generating is refused now (review 6.1), because the old
+      // behaviour detached the first turn's listener without aborting it and
+      // silently lost its whole response.
+      const settleTurn = async (): Promise<void> => {
+        copilot.simulateConversationEvent(conversationId, {
+          kind: 'harness.idle',
+          data: {},
+        } as never);
+        await new Promise((r) => setTimeout(r, 0));
+      };
+
       await service.sendPrompt(chat.id, 'first');
+      await settleTurn();
       await service.sendPrompt(chat.id, 'second');
+      await settleTurn();
+
       const history = await service.getChatHistory(chat.id);
       expect(history.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('refuses a second prompt while the first turn is still generating', async () => {
+      const chat = await service.createChat({ name: 'Busy' });
+      await service.sendPrompt(chat.id, 'first');
+      // No idle event: the turn is still in flight.
+      await expect(service.sendPrompt(chat.id, 'second')).rejects.toThrow(
+        /still generating/i,
+      );
+    });
+  });
+
+  // ── conversation binding (review 3.6) ──
+
+  describe('conversation binding', () => {
+    /**
+     * The binding recorded at creation must equal the one computed on the
+     * first turn, or every chat's first message pays a full rebuild: a
+     * database read, complete agent resolution, skill files written to disk,
+     * MCP resolution, tool definitions and a provider round-trip, all before
+     * the first word. The two strings used to be built separately — four
+     * parts written, five computed — so they could never match, while the
+     * comment above the write claimed the opposite.
+     */
+    it('does not rebind the conversation on the first turn', async () => {
+      const chat = await service.createChat({ name: 'Binding' });
+      const before = copilot.getCallCount('createConversation');
+
+      await service.sendPrompt(chat.id, 'first');
+
+      // A rebind shows up as a second conversation creation or a resume.
+      expect(copilot.getCallCount('createConversation')).toBe(before);
     });
   });
 

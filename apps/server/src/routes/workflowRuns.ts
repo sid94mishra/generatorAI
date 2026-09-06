@@ -23,6 +23,7 @@ export function createWorkflowRunRoutes(container: Container): Router {
     stageRunRepo,
     workflowRunRepo,
     hitlService,
+    durableSleepService,
     logger,
   } = container;
 
@@ -273,6 +274,52 @@ export function createWorkflowRunRoutes(container: Container): Router {
         requestId: req.requestId,
       });
       res.status(202).json({ message: 'Stage resume initiated', stageId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workflow-runs/:runId/stages/:stageId/wake — Wake a sleeping stage now
+  //
+  // The stage timeline has shown a "Wake now" button beside every sleeping
+  // stage for a while with nothing behind it (review 6.x / D14). This is the
+  // missing half: it takes the same atomic claim + resume path the timed
+  // sweeper takes, so an early wake and an expiry are indistinguishable
+  // downstream.
+  router.post('/:runId/stages/:stageId/wake', async (req, res, next) => {
+    try {
+      const runId = String(req.params['runId']);
+      const stageId = String(req.params['stageId']);
+
+      // The stage must belong to the run in the path. Without this, any run
+      // id would serve as a cover for waking any stage in the system.
+      //
+      // `getById` rejects on an unknown id rather than resolving undefined,
+      // so the lookup is guarded and both shapes end at the same 404.
+      const stage = await stageRunRepo.getById(stageId).catch(() => undefined);
+      if (!stage || stage.workflowRunId !== runId) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Stage run not found' } });
+        return;
+      }
+
+      const outcome = await durableSleepService.wakeNow(stageId);
+      if (outcome === 'not_found') {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Stage run not found' } });
+        return;
+      }
+      if (outcome === 'not_sleeping') {
+        // 409, not 404: the row exists, it just is not parked. A double-click
+        // on the button lands here and must not read as a broken link.
+        res.status(409).json({
+          error: { code: 'STAGE_NOT_SLEEPING', message: 'Stage is not sleeping' },
+        });
+        return;
+      }
+
+      logger.info(`[WorkflowRunRoutes] Woke stage ${stageId} early`, {
+        requestId: req.requestId,
+      });
+      res.status(202).json({ message: 'Stage woken', stageId });
     } catch (err) {
       next(err);
     }

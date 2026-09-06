@@ -28,7 +28,7 @@
 //     boot returns stale-but-useful data instantly rather than blocking.
 // ────────────────────────────────────────────────────────────────
 
-import type { IAgentHarness, HarnessModel, ProviderInstanceId } from '@generatorai/core';
+import type { IAgentHarness, HarnessModel, ProviderCapabilities, ProviderInstanceId } from '@generatorai/core';
 import { createHarnessProvider } from './HarnessFactory.js';
 import type { HarnessType, HarnessProviderConfig } from './types.js';
 import { readFile, writeFile, rename, rm } from 'node:fs/promises';
@@ -127,6 +127,33 @@ export const ALL_HARNESS_TYPES: readonly HarnessType[] = [
 
 /** The subset probed automatically — the two managed providers. */
 const AUTO_PROBE_TYPES: readonly HarnessType[] = ['copilot', 'claude-agent'] as const;
+
+/**
+ * W48 — provider honesty. `codex` / `opencode` / `acp` were listed in
+ * `ALL_HARNESS_TYPES` (so `get()` / `registerInstance()` can address them)
+ * and shown by every UI that iterated that list, regardless of whether
+ * `HarnessRegistryOptions.buildConfig` actually supplied their provider
+ * section. Selecting one that wasn't configured failed the FIRST turn with
+ * an opaque error instead of never being offered. `isConfigurable` is the
+ * single source of truth a caller should filter on before presenting a type.
+ */
+const CONFIG_KEY_FOR_TYPE: Partial<Record<HarnessType, keyof HarnessProviderConfig>> = {
+  codex: 'codex',
+  opencode: 'opencode',
+  acp: 'acp',
+};
+
+/**
+ * W48 — capabilities `ProviderCapabilities` has no field for at all, so a
+ * `false` in the struct can't surface them. Hooks are Claude/Copilot-only
+ * plumbing (`HookExecutor` wiring); none of the three breadth adapters
+ * implement them, and nothing in `capabilities()` says so.
+ */
+const UNMODELED_CAPABILITIES: Partial<Record<HarnessType, readonly string[]>> = {
+  codex: ['hooks'],
+  opencode: ['hooks'],
+  acp: ['hooks'],
+};
 
 /** Human label for a provider type. */
 export function harnessTypeLabel(type: HarnessType): string {
@@ -588,6 +615,66 @@ export class HarnessRegistry {
   }
 
   /**
+   * W48 — whether `type` can actually be selected right now.
+   *
+   * The two managed providers (`copilot`, `claude-agent`) are always
+   * configurable — the registry brings them up itself. `codex` / `opencode`
+   * / `acp` are configurable only once the caller's `buildConfig` supplies
+   * their provider-specific config section; before that `get(type)` would
+   * construct an adapter with no connection info and fail the first turn.
+   */
+  isConfigurable(type: HarnessType): boolean {
+    if (AUTO_PROBE_TYPES.includes(type)) return true;
+    const key = CONFIG_KEY_FOR_TYPE[type];
+    if (!key) return false;
+    try {
+      return this.opts.buildConfig(type)[key] !== undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * W48 — every provider that can currently be selected. This is what a
+   * model picker / provider list should filter on instead of iterating
+   * `ALL_HARNESS_TYPES` directly, which is a superset that includes types
+   * this deployment has no config for.
+   */
+  get configurableTypes(): HarnessType[] {
+    return ALL_HARNESS_TYPES.filter((t) => this.isConfigurable(t));
+  }
+
+  /**
+   * W48 — provider honesty, part two. `codex` / `opencode` / `acp` are
+   * genuine adapters, not stubs, but each drops capabilities Claude/Copilot
+   * chats take for granted (see each adapter's `capabilities()` and
+   * `UNMODELED_CAPABILITIES` above for the ones the struct can't even
+   * express, like hooks). Silently dropping them is how a workflow authored
+   * against Claude quietly lost its skills or its per-call permission gate
+   * the moment it got routed to one of these — this makes the loss a log
+   * line instead of a mystery.
+   */
+  #logDroppedCapabilities(type: HarnessType, adapter: IAgentHarness): void {
+    if (AUTO_PROBE_TYPES.includes(type)) return; // the capability baseline
+    let caps: ProviderCapabilities;
+    try {
+      caps = adapter.capabilities();
+    } catch {
+      return; // best-effort — never let a diagnostic break startup
+    }
+    const dropped: string[] = [];
+    if (!caps.mcpServers) dropped.push('tools (no MCP server support)');
+    if (!caps.skillDirectories) dropped.push('skills (no skill directory support)');
+    if (!caps.fullToolGating) dropped.push('permissions (no per-call PreToolUse gate — treat as lower-trust)');
+    dropped.push(...(UNMODELED_CAPABILITIES[type] ?? []));
+    if (dropped.length === 0) return;
+    this.opts.logger?.warn(
+      `[HarnessRegistry] '${type}' is configured but its adapter drops: ${dropped.join(', ')}. ` +
+      `A chat routed to '${type}' loses these silently unless the caller checks capabilities() itself.`,
+    );
+  }
+
+  /**
    * Get (and lazily bring up) the adapter for a provider.
    *
    * Concurrent callers share a single in-flight initialization so we never
@@ -606,6 +693,7 @@ export class HarnessRegistry {
       entry.status.connected = true;
       entry.adapter = adapter;
       this.opts.logger?.info(`[HarnessRegistry] '${type}' initialized`);
+      this.#logDroppedCapabilities(type, adapter); // W48
       return adapter;
     })();
 
@@ -716,6 +804,7 @@ export class HarnessRegistry {
       entry.status.connected = true;
       entry.adapter = adapter;
       this.opts.logger?.info(`[HarnessRegistry] instance '${instanceId}' (${entry.driverType}) initialized`);
+      this.#logDroppedCapabilities(entry.driverType, adapter); // W48
       return adapter;
     })();
 

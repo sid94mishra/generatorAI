@@ -62,6 +62,51 @@ export interface ComputerUseSettings {
   skillId: string;
   runtime?: ComputerRuntime;
 }
+
+
+/** Settings -> Audio, as the server reports them. */
+export interface AudioSettings {
+  sttEngine: string;
+  textFormatter: string;
+  endpointSilenceMs: number;
+  interimResults: boolean;
+  ttsEnabled: boolean;
+  ttsVoice: string;
+  ttsSpeed: number;
+  engines?: string[];
+  formatters?: string[];
+  minEndpointMs?: number;
+  maxEndpointMs?: number;
+  /** Non-null when an operator pinned the engine via the environment. */
+  engineLockedByEnv?: string | null;
+}
+
+/** Whether the Nemotron weights are downloaded, and download progress. */
+export interface SpeechModelStatus {
+  present: boolean;
+  dir: string;
+  repo: string;
+  bytesOnDisk: number;
+  approxTotalBytes: number;
+  downloading?: boolean;
+  progress?: number;
+  error?: string;
+}
+
+/** Server-side state for the nightly execution-workspace sweep. */
+export interface WorkspaceRetentionSettings {
+  enabled: boolean;
+  retentionDays: number;
+  minDays: number;
+  maxDays: number;
+}
+
+/** What one sweep reclaimed. */
+export interface WorkspaceRetentionRunResult {
+  tracked: number;
+  orphans: number;
+  failed: number;
+}
 import type { CreateSessionParams } from '@generatorai/shared';
 import type { PersistedEvent, AgentEventKind } from '@generatorai/shared';
 import type {
@@ -708,6 +753,24 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
+  /**
+   * Answer a blocking tool-permission prompt (review finding 5.1) — sibling
+   * of {@link respondToChatInteraction}, same interaction resource, distinct
+   * route (`ChatManagementService.buildPermissionHandler`'s answer route,
+   * not the question/plan `/respond` route).
+   */
+  async respondToChatPermission(
+    chatId: string,
+    interactionId: string,
+    response: { behavior: 'allow' | 'deny'; message?: string },
+  ): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/chats/${chatId}/interactions/${interactionId}/permission`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(response),
+    });
+  }
+
   async setChatPermissionMode(
     chatId: string,
     mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan',
@@ -835,6 +898,10 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async resumeStageRun(runId: string, stageId: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/resume`, { method: 'POST' });
+  }
+
+  async wakeStageRun(runId: string, stageId: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/wake`, { method: 'POST' });
   }
 
   async retryStageRun(runId: string, stageId: string): Promise<void> {
@@ -1645,8 +1712,48 @@ export class HttpPlatformClient implements IPlatformClient {
   }
 
   // ── System MCP Servers ──
+  // Bundled catalog + custom (Settings → MCP Servers) servers, merged and
+  // redacted server-side (ArtifactCatalog + toMcpServerEntry — W48).
   async listSystemMcpServers(): Promise<any[]> {
     return apiFetch<any[]>(`${this.baseUrl}/api/system/mcp-servers`);
+  }
+
+  /** Per-bundled-server prefs: on/off, `{{input}}` values, credentials. */
+  async updateSystemMcpServerPrefs(
+    id: string,
+    data: { enabled?: boolean; inputs?: Record<string, string>; headers?: Record<string, string>; env?: Record<string, string> },
+  ): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/system/mcp-servers/system/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createCustomMcpServer(data: {
+    name: string; description?: string; serverType: string; url?: string; command?: string; args?: string[];
+    timeoutMs?: number; headers?: Record<string, string>; env?: Record<string, string>;
+  }): Promise<any> {
+    return apiFetch<any>(`${this.baseUrl}/api/system/mcp-servers/custom`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateCustomMcpServer(id: string, data: {
+    name: string; description?: string; serverType: string; url?: string; command?: string; args?: string[];
+    timeoutMs?: number; enabled?: boolean; headers?: Record<string, string>; env?: Record<string, string>;
+  }): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/system/mcp-servers/custom/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteCustomMcpServer(id: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/system/mcp-servers/custom/${id}`, { method: 'DELETE' });
   }
 
   // ── Agents API ──
@@ -1796,6 +1903,55 @@ export class HttpPlatformClient implements IPlatformClient {
       method: 'PUT',
       body: JSON.stringify({ enabled, ...(allowSynthetic === undefined ? {} : { allowSynthetic }) }),
     });
+  }
+
+  // ── Audio (STT / TTS) ──
+  async getAudioSettings(): Promise<AudioSettings> {
+    return apiFetch<AudioSettings>(`${this.baseUrl}/api/system/audio`);
+  }
+
+  async setAudioSettings(patch: Partial<AudioSettings>): Promise<AudioSettings> {
+    return apiFetch<AudioSettings>(`${this.baseUrl}/api/system/audio`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  async getSpeechModelStatus(): Promise<SpeechModelStatus> {
+    return apiFetch<SpeechModelStatus>(`${this.baseUrl}/api/system/audio/model`);
+  }
+
+  async downloadSpeechModel(): Promise<SpeechModelStatus> {
+    return apiFetch<SpeechModelStatus>(`${this.baseUrl}/api/system/audio/model`, { method: 'POST', body: '{}' });
+  }
+
+  async deleteSpeechModel(): Promise<SpeechModelStatus> {
+    return apiFetch<SpeechModelStatus>(`${this.baseUrl}/api/system/audio/model`, { method: 'DELETE' });
+  }
+
+  // ── Workspace retention (nightly cleanup) ──
+  async getWorkspaceRetention(): Promise<WorkspaceRetentionSettings> {
+    return apiFetch<WorkspaceRetentionSettings>(`${this.baseUrl}/api/system/workspace-retention`);
+  }
+
+  async setWorkspaceRetention(
+    enabled: boolean,
+    retentionDays?: number,
+  ): Promise<WorkspaceRetentionSettings> {
+    return apiFetch<WorkspaceRetentionSettings>(`${this.baseUrl}/api/system/workspace-retention`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled, ...(retentionDays === undefined ? {} : { retentionDays }) }),
+    });
+  }
+
+  async runWorkspaceRetention(retentionDays?: number): Promise<WorkspaceRetentionRunResult> {
+    return apiFetch<WorkspaceRetentionRunResult>(
+      `${this.baseUrl}/api/system/workspace-retention/run`,
+      {
+        method: 'POST',
+        body: JSON.stringify(retentionDays === undefined ? {} : { retentionDays }),
+      },
+    );
   }
 
   async getComputerRuntime(workspaceId: string): Promise<ComputerRuntime> {

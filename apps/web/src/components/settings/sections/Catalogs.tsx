@@ -15,13 +15,18 @@ import {
   Server, LayoutTemplate, Globe, Terminal, ChevronRight, Loader2,
   FileText, Plus, Trash2, ArrowLeft, X, Eye, AlertTriangle,
 } from 'lucide-react';
-import { useSystemArtifacts, useSystemMcpServers, useArtifactContent } from '@/hooks/projectQueries.js';
+import {
+  useSystemArtifacts, useSystemMcpServers, useArtifactContent,
+  useCreateCustomMcpServer, useUpdateCustomMcpServer, useDeleteCustomMcpServer,
+  useUpdateSystemMcpServerPrefs,
+} from '@/hooks/projectQueries.js';
 import { useTemplates } from '@/hooks/queries.js';
 import { useCreateFromTemplate } from '@/hooks/workflowQueries.js';
 import { Badge, Spinner, Button, SearchInput, Switch, Input } from '@/components/ui/index.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { useCatalogPrefsStore } from '@/stores/catalogPrefsStore.js';
-import { useCustomMcpStore, type CustomMcpServer, type CustomMcpTransport } from '@/stores/customMcpStore.js';
+import { readLegacyCustomMcpServers, clearLegacyCustomMcpServers } from '@/stores/customMcpStore.js';
+import { toast } from '@/components/Toast.js';
 import { cn } from '@/lib/utils.js';
 import type { ArtifactWithSource, McpServerEntry } from '@generatorai/shared';
 import { SectionHeader, SectionListHeader, CatalogAccordionRow } from '../shared.js';
@@ -172,18 +177,95 @@ function SkillPreview({ artifact, onBack }: { artifact: ArtifactWithSource; onBa
 
 // ── MCP servers ──
 
+/**
+ * W48 — one-time migration off the browser-only `customMcpStore`. A pre-W48
+ * build wrote custom servers ONLY to localStorage, so the server-side harness
+ * config builder never saw them; this POSTs each one to the new server-side
+ * endpoint, then deletes the legacy key so it never runs twice.
+ */
+function useMigrateLegacyCustomMcpServers(): void {
+  const createCustom = useCreateCustomMcpServer();
+  const ranRef = React.useRef(false);
+  React.useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
+    const legacy = readLegacyCustomMcpServers();
+    if (legacy.length === 0) return;
+    void (async () => {
+      let migrated = 0;
+      for (const s of legacy) {
+        try {
+          await createCustom.mutateAsync({
+            name: s.name,
+            serverType: s.transport === 'local' ? 'stdio' : s.transport,
+            command: s.transport === 'local' ? s.command : undefined,
+            args: s.transport === 'local' && s.args ? s.args.split(/\s+/).filter(Boolean) : undefined,
+            url: s.transport !== 'local' ? s.url : undefined,
+            env: s.transport === 'local' ? s.env : undefined,
+            headers: s.transport !== 'local' ? s.env : undefined,
+            timeoutMs: s.timeoutSec ? s.timeoutSec * 1000 : undefined,
+          });
+          migrated += 1;
+        } catch {
+          // Leave this one in localStorage — surfaced in the toast below —
+          // rather than losing it silently.
+        }
+      }
+      clearLegacyCustomMcpServers();
+      if (migrated > 0) {
+        toast({
+          variant: 'info',
+          title: `Moved ${migrated} MCP server${migrated === 1 ? '' : 's'} to your account`,
+          description: 'Custom MCP servers now live on the server instead of only this browser, so they actually reach chats.',
+        });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
 export function McpSection() {
   const [view, setView] = useState<'list' | 'add'>('list');
   const { data: servers, isLoading } = useSystemMcpServers();
   const disabledMcp = useCatalogPrefsStore((s) => s.disabledMcp);
   const setMcpEnabled = useCatalogPrefsStore((s) => s.setMcpEnabled);
-  const customServers = useCustomMcpStore((s) => s.servers);
-  const removeCustom = useCustomMcpStore((s) => s.removeServer);
+  const deleteCustom = useDeleteCustomMcpServer();
+  const updateCustom = useUpdateCustomMcpServer();
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  // A custom server's on/off toggle persists server-side (it is brand new —
+  // nothing about it existed before this feature), unlike a bundled/project
+  // server's toggle below, which stays the pre-existing client-only picker
+  // filter (`catalogPrefsStore`) — changing that mechanic is a larger,
+  // separate change. `headers`/`env` are resent as their REDACTED form from
+  // the GET response, which `McpCredentialVault.save` treats as "keep the
+  // stored value" — a toggle must never wipe a saved credential.
+  const toggleCustom = (s: McpServerEntry, on: boolean): void => {
+    void updateCustom.mutateAsync({
+      id: s.id,
+      data: {
+        name: s.name,
+        description: s.description,
+        serverType: s.serverType,
+        url: s.url,
+        command: s.command,
+        args: s.args,
+        timeoutMs: s.timeoutMs,
+        enabled: on,
+        headers: s.headers,
+        env: s.env,
+      },
+    });
+    setMcpEnabled(s.id, on);
+  };
+
+  useMigrateLegacyCustomMcpServers();
+
+  // GET /system/mcp-servers now returns bundled AND custom servers, merged
+  // and redacted server-side (ArtifactCatalog + toMcpServerEntry).
   const list = (servers as McpServerEntry[] | undefined) ?? [];
-  const total = list.length + customServers.length;
-  const enabledCount = total - disabledMcp.filter((id) => list.some((s) => s.id === id) || customServers.some((s) => s.id === id)).length;
+  const total = list.length;
+  const enabledCount = total - disabledMcp.filter((id) => list.some((s) => s.id === id)).length;
 
   if (view === 'add') {
     return <McpAddForm onDone={() => setView('list')} />;
@@ -225,18 +307,8 @@ export function McpSection() {
               key={s.id}
               server={s}
               enabled={!disabledMcp.includes(s.id)}
-              onToggle={(on) => setMcpEnabled(s.id, on)}
-              expanded={expanded === s.id}
-              onExpand={() => setExpanded((cur) => (cur === s.id ? null : s.id))}
-            />
-          ))}
-          {customServers.map((s) => (
-            <CustomMcpRow
-              key={s.id}
-              server={s}
-              enabled={!disabledMcp.includes(s.id)}
-              onToggle={(on) => setMcpEnabled(s.id, on)}
-              onRemove={() => { removeCustom(s.id); if (expanded === s.id) setExpanded(null); }}
+              onToggle={(on) => (s.source === 'custom' ? toggleCustom(s, on) : setMcpEnabled(s.id, on))}
+              onRemove={s.source === 'custom' ? () => { void deleteCustom.mutateAsync(s.id); if (expanded === s.id) setExpanded(null); } : undefined}
               expanded={expanded === s.id}
               onExpand={() => setExpanded((cur) => (cur === s.id ? null : s.id))}
             />
@@ -248,21 +320,34 @@ export function McpSection() {
 }
 
 function McpRow({
-  server, enabled, onToggle, expanded, onExpand,
+  server, enabled, onToggle, onRemove, expanded, onExpand,
 }: {
   server: McpServerEntry;
   enabled: boolean;
   onToggle: (on: boolean) => void;
+  onRemove?: () => void;
   expanded: boolean;
   onExpand: () => void;
 }) {
-  const isHttp = server.serverType === 'http';
+  const isHttp = server.serverType === 'http' || server.serverType === 'sse';
   const Icon = isHttp ? Globe : Terminal;
+  const needsSetup = !!server.needsConfiguration
+    && (server.needsConfiguration.missingInputs.length > 0 || server.needsConfiguration.missingCredentials.length > 0);
   return (
     <CatalogAccordionRow
       icon={<Icon className={cn('h-4 w-4', isHttp ? 'text-info' : 'text-primary')} />}
       title={server.name}
-      badge={<Badge tone="neutral" size="sm" className="shrink-0 uppercase">{server.serverType}</Badge>}
+      badge={
+        <span className="flex items-center gap-1.5">
+          <Badge tone="neutral" size="sm" className="shrink-0 uppercase">{server.serverType}</Badge>
+          {server.source === 'custom' && <Badge tone="info" size="sm" className="shrink-0">Custom</Badge>}
+          {needsSetup && (
+            <Badge tone="warning" size="sm" className="shrink-0 gap-1">
+              <AlertTriangle className="h-3 w-3" /> Needs setup
+            </Badge>
+          )}
+        </span>
+      }
       subtitle={server.url ?? server.command ?? server.serverType}
       disabled={!enabled}
       expanded={expanded}
@@ -281,101 +366,161 @@ function McpRow({
         {server.url && <DetailLine label="URL" value={server.url} mono />}
         {server.command && <DetailLine label="Command" value={server.command} mono />}
         {server.args && server.args.length > 0 && <DetailLine label="Args" value={server.args.join(' ')} mono />}
+        {server.headers && Object.keys(server.headers).length > 0 && (
+          <DetailLine label="Headers" value={Object.keys(server.headers).join(', ')} mono />
+        )}
+        {server.env && Object.keys(server.env).length > 0 && (
+          <DetailLine label="Env" value={Object.keys(server.env).join(', ')} mono />
+        )}
         <DetailLine label="Source" value={server.source} />
       </div>
-    </CatalogAccordionRow>
-  );
-}
 
-function CustomMcpRow({
-  server, enabled, onToggle, onRemove, expanded, onExpand,
-}: {
-  server: CustomMcpServer;
-  enabled: boolean;
-  onToggle: (on: boolean) => void;
-  onRemove: () => void;
-  expanded: boolean;
-  onExpand: () => void;
-}) {
-  const isLocal = server.transport === 'local';
-  const Icon = isLocal ? Terminal : Globe;
-  const envEntries = Object.entries(server.env ?? {});
-  return (
-    <CatalogAccordionRow
-      icon={<Icon className={cn('h-4 w-4', isLocal ? 'text-primary' : 'text-info')} />}
-      title={server.name}
-      badge={
-        <span className="flex items-center gap-1.5">
-          <Badge tone="neutral" size="sm" className="shrink-0 uppercase">{server.transport}</Badge>
-          <Badge tone="info" size="sm" className="shrink-0">Custom</Badge>
-        </span>
-      }
-      subtitle={server.url ?? server.command ?? server.transport}
-      disabled={!enabled}
-      expanded={expanded}
-      onToggleExpanded={onExpand}
-      control={
-        <Switch
-          checked={enabled}
-          onCheckedChange={onToggle}
-          aria-label={`${enabled ? 'Disable' : 'Enable'} MCP server ${server.name}`}
-        />
-      }
-    >
-      <div className="space-y-1.5 rounded-md border border-border bg-card px-3 py-2.5 text-xs">
-        <DetailLine label="Transport" value={server.transport} />
-        {server.command && <DetailLine label="Command" value={server.command} mono />}
-        {server.args && <DetailLine label="Args" value={server.args} mono />}
-        {server.url && <DetailLine label="URL" value={server.url} mono />}
-        {envEntries.length > 0 && <DetailLine label="Env" value={envEntries.map(([k]) => k).join(', ')} mono />}
-        <DetailLine label="Timeout" value={`${server.timeoutSec ?? 180}s`} />
-        <div className="pt-1">
+      {(needsSetup || (server.inputs && server.inputs.length > 0) || server.credentials) && (
+        <McpConfigureForm server={server} />
+      )}
+
+      {onRemove && (
+        <div className="pt-1.5">
           <Button variant="ghost" size="sm" leftIcon={<Trash2 className="h-3.5 w-3.5 text-danger" />} onClick={onRemove}>
             <span className="text-danger">Remove</span>
           </Button>
         </div>
-      </div>
+      )}
     </CatalogAccordionRow>
+  );
+}
+
+/**
+ * Inline setup form for a bundled server's `{{input}}` values and required
+ * credentials — the UI half of "mark which bundled servers need credentials
+ * so the UI asks before enabling one" (W48). Shown for system servers with
+ * declared inputs/credentials; a custom server has neither and never renders
+ * this. Values save via `PUT /system/mcp-servers/system/:id`, which merges
+ * field-by-field so an untouched credential is left alone.
+ */
+function McpConfigureForm({ server }: { server: McpServerEntry }) {
+  const updatePrefs = useUpdateSystemMcpServerPrefs();
+  const [inputs, setInputs] = useState<Record<string, string>>(server.inputValues ?? {});
+  const [env, setEnv] = useState<Record<string, string>>({});
+  const [headers, setHeaders] = useState<Record<string, string>>({});
+
+  const envCreds = server.credentials?.env ?? [];
+  const headerCreds = server.credentials?.headers ?? [];
+  if (server.source === 'custom' || (!server.inputs?.length && !envCreds.length && !headerCreds.length)) return null;
+
+  const handleSave = async () => {
+    await updatePrefs.mutateAsync({
+      id: server.id,
+      data: {
+        enabled: true,
+        ...(server.inputs?.length ? { inputs } : {}),
+        ...(envCreds.length ? { env } : {}),
+        ...(headerCreds.length ? { headers } : {}),
+      },
+    });
+    toast({ variant: 'success', title: `${server.name} configured`, description: 'It will be offered to chats now.' });
+  };
+
+  const filledCount =
+    (server.inputs ?? []).filter((i) => (inputs[i.key] ?? '').trim().length > 0).length +
+    envCreds.filter((c) => (env[c.name] ?? '').trim().length > 0).length +
+    headerCreds.filter((c) => (headers[c.name] ?? '').trim().length > 0).length;
+  const requiredCount = (server.inputs ?? []).filter((i) => i.required !== false).length
+    + envCreds.filter((c) => c.required !== false).length
+    + headerCreds.filter((c) => c.required !== false).length;
+
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-dashed border-border bg-subtle px-3 py-2.5">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Setup required</div>
+      {(server.inputs ?? []).map((i) => (
+        <Field key={i.key} label={i.label}>
+          <Input
+            value={inputs[i.key] ?? ''}
+            onChange={(e) => setInputs((cur) => ({ ...cur, [i.key]: e.target.value }))}
+            placeholder={i.placeholder}
+            className="font-mono text-xs"
+          />
+          {i.description && <p className="mt-0.5 text-[10px] text-muted-foreground">{i.description}</p>}
+        </Field>
+      ))}
+      {envCreds.map((c) => (
+        <Field key={c.name} label={c.label}>
+          <Input
+            type="password"
+            value={env[c.name] ?? ''}
+            onChange={(e) => setEnv((cur) => ({ ...cur, [c.name]: e.target.value }))}
+            placeholder={c.description ?? c.name}
+            className="font-mono text-xs"
+          />
+        </Field>
+      ))}
+      {headerCreds.map((c) => (
+        <Field key={c.name} label={c.label}>
+          <Input
+            type="password"
+            value={headers[c.name] ?? ''}
+            onChange={(e) => setHeaders((cur) => ({ ...cur, [c.name]: e.target.value }))}
+            placeholder={c.description ?? c.name}
+            className="font-mono text-xs"
+          />
+        </Field>
+      ))}
+      <div className="flex items-center justify-between pt-1">
+        <span className="text-[10px] text-muted-foreground">{filledCount} of {requiredCount} required fields filled</span>
+        <Button variant="primary" size="sm" loading={updatePrefs.isPending} onClick={() => void handleSave()}>
+          Save
+        </Button>
+      </div>
+    </div>
   );
 }
 
 // ── MCP add-server sub-page ──
 
-const TRANSPORTS: Array<{ id: CustomMcpTransport; label: string }> = [
-  { id: 'local', label: 'Local' },
+type AddServerTransport = 'stdio' | 'http' | 'sse';
+
+const TRANSPORTS: Array<{ id: AddServerTransport; label: string }> = [
+  { id: 'stdio', label: 'Local' },
   { id: 'http', label: 'HTTP' },
   { id: 'sse', label: 'SSE' },
 ];
 
 function McpAddForm({ onDone }: { onDone: () => void }) {
-  const addServer = useCustomMcpStore((s) => s.addServer);
+  const createCustom = useCreateCustomMcpServer();
   const [name, setName] = useState('');
-  const [transport, setTransport] = useState<CustomMcpTransport>('local');
+  const [transport, setTransport] = useState<AddServerTransport>('stdio');
   const [command, setCommand] = useState('');
   const [args, setArgs] = useState('');
   const [url, setUrl] = useState('');
   const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
   const [timeoutSec, setTimeoutSec] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const isLocal = transport === 'local';
+  const isLocal = transport === 'stdio';
   const canSave = name.trim().length > 0 && (isLocal ? command.trim().length > 0 : url.trim().length > 0);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!canSave) return;
+    setSaveError(null);
     const env = envVars.reduce<Record<string, string>>((acc, { key, value }) => {
       if (key.trim()) acc[key.trim()] = value;
       return acc;
     }, {});
-    addServer({
-      name: name.trim(),
-      transport,
-      command: isLocal ? command.trim() : undefined,
-      args: isLocal && args.trim() ? args.trim() : undefined,
-      url: !isLocal ? url.trim() : undefined,
-      env: Object.keys(env).length > 0 ? env : undefined,
-      timeoutSec: timeoutSec.trim() ? Number(timeoutSec) : undefined,
-    });
-    onDone();
+    try {
+      await createCustom.mutateAsync({
+        name: name.trim(),
+        serverType: transport,
+        command: isLocal ? command.trim() : undefined,
+        args: isLocal && args.trim() ? args.trim().split(/\s+/) : undefined,
+        url: !isLocal ? url.trim() : undefined,
+        env: isLocal && Object.keys(env).length > 0 ? env : undefined,
+        headers: !isLocal && Object.keys(env).length > 0 ? env : undefined,
+        timeoutMs: timeoutSec.trim() ? Number(timeoutSec) * 1000 : undefined,
+      });
+      onDone();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save server.');
+    }
   };
 
   return (
@@ -430,7 +575,12 @@ function McpAddForm({ onDone }: { onDone: () => void }) {
           )}
 
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-foreground">Environment variables</label>
+            <label className="mb-1.5 block text-xs font-medium text-foreground">
+              {isLocal ? 'Environment variables' : 'Headers'}
+            </label>
+            <p className="mb-1.5 text-[10px] text-muted-foreground">
+              Values are written to the secrets vault and never appear again in this form or in any GET response.
+            </p>
             <div className="space-y-2">
               {envVars.map((pair, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -479,9 +629,17 @@ function McpAddForm({ onDone }: { onDone: () => void }) {
           </Field>
         </div>
 
+        {saveError && (
+          <p className="mt-3 flex items-center gap-1.5 text-xs text-danger">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {saveError}
+          </p>
+        )}
+
         <div className="mt-5 flex items-center justify-end gap-2 border-t border-border pt-4">
           <Button variant="secondary" size="sm" onClick={onDone}>Cancel</Button>
-          <Button variant="primary" size="sm" onClick={handleSave} disabled={!canSave}>Add server</Button>
+          <Button variant="primary" size="sm" loading={createCustom.isPending} onClick={() => void handleSave()} disabled={!canSave}>
+            Add server
+          </Button>
         </div>
       </div>
     </div>

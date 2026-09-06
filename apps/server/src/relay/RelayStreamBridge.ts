@@ -6,7 +6,11 @@
 // loopback HTTP listener. The remote client is therefore speaking ordinary
 // HTTP to the ordinary Express app:
 //
-//   phone ──sealed bytes──▶ cell ──opaque──▶ host ──▶ 127.0.0.1:<port>
+//   phone ──HTTP bytes──▶ cell ──same bytes──▶ host ──▶ 127.0.0.1:<port>
+//
+// Those bytes are NOT end-to-end encrypted today: `e2ee.ts` in the protocol
+// package is not wired here or in any client, so the cell can read them. TLS
+// to the cell (when configured) is the only confidentiality on that hop.
 //
 // Why raw bytes instead of a bespoke RPC:
 //   * every existing control keeps working unchanged — DPoP verification,
@@ -21,7 +25,7 @@
 
 import * as net from 'node:net';
 import { WebSocket } from 'ws';
-import { RELAY_MAX_DATA_FRAME_BYTES } from '@generatorai/relay-protocol';
+import { RELAY_MAX_DATA_FRAME_BYTES, relayDataSocketUrl } from '@generatorai/relay-protocol';
 import type { ILogger } from '@generatorai/shared';
 
 /** Give up if the loopback server does not accept within this window. */
@@ -55,9 +59,9 @@ export class RelayStreamBridge {
   /**
    * Opens one bridged stream.
    *
-   * `cellUrl` is the host control URL (`wss://…/relay/host`); the data
-   * endpoint is derived from it so a malicious control message cannot point
-   * the bridge at an arbitrary origin.
+   * `cellUrl` is the assigned cell's canonical origin; the data endpoint is
+   * derived from it via the shared route table so a malicious control message
+   * cannot point the bridge at an arbitrary origin.
    */
   open(params: { cellUrl: string; relayHostId: string; streamId: string }): void {
     if (this.active.size >= MAX_ACTIVE_STREAMS) {
@@ -69,20 +73,20 @@ export class RelayStreamBridge {
     }
     if (this.active.has(params.streamId)) return;
 
-    let dataUrl: URL;
+    let dataUrl: string;
     try {
-      dataUrl = new URL(params.cellUrl);
+      dataUrl = relayDataSocketUrl(params.cellUrl, {
+        streamId: params.streamId,
+        relayHostId: params.relayHostId,
+      });
     } catch {
       this.options.logger.warn('[Relay] Invalid cell URL; not bridging stream');
       return;
     }
-    dataUrl.pathname = '/relay/data';
-    dataUrl.searchParams.set('streamId', params.streamId);
-    dataUrl.searchParams.set('relayHostId', params.relayHostId);
 
     const ws = this.options.createSocket
-      ? this.options.createSocket(dataUrl.toString())
-      : new WebSocket(dataUrl.toString(), { maxPayload: RELAY_MAX_DATA_FRAME_BYTES });
+      ? this.options.createSocket(dataUrl)
+      : new WebSocket(dataUrl, { maxPayload: RELAY_MAX_DATA_FRAME_BYTES });
 
     const tcp = net.connect({ host: '127.0.0.1', port: this.options.localPort });
     tcp.setNoDelay(true);

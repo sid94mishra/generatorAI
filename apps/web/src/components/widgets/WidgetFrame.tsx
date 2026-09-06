@@ -21,6 +21,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { WidgetBlock } from '@/stores/streamStore.js';
 import { widgetBridge } from '@/lib/widgetBridge.js';
+import { Button } from '@/components/ui/index.js';
 
 interface WidgetFrameProps {
   block: WidgetBlock;
@@ -242,7 +243,7 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
         border: fullscreen ? 'none' : '1px solid var(--color-border, #d0d7de)',
         borderRadius: fullscreen ? 0 : 10,
         overflow: 'hidden',
-        background: 'var(--color-surface, #ffffff)',
+        background: 'var(--color-surface)',
         height: fullscreen ? '100%' : undefined,
       }}
       data-widget-id={block.instanceId}
@@ -302,7 +303,7 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
             gap: 6,
             padding: 16,
             textAlign: 'center',
-            background: 'var(--color-surface, #ffffff)',
+            background: 'var(--color-surface)',
             fontSize: 12,
             color: 'var(--color-muted-foreground, #57606a)',
           }}
@@ -315,7 +316,8 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
             missing <code style={{ fontFamily: 'ui-monospace, monospace' }}>{block.entry}</code>, or
             the page failed to boot.
           </span>
-          <button
+          <Button
+            variant="ghost"
             type="button"
             onClick={() => { setLoaded(false); setStalled(false); setReloadNonce((n) => n + 1); }}
             style={{
@@ -330,7 +332,7 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
             }}
           >
             Retry
-          </button>
+          </Button>
         </div>
       )}
     </div>

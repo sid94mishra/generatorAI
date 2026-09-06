@@ -545,14 +545,19 @@ export function createAuthRoutes(container: Container): Router {
     })();
   });
 
-  router.delete('/devices/:deviceId', (req: Request, res: Response) => {
+  const revokeDeviceHandler = (req: Request, res: Response): void => {
     void (async () => {
       const parsed = revokeSchema.safeParse(req.body ?? {});
       const reason = parsed.success ? parsed.data.reason : 'revoked by operator';
       await devices.revokeDevice(pathParam(req, 'deviceId'), reason, requirePrincipal(req));
       res.status(204).end();
     })();
-  });
+  };
+  router.delete('/devices/:deviceId', revokeDeviceHandler);
+  // Alias for clients that cannot send a body with DELETE (and for the
+  // mobile app's historical call shape). Same handler, same `/auth/devices`
+  // route policy (`admin:devices`), so nothing is gained by choosing it.
+  router.post('/devices/:deviceId/revoke', revokeDeviceHandler);
 
   // ── Push notification registration ───────────────────────────────
   //

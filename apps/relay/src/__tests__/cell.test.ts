@@ -22,6 +22,9 @@ import { ed25519 } from '@noble/curves/ed25519';
 
 import {
   RELAY_PROTOCOL_VERSION,
+  RELAY_ROUTES,
+  RelayStreamIdSchema,
+  createHostBinding,
   encodeHostProofTranscript,
   toBase64Url,
   type RelayControlMessage,
@@ -85,14 +88,28 @@ interface Host {
 
 /** Connects a host and completes the real challenge/response handshake. */
 async function attachHost(
-  opts: { relayHostId?: string; wrongKeySignature?: boolean } = {},
+  opts: {
+    relayHostId?: string;
+    wrongKeySignature?: boolean;
+    /** Reuse a specific signing key (to prove the same host may reconnect). */
+    privateKey?: Uint8Array;
+    /** Send a binding signed for a DIFFERENT id, to prove the cell checks it. */
+    forgedBinding?: boolean;
+  } = {},
 ): Promise<{ host: Host; attached: RelayControlMessage }> {
-  const priv = ed25519.utils.randomPrivateKey();
+  const priv = opts.privateKey ?? ed25519.utils.randomPrivateKey();
   const pub = ed25519.getPublicKey(priv);
   const relayHostId = opts.relayHostId ?? toBase64Url(nodeRandomBytes(32));
   const hostPublicKey = toBase64Url(pub);
+  const hostBinding = createHostBinding(
+    {
+      relayHostId: opts.forgedBinding ? toBase64Url(nodeRandomBytes(32)) : relayHostId,
+      hostPublicKey,
+    },
+    (message) => ed25519.sign(message, priv),
+  );
 
-  const ws = new WebSocket(wsUrl('/relay/host'));
+  const ws = new WebSocket(wsUrl(RELAY_ROUTES.host));
   await waitOpen(ws);
 
   const challengePromise = nextMessage(ws);
@@ -102,13 +119,17 @@ async function attachHost(
       v: RELAY_PROTOCOL_VERSION,
       relayHostId,
       hostPublicKey,
+      hostBinding,
       assignmentEpoch: 0,
       previousGeneration: 0,
       resumeIntent: false,
     }),
   );
   const challenge = await challengePromise;
-  if (challenge.type !== 'challenge') throw new Error(`expected challenge, got ${challenge.type}`);
+  if (challenge.type !== 'challenge') {
+    // Binding/key-pin failures are answered with an error BEFORE any challenge.
+    return { host: { ws, relayHostId, hostPublicKey }, attached: challenge };
+  }
 
   const transcript = encodeHostProofTranscript({
     relayOrigin: ORIGIN,
@@ -178,8 +199,54 @@ describe('RelayCell — host handshake', () => {
     host.ws.close();
   });
 
+  it('refuses a hello whose binding was signed for a different relayHostId (BINDING_INVALID), before any challenge', async () => {
+    const { attached, host } = await attachHost({ forgedBinding: true });
+    expect(attached).toMatchObject({ type: 'error', code: 'BINDING_INVALID' });
+    expect(cell.stats().hosts).toBe(0);
+    host.ws.close();
+  });
+
+  it('refuses a hello without a binding at all (schema-invalid in v2)', async () => {
+    const priv = ed25519.utils.randomPrivateKey();
+    const ws = new WebSocket(wsUrl(RELAY_ROUTES.host));
+    await waitOpen(ws);
+    const closed = waitClose(ws);
+    ws.send(
+      JSON.stringify({
+        type: 'host_hello',
+        v: RELAY_PROTOCOL_VERSION,
+        relayHostId: toBase64Url(nodeRandomBytes(32)),
+        hostPublicKey: toBase64Url(ed25519.getPublicKey(priv)),
+        assignmentEpoch: 0,
+        previousGeneration: 0,
+        resumeIntent: false,
+      }),
+    );
+    expect((await closed).code).toBe(4400);
+  });
+
+  it('pins the first key seen for an id: a different key cannot take the id over (HOST_KEY_MISMATCH)', async () => {
+    const relayHostId = toBase64Url(nodeRandomBytes(32));
+    const priv = ed25519.utils.randomPrivateKey();
+    const first = await attachHost({ relayHostId, privateKey: priv });
+    expect(first.attached.type).toBe('attached');
+
+    // Same id, different key — the very move an impostor would make.
+    const impostor = await attachHost({ relayHostId });
+    expect(impostor.attached).toMatchObject({ type: 'error', code: 'HOST_KEY_MISMATCH' });
+    expect(cell.stats().hosts).toBe(1); // the real host is untouched
+    impostor.host.ws.close();
+
+    // Same id, same key — a legitimate reconnect still supersedes.
+    first.host.ws.close();
+    await new Promise((r) => setTimeout(r, 20));
+    const again = await attachHost({ relayHostId, privateKey: priv });
+    expect(again.attached).toMatchObject({ type: 'attached' });
+    again.host.ws.close();
+  });
+
   it('rejects a binary frame on the control channel', async () => {
-    const ws = new WebSocket(wsUrl('/relay/host'));
+    const ws = new WebSocket(wsUrl(RELAY_ROUTES.host));
     await waitOpen(ws);
     const closed = waitClose(ws);
     ws.send(Buffer.from([1, 2, 3]));
@@ -188,7 +255,7 @@ describe('RelayCell — host handshake', () => {
   });
 
   it('rejects a malformed (schema-invalid) message', async () => {
-    const ws = new WebSocket(wsUrl('/relay/host'));
+    const ws = new WebSocket(wsUrl(RELAY_ROUTES.host));
     await waitOpen(ws);
     const closed = waitClose(ws);
     ws.send(JSON.stringify({ type: 'host_hello', v: RELAY_PROTOCOL_VERSION })); // missing required fields
@@ -198,10 +265,11 @@ describe('RelayCell — host handshake', () => {
 
   it('retires the previous connection when the same relayHostId reconnects', async () => {
     const relayHostId = toBase64Url(nodeRandomBytes(32));
-    const first = await attachHost({ relayHostId });
+    const privateKey = ed25519.utils.randomPrivateKey();
+    const first = await attachHost({ relayHostId, privateKey });
     const firstClosed = waitClose(first.host.ws);
 
-    const second = await attachHost({ relayHostId });
+    const second = await attachHost({ relayHostId, privateKey });
     expect(second.attached).toMatchObject({ type: 'attached', generation: 2 });
 
     const { code } = await firstClosed;
@@ -217,7 +285,7 @@ describe('RelayCell — invites and client pairing', () => {
     const messages = hostMessages(host.ws);
     const invite = await createInvite(host);
 
-    const client = new WebSocket(wsUrl('/relay/client'));
+    const client = new WebSocket(wsUrl(RELAY_ROUTES.client));
     await waitOpen(client);
     const readyPromise = nextMessage(client);
     client.send(
@@ -233,8 +301,14 @@ describe('RelayCell — invites and client pairing', () => {
     expect(ready.type).toBe('client_ready');
 
     await new Promise((r) => setTimeout(r, 20)); // let the stream_open reach the host
-    expect(messages.some((m) => m.type === 'stream_open' && m.credentialKind === 'invite')).toBe(true);
+    const streamOpen = messages.find((m) => m.type === 'stream_open');
+    expect(streamOpen).toMatchObject({ type: 'stream_open', credentialKind: 'invite' });
     expect(cell.stats().streams).toBe(1);
+    // The id the cell mints must pass the schema the HOST parses it with —
+    // the old `invite:<uuid>` form did not, and the host closed the channel.
+    if (streamOpen?.type !== 'stream_open') throw new Error('unreachable');
+    expect(RelayStreamIdSchema.safeParse(streamOpen.streamId).success).toBe(true);
+    expect(ready).toMatchObject({ streamId: streamOpen.streamId });
 
     client.close();
     host.ws.close();
@@ -244,7 +318,7 @@ describe('RelayCell — invites and client pairing', () => {
     const { host } = await attachHost();
     const invite = await createInvite(host);
 
-    const first = new WebSocket(wsUrl('/relay/client'));
+    const first = new WebSocket(wsUrl(RELAY_ROUTES.client));
     await waitOpen(first);
     const firstReady = nextMessage(first);
     first.send(
@@ -258,7 +332,7 @@ describe('RelayCell — invites and client pairing', () => {
     );
     expect((await firstReady).type).toBe('client_ready'); // first redemption succeeds
 
-    const second = new WebSocket(wsUrl('/relay/client'));
+    const second = new WebSocket(wsUrl(RELAY_ROUTES.client));
     await waitOpen(second);
     const secondClosed = waitClose(second);
     second.send(
@@ -278,7 +352,7 @@ describe('RelayCell — invites and client pairing', () => {
   });
 
   it('rejects a client dialling an unknown or offline host id the same way either would look (no oracle)', async () => {
-    const client = new WebSocket(wsUrl('/relay/client'));
+    const client = new WebSocket(wsUrl(RELAY_ROUTES.client));
     await waitOpen(client);
     const closed = waitClose(client);
     client.send(
@@ -299,7 +373,7 @@ describe('RelayCell — invites and client pairing', () => {
     const { host: hostB } = await attachHost();
     const invite = await createInvite(hostA);
 
-    const client = new WebSocket(wsUrl('/relay/client'));
+    const client = new WebSocket(wsUrl(RELAY_ROUTES.client));
     await waitOpen(client);
     const closed = waitClose(client);
     client.send(
@@ -325,7 +399,7 @@ describe('RelayCell — data forwarding', () => {
     const controlMessages = hostMessages(host.ws);
     const invite = await createInvite(host);
 
-    const client = new WebSocket(wsUrl('/relay/client'));
+    const client = new WebSocket(wsUrl(RELAY_ROUTES.client));
     await waitOpen(client);
     const readyPromise = nextMessage(client);
     client.send(
@@ -346,7 +420,7 @@ describe('RelayCell — data forwarding', () => {
 
     // The host dials back a dedicated data socket for this stream.
     const hostData = new WebSocket(
-      wsUrl(`/relay/data?streamId=${encodeURIComponent(streamId)}&relayHostId=${encodeURIComponent(host.relayHostId)}`),
+      wsUrl(`${RELAY_ROUTES.data}?streamId=${encodeURIComponent(streamId)}&relayHostId=${encodeURIComponent(host.relayHostId)}`),
     );
     await waitOpen(hostData);
 
@@ -373,7 +447,7 @@ describe('RelayCell — data forwarding', () => {
     const controlMessages = hostMessages(host.ws);
     const invite = await createInvite(host);
 
-    const client = new WebSocket(wsUrl('/relay/client'));
+    const client = new WebSocket(wsUrl(RELAY_ROUTES.client));
     await waitOpen(client);
     const readyPromise = nextMessage(client);
     client.send(
@@ -396,7 +470,7 @@ describe('RelayCell — data forwarding', () => {
 
     const hostData = new WebSocket(
       wsUrl(
-        `/relay/data?streamId=${encodeURIComponent(streamOpen.streamId)}&relayHostId=${encodeURIComponent(host.relayHostId)}`,
+        `${RELAY_ROUTES.data}?streamId=${encodeURIComponent(streamOpen.streamId)}&relayHostId=${encodeURIComponent(host.relayHostId)}`,
       ),
     );
     const hostReceived: string[] = [];
@@ -420,7 +494,7 @@ describe('RelayCell — revocation', () => {
     // Pair with a resume credential carrying a known binding, so revocation
     // has something to match against.
     const binding = 'device-binding-1';
-    const client = new WebSocket(wsUrl('/relay/client'));
+    const client = new WebSocket(wsUrl(RELAY_ROUTES.client));
     await waitOpen(client);
     const readyPromise = nextMessage(client);
     client.send(
@@ -455,7 +529,7 @@ describe('RelayCell — revocation', () => {
     const controlMessages = hostMessages(host.ws);
     const binding = 'device-binding-early';
 
-    const client = new WebSocket(wsUrl('/relay/client'));
+    const client = new WebSocket(wsUrl(RELAY_ROUTES.client));
     await waitOpen(client);
     const readyPromise = nextMessage(client);
     client.send(
@@ -489,7 +563,7 @@ describe('RelayCell — revocation', () => {
     // The host's belated dial-back must be refused, not silently accepted.
     const belatedHostData = new WebSocket(
       wsUrl(
-        `/relay/data?streamId=${encodeURIComponent(streamOpen.streamId)}&relayHostId=${encodeURIComponent(host.relayHostId)}`,
+        `${RELAY_ROUTES.data}?streamId=${encodeURIComponent(streamOpen.streamId)}&relayHostId=${encodeURIComponent(host.relayHostId)}`,
       ),
     );
     const belatedClosed = waitClose(belatedHostData);
@@ -510,7 +584,7 @@ describe('RelayCell — revocation', () => {
     );
     await new Promise((r) => setTimeout(r, 20));
 
-    const client = new WebSocket(wsUrl('/relay/client'));
+    const client = new WebSocket(wsUrl(RELAY_ROUTES.client));
     await waitOpen(client);
     const closed = waitClose(client);
     client.send(

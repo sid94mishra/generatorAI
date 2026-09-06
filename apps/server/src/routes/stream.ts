@@ -96,6 +96,40 @@ function parseSub(raw: unknown): MuxSub | { error: string } {
   return { scope: scope as MuxSub['scope'], id, ...(filter ? { filter } : {}) };
 }
 
+/**
+ * The scope a principal must hold to READ a given stream scope.
+ *
+ * Review 6.1: the whole stream surface was gated on one coarse `stream:events`
+ * permission, so anything holding it could subscribe to any chat, any run, and
+ * the desktop's screen preview by id — inverting the stated intent that a
+ * paired phone must not see the desktop. `stream:events` still gates the
+ * endpoint; this decides which feeds that connection may actually carry.
+ */
+const STREAM_SCOPE_READ_REQUIREMENTS: Record<string, Scope | undefined> = {
+  // A chat's event feed carries its full transcript.
+  session: 'read:chats',
+  chat: 'read:chats',
+  // Run/automation/workspace feeds carry workflow output.
+  run: 'read:workflows',
+  automation: 'read:workflows',
+  workspace: 'read:workflows',
+  // The desktop screen preview. `exec:computer` is deliberately withheld from
+  // the default device and mobile grants, and watching the screen is not a
+  // lesser act than driving it.
+  computer: 'exec:computer',
+  terminal: 'exec:terminal',
+  browser: 'exec:browser',
+  // `global` is the firehose: everything above, for every id.
+  global: 'admin:settings',
+};
+
+/** `undefined` when the principal may read this scope, else the missing scope. */
+function missingStreamScope(principal: Principal, scope: string): Scope | undefined {
+  const required = STREAM_SCOPE_READ_REQUIREMENTS[scope];
+  if (!required) return undefined;
+  return principal.scopes.includes(required) ? undefined : required;
+}
+
 /** Ticket scopes redeemable by a WebSocket upgrade rather than SSE. */
 const SOCKET_TICKET_SCOPES = new Set<string>(['terminal', 'browser', 'stt', 'tts']);
 
@@ -103,6 +137,7 @@ const SOCKET_TICKET_SCOPES = new Set<string>(['terminal', 'browser', 'stt', 'tts
 const SOCKET_TICKET_SCOPE_REQUIREMENTS: Record<string, Scope | undefined> = {
   terminal: 'exec:terminal',
   browser: 'exec:browser',
+  computer: 'exec:computer',
   stt: 'write:chats',
   // Reading a message aloud carries the same authority as reading that
   // chat — the mirror image of stt's write:chats (speech input becomes a
@@ -274,6 +309,22 @@ export function createUnifiedStreamRoutes(container: Container): Router {
           res.status(400).json({ error: { code: 'INVALID_SUB', message: parsed.error } });
           return;
         }
+        // The INITIAL subscription list needs the same per-scope check as the
+        // ones added later. Gating only the follow-up `/subs` endpoint left the
+        // front door open: a principal could name another chat — or `global` —
+        // in the very first payload and receive it, which is exactly the
+        // widening the header above promises cannot happen.
+        const missing = missingStreamScope(principal, parsed.scope);
+        if (missing) {
+          res.status(403).json({
+            error: {
+              code: 'INSUFFICIENT_SCOPE',
+              message: `Subscribing to a "${parsed.scope}" stream requires the ${missing} scope.`,
+              requiredScopes: [missing],
+            },
+          });
+          return;
+        }
         subs.push(parsed);
       }
 
@@ -359,6 +410,19 @@ export function createUnifiedStreamRoutes(container: Container): Router {
         res.status(400).json({ error: { code: 'INVALID_SUB', message: parsed.error } });
         return;
       }
+      // The header above this file promises every sub is authorised
+      // individually. This is the line that makes that true.
+      const missing = missingStreamScope(principal, parsed.scope);
+      if (missing) {
+        res.status(403).json({
+          error: {
+            code: 'INSUFFICIENT_SCOPE',
+            message: `Subscribing to a "${parsed.scope}" stream requires the ${missing} scope.`,
+            requiredScopes: [missing],
+          },
+        });
+        return;
+      }
       add.push(parsed);
     }
     const remove: string[] = (Array.isArray(req.body?.remove) ? req.body.remove : [])
@@ -412,6 +476,18 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     if (!scopeId) {
       res.status(400).json({
         error: { code: 'MISSING_ID', message: 'query param `id` is required for non-global scopes' },
+      });
+      return;
+    }
+
+    const missingScope = req.principal ? missingStreamScope(req.principal, scope) : undefined;
+    if (missingScope) {
+      res.status(403).json({
+        error: {
+          code: 'INSUFFICIENT_SCOPE',
+          message: `Reading a "${scope}" stream requires the ${missingScope} scope.`,
+          requiredScopes: [missingScope],
+        },
       });
       return;
     }

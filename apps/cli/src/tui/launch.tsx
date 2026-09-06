@@ -15,12 +15,14 @@ import {
   createCliClient,
   getTuiStateFilePath,
   Keymap,
+  shellOnlyHint,
   toCliError,
   type CommandRegistry,
   type TerminalAttachPort,
 } from '@generatorai/cli-core';
 import { enterAlternateScreen, ThemeProvider } from '@generatorai/tui-kit';
 import { App } from './App.js';
+import { connectionToast } from './connectionStatus.js';
 import { createKeyPump } from './keyPump.js';
 import { rehydrateRestoredPanes } from './open.js';
 import {
@@ -141,16 +143,10 @@ export async function launchTui(options: LaunchOptions): Promise<void> {
     ...('deviceId' in authState && authState.deviceId ? { deviceId: authState.deviceId } : {}),
   });
 
-  if (authState.status !== 'authenticated') {
-    store
-      .getState()
-      .toast(
-        authState.status === 'unpaired'
-          ? 'Not paired — run `generatorai device pair <code>` in another shell.'
-          : `Auth: ${authState.status}`,
-        'warning',
-      );
-  }
+  // The real failure reason travels with the toast: "Auth: error" on its own
+  // told nobody whether to fix the network or run `device pair`.
+  const launchToast = connectionToast(authState, new URL(client.baseUrl).host);
+  if (launchToast) store.getState().toast(launchToast.text, launchToast.tone);
 
   // Non-fatal: the server is ahead of what this CLI build understands.
   // `createCliClient` already refuses outright (VERSION_MISMATCH) when the
@@ -178,19 +174,19 @@ export async function launchTui(options: LaunchOptions): Promise<void> {
     void rehydrateRestoredPanes(client.api, store.getState());
   }
 
-  // `terminal.attach` is `inPalette: false, inRpc: false` (see
-  // `commands/workspace.ts`) — the command runner never dispatches it from
-  // here. The TUI's raw takeover instead happens directly in `App.tsx`'s
-  // own `terminal.attach` keybinding, via `useTerminalSuspension`, which
-  // never touches this port either. It exists only so a `CliContext` is
-  // never built with a missing field, and so any future path that DID
-  // reach it fails with a clear message instead of a crash.
+  // `terminal.attach` is `inPalette: false, inRpc: false` and declares
+  // `requires: ['terminal']` (see `commands/workspace.ts`) — the command
+  // runner refuses it before dispatch with `shellOnlyHint`. The TUI's raw
+  // takeover instead happens directly in `App.tsx`'s own `terminal.attach`
+  // keybinding, via `useTerminalSuspension`, which never touches this port
+  // either. It exists only so a `CliContext` is never built with a missing
+  // field, and so any future path that DID reach it fails with the SAME
+  // sentence the palette shows, not a generic crash.
   const terminalAttachUnavailable: TerminalAttachPort = {
     attach() {
-      throw CliError.unsupported(
-        'Raw terminal attach in the TUI happens through the terminal pane, not this command.',
-        { hint: 'Focus a terminal pane and press the attach key.' },
-      );
+      throw CliError.unsupported(shellOnlyHint('terminal attach <workspace>'), {
+        hint: 'Inside the TUI, focus a terminal pane and press the attach key instead.',
+      });
     },
   };
 
@@ -234,10 +230,12 @@ export async function launchTui(options: LaunchOptions): Promise<void> {
               onSelect: (value) => resolve(value as T),
             }),
           ),
-        password: () =>
-          Promise.reject(
-            new Error('Secrets are never collected in the TUI. Use the shell command instead.'),
-          ),
+        // Secrets are never collected inside the TUI (a full-screen app
+        // cannot guarantee no-echo the way a shell prompt can). Any command
+        // that needs one declares `requires: ['secret']` and is refused by
+        // the palette with this same hint; this is the backstop for a
+        // handler that forgot to declare it.
+        password: () => Promise.reject(CliError.unsupported(shellOnlyHint())),
       },
       stream: client.stream,
       terminalAttach: terminalAttachUnavailable,

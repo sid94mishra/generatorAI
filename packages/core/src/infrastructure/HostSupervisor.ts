@@ -22,7 +22,11 @@ import type {
   AgentEventNotification,
   SessionEndedNotification,
 } from '@generatorai/shared';
-import { isAgentHostResponse } from '@generatorai/shared';
+import { HOST_PROTOCOL_VERSIONS, assertHostHello, isAgentHostResponse } from '@generatorai/shared';
+import { readBuildStamp } from '@generatorai/shared/node';
+
+/** Plan item 43 — the protocol this gateway build speaks to agent-host. */
+const EXPECTED_PROTOCOL_VERSION = HOST_PROTOCOL_VERSIONS['agent-host'];
 
 /* W12 — restart cap constants */
 const MAX_RESTARTS = 5;
@@ -117,6 +121,14 @@ export class HostSupervisor {
   private fatalReason: string | undefined;
   /** True once the first start() has completed; every later ready is a restart. */
   private hasBooted = false;
+  /**
+   * Plan item 43 — the `hello` frame the CURRENT child sent, checked when its
+   * ready pong arrives. Reset on every spawn so a restarted host is validated
+   * on its own frame, not its predecessor's.
+   */
+  private helloFrame: unknown = undefined;
+  /** This gateway build's own stamp, compared (advisory) against the host's. */
+  private readonly buildStamp = readBuildStamp(import.meta.url);
   private readonly logger: ILogger;
   private readonly hostEntryPath: string;
   private readonly hostEnv: Record<string, string>;
@@ -171,7 +183,7 @@ export class HostSupervisor {
     }
     this.state = 'running';
     this.hasBooted = true;
-    this.logger.info('[HostSupervisor] Agent host ready');
+    this.logger.info(`[HostSupervisor] Agent host ready (protocol v${EXPECTED_PROTOCOL_VERSION})`);
   }
 
   /** Current lifecycle state. Never inferred — set at every transition. */
@@ -307,6 +319,9 @@ export class HostSupervisor {
   private async spawn(): Promise<void> {
     if (this.stopped) throw new Error('[HostSupervisor] Supervisor is stopped');
 
+    // A new process, a new handshake. `process.env` is spread into the child,
+    // so a `GENERATORAI_BUILD_STAMP` set on the gateway reaches the host too.
+    this.helloFrame = undefined;
     const child = this.forkChild(this.hostEntryPath, { ...process.env, ...this.hostEnv });
 
     // Capture stderr — attach to spawn/exit errors per W12 spec
@@ -448,11 +463,34 @@ export class HostSupervisor {
       return;
     }
 
+    // Plan item 43 — the handshake frame. Recorded here, judged at the ready
+    // pong below, so "hello never came" and "hello came wrong" fail the same way.
+    if (msg.type === 'hello') {
+      this.helloFrame = msg;
+      return;
+    }
+
     // Ready pong from boot
     if (msg.type === 'pong' && msg.reqId === '__ready__') {
-      // Handled by waitForReady
-      this.pendingRequests.get('__ready__')?.resolve(msg);
+      const pending = this.pendingRequests.get('__ready__');
       this.pendingRequests.delete('__ready__');
+      let warning: string | undefined;
+      try {
+        warning = assertHostHello('agent-host', EXPECTED_PROTOCOL_VERSION, this.buildStamp, this.helloFrame);
+      } catch (err: unknown) {
+        // A stale dist will fail identically on every restart, so this is
+        // fatal rather than a crash to retry. Detach the child BEFORE killing
+        // it so its exit handler sees itself as superseded and takes no action.
+        const reason = err instanceof Error ? err.message : String(err);
+        const child = this.child;
+        this.child = null;
+        this.enterFatal(reason);
+        this.terminate(child);
+        pending?.reject(new Error(`[HostSupervisor] ${reason}`));
+        return;
+      }
+      if (warning) this.logger.warn(`[HostSupervisor] ${warning}`);
+      pending?.resolve(msg);
       return;
     }
 

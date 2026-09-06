@@ -24,7 +24,18 @@ export const AppConfigSchema = z.object({
   copilot: z
     .object({
       cliPath: z.string().nullable().default(null),
-      defaultModel: z.string().default('claude-sonnet-4.6'),
+      /**
+       * `auto` — let the provider choose — rather than a pinned model name.
+       *
+       * The default used to be a specific version, `claude-sonnet-4.6`. Model
+       * catalogues move: on an account whose catalogue had advanced, EVERY new
+       * chat failed at creation with `Model "claude-sonnet-4.6" is not
+       * available`, surfaced as a 502. "New Chat" was broken out of the box and
+       * only an explicit per-chat override worked around it. `auto` is offered
+       * by the provider at all times, so the shipped default cannot go stale
+       * the same way; a user or agent can still pin any model explicitly.
+       */
+      defaultModel: z.string().default('auto'),
       useStdio: z.boolean().default(true),
       defaultTimeoutMs: z.number().int().min(1_000).default(300_000),
       autoRestart: z.boolean().default(true),
@@ -41,6 +52,21 @@ export const AppConfigSchema = z.object({
        *  accounts get "not authorized to use this Copilot feature" 403s
        *  because the CLI defaults to github.com. */
       githubHost: z.string().optional(),
+    })
+    .default({}),
+
+  // WS-D1 — workflow stage liveness. `stageTimeoutMs` is the default stage
+  // timeout when a stage definition sets none (the documented 300 s);
+  // `maxStageTimeoutMs` caps any explicit value. The heartbeat is written by
+  // the executor every `heartbeatIntervalMs` while a stage is queued/running
+  // and the run reconciler fails a stage whose last beat is older than
+  // `heartbeatIntervalMs * heartbeatStaleMultiplier`.
+  workflow: z
+    .object({
+      stageTimeoutMs: z.number().int().min(1_000).max(24 * 60 * 60 * 1000).default(300_000),
+      maxStageTimeoutMs: z.number().int().min(1_000).max(7 * 24 * 60 * 60 * 1000).default(4 * 60 * 60 * 1000),
+      heartbeatIntervalMs: z.number().int().min(1_000).max(10 * 60 * 1000).default(10_000),
+      heartbeatStaleMultiplier: z.number().min(2).max(100).default(3),
     })
     .default({}),
 
@@ -198,6 +224,30 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
+  /**
+   * Model-authorable code execution knobs. Both default to the locked-down
+   * position; an operator widens them deliberately, per deployment.
+   */
+  scripts: z
+    .object({
+      /**
+       * Whether `.workflow.mjs` scripts may be loaded AT ALL — the boot-time
+       * templates scan, reload/validate routes and upload all go through the
+       * same loader gate. Scripts run in-process with the server's full
+       * privileges. Env: `GENERATORAI_ALLOW_WORKFLOW_SCRIPTS=true` (also
+       * implied by the legacy `GENERATORAI_ALLOW_SCRIPT_UPLOAD=true`).
+       */
+      workflowScriptsEnabled: z.boolean().default(false),
+      /**
+       * Bare command names added to the script runner's default allow-list.
+       * `sh bash curl wget rm chmod mv cp find sed awk tar zip unzip` are
+       * refused unless listed here. Env: `GENERATORAI_SCRIPT_EXTRA_ALLOWLIST`
+       * (comma-separated).
+       */
+      extraAllowlist: z.array(z.string().min(1).max(64)).max(64).default([]),
+    })
+    .default({}),
+
   // DUR-05 — durable step.sleep sweeper. Active whenever at least one
   // stage row is `sleeping`; runs a small poll against the indexed
   // `wake_at` column. Defaults are deliberately modest — bump
@@ -236,15 +286,42 @@ export const AppConfigSchema = z.object({
        * days and items can keep a much longer TTL of their own; until then a
        * single number has to serve both and 30 is the conservative side of it.
        *
-       * Note this prunes purely by age, with no exclusion for a run that is
-       * still executing. A run alive longer than the TTL loses its own early
-       * events. W07 owns fixing that properly.
+       * This is the ttl for `item`-class rows: the durable record of what was
+       * said and done. Token and reasoning DELTAS, which a finished turn has
+       * already superseded, use the much shorter `deltaPayloadTtlDays`, and a
+       * turn that never finished outlives both (see below) so crash recovery
+       * still has something to replay.
        */
       eventPayloadTtlDays: z.number().int().min(1).max(3650).default(30),
-      /** How often (ms) the retention job sweeps. Default 1 hour. */
-      sweepIntervalMs: z.number().int().min(60_000).default(60 * 60 * 1000),
-      /** Safety: max rows deleted per sweep to avoid long locks. Default 50k. */
-      maxDeletePerSweep: z.number().int().min(100).max(1_000_000).default(50_000),
+      /**
+       * TTL (days) for `delta`-class stream rows. These are the token and
+       * reasoning fragments that a completed turn replaces with a single
+       * item, and they are the bulk of `stream_cursors`. The default of 1 day
+       * is orders of magnitude longer than any turn, so nothing in flight is
+       * ever at risk, and it is capped at `eventPayloadTtlDays` in the sweep.
+       */
+      deltaPayloadTtlDays: z.number().int().min(1).max(3650).default(1),
+      /**
+       * How many multiples of `eventPayloadTtlDays` the rows of an UNFINISHED
+       * turn survive. Below that age they are exempt from both TTLs, because
+       * a turn with no terminal event crashed and its stream rows are the only
+       * record of it. Past it they are pruned anyway, so the table stays
+       * bounded rather than accumulating every crash forever.
+       */
+      unfinishedTtlMultiplier: z.number().int().min(1).max(24).default(2),
+      /** How often (ms) the retention job sweeps. Default 15 minutes. */
+      sweepIntervalMs: z.number().int().min(60_000).default(15 * 60 * 1000),
+      /**
+       * Max rows deleted per sweep.
+       *
+       * This is a SYNCHRONOUS `better-sqlite3` DELETE on the server's only
+       * thread, so the batch size is directly how long every request, SSE
+       * write and harness read is stalled. At the old default of 50,000 that
+       * was a measurable freeze once an hour (review 6.6 / item 45). 2,000
+       * keeps each stall short; the sweep runs four times as often to remove
+       * the same volume over time.
+       */
+      maxDeletePerSweep: z.number().int().min(100).max(1_000_000).default(2_000),
       /**
        * W02 — SQLite never returns freed pages to the filesystem without an
        * explicit VACUUM, so a bounded delete sweep shrinks the row count and

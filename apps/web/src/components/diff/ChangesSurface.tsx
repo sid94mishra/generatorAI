@@ -25,17 +25,22 @@ import {
   GitPullRequest,
   History,
   ListTree,
-  Loader2,
   MessageSquare,
   RefreshCw,
-  Send,
   Settings2,
-  Trash2,
   Undo2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/index.js';
+import {
+  Button,
+  Input,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  Spinner,
+  Textarea,
+} from '@/components/ui/index.js';
 import {
   useWorkspaceChangeSummary,
   useWorkspaceCheckpoints,
@@ -45,7 +50,6 @@ import {
   useCreateWorkspacePullRequest,
   useWorkspacePullRequests,
 } from '@/hooks/queries.js';
-import type { ChangeSummaryFile } from '@/types/changes.js';
 import type {
   ReviewIntent,
   ReviewScope,
@@ -653,8 +657,10 @@ export function ChangesSurface({
             />
           )}
           {/* The keyboard- and screen-reader-facing control for the row. */}
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={(e) => {
               e.stopPropagation();
               if (openable) toggle(item.id);
@@ -663,16 +669,16 @@ export function ChangesSurface({
             aria-expanded={expanded}
             aria-label={expanded ? `Collapse ${item.path}` : `Expand ${item.path}`}
             title={expanded ? 'Hide changes' : 'Show changes'}
-            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+            className="h-4 w-4 shrink-0 rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
           >
             {loading ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner size="xs" />
             ) : expanded ? (
               <ChevronDown className="h-3 w-3" />
             ) : (
               <ChevronRight className="h-3 w-3" />
             )}
-          </button>
+          </Button>
           {/* File-type icon, leading the row. Real brand-coloured glyphs
               (the same set the tree uses) so a file is recognisable by shape
               and colour before the path is read. */}
@@ -730,41 +736,45 @@ export function ChangesSurface({
           {canRevert &&
             (confirming ? (
               <span className="flex shrink-0 items-center gap-1">
-                <button
+                <Button
                   type="button"
+                  variant="primary"
                   onClick={(e) => {
                     e.stopPropagation();
                     void revertFile(item.alias, item.path);
                   }}
                   disabled={restoreCheckpoint.isPending}
-                  className="rounded bg-amber-500 px-1.5 py-px text-[10px] font-medium text-white disabled:opacity-50"
+                  className="h-auto rounded bg-amber-500 px-1.5 py-px text-[10px] font-medium text-white disabled:opacity-50"
                 >
                   {restoreCheckpoint.isPending ? 'Discarding…' : 'Confirm discard'}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={(e) => {
                     e.stopPropagation();
                     setConfirmRevert(null);
                   }}
-                  className="rounded px-1.5 py-px text-[10px] hover:bg-accent"
+                  className="h-auto rounded px-1.5 py-px text-[10px] font-normal hover:bg-accent"
                 >
                   Cancel
-                </button>
+                </Button>
               </span>
             ) : (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 title="Discard this file's changes (undoable)"
                 aria-label={`Discard changes to ${item.path}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   setConfirmRevert(item.id);
                 }}
-                className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <Undo2 className="h-3 w-3" />
-              </button>
+              </Button>
             ))}
         </div>
       );
@@ -887,14 +897,16 @@ export function ChangesSurface({
               readable at the narrow widths the right pane is usually at. */}
           <Popover>
             <PopoverTrigger asChild>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 title="View settings"
                 aria-label="View settings"
-                className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
+                className="h-6 w-6 rounded hover:bg-accent"
               >
                 <Settings2 className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-52 p-1.5">
               <MenuLabel>View</MenuLabel>
@@ -1007,13 +1019,15 @@ export function ChangesSurface({
         <div className="border-b p-2">
           <div className="mb-1 flex items-center gap-2 text-[11px]">
             <span className="font-medium">This will be sent to the agent:</span>
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => setPreviewPrompt(null)}
-              className="ml-auto rounded border px-1.5 text-[10px] hover:bg-accent"
+              className="ml-auto"
             >
               Close
-            </button>
+            </Button>
           </div>
           <pre className="max-h-52 overflow-auto rounded bg-muted/50 p-2 font-mono text-[10px] leading-tight whitespace-pre-wrap">
             {previewPrompt}
@@ -1024,27 +1038,25 @@ export function ChangesSurface({
       {/* ── Source-control actions ─────────────────────────────── */}
       {scmEnabled && stats.files > 0 && (
         <div className="flex items-center gap-1.5 border-b px-2 py-1.5">
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => void commit.mutateAsync(undefined)}
-            disabled={commit.isPending}
-            className="inline-flex h-6 items-center gap-1 rounded border px-2 text-[11px] hover:bg-accent disabled:opacity-50"
+            loading={commit.isPending}
+            leftIcon={<GitCommit className="h-3 w-3" />}
           >
-            {commit.isPending ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <GitCommit className="h-3 w-3" />
-            )}
             Commit
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => setShowPrForm((v) => !v)}
-            className="inline-flex h-6 items-center gap-1 rounded border px-2 text-[11px] hover:bg-accent"
+            leftIcon={<GitPullRequest className="h-3 w-3" />}
           >
-            <GitPullRequest className="h-3 w-3" />
             Pull request
-          </button>
+          </Button>
           {commit.isSuccess && (
             <span className="inline-flex items-center gap-1 text-[11px] text-emerald-500">
               <Check className="h-3 w-3" /> Committed
@@ -1055,22 +1067,27 @@ export function ChangesSurface({
 
       {showPrForm && (
         <div className="space-y-1.5 border-b px-2 py-2">
-          <input
+          <Input
             value={prTitle}
             onChange={(e) => setPrTitle(e.target.value)}
             placeholder="Pull request title"
-            className="h-7 w-full rounded border bg-transparent px-2 text-xs"
+            aria-label="Pull request title"
+            className="h-7 px-2 text-xs"
           />
-          <textarea
+          <Textarea
             value={prBody}
             onChange={(e) => setPrBody(e.target.value)}
             placeholder="Description (optional)"
+            aria-label="Pull request description"
             rows={2}
-            className="w-full resize-none rounded border bg-transparent px-2 py-1 text-xs"
+            className="resize-none px-2 py-1 text-xs"
           />
-          <button
+          <Button
             type="button"
-            disabled={!prTitle.trim() || createPr.isPending}
+            variant="secondary"
+            size="sm"
+            disabled={!prTitle.trim()}
+            loading={createPr.isPending}
             onClick={() => {
               void createPr.mutateAsync({ title: prTitle.trim(), body: prBody }).then(() => {
                 setShowPrForm(false);
@@ -1078,11 +1095,9 @@ export function ChangesSurface({
                 setPrBody('');
               });
             }}
-            className="inline-flex h-6 items-center gap-1 rounded border px-2 text-[11px] hover:bg-accent disabled:opacity-50"
           >
-            {createPr.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
             Create
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1108,9 +1123,14 @@ export function ChangesSurface({
       {revertError && (
         <div className="mx-2 mt-1 rounded bg-danger-muted px-2 py-1 text-[11px] text-danger">
           Could not discard the file: {revertError}
-          <button onClick={() => setRevertError(null)} className="ml-2 underline">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setRevertError(null)}
+            className="ml-2 h-auto w-auto rounded p-0 font-normal underline hover:bg-transparent"
+          >
             Dismiss
-          </button>
+          </Button>
         </div>
       )}
       {/*
@@ -1124,7 +1144,7 @@ export function ChangesSurface({
         <div className="flex min-h-0 min-w-0 flex-1">
           {summaryQuery.isLoading ? (
             <div className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading changes…
+              <Spinner size="sm" /> Loading changes…
             </div>
           ) : stats.files === 0 ? (
             <div className="flex flex-1 items-center justify-center p-6 text-center text-xs text-muted-foreground">
@@ -1234,20 +1254,21 @@ function MenuCheckItem({
   children: React.ReactNode;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       role="menuitemcheckbox"
       aria-checked={checked}
       onClick={onSelect}
       {...(hint ? { title: hint } : {})}
-      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[11.5px] hover:bg-accent"
+      className="h-auto w-full items-center justify-start gap-2 rounded px-2 py-1 text-left text-[11.5px] font-normal hover:bg-accent"
     >
       <Check
         className={cn('h-3 w-3 shrink-0', checked ? 'opacity-100' : 'opacity-0')}
         aria-hidden
       />
       <span className="min-w-0 flex-1 truncate">{children}</span>
-    </button>
+    </Button>
   );
 }
 
@@ -1265,20 +1286,22 @@ function IconButton({
   disabled?: boolean;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-sm"
       title={title}
       aria-label={title}
       aria-pressed={active}
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent disabled:opacity-50',
+        'h-6 w-6 rounded hover:bg-accent',
         active && 'bg-accent',
       )}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 

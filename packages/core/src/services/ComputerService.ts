@@ -78,48 +78,24 @@ import { resolveWithinBase } from '../utils/safePath.js';
 
 export type ComputerUseConfig = AppConfig['computerUse'];
 
-/**
- * Privilege tiers a consent grant can cover, in increasing order.
- *
- * A grant carries its scope so approving a prompt that read "snapshot in
- * Slack" cannot silently authorise every future click and keystroke in Slack.
- * Widening requires a fresh prompt.
- */
-export type ComputerConsentScope = 'read' | 'mutate' | 'synthetic';
+// Consent types live in the domain port so the infrastructure adapter
+// (`infrastructure/computer/PendingConsentStore.ts`) does not have to import
+// from this service — see `domain/ports/IComputerConsentStore.ts`. Re-exported
+// here so `@generatorai/core` consumers keep the same import path.
+import type {
+  ComputerConsentPrompt,
+  ComputerConsentScope,
+  ComputerStoredGrant,
+  IComputerConsentStore,
+} from '../domain/ports/IComputerConsentStore.js';
+export type {
+  ComputerConsentPrompt,
+  ComputerConsentScope,
+  ComputerStoredGrant,
+  IComputerConsentStore,
+} from '../domain/ports/IComputerConsentStore.js';
 
 const SCOPE_RANK: Record<ComputerConsentScope, number> = { read: 0, mutate: 1, synthetic: 2 };
-
-export interface ComputerStoredGrant {
-  decision: 'always_allow' | 'deny';
-  scope: ComputerConsentScope;
-}
-
-/** Persistence + prompting seam. Backed by SQLite + the UI in Phase 5. */
-export interface IComputerConsentStore {
-  find(workspaceId: string, appIdentity: string): Promise<ComputerStoredGrant | null>;
-  save(
-    workspaceId: string,
-    appIdentity: string,
-    appLabel: string,
-    decision: 'always_allow' | 'deny',
-    scope: ComputerConsentScope,
-  ): Promise<void>;
-  /** Ask the user. The service enforces its own deadline on top of this. */
-  prompt(request: ComputerConsentPrompt): Promise<ComputerConsentDecision>;
-}
-
-export interface ComputerConsentPrompt {
-  requestId: string;
-  workspaceId: string;
-  chatId?: string;
-  app: ComputerAppIdentity;
-  action: string;
-  summary: string;
-  scope: ComputerConsentScope;
-  /** The exact element this approval covers, when the action is fenced. */
-  target?: { snapshotId: string; elementIndex: number; elementLabel: string };
-  expiresAt: number;
-}
 
 export interface ComputerAuditEntry {
   workspaceId: string;

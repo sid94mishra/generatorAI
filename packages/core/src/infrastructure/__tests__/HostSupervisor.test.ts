@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import type { ILogger } from '@generatorai/shared';
+import { makeHostHello } from '@generatorai/shared/node';
 import { HostSupervisor, type HostSupervisorOptions } from '../HostSupervisor.js';
 
 class FakeChild extends EventEmitter {
@@ -33,8 +34,18 @@ class FakeChild extends EventEmitter {
     return true;
   }
 
-  /** Answer the boot handshake. */
+  /**
+   * Answer the boot handshake exactly as a real host does: the `hello` frame
+   * (plan item 43 protocol versioning) first, then the ready pong. A host that
+   * skips the hello is a stale dist, which `hellolessReady` below simulates.
+   */
   signalReady(): void {
+    this.emit('message', makeHostHello('agent-host'));
+    this.emit('message', { type: 'pong', reqId: '__ready__' });
+  }
+
+  /** A pre-versioning dist: ready, but no hello frame. */
+  helloLessReady(): void {
     this.emit('message', { type: 'pong', reqId: '__ready__' });
   }
 

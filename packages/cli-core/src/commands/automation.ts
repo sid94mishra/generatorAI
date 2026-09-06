@@ -90,6 +90,10 @@ export function automationCommands(): CommandSpec[] {
           { key: 'inputMode', header: 'Input', priority: 1 },
           { key: 'enabled', header: 'Enabled', format: 'boolean', priority: 0 },
           { key: 'schedule', header: 'Schedule', priority: 3 },
+          // The scheduler has always stored `nextRunAt`; neither this table
+          // nor the web list showed it, so the one question an operator has
+          // about a scheduled automation had no answer anywhere.
+          { key: 'nextRunAt', header: 'Next run', format: 'relative', priority: 1 },
           createdColumn,
         ],
       },
@@ -401,7 +405,7 @@ export function automationCommands(): CommandSpec[] {
       id: 'automation.rotateWebhookToken',
       group: 'automation',
       verb: 'rotate-webhook-token',
-      summary: 'Issue a new webhook token, invalidating the old one',
+      summary: 'Issue a new webhook token + signing secret, invalidating the old ones',
       requiresServer: true,
       destructive: true,
       sinceVersion: '0.2.0',
@@ -411,10 +415,16 @@ export function automationCommands(): CommandSpec[] {
       output: { kind: 'record' },
       async handler(ctx, { args }) {
         const target = await findAutomation(ctx, args.automation);
+        // Response is `{ token, signingSecret }` — shown ONLY in this
+        // output. Neither value can be retrieved again: `automation show`
+        // and `automation list` always come back redacted.
         const result = await ctx.api.automations.rotateWebhookToken(target.id);
         return {
           data: result,
-          warnings: ['The previous token stopped working immediately. Update any callers.'],
+          warnings: [
+            'The previous token and signing secret stopped working immediately. ' +
+              'This is the only place the new ones are shown — save them now.',
+          ],
         };
       },
     }),

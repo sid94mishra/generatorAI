@@ -105,6 +105,53 @@ export function resolveSigning({ platform, env = {} }) {
   return { signed: true, reason: `${platform} signing enabled (${complete.join(' + ')})` };
 }
 
+export class UnsignedPublishError extends Error {
+  constructor(platform) {
+    super(
+      `refusing to publish an UNSIGNED ${platform} build.\n` +
+        `        Unsigned macOS builds cannot self-update (Squirrel.Mac rejects them) and unsigned\n` +
+        `        Windows builds trip SmartScreen, so a release shipped this way cannot be patched.\n` +
+        `        Provide signing credentials (CSC_LINK + CSC_KEY_PASSWORD; on macOS also\n` +
+        `        APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER), or set ALLOW_UNSIGNED_RELEASE=1\n` +
+        `        to publish anyway — knowingly.`,
+    );
+    this.name = 'UnsignedPublishError';
+  }
+}
+
+/**
+ * Whether the electron-builder arguments ask it to upload artifacts.
+ * `--publish never` (what CI passes) does not; `--publish always|onTag|
+ * onTagOrDraft`, `--publish=<x>`, `-p <x>` do.
+ */
+export function requestsPublish(argv) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    let value;
+    if (arg === '--publish' || arg === '-p') value = argv[i + 1] ?? 'onTagOrDraft';
+    else if (arg.startsWith('--publish=')) value = arg.slice('--publish='.length);
+    else if (arg.startsWith('-p=')) value = arg.slice('-p='.length);
+    else continue;
+    if (value !== 'never') return true;
+  }
+  return false;
+}
+
+/**
+ * Refuses to publish an unsigned build unless the operator has said, in the
+ * environment, that they know. Signing is opt-in through credentials, so the
+ * default outcome of a release with no secrets configured was an unsigned
+ * upload that looked like a success.
+ *
+ * @throws {UnsignedPublishError}
+ */
+export function assertPublishAllowed({ argv, signed, platform, env = {} }) {
+  if (!requestsPublish(argv)) return;
+  if (signed) return;
+  if (env.ALLOW_UNSIGNED_RELEASE === '1') return;
+  throw new UnsignedPublishError(platform);
+}
+
 /**
  * Update manifests that must not be published.
  *

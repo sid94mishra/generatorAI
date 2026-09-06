@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "bundle": "node esbuild.config.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --build --force",
     "test": "vitest run",
     "lint": "eslint src/",
     "dev": "tsx --import ./src/instrumentation.ts src/index.tsx",
@@ -21,12 +21,6 @@
     "surface": "tsx scripts/generate-surface.ts",
     "surface:check": "tsx scripts/generate-surface.ts --check",
     "baseline": "tsx scripts/record-baseline.ts"
-  },
-  "dependencies": {
-    "better-sqlite3": "^12.11.1",
-    "node-pty": "^1.1.0",
-    "playwright": "^1.58.2",
-    "playwright-core": "^1.58.2"
   },
   "devDependencies": {
     "@generatorai/agent-harness-providers": "workspace:*",
@@ -37,7 +31,6 @@
     "@generatorai/core": "workspace:*",
     "@generatorai/db": "workspace:*",
     "@generatorai/design-tokens": "workspace:*",
-    "@generatorai/sdk": "workspace:*",
     "@generatorai/secrets": "workspace:*",
     "@generatorai/shared": "workspace:*",
     "@generatorai/tui-kit": "workspace:*",
@@ -65,7 +58,7 @@
     "react": "^19.0.0",
     "string-width": "^7.2.0",
     "tsx": "^4.19.0",
-    "ws": "^8.18.0",
+    "ws": "^8.21.3",
     "yaml": "^2.6.0",
     "zod": "^3.24.0",
     "zustand": "^5.0.11"

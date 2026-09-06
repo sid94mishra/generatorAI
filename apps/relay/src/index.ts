@@ -5,6 +5,8 @@
 // (a $5 VPS is plenty). The GeneratorAI server dials OUT to it, so no inbound
 // firewall rule is ever needed on the machine that holds your code.
 //
+// Routes (paths come from `RELAY_ROUTES` in @generatorai/relay-protocol —
+// the host connector imports the same table, so the two cannot drift):
 //   GET  /relay/assignment?relayHostId=…  → which cell to use (director)
 //   WS   /relay/host                      → host control channel
 //   WS   /relay/client                    → client connection
@@ -12,23 +14,25 @@
 //   GET  /healthz                         → liveness + capacity
 //
 // Deliberately minimal: this process must be boring, auditable and safe to
-// operate without seeing user data. Everything it forwards is already sealed
-// end-to-end by the client and the host.
+// operate. It never receives a device credential, token or scope. It does,
+// however, SEE the application bytes it forwards: the E2EE layer in
+// `packages/relay-protocol/src/e2ee.ts` is not wired into any transport yet,
+// so whoever operates a relay can read the HTTP traffic passing through it
+// unless the hop is otherwise protected. Run it over TLS and treat the
+// operator as trusted until that changes.
 //
 // Environment:
 //   PORT                          listen port (default 8787)
-//   GENERATORAI_RELAY_ORIGIN      public origin, e.g. wss://relay.example.com
+//   GENERATORAI_RELAY_ORIGIN      public origin, e.g. https://relay.example.com
+//                                 (ws/wss accepted; normalised to http/https)
 //   GENERATORAI_RELAY_MAX_HOSTS   capacity ceiling (default 500)
 // ────────────────────────────────────────────────────────────────
 
-import express from 'express';
 import { createServer } from 'node:http';
-import { RELAY_PROTOCOL_VERSION } from '@generatorai/relay-protocol';
-import { RelayCell } from './cell.js';
+import { createRelayApp } from './app.js';
 
 const port = Number(process.env['PORT'] ?? 8787);
-const origin =
-  process.env['GENERATORAI_RELAY_ORIGIN'] ?? `ws://127.0.0.1:${port}`;
+const configuredOrigin = process.env['GENERATORAI_RELAY_ORIGIN'] ?? `http://127.0.0.1:${port}`;
 
 function log(level: 'info' | 'warn' | 'error', message: string, meta?: unknown): void {
   // Structured, single-line, and deliberately free of any credential field:
@@ -42,59 +46,23 @@ function log(level: 'info' | 'warn' | 'error', message: string, meta?: unknown):
   process.stdout.write(`${line}\n`);
 }
 
-const app = express();
-app.disable('x-powered-by');
-app.use(express.json({ limit: '16kb' }));
-
-const cell = new RelayCell({ origin, log });
-
-/**
- * Director endpoint.
- *
- * A single-process deployment always assigns the caller to its own cell. The
- * response shape is the multi-cell one so a fleet deployment can grow into it
- * without a protocol change.
- */
-app.get('/relay/assignment', (req, res) => {
-  const relayHostId = String(req.query['relayHostId'] ?? '');
-  if (!/^[A-Za-z0-9_-]{43}$/.test(relayHostId)) {
-    res.status(400).json({
-      error: { code: 'INVALID_HOST_ID', message: 'relayHostId must be a 43-char base64url id.' },
-    });
-    return;
-  }
-  const httpOrigin = origin.replace(/^ws/, 'http');
-  res.json({
-    v: RELAY_PROTOCOL_VERSION,
-    relayHostId,
-    cellUrl: `${origin}/relay/host`,
-    directorUrl: `${httpOrigin}/relay/assignment`,
-    assignmentEpoch: 1,
-    // Hosts re-register well before this; a short lease means a decommissioned
-    // cell drains quickly instead of black-holing traffic.
-    expiresAt: Date.now() + 60 * 60_000,
-  });
-});
-
-app.get('/healthz', (_req, res) => {
-  res.json({ ok: true, v: RELAY_PROTOCOL_VERSION, ...cell.stats() });
-});
-
-const server = createServer(app);
-cell.attach(server);
+const relay = createRelayApp({ origin: configuredOrigin, log });
+const server = createServer(relay.app);
+relay.attach(server);
 
 server.listen(port, () => {
-  log('info', 'GeneratorAI relay listening', { port, origin });
+  log('info', 'GeneratorAI relay listening', { port, origin: relay.origin });
   log(
-    'info',
-    'This relay is a blind forwarder: it cannot decrypt application traffic. ' +
-      'It can observe connection metadata and deny service.',
+    'warn',
+    'This relay forwards application bytes it can read: end-to-end encryption is ' +
+      'not wired into the relay data path yet. It never receives device credentials ' +
+      'or tokens, but it can observe traffic, connection metadata, and deny service.',
   );
 });
 
 function shutdown(signal: string): void {
   log('info', 'Shutting down', { signal });
-  cell.close();
+  relay.cell.close();
   server.close(() => process.exit(0));
   // Never hang a container restart on a stuck socket.
   setTimeout(() => process.exit(0), 5000).unref();

@@ -198,6 +198,27 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     executePhase: vi.fn().mockResolvedValue(undefined),
   };
 
+  // WorkflowScriptLoader mock — the opt-in gate now lives in the loader
+  // itself (`WorkflowScriptLoader.assertEnabled`), not just the upload
+  // route, so route tests that flip GENERATORAI_ALLOW_SCRIPT_UPLOAD=true
+  // need `isEnabled()` to agree, or `workflowScriptLoader.isEnabled()`
+  // throws on `undefined` and every "enabled" case 502s instead of
+  // exercising real route logic. Defaults to enabled; tests that need the
+  // loader-disabled path can override via container.workflowScriptLoader.
+  const workflowScriptLoader = {
+    isEnabled: vi.fn().mockReturnValue(true),
+    getAllMetadata: vi.fn().mockReturnValue([]),
+    getScript: vi.fn().mockReturnValue(undefined),
+    reloadAll: vi.fn().mockResolvedValue([]),
+    reloadScript: vi.fn().mockResolvedValue({
+      metadata: { id: 'test-script', name: 'Test Script', filePath: '/tmp/test.workflow.mjs', lastModified: new Date(), variables: [], stageCount: 0, profileCount: 0, tags: [] },
+    }),
+    saveScript: vi.fn().mockResolvedValue({
+      metadata: { id: 'test-script', name: 'Test Script', filePath: '/tmp/test.workflow.mjs', lastModified: new Date(), variables: [], stageCount: 0, profileCount: 0, tags: [] },
+    }),
+    validateScriptFile: vi.fn().mockResolvedValue({ valid: true, errors: [] }),
+  };
+
   const configResolver = {
     resolveGlobalHooks: vi.fn().mockReturnValue([]),
     resolveSessionConfig: vi.fn().mockReturnValue({}),
@@ -206,6 +227,9 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
   // ── v2 Service Mocks ──
 
   const chatManagementService = {
+    // No turn in flight by default — the busy guard on POST /prompt asks this
+    // before dispatching, and a mock that omits it would 409 every prompt.
+    isTurnActive: vi.fn().mockReturnValue(false),
     createChat: vi.fn().mockResolvedValue({
       id: 'chat-1',
       sessionId: 'sess-1',
@@ -388,6 +412,7 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     }),
     getAll: vi.fn().mockResolvedValue([]),
     getByStatus: vi.fn().mockResolvedValue([]),
+    countByStatus: vi.fn().mockResolvedValue(0),
     update: vi.fn(),
     delete: vi.fn(),
   };
@@ -407,6 +432,7 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     getAll: vi.fn().mockResolvedValue([]),
     getByDefinitionId: vi.fn().mockResolvedValue([]),
     getByStatus: vi.fn().mockResolvedValue([]),
+    countByStatus: vi.fn().mockResolvedValue(0),
     update: vi.fn(),
     updateStatus: vi.fn(),
     delete: vi.fn(),
@@ -461,6 +487,7 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     workflowRepo,
     templateRegistry,
     hookExecutor,
+    workflowScriptLoader,
     configResolver,
     // v2
     chatManagementService,
@@ -485,6 +512,16 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     chatEntityRepo,
     workflowRunRepo,
     stageRunRepo,
+    // The stage "Wake now" route calls this. Without it the route throws on
+    // an undefined service rather than answering, and the failure would look
+    // like a route bug instead of a missing test double.
+    durableSleepService: {
+      wakeNow: vi.fn().mockResolvedValue('woken'),
+      sleep: vi.fn().mockResolvedValue(new Date()),
+      sweep: vi.fn().mockResolvedValue({ woken: 0, candidates: 0 }),
+      start: vi.fn(),
+      stop: vi.fn(),
+    },
     // Route tests still go through the real auth middleware; this context
     // resolves every request to a full-scope local principal so a route that
     // forgets its scope policy still fails closed here.

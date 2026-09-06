@@ -116,36 +116,39 @@ export function ProjectsListPage() {
       />
 
       {/* Search + view toggle */}
-      <Toolbar>
+      <Toolbar className="flex-wrap sm:flex-nowrap">
         <SearchInput
           value={search}
           onChange={setSearch}
           placeholder="Search projects…"
-          className="max-w-md flex-1"
+          aria-label="Search projects"
+          className="min-w-0 max-w-md flex-1"
         />
         <div className="flex items-center gap-0.5 rounded-md border border-border bg-subtle p-0.5">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => setViewMode('card')}
             className={cn(
-              'flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors',
+              'h-auto w-auto gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors',
               view === 'card' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
             )}
             aria-pressed={view === 'card'}
           >
             <LayoutGrid className="h-3.5 w-3.5" /> Cards
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => setViewMode('list')}
             className={cn(
-              'flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors',
+              'h-auto w-auto gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors',
               view === 'list' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
             )}
             aria-pressed={view === 'list'}
           >
             <ListIcon className="h-3.5 w-3.5" /> List
-          </button>
+          </Button>
         </div>
       </Toolbar>
 
@@ -201,13 +204,15 @@ export function ProjectsListPage() {
                       onCheckedChange={() => toggleActive(project)}
                       aria-label={`${active ? 'Deactivate' : 'Activate'} ${project.name}`}
                     />
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
                       onClick={() => setDeleteTarget(project.id)}
-                      className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-danger-muted hover:text-danger group-hover:opacity-100"
+                      className="opacity-0 transition-opacity hover:bg-danger-muted hover:text-danger group-hover:opacity-100"
                       aria-label="Delete project"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    </Button>
                   </div>
                 </div>
 

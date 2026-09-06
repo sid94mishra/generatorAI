@@ -114,6 +114,19 @@ export type PendingChatInteraction =
       kind: 'question';
       interactionId: string;
       questions: PendingQuestion[];
+    }
+  | {
+      kind: 'permission';
+      interactionId: string;
+      /** Harness tool name (`Bash`, `WebFetch`, Copilot `shell`, …). */
+      toolName: string;
+      /** `ToolPermissionType` — kept as `string` so this viewmodel does not
+       *  need shared's enum just to pass it through unchanged. */
+      permissionType: string;
+      description: string;
+      /** Bounded, secret-redacted rendering of the tool input. */
+      inputSummary: string;
+      permissionMode: string;
     };
 
 export interface TimelineState {
@@ -689,6 +702,34 @@ export function reduceEvent(
       return { ...base, pendingInteraction: null };
     }
 
+    // Review finding 5.1 — a chat set to "ask me before each tool"
+    // (`default`) or "accept edits" (`acceptEdits`) blocks the agent on
+    // every (or every non-edit) tool call until the user allows or denies
+    // it. Same chat-scoped-gate family as plan/question above — real
+    // producer is `ChatManagementService.buildPermissionHandler`, event
+    // shapes verified against `packages/shared/src/types/AgentEvent.ts`.
+    case 'chat.permission.requested': {
+      return {
+        ...base,
+        pendingInteraction: {
+          kind: 'permission',
+          interactionId: str(data['interactionId']),
+          toolName: str(data['toolName']),
+          permissionType: str(data['type']),
+          description: str(data['description']),
+          inputSummary: str(data['inputSummary']),
+          permissionMode: str(data['permissionMode']),
+        },
+      };
+    }
+
+    case 'chat.permission.resolved':
+    case 'chat.permission.expired': {
+      if (base.pendingInteraction?.kind !== 'permission') return base;
+      if (base.pendingInteraction.interactionId !== str(data['interactionId'])) return base;
+      return { ...base, pendingInteraction: null };
+    }
+
     // Phase 6 item 3 — background-task visibility. Real producer:
     // `packages/core/src/services/orchestrator/OrchestratorService.ts`
     // (verified field-by-field there — the per-field shapes match
@@ -844,6 +885,22 @@ export function reduceEvent(
         },
       };
     }
+
+    // Surfaced at `warning` level so the terminal shows it without claiming
+    // the turn failed — an MCP server that could not start is the usual case.
+    case 'harness.warning':
+      return push(
+        base,
+        {
+          id: itemId(),
+          kind: 'error',
+          text: str(data['message'] ?? 'Warning'),
+          complete: true,
+          at: now,
+          level: 'warn',
+        },
+        options,
+      );
 
     case 'harness.error':
     case 'run.error':

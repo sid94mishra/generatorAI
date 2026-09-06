@@ -20,6 +20,8 @@ export {
 export type { ChildEnvOptions } from './childEnv.js';
 
 export { AppConfigSchema } from './AppConfig.js';
+export { McpServerBodySchema, McpTransportSchema, SystemMcpPrefsBodySchema } from './McpSchemas.js';
+export type { McpServerBody, SystemMcpPrefsBody } from './McpSchemas.js';
 export type { AppConfig } from './AppConfig.js';
 export {
   WorkflowTemplateSchema,
@@ -86,6 +88,8 @@ export {
   PlanDecisionSchema,
   AnswerQuestionSchema,
   SetChatPermissionModeSchema,
+  ResolveToolPermissionSchema,
+  UpdateChatSchema,
   StageReviewDecisionSchema,
 } from './ChatSchemas.js';
 

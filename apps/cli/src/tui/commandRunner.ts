@@ -12,6 +12,7 @@ import {
   commandPath,
   formFieldsForSpec,
   formValuesToInput,
+  shellOnlyHint,
   specNeedsForm,
   toCliError,
   validate,
@@ -148,6 +149,15 @@ export function createCommandRunner(options: CommandRunnerOptions): CommandRunne
     async runFromPalette(entry) {
       const spec = registry.get(entry.id);
       if (!spec) return;
+
+      // The TUI cannot collect a secret (its prompt port refuses by design)
+      // or hand over the raw TTY (that happens through a pane), so a command
+      // declaring either is never dispatched from here — the user gets the
+      // one hint that tells them where it does work, not a generic failure.
+      if (entry.shellOnlyHint ?? (spec.requires && spec.requires.length > 0)) {
+        actions.toast(entry.shellOnlyHint ?? shellOnlyHint(commandPath(spec)), 'warning');
+        return;
+      }
 
       // A command that takes input cannot be fired blind from a palette.
       // This used to collect required ARGUMENTS through chained single-line

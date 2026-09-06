@@ -14,7 +14,7 @@
 
 import { MessageSquare, Send, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/index.js';
+import { Button, Popover, PopoverTrigger, PopoverContent } from '@/components/ui/index.js';
 import type { ReviewThread } from '@/types/review.js';
 
 export interface ReviewCommentsPopoverProps {
@@ -50,13 +50,15 @@ export function ReviewCommentsPopover({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           title="Comments — review every note and send them to the agent"
           aria-label={`Comments (${total})`}
           className={cn(
-            'inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] hover:bg-accent',
-            total > 0 && 'text-primary',
+            'h-6 gap-1 rounded px-1.5 text-[11px] hover:bg-accent hover:text-current',
+            total > 0 ? 'text-primary' : 'text-foreground',
           )}
         >
           <MessageSquare className="h-3.5 w-3.5" />
@@ -65,7 +67,7 @@ export function ReviewCommentsPopover({
               {total}
             </span>
           )}
-        </button>
+        </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[320px] p-0">
         <div className="flex items-center justify-between px-3 py-2">
@@ -97,11 +99,12 @@ export function ReviewCommentsPopover({
                   key={thread.id}
                   className="group flex items-start gap-2 px-3 py-1.5 hover:bg-accent/50"
                 >
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => onJump(thread)}
                     title="Show this comment in the diff"
-                    className="min-w-0 flex-1 text-left"
+                    className="block h-auto min-w-0 flex-1 rounded-none p-0 text-left font-normal text-foreground hover:bg-transparent hover:text-foreground"
                   >
                     <div className="truncate font-mono text-[11px]" title={path}>
                       {path}
@@ -113,27 +116,33 @@ export function ReviewCommentsPopover({
                     >
                       {first?.body ?? 'No comment yet'}
                     </div>
-                  </button>
+                  </Button>
                   <div className="flex shrink-0 items-center gap-0.5 opacity-60 group-hover:opacity-100">
                     {onSendOne && isSendable(thread) && (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => onSendOne(thread.id)}
                         disabled={busy}
                         title="Send this comment to the agent"
-                        className="rounded p-1 text-primary hover:bg-primary/15 disabled:opacity-30"
+                        aria-label="Send this comment to the agent"
+                        className="text-primary hover:bg-primary/15 hover:text-primary"
                       >
                         <Send className="h-3 w-3" />
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-sm"
                       onClick={() => onDelete(thread.id)}
                       title="Delete this comment"
-                      className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-danger"
+                      aria-label="Delete this comment"
+                      className="hover:text-danger"
                     >
                       <Trash2 className="h-3 w-3" />
-                    </button>
+                    </Button>
                   </div>
                 </div>
               );
@@ -145,15 +154,17 @@ export function ReviewCommentsPopover({
           <>
             <div className="h-px bg-border" />
             <div className="p-2">
-              <button
+              <Button
                 type="button"
+                variant="primary"
+                size="sm"
                 onClick={onSendAll}
                 disabled={busy}
-                className="flex w-full items-center justify-center gap-1.5 rounded bg-primary px-2 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                className="w-full justify-center"
+                leftIcon={<Send className="h-3.5 w-3.5" />}
               >
-                <Send className="h-3.5 w-3.5" />
                 Send {sendable.length} to chat
-              </button>
+              </Button>
             </div>
           </>
         )}

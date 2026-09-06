@@ -23,15 +23,15 @@ export interface PageContainerProps extends React.HTMLAttributes<HTMLDivElement>
   variant?: PageContainerVariant;
 }
 
-export function PageContainer({
-  variant = 'default',
-  className,
-  children,
-  ...props
-}: PageContainerProps) {
-  return (
-    <div className={cn(VARIANT_CLASSES[variant], className)} {...props}>
-      {children}
-    </div>
-  );
-}
+// Forwards a ref to the scrolling div itself. Needed so a page can hand its
+// own scroll element to @tanstack/react-virtual — these pages scroll inside
+// PageContainer, not the window, so the virtualizer has to observe this node.
+export const PageContainer = React.forwardRef<HTMLDivElement, PageContainerProps>(
+  function PageContainer({ variant = 'default', className, children, ...props }, ref) {
+    return (
+      <div ref={ref} className={cn(VARIANT_CLASSES[variant], className)} {...props}>
+        {children}
+      </div>
+    );
+  },
+);

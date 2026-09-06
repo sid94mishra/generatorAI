@@ -78,10 +78,25 @@ export interface OrchestratorConfig {
    * disable the guard entirely.
    */
   convergenceThreshold: number;
+  /**
+   * How long a finished worker keeps its harness runtime before it is torn
+   * down, so an immediate review round reuses the warm process. Default 90 s.
+   */
+  workerReleaseGraceMs?: number;
 }
 
+/** See `OrchestratorConfig.workerReleaseGraceMs`. */
+const DEFAULT_WORKER_RELEASE_GRACE_MS = 90_000;
+
 export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
-  maxWorkers: 12,
+  // Each worker is a chat, and on the default (persistent-session) Claude
+  // provider each chat is a ~230 MB CLI process. Twelve workers per parent was
+  // 2.8 GB of processes per orchestration, three times the turn permit
+  // (`GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`, default 4) — the extra eight
+  // could only ever wait for a permit while holding their memory. Four matches
+  // the permit; raise `GENERATORAI_ORCH_MAX_WORKERS` on a machine that has the
+  // memory for more.
+  maxWorkers: 4,
   maxReviewRounds: 3,
   defaultWorkerModel: undefined,
   workerTimeoutMs: 5 * 60 * 1000,
@@ -128,6 +143,8 @@ interface TaskRecord {
   resolveFirstOutput: () => void;
   unsub?: () => void;
   lastError?: string;
+  /** Pending teardown of the worker's harness runtime — see `scheduleWorkerRelease`. */
+  releaseTimer?: ReturnType<typeof setTimeout>;
 }
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -553,6 +570,12 @@ export class OrchestratorService {
     record.reviewRounds += 1;
     record.status = 'running';
     record.lastAssistantText = '';
+    // A follow-up within the grace window keeps the worker's process; the
+    // release is re-armed when this turn goes idle.
+    if (record.releaseTimer) {
+      clearTimeout(record.releaseTimer);
+      record.releaseTimer = undefined;
+    }
     this.armIdle(record);
     await this.chatRepo.updateBackgroundTaskStatus(taskId, 'running').catch(() => {});
     await this.emitToParent(record.parentSessionId, {
@@ -877,6 +900,7 @@ export class OrchestratorService {
         }
         const finalStatus: BackgroundTaskStatus = record.status;
         void this.chatRepo.updateBackgroundTaskStatus(record.taskId, finalStatus).catch(() => {});
+        this.scheduleWorkerRelease(record);
         void this.writeScratchpad(record.parentChatId);
         void this.emitToParent(record.parentSessionId, {
           kind: 'chat.background_task.completed',
@@ -1085,6 +1109,40 @@ export class OrchestratorService {
       }
     }
     if (changed) void this.writeScratchpad(parentChatId);
+  }
+
+  /**
+   * Tear down a finished worker's harness runtime.
+   *
+   * A worker is a single-purpose chat; once it has gone idle its CLI process
+   * (~230 MB on the persistent-session Claude provider) has nothing left to
+   * do. Nothing released it: the idle sweep was the only reclaim path, and
+   * the process outlived the orchestration by the whole idle window. The
+   * worker's transcript is in the database, so the parent's digests and the
+   * user's "open this worker" both keep working — `ChatManagementService`
+   * resumes a non-live conversation from the persisted session on the next
+   * prompt.
+   *
+   * A short grace window keeps the process for a review round
+   * (`sendToBackgroundAgent`) that follows immediately, which is the common
+   * shape of a review loop; the timer is cleared there.
+   */
+  private scheduleWorkerRelease(record: TaskRecord): void {
+    if (record.releaseTimer) clearTimeout(record.releaseTimer);
+    const timer = setTimeout(() => {
+      record.releaseTimer = undefined;
+      if (record.status === 'running') return;
+      void (async () => {
+        const session = await this.sessionRepo.getById(record.workerSessionId);
+        const conversationId = session?.conversationId;
+        if (!conversationId || !this.harness.hasLiveConversation(conversationId)) return;
+        await this.harness.destroyConversation(conversationId);
+      })().catch(() => {
+        /* best effort — the idle sweep is the backstop */
+      });
+    }, this.config.workerReleaseGraceMs ?? DEFAULT_WORKER_RELEASE_GRACE_MS);
+    timer.unref?.();
+    record.releaseTimer = timer;
   }
 
   private async emitToParent(parentSessionId: string, event: AgentEvent): Promise<void> {

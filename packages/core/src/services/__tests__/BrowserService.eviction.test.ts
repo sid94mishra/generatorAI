@@ -148,6 +148,32 @@ describe('BrowserService LRU eviction', () => {
     expect(stopped).toEqual(['only-visible']);
   });
 
+  it('dispose() stops every live session with a server-shutdown reason and tolerates one failure', async () => {
+    // APPLICATION-REVIEW-2026-09 §6.7: the browser service had no whole-
+    // service disposal, so graceful restarts force-killed Chromium.
+    const { service, sessions } = makeService(10);
+    await service.ensureStarted(makeWorkspace('ws-1', 'headless'));
+    await service.ensureStarted(makeWorkspace('ws-2', 'visible'));
+    await service.ensureStarted(makeWorkspace('ws-3', 'headless'));
+    expect(sessions.size).toBe(3);
+
+    const reasons: Array<[string, string | undefined]> = [];
+    (service.stop as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (workspaceId: string, reason?: string) => {
+        reasons.push([workspaceId, reason]);
+        if (workspaceId === 'ws-2') throw new Error('bridge gone');
+        sessions.delete(workspaceId);
+      },
+    );
+
+    await expect(service.dispose()).resolves.toBeUndefined();
+    expect(reasons.map(([id]) => id).sort()).toEqual(['ws-1', 'ws-2', 'ws-3']);
+    expect(reasons.every(([, r]) => r === 'server-shutdown')).toBe(true);
+    // The one that threw stays recorded (real stop() would have removed it);
+    // the point is that its failure did not stop the other two.
+    expect([...sessions.keys()]).toEqual(['ws-2']);
+  });
+
   it('evicts the least recently used of several headless sessions', async () => {
     const { service, stopped, sessions } = makeService(3);
     const now = Date.now();

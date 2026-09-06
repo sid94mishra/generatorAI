@@ -17,7 +17,7 @@
 
 import { Router } from 'express';
 import { promises as fs } from 'node:fs';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { resolve, sep, extname } from 'node:path';
 import type { Container } from '../composition-root.js';
 import { InstallExtensionParamsSchema } from '@generatorai/shared';
@@ -167,8 +167,18 @@ export function createWidgetAssetRoutes(container: Container): Router {
       return;
     }
     let stat;
+    let realTarget: string;
     try {
-      stat = statSync(target);
+      // `lstat`, not `stat`: `stat` FOLLOWS symlinks, so `isSymbolicLink()`
+      // below was always false and the check could never fire. Containment
+      // above only bounds the path as written — a link planted inside the
+      // extension folder pointed anywhere on disk and was served happily.
+      // The extension-writing tool can plant exactly such a link, which is
+      // what made this a real chain rather than a theoretical one (review 6.1).
+      stat = lstatSync(target);
+      // Resolve the whole path and re-check containment, which also catches a
+      // link on an intermediate directory rather than the final segment.
+      realTarget = realpathSync(target);
     } catch (err) {
       logger?.warn?.(`[widget-assets] stat failed for ${target}: ${String(err)}`);
       res.status(500).send('stat failed');
@@ -176,6 +186,17 @@ export function createWidgetAssetRoutes(container: Container): Router {
     }
     if (stat.isSymbolicLink()) {
       res.status(400).send('symlink refused');
+      return;
+    }
+    const realRoot = (() => {
+      try {
+        return realpathSync(absRoot);
+      } catch {
+        return absRoot;
+      }
+    })();
+    if (!realTarget.startsWith(realRoot + sep) && realTarget !== realRoot) {
+      res.status(400).send('path escapes extension root');
       return;
     }
     if (!stat.isFile()) {

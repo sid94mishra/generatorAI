@@ -36,22 +36,17 @@ function persist(next: ServerConnectionState): ServerConnectionState {
   return next;
 }
 
-/** Loads `url` in the main window, creating one if the shell has none. */
+/**
+ * Loads `url` in the main window, creating one if the shell has none.
+ *
+ * Goes through `repointMainWindow` so the WindowManager's own record of the
+ * app URL moves too — the navigation guard and the IPC sender guard compare
+ * against it, and a stale value would make every bridge call from the new
+ * backend's page fail as "not the app".
+ */
 function pointWindowAt(url: string): void {
-  const wm = getWindowManager();
-  const win = wm.getMainWindow();
-  if (win && !win.isDestroyed()) {
-    log.info('Switching backend', { url });
-    win.loadURL(url).catch((err: unknown) => {
-      log.error('Failed to load backend', err);
-      wm.showError(
-        `Could not load ${url}.\n\n${err instanceof Error ? err.message : String(err)}`,
-      );
-    });
-    win.focus();
-    return;
-  }
-  wm.createMainWindow(url);
+  log.info('Switching backend', { url });
+  getWindowManager().repointMainWindow(url);
 }
 
 /**

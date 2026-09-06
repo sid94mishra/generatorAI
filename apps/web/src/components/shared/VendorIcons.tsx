@@ -91,6 +91,22 @@ export function GeminiMark({ className }: VendorIconProps): React.JSX.Element {
   );
 }
 
+/**
+ * Neutral mark for a provider with no dedicated brand glyph (`codex`,
+ * `opencode`, `acp`). W48 — these used to fall through to the GitHub
+ * Copilot mark below, which misattributed three unrelated harness
+ * providers to a fourth vendor's logo. A plain glyph is honest about
+ * "no brand mark yet" instead of borrowing someone else's.
+ */
+export function GenericProviderMark({ className }: VendorIconProps): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className={className} aria-hidden>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="4" />
+      <path d="M8 12h8M12 8v8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Every vendor mark this app knows, keyed by a stable vendor id. */
 export const VENDOR_ICONS = {
   'claude-code': ClaudeCodeMark,
@@ -105,18 +121,22 @@ export type VendorId = keyof typeof VENDOR_ICONS;
 /**
  * Brand mark for a harness/agent provider id.
  *
- * `claude-agent` resolves to the Claude Code mark (that provider is the Claude
- * Agent SDK); everything else falls back to GitHub Copilot, which is the only
- * other harness we ship.
+ * `claude-agent` resolves to the Claude Code mark (that provider is the
+ * Claude Agent SDK). `copilot` is GitHub's mark. Everything else — including
+ * `codex` / `opencode` / `acp`, the three breadth-adapter harnesses that used
+ * to fall through to the Copilot mark and read as "GitHub Copilot" in the
+ * picker — gets the neutral `GenericProviderMark` instead of another
+ * vendor's logo (W48 provider honesty).
  */
 export function ProviderBrandIcon({ provider, className }: { provider: string; className?: string }): React.JSX.Element {
   if (provider === 'claude-agent' || provider === 'claude-code' || provider === 'claude') {
     return <ClaudeCodeMark className={className} />;
   }
   if (provider === 'anthropic') return <AnthropicMark className={className} />;
+  if (provider === 'copilot') return <GitHubCopilotMark className={className} />;
   if (provider === 'openai') return <OpenAIMark className={className} />;
   if (provider === 'gemini' || provider === 'google') return <GeminiMark className={className} />;
-  return <GitHubCopilotMark className={className} />;
+  return <GenericProviderMark className={className} />;
 }
 
 /**

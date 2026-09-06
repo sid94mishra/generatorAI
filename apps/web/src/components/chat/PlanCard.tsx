@@ -19,6 +19,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button, Textarea } from '@/components/ui/index.js';
 import type { PlanBlock } from '@/stores/streamStore.js';
 
 export interface PlanCardProps {
@@ -126,12 +127,16 @@ export function PlanCard({ plan, onOpen, onApprove, onRequestChanges, busy }: Pl
     >
       {/* Header — the file chip is the primary "open the plan" affordance. */}
       <div className="flex items-start gap-3 p-3">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={onOpen ? () => onOpen(plan.planId) : undefined}
           disabled={!onOpen}
           className={cn(
-            'flex min-w-0 flex-1 items-start gap-3 text-left',
+            'flex h-auto min-w-0 flex-1 items-start gap-3 whitespace-normal p-0 text-left font-normal',
+            // The chip had no hover chrome and no dimmed disabled state before
+            // it became a <Button>; keep both off so the card looks unchanged.
+            'hover:bg-transparent disabled:cursor-default disabled:opacity-100',
             // Replayed history has no Plan tab to open; drop the affordance
             // rather than offering a button that does nothing.
             onOpen ? 'cursor-pointer' : 'cursor-default',
@@ -170,7 +175,7 @@ export function PlanCard({ plan, onOpen, onApprove, onRequestChanges, busy }: Pl
               </span>
             )}
           </span>
-        </button>
+        </Button>
       </div>
 
       {/* Action row — only while the gate is actually open. */}
@@ -179,44 +184,45 @@ export function PlanCard({ plan, onOpen, onApprove, onRequestChanges, busy }: Pl
           {!showFeedback ? (
             <div className="flex flex-wrap items-center gap-1.5">
               {onOpen && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={() => onOpen(plan.planId)}
-                className="rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+                className="h-auto rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
               >
                 Review plan
-              </button>
+              </Button>
               )}
               <div className="relative">
                 <div className="flex items-stretch">
-                  <button
+                  <Button
                     type="button"
-                    disabled={busy}
+                    variant="primary"
+                    size="sm"
+                    loading={busy}
                     onClick={() => onApprove?.(plan.planId, 'implement_interactive')}
                     className={cn(
-                      'flex items-center gap-1.5 rounded-l-md bg-[var(--color-primary)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50',
-                      !canAutopilot && 'rounded-md',
+                      'flex h-auto items-center gap-1.5 bg-[var(--color-primary)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90',
+                      // Square right edge only while the split-button caret is there.
+                      canAutopilot ? 'rounded-l-md rounded-r-none' : 'rounded-md',
                     )}
                   >
-                    {busy ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Check className="h-3 w-3" />
-                    )}
+                    {!busy && <Check className="h-3 w-3" />}
                     Approve &amp; implement
-                  </button>
+                  </Button>
                   {canAutopilot && (
-                    <button
+                    <Button
                       type="button"
+                      variant="primary"
                       disabled={busy}
                       aria-label="More approval options"
                       aria-haspopup="menu"
                       aria-expanded={showActions}
                       onClick={() => setShowActions((p) => !p)}
-                      className="rounded-r-md border-l border-[var(--color-primary-foreground)]/20 bg-[var(--color-primary)] px-1.5 text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
+                      className="h-auto rounded-r-md rounded-l-none border-l border-[var(--color-primary-foreground)]/20 bg-[var(--color-primary)] px-1.5 text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90"
                     >
                       <ChevronDown className="h-3 w-3" />
-                    </button>
+                    </Button>
                   )}
                 </div>
                 {showActions && canAutopilot && (
@@ -224,32 +230,34 @@ export function PlanCard({ plan, onOpen, onApprove, onRequestChanges, busy }: Pl
                     role="menu"
                     className="absolute bottom-full left-0 z-50 mb-1.5 w-56 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-1.5 shadow-2xl"
                   >
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
                       role="menuitem"
                       onClick={() => {
                         setShowActions(false);
                         onApprove?.(plan.planId, 'implement_autopilot');
                       }}
-                      className="w-full rounded-md px-2 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+                      className="block h-auto w-full whitespace-normal rounded-md px-2 py-1.5 text-left text-xs font-normal text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
                     >
                       <span className="block font-medium">Approve &amp; run autonomously</span>
                       <span className="block text-[10px] text-[var(--color-muted-foreground)]">
                         Skips per-action prompts while implementing.
                       </span>
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 disabled={busy}
                 onClick={() => setShowFeedback(true)}
-                className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)] disabled:opacity-50"
+                className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
               >
                 <MessageSquarePlus className="h-3 w-3" />
                 Request changes
-              </button>
+              </Button>
             </div>
           ) : (
             <div className="space-y-2">
@@ -259,7 +267,7 @@ export function PlanCard({ plan, onOpen, onApprove, onRequestChanges, busy }: Pl
               >
                 What should change?
               </label>
-              <textarea
+              <Textarea
                 id={`plan-feedback-${plan.planId}`}
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
@@ -269,29 +277,32 @@ export function PlanCard({ plan, onOpen, onApprove, onRequestChanges, busy }: Pl
                 className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-xs text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)]/40"
               />
               <div className="flex items-center justify-end gap-1.5">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => {
                     setShowFeedback(false);
                     setFeedback('');
                   }}
-                  className="rounded-md px-2.5 py-1.5 text-xs text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+                  className="h-auto rounded-md px-2.5 py-1.5 text-xs font-normal text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="primary"
+                  size="sm"
                   disabled={busy || feedback.trim().length === 0}
+                  loading={busy}
                   onClick={() => {
                     onRequestChanges?.(plan.planId, feedback.trim());
                     setShowFeedback(false);
                     setFeedback('');
                   }}
-                  className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
+                  className="h-auto flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90"
                 >
-                  {busy && <Loader2 className="h-3 w-3 animate-spin" />}
                   Send feedback
-                </button>
+                </Button>
               </div>
             </div>
           )}

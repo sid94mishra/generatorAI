@@ -36,13 +36,29 @@ const eventsSuppressed = meter.createCounter('eventbus.events.suppressed', {
 export const NOISE_EVENT_KINDS: ReadonlySet<string> = new Set(['harness.unknown']);
 
 /**
+ * `harness.session_info` delta types that are worth persisting when they carry
+ * text and worthless when they do not.
+ *
+ * These are per-chunk frames. A provider that emits one frame per chunk with
+ * the text stripped produces a row that no surface can render — see
+ * `isNoiseEventKind` for the measurements that put this list here.
+ */
+const EMPTYABLE_DELTA_INFO_TYPES: ReadonlySet<string> = new Set([
+  'assistant_streaming_delta',
+  'tool_input_delta',
+  'thinking_tokens',
+]);
+
+/**
  * Suppression, which is not the same thing as classification.
  *
- * W04 classifies `tool_partial_result` and `tool_progress` as deltas, and once
- * W07 lands they will flow to the delta log: coalesced, bounded, droppable, and
- * costing the relational store nothing. Until then a delta is still an INSERT
- * into `stream_cursors` — the table that is 81% of the database file — so
- * un-suppressing them now would trade a real regression for a future benefit.
+ * W04 classifies `tool_partial_result` and `tool_progress` as deltas. The
+ * intent was for deltas to flow to the file delta log and cost the relational
+ * store nothing; what shipped (W07) was a dual-write with no reader, now
+ * opt-in behind `GENERATORAI_DELTA_LOG` (see the composition root). A delta
+ * is therefore still an INSERT into `stream_cursors` — batched by
+ * `StreamWriteBatcher`, but a row per token — and `stream_cursors` remains
+ * the largest table, so un-suppressing these would be a real regression.
  *
  * They are safe to drop in the meantime because no surface reads them: verified
  * by call-site search across web, mobile, CLI and replay. The chunk-carrier list
@@ -56,8 +72,27 @@ export function isNoiseEventKind(kind: string, data?: unknown): boolean {
   if (process.env['GENERATORAI_STREAM_DEBUG_NOISE'] === '1') return false;
   if (NOISE_EVENT_KINDS.has(kind)) return true;
   if (kind !== 'harness.session_info') return false;
-  const infoType = (data as { infoType?: unknown } | undefined)?.infoType;
-  return typeof infoType === 'string' && DELTA_SESSION_INFO_TYPES.has(infoType);
+  const info = data as { infoType?: unknown; message?: unknown } | undefined;
+  const infoType = info?.infoType;
+  if (typeof infoType !== 'string') return false;
+  if (DELTA_SESSION_INFO_TYPES.has(infoType)) return true;
+
+  // An EMPTY streaming delta says nothing, and it is not a rare edge: on a
+  // month-old database every one of the 201,189 `assistant_streaming_delta`
+  // rows had `message: ''` — 21,870 of them in the last week alone, making
+  // this the single largest writer into `stream_cursors` while carrying no
+  // information at all. The text the user actually sees arrives separately as
+  // `harness.token`, so these are duplicate frames with the payload removed.
+  //
+  // Suppressed on emptiness rather than by adding the type to
+  // `DELTA_SESSION_INFO_TYPES`, because a NON-empty streaming delta is real
+  // content and must keep flowing. This drops only the rows that could not
+  // render anything.
+  if (EMPTYABLE_DELTA_INFO_TYPES.has(infoType)) {
+    const message = info?.message;
+    return message === undefined || message === null || message === '';
+  }
+  return false;
 }
 
 /** Sequence number stamped on an event that was suppressed before persistence. */
@@ -82,6 +117,12 @@ export interface ISessionEventStore {
   append(sessionId: string, event: AgentEvent): Promise<{ seq: number; id: number }>;
   /** Replay committed events for a session, oldest first. Must NOT truncate. */
   replaySessionEvents(sessionId: string, afterSeq: number): Promise<PersistedEvent[]>;
+  /**
+   * Highest sequence persisted for the session, or 0 when none. Optional; lets
+   * boot-time recovery read only the TAIL of a long session instead of the
+   * whole log (`InterruptedTurnRecoveryService`).
+   */
+  lastSeq?(sessionId: string): Promise<number>;
   /** Remove every durable row for a session. Used when a session is deleted. */
   deleteSessionEvents(sessionId: string): Promise<void>;
 }
@@ -703,6 +744,16 @@ export class EventBus {
    * public SDK surface. A silent cap here would truncate a run's history with
    * no marker, which Law L2 forbids. The store paginates internally.
    */
+  /**
+   * Highest persisted sequence for a session, or `undefined` when the durable
+   * store cannot answer cheaply (no store, or a store without `lastSeq`).
+   */
+  async getLastSequence(sessionId: string): Promise<number | undefined> {
+    if (this.replaySource?.lastSeq) return this.replaySource.lastSeq(sessionId);
+    const counter = this.sequenceCounters.get(sessionId);
+    return counter === undefined ? undefined : counter;
+  }
+
   async getSessionEvents(
     sessionId: string,
     afterSequence?: number,

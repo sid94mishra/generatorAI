@@ -12,8 +12,9 @@
 // most likely to end up describing the wrong lines.
 
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Send, X } from 'lucide-react';
+import { Send, X } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button, Textarea } from '@/components/ui/index.js';
 import type { ReviewIntent } from '@/types/review.js';
 import { FloatingCard } from './FloatingCard.js';
 
@@ -70,14 +71,16 @@ export function ReviewComposerPopover({
               : `L${range.start}–${range.end}`}
           </span>
         </span>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label="Cancel"
           onClick={onCancel}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-accent"
+          className="h-5 w-5 shrink-0"
         >
           <X className="h-3 w-3" />
-        </button>
+        </Button>
       </div>
 
       <div className="p-2.5">
@@ -89,24 +92,25 @@ export function ReviewComposerPopover({
 
         <div className="mb-1.5 flex flex-wrap gap-1">
           {INTENTS.map((i) => (
-            <button
+            <Button
               key={i.value}
               type="button"
+              variant="ghost"
               title={i.hint}
               aria-pressed={intent === i.value}
               onClick={() => setIntent(i.value)}
               className={cn(
-                'rounded border px-1.5 py-0.5 text-[10px] hover:bg-accent',
+                'h-auto rounded border px-1.5 py-0.5 text-[10px] font-normal text-foreground hover:bg-accent hover:text-foreground',
                 intent === i.value &&
-                  'border-primary bg-primary/15 font-medium text-primary',
+                  'border-primary bg-primary/15 font-medium text-primary hover:bg-primary/15 hover:text-primary',
               )}
             >
               {i.label}
-            </button>
+            </Button>
           ))}
         </div>
 
-        <textarea
+        <Textarea
           ref={textareaRef}
           value={body}
           onChange={(e) => setBody(e.target.value)}
@@ -118,30 +122,33 @@ export function ReviewComposerPopover({
           }}
           rows={3}
           placeholder="What should the agent change here? (⌘↵ to add)"
-          className="w-full resize-none rounded border bg-transparent px-2 py-1.5 text-xs"
+          aria-label="Review comment"
+          className="resize-none px-2 py-1.5 text-xs"
         />
 
         <div className="mt-1.5 flex items-center gap-1.5">
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             disabled={!canSubmit}
+            loading={busy}
             onClick={() => onSubmit(body.trim(), intent)}
-            className="inline-flex h-6 items-center gap-1 rounded border px-2 text-[11px] hover:bg-accent disabled:opacity-50"
           >
-            {busy && <Loader2 className="h-3 w-3 animate-spin" />}
             Add comment
-          </button>
+          </Button>
           {onSubmitAndSend && (
-            <button
+            <Button
               type="button"
+              variant="primary"
+              size="sm"
               disabled={!canSubmit}
               onClick={() => onSubmitAndSend(body.trim(), intent)}
-              className="inline-flex h-6 items-center gap-1 rounded bg-primary px-2 text-[11px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
               title="Add this comment and send it to the agent now"
+              leftIcon={<Send className="h-3 w-3" />}
             >
-              <Send className="h-3 w-3" />
               Add &amp; send
-            </button>
+            </Button>
           )}
           <span className="ml-auto text-[10px] text-muted-foreground">Esc to cancel</span>
         </div>

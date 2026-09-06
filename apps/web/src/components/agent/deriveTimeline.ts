@@ -16,6 +16,70 @@
 import type { StreamBlock } from '@/stores/streamStore.js';
 import type { TimelineStep, StepKind, StepStatus } from '@/components/chat/redesign/types.js';
 
+// ── Step identity ────────────────────────────────────────────────
+//
+// Review 6.4 (plan item 18): every derivation used to build brand-new step
+// objects, so `StepRow`'s `React.memo` — which compares the `step` prop by
+// identity — never bailed out during a live turn. On a streaming answer that
+// meant every row re-rendered on every token.
+//
+// Stream blocks are immutable (the reducer replaces a block to change it), so
+// a block object's identity already encodes everything a step is derived from
+// except the two turn-level inputs (`opts.active`, `awaitingDecision`), which
+// fold into a small `key`. A step whose anchor block, key and children are all
+// identical to the last derivation IS the last derivation's step.
+//
+// Interning runs post-order at the end of `deriveTimeline` (children before
+// parents) because a subagent's children stream in after the parent step was
+// created; a parent is only reused when its children array is element-wise
+// identical, so a memoised row can never miss a new child.
+//
+// Keyed by the block object in a WeakMap so it costs nothing to evict: when a
+// stream is cleared its blocks are unreachable and the entries go with them.
+// A few variants per anchor are kept because `deriveStreamView` derives the
+// same blocks twice per frame (the full list, then per-segment slices) and
+// the subagent composite's key legitimately differs between the two.
+
+interface StepCacheEntry {
+  key: string;
+  step: TimelineStep;
+}
+
+const STEP_VARIANTS_PER_ANCHOR = 4;
+const stepCache = new WeakMap<object, StepCacheEntry[]>();
+
+/** Side table from a freshly built step to the block it was derived from. */
+type StepAnchors = Map<TimelineStep, { anchor: object; key: string }>;
+
+function sameChildren(a: readonly TimelineStep[] | undefined, b: readonly TimelineStep[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function internStep(fresh: TimelineStep, anchors: StepAnchors): TimelineStep {
+  if (fresh.children) {
+    fresh.children = fresh.children.map((c) => internStep(c, anchors));
+  }
+  const ref = anchors.get(fresh);
+  if (!ref) return fresh;
+  const variants = stepCache.get(ref.anchor);
+  if (variants) {
+    for (const v of variants) {
+      if (v.key === ref.key && sameChildren(v.step.children, fresh.children)) return v.step;
+    }
+  }
+  const next: StepCacheEntry[] = [{ key: ref.key, step: fresh }];
+  if (variants) {
+    for (const v of variants) {
+      if (v.key !== ref.key && next.length < STEP_VARIANTS_PER_ANCHOR) next.push(v);
+    }
+  }
+  stepCache.set(ref.anchor, next);
+  return fresh;
+}
+
 /** Infer a step "kind" from the tool name. Used to pick the right icon. */
 function inferKind(toolName: string): StepKind {
   const n = toolName.toLowerCase();
@@ -156,7 +220,8 @@ export function awaitsUserDecision(blocks: StreamBlock[] | undefined): boolean {
   return blocks.some(
     (b) =>
       (b.type === 'plan' && b.status === 'awaiting_review') ||
-      (b.type === 'question' && b.status === 'pending'),
+      (b.type === 'question' && b.status === 'pending') ||
+      (b.type === 'permission' && b.status === 'pending'),
   );
 }
 
@@ -171,14 +236,17 @@ export function deriveTimeline(
   // Consolidate ALL subagent messages first (they may be non-consecutive).
   const subagentMessages: string[] = [];
   const subagentBlockIds: number[] = [];
+  const subagentBlocks: StreamBlock[] = [];
   for (const b of blocks) {
     if (b.type === 'system' && b.category === 'subagent') {
       subagentMessages.push(b.message);
       subagentBlockIds.push(b.blockId);
+      subagentBlocks.push(b);
     }
   }
 
   const steps: TimelineStep[] = [];
+  const anchors: StepAnchors = new Map();
   let subagentEmitted = false;
   /**
    * SDK-subagent nesting: a tool block whose `parentCallId` names an earlier
@@ -197,7 +265,7 @@ export function deriveTimeline(
         // Skip empty thinking (server often emits a heartbeat block).
         if (!b.text.trim()) continue;
         const settled = b.isComplete || !opts.active;
-        steps.push({
+        const thinkStep: TimelineStep = {
           id: `thinking-${b.blockId}`,
           kind: 'think',
           verb: settled ? 'Thought about' : 'Thinking about',
@@ -205,7 +273,9 @@ export function deriveTimeline(
           mono: false,
           status: settled ? 'done' : 'running',
           detail: b.text,
-        });
+        };
+        anchors.set(thinkStep, { anchor: b, key: settled ? 'settled' : 'live' });
+        steps.push(thinkStep);
         break;
       }
 
@@ -260,6 +330,9 @@ export function deriveTimeline(
           ...(fileOp ? { fileOp } : {}),
           ...(isShellTool(b.tool) ? { isShell: true } : {}),
         };
+        // `status` is the only derived field that can change while the block
+        // object stays the same (it folds in `opts.active` / the gate state).
+        anchors.set(step, { anchor: b, key: status });
         stepByCallId.set(b.callId, step);
         const parent = b.parentCallId ? stepByCallId.get(b.parentCallId) : undefined;
         if (parent) {
@@ -274,35 +347,50 @@ export function deriveTimeline(
         if (b.category === 'subagent') {
           if (!subagentEmitted) {
             const status = subagentState(subagentMessages, opts.active);
-            steps.push({
-              id: `sub-${subagentBlockIds[0] ?? b.blockId}`,
-              kind: 'subagent',
-              verb: 'Explore',
-              target: subagentTarget(subagentMessages),
-              mono: false,
-              status,
-              children: subagentMessages.map((m, i) => ({
+            const children: TimelineStep[] = subagentMessages.map((m, i) => {
+              const child: TimelineStep = {
                 id: `sub-child-${subagentBlockIds[i] ?? i}`,
                 kind: 'note',
                 verb: '',
                 target: m,
                 mono: false,
                 status: /completed/i.test(m) ? 'done' : /failed/i.test(m) ? 'failed' : /started/i.test(m) ? 'running' : 'done',
-              })),
+              };
+              const childAnchor = subagentBlocks[i];
+              if (childAnchor) anchors.set(child, { anchor: childAnchor, key: child.status });
+              return child;
             });
+            const subStep: TimelineStep = {
+              id: `sub-${subagentBlockIds[0] ?? b.blockId}`,
+              kind: 'subagent',
+              verb: 'Explore',
+              target: subagentTarget(subagentMessages),
+              mono: false,
+              status,
+              children,
+            };
+            // The composite is derived from EVERY subagent block, so its key
+            // carries the whole message list, not just the first block.
+            anchors.set(subStep, {
+              anchor: subagentBlocks[0] ?? b,
+              key: `${status}|${subagentMessages.join(' ')}`,
+            });
+            steps.push(subStep);
             subagentEmitted = true;
           }
           break;
         }
         if (b.category === 'error') {
-          steps.push({
+          const errStep: TimelineStep = {
             id: `err-${b.blockId}`,
             kind: 'error',
             verb: 'Error',
             target: b.message,
             mono: false,
             status: 'failed',
-          });
+          };
+          anchors.set(errStep, { anchor: b, key: 'failed' });
+          steps.push(errStep);
           break;
         }
         // 'system' category — drop (noise once we have thinking/tools).
@@ -321,11 +409,15 @@ export function deriveTimeline(
 
       case 'plan':
       case 'question':
-        // PLN-01 — rendered as their own interactive segments, not steps.
+      case 'permission':
+        // PLN-01 / 5.1 — rendered as their own interactive segments, not steps.
         break;
     }
   }
 
+  // Post-order: children are interned before the parent decides whether it
+  // is unchanged. See "Step identity" above.
+  for (let i = 0; i < steps.length; i += 1) steps[i] = internStep(steps[i]!, anchors);
   return steps;
 }
 
@@ -372,7 +464,8 @@ export type StreamSegment =
   | { type: 'answer'; id: string; text: string }
   | { type: 'widget'; id: string; widget: Extract<StreamBlock, { type: 'widget' }> }
   | { type: 'plan'; id: string; plan: Extract<StreamBlock, { type: 'plan' }> }
-  | { type: 'question'; id: string; question: Extract<StreamBlock, { type: 'question' }> };
+  | { type: 'question'; id: string; question: Extract<StreamBlock, { type: 'question' }> }
+  | { type: 'permission'; id: string; permission: Extract<StreamBlock, { type: 'permission' }> };
 
 /** Walk stream blocks in order and produce interleaved step / answer /
  *  inline-widget segments that preserve the temporal sequence in which
@@ -436,6 +529,13 @@ export function deriveSegments(
       flushSteps();
       flushText();
       segments.push({ type: 'question', id: `question-${b.interactionId}`, question: b });
+    } else if (b.type === 'permission') {
+      // Review finding 5.1 — the permission card sits exactly where the
+      // agent tried to run the tool, same reasoning as the plan/question
+      // cards above.
+      flushSteps();
+      flushText();
+      segments.push({ type: 'permission', id: `permission-${b.interactionId}`, permission: b });
     } else {
       // thinking / tool_call / system → activity-timeline step block.
       flushText();

@@ -1,0 +1,46 @@
+# Dependency update automation (review §6.7 / Phase 4: "no dependency or
+# static-analysis scanning"). Weekly cadence keeps PR volume reviewable;
+# minor+patch updates are grouped into one PR per ecosystem so a routine
+# week is one review, not thirty. Majors stay individual because they need
+# a human to read the changelog. CodeQL (.github/workflows/codeql.yml)
+# covers the static-analysis half.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    groups:
+      npm-minor-and-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: 'chore(deps)'
+    labels:
+      - dependencies
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+    commit-message:
+      prefix: 'chore(ci)'
+    labels:
+      - dependencies
+      - ci

@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 
 export interface FilterTabOption {
   id: string;
@@ -28,14 +29,15 @@ export function FilterTabs({ options, value, onChange, className }: FilterTabsPr
       {options.map((option) => {
         const active = option.id === value;
         return (
-          <button
+          <Button
             key={option.id}
+            variant="ghost"
             type="button"
             role="tab"
             aria-selected={active}
             onClick={() => onChange(option.id)}
             className={cn(
-              'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+              'h-auto rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
               active
                 ? 'bg-primary-emphasis text-primary-foreground'
                 : 'text-muted-foreground hover:text-foreground',
@@ -47,7 +49,7 @@ export function FilterTabs({ options, value, onChange, className }: FilterTabsPr
                 {option.count}
               </span>
             )}
-          </button>
+          </Button>
         );
       })}
     </div>

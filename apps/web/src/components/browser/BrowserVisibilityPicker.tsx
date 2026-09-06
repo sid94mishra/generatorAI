@@ -9,6 +9,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Eye, EyeOff, Ban, Code2 } from 'lucide-react';
+import { Input, Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 
 export type BrowserVisibility = 'visible' | 'headless' | 'off';
@@ -92,15 +93,16 @@ export function BrowserVisibilityPicker({
           {OPTIONS.map((opt) => {
             const selected = value.visibility === opt.value;
             return (
-              <button
+              <Button
                 key={opt.value}
+                variant="ghost"
                 type="button"
                 role="radio"
                 aria-checked={selected}
                 data-testid={`browser-visibility-${opt.value}`}
                 onClick={() => onChange({ ...value, visibility: opt.value })}
                 className={cn(
-                  'flex flex-col items-start gap-0.5 rounded-md border px-2.5 py-2 text-left transition-colors',
+                  'h-auto flex flex-col items-start gap-0.5 rounded-md border px-2.5 py-2 text-left transition-colors',
                   'text-[11.5px] font-medium',
                   selected
                     ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
@@ -117,7 +119,7 @@ export function BrowserVisibilityPicker({
                     {opt.hint}
                   </span>
                 )}
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -147,16 +149,17 @@ export function BrowserVisibilityPicker({
       {/* Allowed hosts — comma/space list. Left as a plain input rather
           than tag chips to keep the surface tiny for the modal case. */}
       <div>
-        <label className="mb-1 block text-[11.5px] font-medium text-[var(--color-foreground)]">
+        <label htmlFor="browser-allowed-hosts" className="mb-1 block text-[11.5px] font-medium text-[var(--color-foreground)]">
           Allowed hosts <span className="text-[10px] text-[var(--color-muted-foreground)]">(optional; empty = allow all)</span>
         </label>
-        <input
+        <Input
+          id="browser-allowed-hosts"
           type="text"
           data-testid="browser-allowed-hosts"
           value={value.allowedHostsCsv ?? ''}
           onChange={(e) => onChange({ ...value, allowedHostsCsv: e.target.value })}
           placeholder="playwright.dev, *.example.com"
-          className="w-full rounded-md border border-[var(--color-input)] bg-[var(--color-background)] px-2 py-1.5 text-[11.5px] font-mono text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] focus:border-[var(--color-primary)] focus:outline-none"
+          className="h-auto px-2 py-1.5 text-[11.5px] font-mono"
         />
       </div>
     </div>

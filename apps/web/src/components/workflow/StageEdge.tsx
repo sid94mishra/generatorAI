@@ -23,6 +23,7 @@ import {
   type StageEdgeType,
 } from './edgeTypeStyles.js';
 import { useCanvasReadonly } from './canvasContext.js';
+import { Button } from '@/components/ui/index.js';
 
 /** Edge type → icon (makes the condition legible even at low zoom) */
 const edgeTypeIcons: Record<string, React.ReactNode> = {
@@ -140,31 +141,35 @@ function StageEdgeComponent({
         >
           {/* Type badge — doubles as the edge-type picker trigger in the
               builder. Read-only canvases keep the badge but not the menu. */}
-          <button
+          <Button
             type="button"
             onClick={handleLabelClick}
             aria-haspopup={readonly ? undefined : 'menu'}
             aria-expanded={readonly ? undefined : pickerOpen}
             aria-label={readonly ? undefined : `Edge condition: ${label}. Change condition`}
             title={readonly ? label : `Runs when: ${edgeTypeHints[edgeType as StageEdgeType] ?? label}`}
-            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm ring-1 ring-black/10 transition-all"
+            variant="ghost"
+            size="sm"
+            className="h-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm ring-1 ring-black/10 transition-all hover:opacity-90"
             style={{ backgroundColor: color }}
           >
             {edgeTypeIcons[edgeType]}
             {label}
             {!readonly && <ChevronDown className="h-2.5 w-2.5 opacity-80" />}
-          </button>
+          </Button>
 
           {/* Delete button (visible on hover) */}
           {!readonly && (
-            <button
+            <Button
               onClick={handleDelete}
-              className="flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white opacity-0 shadow-sm transition-opacity hover:bg-red-600 group-hover:opacity-100"
+              variant="ghost"
+              size="icon-sm"
+              className="h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white opacity-0 shadow-sm transition-opacity hover:bg-red-600 group-hover:opacity-100"
               aria-label={`Remove ${label} edge`}
               title="Remove edge"
             >
               <X className="h-3 w-3" />
-            </button>
+            </Button>
           )}
 
           {pickerOpen && !readonly && (
@@ -174,13 +179,15 @@ function StageEdgeComponent({
               className="absolute left-1/2 top-full z-50 mt-1.5 w-56 -translate-x-1/2 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-xl"
             >
               {EDGE_TYPE_ORDER.map((type) => (
-                <button
+                <Button
                   key={type}
                   type="button"
                   role="menuitemradio"
                   aria-checked={type === edgeType}
                   onClick={(e) => pick(e, type)}
-                  className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--color-accent)]"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto flex w-full items-start gap-2 rounded-none px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--color-accent)]"
                 >
                   <span
                     className="mt-1 h-2 w-2 shrink-0 rounded-full"
@@ -197,7 +204,7 @@ function StageEdgeComponent({
                   {type === edgeType && (
                     <Check className="mt-0.5 h-3 w-3 shrink-0 text-[var(--color-primary)]" />
                   )}
-                </button>
+                </Button>
               ))}
             </div>
           )}

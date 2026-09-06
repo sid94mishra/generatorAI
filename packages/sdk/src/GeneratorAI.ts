@@ -48,6 +48,15 @@ import {
 import { createLogger, type ILogger } from '@generatorai/shared';
 
 import { type GeneratorAIConfig, type ResolvedConfig, resolveConfig } from './config.js';
+
+/** `HarnessProviderConfig` option-bag key per harness type. */
+const PROVIDER_OPTIONS_KEY: Record<HarnessType, string> = {
+  copilot: 'copilot',
+  'claude-agent': 'claudeAgent',
+  codex: 'codex',
+  opencode: 'opencode',
+  acp: 'acp',
+};
 import {
   WorkflowFacade,
   ChatFacade,
@@ -315,7 +324,7 @@ export class GeneratorAI {
    * This is the recommended way to get started:
    * ```typescript
    * const ai = await GeneratorAI.create({
-   *   provider: 'copilot',
+   *   harness: 'copilot',          // HarnessType — same word as the server's HARNESS_TYPE
    *   database: './my-app.db',
    * });
    * ```
@@ -340,20 +349,21 @@ export class GeneratorAI {
 
     // ── Harness ──
     let harness: HarnessProxy;
-    if (typeof resolved.provider === 'string') {
-      const harnessType = resolved.provider as HarnessType;
+    if (typeof resolved.harness === 'string') {
+      const harnessType: HarnessType = resolved.harness;
+      // `HarnessProviderConfig` keys its per-provider options by a camelCased
+      // form of the type; this is the same mapping the server's config layer
+      // applies, so `providerOptions` lands where the provider reads it.
       const rawHarness = await createHarnessProvider({
         type: harnessType,
-        ...(harnessType === 'copilot'
-          ? { copilot: resolved.providerOptions }
-          : { claudeAgent: resolved.providerOptions }),
+        [PROVIDER_OPTIONS_KEY[harnessType]]: resolved.providerOptions,
       } as never);
       harness = new HarnessProxy(rawHarness, harnessType);
     } else {
       // Bring-your-own-harness: the caller passed a pre-built IAgentHarness.
       // Label it 'custom' (not 'copilot') so health/telemetry don't misreport
       // the provider. The proxy accepts any string label (HarnessTypeLabel).
-      harness = new HarnessProxy(resolved.provider, 'custom');
+      harness = new HarnessProxy(resolved.harness, 'custom');
     }
 
     // ── Infrastructure ──

@@ -32,9 +32,11 @@ import { parseInlineToolCalls } from './parseInlineToolCalls.js';
 import type { ContextUsageSnapshot } from './contextUsage.js';
 import {
   DEFAULT_STREAM,
+  type PermissionBlock,
   type PlanBlock,
   type QuestionBlock,
   type StreamBlock,
+  type StreamHookInvocation,
   type StreamState,
   type StreamUsage,
   type StreamsRecord,
@@ -305,6 +307,96 @@ export function completeToolCall(
       existing.status === 'complete' || existing.status === 'idle' || existing.status === 'error'
         ? existing.status
         : 'streaming',
+  });
+}
+
+// ── Hooks ───────────────────────────────────────────────────────
+//
+// The run inspector's Hooks tab was always empty (deriveRunView hardcoded
+// `hooks: undefined`) because nothing turned `hook.*` events into structured
+// data — `eventRouter` only narrated them as system-message text. These two
+// functions pair `hook.started` with its `hook.completed`/`hook.failed` so
+// the tab has something to render.
+
+export function addHookStarted(
+  streams: StreamsRecord,
+  sessionId: string,
+  hookName: string,
+  phase: string,
+  opts?: { hookId?: string; hookType?: string; stageRunId?: string },
+): StreamsRecord {
+  const existing = existingOrDefault(streams, sessionId);
+  const record: StreamHookInvocation = {
+    id: opts?.hookId ?? `hook_${existing._hookCounter}`,
+    hookName,
+    phase,
+    status: 'running',
+    ...(opts?.hookType ? { hookType: opts.hookType } : {}),
+    ...(opts?.stageRunId ? { stageRunId: opts.stageRunId } : {}),
+  };
+  return put(streams, sessionId, {
+    ...existing,
+    hooks: [...existing.hooks, record],
+    _hookCounter: opts?.hookId ? existing._hookCounter : existing._hookCounter + 1,
+  });
+}
+
+/**
+ * Finalise a hook invocation on `hook.completed` (`status: 'ok'`) or
+ * `hook.failed` (`status: 'failed'`).
+ *
+ * Matches by `hookId` when the event carries one; otherwise falls back to
+ * the most recent RUNNING record with the same `hookName` + `phase`, since
+ * `hookId` is optional on the wire (see `AgentEvent.ts`). A completed/failed
+ * event with no matching started record still produces a finished record —
+ * replay can begin mid-hook, and dropping it would silently under-report.
+ */
+export function completeHook(
+  streams: StreamsRecord,
+  sessionId: string,
+  status: 'ok' | 'failed',
+  hookName: string,
+  phase: string,
+  opts?: { hookId?: string; hookType?: string; stageRunId?: string; durationMs?: number },
+): StreamsRecord {
+  const existing = existingOrDefault(streams, sessionId);
+
+  let idx = opts?.hookId
+    ? existing.hooks.findIndex((h) => h.id === opts.hookId)
+    : -1;
+  if (idx < 0) {
+    for (let i = existing.hooks.length - 1; i >= 0; i--) {
+      const h = existing.hooks[i];
+      if (h && h.status === 'running' && h.hookName === hookName && h.phase === phase) {
+        idx = i;
+        break;
+      }
+    }
+  }
+
+  const finalize = (prior: Partial<StreamHookInvocation>): StreamHookInvocation => ({
+    id: prior.id ?? opts?.hookId ?? `hook_${existing._hookCounter}`,
+    hookName,
+    phase,
+    status,
+    ...(opts?.durationMs !== undefined ? { durationMs: opts.durationMs } : {}),
+    ...(opts?.hookType ?? prior.hookType ? { hookType: opts?.hookType ?? prior.hookType } : {}),
+    ...(opts?.stageRunId ?? prior.stageRunId
+      ? { stageRunId: opts?.stageRunId ?? prior.stageRunId }
+      : {}),
+  });
+
+  if (idx >= 0) {
+    const hooks = existing.hooks.slice();
+    const prior = hooks[idx]!;
+    hooks[idx] = finalize(prior);
+    return put(streams, sessionId, { ...existing, hooks });
+  }
+
+  return put(streams, sessionId, {
+    ...existing,
+    hooks: [...existing.hooks, finalize({})],
+    _hookCounter: opts?.hookId ? existing._hookCounter : existing._hookCounter + 1,
   });
 }
 
@@ -799,6 +891,85 @@ export function expireQuestion(
   const prior = existing.blocks[idx] as QuestionBlock;
   // An answered card is terminal: a late expiry must not undo the answer.
   if (prior.status === 'answered') return streams;
+
+  const blocks = existing.blocks.slice();
+  blocks[idx] = { ...prior, status: 'expired' };
+  return put(streams, sessionId, { ...existing, blocks });
+}
+
+// ── Tool-permission gate (review finding 5.1) ───────────────────
+//
+// Same shape as the question-card trio above: `upsertPermission` opens or
+// merges the card, `resolvePermission`/`expirePermission` settle it. Kept
+// separate rather than folded into the question functions because the two
+// card kinds carry unrelated payloads (`answers` vs `behavior`/`message`)
+// and diverging status enums (`answered`/`expired` vs `allowed`/`denied`/
+// `expired`).
+
+export function upsertPermission(
+  streams: StreamsRecord,
+  sessionId: string,
+  permission: Omit<PermissionBlock, 'type' | 'blockId'>,
+  now: number = Date.now(),
+): StreamsRecord {
+  const existing = existingOrDefault(streams, sessionId);
+  const idx = existing.blocks.findIndex(
+    (b) => b.type === 'permission' && b.interactionId === permission.interactionId,
+  );
+  const openedAt = permission.status === 'pending' ? { openedAt: now } : {};
+
+  if (idx >= 0) {
+    const blocks = existing.blocks.slice();
+    blocks[idx] = { ...(blocks[idx] as PermissionBlock), ...permission, ...openedAt };
+    return put(streams, sessionId, { ...existing, blocks });
+  }
+
+  const block: PermissionBlock = {
+    type: 'permission',
+    blockId: existing._nextBlockId,
+    ...permission,
+    ...openedAt,
+  };
+  return put(streams, sessionId, {
+    ...existing,
+    blocks: [...existing.blocks, block],
+    _nextBlockId: existing._nextBlockId + 1,
+  });
+}
+
+export function resolvePermission(
+  streams: StreamsRecord,
+  sessionId: string,
+  interactionId: string,
+  behavior: 'allow' | 'deny',
+  message?: string,
+): StreamsRecord {
+  return replaceBlock(
+    streams,
+    sessionId,
+    (b) => b.type === 'permission' && b.interactionId === interactionId,
+    (b) => ({
+      ...(b as PermissionBlock),
+      status: behavior === 'allow' ? 'allowed' : 'denied',
+      ...(message ? { message } : {}),
+    }),
+  );
+}
+
+export function expirePermission(
+  streams: StreamsRecord,
+  sessionId: string,
+  interactionId: string,
+): StreamsRecord {
+  const existing = streams[sessionId];
+  if (!existing) return streams;
+  const idx = existing.blocks.findIndex(
+    (b) => b.type === 'permission' && b.interactionId === interactionId,
+  );
+  if (idx < 0) return streams;
+  const prior = existing.blocks[idx] as PermissionBlock;
+  // A settled card is terminal: a late expiry must not undo the decision.
+  if (prior.status === 'allowed' || prior.status === 'denied') return streams;
 
   const blocks = existing.blocks.slice();
   blocks[idx] = { ...prior, status: 'expired' };

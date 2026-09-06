@@ -14,7 +14,11 @@ import {
   type AgentModeDescriptor,
   type ChatPermissionMode,
 } from '@generatorai/shared';
-import type { HarnessPermissionMode } from '../domain/ports/IAgentHarness.js';
+import type {
+  HarnessPermissionMode,
+  PermissionRequest,
+} from '../domain/ports/IAgentHarness.js';
+import type { ToolPermissionRequestPayload } from '@generatorai/shared';
 
 /**
  * Per-turn context the plan/question gates need.
@@ -28,9 +32,16 @@ export interface TurnContext {
   sessionId: string;
   turnId: string;
   agentMode: AgentMode;
+  /**
+   * Effective harness permission mode for this turn (see
+   * `resolveTurnPermissionMode`). The permission handler reads it lazily so
+   * a prompt raised mid-turn is judged against the mode the turn was sent
+   * with, not whatever the chat was flipped to afterwards.
+   */
+  permissionMode: HarnessPermissionMode;
   /** Plans surfaced during this turn, for transcript persistence. */
   planIds: string[];
-  /** Question gates opened during this turn, for transcript persistence. */
+  /** Question + tool-permission gates opened during this turn, for transcript persistence. */
   interactionIds: string[];
   /**
    * Monotonic ordinal handed out to every ordered item of the turn — each
@@ -98,16 +109,119 @@ export function resolveTurnPermissionMode(
 /**
  * Whether a chat-level permission handler should be attached at all.
  *
- * This gate is a behaviour-preservation guard, not an optimisation. On Claude,
- * merely PROVIDING `onPermissionRequest` forces the SDK out of
- * `bypassPermissions` into `'default'` (see HITL-06 in ClaudeAgentProvider),
- * which would turn every existing autonomous chat into a prompt storm. So we
- * only attach it when the chat actually asked for gated permissions.
+ * Attaching `onPermissionRequest` is what turns tool prompts ON: with it
+ * installed the Claude adapter runs `canUseTool` with
+ * `allowDangerouslySkipPermissions` off and forwards every non-auto-allowed
+ * call to the handler (HITL-06), and the Copilot adapter routes the SDK's
+ * `onPermissionRequest` to it instead of `approveAll`. A chat that chose
+ * `bypassPermissions` must therefore NOT get a handler, or every autonomous
+ * chat would become a prompt storm. The chat's mode is part of the
+ * conversation binding key (`ChatManagementService.conversationBindingKey`),
+ * so flipping it via `PATCH /chats/:id/permission-mode` rebinds the live
+ * conversation with or without the handler on the next turn.
  */
 export function shouldAttachPermissionHandler(
   chatPermissionMode: ChatPermissionMode | undefined,
 ): boolean {
   return (chatPermissionMode ?? defaultChatPermissionMode) !== 'bypassPermissions';
+}
+
+/**
+ * What the chat-level permission handler does with a tool call the harness
+ * did not auto-allow itself.
+ *
+ *   bypassPermissions → allow  (only reachable on Copilot, which ignores the
+ *                               per-turn mode and asks for everything)
+ *   acceptEdits       → allow file reads/writes, prompt for the rest
+ *                       (shell, network, MCP/custom tools)
+ *   default / plan    → prompt for everything that reaches the handler
+ *   dontAsk           → deny (Claude semantics: never block on a human)
+ */
+export function decideToolPermission(
+  mode: HarnessPermissionMode,
+  type: PermissionRequest['type'],
+): 'allow' | 'prompt' | 'deny' {
+  switch (mode) {
+    case 'bypassPermissions':
+      return 'allow';
+    case 'dontAsk':
+      return 'deny';
+    case 'acceptEdits':
+      return type === 'file_write' || type === 'file_read' ? 'allow' : 'prompt';
+    case 'default':
+    case 'plan':
+    default:
+      return 'prompt';
+  }
+}
+
+const INPUT_SUMMARY_MAX_CHARS = 600;
+const SECRET_KEY_PATTERN = /token|secret|password|passwd|api[_-]?key|authorization|cookie/i;
+
+/** Redacts secret-looking keys and bounds the rendering so a card never ships a raw env dump. */
+function summariseToolInput(input: unknown): string {
+  const redact = (value: unknown, depth: number): unknown => {
+    if (depth > 4) return '…';
+    if (Array.isArray(value)) return value.slice(0, 50).map((v) => redact(v, depth + 1));
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        out[k] = SECRET_KEY_PATTERN.test(k) ? '[redacted]' : redact(v, depth + 1);
+      }
+      return out;
+    }
+    return value;
+  };
+  let text: string;
+  if (input === undefined || input === null) text = '';
+  else if (typeof input === 'string') text = input;
+  else {
+    try {
+      text = JSON.stringify(redact(input, 0), null, 1) ?? '';
+    } catch {
+      text = String(input);
+    }
+  }
+  return text.length > INPUT_SUMMARY_MAX_CHARS ? `${text.slice(0, INPUT_SUMMARY_MAX_CHARS)}…` : text;
+}
+
+/** Keys the adapters add to `details` that describe the request, not the tool's input. */
+const DETAIL_META_KEYS = new Set(['toolName', 'input', 'toolUseID', 'blockedPath', 'decisionReason', 'kind']);
+
+/**
+ * Builds the durable, display-safe payload for a `tool_permission` gate.
+ *
+ * Claude's adapter puts `{ toolName, input }` in `details`; Copilot's puts the
+ * raw SDK request (`kind`, plus kind-specific fields such as
+ * `fullCommandText`/`path`/`url`). Both are reduced to one shape here so the
+ * three clients render a single card component.
+ */
+export function buildToolPermissionPayload(
+  request: PermissionRequest,
+  permissionMode: HarnessPermissionMode,
+): ToolPermissionRequestPayload {
+  const details = (request.details ?? {}) as Record<string, unknown>;
+  const toolName =
+    typeof details['toolName'] === 'string' && details['toolName'].length > 0
+      ? details['toolName']
+      : typeof details['kind'] === 'string' && details['kind'].length > 0
+        ? details['kind']
+        : request.type;
+  let input: unknown;
+  if ('input' in details) {
+    input = details['input'];
+  } else {
+    const rest: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(details)) if (!DETAIL_META_KEYS.has(k)) rest[k] = v;
+    input = Object.keys(rest).length > 0 ? rest : undefined;
+  }
+  return {
+    toolName,
+    type: request.type,
+    description: request.description,
+    inputSummary: summariseToolInput(input),
+    permissionMode: permissionMode as ToolPermissionRequestPayload['permissionMode'],
+  };
 }
 
 /**

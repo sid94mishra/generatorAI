@@ -7,7 +7,7 @@ import { createBrowserRouter } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout.js';
 import { ErrorBoundary } from '@/components/ErrorBoundary.js';
 import { PageErrorBoundary } from '@/components/PageErrorBoundary.js';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/components/ui/index.js';
 /** Wrap a lazy page in both a Suspense fallback AND a page-scoped error
  *  boundary. A render-time throw inside the page no longer crashes the
  *  surrounding shell (sidebar / nav stay interactive). */
@@ -43,7 +43,7 @@ const AgentEditorPage = lazy(() => import('@/pages/AgentEditorPage.js').then((m)
 function PageLoader() {
   return (
     <div className="flex h-full items-center justify-center">
-      <Loader2 className="h-6 w-6 animate-spin text-[var(--color-muted-foreground)]" />
+      <Spinner size="lg" className="h-6 w-6 text-[var(--color-muted-foreground)]" />
     </div>
   );
 }

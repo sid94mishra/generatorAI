@@ -92,6 +92,17 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     if (updates.sleptSince !== undefined) values['sleptSince'] = updates.sleptSince;
     // HITL-02 — persist or clear interrupt_data alongside the status change.
     if (updates.interruptData !== undefined) values['interruptData'] = updates.interruptData;
+    // WS-D1 — heartbeat/lease are normally written by `heartbeat()`; allow
+    // explicit clears/sets here for tests and recovery paths.
+    if (updates.heartbeatAt !== undefined) values['heartbeatAt'] = updates.heartbeatAt;
+    if (updates.leaseOwner !== undefined) values['leaseOwner'] = updates.leaseOwner;
+
+    // WS-D1 — `version` is documented as "bumped on every mutation" and the
+    // optimistic-lock readers (`incrementRetryCount`, `updateStatus`,
+    // `resetForRetry` with `expectedVersion`) rely on that. Callers never pass
+    // `version` in `updates`; a stale-version write is rejected by those
+    // conditional methods, not by this one.
+    values['version'] = sql`${stageRuns.version} + 1`;
 
     await this.db
       .update(stageRuns)
@@ -114,6 +125,11 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
         status: 'sleeping',
         wakeAt,
         sleptSince: now,
+        // WS-D1 — a sleeping stage is not live; clear the beat so the
+        // reconciler's stale check has nothing to misread if the row is
+        // later resurrected, and bump version like every other mutation.
+        heartbeatAt: null,
+        version: sql`${stageRuns.version} + 1`,
       })
       .where(eq(stageRuns.id, id));
   }
@@ -177,6 +193,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       .set({
         status: 'awaiting_input',
         interruptData,
+        version: sql`${stageRuns.version} + 1`,
       })
       .where(eq(stageRuns.id, id));
   }
@@ -243,11 +260,42 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     return rows.map((r) => this.mapRow(r));
   }
 
-  async updateStatus(id: string, status: StageRunStatus): Promise<void> {
-    await this.db
+  /**
+   * WS-D1 — mirrors `claimForExecution`/`resumeFromInterrupt`: one
+   * conditional write that bumps `version`. With `expectedVersion` the WHERE
+   * also pins the version so two writers racing from the same read cannot
+   * both succeed; the loser sees 0 changed rows and gets `false`.
+   */
+  async updateStatus(id: string, status: StageRunStatus, expectedVersion?: number): Promise<boolean> {
+    const where =
+      expectedVersion === undefined
+        ? eq(stageRuns.id, id)
+        : and(eq(stageRuns.id, id), eq(stageRuns.version, expectedVersion));
+    const result = await this.db
       .update(stageRuns)
-      .set({ status })
-      .where(eq(stageRuns.id, id));
+      .set({ status, version: sql`${stageRuns.version} + 1` })
+      .where(where)
+      .returning({ id: stageRuns.id });
+    return result.length > 0;
+  }
+
+  /**
+   * WS-D1 — liveness beat. Guarded to `queued`/`running` so a beat that
+   * lands after the terminal write is a no-op rather than a resurrection.
+   * Deliberately does NOT bump `version`: a beat changes no state a
+   * conditional writer cares about, and bumping every 10 s would make every
+   * optimistic lock held across a prompt spuriously fail.
+   */
+  async heartbeat(id: string, leaseOwner?: string): Promise<boolean> {
+    const result = await this.db
+      .update(stageRuns)
+      .set({
+        heartbeatAt: new Date(),
+        ...(leaseOwner !== undefined ? { leaseOwner } : {}),
+      })
+      .where(and(eq(stageRuns.id, id), inArray(stageRuns.status, ['queued', 'running'])))
+      .returning({ id: stageRuns.id });
+    return result.length > 0;
   }
 
   async incrementRetryCount(id: string, expectedVersion?: number): Promise<boolean> {
@@ -281,23 +329,34 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     return result.length > 0;
   }
 
-  async resetForRetry(id: string): Promise<void> {
-    await this.db
+  async resetForRetry(id: string, expectedVersion?: number): Promise<boolean> {
+    const where =
+      expectedVersion === undefined
+        ? eq(stageRuns.id, id)
+        : and(eq(stageRuns.id, id), eq(stageRuns.version, expectedVersion));
+    const result = await this.db
       .update(stageRuns)
       .set({
         status: 'pending',
         error: null,
         startedAt: null,
         completedAt: null,
+        // WS-D1 — a reset row has no live executor; a stale beat left over
+        // from the interrupted attempt must not be mistaken for one.
+        heartbeatAt: null,
+        leaseOwner: null,
+        version: sql`${stageRuns.version} + 1`,
       })
-      .where(eq(stageRuns.id, id));
+      .where(where)
+      .returning({ id: stageRuns.id });
+    return result.length > 0;
   }
 
   async batchUpdateStatus(ids: string[], status: StageRunStatus): Promise<void> {
     if (ids.length === 0) return;
     await this.db
       .update(stageRuns)
-      .set({ status })
+      .set({ status, version: sql`${stageRuns.version} + 1` })
       .where(inArray(stageRuns.id, ids));
   }
 
@@ -333,6 +392,8 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       wakeAt: row.wakeAt ?? undefined,
       sleptSince: row.sleptSince ?? undefined,
       interruptData: row.interruptData ?? undefined,
+      heartbeatAt: row.heartbeatAt ?? undefined,
+      leaseOwner: row.leaseOwner ?? undefined,
       createdAt: row.createdAt,
       startedAt: row.startedAt ?? undefined,
       completedAt: row.completedAt ?? undefined,

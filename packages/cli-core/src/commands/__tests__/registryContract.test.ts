@@ -22,7 +22,10 @@
 //     hand (wrong field access, calling a method that does not exist).
 // ────────────────────────────────────────────────────────────────
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildRegistry } from '../index.js';
 import { CliContext, type Api } from '../../context/CliContext.js';
 import { CliError } from '../../errors/CliError.js';
@@ -47,6 +50,44 @@ function deepStub(): unknown {
     },
   });
 }
+
+/**
+ * Point the whole CLI at a throwaway identity for the duration of this file.
+ *
+ * The API is stubbed, but the LOCAL filesystem is not: this suite invokes
+ * EVERY registered handler, and some of them work on disk rather than over
+ * the wire. `device forget` is the sharp one — it opens the credential vault
+ * at `getUserConfigDir()` and deletes the entry. With no override that is the
+ * developer's real `~/.generatorai`, so running the test suite silently
+ * signed them out of their CLI: the vault went from 1,663 bytes to 48
+ * (`{"entries":{}}`) and `device status` reported `unpaired`. It cost two
+ * re-pairings to notice, because nothing fails — the damage is to a file no
+ * assertion looks at.
+ *
+ * `getUserConfigDir()` reads the variable on every call, so setting it here
+ * covers every handler this file reaches.
+ */
+let configDir: string | undefined;
+let previousConfigDir: string | undefined;
+let previousRegistryDir: string | undefined;
+
+beforeAll(() => {
+  configDir = mkdtempSync(join(tmpdir(), 'gai-cli-contract-'));
+  previousConfigDir = process.env['GENERATORAI_CONFIG_DIR'];
+  previousRegistryDir = process.env['GENERATORAI_CHILD_REGISTRY_DIR'];
+  process.env['GENERATORAI_CONFIG_DIR'] = configDir;
+  // Same story, smaller blast radius: the child registry defaults into
+  // `~/.generatorai/children`.
+  process.env['GENERATORAI_CHILD_REGISTRY_DIR'] = join(configDir, 'children');
+});
+
+afterAll(() => {
+  if (previousConfigDir === undefined) delete process.env['GENERATORAI_CONFIG_DIR'];
+  else process.env['GENERATORAI_CONFIG_DIR'] = previousConfigDir;
+  if (previousRegistryDir === undefined) delete process.env['GENERATORAI_CHILD_REGISTRY_DIR'];
+  else process.env['GENERATORAI_CHILD_REGISTRY_DIR'] = previousRegistryDir;
+  if (configDir) rmSync(configDir, { recursive: true, force: true });
+});
 
 function fakeCtx(): CliContext {
   return new CliContext({

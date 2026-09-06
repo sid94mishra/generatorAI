@@ -132,6 +132,23 @@ export class ProjectConfigService {
     await this.configRepo.update(configId, patch);
   }
 
+  /** Raw row read — used by the MCP routes to see the current `credentialRefs`. */
+  async getConfig(configId: string): Promise<ProjectConfig> {
+    return this.configRepo.getById(configId);
+  }
+
+  /**
+   * MCP configs only — persist the credential NAMES a `McpCredentialVault.save()`
+   * returned. Never called with values; the vault is the only thing that ever
+   * writes a value, and it writes to the secrets store, not here.
+   */
+  async setCredentialRefs(
+    configId: string,
+    credentialRefs: { headers?: string[]; env?: string[] },
+  ): Promise<void> {
+    await this.configRepo.update(configId, { credentialRefs });
+  }
+
   /**
    * Scan a project's config directory and sync DB metadata.
    */

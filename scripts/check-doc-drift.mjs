@@ -23,7 +23,7 @@
 // Run: node scripts/check-doc-drift.mjs   (wired into `pnpm lint`)
 // ────────────────────────────────────────────────────────────────
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
@@ -156,6 +156,107 @@ for (const rule of RULES) {
     }
   }
 }
+
+
+// ────────────────────────────────────────────────────────────────
+// Environment-variable drift.
+//
+// The ten rules above pin behavioural claims. This pins a different kind of
+// lie the review found: `.github/docs/operations.md` documented a table of
+// environment variables of which ELEVEN OF TWELVE sampled were read by no file
+// in the repository — including the four in its own flagship "production
+// deployment" example, so an operator following the guide verbatim configured
+// nothing at all and got the defaults.
+//
+// A documented variable must appear in an actual `process.env` read.
+// ────────────────────────────────────────────────────────────────
+
+function checkDocumentedEnvVars() {
+  const docFiles = ['.github/docs/operations.md'];
+  // Names that are genuinely not read by this repo: consumed by a dependency,
+  // the container runtime, or an external tool. Each needs a reason.
+  const NOT_OURS = new Set([
+    'NODE_ENV',
+    'PATH',
+    'HOME',
+    'OTEL_EXPORTER_OTLP_ENDPOINT', // read by the OTel SDK itself
+    'OTEL_EXPORTER_OTLP_HEADERS',
+    'OTEL_SERVICE_NAME',
+    'OTEL_SDK_DISABLED', // read by the OTel SDK itself (@opentelemetry/sdk-node), not our code
+    'GITHUB_TOKEN', // read by the gh CLI / provider SDKs
+    'GIT_SSH_COMMAND', // read by the `git` binary itself when spawned, not our code
+  ]);
+
+  const sources = [];
+  const roots = ['apps', 'packages', 'scripts', 'docker'];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      // `release` is a packaged Electron build artifact (bundles third-party
+      // CLI internals under unrelated SCREAMING_SNAKE names) — not source.
+      if (
+        e.name === 'node_modules' ||
+        e.name === 'dist' ||
+        e.name === 'dist-bundle' ||
+        e.name === 'release'
+      ) {
+        continue;
+      }
+      const full = join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (/\.(ts|tsx|mjs|js|cjs)$/.test(e.name)) sources.push(full);
+    }
+  };
+  for (const r of roots) walk(join(repoRoot, r));
+  const haystack = sources.map((f) => readFileSync(f, 'utf8')).join(String.fromCharCode(10));
+
+  let missing = 0;
+  for (const rel of docFiles) {
+    const abs = join(repoRoot, rel);
+    if (!existsSync(abs)) continue;
+    const doc = readFileSync(abs, 'utf8');
+    // Only names WRITTEN like an environment variable count: a backticked
+    // token (table row, inline reference — with or without a trailing
+    // `=value`, e.g. `` `GENERATORAI_LOG_LEVEL=debug` ``), or a shell/CLI
+    // assignment (`NAME=value`, optionally after `-e `) in a fenced example.
+    // A bare SCREAMING_SNAKE token that is neither — e.g. a markdown link to
+    // a doc file like `INTEGRATED_TERMINAL_PHASE2_PLAN.md` — is not written
+    // the way an env var reference is written, and must not count.
+    const NAME = "[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+";
+    const names = new Set([
+      ...[...doc.matchAll(new RegExp('`(' + NAME + ')(?:`|=)', 'g'))].map((m) => m[1]),
+      ...[...doc.matchAll(new RegExp('(?:^|[\\s"\'])(' + NAME + ')=', 'gm'))].map((m) => m[1]),
+    ]);
+    for (const name of [...names].sort()) {
+      if (NOT_OURS.has(name)) continue;
+      // A variable reaches the code either directly (`process.env.NAME`) or
+      // as a string literal handed to a helper — `readBoundedInt('NAME', …)`
+      // is used widely here — so a bare literal counts as a read.
+      if (
+        haystack.includes(`process.env.${name}`) ||
+        haystack.includes(`'${name}'`) ||
+        haystack.includes(`"${name}"`)
+      ) {
+        continue;
+      }
+      console.error(
+        `❌ env-var-drift — ${rel} documents \`${name}\`, which no file reads.
+` +
+          '   Remedy:   use the name the code actually reads, or delete the row. ' +
+          'A documented variable that configures nothing is worse than an undocumented one.',
+      );
+      missing += 1;
+    }
+  }
+  return missing;
+}
+
+failures += checkDocumentedEnvVars();
 
 if (failures > 0) {
   console.error(

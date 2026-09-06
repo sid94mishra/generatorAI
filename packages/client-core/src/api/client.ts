@@ -67,6 +67,34 @@ export async function requestAllowing<T>(
   return (await res.json()) as T;
 }
 
+/**
+ * For routes that answer with bytes rather than JSON.
+ *
+ * `request` always calls `res.json()`, which is right for almost everything
+ * here — but the terminal scrollback route serves `application/octet-stream`
+ * (a raw VT byte ring), so `terminal scrollback` died on its own output with
+ * `Unexpected token '', "[?9001h["... is not valid JSON`. The command was
+ * unusable for its entire existence; nothing else reads that route.
+ */
+export async function requestText(
+  fetchImpl: ApiFetch,
+  path: string,
+  init?: RequestInit,
+): Promise<string> {
+  const res = await fetchImpl(path, init);
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      detail = describeErrorBody(await res.json()) ?? detail;
+    } catch {
+      // Non-JSON error body; the status line is all we have.
+    }
+    throw new ApiError(res.status, path, detail);
+  }
+  if (res.status === 204) return '';
+  return res.text();
+}
+
 export async function request<T>(fetchImpl: ApiFetch, path: string, init?: RequestInit): Promise<T> {
   const res = await fetchImpl(path, init);
   if (!res.ok) {
@@ -979,6 +1007,23 @@ export function createApiClient(fetchImpl: ApiFetch) {
         request<void>(
           fetchImpl,
           `/api/chats/${id}/interactions/${interactionId}/respond`,
+          json(response),
+        ),
+
+      /**
+       * Answer a blocking tool-permission prompt (review finding 5.1) —
+       * sibling of `respond` above, same interaction resource, distinct verb
+       * (`ChatManagementService.buildPermissionHandler`'s route, not the
+       * question/plan `respond` route).
+       */
+      respondPermission: (
+        id: string,
+        interactionId: string,
+        response: { behavior: 'allow' | 'deny'; message?: string },
+      ) =>
+        request<void>(
+          fetchImpl,
+          `/api/chats/${id}/interactions/${interactionId}/permission`,
           json(response),
         ),
 

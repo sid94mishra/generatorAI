@@ -13,7 +13,7 @@
 
 import React, { useState } from 'react';
 import {
-  CheckCircle2, AlertTriangle, RefreshCw, Wifi, WifiOff, Loader2, Cpu, Star,
+  CheckCircle2, AlertTriangle, RefreshCw, Wifi, WifiOff, Cpu, Star,
 } from 'lucide-react';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { useHarnessProviders, type HarnessProviderInfo } from '@/hooks/queries.js';
@@ -150,7 +150,7 @@ export function ProvidersSection() {
                 expanded={expanded === p.type}
                 onToggleExpanded={() => setExpanded((cur) => (cur === p.type ? null : p.type))}
                 control={
-                  busy === p.type ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : undefined
+                  busy === p.type ? <Spinner size="sm" className="text-muted-foreground" /> : undefined
                 }
               >
                 <ProviderDetails
@@ -185,7 +185,7 @@ function ConnectionPill({ provider, checking }: { provider: HarnessProviderInfo;
   if (checking) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking…
+        <Spinner size="sm" /> Checking…
       </span>
     );
   }

@@ -4,6 +4,7 @@
 
 import React from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/index.js';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -54,19 +55,21 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             </pre>
           )}
           <div className="flex gap-3">
-            <button
+            <Button
+              variant="ghost"
               onClick={this.handleReset}
               className="flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-[var(--color-primary-foreground)] transition-all hover:brightness-110 active:scale-[0.98]"
             >
               <RefreshCw className="h-4 w-4" />
               Try Again
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() => { window.location.href = '/'; }}
               className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
             >
               Go Home
-            </button>
+            </Button>
           </div>
         </div>
       );

@@ -53,6 +53,12 @@ export interface SearchableSelectProps<T> {
   /** Width class for the popover; defaults to trigger width */
   contentClassName?: string;
   'data-testid'?: string;
+  /** Accessible name for the trigger (required when there is no visible <label>). */
+  'aria-label'?: string;
+  /** id of a visible label element naming this control. */
+  'aria-labelledby'?: string;
+  /** Optional id for the trigger, for `<label htmlFor>` association. */
+  id?: string;
 }
 
 export function SearchableSelect<T>({
@@ -75,6 +81,9 @@ export function SearchableSelect<T>({
   className,
   contentClassName,
   'data-testid': dataTestId,
+  'aria-label': ariaLabel,
+  'aria-labelledby': ariaLabelledBy,
+  id,
 }: SearchableSelectProps<T>) {
   const [open, setOpen] = useState(false);
 
@@ -98,8 +107,12 @@ export function SearchableSelect<T>({
       <PopoverTrigger asChild>
         <button
           type="button"
+          id={id}
           role="combobox"
           aria-expanded={open}
+          aria-haspopup="listbox"
+          aria-label={ariaLabel}
+          aria-labelledby={ariaLabelledBy}
           disabled={disabled}
           data-testid={dataTestId}
           className={cn(
@@ -140,7 +153,7 @@ export function SearchableSelect<T>({
             itemValue.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
           }
         >
-          <CommandInput placeholder={searchPlaceholder} />
+          <CommandInput placeholder={searchPlaceholder} aria-label={searchPlaceholder} />
           <CommandList>
             {loading ? (
               <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">

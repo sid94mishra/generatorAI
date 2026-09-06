@@ -63,7 +63,12 @@ export function WorkflowDefinitionPage() {
   const startOrchestratedRun = useStartOrchestratedRun();
   const uploadRunFiles = useUploadRunFiles();
 
-  const store = useWorkflowBuilderStore();
+  // Only `loadDefinition` is used on this read-only page — a single,
+  // referentially-stable action selector rather than subscribing to the
+  // whole (~700-line) builder store, which used to re-render this page on
+  // every field the *editor* touches (nodes/edges drag, keystrokes, etc.)
+  // even though this page never reads any of that state itself.
+  const loadDefinition = useWorkflowBuilderStore((s) => s.loadDefinition);
 
   const [variableModalOpen, setVariableModalOpen] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
@@ -103,9 +108,9 @@ export function WorkflowDefinitionPage() {
   // Load definition into store for the read-only DAG view
   React.useEffect(() => {
     if (definition) {
-      store.loadDefinition(definition);
+      loadDefinition(definition);
     }
-  }, [definition]);
+  }, [definition, loadDefinition]);
 
   const executeRun = useCallback(
     async (variables: Record<string, unknown>, uploads?: UploadedFileSet, stageOverrides?: StageOverrideEntry[]) => {
@@ -446,7 +451,7 @@ function RunRow({ run }: { run: WorkflowRun }) {
   return (
     <EntityListRow
       size="sm"
-      onClick={() => navigate(`/workflows/${run.workflowDefinitionId}/runs/${run.id}`)}
+      href={`/workflows/${run.workflowDefinitionId}/runs/${run.id}`}
       leading={<StatusBadge status={run.status} size="sm" />}
       title={<span className="truncate">{run.name}</span>}
       description={

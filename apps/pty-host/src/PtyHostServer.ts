@@ -13,7 +13,8 @@ import type {
   PtyExitNotification,
   PtySessionReadyNotification,
 } from '@generatorai/shared';
-import { buildChildEnv, isPtyHostRequest } from '@generatorai/shared';
+import { HOST_PROTOCOL_VERSIONS, buildChildEnv, isPtyHostRequest } from '@generatorai/shared';
+import { makeHostHello } from '@generatorai/shared/node';
 import { PtySession } from './PtySession.js';
 
 /**
@@ -57,8 +58,11 @@ export class PtyHostServer {
       });
     });
 
+    // Plan item 43 — hello FIRST, then the ready pong. `PtyHostClient`
+    // validates the hello when the pong arrives and refuses a stale dist.
+    this.send(makeHostHello('pty-host', import.meta.url));
     this.send({ type: 'pong', reqId: '__ready__' });
-    console.log('[PtyHostServer] PTY host ready');
+    console.log(`[PtyHostServer] PTY host ready (protocol v${HOST_PROTOCOL_VERSIONS['pty-host']})`);
   }
 
   private send(msg: PtyHostResponse): void {

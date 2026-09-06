@@ -25,7 +25,7 @@
 // should be lazy becomes an eager dependency again.
 // ────────────────────────────────────────────────────────────────
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { resolve, join } from 'node:path';
 
@@ -81,4 +81,75 @@ if (totalGzip > BUDGET_BYTES) {
   );
   process.exit(1);
 }
+// ── Lazy chunks ────────────────────────────────────────────────────────────
+//
+// The initial-load budget above cannot see a lazy chunk, by design. That is
+// how a single 9.6 MB (1.68 MB gzip) syntax-highlighting chunk shipped for
+// months: it was lazy, so it never tripped the budget, and the first diff a
+// user opened downloaded and parsed all of it. Every chunk the app can load
+// gets its own cap here. A grammar, a page, a vendor library — none should be
+// this large on its own; if one legitimately is, split it or raise the cap
+// with the measurement that justifies it.
+const LAZY_CHUNK_BUDGET_BYTES = 300 * 1024; // 300 KB gzipped, per chunk
+const initialFiles = new Set(report.map((r) => r.file.replace(/^\/+/, '')));
+const assetsDir = join(distDir, 'assets');
+let lazyViolations = [];
+let largestLazy = { file: '', gzip: 0 };
+try {
+  for (const name of readdirSync(assetsDir)) {
+    if (!name.endsWith('.js')) continue;
+    const rel = `assets/${name}`;
+    if (initialFiles.has(rel)) continue;
+    const gzip = gzipSync(readFileSync(join(assetsDir, name))).length;
+    if (gzip > largestLazy.gzip) largestLazy = { file: rel, gzip };
+    if (gzip > LAZY_CHUNK_BUDGET_BYTES) lazyViolations.push({ file: rel, gzip });
+  }
+} catch (err) {
+  console.error(`[check-bundle-size] could not scan ${assetsDir}: ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(2);
+}
+console.log(
+  `[check-bundle-size] largest lazy chunk: ${fmt(largestLazy.gzip)} ${largestLazy.file}  (per-chunk budget ${fmt(LAZY_CHUNK_BUDGET_BYTES)})`,
+);
+if (lazyViolations.length > 0) {
+  for (const v of lazyViolations) console.error(`  ${fmt(v.gzip).padStart(10)}  ${v.file}`);
+  console.error(
+    `
+[check-bundle-size] FAIL — ${lazyViolations.length} lazy chunk(s) exceed ${fmt(LAZY_CHUNK_BUDGET_BYTES)}. ` +
+      `Split the chunk (usually a manualChunks rule collapsing dynamic imports) or raise LAZY_CHUNK_BUDGET_BYTES with justification.`,
+  );
+  process.exit(1);
+}
+
+// ── Staleness ──────────────────────────────────────────────────────────────
+//
+// This script reads `dist/`. A stale build once reported a 224 KB overage
+// that did not exist in the source; a fresh one passes. Refuse to grade a
+// build older than the newest source file.
+const srcDir = resolve(process.cwd(), 'src');
+const newestSrc = existsSync(srcDir) ? newestMtime(srcDir) : 0;
+const builtAt = statSync(indexHtmlPath).mtimeMs;
+if (newestSrc > builtAt) {
+  console.error(
+    `
+[check-bundle-size] FAIL — dist/ is older than src/ (built ${new Date(builtAt).toISOString()}, ` +
+      `newest source ${new Date(newestSrc).toISOString()}). Run \`pnpm build\` first.`,
+  );
+  process.exit(2);
+}
+
 console.log('[check-bundle-size] OK');
+
+function newestMtime(dir) {
+  let newest = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === '__tests__') continue;
+      newest = Math.max(newest, newestMtime(full));
+    } else {
+      newest = Math.max(newest, statSync(full).mtimeMs);
+    }
+  }
+  return newest;
+}

@@ -9,6 +9,8 @@
  * to avoid naming collisions.
  */
 
+import type { HostHelloFrame } from '../protocol/hostProtocol.js';
+
 // ─── Shared payload types ───────────────────────────────────────────────────
 
 /** IPC-level browser context configuration (sent across the wire to browser-host). */
@@ -163,6 +165,8 @@ export interface BrowserPongResponse {
 }
 
 export type BrowserHostResponse =
+  /** Plan item 43 — always the FIRST frame the host sends; see protocol/hostProtocol.ts. */
+  | HostHelloFrame
   | BrowserContextReadyNotification
   | BrowserSnapshotResultNotification
   | BrowserActionResultNotification

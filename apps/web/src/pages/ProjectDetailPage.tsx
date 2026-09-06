@@ -59,7 +59,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { SourceBadge } from '@/components/common/SourceBadge.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import { SyntaxHighlightedCode, extToLang } from '@/components/common/SyntaxHighlightedCode.js';
-import { Select, Modal, Button, Input, Tabs, Badge, Spinner, Switch, SearchInput, PageHeader, type BadgeTone } from '@/components/ui/index.js';
+import { Select, Modal, Button, Input, Textarea, Tabs, Badge, Spinner, Switch, SearchInput, PageHeader, type BadgeTone } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { SectionListHeader, CatalogAccordionRow } from '@/components/settings/shared.js';
 import { useProjectCatalogPrefsStore } from '@/stores/projectCatalogPrefsStore.js';
@@ -129,6 +129,7 @@ function ProjectSettingsForm({
             value={retention}
             onChange={(v) => setRetention(v as RetentionValue)}
             options={RETENTION_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            aria-label="Worktree Retention"
           />
         </div>
         <div>
@@ -139,6 +140,7 @@ function ProjectSettingsForm({
             max={50}
             value={maxCodebases}
             onChange={(e) => setMaxCodebases(Math.max(1, Math.min(50, Number(e.target.value))))}
+            aria-label="Max Codebases"
           />
         </div>
         <div>
@@ -397,12 +399,14 @@ export function ProjectDetailPage() {
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6">
         <AlertCircle className="h-10 w-10 text-danger" />
         <p className="text-sm text-muted-foreground">Project not found</p>
-        <button
+        <Button
+          type="button"
+          variant="ghost"
           onClick={() => navigate('/projects')}
-          className="text-sm text-primary underline"
+          className="h-auto gap-0 rounded-none px-0 py-0 text-sm text-primary underline hover:bg-transparent"
         >
           Back to Projects
-        </button>
+        </Button>
       </div>
     );
   }
@@ -417,6 +421,7 @@ export function ProjectDetailPage() {
               variant="ghost"
               size="icon"
               onClick={() => navigate('/projects')}
+              aria-label="Back to projects"
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
@@ -468,7 +473,7 @@ export function ProjectDetailPage() {
             <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-foreground">Add New Repository</h3>
-                <Button variant="ghost" size="icon-sm" onClick={() => setShowAddCodebase(false)}>
+                <Button variant="ghost" size="icon-sm" onClick={() => setShowAddCodebase(false)} aria-label="Cancel adding repository">
                   <X className="h-4 w-4" />
                 </Button>
               </div>
@@ -489,6 +494,7 @@ export function ProjectDetailPage() {
                     value={cbType}
                     onChange={(v) => setCbType(v as CodebaseType)}
                     className="mt-0.5"
+                    aria-label="Repository type"
                     options={[
                       { value: 'git-remote', label: 'Remote Git Repo' },
                       { value: 'git-local', label: 'Local Git Repo' },
@@ -649,17 +655,19 @@ export function ProjectDetailPage() {
         <div className="space-y-4">
           {/* Per-section hidden file inputs */}
           {/* @ts-expect-error webkitdirectory is non-standard but widely supported */}
-          <input ref={skillsUploadRef} type="file" className="hidden" webkitdirectory="" directory="" multiple onChange={(e) => handleConfigUpload(e, 'skill')} />
-          <input ref={promptsUploadRef} type="file" className="hidden" accept=".md,.txt,.json" onChange={(e) => handleConfigUpload(e, 'prompt')} />
-          <input ref={agentsUploadRef} type="file" className="hidden" accept=".md,.txt,.json,.yaml,.yml" onChange={(e) => handleConfigUpload(e, 'agent')} />
+          <Input ref={skillsUploadRef} type="file" className="hidden" webkitdirectory="" directory="" multiple onChange={(e) => handleConfigUpload(e, 'skill')} />
+          <Input ref={promptsUploadRef} type="file" className="hidden" accept=".md,.txt,.json" onChange={(e) => handleConfigUpload(e, 'prompt')} />
+          <Input ref={agentsUploadRef} type="file" className="hidden" accept=".md,.txt,.json,.yaml,.yml" onChange={(e) => handleConfigUpload(e, 'agent')} />
 
           {/* Category selector — horizontal segmented control (responsive, no inner scroller) */}
           <div className="flex flex-wrap gap-1.5">
             {ARTIFACT_CATEGORIES.map(({ key, label, icon: Icon }) => {
               const active = artifactCategory === key;
               return (
-                <button
+                <Button
                   key={key}
+                  type="button"
+                  variant="ghost"
                   onClick={() => setArtifactCategory(key)}
                   className={cn(
                     'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
@@ -670,7 +678,7 @@ export function ProjectDetailPage() {
                 >
                   <Icon className="h-4 w-4 shrink-0" />
                   {label}
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -965,18 +973,22 @@ function ProjectMcpCatalog({
         action={
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-0.5 rounded-md border border-border bg-subtle p-0.5">
-              <button
+              <Button
+                type="button"
+                variant="ghost"
                 onClick={() => setViewMode('list')}
                 className={cn('flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors', viewMode === 'list' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
               >
                 <List className="h-3 w-3" /> List
-              </button>
-              <button
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
                 onClick={() => setViewMode('json')}
                 className={cn('flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors', viewMode === 'json' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
               >
                 <Code2 className="h-3 w-3" /> JSON
-              </button>
+              </Button>
             </div>
             <Button variant="primary" size="sm" onClick={onAddNew} leftIcon={<Plus className="h-3.5 w-3.5" />}>
               Add server
@@ -988,8 +1000,10 @@ function ProjectMcpCatalog({
       {/* Scope filter */}
       <div className="mb-3 flex items-center gap-1.5">
         {(['all', 'system', 'project'] as const).map((t) => (
-          <button
+          <Button
             key={t}
+            type="button"
+            variant="ghost"
             onClick={() => setScope(t)}
             className={cn(
               'rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors',
@@ -997,7 +1011,7 @@ function ProjectMcpCatalog({
             )}
           >
             {t === 'all' ? `All (${allServers.length})` : t === 'system' ? `System (${allSystem.length})` : `Project (${allProject.length})`}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -1176,11 +1190,12 @@ function ArtifactPreviewModal({
         )}
         {!isLoading && !error && content !== undefined && (
           editMode ? (
-            <textarea
+            <Textarea
               className="h-full w-full resize-none bg-background px-6 py-4 font-mono text-xs text-foreground focus:outline-none"
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               spellCheck={false}
+              aria-label={`Edit contents of ${artifact.name}`}
             />
           ) : isMarkdown ? (
             <div className="px-6 py-4">
@@ -1288,6 +1303,7 @@ function AddMcpServerModal({
             <Select
               value={serverType}
               onChange={(v) => setServerType(v as 'http' | 'stdio')}
+              aria-label="Server Type"
               options={[
                 { value: 'http', label: 'HTTP' },
                 { value: 'stdio', label: 'STDIO (local process)' },

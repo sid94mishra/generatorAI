@@ -12,8 +12,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ShieldCheck, ShieldAlert, Loader2, ArrowRight } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, ArrowRight } from 'lucide-react';
 import { isPairingCode } from '@generatorai/shared';
+import { Button, Input, Spinner } from '@/components/ui/index.js';
 import {
   initAuth,
   subscribeToAuthState,
@@ -132,7 +133,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (!ready || autoPairing) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <Spinner size="lg" className="text-muted-foreground" />
       </div>
     );
   }
@@ -213,7 +214,7 @@ function PairingScreen({ state }: { state: AuthState }) {
     if (code) preview(code);
   }, [code, preview]);
 
-  const confirm = useCallback(async () => {
+  const confirmPairing = useCallback(async () => {
     if (!consent) return;
     setBusy(true);
     setError(null);
@@ -252,7 +253,7 @@ function PairingScreen({ state }: { state: AuthState }) {
         <div className="space-y-3 rounded-lg border border-border bg-card p-5">
           <label className="block space-y-1.5">
             <span className="text-xs font-medium text-foreground">Pairing code</span>
-            <input
+            <Input
               value={code}
               onChange={(e) => setCode(e.target.value)}
               autoCapitalize="characters"
@@ -261,7 +262,7 @@ function PairingScreen({ state }: { state: AuthState }) {
               spellCheck={false}
               inputMode="text"
               placeholder="4H7K-2M9P-XQ3T"
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-center font-mono text-lg tracking-[0.2em] uppercase outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:tracking-[0.2em] placeholder:text-muted-foreground/50"
+              className="h-auto bg-background px-3 py-2 text-center font-mono text-lg tracking-[0.2em] uppercase placeholder:tracking-[0.2em] placeholder:text-muted-foreground/50"
             />
             <span className="block text-[11px] text-muted-foreground">
               Type the code shown on the host device. Scanning a QR code or opening a pairing
@@ -271,7 +272,7 @@ function PairingScreen({ state }: { state: AuthState }) {
 
           {resolving && (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner size="sm" />
               Checking this code…
             </p>
           )}
@@ -312,10 +313,10 @@ function PairingScreen({ state }: { state: AuthState }) {
               </div>
               <label className="block space-y-1.5">
                 <span className="text-xs font-medium text-foreground">Name this device</span>
-                <input
+                <Input
                   value={deviceName}
                   onChange={(e) => setDeviceName(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="h-auto bg-background px-2.5 py-1.5"
                 />
               </label>
             </div>
@@ -327,15 +328,17 @@ function PairingScreen({ state }: { state: AuthState }) {
             </p>
           )}
 
-          <button
+          <Button
             type="button"
+            variant="primary"
             disabled={!consent || busy}
-            onClick={() => void confirm()}
-            className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+            loading={busy}
+            onClick={() => void confirmPairing()}
+            className="w-full"
+            leftIcon={!busy ? <ArrowRight className="h-4 w-4" /> : undefined}
           >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
             {busy ? 'Pairing…' : 'Connect'}
-          </button>
+          </Button>
         </div>
 
         <p className="text-center text-xs text-muted-foreground">

@@ -6,6 +6,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 
 export interface ComposerMenuItem {
   id: string;
@@ -66,14 +67,15 @@ export function ComposerMenu({
           <div className="px-3 py-3 text-xs text-[var(--color-muted-foreground)]">{emptyLabel}</div>
         ) : (
           items.map((item, i) => (
-            <button
+            <Button
               key={item.id}
               ref={i === activeIndex ? activeRef : undefined}
               type="button"
+              variant="ghost"
               onClick={() => onSelect(i)}
               onMouseEnter={() => onHover(i)}
               className={cn(
-                'flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors',
+                'h-auto w-full justify-start gap-2.5 px-3 py-1.5 text-left font-normal transition-colors',
                 i === activeIndex
                   ? 'bg-[var(--color-primary)]/12 text-[var(--color-foreground)]'
                   : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
@@ -97,7 +99,7 @@ export function ComposerMenu({
                   {item.badge}
                 </span>
               )}
-            </button>
+            </Button>
           ))
         )}
       </div>

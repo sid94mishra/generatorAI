@@ -7,8 +7,9 @@
 // comment separately would make the agent re-plan N times.
 
 import { useState } from 'react';
-import { Eye, Loader2, Send, Trash2 } from 'lucide-react';
+import { Eye, Send, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button, Textarea } from '@/components/ui/index.js';
 
 export interface ReviewBatchBarProps {
   pendingCount: number;
@@ -56,63 +57,65 @@ export function ReviewBatchBar({
         <div className="ml-auto flex items-center gap-1">
           {pendingCount > 0 && (
             <>
-              <button
+              <Button
                 type="button"
+                variant="secondary"
+                size="sm"
+                aria-pressed={showNote}
                 onClick={() => setShowNote((v) => !v)}
-                className={cn(
-                  'inline-flex h-6 items-center rounded border px-1.5 text-[10px] hover:bg-accent',
-                  showNote && 'bg-accent',
-                )}
+                className={cn(showNote && 'bg-subtle')}
               >
                 Note
-              </button>
+              </Button>
               {onPreview && (
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => onPreview(note)}
-                  className="inline-flex h-6 items-center gap-1 rounded border px-1.5 text-[10px] hover:bg-accent"
                   title="See exactly what will be sent"
+                  leftIcon={<Eye className="h-3 w-3" />}
                 >
-                  <Eye className="h-3 w-3" />
                   Preview
-                </button>
+                </Button>
               )}
               {onDiscardAll && (
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="icon-sm"
                   onClick={onDiscardAll}
-                  className="inline-flex h-6 items-center gap-1 rounded border px-1.5 text-[10px] hover:bg-accent"
                   title="Discard all pending comments"
+                  aria-label="Discard all pending comments"
                 >
                   <Trash2 className="h-3 w-3" />
-                </button>
+                </Button>
               )}
-              <button
+              <Button
                 type="button"
-                disabled={!onSendAll || busy}
+                variant="secondary"
+                size="sm"
+                disabled={!onSendAll}
+                loading={busy}
                 onClick={() => onSendAll?.(note)}
                 title={disabledReason ?? 'Send all pending comments to the agent'}
-                className="inline-flex h-6 items-center gap-1 rounded border px-2 text-[11px] font-medium hover:bg-accent disabled:opacity-50"
+                leftIcon={<Send className="h-3 w-3" />}
               >
-                {busy ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Send className="h-3 w-3" />
-                )}
                 Send all
-              </button>
+              </Button>
             </>
           )}
         </div>
       </div>
 
       {showNote && pendingCount > 0 && (
-        <textarea
+        <Textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={2}
           placeholder="Extra instruction appended after the comments (optional)"
-          className="mt-1.5 w-full resize-none rounded border bg-transparent px-2 py-1 text-xs"
+          aria-label="Extra instruction for the agent"
+          className="mt-1.5 resize-none px-2 py-1 text-xs"
         />
       )}
 

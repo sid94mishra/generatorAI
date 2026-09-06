@@ -130,8 +130,22 @@ export function workflowCommands(): CommandSpec[] {
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [],
-      flags: [projectFlag, { name: 'tag', description: 'Filter by tag', type: 'string' }],
-      schema: inputSchema({}, { project: z.string().optional(), tag: z.string().optional() }),
+      flags: [
+        projectFlag,
+        { name: 'tag', description: 'Filter by tag', type: 'string' },
+        // Every other list command takes `--limit`; this one did not, so a
+        // workspace with hundreds of definitions had no way to ask for a
+        // readable page of them from the terminal.
+        { name: 'limit', description: 'Maximum rows', type: 'number' },
+      ],
+      schema: inputSchema(
+        {},
+        {
+          project: z.string().optional(),
+          tag: z.string().optional(),
+          limit: z.coerce.number().int().positive().optional(),
+        },
+      ),
       output: {
         kind: 'list',
         columns: [
@@ -155,6 +169,9 @@ export function workflowCommands(): CommandSpec[] {
             ((d as unknown as { tags?: string[] }).tags ?? []).includes(flags.tag!),
           );
         }
+        // Applied AFTER the tag filter so `--limit` means "this many matching
+        // rows", not "this many rows, some of which are then filtered away".
+        if (flags.limit) rows = rows.slice(0, flags.limit);
         return list(rows);
       },
     }),

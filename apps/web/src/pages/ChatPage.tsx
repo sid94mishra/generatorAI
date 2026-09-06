@@ -11,9 +11,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useChat, useChatMessages, useSendChatPrompt, useUpdateChat, useCancelChat, useBackgroundTasks, useHarnessConfig } from '@/hooks/queries.js';
 import { providerLabel } from '@/components/shared/ModelPicker.js';
 // PLN-01 — plan mode
-import { useDecidePlan, useAnswerQuestion, usePendingInteractions } from '@/hooks/queries.js';
+import { useDecidePlan, useAnswerQuestion, useAnswerPermission, usePendingInteractions } from '@/hooks/queries.js';
 import { PlanDocumentPanel } from '@/components/chat/PlanDocumentPanel.js';
-import type { AgentMode } from '@generatorai/shared';
+import type { AgentMode, ChatMessage } from '@generatorai/shared';
 import { DEFAULT_AGENT_MODE } from '@generatorai/shared';
 import { protectStream, useStreamStore } from '@/stores/streamStore.js';
 import { useChatStore } from '@/stores/chatStore.js';
@@ -34,7 +34,7 @@ import type { UsageInfo } from '@/components/chat/redesign/types.js';
 import { useFileTabs } from '@/components/diff/useFileTabs.js';
 import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
 import { ChatMessageSkeleton } from '@/components/Skeleton.js';
-import { RightPane, useRightPaneOpen } from '@/components/layout/RightPane.js';
+import { RightPane, useRightPaneOpen, type RightPaneTabDef } from '@/components/layout/RightPane.js';
 import { clearBrowserTabUrl } from '@/lib/browserTabUrls.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { WidgetHost } from '@/components/widgets/WidgetHost.js';
@@ -70,6 +70,91 @@ function PanelFallback() {
   );
 }
 
+/**
+ * The one place that subscribes to the FULL live stream record.
+ *
+ * ChatPage used to do this at the top level, and the record is replaced on
+ * every streamed token (W27) — so the whole page (RightPane's tabs, every
+ * effect) re-rendered ~60x/second during a turn. Isolating the subscription
+ * here means only this leaf pays that cost; ChatPage itself now reads only
+ * narrow, primitive-derived selectors that change far less often.
+ */
+const LiveTranscript = React.memo(function LiveTranscript({
+  sessionId,
+  prevUsage,
+  prevCompletedAt,
+  onOpenPlan,
+  onOpenChanges,
+  onOpenShell,
+  onApprovePlan,
+  onRequestPlanChanges,
+  onAnswerQuestion,
+  onAnswerPermission,
+  planBusy,
+}: {
+  sessionId: string | undefined;
+  prevUsage: UsageInfo | null;
+  prevCompletedAt: number | null;
+  onOpenPlan: (planId: string) => void;
+  onOpenChanges: (filePath?: string) => void;
+  onOpenShell: (callId: string) => void;
+  onApprovePlan: (planId: string, action: 'implement_interactive' | 'implement_autopilot') => void;
+  onRequestPlanChanges: (planId: string, feedback: string) => void;
+  onAnswerQuestion: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) => void;
+  onAnswerPermission: (interactionId: string, behavior: 'allow' | 'deny', message?: string) => void;
+  planBusy: boolean;
+}) {
+  const stream = useStreamStore((state) => (sessionId ? state.streams[sessionId] : undefined));
+  // Widgets keep the transcript "active" even once the turn itself is idle —
+  // the LLM may have rendered one in an earlier turn and it stays live.
+  const hasActiveWidgetBlock = stream != null && stream.blocks.some(
+    (b) => b.type === 'widget' && b.surface === 'inline' && b.status !== 'closed',
+  );
+  const showStreamingMessage =
+    stream != null && stream.blocks.length > 0 && (stream.status !== 'idle' || hasActiveWidgetBlock);
+
+  if (!showStreamingMessage || !stream) return null;
+
+  return (
+    <StreamingMessage
+      stream={stream}
+      sessionId={sessionId}
+      prevUsage={prevUsage}
+      prevCompletedAt={prevCompletedAt}
+      onOpenPlan={onOpenPlan}
+      onOpenChanges={onOpenChanges}
+      onOpenShell={onOpenShell}
+      onApprovePlan={onApprovePlan}
+      onRequestPlanChanges={onRequestPlanChanges}
+      onAnswerQuestion={onAnswerQuestion}
+      onAnswerPermission={onAnswerPermission}
+      planBusy={planBusy}
+    />
+  );
+});
+
+/**
+ * Same idea for the Terminal tab's agent shell console: it needs the live
+ * stream to show in-progress shell blocks, but subscribing here — rather
+ * than threading `stream` through the (memoised) RightPane `tabs` object —
+ * keeps that per-token subscription scoped to exactly when the console is
+ * actually mounted, and keeps `stream` out of the tabs memo's dependencies.
+ */
+const AgentShellPanel = React.memo(function AgentShellPanel({
+  sessionId,
+  messages,
+  callId,
+  onClose,
+}: {
+  sessionId: string | undefined;
+  messages: readonly ChatMessage[] | undefined;
+  callId: string;
+  onClose: () => void;
+}) {
+  const stream = useStreamStore((state) => (sessionId ? state.streams[sessionId] : undefined));
+  return <AgentConsole messages={messages} stream={stream} selectedCallId={callId} onClose={onClose} />;
+});
+
 export function ChatPage() {
   const { id: chatId } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -96,11 +181,88 @@ export function ChatPage() {
   // of PAGE_SIZE, but eliminates the infinite "Load earlier" loop for exact counts.
   const hasMoreMessages = (messages?.length ?? 0) === msgLimit;
 
-  // The stream store is keyed by sessionId (not chatId)
+  // The stream store is keyed by sessionId (not chatId).
+  //
+  // W-render — this used to subscribe to the WHOLE per-session record, whose
+  // identity is replaced on every streamed token, which re-rendered this
+  // entire page ~60x/second during a turn. Each selector below returns a
+  // PRIMITIVE (or a value — like `usage` — that only changes when it
+  // genuinely should), so Zustand's default equality check skips the
+  // re-render unless that specific field actually changed. The live,
+  // per-token content (`blocks`, `text`) is read only inside `LiveTranscript`
+  // and `AgentShellPanel` — small leaf components that re-render on every
+  // token so the rest of the page does not have to.
   const sessionId = chat?.sessionId;
-  const stream = useStreamStore((state) =>
-    sessionId ? state.streams[sessionId] : undefined,
+  const streamStatus = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.status : undefined));
+  const hasStream = useStreamStore((state) => !!sessionId && state.streams[sessionId] != null);
+  const turnUserMessage = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.turnUserMessage : undefined)) ?? null;
+  const pendingUserMessage = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.pendingUserMessage : undefined)) ?? null;
+  const serverTurnId = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.serverTurnId : undefined)) ?? null;
+  const blocksLength = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.blocks.length ?? 0 : 0));
+  const hasNewTurnContent = useStreamStore((state) => {
+    if (!sessionId) return false;
+    const s = state.streams[sessionId];
+    return s != null && s.blocks.some((b) => b.type !== 'widget');
+  });
+  // Widgets keep the transcript "active" even once the turn itself is idle —
+  // the LLM may have rendered one in an earlier turn and it stays live.
+  const hasActiveWidgetBlock = useStreamStore((state) => {
+    if (!sessionId) return false;
+    const s = state.streams[sessionId];
+    return s != null && s.blocks.some((b) => b.type === 'widget' && b.surface === 'inline' && b.status !== 'closed');
+  });
+  const awaitingUserDecision = useStreamStore((state) =>
+    awaitsUserDecision(sessionId ? state.streams[sessionId]?.blocks : undefined),
   );
+  const awaitingPlanId = useStreamStore((state) => {
+    const blocks = sessionId ? state.streams[sessionId]?.blocks : undefined;
+    if (!blocks) return null;
+    for (let i = blocks.length - 1; i >= 0; i -= 1) {
+      const b = blocks[i];
+      if (b?.type === 'plan' && b.status === 'awaiting_review') return b.planId;
+    }
+    return null;
+  });
+  const lastStreamUsage = useStreamStore((state) => {
+    if (!sessionId) return null;
+    const s = state.streams[sessionId];
+    return s?.status === 'complete' ? (s.usage ?? null) : null;
+  });
+  /**
+   * Lightweight proxies for "a block relevant to THIS effect changed" — text
+   * tokens never touch question/plan/permission/full-page-widget blocks, so
+   * these stay referentially idle during ordinary streaming even though the
+   * underlying `blocks` array is replaced every token.
+   */
+  const interactionBlocksKey = useStreamStore((state) => {
+    const blocks = sessionId ? state.streams[sessionId]?.blocks : undefined;
+    if (!blocks) return '';
+    let key = '';
+    for (const b of blocks) {
+      if (b.type === 'question') key += `|q:${b.interactionId}:${b.status}`;
+      else if (b.type === 'permission') key += `|p:${b.interactionId}:${b.status}`;
+      else if (b.type === 'plan') key += `|pl:${b.planId}:${b.status}:${b.interactionId ?? ''}`;
+    }
+    return key;
+  });
+  const widgetSurfaceKey = useStreamStore((state) => {
+    const blocks = sessionId ? state.streams[sessionId]?.blocks : undefined;
+    if (!blocks) return '';
+    let key = '';
+    for (const b of blocks) {
+      if (b.type === 'widget' && b.surface === 'widget') key += `|${b.instanceId}:${b.status}`;
+    }
+    return key;
+  });
+  const widgetTitlesKey = useStreamStore((state) => {
+    const blocks = sessionId ? state.streams[sessionId]?.blocks : undefined;
+    if (!blocks) return '';
+    let key = '';
+    for (const b of blocks) {
+      if (b.type === 'widget') key += `|${b.instanceId}:${b.title ?? ''}:${b.component}`;
+    }
+    return key;
+  });
   // The stream record is LRU-bounded; exempt the transcript that is on screen
   // so a busy workflow run streaming twenty stages cannot evict the chat the
   // user is actually reading.
@@ -227,6 +389,7 @@ export function ChatPage() {
 
   const decidePlan = useDecidePlan(chatId ?? '');
   const answerQuestion = useAnswerQuestion(chatId ?? '');
+  const answerPermission = useAnswerPermission(chatId ?? '');
   // The blocking promise lives server-side, so polling rehydrates the gate
   // after a reload even when the SSE replay window has moved on.
   const { data: pendingInteractions, dataUpdatedAt: pendingFetchedAt } = usePendingInteractions(
@@ -268,15 +431,7 @@ export function ChatPage() {
 
   // Auto-open the Plan tab the first time a plan asks for review — but only
   // when the tab is actually visible, matching the browser-tab guard.
-  const awaitingPlanId = useMemo(() => {
-    const blocks = stream?.blocks ?? [];
-    for (let i = blocks.length - 1; i >= 0; i -= 1) {
-      const b = blocks[i];
-      if (b?.type === 'plan' && b.status === 'awaiting_review') return b.planId;
-    }
-    return null;
-  }, [stream?.blocks]);
-
+  // (`awaitingPlanId` is one of the narrow stream selectors declared above.)
   useEffect(() => {
     if (!awaitingPlanId || planTabAutoOpenedFor === awaitingPlanId) return;
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
@@ -324,12 +479,30 @@ export function ChatPage() {
     [answerQuestion, sessionId],
   );
 
+  const handleAnswerPermission = useCallback(
+    (interactionId: string, behavior: 'allow' | 'deny', message?: string) => {
+      if (sessionId) {
+        useStreamStore.getState().resolvePermission(sessionId, interactionId, behavior, message);
+      }
+      answerPermission.mutate({
+        interactionId,
+        behavior,
+        ...(message ? { message } : {}),
+      });
+    },
+    [answerPermission, sessionId],
+  );
+
   /** Human-readable reason the composer is blocked, if it is. */
   const pendingInteractionLabel = useMemo(() => {
     if (!pendingGate) return null;
-    return pendingGate.kind === 'plan_review'
-      ? 'Waiting on your plan review before the agent can continue.'
-      : 'The agent is waiting for your answer.';
+    if (pendingGate.kind === 'plan_review') {
+      return 'Waiting on your plan review before the agent can continue.';
+    }
+    if (pendingGate.kind === 'tool_permission') {
+      return 'The agent is waiting for you to allow or deny a tool call.';
+    }
+    return 'The agent is waiting for your answer.';
   }, [pendingGate]);
 
   // Reconcile optimistic card state against the server's pending gates.
@@ -369,8 +542,16 @@ export function ChatPage() {
       ) {
         store.setPlanStatus(sessionId, block.planId, 'expired');
       }
+      if (
+        block.type === 'permission' &&
+        block.status === 'pending' &&
+        !live.has(block.interactionId) &&
+        !isStale(block.openedAt)
+      ) {
+        store.expirePermission(sessionId, block.interactionId);
+      }
     }
-  }, [sessionId, pendingInteractions, pendingFetchedAt, stream?.blocks]);
+  }, [sessionId, pendingInteractions, pendingFetchedAt, interactionBlocksKey]);
 
   // ── Split-pane resize state for chat ↔ right pane ────────────
   // The width itself is owned by `RightPane` via `useResizablePane`.
@@ -558,8 +739,13 @@ export function ChatPage() {
   // and re-rendering the same widget focuses the tab already showing it.
   const seenCanvasWidgetsRef = React.useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!stream) return;
-    for (const b of stream.blocks) {
+    // Triggered by `widgetSurfaceKey` (a cheap instanceId:status signature)
+    // rather than the live `stream`, so this effect only re-runs when a
+    // full-page widget block actually appears/changes status — not on every
+    // streamed token. The actual blocks are read fresh from the store here.
+    if (!sessionId) return;
+    const blocks = useStreamStore.getState().streams[sessionId]?.blocks ?? [];
+    for (const b of blocks) {
       if (b.type !== 'widget') continue;
       if (b.surface !== 'widget') continue;
       if (b.status === 'closed') continue;
@@ -572,7 +758,7 @@ export function ChatPage() {
         tabId: widgetTabId(b.instanceId),
       });
     }
-  }, [stream, setRightPaneOpen]);
+  }, [sessionId, widgetSurfaceKey, setRightPaneOpen]);
 
   const openWidgetTab = useCallback(
     (instanceId: string) => {
@@ -582,13 +768,12 @@ export function ChatPage() {
     [setRightPaneOpen],
   );
 
-  // Stream state
-  const isStreaming = stream?.status === 'streaming' || stream?.status === 'thinking';
-  const isPending = stream?.status === 'pending';
+  // Stream state — derived from the narrow selectors declared above, not a
+  // full `stream` object, so these stay stable across most streamed tokens.
+  const isStreaming = streamStatus === 'streaming' || streamStatus === 'thinking';
+  const isPending = streamStatus === 'pending';
   const isCopilotWorking = isStreaming || isPending;
   const isInputDisabled = isStreaming || isPending;
-  const turnUserMessage = stream?.turnUserMessage ?? null;
-  const pendingUserMessage = stream?.pendingUserMessage ?? null;
   const isChatActive = chat?.status === 'active';
 
   /**
@@ -619,48 +804,29 @@ export function ChatPage() {
 
   // The turn is parked on a gate: the agent is idle and the ball is with the
   // user, so every "generating" affordance must stand down.
-  const awaitingUserDecision = useMemo(
-    () => awaitsUserDecision(stream?.blocks),
-    [stream?.blocks],
-  );
-
-  // Show stream blocks — treat inline/right-pane widget blocks as "active
-  // content" even when no chat turn is in flight (the LLM may have rendered
-  // a widget in a previous turn but the state stays live for interaction).
-  const hasActiveWidgetBlock = React.useMemo(() => {
-    if (!stream) return false;
-    return stream.blocks.some(
-      (b) => b.type === 'widget' && b.surface === 'inline' && b.status !== 'closed',
-    );
-  }, [stream]);
-
-  const showStreamingMessage =
-    stream != null &&
-    stream.blocks.length > 0 &&
-    (stream.status !== 'idle' || hasActiveWidgetBlock);
+  // (`awaitingUserDecision` is one of the narrow stream selectors above.)
 
   // W30: Track the previous completed turn's usage for the cache-miss notice.
   // When a turn transitions to 'complete', capture its usage in a ref so the
   // NEXT turn's UsageChip can compare against it.
   const prevUsageRef = React.useRef<{ usage: UsageInfo; completedAt: number } | null>(null);
-  const lastStreamUsage = stream?.status === 'complete' ? stream.usage : null;
   React.useEffect(() => {
-    if (stream?.status === 'complete' && stream.usage) {
+    if (streamStatus === 'complete' && lastStreamUsage) {
       prevUsageRef.current = {
         usage: {
-          model: stream.usage.model,
-          inputTokens: stream.usage.inputTokens,
-          outputTokens: stream.usage.outputTokens,
-          durationMs: stream.usage.durationMs ?? 0,
-          cacheReadTokens: stream.usage.cacheReadTokens,
-          cacheWriteTokens: stream.usage.cacheWriteTokens,
-          cost: stream.usage.cost,
-          provider: stream.usage.provider,
+          model: lastStreamUsage.model,
+          inputTokens: lastStreamUsage.inputTokens,
+          outputTokens: lastStreamUsage.outputTokens,
+          durationMs: lastStreamUsage.durationMs ?? 0,
+          cacheReadTokens: lastStreamUsage.cacheReadTokens,
+          cacheWriteTokens: lastStreamUsage.cacheWriteTokens,
+          cost: lastStreamUsage.cost,
+          provider: lastStreamUsage.provider,
         },
         completedAt: Date.now(),
       };
     }
-  }, [lastStreamUsage, stream?.status]);
+  }, [lastStreamUsage, streamStatus]);
 
   // Whether the current turn has produced its OWN content yet (text / tool
   // steps / answer) — i.e. anything other than blocks carried across the
@@ -668,13 +834,14 @@ export function ChatPage() {
   // Used to gate the pending spinner: a follow-up prompt in a widget chat
   // still has carried widget blocks, which must NOT suppress the "thinking"
   // indicator, otherwise the user sees no feedback after sending.
-  const hasNewTurnContent = React.useMemo(
-    () => stream != null && stream.blocks.some((b) => b.type !== 'widget'),
-    [stream],
-  );
+  // (`hasNewTurnContent` is one of the narrow stream selectors above.)
+
+  // Whether the transcript has anything to show right now — gates both the
+  // empty state below and whether `<LiveTranscript>` renders anything.
+  const showStreamingMessage = hasStream && blocksLength > 0 && (streamStatus !== 'idle' || hasActiveWidgetBlock);
 
   // Display messages dedup (same logic as ChatView)
-  const isInActiveTurn = stream != null && stream.status !== 'idle' && !!turnUserMessage;
+  const isInActiveTurn = hasStream && streamStatus !== 'idle' && !!turnUserMessage;
 
   const displayMessages = useMemo(() => {
     if (!messages?.length) return messages ?? [];
@@ -688,7 +855,6 @@ export function ChatPage() {
     // prompt they sent earlier, the scan lands on the OLDER copy and slicing
     // there hides every message after it, so the conversation appears to
     // vanish until the turn ends and this dedup switches off.
-    const serverTurnId = stream?.serverTurnId ?? null;
     if (serverTurnId) {
       const idx = messages.findIndex(
         (m) => m.role === 'user'
@@ -718,31 +884,43 @@ export function ChatPage() {
     }
 
     return messages;
-  }, [messages, isInActiveTurn, turnUserMessage, stream?.serverTurnId]);
+  }, [messages, isInActiveTurn, turnUserMessage, serverTurnId]);
 
   // Optimistic user message
   const showOptimisticUserMessage = useMemo(
-    () => !!turnUserMessage && stream?.status !== 'idle',
-    [turnUserMessage, stream?.status],
+    () => !!turnUserMessage && streamStatus !== 'idle',
+    [turnUserMessage, streamStatus],
   );
 
   // Stick-to-bottom: auto-follow while pinned near the bottom; surface a
   // "jump to latest" pill when the user scrolls up to read mid-stream.
-  const scrollSignature = `${displayMessages.length}:${stream?.blocks?.length ?? 0}:${stream?.text?.length ?? 0}:${stream?.status ?? ''}`;
+  //
+  // `useStickToBottom` re-binds on this signature and then follows content
+  // growth itself via a `ResizeObserver` on the scrolled element — so the
+  // signature only needs to change on message-count/block-count/status
+  // boundaries, NOT on every streamed token (`stream.text` grows every
+  // token; deliberately left out here).
+  const scrollSignature = `${displayMessages.length}:${blocksLength}:${streamStatus ?? ''}`;
   const { ref: scrollRef, showJumpToLatest, jumpToLatest } = useStickToBottom(scrollSignature);
 
-  // Auto-clear completed stream once chatMessages catches up
+  // Auto-clear completed stream once chatMessages catches up. Only matters at
+  // the turn-complete boundary, so this is keyed off `streamStatus` (a
+  // primitive) and reads the live blocks/turnUserMessage from a fresh
+  // snapshot rather than subscribing to them reactively.
   useEffect(() => {
-    if (!stream || stream.status !== 'complete' || !sessionId) return;
+    if (streamStatus !== 'complete' || !sessionId) return;
     if (!messages?.length) return;
+
+    const current = useStreamStore.getState().streams[sessionId];
+    if (!current || current.status !== 'complete') return;
 
     // Preserve stream state when it holds widget blocks — widgets live only
     // in the event stream (not in chat history), so clearing here would
     // drop the inline widget iframes the LLM rendered during the turn.
-    const hasWidgetBlocks = stream.blocks.some((b) => b.type === 'widget');
+    const hasWidgetBlocks = current.blocks.some((b) => b.type === 'widget');
     if (hasWidgetBlocks) return;
 
-    const turnMsg = stream.turnUserMessage?.trim();
+    const turnMsg = current.turnUserMessage?.trim();
     if (!turnMsg) {
       useStreamStore.getState().clearStream(sessionId);
       return;
@@ -759,7 +937,224 @@ export function ChatPage() {
         return;
       }
     }
-  }, [stream?.status, stream?.blocks, messages, sessionId, stream?.turnUserMessage]);
+  }, [streamStatus, messages, sessionId]);
+
+  // Right-pane tabs — memoised so a token frame (which changes `stream`,
+  // deliberately excluded from these deps) does not rebuild all ~10 panel
+  // configs and defeat RightPane's own per-panel memoisation (see the
+  // `Component`/`render` doc comment in RightPane.tsx). Anything that needs
+  // the live stream (the terminal's shell console, the widget tab's live
+  // label) reads it narrowly instead of closing over a value captured here —
+  // `AgentShellPanel` subscribes itself, and `widgetLabel` below reads a
+  // fresh snapshot only when `widgetTitlesKey` actually changes.
+  const tabs = useMemo<Record<string, RightPaneTabDef>>(() => {
+    // `widgetTitlesKey` (in the dep array below) is a trigger-only
+    // dependency: it is not read here directly, but its identity is what
+    // this factory should recompute on — a fresh snapshot is taken from the
+    // store below instead, exactly when that key says a widget's title
+    // actually changed.
+    void widgetTitlesKey;
+    const widgetLabel = (instanceId: string): string => {
+      const blocks = sessionId ? (useStreamStore.getState().streams[sessionId]?.blocks ?? []) : [];
+      const block = blocks.find((b) => b.type === 'widget' && b.instanceId === instanceId);
+      return (block && block.type === 'widget' && (block.title ?? block.component)) || 'Widget';
+    };
+
+    return {
+      changes: {
+        label: 'Changes',
+        description: 'Files & changes for this chat',
+        icon: <FolderGit2 className="h-3.5 w-3.5" />,
+        render: () => (
+          <React.Suspense fallback={<PanelFallback />}>
+            <ChangesSurface
+              embedded
+              workspaceId={chat?.workspaceId}
+              enableReview
+              // Threads are scoped to the chat; the send target is also the
+              // chat, so "Send all" posts the batch as a new user turn.
+              reviewScope={{ scope: 'chat', scopeId: chatId ?? '' }}
+              {...(chatId ? { reviewTarget: { kind: 'chat', chatId } } : {})}
+            />
+          </React.Suspense>
+        ),
+      },
+      files: fileTabs.filesTab,
+      file: fileTabs.fileTab,
+      browser: {
+        label: 'Browser',
+        description: 'Integrated browser for this chat',
+        icon: <BrowserTabIcon state={null} />,
+        allowMultiple: true,
+        maxInstances: 5,
+        getTabLabel: ({ id, index }) => {
+          const t = (browserTabs[id]?.title ?? '').trim();
+          return t || (index <= 1 ? 'Browser' : `Browser ${index}`);
+        },
+        getTabIcon: ({ id }) => <BrowserTabIcon state={browserTabs[id] ?? null} />,
+        disabled: !chat?.workspaceId,
+        disabledReason: 'Send a message first to create a workspace',
+        render: (ctx) => (
+          chat?.workspaceId ? (
+            <div className="flex h-full min-h-0 flex-1 flex-col">
+              {/* Pending-capture banner is hoisted above ChatInput for
+                  visibility across all right-pane tabs. */}
+              <div className="flex-1 min-h-0">
+                <BrowserPanel
+                  embedded
+                  workspaceId={chat.workspaceId}
+                  tabId={ctx.id}
+                  urlScopeKey={browserUrlScopeKey}
+                  open={true}
+                  // P1-50 — every tab is mounted; only the selected one
+                  // may hold a live screencast socket.
+                  visible={ctx.active}
+                  onClose={() => setRightPaneOpen(false)}
+                  onCapture={(file) =>
+                    setPendingCaptures((prev) => [
+                      ...prev,
+                      { id: `browser:${Date.now()}:${file.name}`, file, source: 'browser', label: file.name },
+                    ])
+                  }
+                  onTabStateChange={(s) => setBrowserTabs((prev) => {
+                    const cur = prev[ctx.id];
+                    if (cur && cur.loading === s.loading && cur.title === s.title && cur.favicon === s.favicon && cur.url === s.url) return prev;
+                    return { ...prev, [ctx.id]: s };
+                  })}
+                  agentBusy={isCopilotWorking}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 text-xs text-[var(--color-muted-foreground)]">
+              Browser is not available until this chat has a workspace.
+            </div>
+          )
+        ),
+      },
+      terminal: {
+        label: 'Terminal',
+        description: 'Integrated shell in this workspace',
+        icon: <TerminalSquare className="h-3.5 w-3.5" />,
+        allowMultiple: true,
+        // P2-54 — terminals are the one uncapped WebGL-context consumer:
+        // each xterm instance takes a WebGL context, and browsers hand out
+        // ~16 per page before evicting the oldest, at which point earlier
+        // terminals silently stop painting. Also one PTY per tab on the
+        // host. 4 is above any observed real use of parallel shells.
+        maxInstances: 4,
+        disabled: !chat?.workspaceId,
+        disabledReason: 'Send a message first to create a workspace',
+        render: (ctx) => (
+          <React.Suspense fallback={<PanelFallback />}>
+            {agentConsoleCallId != null ? (
+              <AgentShellPanel
+                sessionId={sessionId}
+                messages={messages}
+                callId={agentConsoleCallId}
+                onClose={() => setAgentConsoleCallId(null)}
+              />
+            ) : (
+              <TerminalPanel
+                embedded
+                workspaceId={chat?.workspaceId}
+                tabId={ctx.id}
+                onCapture={(file) =>
+                  setPendingCaptures((prev) => [
+                    ...prev,
+                    { id: `terminal:${Date.now()}:${file.name}`, file, source: 'terminal', label: file.name },
+                  ])
+                }
+                agentBusy={isCopilotWorking}
+              />
+            )}
+          </React.Suspense>
+        ),
+      },
+      computer: {
+        label: 'Computer',
+        description: 'Watch the desktop windows the agent reads and acts on',
+        icon: <MonitorCog className="h-3.5 w-3.5" />,
+        disabled: !chat?.workspaceId,
+        disabledReason: 'Send a message first to create a workspace',
+        render: (ctx) => (
+          <React.Suspense fallback={<PanelFallback />}>
+            <ComputerPanel embedded workspaceId={chat?.workspaceId} active={ctx.active} />
+          </React.Suspense>
+        ),
+      },
+      widget: {
+        label: 'Widget',
+        description: 'Agent-rendered interactive widgets in a full-page surface',
+        icon: <LayoutGrid className="h-3.5 w-3.5" />,
+        // One tab per widget instance — several widgets in one chat must
+        // not compete for a single surface.
+        allowMultiple: true,
+        maxInstances: 6,
+        disabled: !sessionId,
+        disabledReason: 'Start the chat to enable widgets',
+        getTabLabel: ({ id }) => {
+          const instanceId = parseWidgetTabId(id);
+          return instanceId ? widgetLabel(instanceId) : 'Widgets';
+        },
+        render: (ctx) => {
+          if (!sessionId) {
+            return <div className="p-4 text-xs text-[var(--color-muted-foreground)]">No active session.</div>;
+          }
+          const instanceId = parseWidgetTabId(ctx.id);
+          return instanceId ? (
+            <WidgetHost sessionId={sessionId} instanceId={instanceId} />
+          ) : (
+            // Unbound tab (added from "+", or stored before widgets got
+            // their own tabs) — a picker, so it never mounts a second live
+            // copy of a widget that already has a tab.
+            <WidgetHost sessionId={sessionId} onOpenWidget={openWidgetTab} />
+          );
+        },
+      },
+      background_tasks: {
+        label: 'Background Tasks',
+        description: 'Background agent tasks spawned by this orchestrator chat',
+        icon: <Boxes className="h-3.5 w-3.5" />,
+        allowMultiple: false,
+        disabled: !isOrchestrator,
+        disabledReason: 'Enable Orchestrate mode on this chat to spawn background tasks',
+        render: () => <BackgroundTasksPanel chatId={chatId} />,
+      },
+      // PLN-01 — the plan document surface. Auto-opens when the agent asks
+      // for a review; also addable so a user can revisit an older plan.
+      plan: {
+        label: 'Plan',
+        description: 'Review, edit and approve the agent’s implementation plan',
+        icon: <ClipboardList className="h-3.5 w-3.5" />,
+        allowMultiple: false,
+        render: () =>
+          chatId ? (
+            <PlanDocumentPanel chatId={chatId} planId={activePlanId} />
+          ) : (
+            <div className="p-4 text-xs text-[var(--color-muted-foreground)]">No chat.</div>
+          ),
+      },
+    };
+  }, [
+    chat?.workspaceId,
+    chatId,
+    sessionId,
+    fileTabs.filesTab,
+    fileTabs.fileTab,
+    browserTabs,
+    browserUrlScopeKey,
+    setRightPaneOpen,
+    setPendingCaptures,
+    isCopilotWorking,
+    agentConsoleCallId,
+    setAgentConsoleCallId,
+    messages,
+    isOrchestrator,
+    activePlanId,
+    openWidgetTab,
+    widgetTitlesKey,
+  ]);
 
   // Loading
   if (!chatId) {
@@ -870,10 +1265,10 @@ export function ChatPage() {
           </div>
         )}
 
-        {/* Streaming message */}
+        {/* Streaming message — LiveTranscript owns the per-token subscription
+            (see its definition above `ChatPage`) so this page does not. */}
         {showStreamingMessage && (
-          <StreamingMessage
-            stream={stream}
+          <LiveTranscript
             sessionId={sessionId}
             prevUsage={prevUsageRef.current?.usage ?? null}
             prevCompletedAt={prevUsageRef.current?.completedAt ?? null}
@@ -883,7 +1278,8 @@ export function ChatPage() {
             onApprovePlan={handleApprovePlan}
             onRequestPlanChanges={handleRequestPlanChanges}
             onAnswerQuestion={handleAnswerQuestion}
-            planBusy={decidePlan.isPending || answerQuestion.isPending}
+            onAnswerPermission={handleAnswerPermission}
+            planBusy={decidePlan.isPending || answerQuestion.isPending || answerPermission.isPending}
           />
         )}
 
@@ -1047,186 +1443,7 @@ export function ChatPage() {
         addableTabTypes={addableRightPaneTabs}
         focusTabRequest={browserTabFocusRequest}
         onTabClose={handleRightPaneTabClose}
-        tabs={{
-          changes: {
-            label: 'Changes',
-            description: 'Files & changes for this chat',
-            icon: <FolderGit2 className="h-3.5 w-3.5" />,
-            render: () => (
-              <React.Suspense fallback={<PanelFallback />}>
-                <ChangesSurface
-                  embedded
-                  workspaceId={chat?.workspaceId}
-                  enableReview
-                  // Threads are scoped to the chat; the send target is also the
-                  // chat, so "Send all" posts the batch as a new user turn.
-                  reviewScope={{ scope: 'chat', scopeId: chatId ?? '' }}
-                  {...(chatId ? { reviewTarget: { kind: 'chat', chatId } } : {})}
-                />
-              </React.Suspense>
-            ),
-          },
-          files: fileTabs.filesTab,
-          file: fileTabs.fileTab,
-          browser: {
-            label: 'Browser',
-            description: 'Integrated browser for this chat',
-            icon: <BrowserTabIcon state={null} />,
-            allowMultiple: true,
-            maxInstances: 5,
-            getTabLabel: ({ id, index }) => {
-              const t = (browserTabs[id]?.title ?? '').trim();
-              return t || (index <= 1 ? 'Browser' : `Browser ${index}`);
-            },
-            getTabIcon: ({ id }) => <BrowserTabIcon state={browserTabs[id] ?? null} />,
-            disabled: !chat?.workspaceId,
-            disabledReason: 'Send a message first to create a workspace',
-            render: (ctx) => (
-              chat?.workspaceId ? (
-                <div className="flex h-full min-h-0 flex-1 flex-col">
-                  {/* Pending-capture banner is hoisted above ChatInput for
-                      visibility across all right-pane tabs. */}
-                  <div className="flex-1 min-h-0">
-                    <BrowserPanel
-                      embedded
-                      workspaceId={chat.workspaceId}
-                      tabId={ctx.id}
-                      urlScopeKey={browserUrlScopeKey}
-                      open={true}
-                      // P1-50 — every tab is mounted; only the selected one
-                      // may hold a live screencast socket.
-                      visible={ctx.active}
-                      onClose={() => setRightPaneOpen(false)}
-                      onCapture={(file) =>
-                        setPendingCaptures((prev) => [
-                          ...prev,
-                          { id: `browser:${Date.now()}:${file.name}`, file, source: 'browser', label: file.name },
-                        ])
-                      }
-                      onTabStateChange={(s) => setBrowserTabs((prev) => {
-                        const cur = prev[ctx.id];
-                        if (cur && cur.loading === s.loading && cur.title === s.title && cur.favicon === s.favicon && cur.url === s.url) return prev;
-                        return { ...prev, [ctx.id]: s };
-                      })}
-                      agentBusy={isCopilotWorking}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="p-4 text-xs text-[var(--color-muted-foreground)]">
-                  Browser is not available until this chat has a workspace.
-                </div>
-              )
-            ),
-          },
-          terminal: {
-            label: 'Terminal',
-            description: 'Integrated shell in this workspace',
-            icon: <TerminalSquare className="h-3.5 w-3.5" />,
-            allowMultiple: true,
-            // P2-54 — terminals are the one uncapped WebGL-context consumer:
-            // each xterm instance takes a WebGL context, and browsers hand out
-            // ~16 per page before evicting the oldest, at which point earlier
-            // terminals silently stop painting. Also one PTY per tab on the
-            // host. 4 is above any observed real use of parallel shells.
-            maxInstances: 4,
-            disabled: !chat?.workspaceId,
-            disabledReason: 'Send a message first to create a workspace',
-            render: (ctx) => (
-              <React.Suspense fallback={<PanelFallback />}>
-                {agentConsoleCallId != null ? (
-                  <AgentConsole
-                    messages={messages}
-                    stream={stream}
-                    selectedCallId={agentConsoleCallId}
-                    onClose={() => setAgentConsoleCallId(null)}
-                  />
-                ) : (
-                  <TerminalPanel
-                    embedded
-                    workspaceId={chat?.workspaceId}
-                    tabId={ctx.id}
-                    onCapture={(file) =>
-                      setPendingCaptures((prev) => [
-                        ...prev,
-                        { id: `terminal:${Date.now()}:${file.name}`, file, source: 'terminal', label: file.name },
-                      ])
-                    }
-                    agentBusy={isCopilotWorking}
-                  />
-                )}
-              </React.Suspense>
-            ),
-          },
-          computer: {
-            label: 'Computer',
-            description: 'Watch the desktop windows the agent reads and acts on',
-            icon: <MonitorCog className="h-3.5 w-3.5" />,
-            disabled: !chat?.workspaceId,
-            disabledReason: 'Send a message first to create a workspace',
-            render: () => (
-              <React.Suspense fallback={<PanelFallback />}>
-                <ComputerPanel embedded workspaceId={chat?.workspaceId} />
-              </React.Suspense>
-            ),
-          },
-          widget: {
-            label: 'Widget',
-            description: 'Agent-rendered interactive widgets in a full-page surface',
-            icon: <LayoutGrid className="h-3.5 w-3.5" />,
-            // One tab per widget instance — several widgets in one chat must
-            // not compete for a single surface.
-            allowMultiple: true,
-            maxInstances: 6,
-            disabled: !sessionId,
-            disabledReason: 'Start the chat to enable widgets',
-            getTabLabel: ({ id }) => {
-              const instanceId = parseWidgetTabId(id);
-              if (!instanceId) return 'Widgets';
-              const block = stream?.blocks.find(
-                (b) => b.type === 'widget' && b.instanceId === instanceId,
-              );
-              return (block && block.type === 'widget' && (block.title ?? block.component)) || 'Widget';
-            },
-            render: (ctx) => {
-              if (!sessionId) {
-                return <div className="p-4 text-xs text-[var(--color-muted-foreground)]">No active session.</div>;
-              }
-              const instanceId = parseWidgetTabId(ctx.id);
-              return instanceId ? (
-                <WidgetHost sessionId={sessionId} instanceId={instanceId} />
-              ) : (
-                // Unbound tab (added from "+", or stored before widgets got
-                // their own tabs) — a picker, so it never mounts a second live
-                // copy of a widget that already has a tab.
-                <WidgetHost sessionId={sessionId} onOpenWidget={openWidgetTab} />
-              );
-            },
-          },
-          background_tasks: {
-            label: 'Background Tasks',
-            description: 'Background agent tasks spawned by this orchestrator chat',
-            icon: <Boxes className="h-3.5 w-3.5" />,
-            allowMultiple: false,
-            disabled: !isOrchestrator,
-            disabledReason: 'Enable Orchestrate mode on this chat to spawn background tasks',
-            render: () => <BackgroundTasksPanel chatId={chatId} />,
-          },
-          // PLN-01 — the plan document surface. Auto-opens when the agent asks
-          // for a review; also addable so a user can revisit an older plan.
-          plan: {
-            label: 'Plan',
-            description: 'Review, edit and approve the agent\u2019s implementation plan',
-            icon: <ClipboardList className="h-3.5 w-3.5" />,
-            allowMultiple: false,
-            render: () =>
-              chatId ? (
-                <PlanDocumentPanel chatId={chatId} planId={activePlanId} />
-              ) : (
-                <div className="p-4 text-xs text-[var(--color-muted-foreground)]">No chat.</div>
-              ),
-          },
-        }}
+        tabs={tabs}
       />
     </div>
   );

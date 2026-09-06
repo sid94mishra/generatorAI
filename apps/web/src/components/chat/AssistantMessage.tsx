@@ -8,12 +8,13 @@
 
 import React, { useCallback, useMemo } from 'react';
 import type { ChatMessage } from '@generatorai/shared';
-import { Bot, Download, CircleSlash, Volume2, Square, Loader2 } from 'lucide-react';
+import { Bot, Download, CircleSlash, Volume2, Square } from 'lucide-react';
 import { StreamPanel } from '@/components/agent/StreamPanel.js';
 import { chatMessageToBlocks } from '@/components/agent/chatMessageToBlocks.js';
 import { deriveStreamView } from '@/components/agent/deriveTimeline.js';
 import { useTextToSpeech } from '@/hooks/useTextToSpeech.js';
 import { toast } from '@/components/Toast.js';
+import { Button, Spinner } from '@/components/ui/index.js';
 
 interface AssistantMessageProps {
   message: ChatMessage;
@@ -94,22 +95,24 @@ export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOp
         {/* Read this message aloud (Phase 3) — only offered once there's
             actual answer text and the platform supports playback. */}
         {ttsSupported && view.answer.trim() && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={handleReadAloud}
             className="mt-1.5 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] transition-colors"
             title={isSpeakingOrConnecting ? 'Stop reading' : 'Read this message aloud'}
             aria-label={isSpeakingOrConnecting ? 'Stop reading' : 'Read this message aloud'}
           >
             {ttsStatus === 'connecting' ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner size="sm" />
             ) : ttsStatus === 'speaking' ? (
               <Square className="h-3.5 w-3.5" />
             ) : (
               <Volume2 className="h-3.5 w-3.5" />
             )}
             {isSpeakingOrConnecting ? 'Stop' : 'Read aloud'}
-          </button>
+          </Button>
         )}
 
         {/* A stopped turn keeps everything it streamed, so say that it is not

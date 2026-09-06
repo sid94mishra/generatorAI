@@ -2,7 +2,12 @@
 // ChatMessage — Domain value object
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentMode, PlanCardSummary, QuestionCardSummary } from './AgentMode.js';
+import type {
+  AgentMode,
+  PermissionCardSummary,
+  PlanCardSummary,
+  QuestionCardSummary,
+} from './AgentMode.js';
 import type { FileOpStat } from './AgentEvent.js';
 
 export interface ChatMessageMetadata {
@@ -83,6 +88,8 @@ export interface ChatMessageMetadata {
   planCards?: PlanCardSummary[];
   /** Clarifying-question cards surfaced during this turn, with their answers. */
   questionCards?: QuestionCardSummary[];
+  /** Tool-permission prompts raised during this turn, with the user's decision. */
+  permissionCards?: PermissionCardSummary[];
 }
 
 export interface ChatMessage {

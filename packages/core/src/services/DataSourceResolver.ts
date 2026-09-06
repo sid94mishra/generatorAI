@@ -1,9 +1,23 @@
 // ────────────────────────────────────────────────────────────────
 // DataSourceResolver — Resolves dynamic data sources for automation
 //   iterations. Supports script, HTTP, and file-based data sources.
+//
+// Every value a resolver returns becomes variables inside an agent's
+// prompt, so the three resolvers are hardened accordingly:
+//   * HTTP — requests go through the SSRF-safe transport
+//     (`network: 'public-only'`): DNS is resolved first, private /
+//     loopback / link-local / metadata targets are refused, the socket is
+//     pinned to the vetted address and every redirect hop is re-vetted.
+//   * File — paths resolve against the automation's PROJECT ROOT (never
+//     `process.cwd()`), through `realpath`, must stay inside it, and
+//     hidden files (`.env`, `.git/…`) are refused unless opted in.
+//   * Script — argv is produced by a real word splitter that rejects
+//     shell operators instead of silently mis-tokenising them.
+// Credential-bearing headers / env values are stored as vault references
+// (`${secret:…}`) and materialised here, at execution time only.
 // ────────────────────────────────────────────────────────────────
 
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import type {
   Automation,
@@ -17,10 +31,12 @@ import type {
   DataSourceSchema,
   ILogger,
 } from '@generatorai/shared';
-import { parseBatchData } from '@generatorai/shared';
+import { parseBatchData, isSecretRef, parseSecretRefValue, SECRET_MASK } from '@generatorai/shared';
+import { redactUrl } from '@generatorai/secrets';
 import type { IScriptRunner } from '../domain/ports/IScriptRunner.js';
 import type { IHttpClient } from '../domain/ports/IHttpClient.js';
 import type { WorkflowScriptLoader } from './WorkflowScriptLoader.js';
+import { splitShellWords } from './shellWords.js';
 
 /** Maximum number of items a data source can return */
 const MAX_DATA_SOURCE_ITEMS = 10_000;
@@ -40,7 +56,15 @@ const RESERVED_NAMES = new Set([
   'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable',
 ]);
 
+/**
+ * Resolves a `${secret:<namespace>/<name>}` reference to its value, or
+ * null when the vault has no such entry. Wired by the composition root.
+ */
+export type SecretResolver = (ref: { namespace: string; name: string }) => Promise<string | null>;
+
 export class DataSourceResolver {
+  private secretResolver: SecretResolver | null = null;
+
   constructor(
     private scriptRunner: IScriptRunner,
     private httpClient: IHttpClient,
@@ -52,6 +76,11 @@ export class DataSourceResolver {
   /** Late-bind the script loader (needed when script loader is created after DataSourceResolver) */
   setScriptLoader(loader: WorkflowScriptLoader): void {
     this.scriptLoader = loader;
+  }
+
+  /** Late-bind the vault lookup used to materialise `${secret:…}` references. */
+  setSecretResolver(resolver: SecretResolver): void {
+    this.secretResolver = resolver;
   }
 
   /**
@@ -67,24 +96,7 @@ export class DataSourceResolver {
     this.logger.info(`[DataSourceResolver] Resolving ${config.type} data source for automation ${automation.id}`);
     const startTime = Date.now();
 
-    let result: ParsedBatchData;
-
-    switch (config.type) {
-      case 'script':
-        result = await this.resolveScript(config);
-        break;
-      case 'http':
-        result = await this.resolveHttp(config);
-        break;
-      case 'file':
-        result = await this.resolveFile(config);
-        break;
-      case 'workflow_script':
-        result = await this.resolveWorkflowScript(config);
-        break;
-      default:
-        throw new Error(`Unknown data source type: ${(config as DataSourceConfig).type}`);
-    }
+    const result = await this.resolveConfig(config);
 
     const durationMs = Date.now() - startTime;
     this.logger.info(`[DataSourceResolver] Resolved ${result.rowCount} items in ${durationMs}ms`);
@@ -103,25 +115,7 @@ export class DataSourceResolver {
 
     const startTime = Date.now();
     try {
-      let result: ParsedBatchData;
-
-      switch (config.type) {
-        case 'script':
-          result = await this.resolveScript(config);
-          break;
-        case 'http':
-          result = await this.resolveHttp(config);
-          break;
-        case 'file':
-          result = await this.resolveFile(config);
-          break;
-        case 'workflow_script':
-          result = await this.resolveWorkflowScript(config);
-          break;
-        default:
-          throw new Error(`Unknown data source type`);
-      }
-
+      const result = await this.resolveConfig(config);
       const durationMs = Date.now() - startTime;
       return {
         success: true,
@@ -142,6 +136,61 @@ export class DataSourceResolver {
     }
   }
 
+  private async resolveConfig(config: Exclude<DataSourceConfig, { type: 'static' }>): Promise<ParsedBatchData> {
+    switch (config.type) {
+      case 'script':
+        return this.resolveScript(config);
+      case 'http':
+        return this.resolveHttp(config);
+      case 'file':
+        return this.resolveFile(config);
+      case 'workflow_script':
+        return this.resolveWorkflowScript(config);
+      default:
+        throw new Error(`Unknown data source type: ${(config as DataSourceConfig).type}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Secret references
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Replace `${secret:…}` references in a header / env bag with the vault
+   * value. A masked placeholder (`••••`) means the caller round-tripped a
+   * redacted API response instead of the stored reference — refuse loudly
+   * rather than hand the literal bullets to a script.
+   */
+  private async materializeSecrets(
+    bag: Record<string, string> | undefined,
+    what: string,
+  ): Promise<Record<string, string> | undefined> {
+    if (!bag) return bag;
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(bag)) {
+      if (value === SECRET_MASK) {
+        throw new Error(
+          `${what} "${key}" is a masked placeholder — supply the real value (or the stored secret reference) before running`,
+        );
+      }
+      if (isSecretRef(value)) {
+        const ref = parseSecretRefValue(value);
+        if (!ref) throw new Error(`${what} "${key}" has a malformed secret reference`);
+        if (!this.secretResolver) {
+          throw new Error(`${what} "${key}" references the secrets vault but no vault is configured`);
+        }
+        const resolved = await this.secretResolver(ref);
+        if (resolved === null) {
+          throw new Error(`${what} "${key}" references secret ${ref.namespace}/${ref.name}, which is not in the vault`);
+        }
+        out[key] = resolved;
+        continue;
+      }
+      out[key] = value;
+    }
+    return out;
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // Script Data Source
   // ═══════════════════════════════════════════════════════════════
@@ -152,8 +201,9 @@ export class DataSourceResolver {
 
     // Build sanitized env (block sensitive shell vars from leaking)
     const env: Record<string, string> = {};
-    if (config.env) {
-      for (const [key, value] of Object.entries(config.env)) {
+    const materialized = await this.materializeSecrets(config.env, 'Environment variable');
+    if (materialized) {
+      for (const [key, value] of Object.entries(materialized)) {
         // Prevent env variable injection — block keys with special chars
         if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
           env[key] = String(value);
@@ -161,12 +211,19 @@ export class DataSourceResolver {
       }
     }
 
-    // Split the command string into binary and arguments
-    const parts = config.command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [config.command];
+    // Real word splitting: quotes and escapes behave like a shell's, and
+    // anything that would NEED a shell (pipes, `$VAR`, redirects) is refused
+    // with an explanation instead of becoming a literal argument.
+    let parts: string[];
+    try {
+      parts = splitShellWords(config.command);
+    } catch (err) {
+      throw new Error(`Invalid data source command: ${err instanceof Error ? err.message : String(err)}`);
+    }
     const binary = parts[0]!;
-    const args = parts.slice(1).map(a => a.replace(/^["']|["']$/g, ''));
+    const args = parts.slice(1);
 
-    this.logger.info(`[DataSourceResolver] Running script: ${binary} ${args.join(' ')} (timeout: ${timeout}ms)`);
+    this.logger.info(`[DataSourceResolver] Running script: ${binary} (${args.length} args, timeout: ${timeout}ms)`);
 
     const result = await this.scriptRunner.run(binary, args, {
       cwd,
@@ -203,17 +260,31 @@ export class DataSourceResolver {
     const timeout = config.timeout ?? DEFAULT_HTTP_TIMEOUT;
     const method = config.method ?? 'GET';
 
-    // Security: block SSRF attacks against internal services
-    this.validateHttpUrl(config.url);
+    // Cheap, network-free sanity check so a malformed URL fails with a
+    // clear message. The real SSRF defence (DNS-first vetting, pinning,
+    // per-hop redirect checks) lives in the transport and is FORCED on via
+    // `network: 'public-only'` regardless of how the client was configured.
+    let parsed: URL;
+    try {
+      parsed = new URL(config.url);
+    } catch {
+      throw new Error(`Invalid data source URL: ${config.url}`);
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`Data source URL must use http or https (got ${parsed.protocol})`);
+    }
 
-    this.logger.info(`[DataSourceResolver] HTTP ${method} ${config.url}`);
+    const headers = await this.materializeSecrets(config.headers, 'Header');
+
+    this.logger.info(`[DataSourceResolver] HTTP ${method} ${redactUrl(config.url)}`);
 
     const response = await this.httpClient.request({
       method,
       url: config.url,
-      headers: config.headers,
+      headers,
       body: config.body,
       timeout,
+      network: 'public-only',
     });
 
     if (response.status >= 400) {
@@ -239,60 +310,61 @@ export class DataSourceResolver {
     return this.parseOutput(data, 'json_array', config.schema);
   }
 
-  /** Block SSRF attacks by rejecting requests to private/internal URLs */
-  private validateHttpUrl(url: string): void {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new Error(`Invalid data source URL: ${url}`);
-    }
-
-    // Only allow http/https
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error(`Data source URL must use http or https (got ${parsed.protocol})`);
-    }
-
-    const hostname = parsed.hostname.toLowerCase();
-
-    // Block loopback and private networks
-    const blockedPatterns = [
-      /^localhost$/i,
-      /^127\./,
-      /^0\.0\.0\.0$/,
-      /^::1$/,
-      /^\[::1\]$/,
-      /^10\./,
-      /^172\.(1[6-9]|2\d|3[01])\./,
-      /^192\.168\./,
-      /^169\.254\./, // AWS/cloud metadata
-      /^fc00:/i,     // IPv6 private
-      /^fe80:/i,     // IPv6 link-local
-    ];
-
-    if (blockedPatterns.some(p => p.test(hostname))) {
-      throw new Error('Data source URL cannot target private or internal network addresses');
-    }
-  }
-
   // ═══════════════════════════════════════════════════════════════
   // File Data Source
   // ═══════════════════════════════════════════════════════════════
 
   private async resolveFile(config: FileDataSourceConfig): Promise<ParsedBatchData> {
-    // Security: resolve against cwd and verify final path stays within it
-    const baseDir = path.resolve(process.cwd());
-    const filePath = path.resolve(baseDir, config.filePath);
-
-    if (!filePath.startsWith(baseDir + path.sep) && filePath !== baseDir) {
-      throw new Error('File path escapes the allowed base directory');
+    // The boundary is the injected project root — NEVER the server's
+    // working directory, which is wherever the process was launched from
+    // (in dev, `apps/server`, next to `.env`).
+    if (!this.projectRoot) {
+      throw new Error('File data sources require a project root; none is configured for this deployment');
+    }
+    if (path.isAbsolute(config.filePath)) {
+      throw new Error('File path must be relative to the project root');
     }
 
-    this.logger.info(`[DataSourceResolver] Reading file: ${filePath}`);
+    let realBase: string;
+    try {
+      realBase = await realpath(this.projectRoot);
+    } catch (err) {
+      throw new Error(
+        `Project root is not accessible: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const candidate = path.resolve(realBase, config.filePath);
+    let realTarget: string;
+    try {
+      // realpath follows symlinks, so a link inside the root pointing at
+      // /etc/passwd resolves to its true location and fails containment.
+      realTarget = await realpath(candidate);
+    } catch (err) {
+      throw new Error(
+        `Failed to read data source file "${config.filePath}": ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const rel = path.relative(realBase, realTarget);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error('File path escapes the project root');
+    }
+
+    // Hidden files and directories are where credentials live (.env,
+    // .git/config, .npmrc). Refuse unless the automation says otherwise.
+    const hiddenSegment = rel.split(/[\\/]/).find((seg) => seg.startsWith('.') && seg !== '.' && seg !== '..');
+    if (hiddenSegment && config.allowHidden !== true) {
+      throw new Error(
+        `File path contains a hidden segment ("${hiddenSegment}"); set allowHidden to read dotfiles deliberately`,
+      );
+    }
+
+    this.logger.info(`[DataSourceResolver] Reading file: ${rel}`);
 
     let content: string;
     try {
-      content = await readFile(filePath, 'utf-8');
+      content = await readFile(realTarget, 'utf-8');
     } catch (err) {
       throw new Error(
         `Failed to read data source file "${config.filePath}": ${err instanceof Error ? err.message : String(err)}`,

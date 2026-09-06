@@ -9,8 +9,10 @@
 import {
   commandPath,
   flagToCli,
+  shellOnlyHint,
   usageLine,
   type CommandSpec,
+  type ShellOnlyRequirement,
 } from './CommandSpec.js';
 import type { CommandRegistry } from './registry.js';
 
@@ -29,6 +31,14 @@ export interface PaletteEntry {
   requiresServer: boolean;
   /** True when the command needs arguments and must open a form first. */
   needsInput: boolean;
+  /** Mirrors `CommandSpec.requires`; empty for the ordinary case. */
+  requires: ReadonlyArray<ShellOnlyRequirement>;
+  /**
+   * Set when `requires` is non-empty: the row is shown disabled with this
+   * text in place of the summary, and selecting it surfaces the same text
+   * rather than running the handler.
+   */
+  shellOnlyHint?: string;
 }
 
 function titleCase(text: string): string {
@@ -58,6 +68,10 @@ export function toPalette(registry: CommandRegistry): PaletteEntry[] {
       destructive: Boolean(spec.destructive),
       requiresServer: spec.requiresServer,
       needsInput: spec.args.some((a) => a.required) || spec.flags.some((f) => f.required),
+      requires: spec.requires ?? [],
+      ...(spec.requires && spec.requires.length > 0
+        ? { shellOnlyHint: shellOnlyHint(commandPath(spec)) }
+        : {}),
     }));
 }
 

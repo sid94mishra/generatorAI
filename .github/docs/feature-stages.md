@@ -139,7 +139,9 @@ Example: `parentStatus == "completed" && variables.priority > 3`
 
 ### 3.2 Timeout (seconds)
 
-`timeoutMs: int` — applies to the whole stage (not per prompt). When elapsed, the stage is marked `failed` with error `TimeoutError`. Minimum recommended: 30s; default if unset: 300s (5min); some workflows use much higher (e.g., 1800s for code generation).
+`timeoutMs: int` — applies to each prompt turn within the stage individually, not the stage as a whole (a multi-prompt stage's total wall-clock time is the sum across its turns). When a turn's deadline elapses, the in-flight harness call is actually **aborted** (via `AbortSignal`, not merely abandoned to keep running against the stage's working directory) and the turn fails with `HarnessTimeoutError`; the stage's normal retry policy (§5) then applies exactly as for any other error. An explicit value is floored at 1s (`MIN_TIMEOUT_MS`); **default if unset: 300s (5min)** — some workflows use much higher (e.g., 1800s for code generation).
+
+A `queued`/`running` stage also beats `stage_runs.heartbeat_at` roughly every 10s for as long as it is doing work. If that beat goes stale (the executor is hung or its process is gone), the run's reconciler fails the stage on the stage's behalf — see [feature-workflow-runs.md](./feature-workflow-runs.md) §"Stage liveness".
 
 ### 3.3 Context from Predecessors
 

@@ -8,6 +8,9 @@ import {
   resolveSigning,
   unpublishableManifests,
   PartialSigningConfigError,
+  assertPublishAllowed,
+  requestsPublish,
+  UnsignedPublishError,
 } from './build-config.mjs';
 
 const base = { platform: 'win', arch: 'x64', channel: 'alpha', signed: false, env: {} };
@@ -324,5 +327,54 @@ describe('createBuildConfig', () => {
   it('produces a config for every platform without throwing', () => {
     expect(() => createBuildConfig({ ...base, platform: 'linux', arch: 'x64' })).not.toThrow();
     expect(() => createBuildConfig({ ...base, platform: 'mac', arch: 'universal' })).not.toThrow();
+  });
+});
+
+describe('requestsPublish / assertPublishAllowed', () => {
+  it('recognises every way electron-builder can be asked to upload', () => {
+    expect(requestsPublish(['--publish', 'always'])).toBe(true);
+    expect(requestsPublish(['--publish=onTag'])).toBe(true);
+    expect(requestsPublish(['-p', 'onTagOrDraft'])).toBe(true);
+    expect(requestsPublish(['--win', '--publish'])).toBe(true); // bare flag defaults to onTagOrDraft
+  });
+
+  it('does not treat `--publish never` or a plain build as publishing', () => {
+    expect(requestsPublish(['--publish', 'never'])).toBe(false);
+    expect(requestsPublish(['--publish=never'])).toBe(false);
+    expect(requestsPublish(['--win', '--dir'])).toBe(false);
+  });
+
+  it('refuses to publish an unsigned build by default', () => {
+    expect(() =>
+      assertPublishAllowed({ argv: ['--publish', 'always'], signed: false, platform: 'mac', env: {} }),
+    ).toThrow(UnsignedPublishError);
+  });
+
+  it('names the override in the refusal so the operator knows the escape hatch', () => {
+    expect(() =>
+      assertPublishAllowed({ argv: ['--publish', 'always'], signed: false, platform: 'win', env: {} }),
+    ).toThrow(/ALLOW_UNSIGNED_RELEASE=1/);
+  });
+
+  it('lets a signed build publish, and an unsigned one only with the explicit override', () => {
+    expect(() =>
+      assertPublishAllowed({ argv: ['--publish', 'always'], signed: true, platform: 'mac', env: {} }),
+    ).not.toThrow();
+    expect(() =>
+      assertPublishAllowed({
+        argv: ['--publish', 'always'],
+        signed: false,
+        platform: 'linux',
+        env: { ALLOW_UNSIGNED_RELEASE: '1' },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertPublishAllowed({ argv: ['--publish', 'always'], signed: false, platform: 'linux', env: { ALLOW_UNSIGNED_RELEASE: 'yes' } }),
+    ).toThrow(UnsignedPublishError);
+  });
+
+  it('never blocks a build that does not publish', () => {
+    expect(() => assertPublishAllowed({ argv: ['--publish', 'never'], signed: false, platform: 'mac', env: {} })).not.toThrow();
+    expect(() => assertPublishAllowed({ argv: [], signed: false, platform: 'mac', env: {} })).not.toThrow();
   });
 });

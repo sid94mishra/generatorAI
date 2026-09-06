@@ -261,3 +261,65 @@ describe('StageRunStateMachine — sleeping state (DUR-05)', () => {
     expect(() => sm.transition('sys:wake')).toThrow();
   });
 });
+
+// ────────────────────────────────────────────────────────────────
+// wakeNow — the on-demand half of the wake path.
+//
+// The stage timeline's "Wake now" button was wired to nothing: the whole
+// wake machinery existed but only the timer could trigger it. These cases
+// pin the operator-triggered path and the two ways it declines.
+// ────────────────────────────────────────────────────────────────
+describe('DurableSleepService.wakeNow', () => {
+  function svcFor(repo: ReturnType<typeof createMemoryRepo>, onWake = async () => {}) {
+    return new DurableSleepService(repo, new EventBus(), onWake, {
+      enabled: false, // no sweeper: the timer must not race the explicit wake
+      sweepIntervalMs: 1000,
+      maxWakesPerSweep: 10,
+    });
+  }
+
+  it('wakes a sleeping stage ahead of its wake_at and resumes it', async () => {
+    // Parked six hours out, so the sweeper would never have picked it up.
+    const repo = createMemoryRepo([
+      stubStageRun({ status: 'sleeping', wakeAt: new Date(Date.now() + 6 * 60 * 60 * 1000) }),
+    ]);
+    const resumed: string[] = [];
+    const svc = svcFor(repo, async (stage) => { resumed.push(stage.id); });
+
+    expect(await svc.wakeNow('s1')).toBe('woken');
+    expect(repo.rows.get('s1')!.status).toBe('queued');
+    // Falsy rather than null: the in-memory stub clears the field where the
+    // SQL repository writes NULL. What matters is that the sleep bookkeeping
+    // is gone, so no sweeper can wake the row a second time.
+    expect(repo.rows.get('s1')!.wakeAt).toBeFalsy();
+    expect(resumed).toEqual(['s1']);
+  });
+
+  it('emits stage_run.woken, exactly as an expiry does', async () => {
+    const repo = createMemoryRepo([
+      stubStageRun({ status: 'sleeping', wakeAt: new Date(Date.now() + 60_000) }),
+    ]);
+    const bus = new EventBus();
+    const seen: string[] = [];
+    bus.subscribeGlobal((e) => seen.push(e.kind));
+    const svc = new DurableSleepService(repo, bus, async () => {}, {
+      enabled: false, sweepIntervalMs: 1000, maxWakesPerSweep: 10,
+    });
+
+    await svc.wakeNow('s1');
+    expect(seen).toContain('stage_run.woken');
+  });
+
+  it('declines a stage that is not sleeping', async () => {
+    const repo = createMemoryRepo([stubStageRun({ status: 'running' })]);
+    expect(await svcFor(repo).wakeNow('s1')).toBe('not_sleeping');
+    expect(repo.rows.get('s1')!.status).toBe('running');
+  });
+
+  it('reports not_found for an unknown id, which the repository REJECTS on', async () => {
+    // `getById` returns `Promise<StageRun>` and throws rather than resolving
+    // undefined, so this path is an exception, not a null check.
+    const repo = createMemoryRepo([]);
+    expect(await svcFor(repo).wakeNow('nope')).toBe('not_found');
+  });
+});

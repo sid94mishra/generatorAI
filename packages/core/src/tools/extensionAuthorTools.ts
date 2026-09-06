@@ -338,6 +338,16 @@ export function buildReloadExtensionTool(ctx: ExtensionAuthorContext): ToolDefin
   };
 }
 
+/**
+ * True for the tools in this module. `ChatManagementService` uses it to keep
+ * them out of a conversation unless the bound agent's tool policy grants
+ * `extensionAuthoring` — they hot-load model-written code into the server
+ * process, which is host code execution and never an implicit capability.
+ */
+export function isExtensionAuthorToolName(name: string): boolean {
+  return (EXTENSION_AUTHOR_TOOL_NAMES as readonly string[]).includes(name);
+}
+
 export const EXTENSION_AUTHOR_TOOL_NAMES = [
   'write_extension',
   'reload_extension',

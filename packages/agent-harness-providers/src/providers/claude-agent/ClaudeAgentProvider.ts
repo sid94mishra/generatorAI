@@ -2,14 +2,29 @@
 // ClaudeAgentProvider — IAgentHarness implementation wrapping
 // the Claude Agent SDK (@anthropic-ai/claude-agent-sdk)
 //
-// Key difference from CopilotAdapter: the Claude Agent SDK uses a
-// per-query subprocess model (not a persistent client). Each
-// query() call spawns a Claude Code process, runs the agent loop
-// autonomously, and returns results via async iterator.
+// Two runtime shapes, chosen per call site (item 17 of
+// docs/APPLICATION-REVIEW-2026-09.md):
+//
+//   • Chat (`sendPrompt`) — ONE long-lived streaming-input `query()` per
+//     conversation. The prompt is an async iterable we push each user turn
+//     into, so the CLI process, its MCP servers and its context survive
+//     across messages; Stop is `interrupt()`, model / permission-mode / MCP
+//     changes go through the live setters, and only a change to cwd, system
+//     prompt, tool lists, skills or agents tears the session down (rebuilt
+//     with `resume`). `GENERATORAI_CLAUDE_PERSISTENT_SESSIONS=false` falls
+//     back to one-shot.
+//   • Workflow stages (`sendPromptAndWait`) — one-shot `query({ prompt:
+//     string })`: a single-message conversation in a per-run directory gains
+//     nothing from a persistent process and would only leave one idle.
+//
+// Sessions are bounded (item 16): idle conversations are swept and a
+// least-recently-used cap applies, but a conversation with a turn in
+// flight is never evicted. Event handlers are AWAITED (item 19), so a slow
+// consumer pauses the SDK read loop instead of piling events up.
 //
 // This adapter bridges:
-//   SDK async iterators  →  ICopilotPort callback events
-//   SDK per-query model  →  ICopilotPort session lifecycle
+//   SDK async iterators  →  IAgentHarness callback events
+//   SDK sessions         →  IAgentHarness conversation lifecycle
 //   SDK MCP tools        →  Domain ToolDefinition[]
 // ────────────────────────────────────────────────────────────────
 
@@ -25,7 +40,10 @@
 import type {
   Query,
   Options as ClaudeOptions,
+  SDKMessage,
+  SDKUserMessage,
   SDKControlGetContextUsageResponse as ClaudeContextUsageResponse,
+  WarmQuery,
 } from '@anthropic-ai/claude-agent-sdk';
 import type {
   IAgentHarness,
@@ -40,6 +58,7 @@ import type {
   ConversationWarning,
   HarnessAgentInfo,
   ProviderCapabilities,
+  HarnessRuntimeDiagnostics,
 } from '@generatorai/core';
 import type { HookBridge } from '@generatorai/core';
 import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
@@ -53,7 +72,10 @@ import { lastIterationUsage, mapClaudeAgentMessageToAgentEvents } from './event-
 import { ToolSemaphore, MAX_PARALLEL_TOOLS } from '../../toolSemaphore.js';
 import { mapClaudeToolNameToDomainType } from './permission-map.js';
 import type { AgentHostSupervisor } from '../../AgentHostSupervisor.js';
+import { cancelSemantically, CancellationInFlight } from '../../hardening/semanticCancel.js';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { basename, extname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type {
   ClaudeAgentProviderOptions,
@@ -119,6 +141,203 @@ export async function loadClaudeSdk(): Promise<ClaudeAgentSdk> {
 export function isClaudeSdkLoaded(): boolean {
   return claudeSdk !== null;
 }
+
+/**
+ * Test seam: substitute a fake SDK module (a `query()` that yields scripted
+ * messages) so the session machinery can be driven without a CLI. Pass
+ * `null` to restore lazy loading. Not part of the provider's public API.
+ */
+export function __setClaudeSdkForTests(sdk: Partial<ClaudeAgentSdk> | null): void {
+  claudeSdk = sdk as ClaudeAgentSdk | null;
+  claudeSdkLoading = null;
+}
+
+// ── Item 17 — persistent streaming-input sessions ───────────────
+
+/**
+ * The async iterable a persistent session is opened with. Each user turn is
+ * `push()`ed in; the SDK pulls from it for the lifetime of the session.
+ */
+class AsyncInputQueue<T> implements AsyncIterable<T> {
+  private readonly items: T[] = [];
+  private readonly waiters: Array<(r: IteratorResult<T>) => void> = [];
+  private ended = false;
+
+  push(item: T): void {
+    if (this.ended) return;
+    const waiter = this.waiters.shift();
+    if (waiter) waiter({ value: item, done: false });
+    else this.items.push(item);
+  }
+
+  end(): void {
+    if (this.ended) return;
+    this.ended = true;
+    for (const waiter of this.waiters.splice(0)) {
+      waiter({ value: undefined as unknown as T, done: true });
+    }
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    return {
+      next: (): Promise<IteratorResult<T>> => {
+        const item = this.items.shift();
+        if (item !== undefined) return Promise.resolve({ value: item, done: false });
+        if (this.ended) return Promise.resolve({ value: undefined as unknown as T, done: true });
+        return new Promise((resolve) => this.waiters.push(resolve));
+      },
+      return: (): Promise<IteratorResult<T>> => {
+        this.end();
+        return Promise.resolve({ value: undefined as unknown as T, done: true });
+      },
+    };
+  }
+}
+
+/** One live CLI process serving one conversation across many turns. */
+interface PersistentSession {
+  conversationId: string;
+  query: Query;
+  input: AsyncInputQueue<SDKUserMessage>;
+  /** `sessionFingerprint()` of the options it was opened with. */
+  fingerprint: string;
+  /** What the live setters currently hold, so a turn only calls them on change. */
+  liveModel: string | undefined;
+  livePermissionMode: string | undefined;
+  liveMcpKey: string;
+  /** The SDK's own session id, captured from `system/init`; drives `resume`. */
+  sdkSessionId: string | undefined;
+  closed: boolean;
+  reader: Promise<void>;
+}
+
+/**
+ * Per-turn bookkeeping shared by the persistent and one-shot paths, so the
+ * message handling, truncation guard, transcript accumulation and permit
+ * release exist exactly once.
+ */
+interface TurnState {
+  conversationId: string;
+  activeQuery: ActiveQuery;
+  startedAt: number;
+  fullContent: string;
+  pendingToolNames: string[];
+  truncationStopReason?: string;
+  releaseExecution?: () => void;
+  /** Set by Stop. Everything the runtime sends afterwards is discarded. */
+  aborted: boolean;
+  cancellation?: CancellationInFlight;
+  settled: boolean;
+  /** Resolves when the turn has reached a terminal state, however it got there. */
+  done: Promise<void>;
+  settle: () => void;
+}
+
+/**
+ * The options that have NO live setter in the installed SDK (0.3.220) and
+ * therefore force a session rebuild when they change: cwd, system prompt,
+ * tool lists, skills, agents, env, effort and budgets. Model, permission mode
+ * and MCP servers are deliberately absent — those go through `setModel`,
+ * `setPermissionMode` and `setMcpServers` on the live session.
+ */
+/** Above this an image costs more than it informs; the model reads the file instead. */
+const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * How long a speculative pre-warm waits for the CLI's initialize handshake
+ * before giving up. The SDK's own default is 60 s, which is far too patient
+ * for work nobody is waiting on.
+ */
+const PREWARM_INITIALIZE_TIMEOUT_MS = 30_000;
+
+/**
+ * Memory bounds for persistent sessions. Each live session is a ~230 MB
+ * `claude` CLI process, so these defaults ARE the memory budget:
+ *
+ *   - `DEFAULT_MAX_LIVE_SESSIONS` was 32 (= 7.4 GB of processes) while the
+ *     turn permit (`GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`) defaults to 4.
+ *     Eight is twice the permit: enough that a user flipping between a few
+ *     chats keeps them warm, small enough that a busy server tops out near
+ *     1.8 GB of CLI processes.
+ *   - `DEFAULT_SESSION_IDLE_MINUTES` was 30. An abandoned chat should not hold
+ *     230 MB for half an hour; resuming after ten minutes costs one cold
+ *     start, which the pre-warm path already amortises.
+ *
+ * Override with `GENERATORAI_CLAUDE_MAX_LIVE_SESSIONS` and
+ * `GENERATORAI_CLAUDE_SESSION_IDLE_MINUTES`.
+ */
+const DEFAULT_MAX_LIVE_SESSIONS = 8;
+const DEFAULT_SESSION_IDLE_MINUTES = 10;
+
+/** In-memory transcript copy kept per conversation (see `pushMessage`). */
+const MAX_TRANSCRIPT_MESSAGES = 400;
+
+/**
+ * `ping()` reports unhealthy after this many consecutive failed turns — the
+ * same threshold the circuit breaker in `sendPrompt` uses, so health goes red
+ * at the moment the adapter starts refusing work instead of never.
+ */
+const PING_UNHEALTHY_AFTER_FAILURES = 3;
+
+function sessionFingerprint(options: ClaudeOptions): string {
+  const o = options as unknown as Record<string, unknown>;
+  const hooks = (o['hooks'] as Record<string, unknown[] | undefined> | undefined) ?? {};
+  return JSON.stringify({
+    cwd: o['cwd'],
+    systemPrompt: o['systemPrompt'],
+    tools: o['tools'],
+    allowedTools: o['allowedTools'],
+    disallowedTools: o['disallowedTools'],
+    skills: o['skills'],
+    agent: o['agent'],
+    agents: o['agents'],
+    effort: o['effort'],
+    maxTurns: o['maxTurns'],
+    maxBudgetUsd: o['maxBudgetUsd'],
+    env: o['env'],
+    settingSources: o['settingSources'],
+    enableFileCheckpointing: o['enableFileCheckpointing'],
+    includePartialMessages: o['includePartialMessages'],
+    includeHookEvents: o['includeHookEvents'],
+    planModeInstructions: o['planModeInstructions'],
+    allowDangerouslySkipPermissions: o['allowDangerouslySkipPermissions'],
+    canUseTool: typeof o['canUseTool'] === 'function',
+    hooks: Object.keys(hooks).sort().map((k) => `${k}:${hooks[k]?.length ?? 0}`),
+    executable: o['pathToClaudeCodeExecutable'],
+  });
+}
+
+/**
+ * Identity of the MCP server SET, by name and transport. In-process SDK
+ * servers (`type: 'sdk'`) carry a live `instance` whose identity changes on
+ * every rebind, so they are keyed by name alone; the tool NAMES they expose
+ * are already part of `allowedTools` and therefore of the session fingerprint.
+ */
+function mcpFingerprint(servers: Record<string, unknown> | undefined): string {
+  if (!servers) return '';
+  return JSON.stringify(
+    Object.keys(servers)
+      .sort()
+      .map((name) => {
+        const s = (servers[name] ?? {}) as Record<string, unknown>;
+        return [name, s['type'], s['command'], s['args'], s['url']];
+      }),
+  );
+}
+
+/** Image attachments become content blocks; anything else is referenced by path. */
+const IMAGE_MEDIA_TYPES: Record<string, 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+};
+
+type UserContentBlock = Exclude<SDKUserMessage['message']['content'], string>[number];
+
+/** Bound on remembered session ids for evicted conversations (item 16). */
+const REMEMBERED_SESSION_IDS_MAX = 512;
 
 /**
  * Locate the user's installed Claude Code CLI.
@@ -368,7 +587,62 @@ export class ClaudeAgentProvider implements IAgentHarness {
   // ── Internal State ──
   private conversations = new Map<string, StoredConversationConfig>();
   private activeQueries = new Map<string, ActiveQuery>();
-  private conversationEventHandlers = new Map<string, Set<(event: AgentEvent) => void>>();
+  /**
+   * Item 19 — handlers may be async, and they are AWAITED. A handler that
+   * persists the event (ChatManagementService → EventBus → SQLite) returns
+   * its promise, and `emitEventToHandlers` does not move on until it settles,
+   * so the SDK message loop behind it pauses too. Before this the type was
+   * `=> void` and the promise was structurally unreachable — the queue grew
+   * and the transcript fell progressively behind the model on long answers.
+   */
+  private conversationEventHandlers = new Map<string, Set<(event: AgentEvent) => void | Promise<void>>>();
+  /** Item 17 — one live streaming-input session per chat conversation. */
+  private readonly sessions = new Map<string, PersistentSession>();
+  /** The turn in flight per conversation, for BOTH runtime modes. */
+  private readonly turns = new Map<string, TurnState>();
+  /**
+   * Item 16 — SDK session ids of conversations the sweep or the LRU cap
+   * evicted. `createConversation` for such a conversation resumes from here
+   * when the caller cannot supply `resumeProviderSessionId`, so eviction never
+   * costs the model its history — only its process. Bounded FIFO.
+   */
+  private readonly evictedSessionIds = new Map<string, string>();
+  private readonly persistentSessions: boolean;
+  /**
+   * Conversations pre-warmed by `prewarmConversation` but not yet used.
+   *
+   * The SDK's `startup()` spawns the CLI and completes the initialize
+   * handshake without a prompt; `WarmQuery.query()` then attaches the input
+   * queue to an already-ready process. Measured, that turns a 12.8 s first
+   * turn into ~3 s.
+   *
+   * The stored fingerprint is what makes this safe: if the first turn's
+   * options differ structurally from what we warmed with, the handle is
+   * closed and the session is built the old way rather than running against
+   * options the process does not actually have.
+   */
+  /**
+   * Pre-spawned sessions waiting for their first prompt.
+   *
+   * `built` records the options the handle was actually CONSTRUCTED with.
+   * `sessionFingerprint` deliberately omits `model`, `permissionMode` and
+   * `mcpServers` because a live session can be switched between them with
+   * setters — but those setters only exist on a Query, which does not exist
+   * until `warm.query(input)` starts the turn. So for a warm handle they are
+   * construction-time after all, and a turn that needs different values must
+   * not claim it.
+   */
+  private readonly warmSessions = new Map<
+    string,
+    {
+      warm: WarmQuery;
+      fingerprint: string;
+      built: { permissionMode?: string; model?: string; mcpKey: string };
+    }
+  >();
+  private readonly sessionIdleMs: number;
+  private readonly maxLiveConversations: number;
+  private sweepTimer: ReturnType<typeof setInterval> | undefined;
   private conversationListenerCleanups = new Map<string, Set<() => void>>();
   private conversationLeakWarned = new Set<string>();
   private clientEventHandlers = new Set<(event: HarnessClientEvent) => void>();
@@ -395,9 +669,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
   private readonly toolSemaphore = new ToolSemaphore(MAX_PARALLEL_TOOLS);
 
   /**
-   * W12 / P0-14 — optional supervisor gating concurrent turns.
-   * When set, each `sendPromptAndWait` acquires one execution slot before
-   * spawning a `query()`, preventing unbounded concurrent process launches.
+   * W12 / P0-14 / item 4 — optional supervisor gating concurrent turns.
+   * When set, EVERY turn (`sendPrompt` and `sendPromptAndWait`) acquires one
+   * execution slot before it starts and releases it when it settles, so the
+   * number of concurrently running CLI turns is bounded on the chat path too.
+   * See `acquireTurnPermit`.
    */
   private readonly supervisor: AgentHostSupervisor | undefined;
 
@@ -439,8 +715,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * fail-closed `PreToolUse` policy. Callers that do NOT set it get an honest
    * `false` rather than the unconditional `true` this provider used to claim.
    *
-   * Takes effect on the NEXT turn of every conversation — options are rebuilt
-   * per `sendPrompt`, so already-open conversations are covered too.
+   * Takes effect on the NEXT tool call of every conversation — the installed
+   * `PreToolUse` hook reads `this.defaultToolGate` when it fires rather than
+   * capturing it when the hook is built, so a persistent session opened
+   * before this was called is covered without a rebuild.
    */
   setDefaultToolGate(gate: PreToolUseGate | undefined): void {
     this.defaultToolGate = gate;
@@ -455,8 +733,23 @@ export class ClaudeAgentProvider implements IAgentHarness {
     this.supervisor = options.supervisor;
     this.verbose = options.verbose ?? (process.env['GENERATORAI_LOG_LEVEL'] === 'debug');
     this.cliPath = resolveClaudeCliPath(options.cliPath);
+    // Item 17 kill switch — default ON.
+    const persistentEnv = process.env['GENERATORAI_CLAUDE_PERSISTENT_SESSIONS'];
+    this.persistentSessions =
+      options.persistentSessions ?? !(persistentEnv === 'false' || persistentEnv === '0');
+    // Item 16 bounds.
+    const idleMinutes = Number(process.env['GENERATORAI_CLAUDE_SESSION_IDLE_MINUTES'] ?? DEFAULT_SESSION_IDLE_MINUTES);
+    this.sessionIdleMs =
+      options.sessionIdleMs ?? (Number.isFinite(idleMinutes) ? Math.max(0, idleMinutes) * 60_000 : DEFAULT_SESSION_IDLE_MINUTES * 60_000);
+    const maxLive = Number(process.env['GENERATORAI_CLAUDE_MAX_LIVE_SESSIONS'] ?? DEFAULT_MAX_LIVE_SESSIONS);
+    this.maxLiveConversations =
+      options.maxLiveConversations ?? (Number.isFinite(maxLive) && maxLive > 0 ? maxLive : DEFAULT_MAX_LIVE_SESSIONS);
     if (this.verbose) {
-      console.log(`[ClaudeAgentAdapter] CLI: ${this.cliPath ?? '(SDK bundled)'}`);
+      console.log(
+        `[ClaudeAgentAdapter] CLI: ${this.cliPath ?? '(SDK bundled)'}; ` +
+          `sessions=${this.persistentSessions ? 'persistent' : 'one-shot'} ` +
+          `idle=${this.sessionIdleMs}ms max=${this.maxLiveConversations}`,
+      );
     }
   }
 
@@ -480,33 +773,43 @@ export class ClaudeAgentProvider implements IAgentHarness {
     return withSpan('claude-agent-bridge', 'claude_agent.initialize', async () => {
       this.clientState = 'running';
       this.emitClientEvent({ type: 'client.started' });
-      if (this.verbose) console.log('[ClaudeAgentAdapter] Initialized (stateless per-query model)');
+      if (this.verbose) {
+        console.log(
+          `[ClaudeAgentAdapter] Initialized (${this.persistentSessions ? 'persistent session per chat' : 'one-shot query per turn'})`,
+        );
+      }
     });
   }
 
   async stop(): Promise<void> {
     return withSpan('claude-agent-bridge', 'claude_agent.stop', async () => {
-      // Abort all active queries
-      for (const [, aq] of this.activeQueries) {
-        aq.abortController.abort();
-        aq.closeHandle?.();
-        aq.status = 'aborted';
-      }
-      this.activeQueries.clear();
+      this.stopAllTurnsAndSessions();
       this.clientState = 'stopped';
       this.emitClientEvent({ type: 'client.stopped' });
     });
   }
 
   async forceStop(): Promise<void> {
+    this.stopAllTurnsAndSessions();
+    this.clientState = 'stopped';
+    this.emitClientEvent({ type: 'client.stopped', data: { message: 'Force stopped' } });
+  }
+
+  /** Abort every turn in flight and close every live session. */
+  private stopAllTurnsAndSessions(): void {
+    for (const turn of [...this.turns.values()]) {
+      turn.aborted = true;
+      void this.completeTurn(turn, 'aborted');
+    }
     for (const [, aq] of this.activeQueries) {
       aq.abortController.abort();
       aq.closeHandle?.();
       aq.status = 'aborted';
     }
     this.activeQueries.clear();
-    this.clientState = 'stopped';
-    this.emitClientEvent({ type: 'client.stopped', data: { message: 'Force stopped' } });
+    for (const session of [...this.sessions.values()]) {
+      void this.closeSession(session, 'provider stopped');
+    }
   }
 
   private consecutiveFailCount = 0;
@@ -520,17 +823,31 @@ export class ClaudeAgentProvider implements IAgentHarness {
   }
 
   async ping(): Promise<boolean> {
-    // Claude Agent SDK is stateless — we can't ping. Return true if initialized.
-    return this.clientState === 'running';
+    // There is no cheap liveness probe on the control channel that does not
+    // itself cost a CLI round-trip. What CAN be said without spawning: the
+    // adapter is started, the CLI it pinned still exists on disk (an
+    // uninstall or an update that moved it mid-life), and turns are not
+    // failing back to back. Before this it returned a state string that was
+    // `true` from boot to shutdown whatever the CLI did.
+    if (this.clientState !== 'running') return false;
+    if (this.cliPath && !existsSync(this.cliPath)) return false;
+    return this.consecutiveFailCount < PING_UNHEALTHY_AFTER_FAILURES;
   }
 
   async shutdown(): Promise<void> {
     await this.stop();
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = undefined;
+    }
     this.conversations.clear();
     this.conversationMessages.clear();
     this.conversationEventHandlers.clear();
     this.conversationListenerCleanups.clear();
     this.clientEventHandlers.clear();
+    this.sessions.clear();
+    this.turns.clear();
+    this.evictedSessionIds.clear();
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -585,6 +902,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // MINOR-4 fix: computerUse must be explicitly declared (L9 fail-closed).
       // Claude supports the native computer_use tool via its SDK.
       computerUse: true,
+      // Only in persistent-session mode: one-shot queries build and discard a
+      // process per turn, so there is nothing for a warm handle to be reused by.
+      prewarm: this.persistentSessions,
     };
   }
 
@@ -619,7 +939,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * it reflects enterprise policy and model availability. Probing costs a
    * CLI round-trip (~10s cold), hence the cache.
    */
-  private modelCache: { models: HarnessModel[]; at: number } | null = null;
+  private modelCache: { rows: Array<{ model: HarnessModel; resolvedModel?: string }>; at: number } | null = null;
   private modelProbeInFlight: Promise<HarnessModel[]> | null = null;
   private static readonly MODEL_CACHE_TTL_MS = 5 * 60_000;
 
@@ -634,7 +954,17 @@ export class ClaudeAgentProvider implements IAgentHarness {
    */
   private observedModelLimits = new Map<string, { contextWindow?: number; maxOutputTokens?: number }>();
 
-  /** Record limits seen in a `result` message so the catalog can self-correct. */
+  /**
+   * Record limits seen in a `result` message so the catalog can self-correct.
+   *
+   * Item 24 — this must NOT invalidate `modelCache`. It used to, on every
+   * turn that carried `modelUsage` (i.e. nearly every turn), so in an active
+   * chat the "5-minute" catalog cache was dropped almost every message and the
+   * next `getModels()` paid the ~10 s CLI probe again. The catalog (aliases,
+   * names, capabilities) does not change when a limit is observed; only the
+   * derived numbers do, and those are applied as an overlay at read time by
+   * `probeModels`, so the cache stays valid for its full TTL.
+   */
   private recordObservedLimits(message: unknown): void {
     const modelUsage = (message as { modelUsage?: Record<string, unknown> }).modelUsage;
     if (!modelUsage) return;
@@ -647,8 +977,6 @@ export class ClaudeAgentProvider implements IAgentHarness {
         ...(typeof u.contextWindow === 'number' ? { contextWindow: u.contextWindow } : {}),
         ...(typeof u.maxOutputTokens === 'number' ? { maxOutputTokens: u.maxOutputTokens } : {}),
       });
-      // The catalog is now stale — let the next getModels() re-derive limits.
-      this.modelCache = null;
     }
   }
 
@@ -740,9 +1068,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
   /** The real probe. May throw; only {@link getModels} calls it. */
   private async probeModels(): Promise<HarnessModel[]> {
+    // The cache holds the CLI's catalog as probed; observed limits are laid
+    // over it on every read so a fresh `result` corrects the numbers without
+    // costing a re-probe (item 24).
+    const overlay = (rows: Array<{ model: HarnessModel; resolvedModel?: string }>): HarnessModel[] =>
+      rows.map((r) => this.applyObservedLimits(r.model, r.resolvedModel));
+
     const cached = this.modelCache;
     if (cached && Date.now() - cached.at < ClaudeAgentProvider.MODEL_CACHE_TTL_MS) {
-      return cached.models;
+      return overlay(cached.rows);
     }
     // Coalesce concurrent probes — several UI surfaces can ask at once and a
     // cold probe is slow enough that they would otherwise stack up.
@@ -750,16 +1084,14 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
     this.modelProbeInFlight = this.withControlSession(async (q) => {
       const sdkModels = await q.supportedModels();
-      return sdkModels.map((m) =>
-        this.applyObservedLimits(
-          mapClaudeModelInfo(m),
-          (m as unknown as { resolvedModel?: string }).resolvedModel,
-        ),
-      );
+      return sdkModels.map((m) => ({
+        model: mapClaudeModelInfo(m),
+        resolvedModel: (m as unknown as { resolvedModel?: string }).resolvedModel,
+      }));
     })
-      .then((models) => {
-        this.modelCache = { models, at: Date.now() };
-        return models;
+      .then((rows) => {
+        this.modelCache = { rows, at: Date.now() };
+        return overlay(rows);
       })
       .finally(() => {
         this.modelProbeInFlight = null;
@@ -921,14 +1253,29 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // recycle reads it off the outgoing adapter and passes it in
       // `resumeProviderSessionId`). Honouring it is the difference between the
       // chat continuing and the model silently restarting with no history.
+      //
+      // Item 16: a conversation this adapter EVICTED (idle sweep / LRU cap)
+      // left its session id in `evictedSessionIds`, so a caller that simply
+      // re-creates it gets its history back without knowing anything happened.
       const previous = this.conversations.get(params.conversationId);
       const nextModel = params.model ?? this.options.defaultModel;
       const modelChanged = !!previous && previous.model !== nextModel;
+      const remembered = this.evictedSessionIds.get(params.conversationId);
+      this.evictedSessionIds.delete(params.conversationId);
       const resumeSessionId = previous
         ? modelChanged
           ? undefined
           : previous.sdkSessionId
-        : params.resumeProviderSessionId;
+        : (params.resumeProviderSessionId ?? remembered);
+
+      // Item 16 — bound the number of live conversations BEFORE admitting a
+      // new one. Only idle conversations are candidates; if every one is
+      // mid-turn the cap is exceeded rather than a turn killed.
+      if (!previous) {
+        while (this.conversations.size >= this.maxLiveConversations) {
+          if (!this.evictLruConversation(params.conversationId)) break;
+        }
+      }
       const config: StoredConversationConfig = {
         conversationId: params.conversationId,
         model: nextModel,
@@ -967,6 +1314,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         onQuestionRequest: params.onQuestionRequest,
         planModeInstructions: params.planModeInstructions,
         ...(resumeSessionId ? { sdkSessionId: resumeSessionId } : {}),
+        lastUsedAt: Date.now(),
       };
 
       this.conversations.set(params.conversationId, config);
@@ -978,6 +1326,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         this.conversationMessages.set(params.conversationId, []);
       }
       if (!previous) activeSessions.add(1);
+      this.startSweeper();
 
       if (this.verbose) {
         const what = !previous ? 'Created' : modelChanged ? 'Rebound (new session, model changed)' : 'Rebound';
@@ -1026,13 +1375,17 @@ export class ClaudeAgentProvider implements IAgentHarness {
     }
 
     // Create a minimal config for resumed sessions (no tools available).
+    const remembered = this.evictedSessionIds.get(conversationId);
+    this.evictedSessionIds.delete(conversationId);
     this.conversations.set(conversationId, {
       conversationId,
       model: this.options.defaultModel,
       workingDirectory: this.options.defaultCwd,
       permissionMode: this.options.defaultPermissionMode ?? 'bypassPermissions',
-      sdkSessionId: conversationId,
+      sdkSessionId: remembered ?? conversationId,
+      lastUsedAt: Date.now(),
     });
+    this.startSweeper();
 
     if (this.verbose) console.log(`[ClaudeAgentAdapter] Resumed conversation ${conversationId} (minimal, no tools)`);
   }
@@ -1040,6 +1393,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
   /** Whether the conversation is live in memory (tool handlers registered). */
   hasLiveConversation(conversationId: string): boolean {
     return this.conversations.has(conversationId);
+  }
+
+  runtimeDiagnostics(): HarnessRuntimeDiagnostics {
+    return {
+      liveConversations: this.conversations.size,
+      liveSessions: this.sessions.size,
+      warmSessions: this.warmSessions.size,
+      maxLiveSessions: this.maxLiveConversations,
+    };
   }
 
   /**
@@ -1106,10 +1468,19 @@ export class ClaudeAgentProvider implements IAgentHarness {
   // Messaging
   // ══════════════════════════════════════════════════════════════
 
+  /**
+   * The chat path. Resolves once the turn has been HANDED to the runtime (not
+   * when it completes) — events arrive through `onConversationEvent`.
+   *
+   * Persistent mode (default): the user message is pushed into the
+   * conversation's long-lived session, reopened (with `resume`) only when a
+   * construction-time option changed. One-shot mode: a fresh `query()` per
+   * call, as before.
+   */
   async sendPrompt(
     conversationId: string,
     prompt: string,
-    _attachments?: AttachmentRef[],
+    attachments?: AttachmentRef[],
     turnOptions?: SendPromptOptions,
   ): Promise<void> {
     const start = Date.now();
@@ -1119,21 +1490,29 @@ export class ClaudeAgentProvider implements IAgentHarness {
       promptCounter.add(1, { conversation_id: conversationId });
 
       const config = this.getConversationConfig(conversationId);
+      config.lastUsedAt = Date.now();
 
-      // Emit user_message event
-      this.emitToHandlers(conversationId, 'harness.user_message', { content: prompt });
+      // One turn at a time per conversation. A persistent session would
+      // happily queue a second user message behind the first, but the turn
+      // bookkeeping (permit, plan phase, transcript accumulation) is per
+      // conversation, so a second turn waits for the first to settle.
+      const inFlight = this.turns.get(conversationId);
+      if (inFlight) await inFlight.done;
 
-      // Store user message
+      await this.emitToHandlers(conversationId, 'harness.user_message', { content: prompt });
       this.pushMessage(conversationId, { role: 'user', content: prompt, timestamp: new Date() });
 
-      // Build query options
-      const options = this.buildQueryOptions(config, turnOptions);
+      const persistent = this.persistentSessions;
+      const options = this.buildQueryOptions(config, turnOptions, { persistent });
 
       // PLN-01 — arm the plan phase for this turn.
       this.beginPlanTurn(conversationId, turnOptions);
 
-      // Fire and forget — run query in background
-      const abortController = new AbortController();
+      // Item 4 — the chat path holds an execution permit for the whole turn,
+      // exactly like `sendPromptAndWait` always did. Acquired BEFORE anything
+      // is spawned or pushed, and announced to the user if it has to wait.
+      const releaseExecution = await this.acquireTurnPermit(conversationId);
+
       // W13-B1 — a turn starts un-truncated. Without this the latch set by a
       // previous truncated turn would persist and refuse every tool for the
       // rest of the conversation.
@@ -1146,38 +1525,63 @@ export class ClaudeAgentProvider implements IAgentHarness {
       const activeQuery: ActiveQuery = {
         queryId: crypto.randomUUID(),
         conversationId,
-        abortController,
+        abortController: new AbortController(),
         status: 'running',
       };
       this.activeQueries.set(conversationId, activeQuery);
+      const turn = this.beginTurn(conversationId, activeQuery, start, releaseExecution);
 
-      // Start the query iterator in the background
-      this.runQueryInBackground(conversationId, prompt, options, activeQuery, start).catch((err) => {
-        if (this.verbose) console.error(`[ClaudeAgentAdapter] Background query error for ${conversationId}:`, err);
-      });
+      if (!persistent) {
+        // One-shot fallback: a string prompt cannot carry content blocks, so
+        // attachments are referenced by path (the model has file tools).
+        const oneShotPrompt = this.describeAttachmentsInline(prompt, attachments);
+        this.runQueryInBackground(conversationId, oneShotPrompt, options, turn).catch((err) => {
+          if (this.verbose) console.error(`[ClaudeAgentAdapter] Background query error for ${conversationId}:`, err);
+        });
+        return;
+      }
+
+      try {
+        const session = await this.ensureSession(conversationId, config, options);
+        // `closeHandle` is what stop()/cleanup reach for to kill the process.
+        activeQuery.closeHandle = () => {
+          void this.closeSession(session, 'turn handle closed');
+        };
+        session.input.push(await this.buildUserMessage(prompt, attachments, session.sdkSessionId));
+      } catch (err) {
+        await this.failTurn(turn, err);
+      }
     });
   }
 
+  /**
+   * The workflow-stage path. Deliberately one-shot regardless of
+   * `persistentSessions`: a stage is a single-message conversation in a
+   * per-run directory, so a persistent process would gain nothing and leave
+   * an idle CLI behind (APPLICATION-REVIEW-2026-09, item 17 open question 2).
+   */
   async sendPromptAndWait(
     conversationId: string,
-    prompt: string,
-    _attachments?: AttachmentRef[],
+    rawPrompt: string,
+    attachments?: AttachmentRef[],
     signal?: AbortSignal,
     turnOptions?: SendPromptOptions,
   ): Promise<ConversationResponse> {
     const start = Date.now();
     return withSpan('claude-agent-bridge', 'claude_agent.sendPromptAndWait', async (span) => {
       span.setAttribute('claude_agent.conversation_id', conversationId);
-      span.setAttribute('claude_agent.prompt.length', prompt.length);
+      span.setAttribute('claude_agent.prompt.length', rawPrompt.length);
       promptCounter.add(1, { conversation_id: conversationId });
 
       const config = this.getConversationConfig(conversationId);
+      config.lastUsedAt = Date.now();
+      const prompt = this.describeAttachmentsInline(rawPrompt, attachments);
 
       // Emit user_message event
-      this.emitToHandlers(conversationId, 'harness.user_message', { content: prompt });
+      await this.emitToHandlers(conversationId, 'harness.user_message', { content: rawPrompt });
 
       // Store user message
-      this.pushMessage(conversationId, { role: 'user', content: prompt, timestamp: new Date() });
+      this.pushMessage(conversationId, { role: 'user', content: rawPrompt, timestamp: new Date() });
 
       // Build query options
       const options = this.buildQueryOptions(config, turnOptions);
@@ -1256,14 +1660,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
       // W12 / P0-14 — acquire one execution slot from the supervisor before
       // spawning the query() process. This caps concurrent CLI spawns to
-      // `maxConcurrentExecutions` (default 16). When the semaphore is full,
-      // new turns queue here rather than spawning unboundedly.
-      let releaseExecution: (() => void) | undefined;
-      if (this.supervisor) {
-        releaseExecution = await this.supervisor.acquireExecution();
-        this.supervisor.registerInstance(conversationId, conversationId);
-        this.supervisor.markInUse(conversationId);
-      }
+      // `maxConcurrentExecutions` (default 4). When the semaphore is full the
+      // turn queues here — visibly, via `harness.session_info`/`queued`.
+      const releaseExecution = await this.acquireTurnPermit(conversationId);
 
       try {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Sending prompt to ${conversationId} (${prompt.length} chars)`);
@@ -1283,10 +1682,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
           // so an actively-streaming agent won't be killed no matter how
           // long the total run takes.
           lastActivityMs = Date.now();
-          // Map to domain events and emit to handlers
+          // Map to domain events and emit to handlers. AWAITED (item 19): a
+          // slow consumer pauses this loop, and the SDK's reader behind it.
           const events = mapClaudeAgentMessageToAgentEvents(message);
           for (const event of events) {
-            this.emitEventToHandlers(conversationId, event);
+            await this.emitEventToHandlers(conversationId, event);
           }
 
           // Accumulate content
@@ -1350,8 +1750,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
           }
           for (const tc of toolCalls) {
             // Use harness.tool_complete with success:false — there is no
-          // harness.tool_error kind; tool failures are signalled via complete+false.
-          /* W13-B1 */ this.emitToHandlers(conversationId, 'harness.tool_complete', {
+            // harness.tool_error kind; tool failures are signalled via complete+false.
+            /* W13-B1 */ await this.emitToHandlers(conversationId, 'harness.tool_complete', {
               tool: tc.tool,
               result: { error: truncMsg, truncated: true },
               success: false,
@@ -1397,13 +1797,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
         throw err;
       } finally {
         this.activeQueries.delete(conversationId);
+        config.lastUsedAt = Date.now();
         if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
         if (timeoutHandle) clearInterval(timeoutHandle);
         // W12 / P0-14 — release the execution slot so the next queued turn can start.
-        if (releaseExecution) {
-          this.supervisor?.markIdle(conversationId);
-          releaseExecution();
-        }
+        releaseExecution?.();
       }
     });
   }
@@ -1413,13 +1811,38 @@ export class ClaudeAgentProvider implements IAgentHarness {
     return this.conversationMessages.get(conversationId) ?? [];
   }
 
+  /**
+   * Stop the turn in flight.
+   *
+   * One-shot turns: the process IS the turn, so the handle is closed.
+   *
+   * Persistent sessions run the W13 ladder from `semanticCancel.ts` —
+   * settle → local interrupt → `query.interrupt()` in the background → grace
+   * budget → escalate. The escalation is where this adapter knowingly departs
+   * from that module's no-kill rule: the runtime here is one CLI process
+   * serving exactly one conversation, not a shared pool, so closing it after
+   * an unacknowledged interrupt takes nobody else down. The next turn simply
+   * reopens the session with `resume`.
+   *
+   * The user-visible outcome (`harness.cancelled` + `harness.idle`) is emitted
+   * at the local-interrupt step, immediately; whatever the runtime sends after
+   * that for the aborted turn is discarded, and its eventual `result` is the
+   * acknowledgement that keeps the session alive.
+   */
   async abortConversation(conversationId: string): Promise<void> {
-    const aq = this.activeQueries.get(conversationId);
-    if (aq) {
+    const turn = this.turns.get(conversationId);
+    const aq = turn?.activeQuery ?? this.activeQueries.get(conversationId);
+    if (!aq) return;
+    const session = this.sessions.get(conversationId);
+
+    const stopLocally = async (): Promise<void> => {
+      if (turn) turn.aborted = true;
       aq.abortController.abort();
-      aq.closeHandle?.();
       aq.status = 'aborted';
       this.activeQueries.delete(conversationId);
+      // One-shot: closing the handle ends the process, which ends the turn.
+      // Persistent: the process must survive — the interrupt below ends the turn.
+      if (!session) aq.closeHandle?.();
 
       // W13 / X-4 — emit a semantic 'cancelled' outcome, NOT an error.
       //
@@ -1428,12 +1851,48 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // success-valued terminal event: downstream state machines treat it as
       // a clean stop (pending approvals settle, the run records 'cancelled'
       // rather than 'failed', and the UI renders a neutral "Stopped" badge).
-      this.emitToHandlers(conversationId, 'harness.cancelled', {
+      await this.emitToHandlers(conversationId, 'harness.cancelled', {
         reason: 'user_abort',
         provider: 'claude-agent',
       });
-      this.emitEventToHandlers(conversationId, createAgentEvent('harness.idle', {} as Record<string, never>));
+      await this.emitEventToHandlers(conversationId, createAgentEvent('harness.idle', {} as Record<string, never>));
+    };
+
+    if (!session || !turn) {
+      await stopLocally();
+      return;
     }
+
+    const inFlight = new CancellationInFlight();
+    turn.cancellation = inFlight;
+    let localStop: Promise<void> = Promise.resolve();
+    void cancelSemantically(
+      {
+        // Permission prompts parked in `canUseTool` are settled by the CLI
+        // itself when the turn is interrupted; report how many were open.
+        settlePending: () => this.permissionPending.get(conversationId) ?? 0,
+        interrupt: () => {
+          localStop = stopLocally();
+        },
+        protocolCancel: () => session.query.interrupt().then(() => undefined),
+        // The grace budget expired without a `result` for the aborted turn:
+        // the CLI is wedged. Close it — see the method doc for why a close is
+        // legitimate here and not for the shared runtimes semanticCancel.ts
+        // was written for. The reader loop settles the turn as 'aborted'.
+        synthesiseTerminal: () => {
+          void this.closeSession(session, 'interrupt not acknowledged within grace budget');
+        },
+      },
+      inFlight,
+      { graceMs: this.options.cancelGraceMs },
+    ).then((outcome) => {
+      if (this.verbose) {
+        console.log(
+          `[ClaudeAgentAdapter] Stop for ${conversationId}: terminal=${outcome.terminal} after ${outcome.graceElapsedMs}ms`,
+        );
+      }
+    });
+    await localStop;
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -1442,7 +1901,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
   onConversationEvent(
     conversationId: string,
-    handler: (event: AgentEvent) => void,
+    handler: (event: AgentEvent) => void | Promise<void>,
   ): () => void {
     // Must have the conversation (or at least be tracking it)
     let handlers = this.conversationEventHandlers.get(conversationId);
@@ -1635,25 +2094,33 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * Policy precedence: the conversation's own bridge → the provider-level
    * default (`setDefaultToolGate`) → DEFER (see `preToolUseHandler`).
    */
-  private buildConversationHooks(config: StoredConversationConfig): ClaudeOptions['hooks'] {
+  private buildConversationHooks(
+    config: StoredConversationConfig,
+    persistent = false,
+  ): ClaudeOptions['hooks'] {
     const bridge = (config.hooks as HookBridge | undefined) ?? {};
     const hooks = { ...(this.buildClaudeHooks(bridge) as unknown as Record<string, unknown[]>) };
     if (!hooks['PreToolUse']) {
-      hooks['PreToolUse'] = wrapClaudeHook(this.preToolUseHandler(this.defaultToolGate));
+      // The default gate is read when the hook FIRES, not captured here: a
+      // persistent session keeps these hooks for its whole life, and
+      // `setDefaultToolGate()` after it opened must still apply to it.
+      hooks['PreToolUse'] = wrapClaudeHook((input) => this.preToolUseHandler(this.defaultToolGate)(input));
     }
-    // Pin SDK subagents to the foreground — always installed, alongside the
-    // policy gate (a deny from the gate still wins; this only rewrites input).
+    // ONE-SHOT ONLY: pin SDK subagents to the foreground, alongside the policy
+    // gate (a deny from the gate still wins; this only rewrites input).
     //
     // The SDK's `Agent` tool runs subagents in the background BY DEFAULT
-    // (`run_in_background` defaults to true). This provider spawns one CLI
-    // process per turn and that process exits when the turn's `result`
-    // arrives, so a "background" subagent silently evaporates: observed live
-    // (2026-09-01) as "Async agent launched successfully" followed by a turn
-    // that ended with the model promising results that could never come.
-    // Foreground subagents block the turn until they finish, which is the
-    // only semantics a per-turn process can honour. (Platform-level
-    // background work goes through spawn_background_agent instead, which
-    // outlives the process by design.)
+    // (`run_in_background` defaults to true). A one-shot CLI process exits
+    // when the turn's `result` arrives, so a "background" subagent silently
+    // evaporates: observed live (2026-09-01) as "Async agent launched
+    // successfully" followed by a turn that ended with the model promising
+    // results that could never come. Foreground subagents block the turn
+    // until they finish, which is the only semantics a per-turn process can
+    // honour. A persistent session outlives the turn, so it keeps the SDK's
+    // native background subagents (item 17: one of the workarounds streaming
+    // mode deletes). Platform-level background work goes through
+    // spawn_background_agent in both modes.
+    if (persistent) return hooks as ClaudeOptions['hooks'];
     (hooks['PreToolUse'] as unknown[]).push({
       matcher: 'Agent',
       hooks: [
@@ -1798,10 +2265,21 @@ export class ClaudeAgentProvider implements IAgentHarness {
    *   HITL-06 `'default'` coercion below, otherwise selecting Plan mode on a
    *   chat that also has a domain permission handler would silently downgrade
    *   to normal permission prompting and writes would not be gated.
-   */  private buildQueryOptions(
+   * @param runtime `persistent: true` when the options will open (or be
+   *   compared against) a long-lived streaming session. Two construction-time
+   *   flags then have to cover every mode the session may later be switched
+   *   to via `setPermissionMode`: `allowDangerouslySkipPermissions` is granted
+   *   whenever no domain handler exists (the ACTIVE mode still decides what
+   *   runs), and `planModeInstructions` is always attached (the CLI only reads
+   *   it while in plan mode). Otherwise toggling plan mode or bypass would
+   *   force a session rebuild every time — the exact cost item 17 removes.
+   */
+  private buildQueryOptions(
     config: StoredConversationConfig,
     turnOptions?: SendPromptOptions,
+    runtime: { persistent?: boolean } = {},
   ): ClaudeOptions {
+    const persistent = runtime.persistent === true;
     // HITL-06 (Claude parity): if a domain permission callback is wired,
     // we MUST NOT let the SDK bypass permissions — otherwise `canUseTool`
     // is never invoked and the domain handler (which routes to HITL /
@@ -1827,7 +2305,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
       includeHookEvents: this.options.includeHookEvents ?? false,
       // See comment above — domain handler forces 'default' + no skip.
       permissionMode: effectivePermissionMode as ClaudeOptions['permissionMode'],
-      allowDangerouslySkipPermissions: !hasDomainHandler && effectivePermissionMode === 'bypassPermissions',
+      allowDangerouslySkipPermissions: persistent
+        ? !hasDomainHandler
+        : !hasDomainHandler && effectivePermissionMode === 'bypassPermissions',
       // Session management
       persistSession: true,
       settingSources: this.options.settingSources ?? [],
@@ -1837,7 +2317,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     // PLN-01 — Claude-native custom plan-mode workflow body. Only meaningful
     // while `permissionMode: 'plan'`; the CLI still wraps it with the
     // read-only enforcement preamble and the ExitPlanMode protocol footer.
-    if (effectivePermissionMode === 'plan' && config.planModeInstructions) {
+    if ((persistent || effectivePermissionMode === 'plan') && config.planModeInstructions) {
       (options as Record<string, unknown>)['planModeInstructions'] = config.planModeInstructions;
     }
 
@@ -1894,7 +2374,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     // while `capabilities()` claimed `fullToolGating: true` regardless.
     // `buildConversationHooks` always installs the gate; see there for the
     // no-policy default and `capabilities()` for the (now honest) ledger.
-    options.hooks = this.buildConversationHooks(config);
+    options.hooks = this.buildConversationHooks(config, persistent);
 
     // ── Child environment ──────────────────────────────────────────
     //
@@ -1964,7 +2444,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
             const planContent = extractPlanContent(args, phase?.planText ?? '');
             if (!planContent) {
               // Fail loudly rather than opening a gate on an empty plan.
-              this.emitToHandlers(capturedConvId, 'harness.error', {
+              await this.emitToHandlers(capturedConvId, 'harness.error', {
                 message:
                   'Plan mode: could not capture the plan text from the model. ' +
                   'Ask the agent to restate its plan in the reply.',
@@ -2207,7 +2687,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
           : {}),
       };
 
-      this.emitEventToHandlers(conversationId, createAgentEvent('harness.context_usage', {
+      void this.emitEventToHandlers(conversationId, createAgentEvent('harness.context_usage', {
         provider: 'claude-agent',
         source: 'provider',
         currentTokens,
@@ -2258,13 +2738,450 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * Runs a query() in the background, emitting events to registered handlers.
    * This is the async-iterator → callback bridge (R-01).
    */
+  // ══════════════════════════════════════════════════════════════
+  // Turn and session lifecycle (review item 17)
+  // ══════════════════════════════════════════════════════════════
+
+  /**
+   * Take an execution permit for this turn.
+   *
+   * Item 4: chat turns used to bypass the concurrency limit entirely — only
+   * the workflow path acquired — so the limit bounded workflow steps and
+   * nothing else. Now both paths acquire. A turn that has to wait says so:
+   * blocking silently is what turns "too busy" into "the prompt hangs with no
+   * explanation".
+   */
+  private async acquireTurnPermit(conversationId: string): Promise<() => void> {
+    const supervisor = this.supervisor;
+    // No supervisor wired (embedded and test use): nothing to bound against.
+    if (!supervisor) return () => {};
+
+    const immediate = supervisor.tryAcquireExecution();
+    if (immediate) return immediate;
+
+    const ahead = supervisor.snapshot?.().executionQueueDepth ?? 0;
+    await this.emitToHandlers(conversationId, 'harness.warning', {
+      code: 'execution_queued',
+      message:
+        ahead > 0
+          ? `Waiting for a free agent slot — ${ahead} turn${ahead === 1 ? '' : 's'} ahead.`
+          : 'Waiting for a free agent slot.',
+      provider: 'claude-agent',
+    });
+    return supervisor.acquireExecution();
+  }
+
+  /** Register per-turn bookkeeping and return it. */
+  private beginTurn(
+    conversationId: string,
+    activeQuery: ActiveQuery,
+    startedAt: number,
+    releaseExecution: () => void,
+  ): TurnState {
+    let settle: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const turn: TurnState = {
+      conversationId,
+      activeQuery,
+      startedAt,
+      fullContent: '',
+      pendingToolNames: [],
+      releaseExecution,
+      aborted: false,
+      settled: false,
+      done,
+      settle,
+    };
+    this.turns.set(conversationId, turn);
+    return turn;
+  }
+
+  /**
+   * End a turn exactly once, whatever ended it. Releases the execution permit
+   * and wakes anyone waiting on `done` — a second prompt for the same
+   * conversation waits on that rather than racing this one.
+   */
+  private completeTurn(turn: TurnState, status: 'completed' | 'failed' | 'aborted'): void {
+    if (turn.settled) return;
+    turn.settled = true;
+    turn.activeQuery.status = status === 'completed' ? 'completed' : status === 'aborted' ? 'aborted' : 'failed';
+
+    if (status === 'completed') {
+      this.querySuccessCount++;
+      this.consecutiveFailCount = 0;
+      promptDuration.record(Date.now() - turn.startedAt, { conversation_id: turn.conversationId });
+    } else if (status === 'failed') {
+      this.queryFailCount++;
+      this.consecutiveFailCount++;
+    }
+
+    try {
+      turn.releaseExecution?.();
+    } catch {
+      // A double release is a no-op by construction; never mask the outcome.
+    }
+    if (this.turns.get(turn.conversationId) === turn) this.turns.delete(turn.conversationId);
+    if (this.activeQueries.get(turn.conversationId) === turn.activeQuery) {
+      this.activeQueries.delete(turn.conversationId);
+    }
+    // The plan phase is per-turn; never leak it into the next one.
+    this.planPhases.delete(turn.conversationId);
+    turn.settle();
+  }
+
+  /** Report a turn that could not run, then end it. */
+  private async failTurn(turn: TurnState, err: unknown): Promise<void> {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[ClaudeAgentAdapter] Turn failed for ${turn.conversationId}: ${message}`);
+    await this.emitToHandlers(turn.conversationId, 'harness.error', { message, provider: 'claude-agent' });
+    this.completeTurn(turn, 'failed');
+  }
+
+  /**
+   * One-shot mode cannot carry image content blocks, so attachments are named
+   * in the prompt text and the model reaches them with its file tools. The
+   * persistent path uses real content blocks instead — see `buildUserMessage`.
+   */
+  private describeAttachmentsInline(prompt: string, attachments?: AttachmentRef[]): string {
+    if (!attachments || attachments.length === 0) return prompt;
+    const lines = attachments.map((a) => {
+      const label = a.displayName ? `${a.displayName} — ` : '';
+      return `- ${label}${a.path}`;
+    });
+    return `${prompt}\n\nAttached files:\n${lines.join('\n')}`;
+  }
+
+  /**
+   * Build the user message pushed into a live session.
+   *
+   * Image attachments become real content blocks here, which is the whole
+   * reason the provider declares `vision: true`. In one-shot mode the prompt
+   * is a plain string and they were silently discarded.
+   */
+  private async buildUserMessage(
+    prompt: string,
+    attachments: AttachmentRef[] | undefined,
+    sdkSessionId: string | undefined,
+  ): Promise<SDKUserMessage> {
+    const blocks: Array<Record<string, unknown>> = [];
+    const nonImages: AttachmentRef[] = [];
+
+    for (const attachment of attachments ?? []) {
+      const image = await this.readImageAttachment(attachment);
+      if (image) blocks.push(image);
+      else nonImages.push(attachment);
+    }
+
+    const text = this.describeAttachmentsInline(prompt, nonImages.length > 0 ? nonImages : undefined);
+    blocks.push({ type: 'text', text });
+
+    return {
+      type: 'user',
+      message: { role: 'user', content: blocks },
+      parent_tool_use_id: null,
+      session_id: sdkSessionId ?? '',
+    } as unknown as SDKUserMessage;
+  }
+
+  /** An image attachment as a base64 content block, or undefined if it is not one. */
+  private async readImageAttachment(
+    attachment: AttachmentRef,
+  ): Promise<Record<string, unknown> | undefined> {
+    const path = attachment.path;
+    if (!path) return undefined;
+    const mediaType = IMAGE_MEDIA_TYPES[extname(path).toLowerCase()];
+    if (!mediaType) return undefined;
+    try {
+      const data = await readFile(path);
+      // Very large images cost more than they inform; let the model read the
+      // file with its own tools instead of blowing up the request.
+      if (data.byteLength > MAX_INLINE_IMAGE_BYTES) return undefined;
+      return { type: 'image', source: { type: 'base64', media_type: mediaType, data: data.toString('base64') } };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * The live session for a conversation, opened on first use and reused for
+   * every later turn.
+   *
+   * This is the change that removes a full CLI start-up from every message.
+   * Options that the installed SDK can change on a running session (model,
+   * permission mode, MCP servers) are applied in place; the ones with no live
+   * setter — cwd, system prompt, tool lists, skills — change the fingerprint
+   * and force a rebuild, resumed from the SDK session id so the conversation
+   * keeps its memory.
+   */
+  /**
+   * Bring a conversation's CLI process to readiness before its first prompt.
+   *
+   * Uses the SDK's own `startup()`, which spawns the subprocess and completes
+   * the initialize handshake with no prompt available; the returned
+   * `WarmQuery` accepts the input queue later and writes it to an already-ready
+   * process. Measured on this machine: a first turn falls from ~12.8 s to
+   * ~3 s when the process had ten seconds of lead time.
+   *
+   * Best-effort by contract — every failure path returns quietly and the first
+   * prompt simply pays what it pays today.
+   */
+  async prewarmConversation(conversationId: string, turnOptions?: SendPromptOptions): Promise<void> {
+    // One-shot mode builds and discards a process per turn, so a warm handle
+    // would never be claimed.
+    if (!this.persistentSessions) return;
+    // Already live, or already warm: both make this a no-op, which is what the
+    // idempotency half of the contract requires.
+    if (this.sessions.has(conversationId) || this.warmSessions.has(conversationId)) return;
+
+    const config = this.conversations.get(conversationId);
+    if (!config) return;
+
+    try {
+      // No `turnOptions`: this is the conversation's baseline. `model`,
+      // `permissionMode` and `mcpServers` are deliberately absent from
+      // `sessionFingerprint`, so a first turn that changes any of them still
+      // claims this handle and applies the change through the live setters.
+      // Build the warm session with the options the FIRST TURN will ask for,
+      // not with none. A handle built without them lands on the HITL-06
+      // 'default' coercion, while an ordinary turn asks for the chat's own
+      // permission mode — so the two never matched and the warm handle was
+      // either wasted or (before the claim compared them) silently used to
+      // run the turn under the wrong mode.
+      const options = this.buildQueryOptions(config, turnOptions, { persistent: true });
+      // A conversation that has to resume a previous SDK session cannot use a
+      // freshly-started process: `resume` is fixed at spawn.
+      if (config.sdkSessionId) return;
+
+      const fingerprint = sessionFingerprint(options);
+      const sdk = await loadClaudeSdk();
+      const startup = (sdk as {
+        startup?: (p?: { options?: ClaudeOptions; initializeTimeoutMs?: number }) => Promise<WarmQuery>;
+      }).startup;
+      // Older SDKs have no `startup()`. Declaring the capability is not a
+      // promise that the installed SDK provides it.
+      if (typeof startup !== 'function') return;
+
+      // The SDK's default is 60 s. A warm-up is a speculative bet on a turn
+      // that may never come, so it must not hold a half-spawned process for a
+      // minute when the CLI is missing or wedged — an unreachable executable
+      // otherwise hangs here for the full default. Measured initialize is
+      // ~14 s, so this is generous and still bounded.
+      const warm = await startup({ options, initializeTimeoutMs: PREWARM_INITIALIZE_TIMEOUT_MS });
+
+      // A turn may have started, or another warm may have won, while we were
+      // spawning. Losing that race must not leak the process.
+      if (this.sessions.has(conversationId) || this.warmSessions.has(conversationId)) {
+        warm.close();
+        return;
+      }
+      // Nor may it leak if the conversation was deleted meanwhile.
+      if (!this.conversations.has(conversationId)) {
+        warm.close();
+        return;
+      }
+      this.warmSessions.set(conversationId, {
+        warm,
+        fingerprint,
+        built: {
+          permissionMode: options.permissionMode,
+          model: options.model,
+          mcpKey: mcpFingerprint(options.mcpServers as Record<string, unknown> | undefined),
+        },
+      });
+      if (this.verbose) {
+        console.log(`[ClaudeAgentAdapter] pre-warmed conversation ${conversationId}`);
+      }
+    } catch (err) {
+      if (this.verbose) {
+        console.warn(`[ClaudeAgentAdapter] pre-warm failed for ${conversationId}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  /** Discard a pre-warmed handle, killing its process. Safe to call always. */
+  private discardWarmSession(conversationId: string, reason: string): void {
+    const warmed = this.warmSessions.get(conversationId);
+    if (!warmed) return;
+    this.warmSessions.delete(conversationId);
+    try {
+      warmed.warm.close();
+    } catch {
+      // Already gone — nothing to release.
+    }
+    if (this.verbose) {
+      console.log(`[ClaudeAgentAdapter] discarded warm session for ${conversationId}: ${reason}`);
+    }
+  }
+
+  private async ensureSession(
+    conversationId: string,
+    config: StoredConversationConfig,
+    options: ClaudeOptions,
+  ): Promise<PersistentSession> {
+    const fingerprint = sessionFingerprint(options);
+    const existing = this.sessions.get(conversationId);
+
+    if (existing && !existing.closed && existing.fingerprint === fingerprint) {
+      await this.applyLiveOptionChanges(existing, options);
+      return existing;
+    }
+
+    if (existing) {
+      // A rebuild, not a fresh start: carry the SDK session id so the new
+      // process resumes the same conversation rather than starting cold.
+      await this.closeSession(existing, 'options changed that have no live setter');
+      if (existing.sdkSessionId && !options.resume) {
+        options = { ...options, resume: existing.sdkSessionId };
+      }
+    } else if (config.sdkSessionId && !options.resume) {
+      options = { ...options, resume: config.sdkSessionId };
+    }
+
+    const { query: claudeQuery } = await loadClaudeSdk(); // W41
+    const input = new AsyncInputQueue<SDKUserMessage>();
+
+    // Claim a pre-warmed process when one is waiting and it was started with
+    // structurally identical options. A mismatch (or a resume, which is fixed
+    // at spawn) closes the handle and falls back to spawning here — the same
+    // cost as before pre-warming existed, never worse.
+    const warmed = this.warmSessions.get(conversationId);
+    // `model`, `permissionMode` and `mcpServers` are excluded from the
+    // fingerprint because a RUNNING session can be switched between them.
+    // A warm handle is not running yet: its setters live on the Query that
+    // `warm.query(input)` returns, and by then the prompt is already away.
+    //
+    // Claiming a mismatched handle therefore ran the turn under the warm-up's
+    // options while the session record claimed otherwise — measured: selecting
+    // Plan mode on a pre-warmed chat silently ran in the warm-up's mode, so
+    // the agent wrote files and no plan gate ever opened, intermittently,
+    // depending on whether the warm-up had finished in time. Compare them
+    // here and spawn fresh on a mismatch.
+    const warmMatches =
+      !!warmed &&
+      warmed.fingerprint === fingerprint &&
+      warmed.built.permissionMode === options.permissionMode &&
+      warmed.built.model === options.model &&
+      warmed.built.mcpKey === mcpFingerprint(options.mcpServers as Record<string, unknown> | undefined);
+    let queryHandle: Query;
+    if (warmed && warmMatches && !options.resume) {
+      this.warmSessions.delete(conversationId);
+      queryHandle = warmed.warm.query(input);
+    } else {
+      if (warmed) this.discardWarmSession(conversationId, 'options changed before first use');
+      queryHandle = claudeQuery({ prompt: input, options });
+    }
+
+    const session: PersistentSession = {
+      conversationId,
+      query: queryHandle,
+      input,
+      fingerprint,
+      liveModel: options.model,
+      livePermissionMode: options.permissionMode,
+      liveMcpKey: mcpFingerprint(options.mcpServers as Record<string, unknown> | undefined),
+      sdkSessionId: config.sdkSessionId,
+      closed: false,
+      reader: Promise.resolve(),
+    };
+    session.reader = this.readSession(session);
+    this.sessions.set(conversationId, session);
+    return session;
+  }
+
+  /** Apply the option changes the SDK supports on a running session. */
+  private async applyLiveOptionChanges(session: PersistentSession, options: ClaudeOptions): Promise<void> {
+    try {
+      if (options.model !== session.liveModel) {
+        await session.query.setModel(options.model);
+        session.liveModel = options.model;
+      }
+      if (options.permissionMode && options.permissionMode !== session.livePermissionMode) {
+        await session.query.setPermissionMode(options.permissionMode);
+        session.livePermissionMode = options.permissionMode;
+      }
+      const mcpKey = mcpFingerprint(options.mcpServers as Record<string, unknown> | undefined);
+      if (mcpKey !== session.liveMcpKey) {
+        await session.query.setMcpServers(options.mcpServers ?? {});
+        session.liveMcpKey = mcpKey;
+      }
+    } catch (err) {
+      // A setter that fails leaves the session in an unknown state; drop the
+      // fingerprint so the next turn rebuilds rather than running with options
+      // the process may not actually have.
+      session.fingerprint = '';
+      if (this.verbose) {
+        console.warn(`[ClaudeAgentAdapter] live option change failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  /**
+   * Drain one live session for its whole lifetime, routing each message into
+   * whichever turn is currently in flight.
+   */
+  private async readSession(session: PersistentSession): Promise<void> {
+    const { conversationId } = session;
+    try {
+      for await (const message of session.query) {
+        const turn = this.turns.get(conversationId);
+        if (!turn || turn.aborted) {
+          // Nothing is waiting for this (a cancelled turn, or output that
+          // arrived after settlement) — record the session id and drop it.
+          if (message.type === 'result') this.rememberSdkSessionId(session, message);
+          continue;
+        }
+        await this.applyMessageToTurn(turn, message, session.query);
+        if (message.type === 'result') {
+          this.rememberSdkSessionId(session, message);
+          this.finishTurnFromResult(turn);
+        }
+      }
+    } catch (err) {
+      const turn = this.turns.get(conversationId);
+      if (turn) await this.failTurn(turn, err);
+      else if (this.verbose) {
+        console.warn(`[ClaudeAgentAdapter] session reader ended for ${conversationId}: ${(err as Error).message}`);
+      }
+    } finally {
+      session.closed = true;
+      if (this.sessions.get(conversationId) === session) this.sessions.delete(conversationId);
+    }
+  }
+
+  private rememberSdkSessionId(session: PersistentSession, message: { session_id?: string }): void {
+    if (!message.session_id) return;
+    session.sdkSessionId = message.session_id;
+    const config = this.conversations.get(session.conversationId);
+    if (config) config.sdkSessionId = message.session_id;
+  }
+
+  /** Close a live session and its reader. Safe to call twice. */
+  private async closeSession(session: PersistentSession, reason: string): Promise<void> {
+    if (session.closed) return;
+    session.closed = true;
+    if (this.verbose) {
+      console.log(`[ClaudeAgentAdapter] closing session for ${session.conversationId}: ${reason}`);
+    }
+    try {
+      session.input.end();
+      await session.query.close();
+    } catch {
+      // Already gone — the reader's finally block does the bookkeeping.
+    }
+    if (this.sessions.get(session.conversationId) === session) {
+      this.sessions.delete(session.conversationId);
+    }
+  }
+
   private async runQueryInBackground(
     conversationId: string,
     prompt: string,
     options: ClaudeOptions,
-    activeQuery: ActiveQuery,
-    startTime: number,
+    turn: TurnState,
   ): Promise<void> {
+    const activeQuery = turn.activeQuery;
     try {
       if (this.verbose) console.log(`[ClaudeAgentAdapter] Starting background query for ${conversationId}`);
 
@@ -2272,125 +3189,132 @@ export class ClaudeAgentProvider implements IAgentHarness {
       const queryHandle = claudeQuery({ prompt, options });
       activeQuery.closeHandle = () => queryHandle.close();
 
-      let fullContent = '';
-      const pendingToolNames: string[] = []; // W13-B1: track tool calls for truncation guard
-      let truncationStopReason: string | undefined; // W13-B1
-
       for await (const message of queryHandle) {
-        // Map to domain events and emit
-        const events = mapClaudeAgentMessageToAgentEvents(message);
-        for (const event of events) {
-          this.emitEventToHandlers(conversationId, event);
-        }
-
-        // Accumulate assistant content for getMessages()
-        if (message.type === 'assistant') {
-          // See `beginContextUsageProbe` — sampled mid-turn, never awaited.
-          this.beginContextUsageProbe(conversationId, queryHandle);
-          const betaMsg = message.message;
-          if (betaMsg?.content) {
-            for (const block of betaMsg.content) {
-              if (block.type === 'text') {
-                fullContent += block.text;
-                // PLN-01 — in plan mode the model writes the plan as its
-                // message right before calling ExitPlanMode, and the SDK's
-                // ExitPlanModeInput has no contractual `plan` field. Keep the
-                // running text so the gate has a reliable fallback source.
-                const phase = this.planPhases.get(conversationId);
-                if (phase && phase.phase === 'planning') {
-                  phase.planText += block.text;
-                }
-              } else if (block.type === 'tool_use') {
-                // W13-B1: track tool calls so we can fail them on truncation.
-                /* W13-B1 */ pendingToolNames.push(block.name);
-              }
-            }
-          }
-          // W13-B1: detect truncation stop reason.
-          /* W13-B1 */ if (betaMsg?.stop_reason && isTruncationStopReason(String(betaMsg.stop_reason))) {
-            truncationStopReason = String(betaMsg.stop_reason);
-            this.toolSemaphore.markTruncated(conversationId, truncationStopReason);
-          }
-        } else if (message.type === 'result') {
-          // Store SDK session ID for resume
-          const config = this.conversations.get(conversationId);
-          if (config) {
-            config.sdkSessionId = message.session_id;
-          }
-          if (message.subtype === 'success' && !fullContent && message.result) {
-            fullContent = message.result;
-          }
-          // Learn the account's real per-model limits, then publish the
-          // CLI's authoritative breakdown alongside the derived estimate.
-          this.recordObservedLimits(message);
-          this.emitContextUsageSnapshot(conversationId, message);
-        }
+        if (turn.aborted) break;
+        await this.applyMessageToTurn(turn, message, queryHandle);
       }
 
-      // W13-B1: Fail all tool calls when the response was truncated.
-      /* W13-B1 */ if (truncationStopReason && pendingToolNames.length > 0) {
-        const truncMsg =
-          `Response was truncated (stop_reason: ${truncationStopReason}). ` +
-          `All ${pendingToolNames.length} tool call(s) in this batch are cancelled — ` +
-          `please re-issue your request with a shorter response or fewer tools.`;
-        console.warn(`[ClaudeAgentAdapter] Truncation detected (background) for ${conversationId}: ${truncMsg}`);
-        for (const toolName of pendingToolNames) {
-          /* W13-B1 */ this.emitToHandlers(conversationId, 'harness.tool_complete', {
-            tool: toolName,
-            result: { error: truncMsg, truncated: true },
-            success: false,
-          });
-        }
-      }
-
-      // Store the accumulated assistant response
-      if (fullContent) {
-        this.pushMessage(conversationId, { role: 'assistant', content: fullContent, timestamp: new Date() });
-      }
-
-      activeQuery.status = 'completed';
-      this.querySuccessCount++;
-      this.consecutiveFailCount = 0;
-      promptDuration.record(Date.now() - startTime, { conversation_id: conversationId });
-
+      this.finishTurnFromResult(turn);
       if (this.verbose) console.log(`[ClaudeAgentAdapter] Background query completed for ${conversationId}`);
     } catch (err) {
-      activeQuery.status = 'failed';
-      this.queryFailCount++;
-      this.consecutiveFailCount++;
-
-      // Emit error event — always log regardless of verbose
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error(`[ClaudeAgentAdapter] Background query failed for ${conversationId}: ${errorMsg}`);
-
-      const errorEvent = createAgentEvent('harness.error', {
-        message: errorMsg,
-        provider: 'claude-agent',
-      });
-      this.emitEventToHandlers(conversationId, errorEvent);
-    } finally {
-      this.activeQueries.delete(conversationId);
-      // PLN-01 — the plan phase is per-turn; never leak it into the next turn.
-      this.planPhases.delete(conversationId);
+      await this.failTurn(turn, err);
     }
   }
 
-  private emitEventToHandlers(conversationId: string, event: AgentEvent): void {
-    const handlers = this.conversationEventHandlers.get(conversationId);
-    if (handlers) {
-      for (const handler of handlers) {
-        try {
-          handler(event);
-        } catch (err) {
-          if (this.verbose) console.error(`[ClaudeAgentAdapter] Event handler error:`, err);
+  /**
+   * Handle one SDK message for the turn it belongs to.
+   *
+   * Both paths run this: the one-shot query loop and the persistent session
+   * reader. It exists once on purpose — the review's second recurring defect
+   * is a fix applied to one copy of duplicated logic and not the other, and
+   * this is the logic that maps every provider message to a domain event.
+   */
+  private async applyMessageToTurn(turn: TurnState, message: SDKMessage, queryHandle: Query): Promise<void> {
+    const { conversationId } = turn;
+
+    for (const event of mapClaudeAgentMessageToAgentEvents(message)) {
+      await this.emitEventToHandlers(conversationId, event);
+    }
+
+    if (message.type === 'assistant') {
+      // See `beginContextUsageProbe` — sampled mid-turn, never awaited.
+      this.beginContextUsageProbe(conversationId, queryHandle);
+      const betaMsg = message.message;
+      if (betaMsg?.content) {
+        for (const block of betaMsg.content) {
+          if (block.type === 'text') {
+            turn.fullContent += block.text;
+            // PLN-01 — in plan mode the model writes the plan as its message
+            // right before calling ExitPlanMode, and the SDK's
+            // ExitPlanModeInput has no contractual `plan` field. Keep the
+            // running text so the gate has a reliable fallback source.
+            const phase = this.planPhases.get(conversationId);
+            if (phase && phase.phase === 'planning') {
+              phase.planText += block.text;
+            }
+          } else if (block.type === 'tool_use') {
+            // W13-B1: track tool calls so we can fail them on truncation.
+            turn.pendingToolNames.push(block.name);
+          }
         }
+      }
+      // W13-B1: detect truncation stop reason.
+      if (betaMsg?.stop_reason && isTruncationStopReason(String(betaMsg.stop_reason))) {
+        turn.truncationStopReason = String(betaMsg.stop_reason);
+        this.toolSemaphore.markTruncated(conversationId, turn.truncationStopReason);
+      }
+    } else if (message.type === 'result') {
+      const config = this.conversations.get(conversationId);
+      if (config) config.sdkSessionId = message.session_id;
+      if (message.subtype === 'success' && !turn.fullContent && message.result) {
+        turn.fullContent = message.result;
+      }
+      // Learn the account's real per-model limits, then publish the CLI's
+      // authoritative breakdown alongside the derived estimate.
+      this.recordObservedLimits(message);
+      this.emitContextUsageSnapshot(conversationId, message);
+    }
+  }
+
+  /**
+   * Settle a turn that reached its own end: report cancelled tool calls if the
+   * response was truncated, store the assistant text, then complete.
+   */
+  private finishTurnFromResult(turn: TurnState): void {
+    if (turn.settled) return;
+    const { conversationId } = turn;
+
+    // W13-B1: fail all tool calls when the response was truncated.
+    if (turn.truncationStopReason && turn.pendingToolNames.length > 0) {
+      const truncMsg =
+        `Response was truncated (stop_reason: ${turn.truncationStopReason}). ` +
+        `All ${turn.pendingToolNames.length} tool call(s) in this batch are cancelled — ` +
+        `please re-issue your request with a shorter response or fewer tools.`;
+      console.warn(`[ClaudeAgentAdapter] Truncation detected for ${conversationId}: ${truncMsg}`);
+      for (const toolName of turn.pendingToolNames) {
+        void this.emitToHandlers(conversationId, 'harness.tool_complete', {
+          tool: toolName,
+          result: { error: truncMsg, truncated: true },
+          success: false,
+        });
+      }
+    }
+
+    if (turn.fullContent) {
+      this.pushMessage(conversationId, { role: 'assistant', content: turn.fullContent, timestamp: new Date() });
+    }
+    this.completeTurn(turn, 'completed');
+  }
+
+  /**
+   * Deliver one event to every subscriber, AWAITING each.
+   *
+   * Review 3.4: this used to call `handler(event)` and drop the returned
+   * promise, so the comment claiming backpressure "reaches back to the
+   * harness's own read loop" was false. Nothing slowed down when the model
+   * outran the persist path — the queue simply grew, and the text on screen
+   * fell further behind the model the longer the answer ran.
+   *
+   * Awaiting here is what makes that comment true: `applyMessageToTurn`
+   * awaits this, and the SDK message loops await that, so a slow consumer
+   * genuinely pauses reading the next message instead of piling events up.
+   */
+  private async emitEventToHandlers(conversationId: string, event: AgentEvent): Promise<void> {
+    const handlers = this.conversationEventHandlers.get(conversationId);
+    if (!handlers) return;
+    for (const handler of handlers) {
+      try {
+        await handler(event);
+      } catch (err) {
+        // One bad subscriber must not stop the others, or drop the turn.
+        if (this.verbose) console.error(`[ClaudeAgentAdapter] Event handler error:`, err);
       }
     }
   }
 
-  private emitToHandlers(conversationId: string, kind: AgentEventKind, data: unknown): void {
+  private async emitToHandlers(conversationId: string, kind: AgentEventKind, data: unknown): Promise<void> {
     const event = createAgentEvent(kind, data as never);
-    this.emitEventToHandlers(conversationId, event);
+    await this.emitEventToHandlers(conversationId, event);
   }
 
   private emitClientEvent(event: HarnessClientEvent): void {
@@ -2406,9 +3330,99 @@ export class ClaudeAgentProvider implements IAgentHarness {
       this.conversationMessages.set(conversationId, msgs);
     }
     msgs.push(msg);
+    // The durable transcript is the database; this copy only serves
+    // `getMessages()` (one legacy route). It grew for the life of the
+    // conversation — a long-running chat kept every message twice.
+    if (msgs.length > MAX_TRANSCRIPT_MESSAGES) msgs.splice(0, msgs.length - MAX_TRANSCRIPT_MESSAGES);
+  }
+
+  /**
+   * Review item 16 — bound the live conversation set.
+   *
+   * Four maps and, in persistent-session mode, a live CLI process hang off
+   * every conversation, and nothing but an explicit delete ever released them:
+   * the only thing that emptied them was restarting the server. This sweeper
+   * closes conversations that have gone quiet, so a long-lived server settles
+   * back to the sessions actually in use.
+   *
+   * Idle-only. The LRU cap is enforced at bind time (`evictLruConversation`),
+   * where there is a new conversation to make room for.
+   */
+  private startSweeper(): void {
+    if (this.sweepTimer || this.sessionIdleMs <= 0) return;
+    // A quarter of the idle window, floored at 30s and capped at 5min: often
+    // enough that an expired session is reaped promptly, rarely enough that an
+    // idle server is not doing steady wake-ups.
+    const period = Math.min(Math.max(Math.floor(this.sessionIdleMs / 4), 30_000), 300_000);
+    this.sweepTimer = setInterval(() => {
+      try {
+        this.sweepIdleConversations();
+      } catch (err) {
+        if (this.verbose) {
+          console.warn(`[ClaudeAgentAdapter] idle sweep failed: ${(err as Error).message}`);
+        }
+      }
+    }, period);
+    // Never hold the process open for a maintenance timer.
+    this.sweepTimer.unref?.();
+  }
+
+  /** Close every conversation whose last use is older than the idle window. */
+  private sweepIdleConversations(): void {
+    const cutoff = Date.now() - this.sessionIdleMs;
+    // The cap is enforced on `conversations`; `sessions` must never exceed it
+    // for long. If it does, cleanup is not closing processes again — say so
+    // rather than let it show up as "the app uses too much memory".
+    if (this.sessions.size > this.maxLiveConversations) {
+      console.warn(
+        `[ClaudeAgentAdapter] ${this.sessions.size} live sessions exceed the cap of ${this.maxLiveConversations} ` +
+          `(${this.conversations.size} conversations, ${this.warmSessions.size} warm)`,
+      );
+    }
+    for (const [conversationId, config] of [...this.conversations]) {
+      // An in-flight turn is never idle, whatever the timestamp says.
+      if (this.activeQueries.has(conversationId)) continue;
+      const lastUsed = config.lastUsedAt ?? 0;
+      if (lastUsed > cutoff) continue;
+      if (this.verbose) {
+        console.log(`[ClaudeAgentAdapter] evicting idle conversation ${conversationId}`);
+      }
+      this.cleanupConversation(conversationId);
+    }
+  }
+
+  /**
+   * Free the least recently used idle conversation so a new one can bind.
+   *
+   * Returns false when nothing could be freed — every remaining conversation
+   * is mid-turn — so the caller stops looping instead of spinning. Exceeding
+   * the cap is the right call there: refusing to bind would fail the user's
+   * message to protect a memory ceiling.
+   */
+  private evictLruConversation(exceptConversationId?: string): boolean {
+    let oldestId: string | undefined;
+    let oldestAt = Number.POSITIVE_INFINITY;
+    for (const [conversationId, config] of this.conversations) {
+      if (conversationId === exceptConversationId) continue;
+      if (this.activeQueries.has(conversationId)) continue;
+      const lastUsed = config.lastUsedAt ?? 0;
+      if (lastUsed < oldestAt) {
+        oldestAt = lastUsed;
+        oldestId = conversationId;
+      }
+    }
+    if (oldestId === undefined) return false;
+    if (this.verbose) {
+      console.log(`[ClaudeAgentAdapter] evicting LRU conversation ${oldestId} to stay under the live-session cap`);
+    }
+    this.cleanupConversation(oldestId);
+    return true;
   }
 
   private cleanupConversation(conversationId: string): void {
+    // A conversation deleted or swept before its first prompt still owns a
+    // spawned CLI process if it was pre-warmed.
+    this.discardWarmSession(conversationId, 'conversation cleaned up');
     const cleanups = this.conversationListenerCleanups.get(conversationId);
     if (cleanups) {
       for (const cleanup of cleanups) cleanup();
@@ -2425,6 +3439,19 @@ export class ClaudeAgentProvider implements IAgentHarness {
       aq.abortController.abort();
       aq.closeHandle?.();
       this.activeQueries.delete(conversationId);
+    }
+
+    // The persistent session owns the CLI process (~230 MB). Every caller of
+    // this method — idle sweep, LRU cap, deleteConversation, destroyConversation
+    // — used to drop the bookkeeping above and leave that process running for
+    // the life of the server, because `closeSession` was only reachable from
+    // stop(), an active turn's close handle, an unacknowledged interrupt and an
+    // options change. Measured: eight ~230 MB `claude.exe` children alive 80
+    // minutes after spawn with a 30-minute idle window. Close it here so the
+    // bound on `conversations` is also a bound on processes.
+    const live = this.sessions.get(conversationId);
+    if (live) {
+      void this.closeSession(live, 'conversation cleaned up');
     }
 
     this.conversations.delete(conversationId);

@@ -19,7 +19,10 @@ interface ConnectionInfo {
    * fill clamps past it: those events are gone from this tab's view of the
    * transcript for good. That is data loss, and it used to be completely
    * invisible — the comment in `sseManager.gapFill` acknowledged it and
-   * nothing said so to the user. This is what makes it sayable.
+   * nothing said so to the user. This is what makes it sayable — and
+   * `components/status/ConnectionStatus.tsx`, mounted in the app header, is
+   * what says it: an "events may be missing since <time> — refresh" badge
+   * whose click refetches every query and then calls `clearGap`.
    */
   unrecoverableEvents: number;
   /** When the most recent unrecoverable gap was detected (epoch ms). */
@@ -36,6 +39,12 @@ interface ConnectionStore {
   recordEvent: (sessionId: string) => void;
   /** Report `count` events that a resume could not recover. See ConnectionInfo. */
   recordGap: (sessionId: string, count: number) => void;
+  /**
+   * Forget recorded gaps — for one session, or every session when omitted.
+   * Called after the user refetches: the persisted transcript has replaced the
+   * missing events, so the badge would now be warning about nothing.
+   */
+  clearGap: (sessionId?: string) => void;
   getConnection: (sessionId: string) => ConnectionInfo;
   removeConnection: (sessionId: string) => void;
 }
@@ -92,6 +101,21 @@ const useConnectionStoreImpl = create<ConnectionStore>((set, get) => ({
         },
       },
     };
+  }),
+
+  clearGap: (sessionId) => set((prev) => {
+    const next: Record<string, ConnectionInfo> = {};
+    let changed = false;
+    for (const [key, info] of Object.entries(prev.connections)) {
+      const target = sessionId === undefined || key === sessionId;
+      if (target && (info.unrecoverableEvents !== 0 || info.lastGapAt !== null)) {
+        next[key] = { ...info, unrecoverableEvents: 0, lastGapAt: null };
+        changed = true;
+      } else {
+        next[key] = info;
+      }
+    }
+    return changed ? { connections: next } : prev;
   }),
 
   getConnection: (sessionId) => get().connections[sessionId] ?? DEFAULT_CONNECTION,

@@ -89,16 +89,52 @@ export interface LoadedScript {
 
 // ── Main Service ──
 
+export interface WorkflowScriptLoaderOptions {
+  /**
+   * Master switch. When false (the default) NOTHING is imported: the boot
+   * scan reports what it found and skips it, and every load/validate/save
+   * call throws `ScriptSecurityError` so the caller sees a clear refusal
+   * instead of silently getting an empty registry.
+   */
+  enabled?: boolean;
+}
+
+/** The message every gated path surfaces, so operators know which knob to turn. */
+export const WORKFLOW_SCRIPTS_DISABLED_MESSAGE =
+  'Workflow scripts are disabled. `.workflow.mjs` files execute in-process with the ' +
+  "server's full privileges; set GENERATORAI_ALLOW_WORKFLOW_SCRIPTS=true " +
+  '(config `scripts.workflowScriptsEnabled`) on a trusted deployment to enable them.';
+
 export class WorkflowScriptLoader {
   private loadedScripts = new Map<string, LoadedScript>();
   private readonly IMPORT_TIMEOUT_MS = 30_000;
   private hookUnregisters = new Map<string, () => void>();
+  private readonly enabled: boolean;
 
   constructor(
     private readonly logger: ILogger,
     private readonly scriptDirs: string[],
     private readonly hookExecutor: HookExecutor,
-  ) {}
+    options?: WorkflowScriptLoaderOptions,
+  ) {
+    this.enabled = options?.enabled ?? false;
+  }
+
+  /** Whether scripts may be loaded at all (operator opt-in). */
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  /**
+   * The gate every code path that would `import()` a script goes through.
+   * Kept in the loader — not the route layer — so the boot-time scan and
+   * every route (reload, reload one, validate, upload) are refused together.
+   */
+  private assertEnabled(): void {
+    if (!this.enabled) {
+      throw new ScriptSecurityError(WORKFLOW_SCRIPTS_DISABLED_MESSAGE);
+    }
+  }
 
   /**
    * Scan configured directories for .workflow.mjs files.
@@ -106,6 +142,26 @@ export class WorkflowScriptLoader {
    */
   async discoverScripts(): Promise<ScriptMetadata[]> {
     const metadata: ScriptMetadata[] = [];
+    if (!this.enabled) {
+      // Count what WOULD have loaded so the operator can tell "no scripts
+      // present" from "scripts present but refused".
+      let found = 0;
+      for (const dir of this.scriptDirs) {
+        const resolved = resolve(dir);
+        if (!existsSync(resolved)) continue;
+        try {
+          found += (await readdir(resolved)).filter((f) => f.endsWith('.workflow.mjs')).length;
+        } catch { /* unreadable dir — nothing to count */ }
+      }
+      if (found > 0) {
+        this.logger.warn(
+          `[ScriptLoader] ${found} workflow script(s) found but NOT loaded — ${WORKFLOW_SCRIPTS_DISABLED_MESSAGE}`,
+        );
+      } else {
+        this.logger.info('[ScriptLoader] Workflow scripts disabled (no .workflow.mjs files present either)');
+      }
+      return metadata;
+    }
     for (const dir of this.scriptDirs) {
       const resolved = resolve(dir);
       if (!existsSync(resolved)) {
@@ -131,6 +187,8 @@ export class WorkflowScriptLoader {
    * Dynamically import and validate a single .workflow.mjs script.
    */
   async loadScript(scriptPath: string): Promise<LoadedScript> {
+    // 0. Security: operator opt-in — refused loudly, never silently.
+    this.assertEnabled();
     const resolvedPath = resolve(scriptPath);
 
     // 1. Security: Validate path is within allowed directories
@@ -326,16 +384,18 @@ export class WorkflowScriptLoader {
    *
    * SECURITY: scripts execute arbitrary JavaScript in-process with full server
    * privileges (dynamic `import()`), so this is effectively remote code
-   * execution. The route layer MUST gate this behind an explicit operator
-   * opt-in (env flag) — this method itself only enforces that the filename is a
-   * safe, single-segment `*.workflow.mjs` and that the resolved path stays
-   * within an allowed directory (defense-in-depth via validateScriptPath).
+   * execution. The loader itself enforces the operator opt-in
+   * (`assertEnabled`, config `scripts.workflowScriptsEnabled`) — the upload
+   * route's own check is defense-in-depth, not the gate. This method also
+   * enforces that the filename is a safe, single-segment `*.workflow.mjs` and
+   * that the resolved path stays within an allowed directory.
    *
    * @param filename desired file name (no path segments); must end in .workflow.mjs
    * @param source   the script source text
    * @returns the loaded script
    */
   async saveScript(filename: string, source: string): Promise<LoadedScript> {
+    this.assertEnabled();
     // Reject any path component — only a bare filename is allowed.
     const safeName = basename(filename);
     if (safeName !== filename || safeName.length === 0) {
@@ -371,6 +431,10 @@ export class WorkflowScriptLoader {
 
   /** Validate a script path without loading it into the registry. */
   async validateScriptFile(scriptPath: string): Promise<{ valid: boolean; errors: string[] }> {
+    // Validation imports the module too (it has to, to read its exports), so
+    // it is gated exactly like a load — the error is thrown, not folded into
+    // `errors`, so the route can answer 403 rather than "invalid script".
+    this.assertEnabled();
     try {
       const resolvedPath = resolve(scriptPath);
 

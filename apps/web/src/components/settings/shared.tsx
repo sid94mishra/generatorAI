@@ -8,6 +8,7 @@
 import React from 'react';
 import { Check, X, Minus, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 
 /** Header for a whole settings section (the right-pane title). */
 export function SectionHeader({ title, description }: { title: string; description?: string }) {
@@ -163,11 +164,12 @@ export function CatalogAccordionRow({
   return (
     <div className={cn('overflow-hidden rounded-lg border border-border bg-card transition-colors', disabled && 'opacity-60', expanded && 'border-primary/40')}>
       <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <button
+        <Button
+          variant="ghost"
           type="button"
           onClick={onToggleExpanded}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left focus-visible:outline-none"
+          className="h-auto flex min-w-0 flex-1 items-center gap-2.5 text-left focus-visible:outline-none"
         >
           <ChevronRight
             className={cn(
@@ -189,7 +191,7 @@ export function CatalogAccordionRow({
               <span className="mt-0.5 block truncate text-xs text-muted-foreground">{subtitle}</span>
             )}
           </span>
-        </button>
+        </Button>
         {control && <div className="shrink-0">{control}</div>}
       </div>
       {expanded && children && (

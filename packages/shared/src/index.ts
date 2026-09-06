@@ -12,5 +12,7 @@ export * from './ipc/AgentHostIpc.js';
 export * from './ipc/PtyHostIpc.js';
 export * from './ipc/BrowserHostIpc.js';
 export * from './ipc/CuaHostIpc.js';
+// Plan item 43 — host protocol version handshake shared by all four hosts
+export * from './protocol/hostProtocol.js';
 // W29 — Transport capability ledger per surface
 export * from './transport/TransportCapabilities.js';

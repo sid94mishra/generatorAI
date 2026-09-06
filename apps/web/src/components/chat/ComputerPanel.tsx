@@ -26,6 +26,7 @@ import {
   Pause, Play, ShieldQuestion, Square, Video,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/index.js';
 import { openMultiplexedStream } from '@/platform/muxStream.js';
 import type { ComputerRuntime } from '@/platform/HttpPlatformClient.js';
 
@@ -65,6 +66,14 @@ interface Grant {
 interface Props {
   workspaceId?: string;
   embedded?: boolean;
+  /**
+   * Whether this panel is the visible tab. The live preview feed (a window
+   * frame per action plus a cursor sample every ~30 ms) is only subscribed
+   * while true; the RightPane keeps inactive tabs mounted, so without this a
+   * hidden Computer tab kept decoding frames nobody was looking at. The feed
+   * is live-only, so nothing is lost by re-subscribing on activation.
+   */
+  active?: boolean;
 }
 
 interface RecordingState {
@@ -144,7 +153,7 @@ function iconFor(entry: TimelineEntry): React.ReactNode {
   return <Hand className="h-3.5 w-3.5 text-muted-foreground" />;
 }
 
-export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Element {
+export function ComputerPanel({ workspaceId, embedded, active = true }: Props): React.JSX.Element {
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
   const [windowTitle, setWindowTitle] = useState<string>('');
@@ -269,7 +278,7 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
   // multiplexed connection, and the feed itself is live-only: nothing about it
   // is worth replaying, so it never reaches the durable log.
   useEffect(() => {
-    if (!workspaceId || !recording.recording) {
+    if (!workspaceId || !recording.recording || !active) {
       setCursor(null);
       return;
     }
@@ -303,7 +312,7 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
     });
 
     return () => stream.close();
-  }, [workspaceId, recording.recording]);
+  }, [workspaceId, recording.recording, active]);
 
   // Screen coordinates onto the rendered frame. The recorder reports the cursor
   // against the whole desktop but captures a single window, so without the
@@ -723,15 +732,16 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
           {windowTitle || 'Computer Use'}
         </span>
         {grants.length > 0 && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => setShowGrants((v) => !v)}
             aria-expanded={showGrants}
-            className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-subtle hover:text-foreground"
+            className="ml-auto flex h-auto items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground transition-colors hover:bg-subtle hover:text-foreground"
           >
             <KeyRound className="h-3 w-3" />
             {grants.length} allowed
-          </button>
+          </Button>
         )}
         <span
           className={cn(
@@ -748,13 +758,14 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
         <div className="flex items-center gap-0.5 rounded border border-border p-0.5">
           {(['frame', 'video'] as const).map((mode) => (
-            <button
+            <Button
               key={mode}
               type="button"
+              variant="ghost"
               onClick={() => setView(mode)}
               aria-pressed={view === mode}
               className={cn(
-                'flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors',
+                'flex h-auto items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-normal transition-colors',
                 view === mode
                   ? 'bg-subtle text-foreground'
                   : 'text-muted-foreground hover:text-foreground',
@@ -762,17 +773,18 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
             >
               {mode === 'frame' ? <Image className="h-3 w-3" /> : <Video className="h-3 w-3" />}
               {mode === 'frame' ? 'Now' : 'Replay'}
-            </button>
+            </Button>
           ))}
         </div>
 
         <div className="ml-auto flex items-center gap-1">
-          <button
+          <Button
             type="button"
+            variant="secondary"
             disabled={recordingBusy || !workspaceId}
             onClick={() => void togglePreview(false)}
             className={cn(
-              'flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+              'flex h-auto items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-normal transition-colors',
               recording.recording
                 ? 'border-destructive/50 bg-destructive/10 text-destructive'
                 : 'border-border bg-card text-foreground hover:bg-subtle',
@@ -785,18 +797,19 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
           >
             {recording.recording ? <Square className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
             {recordingBusy ? 'Working…' : recording.recording ? 'Stop' : 'Live preview'}
-          </button>
+          </Button>
           {!recording.recording && (
-            <button
+            <Button
               type="button"
+              variant="secondary"
               disabled={recordingBusy || !workspaceId}
               onClick={() => void togglePreview(true)}
-              className="flex items-center gap-1 rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-subtle disabled:opacity-50"
+              className="flex h-auto items-center gap-1 rounded border border-border bg-card px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground transition-colors hover:bg-subtle"
               title="Also record a screen video. Needs ffmpeg, captures the whole display, and records the lock screen if the workstation locks."
             >
               <Video className="h-3 w-3" />
               + screen video
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -841,14 +854,15 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
                   : 'Desktop driver unavailable'}
             </span>
             {runtime.state !== 'unavailable' && (
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 disabled={runtimeBusy}
                 onClick={() => void controlRuntime(runtime.state === 'stopped' ? 'start' : 'restart')}
-                className="shrink-0 rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-foreground transition-colors hover:bg-subtle disabled:opacity-50"
+                className="h-auto shrink-0 rounded border border-border bg-card px-1.5 py-0.5 text-[11px] font-normal text-foreground transition-colors hover:bg-subtle"
               >
                 {runtimeBusy ? 'Working…' : runtime.state === 'stopped' ? 'Start now' : 'Restart'}
-              </button>
+              </Button>
             )}
           </div>
           {runtime.state === 'stopped' ? (
@@ -874,13 +888,14 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
                   {g.appLabel || g.appIdentity}
                 </span>
                 <span className="shrink-0 text-[11px] text-muted-foreground">{g.scope}</span>
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
                   onClick={() => void revokeGrant(g.appIdentity)}
-                  className="shrink-0 rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-foreground transition-colors hover:bg-subtle"
+                  className="h-auto shrink-0 rounded border border-border bg-card px-1.5 py-0.5 text-[11px] font-normal text-foreground transition-colors hover:bg-subtle"
                 >
                   Revoke
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -909,47 +924,51 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
               </div>
             </div>
             <div className="mt-2.5 flex flex-wrap gap-1.5">
-              <button
+              <Button
                 type="button"
+                variant="primary"
                 disabled={answering}
                 onClick={() => void answerConsent('allow_once')}
-                className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="h-auto rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
               >
                 Allow once
-              </button>
+              </Button>
               {/* The only answer that covers synthetic input without asking
                   again. Offered because an unanswered prompt expires as a
                   denial and ends the run — the common way a long task dies. */}
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 disabled={answering}
                 onClick={() => void answerConsent('allow_run')}
                 title="Approve every desktop action for the rest of this run, including ones that take over the keyboard and mouse. Ends when the desktop session does."
-                className="rounded border border-primary/50 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+                className="h-auto rounded border border-primary/50 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
               >
                 Allow all this run
-              </button>
+              </Button>
               {/* Synthetic input is never persisted as a standing grant, so
                   offering the option here would promise something the server
                   deliberately downgrades. */}
               {!tookScreen(consent.path) && (
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
                   disabled={answering}
                   onClick={() => void answerConsent('always_allow')}
-                  className="rounded border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-subtle disabled:opacity-50"
+                  className="h-auto rounded border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-subtle"
                 >
                   Always allow this app
-                </button>
+                </Button>
               )}
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 disabled={answering}
                 onClick={() => void answerConsent('deny')}
-                className="rounded border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-subtle disabled:opacity-50"
+                className="h-auto rounded border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-subtle"
               >
                 Deny
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -973,21 +992,24 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
                   <div className="shrink-0">
                     <div className="relative h-1.5 rounded-full bg-border">
                       {markers.map((marker) => (
-                        <button
+                        <Button
                           key={marker.id}
                           type="button"
+                          // `primary` rather than `ghost`: the mark's own colour
+                          // is set below, and ghost would repaint it on hover.
+                          variant="primary"
                           title={`${marker.label} — ${formatOffset(marker.offset)}`}
                           onClick={() => {
                             if (videoRef.current) videoRef.current.currentTime = marker.offset;
                           }}
                           style={{ left: `${marker.percent}%` }}
                           className={cn(
-                            'absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm',
+                            'absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm p-0',
                             marker.kind === 'refusal' ? 'bg-destructive' : 'bg-primary',
                           )}
                         >
                           <span className="sr-only">{marker.label}</span>
-                        </button>
+                        </Button>
                       ))}
                     </div>
                     <p className="mt-1 text-[10px] text-muted-foreground">
@@ -1010,8 +1032,9 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
                   />
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
                     onClick={() => {
                       if (!playing && playhead >= turns.length - 1) {
                         scrubbedRef.current = true;
@@ -1020,11 +1043,11 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
                       setPlaying((p) => !p);
                     }}
                     title={playing ? 'Pause' : 'Play the run back'}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-card text-foreground transition-colors hover:bg-subtle"
+                    className="h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-card text-foreground transition-colors hover:bg-subtle"
                   >
                     {playing ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
                     <span className="sr-only">{playing ? 'Pause' : 'Play'}</span>
-                  </button>
+                  </Button>
                   <input
                     type="range"
                     min={0}
@@ -1108,13 +1131,14 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
               Activity
             </span>
             {pinned ? (
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={() => setPinned(null)}
-                className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-subtle"
+                className="h-auto whitespace-normal rounded border border-border px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-subtle"
               >
                 {pinnedIsFallback ? 'Last window read before this step' : 'Showing a past frame'} — back to live
-              </button>
+              </Button>
             ) : (
               <span className="text-[10px] text-muted-foreground">
                 Click an entry to see the window at that moment
@@ -1130,12 +1154,13 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
               <ul className="space-y-0.5">
                 {entries.map((entry) => (
                   <li key={entry.id}>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
                       onClick={() => pinTo(entry)}
                       aria-pressed={pinned === entry.id}
                       className={cn(
-                        'flex w-full items-start gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-subtle',
+                        'flex h-auto w-full items-start gap-2 whitespace-normal rounded px-1.5 py-1 text-left text-xs font-normal hover:bg-subtle',
                         pinned === entry.id && 'bg-subtle ring-1 ring-inset ring-border',
                       )}
                     >
@@ -1163,7 +1188,7 @@ export function ComputerPanel({ workspaceId, embedded }: Props): React.JSX.Eleme
                       {entry.kind === 'action' && entry.verified && (
                         <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
                       )}
-                    </button>
+                    </Button>
                   </li>
                 ))}
               </ul>

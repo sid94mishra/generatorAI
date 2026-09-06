@@ -955,6 +955,25 @@ export function useAnswerQuestion(chatId: string) {
   });
 }
 
+/** Answer a blocking tool-permission prompt (review finding 5.1). */
+export function useAnswerPermission(chatId: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: {
+      interactionId: string;
+      behavior: 'allow' | 'deny';
+      message?: string;
+    }) => {
+      const { interactionId, ...response } = params;
+      return platform.respondToChatPermission(chatId, interactionId, response);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'interactions'] });
+    },
+  });
+}
+
 /** Promote an approved plan into the tracked working tree. */
 export function useSavePlanToWorkspace(chatId: string) {
   const platform = usePlatform() as HttpPlatformClient;

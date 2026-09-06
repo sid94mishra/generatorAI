@@ -14,9 +14,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
-  AlertCircle, Loader2, ListTree, FolderOpen, FileText, TerminalSquare, LayoutGrid,
+  AlertCircle, ListTree, FolderOpen, FileText, TerminalSquare, LayoutGrid,
 } from 'lucide-react';
-import { Modal, EmptyState } from '@/components/ui/index.js';
+import { Modal, EmptyState, Button, Spinner } from '@/components/ui/index.js';
 
 import { useWorkflowRunStore } from '@/stores/workflowRunStore.js';
 import { useStreamStore } from '@/stores/streamStore.js';
@@ -25,6 +25,7 @@ import {
   useWorkflowRun, useWorkflowDefinition,
   usePauseWorkflowRun, useResumeWorkflowRun, useCancelWorkflowRun, useRetryWorkflowRun,
   useRetryStageRun,
+  useWakeStageRun,
   useRunWorkspace,
   useRunScratchpad,
 } from '@/hooks/workflowQueries.js';
@@ -32,7 +33,6 @@ import { usePlatform } from '@/providers/PlatformProvider.js';
 import { connectWorkflowRun } from '@/stores/sseManager.js';
 import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
 import type { WorkflowRunPermissionMode } from '@generatorai/shared';
-import type { StreamState } from '@/stores/streamStore.js';
 
 import { RunHeaderBar } from '@/components/workflow/redesign/RunHeaderBar.js';
 import { PipelineFlow } from '@/components/workflow/redesign/PipelineFlow.js';
@@ -107,6 +107,7 @@ export function WorkflowRunPageV2() {
   const cancelRun = useCancelWorkflowRun();
   const retryRun = useRetryWorkflowRun();
   const retryStageMutation = useRetryStageRun();
+  const wakeStageMutation = useWakeStageRun();
 
   // ── UI state ─────────────────────────────────────────────────
 
@@ -384,12 +385,19 @@ export function WorkflowRunPageV2() {
     void retryStageMutation.mutateAsync({ runId, stageId });
   }, [runId, retryStageMutation]);
 
+  const handleWakeStage = useCallback((stageId: string) => {
+    if (!runId) return;
+    // A 409 here just means the sweeper's timer beat the click; the stream
+    // pushes the resulting status either way, so there is nothing to report.
+    void wakeStageMutation.mutateAsync({ runId, stageId }).catch(() => undefined);
+  }, [runId, wakeStageMutation]);
+
   // ── Loading / error ─────────────────────────────────────────
 
   if (runLoading || !runView) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-[var(--color-muted-foreground)]" />
+        <Spinner size="lg" className="text-[var(--color-muted-foreground)]" label="Loading workflow run" />
       </div>
     );
   }
@@ -401,12 +409,13 @@ export function WorkflowRunPageV2() {
         <p className="text-sm text-[var(--color-muted-foreground)]">
           {runError ? 'Failed to load workflow run' : 'Run not found'}
         </p>
-        <button
+        <Button
+          variant="ghost"
           onClick={() => navigate(definitionId ? `/workflows/${definitionId}` : '/workflows')}
-          className="text-sm text-[var(--color-primary)] underline"
+          className="h-auto rounded-none bg-transparent p-0 text-sm text-[var(--color-primary)] underline hover:bg-transparent hover:text-[var(--color-primary)]"
         >
           Back to workflow
-        </button>
+        </Button>
       </div>
     );
   }
@@ -519,6 +528,7 @@ export function WorkflowRunPageV2() {
                 onRejectHitl={handleRejectHitl}
                 onTerminalRejectHitl={handleTerminalRejectHitl}
                 onRetry={handleRetryStage}
+                onWake={handleWakeStage}
                 onSelectFiles={selectStage}
                 onSelectOutput={selectStage}
                 onOpenInspector={(id) => {
@@ -535,13 +545,15 @@ export function WorkflowRunPageV2() {
 
             {/* Bottom control row: timeline toggle */}
             <div className="mt-6 flex items-center justify-center gap-2 pb-6">
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => setTimelineOpen(true)}
-                className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-[11.5px] font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
+                className="text-muted-foreground hover:text-foreground"
+                leftIcon={<ListTree className="h-3.5 w-3.5" />}
               >
-                <ListTree className="h-3.5 w-3.5" />
                 Show event timeline
-              </button>
+              </Button>
             </div>
           </div>
         </div>

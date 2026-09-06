@@ -13,7 +13,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { readFileSync } from 'node:fs';
-// Not `globSync` from node:fs — that is Node 22+, and CI pins Node 20, so
+// Not `globSync` from node:fs — it only landed in Node 22 and the engine floor was Node 20 when this was written, so
 // every checker in the root `lint` chain died at import before its first rule.
 import { globFiles } from './lib/globFiles.mjs';
 import { resolve, dirname } from 'node:path';

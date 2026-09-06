@@ -17,7 +17,6 @@ import {
   ChevronDown,
   ChevronRight,
   CornerDownRight,
-  Loader2,
   MessageSquare,
   Pencil,
   Send,
@@ -25,6 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
+import { Button, Spinner, Textarea } from '@/components/ui/index.js';
 import type { ReviewIntent, ReviewThread, ReviewThreadStatus } from '@/types/review.js';
 
 const STATUS_LABEL: Record<ReviewThreadStatus, { text: string; className: string }> = {
@@ -101,11 +101,12 @@ export function ReviewThreadCard({
       )}
     >
       {/* ── Summary row (always visible) ─────────────────────── */}
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left hover:bg-accent/50"
+        className="h-auto w-full items-center justify-start gap-1.5 rounded-none px-2 py-1.5 text-left font-normal hover:bg-accent/50"
       >
         {expanded ? (
           <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
@@ -141,7 +142,7 @@ export function ReviewThreadCard({
         >
           {status.text}
         </span>
-      </button>
+      </Button>
 
       {expanded && (
         <div className="border-t px-2 py-1.5">
@@ -153,42 +154,47 @@ export function ReviewThreadCard({
             )}
             <div className="ml-auto flex items-center gap-0.5">
               {onSend && (thread.status === 'pending' || thread.status === 'draft') && (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   title="Send this comment to the agent"
                   onClick={() => onSend(thread.id)}
                   disabled={busy}
-                  className="inline-flex h-5 items-center gap-1 rounded border px-1.5 text-[10px] hover:bg-accent disabled:opacity-50"
+                  className="h-5 items-center gap-1 rounded border px-1.5 text-[10px] font-normal hover:bg-accent disabled:opacity-50"
                 >
                   {busy ? (
-                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                    <Spinner size="xs" />
                   ) : (
                     <Send className="h-2.5 w-2.5" />
                   )}
                   Send
-                </button>
+                </Button>
               )}
               {onResolve && !isClosed && (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   title="Resolve"
                   aria-label="Resolve thread"
                   onClick={() => onResolve(thread.id)}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-accent"
+                  className="h-5 w-5 rounded hover:bg-accent"
                 >
                   <Check className="h-3 w-3" />
-                </button>
+                </Button>
               )}
               {onDelete && (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   title="Delete"
                   aria-label="Delete thread"
                   onClick={() => onDelete(thread.id)}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-accent hover:text-danger"
+                  className="h-5 w-5 rounded hover:bg-accent hover:text-danger"
                 >
                   <Trash2 className="h-3 w-3" />
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -211,7 +217,7 @@ export function ReviewThreadCard({
                   <div className="min-w-0 flex-1">
                     {isEditing ? (
                       <div className="flex items-start gap-1">
-                        <textarea
+                        <Textarea
                           ref={editRef}
                           value={editing.body}
                           onChange={(e) =>
@@ -228,25 +234,30 @@ export function ReviewThreadCard({
                             }
                           }}
                           rows={2}
+                          aria-label="Edit comment"
                           className="min-w-0 flex-1 resize-none rounded border bg-transparent px-1.5 py-1 text-xs"
                         />
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="icon-sm"
                           aria-label="Save edit"
                           title="Save (⌘↵)"
                           onClick={commitEdit}
-                          className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded hover:bg-accent"
+                          className="mt-0.5 h-5 w-5 rounded hover:bg-accent"
                         >
                           <Check className="h-3 w-3" />
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="icon-sm"
                           aria-label="Cancel edit"
                           onClick={() => setEditing(null)}
-                          className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded hover:bg-accent"
+                          className="mt-0.5 h-5 w-5 rounded hover:bg-accent"
                         >
                           <X className="h-3 w-3" />
-                        </button>
+                        </Button>
                       </div>
                     ) : (
                       <>
@@ -261,17 +272,19 @@ export function ReviewThreadCard({
                         {/* Only the user's own words are editable — an agent
                             reply is a record of what was actually said. */}
                         {onEdit && comment.author === 'user' && !isClosed && (
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
+                            size="icon-sm"
                             aria-label="Edit comment"
                             title="Edit"
                             onClick={() =>
                               setEditing({ id: comment.id, body: comment.body })
                             }
-                            className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded align-text-bottom text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/comment:opacity-100"
+                            className="ml-1 h-4 w-4 rounded align-text-bottom text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/comment:opacity-100"
                           >
                             <Pencil className="h-2.5 w-2.5" />
-                          </button>
+                          </Button>
                         )}
                       </>
                     )}
@@ -286,7 +299,7 @@ export function ReviewThreadCard({
               {replying ? (
                 <div className="flex items-start gap-1">
                   <CornerDownRight className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
-                  <textarea
+                  <Textarea
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
                     onKeyDown={(e) => {
@@ -307,28 +320,32 @@ export function ReviewThreadCard({
                     rows={2}
                     autoFocus
                     placeholder="Reply… (⌘↵ to send)"
+                    aria-label="Reply"
                     className="min-w-0 flex-1 resize-none rounded border bg-transparent px-1.5 py-1 text-xs"
                   />
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon-sm"
                     aria-label="Cancel reply"
                     onClick={() => {
                       setReplyText('');
                       setReplying(false);
                     }}
-                    className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded hover:bg-accent"
+                    className="mt-0.5 h-5 w-5 rounded hover:bg-accent"
                   >
                     <X className="h-3 w-3" />
-                  </button>
+                  </Button>
                 </div>
               ) : (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => setReplying(true)}
-                  className="text-[10px] text-muted-foreground hover:underline"
+                  className="h-auto w-auto rounded px-0 py-0 font-normal text-[10px] text-muted-foreground hover:bg-transparent hover:underline"
                 >
                   Reply
-                </button>
+                </Button>
               )}
             </div>
           )}

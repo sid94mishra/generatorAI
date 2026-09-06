@@ -34,6 +34,7 @@ import {
   type ThemeDef,
 } from '@generatorai/design-tokens';
 import { SectionHeader, SettingsCard } from '../shared.js';
+import { Button } from '@/components/ui/index.js';
 
 const MODE_ICONS: Record<ModeDef['icon'], React.ReactNode> = {
   Sun: <Sun className="h-4 w-4" />,
@@ -110,13 +111,14 @@ function ThemeCard({
   onSelect: () => void;
 }) {
   return (
-    <button
+    <Button
+      variant="ghost"
       type="button"
       role="radio"
       aria-checked={selected}
       onClick={onSelect}
       className={cn(
-        'group flex flex-col gap-2 rounded-lg border p-2.5 text-left transition-colors',
+        'h-auto group flex flex-col gap-2 rounded-lg border p-2.5 text-left transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selected ? 'border-primary bg-primary/5' : 'border-border hover:bg-subtle',
       )}
@@ -133,7 +135,7 @@ function ThemeCard({
           </p>
         </div>
       </div>
-    </button>
+    </Button>
   );
 }
 
@@ -155,15 +157,16 @@ export function AppearanceSection() {
         >
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Appearance mode">
             {MODES.map((m) => (
-              <button
+              <Button
                 key={m.id}
+                variant="ghost"
                 type="button"
                 role="radio"
                 aria-checked={mode === m.id}
                 onClick={() => setMode(m.id)}
                 title={m.description}
                 className={cn(
-                  'flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm transition-colors',
+                  'h-auto flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm transition-colors',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   mode === m.id
                     ? 'border-primary bg-primary/10 text-primary'
@@ -179,7 +182,7 @@ export function AppearanceSection() {
                     {resolvedTheme}
                   </span>
                 )}
-              </button>
+              </Button>
             ))}
           </div>
         </SettingsCard>
@@ -229,8 +232,9 @@ export function AppearanceSection() {
               const swatch = a[resolvedTheme].primary;
               const selected = accent === a.id;
               return (
-                <button
+                <Button
                   key={a.id}
+                  variant="ghost"
                   type="button"
                   role="radio"
                   aria-checked={selected}
@@ -238,7 +242,7 @@ export function AppearanceSection() {
                   title={a.label}
                   onClick={() => setAccent(a.id)}
                   className={cn(
-                    'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors',
+                    'h-auto flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     selected
                       ? 'border-primary bg-primary/10 text-foreground'
@@ -251,7 +255,7 @@ export function AppearanceSection() {
                     style={{ backgroundColor: swatch }}
                   />
                   {a.label}
-                </button>
+                </Button>
               );
             })}
           </div>

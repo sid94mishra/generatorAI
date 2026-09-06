@@ -8,15 +8,43 @@ import type { AgentHostSupervisor } from '../../AgentHostSupervisor.js';
 export interface ClaudeAgentProviderOptions {
   /**
    * W12 — optional AgentHostSupervisor that gates concurrent turns via the
-   * execution semaphore. When provided, each `sendPromptAndWait` acquires one
-   * execution slot before spawning a `query()` and releases it when the turn
-   * completes (including on abort or error). Prevents unbounded concurrent
-   * process spawns (P0-14: "Claude spawns one CLI per turn, uncapped").
+   * execution semaphore. When provided, BOTH `sendPrompt` (chat) and
+   * `sendPromptAndWait` (workflow stages) acquire one execution slot before a
+   * turn starts and release it when the turn completes (including on abort or
+   * error). Prevents unbounded concurrent process spawns (P0-14: "Claude
+   * spawns one CLI per turn, uncapped"). A turn that has to wait for a slot
+   * announces it with a `harness.session_info` / `infoType: 'queued'` event so
+   * the user sees "Waiting for a free agent slot" instead of a silent hang.
    *
    * Omit in tests that don't need concurrency control. The default singleton
    * (`defaultAgentHostSupervisor`) is wired at the composition root.
    */
   supervisor?: AgentHostSupervisor;
+  /**
+   * Item 17 — keep one long-lived streaming-input `query()` per chat
+   * conversation instead of spawning a CLI process per message.
+   *
+   * Default ON; `GENERATORAI_CLAUDE_PERSISTENT_SESSIONS=false` is the kill
+   * switch back to one-shot string prompts. `sendPromptAndWait` (workflow
+   * stages: single-message conversations in per-run directories) always uses
+   * the one-shot path regardless of this flag.
+   */
+  persistentSessions?: boolean;
+  /**
+   * Item 16 — a conversation (its maps AND its live process) idle for longer
+   * than this is evicted. Default 10 min (`GENERATORAI_CLAUDE_SESSION_IDLE_MINUTES`).
+   * `0` disables the idle sweep.
+   */
+  sessionIdleMs?: number;
+  /**
+   * Item 16 — hard cap on conversations held live at once. When a NEW
+   * conversation would exceed it the least-recently-used IDLE conversation is
+   * evicted first. A conversation with a turn in flight is never evicted.
+   * Default 8 (`GENERATORAI_CLAUDE_MAX_LIVE_SESSIONS`).
+   */
+  maxLiveConversations?: number;
+  /** Item 16 — how often the idle sweep runs. Defaults to `min(idle/2, 60s)`. */
+  sessionSweepIntervalMs?: number;
   /** Default model (e.g. 'claude-sonnet-4-6'). */
   defaultModel?: string;
   /**
@@ -93,10 +121,15 @@ export interface ClaudeAgentProviderOptions {
   recordByteCapBytes?: number;
 
   /**
-   * W13 — how long a cancel waits for the runtime's own terminal event before
-   * synthesising one. Never a process kill: the runtime may be shared, and
-   * killing it would take every co-tenant session with it.
+   * W13 — how long a cancel waits for the runtime to acknowledge an
+   * `interrupt()` (by ending the turn with a `result`) before escalating.
    * Defaults to `DEFAULT_CANCEL_GRACE_MS` (2 s).
+   *
+   * The escalation here IS a process close, deliberately. `semanticCancel.ts`
+   * forbids a kill because the runtimes it was written for are SHARED; a
+   * persistent Claude session is one CLI process serving exactly one
+   * conversation, so closing it takes nobody else down, and the next turn
+   * simply reopens it with `resume`.
    */
   cancelGraceMs?: number;
 }
@@ -145,6 +178,11 @@ export interface StoredConversationConfig {
   sdkSessionId?: string;
   env?: Record<string, string | undefined>;
   /**
+   * Item 16 — last time this conversation was created, resumed, or had a
+   * turn start or finish. The idle sweep and the LRU cap read it.
+   */
+  lastUsedAt?: number;
+  /**
    * HITL-06 (Claude parity): Domain permission callback provided by the
    * caller (usually `StageExecutionService.buildPermissionHandler`). Bridged
    * to the Claude SDK's `canUseTool` in `buildQueryOptions`. When absent,
@@ -172,12 +210,13 @@ export interface StoredConversationConfig {
 /**
  * PLN-01 — per-conversation plan-mode phase.
  *
- * The Claude SDK's `Query.setPermissionMode()` is only available in streaming
- * input mode, and this adapter drives single-shot `query({ prompt: string })`
- * per turn. We therefore realise the "plan → implement" transition inside our
- * own `canUseTool`: while `permissionMode: 'plan'` is active EVERY write lands
- * on the callback by construction, so flipping to implementation is simply
- * "start returning allow".
+ * The "plan → implement" transition is realised inside our own `canUseTool`
+ * rather than via `Query.setPermissionMode()`: while `permissionMode: 'plan'`
+ * is active EVERY write lands on the callback by construction, so flipping to
+ * implementation is simply "start returning allow". Doing it in the callback
+ * keeps ONE mechanism for both runtime modes — the persistent streaming
+ * session (where `setPermissionMode` would also work) and the one-shot
+ * fallback (where it cannot).
  */
 export interface PlanPhaseState {
   phase: 'planning' | 'implementing';

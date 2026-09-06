@@ -26,8 +26,14 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import type { IChatRepository } from '../domain/ports/IChatRepository.js';
 import type { ISessionRepository, IChatMessageRepository } from '../domain/ports/IRepositories.js';
-import type { IAgentHarness, AttachmentRef, CreateConversationParams, ToolDefinition } from '../domain/ports/IAgentHarness.js';
-import type { PlanReviewRequest, PlanReviewDecision, QuestionRequest } from '../domain/ports/IAgentHarness.js';
+import type { IAgentHarness, AttachmentRef, CreateConversationParams, ToolDefinition, HarnessPermissionMode } from '../domain/ports/IAgentHarness.js';
+import type {
+  PlanReviewRequest,
+  PlanReviewDecision,
+  QuestionRequest,
+  PermissionRequest,
+  PermissionResponse,
+} from '../domain/ports/IAgentHarness.js';
 import type { AgentInteractionService } from './AgentInteractionService.js';
 import type { PlanService } from './PlanService.js';
 import {
@@ -36,6 +42,8 @@ import {
   resolveModeDescriptor,
   resolveTurnPermissionMode,
   shouldAttachPermissionHandler,
+  decideToolPermission,
+  buildToolPermissionPayload,
   type TurnContext,
 } from './agentModePolicy.js';
 import type { HookBridge } from '../domain/ports/IHookBridge.js';
@@ -65,7 +73,15 @@ import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebas
 import { AgentResolver, redactProjection } from './AgentResolver.js';
 import type { AgentStagingService } from './AgentStagingService.js';
 import type { SystemArtifactService } from './SystemArtifactService.js';
-import { BROWSER_SYSTEM_HINT, COMPUTER_USE_SYSTEM_HINT, WIDGET_SYSTEM_HINT } from './chatSystemHints.js';
+import {
+  BROWSER_SYSTEM_HINT,
+  COMPUTER_USE_SYSTEM_HINT,
+  EXTENSION_AUTHORING_HINT,
+  WIDGET_SYSTEM_HINT,
+} from './chatSystemHints.js';
+import { isExtensionAuthorToolName } from '../tools/extensionAuthorTools.js';
+import { mergeMcpServers } from '../mcp/mergeMcpServers.js';
+import type { McpServerConfig } from '@generatorai/shared';
 
 /** Local alias so the helper reads cleanly at its call sites. */
 const AgentResolverEmpty = (): ResolvedAgentProjection => AgentResolver.empty();
@@ -419,6 +435,133 @@ export class ChatManagementService {
   }
 
   /** Blocking gate invoked when the agent asks the user clarifying questions. */
+  /**
+   * The tool-permission gate — review finding 5.1.
+   *
+   * A chat could be set to "ask me before each tool" or "accept edits", the
+   * setting was validated, saved, echoed back and shown as a live control in
+   * three clients — and nothing ever asked. `onPermissionRequest` was never
+   * assigned, so the adapter's approval callback fell straight through to
+   * allow. A user who selected "Ask me" was watching an agent that was not
+   * asking, which is worse than never having built the feature.
+   *
+   * The gate is the same durable machinery questions and plan reviews already
+   * use, so an approval survives a restart and a reconnecting client replays
+   * the pending card instead of losing it.
+   *
+   * Modes are decided by `decideToolPermission`, and against the mode the TURN
+   * started with (`ctx.permissionMode`), not whatever the chat was flipped to
+   * while the model was mid-answer.
+   */
+  private buildPermissionHandler(chatId: string) {
+    return async (request: PermissionRequest): Promise<PermissionResponse> => {
+      const interactions = this.extensions.agentInteractionService;
+      const ctx = this.turnContexts.get(chatId);
+      // No durable gate available, or no turn context to attach it to. Deny
+      // rather than allow: reaching this handler means the harness did not
+      // auto-allow the call, and a silent allow is the exact failure this
+      // finding is about.
+      if (!interactions || !ctx) {
+        return { granted: false, reason: 'No approval channel is available for this chat.' };
+      }
+
+      const mode = ctx.permissionMode;
+      const verdict = decideToolPermission(mode, request.type);
+      if (verdict === 'allow') return { granted: true };
+      if (verdict === 'deny') {
+        return { granted: false, reason: `Blocked by the chat's ${mode} permission mode.` };
+      }
+
+      const payload = buildToolPermissionPayload(request, mode);
+
+      // `open` blocks until the user answers, so the card is announced from a
+      // microtask that runs once the row exists — the same approach the
+      // question gate uses to learn the id without threading it out of the
+      // blocking call.
+      const announce = (async () => {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const pending = (await interactions.listPendingByChat(chatId)).find(
+            (i) => i.kind === 'tool_permission' && !ctx.interactionIds.includes(i.id),
+          );
+          if (pending) {
+            ctx.interactionIds.push(pending.id);
+            this.stampCardSequence(ctx, pending.id);
+            const chat = await this.chatRepo.getById(chatId).catch(() => null);
+            if (chat) {
+              await this.eventBus.emit(chat.sessionId, {
+                kind: 'chat.permission.requested',
+                data: { chatId, interactionId: pending.id, turnId: ctx.turnId, ...payload },
+              } as AgentEvent);
+            }
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      })();
+
+      const outcome = await interactions.open<PermissionResponse>(
+        { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
+        'tool_permission',
+        payload as unknown as Record<string, unknown>,
+      );
+      await announce.catch(() => undefined);
+
+      if (outcome.status === 'answered' && outcome.value) {
+        return outcome.value;
+      }
+      // Cancelled, expired, or the turn was stopped. Deny — an unanswered
+      // approval is not an approval.
+      return {
+        granted: false,
+        reason: 'The request was not approved (the prompt was cancelled or timed out).',
+      };
+    };
+  }
+
+  /**
+   * Resolve a pending tool-permission gate. Mirrors `answerQuestion`: the
+   * service — not the route — checks the interaction belongs to this chat and
+   * emits the resolution event, so a reload replays a settled card rather than
+   * a pending one.
+   */
+  async resolveToolPermission(
+    chatId: string,
+    interactionId: string,
+    decision: { behavior: 'allow' | 'deny'; message?: string },
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const interactions = this.extensions.agentInteractionService;
+    if (!interactions) return { ok: false, reason: 'Approvals are not enabled' };
+
+    const record = await interactions.findById(interactionId);
+    if (!record || record.chatId !== chatId) {
+      return { ok: false, reason: 'Interaction not found' };
+    }
+    if (record.kind !== 'tool_permission') {
+      return { ok: false, reason: 'Interaction is not a permission request' };
+    }
+
+    const response: PermissionResponse = {
+      granted: decision.behavior === 'allow',
+      ...(decision.message ? { reason: decision.message } : {}),
+    };
+    const result = await interactions.resolve(interactionId, 'answered', response);
+    if (!result.ok) return result;
+
+    const chat = await this.chatRepo.getById(chatId).catch(() => null);
+    if (chat) {
+      await this.eventBus.emit(chat.sessionId, {
+        kind: 'chat.permission.resolved',
+        data: {
+          chatId,
+          interactionId,
+          behavior: decision.behavior,
+          ...(decision.message ? { message: decision.message } : {}),
+        },
+      } as AgentEvent);
+    }
+    return { ok: true };
+  }
+
   private buildQuestionHandler(chatId: string) {
     return async (request: QuestionRequest): Promise<AgentQuestionResponse> => {
       const interactions = this.extensions.agentInteractionService;
@@ -527,6 +670,7 @@ export class ChatManagementService {
 
     conversationConfig['onPlanReviewRequest'] = this.buildPlanReviewHandler(chat.id);
     conversationConfig['onQuestionRequest'] = this.buildQuestionHandler(chat.id);
+    conversationConfig['onPermissionRequest'] = this.buildPermissionHandler(chat.id);
 
     // Instruction blocks. BOTH are installed regardless of the chat's sticky
     // default, because the mode is chosen per turn while the conversation
@@ -914,20 +1058,74 @@ export class ChatManagementService {
     conversationConfig['skillDirectories'] = [...new Set([...dirs, dir])];
   }
 
-  /** The model + provider + agent a chat currently asks for. */
-  private conversationBindingKey(chat: Chat): string {
-    const model = chat.harnessConfig?.model ?? chat.model ?? '';
-    const harnessType = chat.harnessConfig?.harnessType ?? '';
-    // Agent ref + version only. Per-turn options must NOT participate, or every
-    // plan-mode toggle would force a full conversation rebind.
-    const agentRef = chat.agentRef ?? '-';
-    const agentVersion = chat.agentVersion ?? 0;
+  /**
+   * The model + provider + agent a chat currently asks for.
+   *
+   * ONE formatter, used by both the site that RECORDS a binding at creation
+   * and the site that COMPARES it on the next turn. They used to build the
+   * string separately — four parts written, five computed — so the comparison
+   * could never match and every chat's first message paid a full rebuild:
+   * a database read, complete agent resolution, writing skill files to disk,
+   * MCP resolution, tool definitions, and a provider round-trip, all before
+   * the first word (review 3.6). The comment at the write site said the
+   * opposite of what the code did.
+   */
+  private formatConversationBindingKey(parts: {
+    harnessType: string;
+    model: string;
+    agentRef: string;
+    agentVersion: number;
+    permissionMode?: string;
+  }): string {
     // Computer Use is a Settings toggle that applies live. Without it here, a
     // chat that was open when the user turned the feature on would keep the
     // tool-less conversation until the server restarted — and one that was open
     // when they turned it OFF would keep driving their desktop.
     const computerUse = this.extensions.computerService?.isEnabled() ? '1' : '0';
-    return `${harnessType}::${model}::${agentRef}::${agentVersion}::cu${computerUse}`;
+    return `${parts.harnessType}::${parts.model}::${parts.agentRef}::${parts.agentVersion}::cu${computerUse}::pm${parts.permissionMode ?? '-'}`;
+  }
+
+  /**
+   * Custom tools for one conversation, with the extension-authoring pair
+   * removed unless this chat's agent explicitly grants that capability.
+   *
+   * Review 5.3 — the number-one security finding. `write_extension` writes an
+   * arbitrary file tree and `reload_extension` imports it INTO THE SERVER'S OWN
+   * PROCESS, inheriting the vault key and every token the server can reach, and
+   * surviving reboots. They were registered on the process-wide registry, so
+   * the wiring comment said it plainly: "every chat conversation gets them
+   * automatically". Host code execution must be a capability a chat is granted,
+   * never one it has by default.
+   */
+  private selectCustomTools(allowExtensionAuthoring: boolean): unknown[] {
+    const all = this.extensions.customToolRegistry?.list() ?? [];
+    if (allowExtensionAuthoring) return all;
+    return all.filter(
+      (tool) => !isExtensionAuthorToolName((tool as { name?: string }).name ?? ''),
+    );
+  }
+
+  private conversationBindingKey(chat: Chat): string {
+    return this.formatConversationBindingKey({
+      harnessType: chat.harnessConfig?.harnessType ?? '',
+      model: chat.harnessConfig?.model ?? chat.model ?? '',
+      // Agent ref + version only. Per-turn options must NOT participate, or
+      // every plan-mode toggle would force a full conversation rebind.
+      agentRef: chat.agentRef ?? '-',
+      agentVersion: chat.agentVersion ?? 0,
+      // The chat's permission mode DOES belong here: it decides whether
+      // `permissionMode` is placed on the conversation config at all
+      // (`shouldAttachPermissionHandler`), which is a construction-time
+      // property of the live conversation rather than a per-turn one.
+      //
+      // `agentModePolicy.ts` already documents this as the behaviour —
+      // "flipping it via PATCH /chats/:id/permission-mode rebinds the live
+      // conversation with or without the handler on the next turn" — but the
+      // key did not include it, so the rebind never happened and the command
+      // changed only the database row. Chats kept whatever mode they were
+      // created with for the life of the conversation.
+      permissionMode: chat.permissionMode ?? '-',
+    });
   }
 
   /**
@@ -961,7 +1159,15 @@ export class ChatManagementService {
     },
   ): Promise<ResolvedAgentProjection> {
     const ref = source.agentRef ?? source.harnessConfig?.agentRef;
-    if (!ref && !source.snapshot) return AgentResolverEmpty();
+    // No agent bound is NOT "no configuration". The resolver still unions the
+    // project's and the globally-enabled system MCP servers, and it handles a
+    // missing `agentRef` on its own. Returning empty here is why a chat with
+    // no agent forwarded ZERO MCP servers — one of the two undocumented
+    // conditions that made most bundled servers unusable (review 2.4).
+    if (!ref && !source.snapshot && !source.projectId) return AgentResolverEmpty();
+    if (!ref && !source.snapshot && !this.extensions.agentResolver) {
+      return AgentResolverEmpty();
+    }
 
     if (!this.extensions.agentResolver) {
       throw new ValidationError(
@@ -1101,6 +1307,68 @@ export class ChatManagementService {
     if (pending) {
       await pending;
     }
+  }
+
+  /**
+   * Warm everything the FIRST turn of a chat would otherwise pay for while the
+   * user waits.
+   *
+   * Two costs, both measured, both harness-agnostic in origin:
+   *
+   *   1. **The provider's conversation.** Every harness builds the process or
+   *      session backing a new conversation on the first prompt. Measured on
+   *      this machine: 12.8 s for `claude-agent` and 7.1 s for `copilot`, against
+   *      warm turns of 2.2 s and 3.9 s. Delegated through the optional
+   *      `prewarmConversation` capability, so a provider that cannot warm is
+   *      simply skipped.
+   *   2. **The workspace baseline checkpoint.** `WorkspaceCheckpointService`
+   *      writes an implicit `baseline` on the first capture of a repo, which is
+   *      the pre-turn checkpoint of the first turn. That one is a full
+   *      `git add -A` + `write-tree` over the whole workspace; every later turn
+   *      only pays an incremental one. This cost is paid by EVERY harness,
+   *      which is why warming it lives here rather than in a provider.
+   *
+   * Fire-and-forget and non-blocking: chat creation must not wait for either,
+   * and a failure in either must be invisible. The worst case is that the first
+   * turn costs exactly what it costs today.
+   *
+   * Both run concurrently — they contend for nothing (one spawns a process and
+   * waits on it, the other runs git), and three concurrent provider warms were
+   * measured to cost the same wall time as one.
+   */
+  prewarmChat(
+    conversationId: string,
+    workspaceId?: string,
+    firstTurn?: { agentMode: AgentMode; permissionMode: HarnessPermissionMode },
+  ): void {
+    const warmProvider = async (): Promise<void> => {
+      const prewarm = this.harness.prewarmConversation?.bind(this.harness);
+      if (!prewarm) return;
+      // Hand over what the first turn will ask for. Warming with no options
+      // builds a session under a different permission mode than the turn
+      // then requests, so the handle either goes unused (losing the whole
+      // point) or gets claimed and runs the turn under the wrong mode.
+      await prewarm(conversationId, firstTurn);
+    };
+
+    const warmBaseline = async (): Promise<void> => {
+      const checkpoints = this.extensions.workspaceCheckpointService;
+      if (!workspaceId || !checkpoints) return;
+      // `kind: 'baseline'` is what the first capture would have written
+      // anyway; asking for it explicitly just moves it off the turn path.
+      // `capture` is documented never to throw.
+      await checkpoints.capture({ workspaceId, kind: 'baseline' });
+    };
+
+    void Promise.allSettled([warmProvider(), warmBaseline()]).then((results) => {
+      for (const r of results) {
+        if (r.status === 'rejected') {
+          console.warn(
+            `[ChatManagement] pre-warm step failed for ${conversationId}: ${String(r.reason)}`,
+          );
+        }
+      }
+    });
   }
 
   /**
@@ -1414,7 +1682,12 @@ export class ChatManagementService {
 
       // System-prompt hint — kept short. The tool descriptions carry the
       // detail the model needs.
-      const uiHint = WIDGET_SYSTEM_HINT;
+      // The authoring block only makes sense when the chat actually HAS those
+      // tools — otherwise it spends ~5,800 characters a message describing a
+      // capability the model cannot exercise (reviews 3.7 and 5.3).
+      const uiHint = agentProjection.toolPolicy.groups.extensionAuthoring
+        ? WIDGET_SYSTEM_HINT + EXTENSION_AUTHORING_HINT
+        : WIDGET_SYSTEM_HINT;
       const existingSys = (conversationConfig['systemMessage'] as { mode?: string; content?: string } | undefined);
       conversationConfig['systemMessage'] = {
         mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
@@ -1425,7 +1698,15 @@ export class ChatManagementService {
     // TOL-06 — resolve MCP server config through the hub so run-level
     // overrides / disable-flags take effect. Falls back to the declared
     // map when no hub is wired (behaviour-identical to pre-rollout).
-    const declaredMcp = params.harnessConfig?.mcpServers;
+    // ONE merge, shared with the resume path. Each side used to assemble the
+    // final map differently — the create path handed the hub only the chat's
+    // own `harnessConfig.mcpServers`, so an agent's servers were dropped at
+    // creation and reappeared on the next turn (review 8.2's duplicated-logic
+    // pattern, with the divergence visible to the user).
+    const declaredMcp = mergeMcpServers({
+      agent: conversationConfig['mcpServers'] as Record<string, McpServerConfig> | undefined,
+      chatOverrides: params.harnessConfig?.mcpServers,
+    });
     if (this.extensions.mcpHub) {
       const resolved = await this.extensions.mcpHub.resolveForRun({
         workflowDefinitionId: `chat:${chatId}`,
@@ -1451,7 +1732,7 @@ export class ChatManagementService {
         : [];
       conversationConfig['tools'] = [
         ...existingTools,
-        ...this.extensions.customToolRegistry.list(),
+        ...this.selectCustomTools(agentProjection.toolPolicy.groups.extensionAuthoring),
       ];
     }
 
@@ -1524,11 +1805,27 @@ export class ChatManagementService {
     // above is a valid CreateConversationParams field, so assert the final shape
     // rather than leaking `any` into the harness boundary.
     await this.harness.createConversation(conversationConfig as unknown as CreateConversationParams);
+    // Bring the first turn's fixed costs forward into the time the user spends
+    // writing that first message. Fire-and-forget by design — see `prewarmChat`.
+    const firstAgentMode = (params.orchestratorMode ? DEFAULT_AGENT_MODE : (params.defaultAgentMode ?? DEFAULT_AGENT_MODE));
+    this.prewarmChat(conversationId, workspaceId, {
+      agentMode: firstAgentMode,
+      permissionMode: resolveTurnPermissionMode(firstAgentMode, params.permissionMode),
+    });
     // Remember what this conversation was bound to so the first turn doesn't
     // rebind it needlessly.
     this.conversationBindings.set(
       conversationId,
-      `${(conversationConfig['harnessType'] as string | undefined) ?? ''}::${(conversationConfig['model'] as string | undefined) ?? ''}::${agentProjection.agentRef ?? '-'}::${agentProjection.agentVersion ?? 0}`,
+      this.formatConversationBindingKey({
+        harnessType: (conversationConfig['harnessType'] as string | undefined) ?? '',
+        model: (conversationConfig['model'] as string | undefined) ?? '',
+        agentRef: agentProjection.agentRef ?? '-',
+        agentVersion: agentProjection.agentVersion ?? 0,
+        // Must match what `conversationBindingKey` will compute for the chat
+        // record built below, or the very first turn would see a changed key
+        // and rebind the conversation this call just created.
+        permissionMode: params.permissionMode ?? 'bypassPermissions',
+      }),
     );
 
     // 3. Transition session to active
@@ -1625,6 +1922,9 @@ export class ChatManagementService {
       unsub();
       this.activeSubscriptions.delete(chatId);
     }
+    // The binding key is per conversation and was never removed; a server
+    // that has served N chats kept N entries forever.
+    if (session?.conversationId) this.conversationBindings.delete(session.conversationId);
 
     await this.eventBus.emit(chat.sessionId, {
       kind: 'chat.archived',
@@ -1710,10 +2010,17 @@ export class ChatManagementService {
 
     // MCP servers — the resume path used to drop these entirely, so a chat's
     // MCP tools silently vanished after a restart.
-    const declaredMcp = {
-      ...(chat.harnessConfig?.mcpServers ?? {}),
-      ...(conversationConfig['mcpServers'] as Record<string, unknown> | undefined),
-    };
+    //
+    // Uses the SAME merge as the create path. Hand-rolling it here spread the
+    // two maps in the opposite order, so the agent's config beat the chat's
+    // explicit override on resume while the chat's won at creation: a setting
+    // that worked when you made the chat quietly reverted on the next restart.
+    // That is precisely the create-vs-resume divergence this helper exists to
+    // end, so there is one call and one precedence rule.
+    const declaredMcp = mergeMcpServers({
+      agent: conversationConfig['mcpServers'] as Record<string, McpServerConfig> | undefined,
+      chatOverrides: chat.harnessConfig?.mcpServers,
+    });
     if (this.extensions.mcpHub) {
       const resolved = await this.extensions.mcpHub.resolveForRun({
         workflowDefinitionId: `chat:${chat.id}`,
@@ -1803,7 +2110,11 @@ export class ChatManagementService {
         const existingSys = (conversationConfig['systemMessage'] as { mode?: string; content?: string } | undefined);
         conversationConfig['systemMessage'] = {
           mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
-          content: (existingSys?.content ?? '') + WIDGET_SYSTEM_HINT,
+          content:
+            (existingSys?.content ?? '') +
+            (agentProjection.toolPolicy.groups.extensionAuthoring
+              ? WIDGET_SYSTEM_HINT + EXTENSION_AUTHORING_HINT
+              : WIDGET_SYSTEM_HINT),
         };
       } catch {
         // Non-fatal.
@@ -1813,7 +2124,10 @@ export class ChatManagementService {
     // Surface registered custom tools.
     if (this.extensions.customToolRegistry && this.extensions.customToolRegistry.size > 0) {
       const existing = Array.isArray(conversationConfig['tools']) ? (conversationConfig['tools'] as unknown[]) : [];
-      conversationConfig['tools'] = [...existing, ...this.extensions.customToolRegistry.list()];
+      conversationConfig['tools'] = [
+        ...existing,
+        ...this.selectCustomTools(agentProjection.toolPolicy.groups.extensionAuthoring),
+      ];
     }
 
     // Orchestrator mode — re-inject the identical background-agent tool set +
@@ -1866,6 +2180,30 @@ export class ChatManagementService {
   /**
    * Send a prompt within a chat.
    */
+  /**
+   * Is a turn still generating in this chat?
+   *
+   * Routes check this BEFORE dispatching, because `sendPrompt` is
+   * fire-and-forget from the HTTP layer: a throw inside it would only ever
+   * reach the event stream, so the caller would get a 202 for a prompt that
+   * was refused.
+   */
+  /**
+   * Chats whose turn has been CLAIMED but whose finaliser is not registered
+   * yet. Bridges the gap between the busy check and the real lock, which are
+   * separated by several awaits.
+   */
+  private readonly startingTurns = new Set<string>();
+
+  isTurnActive(chatId: string): boolean {
+    // `turnFinalizers`, not `turnContexts`: the finaliser is registered when a
+    // turn starts and deleted on EVERY terminal path (idle, error, abort,
+    // delete). `turnContexts` deliberately outlives its turn so late events
+    // can still be attributed, so testing it would mark a chat busy forever
+    // after its first prompt.
+    return this.turnFinalizers.has(chatId) || this.startingTurns.has(chatId);
+  }
+
   async sendPrompt(
     chatId: string,
     prompt: string,
@@ -1896,6 +2234,34 @@ export class ChatManagementService {
         throw err;
       }
     }
+
+    // Review 6.1 — refuse a second prompt while a turn is still running.
+    //
+    // The line further down that swaps the event listener ("unsubscribe
+    // previous listener to prevent duplicate events") does NOT abort the turn
+    // it detaches: the first query kept running with nowhere to send its
+    // output, so its entire response was lost and never saved. The web client
+    // disables Send while streaming, but the API, the terminal and the SDK do
+    // not, so the guard has to live here where every caller passes.
+    if (this.isTurnActive(chatId)) {
+      const err = new Error(
+        'This chat is still generating a response. Wait for it to finish, or stop it first.',
+      ) as Error & { code?: string; details?: unknown };
+      err.code = 'CHAT_BUSY';
+      err.details = { turnId: this.turnContexts.get(chatId)?.turnId };
+      throw err;
+    }
+    // Claim the chat NOW, synchronously, in the same tick as the check.
+    //
+    // The finaliser that `isTurnActive` really watches is not registered until
+    // ~250 lines and several awaits below. Two prompts arriving inside that
+    // window — a double-click, a retry, two clients — both passed the check,
+    // and the second then replaced the first turn's finaliser and unsubscribed
+    // its listener: the first response kept being generated with nowhere to go.
+    // That is the very bug this guard exists to prevent, so the claim has to be
+    // atomic with the test.
+    this.startingTurns.add(chatId);
+    try {
 
     const agentMode = this.resolveAgentMode(chat, options?.mode);
 
@@ -1992,6 +2358,10 @@ export class ChatManagementService {
       sessionId: chat.sessionId,
       turnId,
       agentMode,
+      // Pinned for the life of the turn: a prompt raised mid-turn is judged
+      // against the mode the turn was sent with, not whatever the chat was
+      // flipped to while the model was still working.
+      permissionMode: resolveTurnPermissionMode(agentMode, chat.permissionMode),
       planIds: [],
       interactionIds: [],
       nextSequence: 0,
@@ -2007,20 +2377,33 @@ export class ChatManagementService {
 
     // Checkpoint the workspace BEFORE the agent touches anything. This is the
     // anchor for the turn diff ("what did this message change?") and for
-    // rewinding back to the state the prompt was written against. Awaited so
-    // the snapshot is guaranteed pristine; it is O(changed files) and cannot
-    // throw (the service swallows its own errors).
-    if (chat.workspaceId && this.extensions.workspaceCheckpointService) {
-      await this.extensions.workspaceCheckpointService.capture({
-        workspaceId: chat.workspaceId,
-        kind: 'turn',
-        turnId,
-        chatId,
-        sessionId: chat.sessionId,
-        phase: 'before',
-        promptExcerpt: prompt,
-      });
-    }
+    // rewinding back to the state the prompt was written against.
+    //
+    // STARTED here and AWAITED just before the harness dispatch, rather than
+    // awaited on the spot. The guarantee that matters is "pristine before the
+    // AGENT runs", and nothing between these two points touches the working
+    // tree: persisting the user message writes to SQLite, and the events are
+    // in-process. Awaiting it here instead put a measured ~3.1 s of `git` in
+    // front of the user's own message appearing, on every single turn, for no
+    // added safety.
+    //
+    // The service swallows its own errors, so this cannot reject; the
+    // `.catch` is belt-and-braces against an unhandled rejection if that ever
+    // changes.
+    const beforeCheckpoint =
+      chat.workspaceId && this.extensions.workspaceCheckpointService
+        ? this.extensions.workspaceCheckpointService
+            .capture({
+              workspaceId: chat.workspaceId,
+              kind: 'turn',
+              turnId,
+              chatId,
+              sessionId: chat.sessionId,
+              phase: 'before',
+              promptExcerpt: prompt,
+            })
+            .catch(() => undefined)
+        : undefined;
 
     // Save user message
     await this.messageRepo.create({
@@ -2044,6 +2427,14 @@ export class ChatManagementService {
       kind: 'harness.user_message',
       data: { content: prompt, chatId } as { content: string },
     } as AgentEvent);
+
+    // "Cancelled" describes THIS turn. Only the aborted-`sendPrompt` catch
+    // used to clear the flag, so a provider whose abort resolves instead of
+    // rejecting left it set forever — harmless while it merely suppressed an
+    // error message, but `finalizeTurn` now reads it, and a stale flag would
+    // mark every later turn on this chat partial. A new turn is the honest
+    // place to clear it.
+    this.cancelledTurns.delete(chatId);
 
     // Unsubscribe previous listener to prevent duplicate events
     const prevUnsub = this.activeSubscriptions.get(chatId);
@@ -2076,10 +2467,26 @@ export class ChatManagementService {
      */
     const finalizeTurn = async (opts: { partial?: boolean } = {}): Promise<void> => {
       if (assistantPersisted) return;
+      // Whether this turn was CANCELLED is a fact about the chat, not about
+      // who happened to call this function.
+      //
+      // A cancel reaches finalisation by up to three routes, and they race:
+      // `cancelTurn` calls this with `partial`, the aborted `sendPrompt`
+      // rejection calls it with `partial`, and the abort ALSO drives the
+      // provider to `harness.idle` — whose handler calls it with NO options
+      // and then deletes the entry from `turnFinalizers`. When idle won that
+      // race the turn was written off as empty (`turnContent` is only set by
+      // `message_complete`, which an aborted turn never sends) and
+      // `cancelTurn`'s later lookup found nothing to call. Measured live:
+      // 2,586 bytes streamed to the user, then discarded — the transcript
+      // kept the question with no answer.
+      //
+      // Reading the flag here makes every route agree, whichever wins.
+      const partial = opts.partial === true || this.cancelledTurns.has(chatId);
       // A cancel keeps whichever record is richer: the last completed message,
       // or the tokens streamed since it.
       const content =
-        opts.partial && streamedText.trim().length > turnContent.trim().length
+        partial && streamedText.trim().length > turnContent.trim().length
           ? streamedText
           : turnContent;
       const hasText = content.trim().length > 0;
@@ -2087,7 +2494,7 @@ export class ChatManagementService {
         !!turnMetadata.thinkingText?.trim() || (turnMetadata.toolCalls?.length ?? 0) > 0;
       // A cancel before the model said anything at all leaves nothing worth a
       // transcript row; a completed turn still requires text, as before.
-      if (opts.partial ? !hasText && !hasActivity : !hasText) return;
+      if (partial ? !hasText && !hasActivity : !hasText) return;
       assistantPersisted = true;
 
       const metadata: ChatMessageMetadata = {};
@@ -2101,7 +2508,7 @@ export class ChatManagementService {
       // WEB-02: tag assistant with the same turnId as the user msg.
       metadata.turnId = turnId;
       metadata.agentMode = agentMode;
-      if (opts.partial) metadata.partial = true;
+      if (partial) metadata.partial = true;
 
       // PLN-01 — persist plan/question cards into the transcript.
       // Event replay is SKIPPED for completed chats (replayEvents fast
@@ -2342,6 +2749,11 @@ export class ChatManagementService {
           `\n\n` +
           prompt;
       }
+      // The `before` snapshot must be complete before the agent can touch the
+      // working tree. This is the last moment that holds, and by now it has
+      // been running concurrently with message persistence and event emission.
+      if (beforeCheckpoint) await beforeCheckpoint;
+
       await this.harness.sendPrompt(session.conversationId, promptForHarness, attachments, {
         agentMode,
         permissionMode: resolveTurnPermissionMode(agentMode, chat.permissionMode),
@@ -2365,6 +2777,12 @@ export class ChatManagementService {
       this.activeSubscriptions.delete(chatId);
       unsub();
       throw err;
+      }
+    } finally {
+      // Release the synchronous claim. The real lock (`turnFinalizers`) has
+      // taken over by now on the success path; on every failure path this is
+      // what stops a chat being stuck "busy" forever.
+      this.startingTurns.delete(chatId);
     }
   }
 

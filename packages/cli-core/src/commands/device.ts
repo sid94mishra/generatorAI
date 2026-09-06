@@ -127,7 +127,21 @@ export function deviceCommands(): CommandSpec[] {
       ),
       output: { kind: 'record', successMessage: 'Paired.' },
       async handler(ctx, { args, flags }) {
-        const consent = parseCliPairingCode(args.code);
+        // A short code carries no endpoint, so it is resolved against the
+        // server this CLI is already pointed at. `ctx.baseUrl` is empty here —
+        // `pair` declares `requiresServer: false`, since it is the one command
+        // that must run without a credential — so fall back to the connection
+        // catalog, which is where `device status` reads its endpoint from.
+        const activeEndpoint = (() => {
+          if (ctx.baseUrl) return ctx.baseUrl;
+          try {
+            return new ConnectionManager().active()?.endpoint;
+          } catch {
+            // No catalog yet: a first-ever pairing must use the full code.
+            return undefined;
+          }
+        })();
+        const consent = await parseCliPairingCode(args.code, activeEndpoint);
 
         // The consent screen is not decoration. The code is entirely
         // attacker-controllable, so the user must see which host and which
@@ -385,7 +399,25 @@ export function deviceCommands(): CommandSpec[] {
       args: [],
       flags: [
         { name: 'scopes', description: 'Comma-separated scopes to request', type: 'string' },
-        { name: 'ttl', description: 'Validity in minutes', type: 'number', default: 10 },
+        // `deviceName` is REQUIRED by `POST /api/auth/pair`. It was never
+        // sent, so the authenticated path of this command failed 100% of the
+        // time with "deviceName: Required" — only the two bootstrap paths,
+        // which do not call the API, ever worked.
+        {
+          name: 'name',
+          description: 'Name to record for the device being invited',
+          type: 'string',
+        },
+        {
+          name: 'platform',
+          description: 'Device platform: web, desktop, cli, mobile or other',
+          type: 'string',
+          default: 'other',
+        },
+        // The server caps `ttlMs` at 10 minutes, so every value above 10 was
+        // rejected. Saying so in the description beats a validation error
+        // from the far end.
+        { name: 'ttl', description: 'Validity in minutes (max 10)', type: 'number', default: 10 },
         {
           name: 'dataDir',
           description: "Server data directory holding local-admin.json (bootstrap only)",
@@ -396,13 +428,20 @@ export function deviceCommands(): CommandSpec[] {
         {},
         {
           scopes: z.string().optional(),
-          ttl: z.coerce.number().int().positive().default(10),
+          name: z.string().min(1).max(64).optional(),
+          platform: z.enum(['web', 'desktop', 'cli', 'mobile', 'other']).default('other'),
+          // Bounded here rather than at the server, so an out-of-range value
+          // is a local error naming the limit instead of a round trip that
+          // fails validation.
+          ttl: z.coerce.number().int().positive().max(10).default(10),
           dataDir: z.string().optional(),
         },
       ),
       output: { kind: 'record' },
       async handler(ctx, { flags }) {
         const body = {
+          deviceName: flags.name ?? 'New device',
+          platform: flags.platform ?? 'other',
           ...(flags.scopes ? { scopes: flags.scopes.split(',').map((s) => s.trim()) } : {}),
           ttlMs: (flags.ttl ?? 10) * 60_000,
         };

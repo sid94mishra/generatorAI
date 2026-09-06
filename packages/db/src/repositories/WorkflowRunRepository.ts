@@ -2,13 +2,14 @@
 // DrizzleWorkflowRunRepository — IWorkflowRunRepository impl (v2)
 // ────────────────────────────────────────────────────────────────
 
-import { eq, inArray } from 'drizzle-orm';
+import { count, eq, inArray } from 'drizzle-orm';
 import type { IWorkflowRunRepository } from '@generatorai/core';
 import type {
   WorkflowRun,
   WorkflowRunStatus,
   WorkflowSessionMode,
   WorkflowRunPermissionMode,
+  WorkflowDefinitionSnapshot,
 } from '@generatorai/shared';
 import { StorageError, NotFoundError } from '@generatorai/shared';
 import { workflowRuns } from '../schema.js';
@@ -16,6 +17,22 @@ import type { AppDatabase } from '../index.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
 import { validateJsonColumn } from '../utils/validateJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
+
+/**
+ * WS-D1 — drizzle's `mode: 'json'` already parses the column; this only
+ * guards the shape so a hand-edited or truncated row degrades to "no
+ * snapshot" instead of throwing inside `mapRow`.
+ */
+function parseSnapshot(value: unknown): WorkflowDefinitionSnapshot | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Partial<WorkflowDefinitionSnapshot>;
+  if (!Array.isArray(v.stages) || !Array.isArray(v.edges)) return undefined;
+  return {
+    stages: v.stages,
+    edges: v.edges,
+    capturedAt: typeof v.capturedAt === 'string' ? v.capturedAt : new Date(0).toISOString(),
+  };
+}
 
 export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
   constructor(private db: AppDatabase) {}
@@ -39,6 +56,8 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
         workspaceId: run.workspaceId ?? null,
         // W23: persist the ancestor reference for the retry identity chain.
         ...(run.ancestorRunId ? { ancestorRunId: run.ancestorRunId } : {}),
+        // WS-D1 — frozen topology, when the run was created from one.
+        definitionSnapshot: run.definitionSnapshot ?? null,
         createdAt: run.createdAt,
         updatedAt: run.updatedAt,
         startedAt: run.startedAt ?? null,
@@ -89,6 +108,15 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
     return rows.map((r) => this.mapRow(r));
   }
 
+  async countByStatus(statuses: WorkflowRunStatus[]): Promise<number> {
+    if (statuses.length === 0) return 0;
+    const [row] = await this.db
+      .select({ value: count() })
+      .from(workflowRuns)
+      .where(inArray(workflowRuns.status, statuses));
+    return row?.value ?? 0;
+  }
+
   async update(id: string, updates: Partial<WorkflowRun>): Promise<WorkflowRun> {
     // DB-03 — validate variables when present in the diff.
     if (updates.variables !== undefined) {
@@ -109,6 +137,8 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
     // silent no-op. ancestorRunId is normally immutable after create(), but
     // including it here prevents silent data loss in future callers.
     if (updates.ancestorRunId !== undefined) values['ancestorRunId'] = updates.ancestorRunId;
+    // WS-D1 — written once by startRun; nullable so pre-column runs read as undefined.
+    if (updates.definitionSnapshot !== undefined) values['definitionSnapshot'] = updates.definitionSnapshot;
     if (updates.startedAt !== undefined) values['startedAt'] = updates.startedAt;
     if (updates.completedAt !== undefined) values['completedAt'] = updates.completedAt;
     values['updatedAt'] = new Date();
@@ -147,6 +177,9 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
       workspaceId: row.workspaceId ?? undefined,
       // W23: ancestor run for the retry identity chain.
       ancestorRunId: (row as typeof workflowRuns.$inferSelect & { ancestorRunId?: string | null }).ancestorRunId ?? undefined,
+      // WS-D1 — a malformed snapshot must not take the run down with it; the
+      // scheduler falls back to the live definition when this is undefined.
+      definitionSnapshot: parseSnapshot(row.definitionSnapshot),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       startedAt: row.startedAt ?? undefined,

@@ -95,7 +95,7 @@ Boot order (simplified):
 13. Listen on $PORT
 ```
 
-The CLI app uses the same `createCoreServices()` factory when running in `--mode=direct` (in-process), so behavior matches the server.
+The CLI app does **not** run this factory: it is an HTTP + WebSocket client of a running server only (no `--mode=direct` / `--local` in-process mode exists). Behaviour matches the server because there is exactly one composition root — this one.
 
 ---
 

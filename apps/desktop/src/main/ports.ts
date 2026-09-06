@@ -4,6 +4,17 @@
 
 import * as net from 'node:net';
 
+/**
+ * Which port to ask for: the configured one when set, otherwise the port the
+ * server used last time in this process (so a restart keeps the window's URL
+ * valid), otherwise "any" (0).
+ */
+export function preferredPort(configured: number, last: number | null): number {
+  if (Number.isInteger(configured) && configured > 0 && configured <= 65535) return configured;
+  if (last !== null && Number.isInteger(last) && last > 0) return last;
+  return 0;
+}
+
 /** Resolve a free port, preferring `preferred` when it is available. */
 export function findFreePort(preferred = 0): Promise<number> {
   return new Promise((resolve, reject) => {

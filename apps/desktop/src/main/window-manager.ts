@@ -18,17 +18,48 @@ import {
 } from './platform';
 import type { DesktopCommand } from '../shared/ipc';
 import { IPC_EVENT } from '../shared/ipc';
+import { isAppOrigin } from './navigation-guard';
+import { appWindowPermissionPolicy, installCspFloor, installPermissionPolicy } from './session-hardening';
 
 const RESOURCES = path.join(__dirname, '..', '..', 'resources');
 const PRELOAD = path.join(__dirname, '..', 'preload', 'index.js');
+
+export interface CreateMainWindowOptions {
+  /**
+   * Add the server-mirroring CSP to documents that arrive without one. On by
+   * default; `index.ts` turns it off in dev mode, where the Vite server's
+   * responses have no CSP and need inline HMR scripts.
+   */
+  cspFloor?: boolean;
+}
+
+/** Whether a native close click should hide to the tray instead. */
+export function shouldHideOnClose(state: { minimizeToTray: boolean; quitting: boolean }): boolean {
+  return state.minimizeToTray && !state.quitting;
+}
 
 export class WindowManager {
   private mainWindow: BrowserWindow | null = null;
   private splashWindow: BrowserWindow | null = null;
   private appUrl: string | null = null;
+  private quitting = false;
 
   getMainWindow(): BrowserWindow | null {
     return this.mainWindow;
+  }
+
+  /** The URL the main window is meant to be showing. */
+  getAppUrl(): string | null {
+    return this.appUrl;
+  }
+
+  /**
+   * Once the app is quitting, `close` must actually close: the tray "hide
+   * instead of close" interception would otherwise keep the window alive and
+   * the quit would never finish.
+   */
+  setQuitting(value: boolean): void {
+    this.quitting = value;
   }
 
   private backgroundColor(): string {
@@ -65,7 +96,7 @@ export class WindowManager {
     this.splashWindow = null;
   }
 
-  createMainWindow(appUrl: string): BrowserWindow {
+  createMainWindow(appUrl: string, options: CreateMainWindowOptions = {}): BrowserWindow {
     this.appUrl = appUrl;
     const settings = loadSettings();
     const bounds = this.sanitizeBounds(settings.window);
@@ -104,32 +135,13 @@ export class WindowManager {
 
     // Microphone permission for voice input (getUserMedia). The app is
     // loopback-only, so grant `media` (audio) to our own origin and deny
-    // everything else. Both the request handler (permission prompt path)
-    // and the check handler (pre-check path) are required. This is scoped
-    // to the main window's session; the native browser views use separate
-    // per-workspace partitions and are unaffected.
+    // everything else — see `session-hardening.ts`. Scoped to the main
+    // window's session; the native browser tabs get their own (deny-all)
+    // policy in `browser-host.ts`. The CSP floor covers any document this
+    // session renders that did not bring its own policy.
     const ses = win.webContents.session;
-    const isAppOrigin = (url: string | null | undefined): boolean => {
-      if (!url) return true; // Electron internal / null origin from the app frame.
-      if (!this.appUrl) return false;
-      try {
-        return new URL(url).origin === new URL(this.appUrl).origin;
-      } catch {
-        return false;
-      }
-    };
-    ses.setPermissionRequestHandler((_wc, permission, callback, details) => {
-      if (permission === 'media') {
-        const d = details as { securityOrigin?: string; requestingUrl?: string };
-        callback(isAppOrigin(d.securityOrigin ?? d.requestingUrl));
-        return;
-      }
-      callback(false);
-    });
-    ses.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
-      if (permission === 'media') return isAppOrigin(requestingOrigin);
-      return false;
-    });
+    installPermissionPolicy(ses, appWindowPermissionPolicy(() => this.appUrl));
+    if (options.cspFloor !== false) installCspFloor(ses);
 
     if (settings.window.maximized) win.maximize();
 
@@ -160,6 +172,16 @@ export class WindowManager {
     win.on('focus', () => this.emitWindowState(win));
     win.on('blur', () => this.emitWindowState(win));
 
+    // Minimise-to-tray: a native close click hides the window instead of
+    // destroying it, so the tray's "Open GeneratorAI" has something to show.
+    // Quitting (menu, tray, Cmd+Q) sets `quitting` first and closes for real.
+    win.on('close', (event) => {
+      if (shouldHideOnClose({ minimizeToTray: loadSettings().minimizeToTray, quitting: this.quitting })) {
+        event.preventDefault();
+        win.hide();
+      }
+    });
+
     win.on('closed', () => {
       this.mainWindow = null;
     });
@@ -169,8 +191,12 @@ export class WindowManager {
       this.openExternalSafely(url);
       return { action: 'deny' };
     });
+    // Same-window navigation stays on the app origin. Parsed-origin
+    // comparison, strict on empty/unparseable — `url.startsWith(appUrl)` let
+    // `http://127.0.0.1:3100@evil.com` through. Anything else is handed to
+    // the OS browser (which itself only opens http/https/mailto).
     win.webContents.on('will-navigate', (event, url) => {
-      if (this.appUrl && !url.startsWith(this.appUrl)) {
+      if (!isAppOrigin(url, this.appUrl)) {
         event.preventDefault();
         this.openExternalSafely(url);
       }
@@ -205,6 +231,44 @@ export class WindowManager {
     });
 
     return win;
+  }
+
+  /**
+   * Points the main window at a different server URL.
+   *
+   * Used after "Restart Server" (the embedded server may come back on a new
+   * port) and when switching between the embedded and a remote backend. Both
+   * used to leave the renderer on the old, now-dead origin — every request and
+   * the SSE stream failed until the user quit. `loadURL` rather than a state
+   * swap is deliberate: changing origin makes the browser discard every store,
+   * cache and open stream from the previous server.
+   */
+  repointMainWindow(url: string): void {
+    this.appUrl = url;
+    const win = this.mainWindow;
+    if (!win || win.isDestroyed()) {
+      this.createMainWindow(url);
+      return;
+    }
+    log.info('Repointing main window', { url });
+    win.loadURL(url).catch((err: unknown) => {
+      log.error('Failed to load backend', err);
+      this.showError(`Could not load ${url}.\n\n${err instanceof Error ? err.message : String(err)}`);
+    });
+    if (!win.isVisible()) win.show();
+    win.focus();
+  }
+
+  /** Brings the window back from the tray / minimised state. */
+  restoreFromTray(): void {
+    const win = this.mainWindow;
+    if (!win || win.isDestroyed()) {
+      if (this.appUrl) this.createMainWindow(this.appUrl);
+      return;
+    }
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
   }
 
   showError(message: string): void {

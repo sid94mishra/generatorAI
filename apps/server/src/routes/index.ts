@@ -36,7 +36,7 @@ import { createComputerRoutes } from './computer.js';
 import { createTerminalRoutes } from './terminals.js';
 
 // Widgets & Extensions
-import { createExtensionRoutes, createWidgetAssetRoutes } from './extensions.js';
+import { createExtensionRoutes } from './extensions.js';
 import { createWidgetRoutes } from './widgets.js';
 
 /**
@@ -125,7 +125,16 @@ export function createApiRouter(container: Container): Router {
   // Widgets & Extensions — agent-rendered UI + extension management
   router.use('/extensions', createExtensionRoutes(container));
   router.use('/widgets', createWidgetRoutes(container));
-  router.use('/widget-assets', createWidgetAssetRoutes(container));
+  // Widget assets are NOT mounted here on purpose. They are served only from
+  // the dedicated loopback origin in `index.ts` (WIDGET_PORT, default 3101).
+  //
+  // Review 6.7: this second mount put model-authored HTML — with a CSP that
+  // permits inline and dynamically evaluated script — on the SAME origin as
+  // the authenticated API and the SPA, unauthenticated. That is the
+  // origin-isolation escape that made the widget sandbox decorative: the
+  // separate origin is the whole mechanism, and mounting the same router here
+  // cancelled it. It is also the route carrying the symlink read, which the
+  // extension-writing tool can reach.
 
   // DOC-01 — OpenAPI spec + Swagger UI. Mounted BEFORE the 404
   // catch-all; exposes `/api/openapi.json` and `/api/docs`.

@@ -38,11 +38,13 @@ const AgentHarnessConfigSchema = z.object({
   systemPromptAppend: z.string().optional(),
   streaming: z.boolean().optional(),
   mcpServers: z.record(McpServerConfigSchema).optional(),
-  availableTools: z.array(z.string()).optional(),
-  excludedTools: z.array(z.string()).optional(),
-  excludedMcpServerIds: z.array(z.string()).optional(),
-  skillDirectories: z.array(z.string()).optional(),
-  disabledSkills: z.array(z.string()).optional(),
+  // Bounded: these lists reach the harness verbatim, so an unbounded array
+  // from a `write:chats` holder would be a free denial-of-service lever.
+  availableTools: z.array(z.string().max(200)).max(500).optional(),
+  excludedTools: z.array(z.string().max(200)).max(500).optional(),
+  excludedMcpServerIds: z.array(z.string().max(200)).max(200).optional(),
+  skillDirectories: z.array(z.string().max(1000)).max(100).optional(),
+  disabledSkills: z.array(z.string().max(200)).max(500).optional(),
   customAgents: z.array(z.object({
     name: z.string(),
     description: z.string(),
@@ -181,6 +183,40 @@ export const AnswerQuestionSchema = z.object({
 /** PATCH /api/chats/:id/permission-mode */
 export const SetChatPermissionModeSchema = z.object({
   mode: z.enum(['bypassPermissions', 'default', 'acceptEdits', 'plan']),
+});
+
+/**
+ * POST /api/chats/:id/interactions/:interactionId/permission — answer a
+ * tool-permission prompt raised while the chat runs in `default` /
+ * `acceptEdits` mode.
+ */
+export const ResolveToolPermissionSchema = z.object({
+  behavior: z.enum(['allow', 'deny']),
+  /** Relayed to the agent as the denial reason. */
+  message: z.string().max(2000).optional(),
+});
+
+/**
+ * PATCH /api/chats/:id — every field optional, every field validated.
+ *
+ * `harnessConfig` goes through the same schema as chat creation so tool
+ * allow/deny lists, MCP servers and provider overrides are never assigned
+ * raw from the request body. Unknown keys are stripped rather than rejected
+ * so older clients that PATCH fields the route ignores keep working.
+ */
+export const UpdateChatSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(2000).optional(),
+  model: z.string().max(200).optional(),
+  tags: z.array(z.string().max(50)).max(20).optional(),
+  status: z.enum(['active', 'archived']).optional(),
+  projectId: z.string().uuid().nullable().optional(),
+  harnessConfig: AgentHarnessConfigSchema.optional(),
+  defaultAgentMode: AgentModeSchema.optional(),
+  permissionMode: z.enum(['bypassPermissions', 'default', 'acceptEdits', 'plan']).optional(),
+  agentRef: z.string().max(128).nullable().optional(),
+  agentOverrides: AgentOverridesSchema.nullable().optional(),
+  orchestratorMode: z.boolean().optional(),
 });
 
 /**

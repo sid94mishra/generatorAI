@@ -2,21 +2,39 @@
 // useSpeechToText — voice input hook (web + desktop).
 //
 // Captures the microphone via getUserMedia, streams 16 kHz mono Float32
-// PCM over a WebSocket to the local server's Whisper engine
-// (`/api/stt/stream`), and surfaces interim + final transcripts plus a
-// live amplitude value for the recording waveform.
+// PCM over a WebSocket to the local server's speech engine
+// (`/api/stt/stream`), and surfaces interim + segment + final transcripts
+// plus a live amplitude value for the recording waveform.
 //
 // Identical on web and in the Electron desktop renderer — both use the
 // same browser getUserMedia + WebSocket path. The desktop shell only
 // needs to grant the `media` permission (handled in the main process).
 //
-// Everything runs locally: audio goes to the loopback server,
-// Whisper/Parakeet transcribes on-device, no cloud / key / cost.
+// Everything runs locally: audio goes to the loopback server, Nemotron /
+// Moonshine / Whisper transcribes on-device, no cloud / key / cost.
 //
 // Phase 1 (VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part C): adds
 // pause()/resume() (suspends outgoing audio without tearing the mic/socket
 // down) and an `onSegment` callback for mid-session committed text — see
 // each callback's doc comment below for the interim/segment/final split.
+//
+// PAUSE, AND WHY THE FIRST WORD AFTER IT USED TO VANISH
+// -----------------------------------------------------
+// Typing into the composer pauses dictation (the composer calls `pause()`),
+// and speaking again resumes it. While paused, no audio is forwarded — that
+// is what pause means — so the resume decision has to be made from the
+// audio itself, and whatever was said BEFORE the decision landed was gone.
+// The previous detector wanted nine consecutive animation frames above a
+// loudness threshold: a consonant gap in the first word reset the count, so
+// the resume typically fired on the SECOND word, and the first was never
+// sent anywhere. Reported verbatim as "the first word is never registered".
+//
+// Two changes fix it. The last second of audio is kept in a ring buffer
+// while paused, and on resume it is sent AHEAD of the live audio, so the
+// server hears the onset that triggered the resume rather than what came
+// after it. And the onset detector runs on the capture frames themselves
+// (128 ms each) rather than on animation frames, so it still works in a
+// background tab and is not defeated by a gap between syllables.
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -78,23 +96,32 @@ export interface UseSpeechToText {
 
 const TARGET_SAMPLE_RATE = 16_000;
 
+/** Samples per capture frame handed over by the worklet — 128 ms at 16 kHz. */
+const FRAME_SAMPLES = 2048;
+
 /**
- * RMS above which we treat a frame as the user speaking again while paused.
- * Comfortably above keyboard clicks and room tone (which sit under ~0.01),
- * below normal speech (~0.02-0.15 measured at the analyser).
+ * Capture frames kept while paused and replayed on resume: 8 × 128 ms ≈ 1 s.
+ * Long enough to hold the whole onset of the first word (and the detector's
+ * own reaction time), short enough that a resume never replays stale room
+ * tone from a long pause.
  */
-const RESUME_RMS_THRESHOLD = 0.02;
+const PRE_ROLL_FRAMES = 8;
+
 /**
- * Consecutive above-threshold animation frames before auto-resuming, i.e.
- * roughly 150ms of sustained sound at 60fps. A single key press or a chair
- * creak cannot reach this; a spoken syllable does.
+ * RMS above which a capture frame counts as the user speaking again.
+ * Comfortably above keyboard clicks and room tone (which average well under
+ * 0.01 over a 128 ms frame with the browser's noise suppression on), below
+ * normal speech (~0.02-0.15).
  */
-const RESUME_SUSTAIN_FRAMES = 9;
+const ONSET_RMS = 0.015;
+/** Frames the detector looks back over, and how many must be loud. */
+const ONSET_WINDOW = 4;
+const ONSET_HITS = 2;
 
 /** The AudioWorklet processor, inlined so no separate build asset is needed. */
 const WORKLET_SRC = `
 class PCMWorklet extends AudioWorkletProcessor {
-  constructor() { super(); this._chunks = []; this._len = 0; this._target = 2048; }
+  constructor() { super(); this._chunks = []; this._len = 0; this._target = ${FRAME_SAMPLES}; }
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
     if (ch) {
@@ -132,6 +159,12 @@ function sttWebSocketUrl(): Promise<string> {
   return buildAuthenticatedSocketUrl('/api/stt/stream', { scope: 'stt', id: null });
 }
 
+function frameRms(pcm: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < pcm.length; i += 1) sum += pcm[i]! * pcm[i]!;
+  return Math.sqrt(sum / (pcm.length || 1));
+}
+
 export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeechToText {
   const { onInterim, onSegment, onFinal, onError, language, interim } = options;
   const wantInterim = interim ?? onInterim != null;
@@ -164,6 +197,10 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
    * from the render that created the closure, not the latest one.
    */
   const pausedRef = useRef(false);
+  /** The last ~1s of capture frames while paused — see the file header. */
+  const preRollRef = useRef<Float32Array[]>([]);
+  /** Recent frame loudness while paused, for the onset detector. */
+  const onsetRef = useRef<number[]>([]);
 
   const teardownAudio = useCallback(() => {
     if (rafRef.current != null) {
@@ -183,6 +220,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       void ctxRef.current.close().catch(() => undefined);
       ctxRef.current = null;
     }
+    preRollRef.current = [];
+    onsetRef.current = [];
   }, []);
 
   const closeWs = useCallback(() => {
@@ -198,6 +237,23 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     closeWs();
   }, [teardownAudio, closeWs]);
 
+  /**
+   * Leave the paused state: tell the server, then replay the pre-roll so the
+   * words that triggered (or preceded) the resume are the first thing the
+   * new stream hears. Frame order on the socket is preserved, and the server
+   * handles the `resume` control frame before any audio that follows it.
+   */
+  const resumeNow = useCallback((ws: WebSocket) => {
+    pausedRef.current = false;
+    try { ws.send(JSON.stringify({ t: 'resume' })); } catch { /* ignore */ }
+    const frames = preRollRef.current;
+    preRollRef.current = [];
+    onsetRef.current = [];
+    for (const frame of frames) {
+      try { ws.send(frame.buffer); } catch { /* ignore */ }
+    }
+  }, []);
+
   const start = useCallback(async () => {
     if (!isSupported) {
       const msg = 'Voice input is not supported in this environment.';
@@ -211,6 +267,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     setError(null);
     setStatus('connecting');
     pausedRef.current = false;
+    preRollRef.current = [];
+    onsetRef.current = [];
 
     // 1. Microphone.
     let stream: MediaStream;
@@ -282,13 +340,33 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
 
     worklet.port.onmessage = (e: MessageEvent) => {
       const buf = e.data as Float32Array;
-      // Phase 1: while paused, audio keeps arriving from the worklet (the
-      // mic stream is intentionally kept alive — see pause()'s comment) but
-      // must not be forwarded — that's what "client stops sending audio
-      // frames" (Part C.3) means client-side.
-      if (!pausedRef.current && ws.readyState === ws.OPEN && buf?.byteLength) {
+      if (!buf?.length || ws.readyState !== ws.OPEN) return;
+
+      if (!pausedRef.current) {
         try { ws.send(buf.buffer); } catch { /* ignore */ }
+        return;
       }
+
+      // Paused: the mic stays live (see pause()) but nothing is forwarded.
+      // Keep the last second so a resume can replay it, and watch for the
+      // user speaking again — which is the resume gesture.
+      //
+      // VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part C.3 specifies resume as
+      // an explicit click, "never ambient auto-resume-on-detected-speech".
+      // That is a deliberate divergence: in use, pausing to fix a word and
+      // then carrying on talking is the normal flow, and having to find and
+      // click the pill first meant the first few words of every continuation
+      // were silently dropped. The explicit control still exists — the pill
+      // stays clickable — this just also accepts the obvious gesture.
+      const ring = preRollRef.current;
+      ring.push(buf);
+      if (ring.length > PRE_ROLL_FRAMES) ring.shift();
+      const recent = onsetRef.current;
+      recent.push(frameRms(buf));
+      if (recent.length > ONSET_WINDOW) recent.shift();
+      let loud = 0;
+      for (const v of recent) if (v >= ONSET_RMS) loud += 1;
+      if (loud >= ONSET_HITS) resumeNow(ws);
     };
 
     ws.onopen = () => {
@@ -346,47 +424,13 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       }
     };
 
-    // 4. Amplitude loop — drives the waveform, and the auto-resume detector.
+    // 4. Amplitude loop — drives the waveform.
     const data = new Float32Array(analyser.fftSize);
-    let sustainedSpeechFrames = 0;
     const tick = () => {
       const a = analyserRef.current;
       if (!a) return;
       a.getFloatTimeDomainData(data);
-      let sum = 0;
-      for (let i = 0; i < data.length; i++) sum += data[i]! * data[i]!;
-      const rms = Math.sqrt(sum / data.length);
-
-      // Speaking again is the resume gesture.
-      //
-      // VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part C.3 specifies resume as
-      // an explicit click, "never ambient auto-resume-on-detected-speech".
-      // That is a deliberate divergence: in use, pausing to fix a word and
-      // then carrying on talking is the normal flow, and having to find and
-      // click the pill first meant the first few words of every continuation
-      // were silently dropped. The explicit control still exists — the pill
-      // stays clickable — this just also accepts the obvious gesture.
-      //
-      // The mic and the audio graph are still live while paused (pause only
-      // stops FORWARDING frames), so this costs nothing extra to detect.
-      if (pausedRef.current) {
-        if (rms >= RESUME_RMS_THRESHOLD) {
-          sustainedSpeechFrames += 1;
-          if (sustainedSpeechFrames >= RESUME_SUSTAIN_FRAMES) {
-            sustainedSpeechFrames = 0;
-            const sock = wsRef.current;
-            if (sock && sock.readyState === sock.OPEN) {
-              pausedRef.current = false;
-              try { sock.send(JSON.stringify({ t: 'resume' })); } catch { /* ignore */ }
-            }
-          }
-        } else {
-          sustainedSpeechFrames = 0;
-        }
-      } else {
-        sustainedSpeechFrames = 0;
-      }
-
+      const rms = frameRms(data);
       // Scale RMS to a lively 0..1 range for the waveform. Speech measures
       // ~0.02-0.15 RMS at this analyser, so a linear 4x put every ordinary
       // syllable in the bottom sixth of the bar's height and the waveform
@@ -397,7 +441,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
-  }, [isSupported, status, language, wantInterim, fullTeardown, teardownAudio]);
+  }, [isSupported, status, language, wantInterim, fullTeardown, teardownAudio, resumeNow]);
 
   const stop = useCallback(() => {
     const ws = wsRef.current;
@@ -433,6 +477,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     const ws = wsRef.current;
     if (!ws || ws.readyState !== ws.OPEN) return;
     pausedRef.current = true;
+    preRollRef.current = [];
+    onsetRef.current = [];
     try { ws.send(JSON.stringify({ t: 'pause' })); } catch { /* ignore */ }
   }, []);
 
@@ -440,9 +486,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   const resume = useCallback(() => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== ws.OPEN) return;
-    pausedRef.current = false;
-    try { ws.send(JSON.stringify({ t: 'resume' })); } catch { /* ignore */ }
-  }, []);
+    resumeNow(ws);
+  }, [resumeNow]);
 
   // Cleanup on unmount.
   useEffect(() => () => fullTeardown(), [fullTeardown]);

@@ -1,21 +1,27 @@
 // ────────────────────────────────────────────────────────────────
-// Cell — the blind forwarder.
+// Cell — the forwarder.
 //
 // A cell holds one outbound control channel per GeneratorAI host and pipes
-// opaque byte streams between paired clients and that host. It is explicitly
-// designed so that operating it grants NO ability to read user data:
+// opaque byte streams between paired clients and that host. Its trust
+// properties, stated exactly:
 //
-//   * every application byte it carries is already sealed by the E2EE layer
-//   * it never receives a device credential, an access token, or a scope
+//   * it never receives a device credential, an access token, or a scope —
+//     the host validates those inside the stream, behind its own front door
 //   * host identity is proven by an Ed25519 signature over a transcript that
 //     binds this cell's origin and ephemeral key, so a captured proof cannot
 //     be replayed at a different relay or rolled back to an older epoch
+//   * a `relayHostId` is bound to the key that proves it (`hostBinding`) and
+//     pinned for the cell's lifetime, so a second key cannot supersede the
+//     first host that claimed an id
 //
-// What a cell CAN do is deny service and observe metadata (who connected,
-// when, and roughly how much traffic). That is documented, not hidden.
+// What a cell CAN do: deny service, observe metadata (who connected, when,
+// roughly how much traffic) — and READ THE BYTES IT FORWARDS. The E2EE layer
+// in `@generatorai/relay-protocol` (`e2ee.ts`) is not wired into any
+// transport yet, so the stream is plain HTTP over the WebSocket. Until that
+// changes, the relay operator is a trusted party. Documented, not hidden.
 // ────────────────────────────────────────────────────────────────
 
-import { randomUUID, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
+import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import type { Server } from 'node:http';
 import { ed25519 } from '@noble/curves/ed25519';
@@ -26,8 +32,12 @@ import {
   RELAY_MAX_DATA_FRAME_BYTES,
   RELAY_MAX_STREAMS_PER_HOST,
   RELAY_INVITE_MAX_ATTEMPTS,
+  RELAY_ROUTES,
+  canonicalRelayOrigin,
   encodeHostProofTranscript,
+  newRelayStreamId,
   parseControlMessage,
+  verifyHostBinding,
   RelayClientHelloSchema,
   fromBase64Url,
   toBase64Url,
@@ -42,6 +52,14 @@ const LEASE_MS = 10 * 60_000;
 
 /** Ceiling on concurrently attached hosts, so one cell cannot be exhausted. */
 const MAX_HOSTS = Number(process.env['GENERATORAI_RELAY_MAX_HOSTS'] ?? 500);
+
+/**
+ * How many `relayHostId → hostPublicKey` pins to remember for hosts that are
+ * no longer attached. Bounded so a flood of throwaway ids (each needs a valid
+ * proof, but proofs are cheap to mint for random ids) cannot grow memory
+ * without limit; the oldest pin is evicted first.
+ */
+const MAX_HOST_KEY_PINS = MAX_HOSTS * 10;
 
 // W48 / TODO(lane-scheduling): Cell currently forwards all streams with equal
 // priority. A future enhancement should implement 3-lane scheduling
@@ -65,6 +83,8 @@ interface Invite {
 
 interface PendingStream {
   streamId: string;
+  /** Relay binding of the paired device (`resume` streams), for revocation. */
+  relayBinding: string | null;
   clientSocket: WebSocket;
   /** Buffered client frames that arrived before the host attached. */
   buffered: Buffer[];
@@ -93,7 +113,11 @@ function constantTimeEqualHex(a: string, b: string): boolean {
 }
 
 export interface CellOptions {
-  /** Public origin clients and hosts dial, e.g. `wss://relay.example.com`. */
+  /**
+   * Public origin clients and hosts dial, e.g. `https://relay.example.com`.
+   * Normalised with `canonicalRelayOrigin` so `wss://…` and `https://…`
+   * configure the same cell and sign the same transcript.
+   */
   origin: string;
   log: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void;
 }
@@ -101,15 +125,27 @@ export interface CellOptions {
 export class RelayCell {
   private readonly hosts = new Map<string, HostConnection>();
   private readonly invites = new Map<string, Invite>();
+  /**
+   * First key seen for each `relayHostId`, kept beyond the connection so a
+   * different key cannot take over an id by simply reconnecting (see
+   * `hostBinding.ts` for what this does and does not guarantee).
+   */
+  private readonly hostKeys = new Map<string, string>();
   private sweeper: ReturnType<typeof setInterval> | null = null;
+  private readonly origin: string;
 
-  constructor(private readonly options: CellOptions) {}
+  constructor(private readonly options: CellOptions) {
+    const origin = canonicalRelayOrigin(options.origin);
+    if (!origin) throw new Error(`RelayCell: not a valid origin: ${options.origin}`);
+    this.origin = origin;
+  }
 
   /**
-   * Attaches the two WebSocket endpoints to an existing HTTP server:
-   *   `/relay/host`   — outbound control channel from a GeneratorAI server
-   *   `/relay/client` — inbound connection from a paired device
-   *   `/relay/data`   — one per stream, carrying opaque sealed bytes
+   * Attaches the three WebSocket endpoints to an existing HTTP server (paths
+   * from `RELAY_ROUTES`, shared with the host connector):
+   *   `host`   — outbound control channel from a GeneratorAI server
+   *   `client` — inbound connection from a paired device
+   *   `data`   — one per stream, carrying the client's opaque bytes
    */
   attach(server: Server): void {
     const hostWss = new WebSocketServer({ noServer: true, maxPayload: RELAY_MAX_CONTROL_MESSAGE_BYTES });
@@ -124,11 +160,11 @@ export class RelayCell {
         socket.destroy();
         return;
       }
-      if (path === '/relay/host') {
+      if (path === RELAY_ROUTES.host) {
         hostWss.handleUpgrade(req, socket, head, (ws) => this.onHostSocket(ws));
-      } else if (path === '/relay/client') {
+      } else if (path === RELAY_ROUTES.client) {
         clientWss.handleUpgrade(req, socket, head, (ws) => this.onClientSocket(ws));
-      } else if (path === '/relay/data') {
+      } else if (path === RELAY_ROUTES.data) {
         const url = new URL(req.url ?? '/', 'http://placeholder');
         const streamId = url.searchParams.get('streamId') ?? '';
         const relayHostId = url.searchParams.get('relayHostId') ?? '';
@@ -218,6 +254,32 @@ export class RelayCell {
           return;
         }
         helloSeen = true;
+
+        // The id must be claimed by the key that is about to prove itself,
+        // and it must be the SAME key this cell has seen for that id before.
+        // Checked before the challenge so an impostor never even gets one.
+        if (
+          !verifyHostBinding({
+            relayHostId: message.relayHostId,
+            hostPublicKey: message.hostPublicKey,
+            hostBinding: message.hostBinding,
+          })
+        ) {
+          this.options.log('warn', 'Host binding failed', { relayHostId: message.relayHostId });
+          this.sendError(ws, 'BINDING_INVALID', 'relayHostId is not bound to hostPublicKey.');
+          ws.close(4401, 'binding invalid');
+          return;
+        }
+        const pinnedKey = this.hostKeys.get(message.relayHostId);
+        if (pinnedKey !== undefined && pinnedKey !== message.hostPublicKey) {
+          this.options.log('warn', 'Host key mismatch for a known id', {
+            relayHostId: message.relayHostId,
+          });
+          this.sendError(ws, 'HOST_KEY_MISMATCH', 'This relayHostId is bound to a different key.');
+          ws.close(4401, 'host key mismatch');
+          return;
+        }
+
         pendingHello = {
           relayHostId: message.relayHostId,
           hostPublicKey: message.hostPublicKey,
@@ -231,7 +293,7 @@ export class RelayCell {
           challengeId,
           nonce,
           relayEphemeralPublicKey,
-          relayOrigin: this.options.origin,
+          relayOrigin: this.origin,
           issuedAt,
           expiresAt,
         });
@@ -249,10 +311,9 @@ export class RelayCell {
           return;
         }
 
-        // The relayHostId is the hash of the public key, so a host cannot
-        // claim an id that does not belong to the key it is about to prove.
         // `fromBase64Url` returns null on malformed input — a proof we cannot
-        // even decode is a failed proof, not a crash.
+        // even decode is a failed proof, not a crash. (The id ↔ key binding
+        // was already verified on the hello; this proves possession.)
         const hostPublicKey = fromBase64Url(pendingHello.hostPublicKey);
         const signature = fromBase64Url(message.signature);
         if (!hostPublicKey || !signature) {
@@ -261,7 +322,7 @@ export class RelayCell {
           return;
         }
         const transcript = encodeHostProofTranscript({
-          relayOrigin: this.options.origin,
+          relayOrigin: this.origin,
           relayEphemeralPublicKey,
           challengeId,
           nonce,
@@ -287,6 +348,7 @@ export class RelayCell {
         }
 
         clearTimeout(timeout);
+        this.pinHostKey(pendingHello.relayHostId, pendingHello.hostPublicKey);
 
         // A reconnect retires the previous socket, so a hijacked-but-stale
         // connection cannot keep receiving streams.
@@ -399,7 +461,7 @@ export class RelayCell {
         // correctly finds nothing and refuses the belated attach as an
         // "unknown stream" instead of completing it.
         for (const [streamId, stream] of host.streams) {
-          if (streamId.startsWith(`${message.relayBinding}:`)) {
+          if (stream.relayBinding === message.relayBinding) {
             try {
               stream.clientSocket.close(4403, 'device revoked');
             } catch {
@@ -507,9 +569,13 @@ export class RelayCell {
           return;
         }
 
-        const streamId = `${hello.data.relayBinding ?? 'invite'}:${randomUUID()}`;
+        // Plain base64url: the wire schema's `Base64Url` class has no room
+        // for a `binding:uuid` composite, and the host's strict parser would
+        // have closed the control channel on the first `stream_open`.
+        const streamId = newRelayStreamId();
         const stream: PendingStream = {
           streamId,
+          relayBinding: hello.data.relayBinding ?? null,
           clientSocket: ws,
           buffered: [],
           bufferedBytes: 0,
@@ -622,6 +688,18 @@ export class RelayCell {
   }
 
   // ── Housekeeping ────────────────────────────────────────────────
+
+  private pinHostKey(relayHostId: string, hostPublicKey: string): void {
+    // Re-insert to refresh recency; Map iteration order is insertion order,
+    // so the first entry is always the least recently confirmed pin.
+    this.hostKeys.delete(relayHostId);
+    this.hostKeys.set(relayHostId, hostPublicKey);
+    while (this.hostKeys.size > MAX_HOST_KEY_PINS) {
+      const oldest = this.hostKeys.keys().next().value;
+      if (oldest === undefined || this.hosts.has(oldest)) break;
+      this.hostKeys.delete(oldest);
+    }
+  }
 
   private sweep(): void {
     const now = Date.now();

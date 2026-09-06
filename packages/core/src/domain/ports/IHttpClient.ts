@@ -14,6 +14,14 @@ export interface HttpRequestOptions {
    * actually cancels the socket instead of just rejecting the wait.
    */
   signal?: AbortSignal;
+  /**
+   * Address policy for this request. `'public-only'` forces the SSRF
+   * policy (no private / loopback / link-local / metadata targets, redirects
+   * re-vetted per hop) even on a client constructed with a private-network
+   * opt-in. Callers handing user-supplied URLs to the network (data
+   * sources) MUST set it. Default: the client's own configuration.
+   */
+  network?: 'public-only' | 'default';
 }
 
 export interface HttpResponse {

@@ -124,25 +124,32 @@ export class AgentResolver {
       skillIds.delete(id);
     }
 
-    // ── MCP servers: UNION, then subtract removals + explicit exclusions ──
-    const mcpIds = new Set<string>();
-    for (const id of input.baseHarnessConfig?.agentOverrides?.addMcpServerIds ?? []) mcpIds.add(id);
-    for (const id of agent?.mcpServerIds ?? []) mcpIds.add(id);
-    for (const id of input.overrides?.addMcpServerIds ?? []) mcpIds.add(id);
-    for (const id of input.runtimeOverrides?.agentOverrides?.addMcpServerIds ?? []) mcpIds.add(id);
-    for (const id of [
+    // ── MCP servers ──
+    // Rule (see packages/core/src/mcp/mergeMcpServers.ts for the full statement):
+    //   baseline = every globally-enabled, fully-configured system/custom
+    //              server ∪ every enabled project server
+    //   explicit = agent.mcpServerIds ∪ addMcpServerIds (all levels)
+    //   result   = (baseline ∪ explicit) − removeMcpServerIds − excludedMcpServerIds
+    // A chat with NO agent therefore still gets the baseline; the caller
+    // merges inline `harnessConfig.mcpServers` LAST. A server switched OFF in
+    // Settings is a kill switch: it is never sent, even when an agent lists it
+    // (the agent gets an MCP_SERVER_DISABLED warning instead of a silent drop).
+    const explicitMcpIds = new Set<string>();
+    for (const id of input.baseHarnessConfig?.agentOverrides?.addMcpServerIds ?? []) explicitMcpIds.add(id);
+    for (const id of agent?.mcpServerIds ?? []) explicitMcpIds.add(id);
+    for (const id of input.overrides?.addMcpServerIds ?? []) explicitMcpIds.add(id);
+    for (const id of input.runtimeOverrides?.agentOverrides?.addMcpServerIds ?? []) explicitMcpIds.add(id);
+    const removedMcpIds = new Set<string>([
       ...(input.baseHarnessConfig?.agentOverrides?.removeMcpServerIds ?? []),
       ...(input.overrides?.removeMcpServerIds ?? []),
       ...(input.runtimeOverrides?.agentOverrides?.removeMcpServerIds ?? []),
       ...(input.baseHarnessConfig?.excludedMcpServerIds ?? []),
       ...(input.runtimeOverrides?.excludedMcpServerIds ?? []),
-    ]) {
-      mcpIds.delete(id);
-    }
+    ]);
 
     const [skills, mcpServers] = await Promise.all([
       this.resolveSkills([...skillIds], input.projectId, warnings),
-      this.resolveMcpServers([...mcpIds], input.projectId, warnings),
+      this.resolveMcpServers([...explicitMcpIds], removedMcpIds, input.projectId, warnings),
     ]);
 
     // ── Tool groups: tri-state fold, `false` wins at the highest level that sets it ──
@@ -234,7 +241,16 @@ export class AgentResolver {
     };
   }
 
-  /** An empty projection — what callers get when no agent is bound. */
+  /**
+   * An empty projection — the SYNCHRONOUS fallback for callers that have no
+   * resolver wired at all.
+   *
+   * It carries NO MCP servers, so a caller that has a resolver must not
+   * short-circuit to this when no agent is bound: call `resolve({ scope,
+   * projectId })` with no `agentRef` instead, which returns the project +
+   * globally-enabled baseline (see `resolveMcpServers`). Falling back to
+   * `empty()` was why a chat without an agent got zero MCP servers.
+   */
   static empty(): ResolvedAgentProjection {
     return {
       driving: null,
@@ -297,24 +313,51 @@ export class AgentResolver {
     return out;
   }
 
+  /**
+   * baseline ∪ explicit − removed, keyed by server NAME (what the harness
+   * exposes). Only `enabled` catalog entries (user toggle on AND fully
+   * configured) are ever returned; an explicit id that is not usable gets a
+   * warning so the drop is visible.
+   */
   private async resolveMcpServers(
-    ids: string[],
+    explicitIds: string[],
+    removedIds: Set<string>,
     projectId: string | undefined,
     warnings: ResolutionWarning[],
   ): Promise<Record<string, McpServerConfig>> {
-    if (ids.length === 0) return {};
     const catalog = await this.catalog.listMcpServers(projectId);
     const byId = new Map(catalog.map((s) => [s.id, s]));
-    const out: Record<string, McpServerConfig> = {};
-    for (const id of ids) {
+    const chosen = new Map<string, (typeof catalog)[number]>();
+
+    for (const s of catalog) if (s.enabled) chosen.set(s.id, s);
+
+    for (const id of explicitIds) {
       const hit = byId.get(id);
       if (!hit) {
         warnings.push({ code: 'MCP_SERVER_NOT_FOUND', params: { id } });
         continue;
       }
-      if (!hit.enabled) continue;
-      out[hit.name] = hit.config;
+      if (hit.needsConfiguration) {
+        warnings.push({
+          code: 'MCP_SERVER_NEEDS_CONFIGURATION',
+          params: {
+            id,
+            missing: [...hit.needsConfiguration.missingInputs, ...hit.needsConfiguration.missingCredentials].join(','),
+          },
+        });
+        continue;
+      }
+      if (!hit.enabled) {
+        warnings.push({ code: 'MCP_SERVER_DISABLED', params: { id } });
+        continue;
+      }
+      chosen.set(id, hit);
     }
+
+    for (const id of removedIds) chosen.delete(id);
+
+    const out: Record<string, McpServerConfig> = {};
+    for (const s of chosen.values()) out[s.name] = s.config;
     return out;
   }
 

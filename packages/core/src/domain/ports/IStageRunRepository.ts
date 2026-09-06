@@ -10,7 +10,14 @@ export interface IStageRunRepository {
   getByRunId(workflowRunId: string): Promise<StageRun[]>;
   getByStatus(workflowRunId: string, statuses: StageRunStatus[]): Promise<StageRun[]>;
   update(id: string, updates: Partial<StageRun>): Promise<StageRun>;
-  updateStatus(id: string, status: StageRunStatus): Promise<void>;
+  /**
+   * WS-D1 — every status write bumps `version`. Pass `expectedVersion` to
+   * make the write conditional (optimistic lock): the returned boolean is
+   * `false` when the row's version no longer matches, i.e. someone else
+   * mutated the stage between your read and this write. Callers that do not
+   * hold a version omit it and get an unconditional write (still bumped).
+   */
+  updateStatus(id: string, status: StageRunStatus, expectedVersion?: number): Promise<boolean>;
   /**
    * Increment the stage's retryCount.
    *
@@ -21,8 +28,21 @@ export interface IStageRunRepository {
    * races (legacy) can omit the arg and get fire-and-forget semantics.
    */
   incrementRetryCount(id: string, expectedVersion?: number): Promise<boolean>;
-  resetForRetry(id: string): Promise<void>;
+  /**
+   * Reset a stage to `pending` for a fresh attempt. WS-D1 — bumps `version`;
+   * with `expectedVersion` the reset is conditional and returns `false` when
+   * another writer got there first.
+   */
+  resetForRetry(id: string, expectedVersion?: number): Promise<boolean>;
+  /** Bulk status write. WS-D1 — bumps `version` on every affected row. */
   batchUpdateStatus(ids: string[], status: StageRunStatus): Promise<void>;
+  /**
+   * WS-D1 — liveness beat. Writes `heartbeat_at = now` (and `lease_owner`
+   * when given) ONLY while the row is `queued` or `running`, so a beat that
+   * races a terminal write can never resurrect a finished stage. Returns
+   * `true` iff a row was updated.
+   */
+  heartbeat(id: string, leaseOwner?: string): Promise<boolean>;
   delete(id: string): Promise<void>;
   deleteByRunId(workflowRunId: string): Promise<void>;
 

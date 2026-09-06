@@ -23,7 +23,14 @@
 
 import type { TransportCapabilitySet } from '@generatorai/shared';
 
-import type { PlanBlock, QuestionBlock, SystemCategory, ToolFileOp, WidgetBlock } from './types.js';
+import type {
+  PermissionBlock,
+  PlanBlock,
+  QuestionBlock,
+  SystemCategory,
+  ToolFileOp,
+  WidgetBlock,
+} from './types.js';
 
 /**
  * A plan filed by the non-blocking `record_plan` tool is born `recorded` and
@@ -101,6 +108,29 @@ export type StreamEffect =
   | { op: 'addToolCall'; key: string; tool: string; args: unknown; callId?: string; parentCallId?: string }
   | { op: 'completeToolCall'; key: string; toolOrCallId: string; result: unknown; fileOp?: ToolFileOp }
   | { op: 'addSystemMessage'; key: string; message: string; category: SystemCategory }
+  /** `hook.started` — see `StreamHookInvocation`; routed to the stage-aware
+   *  `key` so `deriveRunView` can read a stage's hooks off its own stream. */
+  | {
+      op: 'hookStarted';
+      key: string;
+      hookName: string;
+      phase: string;
+      hookId?: string;
+      hookType?: string;
+      stageRunId?: string;
+    }
+  /** `hook.completed` (status `'ok'`) or `hook.failed` (status `'failed'`). */
+  | {
+      op: 'hookCompleted';
+      key: string;
+      status: 'ok' | 'failed';
+      hookName: string;
+      phase: string;
+      hookId?: string;
+      hookType?: string;
+      stageRunId?: string;
+      durationMs?: number;
+    }
   | { op: 'processInlineToolCalls'; key: string; content: string }
   | { op: 'completeStream'; key: string }
   | { op: 'errorStream'; key: string }
@@ -126,6 +156,15 @@ export type StreamEffect =
       freeformResponse?: string;
     }
   | { op: 'expireQuestion'; key: string; interactionId: string }
+  | { op: 'upsertPermission'; key: string; permission: Omit<PermissionBlock, 'type' | 'blockId'> }
+  | {
+      op: 'resolvePermission';
+      key: string;
+      interactionId: string;
+      behavior: 'allow' | 'deny';
+      message?: string;
+    }
+  | { op: 'expirePermission'; key: string; interactionId: string; reason?: string }
   | {
       op: 'addWidget';
       key: string;
@@ -658,6 +697,17 @@ export class StreamEventRouter {
         break;
       }
 
+      // A warning is NOT an error: the turn carries on. It exists so a
+      // problem the user has to act on — most often an MCP server that failed
+      // to start or needs credentials — is visible instead of silent. This
+      // case was missing entirely, so those warnings fell through to the
+      // "ignored on purpose" default (review 2.4).
+      case 'harness.warning': {
+        const message = str(data['message'], 'The agent reported a warning.');
+        out.push({ op: 'addSystemMessage', key, message, category: 'warning' });
+        break;
+      }
+
       case 'harness.idle':
         this.flushKey(key, out);
         out.push({ op: 'invalidate', resource: 'messages' });
@@ -875,6 +925,54 @@ export class StreamEventRouter {
         out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
         break;
 
+      // ── Tool-permission gate (review finding 5.1) ───────────────────
+      //
+      // A chat set to `default`/`acceptEdits` blocks the agent on every
+      // (or every non-edit) tool call until the user allows or denies it.
+      // Mirrors the question-card wiring above field-for-field — same
+      // pending → resolved/expired lifecycle, same pending-interaction
+      // invalidation so the poll-based reconciliation in ChatPage sees it.
+      case 'chat.permission.requested':
+        this.flushKey(key, out);
+        out.push({
+          op: 'upsertPermission',
+          key,
+          permission: {
+            interactionId: str(data['interactionId']),
+            toolName: str(data['toolName']),
+            permissionType: str(data['type']),
+            description: str(data['description']),
+            inputSummary: str(data['inputSummary']),
+            permissionMode: str(data['permissionMode']),
+            status: 'pending',
+          },
+        });
+        out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
+        break;
+
+      case 'chat.permission.resolved':
+        this.flushKey(key, out);
+        out.push({
+          op: 'resolvePermission',
+          key,
+          interactionId: str(data['interactionId']),
+          behavior: data['behavior'] === 'deny' ? 'deny' : 'allow',
+          ...(optStr(data['message']) ? { message: str(data['message']) } : {}),
+        });
+        out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
+        break;
+
+      case 'chat.permission.expired':
+        this.flushKey(key, out);
+        out.push({
+          op: 'expirePermission',
+          key,
+          interactionId: str(data['interactionId']),
+          ...(optStr(data['reason']) ? { reason: str(data['reason']) } : {}),
+        });
+        out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
+        break;
+
       // ── Widgets ──────────────────────────────────────────────────
       case 'harness.widget.render':
         this.flushKey(key, out);
@@ -1017,12 +1115,45 @@ export class StreamEventRouter {
         break;
       case 'hook.started':
         note(`Hook "${str(data['hookName'])}" started (phase: ${str(data['phase'])})`);
+        // Filed on `key` (stage-aware), not `sessionKey` like the note above:
+        // `deriveRunView` reads a stage's hooks off that stage's own stream.
+        out.push({
+          op: 'hookStarted',
+          key,
+          hookName: str(data['hookName']),
+          phase: str(data['phase']),
+          ...(optStr(data['hookId']) ? { hookId: str(data['hookId']) } : {}),
+          ...(optStr(data['hookType']) ? { hookType: str(data['hookType']) } : {}),
+          ...(optStr(data['stageRunId']) ? { stageRunId: str(data['stageRunId']) } : {}),
+        });
         break;
       case 'hook.completed':
         note(`Hook "${str(data['hookName'])}" completed`);
+        out.push({
+          op: 'hookCompleted',
+          key,
+          status: 'ok',
+          hookName: str(data['hookName']),
+          phase: str(data['phase']),
+          ...(optStr(data['hookId']) ? { hookId: str(data['hookId']) } : {}),
+          ...(optStr(data['hookType']) ? { hookType: str(data['hookType']) } : {}),
+          ...(optStr(data['stageRunId']) ? { stageRunId: str(data['stageRunId']) } : {}),
+          ...(typeof data['durationMs'] === 'number' ? { durationMs: data['durationMs'] } : {}),
+        });
         break;
       case 'hook.failed':
         note(`Hook "${str(data['hookName'])}" failed: ${str(data['error'])}`, 'error');
+        out.push({
+          op: 'hookCompleted',
+          key,
+          status: 'failed',
+          hookName: str(data['hookName']),
+          phase: str(data['phase']),
+          ...(optStr(data['hookId']) ? { hookId: str(data['hookId']) } : {}),
+          ...(optStr(data['hookType']) ? { hookType: str(data['hookType']) } : {}),
+          ...(optStr(data['stageRunId']) ? { stageRunId: str(data['stageRunId']) } : {}),
+          ...(typeof data['durationMs'] === 'number' ? { durationMs: data['durationMs'] } : {}),
+        });
         break;
       case 'permission.requested':
         note(`Permission requested: ${str(data['permission'])}`);

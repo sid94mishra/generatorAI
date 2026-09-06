@@ -386,6 +386,60 @@ describe('reduceEvent — chat.question.* (clarifying-question gate)', () => {
   });
 });
 
+// Review finding 5.1 — the blocking tool-permission prompt. Same chat-scoped
+// gate family as plan/question above; fields verified against
+// `ChatManagementService.buildPermissionHandler` and
+// `packages/shared/src/types/AgentEvent.ts`'s `chat.permission.*` shapes.
+describe('reduceEvent — chat.permission.* (tool-permission gate)', () => {
+  it('sets pendingInteraction on chat.permission.requested with the real payload shape', () => {
+    const state = reduceEvent(
+      emptyTimeline(),
+      evt('chat.permission.requested', {
+        chatId: 'c1',
+        interactionId: 'i3',
+        toolName: 'Bash',
+        type: 'shell_exec',
+        description: 'Run a shell command',
+        inputSummary: 'rm -rf /tmp/scratch',
+        permissionMode: 'default',
+      }),
+    );
+    expect(state.pendingInteraction).toEqual({
+      kind: 'permission',
+      interactionId: 'i3',
+      toolName: 'Bash',
+      permissionType: 'shell_exec',
+      description: 'Run a shell command',
+      inputSummary: 'rm -rf /tmp/scratch',
+      permissionMode: 'default',
+    });
+  });
+
+  it('clears pendingInteraction on chat.permission.resolved', () => {
+    let state = reduceEvent(
+      emptyTimeline(),
+      evt('chat.permission.requested', { interactionId: 'i3', toolName: 'Bash' }),
+    );
+    state = reduceEvent(state, evt('chat.permission.resolved', { interactionId: 'i3', behavior: 'allow' }));
+    expect(state.pendingInteraction).toBeNull();
+  });
+
+  it('clears pendingInteraction on chat.permission.expired', () => {
+    let state = reduceEvent(
+      emptyTimeline(),
+      evt('chat.permission.requested', { interactionId: 'i3', toolName: 'Bash' }),
+    );
+    state = reduceEvent(state, evt('chat.permission.expired', { interactionId: 'i3', reason: 'turn ended' }));
+    expect(state.pendingInteraction).toBeNull();
+  });
+
+  it('a question gate is not accidentally cleared by a permission-kind clearing event, and vice versa', () => {
+    let state = reduceEvent(emptyTimeline(), evt('chat.question.asked', { interactionId: 'i2', questions: [] }));
+    state = reduceEvent(state, evt('chat.permission.resolved', { interactionId: 'i2', behavior: 'allow' }));
+    expect(state.pendingInteraction).not.toBeNull();
+  });
+});
+
 // Phase 6 item 3 — background-task visibility. Fields verified against the
 // real producer, `packages/core/src/services/orchestrator/OrchestratorService.ts`.
 describe('reduceEvent — chat.background_task.*', () => {

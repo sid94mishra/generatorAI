@@ -54,8 +54,8 @@ describe('RuleBasedTextFormatter', () => {
     });
 
     it('new line / newline breaks the text and absorbs surrounding spaces', async () => {
-      expect(await formatter.format('first line new line second line')).toBe('first line\nsecond line');
-      expect(await formatter.format('first line newline second line')).toBe('first line\nsecond line');
+      expect(await formatter.format('first line new line second line')).toBe('first line\nSecond line');
+      expect(await formatter.format('first line newline second line')).toBe('first line\nSecond line');
     });
 
     it('handles multiple commands in one utterance', async () => {
@@ -155,7 +155,7 @@ describe('RuleBasedTextFormatter', () => {
 
     it('trims the whole result and each line', async () => {
       expect(await formatter.format('  hello world  ')).toBe('hello world');
-      expect(await formatter.format('line one new line   line two  ')).toBe('line one\nline two');
+      expect(await formatter.format('line one new line   line two  ')).toBe('line one\nLine two');
     });
 
     it('passes through plain text with nothing to clean up unchanged', async () => {
@@ -226,5 +226,92 @@ describe('RuleBasedTextFormatter — symbols and attachment (added after a live 
 
   it('does not turn ordinary prose into digits', async () => {
     expect(await f.format('one thing at a time')).toBe('one thing at a time');
+  });
+});
+
+describe('spoken commands the model punctuated in the middle', () => {
+  // Nemotron infers punctuation from prosody, and a spoken command carries
+  // the prosody of the thing it names — so it lands a mark INSIDE the phrase
+  // and capitalises the next word. These are verbatim shapes observed from
+  // the model, not hypotheticals.
+  const fmt = new RuleBasedTextFormatter();
+
+  it('recovers "question mark" from "question? Mark"', async () => {
+    expect(await fmt.format('Are we still on track question? Mark the rate limiter worries me', {}))
+      .toContain('on track?');
+  });
+
+  it('does not leave the literal command words behind', async () => {
+    const out = await fmt.format('Are we still on track question? Mark the rate limiter', {});
+    expect(out.toLowerCase()).not.toContain('question');
+    expect(out).not.toContain('Mark the');
+  });
+
+  it('still matches a cleanly transcribed command', async () => {
+    expect(await fmt.format('Are we still on track question mark', {})).toContain('track?');
+  });
+
+  it('leaves ordinary prose alone', async () => {
+    // "open" and "paren" never co-occur this way in real text, but a sentence
+    // that merely contains one of the words must be untouched.
+    const out = await fmt.format('I will open the door. Mark said it was fine.', {});
+    expect(out).toContain('open the door');
+    expect(out).toContain('Mark said');
+  });
+});
+
+describe('sentence case, line breaks and corrections (2026-09 dictation review)', () => {
+  const f = new RuleBasedTextFormatter();
+
+  it('capitalizes after a spoken terminal mark, but never the start of a segment', async () => {
+    // The model had already put its own "?" and lowercase continuation in.
+    expect(await f.format('Are we still on track? Question mark the rate limiter worries me exclamation mark here is the breakdown colon'))
+      .toBe('Are we still on track? The rate limiter worries me! Here is the breakdown:');
+    // A segment often continues a sentence; only the composer can case its
+    // first word, because only it can see what precedes it.
+    expect(await f.format('and the client caches responses')).toBe('and the client caches responses');
+  });
+
+  it('absorbs the punctuation the model hangs on "new line" and starts the line capitalized', async () => {
+    expect(await f.format('Here is the checklist. New line. One, rebuild the index. New line two. Restart the workers.'))
+      .toBe('Here is the checklist.\nOne, rebuild the index.\nTwo. Restart the workers.');
+    expect(await f.format('here is the checklist colon new line one rebuild the index new line two restart the workers'))
+      .toBe('here is the checklist:\nOne rebuild the index\nTwo restart the workers');
+  });
+
+  it('"new paragraph" leaves a blank line', async () => {
+    expect(await f.format('and then new paragraph next section')).toBe('and then\n\nNext section');
+    expect(await f.format('one new paragraph new paragraph two')).toBe('one\n\nTwo');
+  });
+
+  it('accepts the semicolon spellings the recogniser produces', async () => {
+    expect(await f.format('Staging is fine some a colon production is not period')).toBe('Staging is fine; production is not.');
+    expect(await f.format('fine semi colon production')).toBe('fine; production');
+  });
+
+  it('handles the extra symbols and the quote forms', async () => {
+    expect(await f.format('a pipe symbol b')).toBe('a|b');
+    expect(await f.format('tilde home')).toBe('~home');
+    expect(await f.format('backtick code backtick')).toBe('`code`');
+    expect(await f.format('quote hello end quote')).toBe('"hello"');
+    expect(await f.format('x greater than sign y')).toBe('x>y');
+    expect(await f.format('twenty degrees sign')).toBe('20°');
+  });
+
+  it('resolves "scratch that" inside an utterance and passes the standalone form through', async () => {
+    expect(await f.format('send the report scratch that send the summary period')).toBe('send the summary.');
+    expect(await f.format('Scratch that.')).toBe('scratch that');
+  });
+
+  it('strips a locale tag the multilingual model appended', async () => {
+    expect(await f.format('We need to migrate. <en-US>')).toBe('We need to migrate.');
+  });
+
+  it('normalizes the numbers, times and units a chat message contains', async () => {
+    expect(await f.format('the cluster handles twelve thousand requests per second comma with latency around three point five milliseconds period'))
+      .toBe('the cluster handles 12,000 requests per second, with latency around 3.5 milliseconds.');
+    expect(await f.format('meet at ten thirty a m on the fifth')).toBe('meet at 10:30 AM on the fifth');
+    expect(await f.format('the price is dollar sign fifty nine point nine nine comma about twenty percent off'))
+      .toBe('the price is $59.99, about 20% off');
   });
 });

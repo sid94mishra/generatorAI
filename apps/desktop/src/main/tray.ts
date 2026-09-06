@@ -37,13 +37,9 @@ export function createTray(): void {
   tray.setToolTip('GeneratorAI');
   refreshTrayMenu();
 
-  tray.on('click', () => {
-    const win = getWindowManager().getMainWindow();
-    if (win) {
-      win.show();
-      win.focus();
-    }
-  });
+  // Restores a window hidden by the minimise-to-tray close interception (see
+  // WindowManager's `close` handler) or recreates one if it was destroyed.
+  tray.on('click', () => getWindowManager().restoreFromTray());
 
   // On Windows a left click activates and a right click opens the menu; the
   // context menu set via `setContextMenu` already handles right-click there,
@@ -64,7 +60,7 @@ export function refreshTrayMenu(): void {
   const menu = Menu.buildFromTemplate([
     { label: `Server: ${status.state}${status.port ? ` (:${status.port})` : ''}`, enabled: false },
     { type: 'separator' },
-    { label: 'Open GeneratorAI', click: () => { const w = wm.getMainWindow(); w?.show(); w?.focus(); } },
+    { label: 'Open GeneratorAI', click: () => wm.restoreFromTray() },
     { label: 'Dashboard', click: () => wm.navigateTo('/') },
     { label: 'Chats', click: () => wm.navigateTo('/chats') },
     { label: 'Workflows', click: () => wm.navigateTo('/workflows') },
@@ -72,7 +68,9 @@ export function refreshTrayMenu(): void {
     { type: 'separator' },
     { label: 'Restart Server', click: () => void sm.restart().catch(() => undefined) },
     { type: 'separator' },
-    { label: 'Quit', click: () => app.quit() },
+    // `app.quit()` fires `before-quit`, where index.ts marks the WindowManager
+    // as quitting so the minimise-to-tray `close` interception stands aside.
+    { label: 'Quit', click: () => { wm.setQuitting(true); app.quit(); } },
   ]);
   tray.setContextMenu(menu);
 }

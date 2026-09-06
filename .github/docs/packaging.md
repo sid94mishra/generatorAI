@@ -50,7 +50,7 @@ an app whose database fails on first use.
 
 ## 3. Prerequisites
 
-Beyond Node 20 and pnpm 10:
+Beyond Node 22 and pnpm 10:
 
 | Platform | Needs |
 | -------- | ----- |

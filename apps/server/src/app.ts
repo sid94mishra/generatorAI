@@ -11,6 +11,7 @@ import { requestIdMiddleware } from './middleware/requestId.js';
 import { requestMetricsMiddleware } from './middleware/requestMetrics.js';
 import { createCorsMiddleware } from './middleware/cors.js';
 import { createCspMiddleware } from './middleware/csp.js';
+import { createSecurityHeadersMiddleware } from './middleware/securityHeaders.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { createRateLimitMiddleware } from './middleware/rateLimit.js';
 import { createErrorMiddleware } from './middleware/errorHandler.js';
@@ -64,6 +65,10 @@ export function createApp(container: Container): Express {
   // rationale, including why `script-src` uses a hash-source rather than
   // 'unsafe-inline'.
   app.use(createCspMiddleware());
+  // 2c. Review plan item 14 — nosniff, Referrer-Policy, Permissions-Policy,
+  // and HSTS on HTTPS. Set here, in the app, so a deployment that is not
+  // fronted by the shipped nginx config is not silently unprotected.
+  app.use(createSecurityHeadersMiddleware());
 
   // 3+4. Body parsers.
   //

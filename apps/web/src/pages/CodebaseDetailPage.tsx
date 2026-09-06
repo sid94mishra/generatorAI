@@ -43,7 +43,7 @@ import { extToLang } from '@/components/common/SyntaxHighlightedCode.js';
 import { FileCodeView } from '@/components/diff/FileCodeView.js';
 import { DiffProviders } from '@/components/diff/DiffProviders.js';
 import { toast } from '@/components/Toast.js';
-import { Modal, Button, Badge, Spinner, Tabs, PageHeader, Popover, PopoverTrigger, PopoverContent, type BadgeTone } from '@/components/ui/index.js';
+import { Modal, Button, Badge, Spinner, Tabs, PageHeader, Popover, PopoverTrigger, PopoverContent, Input, type BadgeTone } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { cn } from '@/lib/utils.js';
 import type { CodebaseType, ProjectCodebase } from '@generatorai/shared';
@@ -154,12 +154,14 @@ export function CodebaseDetailPage() {
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6">
         <AlertCircle className="h-10 w-10 text-danger" />
         <p className="text-sm text-muted-foreground">Codebase not found</p>
-        <button
+        <Button
+          type="button"
+          variant="ghost"
           onClick={() => navigate(`/projects/${projectId}`)}
-          className="text-sm text-primary underline"
+          className="h-auto gap-0 rounded-none px-0 py-0 text-sm text-primary underline hover:bg-transparent"
         >
           Back to Project
-        </button>
+        </Button>
       </div>
     );
   }
@@ -174,6 +176,7 @@ export function CodebaseDetailPage() {
               variant="ghost"
               size="icon"
               onClick={() => navigate(`/projects/${projectId}`)}
+              aria-label="Back to project"
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
@@ -448,8 +451,9 @@ function FilePreviewPanel({
         </span>
         {isMarkdown ? (
           <div className="ml-auto flex shrink-0 items-center rounded border border-border p-px">
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setMarkdownMode('preview')}
               aria-label="Rendered preview"
               aria-pressed={markdownMode === 'preview'}
@@ -462,9 +466,10 @@ function FilePreviewPanel({
               )}
             >
               <Eye className="h-3 w-3" />
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setMarkdownMode('code')}
               aria-label="Source code"
               aria-pressed={markdownMode === 'code'}
@@ -477,7 +482,7 @@ function FilePreviewPanel({
               )}
             >
               <Code2 className="h-3 w-3" />
-            </button>
+            </Button>
           </div>
         ) : lang ? (
           <Badge tone="neutral" size="sm" className="ml-auto uppercase">
@@ -593,8 +598,9 @@ function DefaultBranchControl({
       <div className="mt-1">
         <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(''); }}>
           <PopoverTrigger asChild>
-            <button
+            <Button
               type="button"
+              variant="ghost"
               disabled={saving}
               className={cn(
                 'flex h-7 max-w-[16rem] items-center gap-1.5 rounded-md border border-border bg-background px-2 text-sm font-medium text-foreground',
@@ -605,17 +611,18 @@ function DefaultBranchControl({
               {saving ? <Spinner size="xs" /> : <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
               <span className="truncate font-mono">{current}</span>
               <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            </button>
+            </Button>
           </PopoverTrigger>
           <PopoverContent align="start" className="w-64 p-0">
             <div className="border-b border-border p-1.5">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
+                <Input
                   autoFocus
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search branches…"
+                  aria-label="Search branches"
                   className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-ring/40"
                 />
               </div>
@@ -629,8 +636,10 @@ function DefaultBranchControl({
                 <p className="py-6 text-center text-xs text-muted-foreground">No branches found.</p>
               ) : (
                 filtered.map((b) => (
-                  <button
+                  <Button
                     key={b}
+                    type="button"
+                    variant="ghost"
                     onClick={() => void handleSelect(b)}
                     className={cn(
                       'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-subtle',
@@ -640,7 +649,7 @@ function DefaultBranchControl({
                     <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate font-mono">{b}</span>
                     {b === current && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-                  </button>
+                  </Button>
                 ))
               )}
             </div>

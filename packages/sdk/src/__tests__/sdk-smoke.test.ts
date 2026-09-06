@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createTestGeneratorAI } from '../testing/helpers.js';
 import { MockHarness } from '../testing/MockHarness.js';
 import type { GeneratorAI } from '../GeneratorAI.js';
+import { resolveConfig } from '../config.js';
 
 // SDK smoke tests — exercise the public facade surface against an in-memory
 // temp DB with a stubbed harness (no real model calls). Covers the DB-backed
@@ -18,9 +19,31 @@ afterEach(async () => {
 
 async function make(): Promise<GeneratorAI> {
   // Inject the stub harness so create() does not spin up a real provider.
-  ai = await createTestGeneratorAI({ provider: new MockHarness() as never });
+  ai = await createTestGeneratorAI({ harness: new MockHarness() as never });
   return ai;
 }
+
+describe('config: harness selection', () => {
+  it('still honours the deprecated `provider` alias', async () => {
+    const sdk = await createTestGeneratorAI({ provider: new MockHarness() as never });
+    ai = sdk;
+    expect(typeof sdk.config.harness).toBe('object');
+  });
+
+  it('prefers `harness` when both are given', async () => {
+    const chosen = new MockHarness();
+    const sdk = await createTestGeneratorAI({
+      harness: chosen as never,
+      provider: new MockHarness() as never,
+    });
+    ai = sdk;
+    expect(sdk.config.harness).toBe(chosen);
+  });
+
+  it('refuses a config with neither, naming the field to set', () => {
+    expect(() => resolveConfig({})).toThrow(/`harness`/);
+  });
+});
 
 describe('GeneratorAI lifecycle', () => {
   it('creates and shuts down cleanly (idempotent shutdown)', async () => {

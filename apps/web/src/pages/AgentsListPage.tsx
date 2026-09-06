@@ -36,6 +36,7 @@ import {
   SearchInput,
   EmptyState,
   Button,
+  Input,
   Badge,
   PageHeader,
   Select,
@@ -147,7 +148,7 @@ export function AgentsListPage() {
         subtitle="Reusable instructions with their own skills, MCP servers and capabilities"
         actions={
           <div className="flex items-center gap-2">
-            <input
+            <Input
               ref={fileInputRef}
               type="file"
               accept=".md,text/markdown"
@@ -179,14 +180,16 @@ export function AgentsListPage() {
         }
       />
 
-      <Toolbar className="mb-6">
+      <Toolbar className="mb-6 flex-wrap sm:flex-nowrap">
         <SearchInput
           value={search}
           onChange={setSearch}
           placeholder="Search agents by name, slug, description or tag…"
-          className="flex-1"
+          aria-label="Search agents"
+          className="min-w-0 flex-1"
         />
         <Select
+          aria-label="Filter by scope"
           value={scope}
           onChange={(v) => setScope(v as AgentScope | '')}
           options={[
@@ -197,6 +200,7 @@ export function AgentsListPage() {
           ]}
         />
         <Select
+          aria-label="Filter by role"
           value={role}
           onChange={(v) => setRole(v as AgentRole | '')}
           options={[
@@ -251,40 +255,43 @@ export function AgentsListPage() {
                 onClick={() => navigate(`/agents/${agent.id}`)}
                 actions={
                   <>
-                    <button
+                    <Button
+                      variant="ghost"
                       onClick={(e) => {
                         e.stopPropagation();
                         navigate(`/agents/${agent.id}`);
                       }}
-                      className="rounded-lg bg-subtle p-2 text-muted-foreground transition-colors hover:text-foreground"
+                      className="h-auto w-auto rounded-lg bg-subtle p-2 text-muted-foreground transition-colors hover:text-foreground"
                       title={readOnly ? 'View agent' : 'Edit agent'}
                       aria-label={`${readOnly ? 'View' : 'Edit'} ${agent.name}`}
                     >
                       {readOnly ? <Eye className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="ghost"
                       onClick={(e) => {
                         e.stopPropagation();
                         void handleExport(agent);
                       }}
-                      className="rounded-lg bg-subtle p-2 text-muted-foreground transition-colors hover:text-foreground"
+                      className="h-auto w-auto rounded-lg bg-subtle p-2 text-muted-foreground transition-colors hover:text-foreground"
                       title="Export as .agent.md"
                       aria-label={`Export ${agent.name}`}
                     >
                       <Download className="h-4 w-4" />
-                    </button>
+                    </Button>
                     {!readOnly && (
-                      <button
+                      <Button
+                        variant="ghost"
                         onClick={(e) => {
                           e.stopPropagation();
                           setPendingDelete(agent);
                         }}
-                        className="rounded-lg bg-danger-muted p-2 text-danger transition-colors hover:bg-danger/20"
+                        className="h-auto w-auto rounded-lg bg-danger-muted p-2 text-danger transition-colors hover:bg-danger/20"
                         title="Delete agent"
                         aria-label={`Delete ${agent.name}`}
                       >
                         <Trash2 className="h-4 w-4" />
-                      </button>
+                      </Button>
                     )}
                   </>
                 }

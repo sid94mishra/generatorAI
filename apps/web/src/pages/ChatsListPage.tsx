@@ -3,8 +3,8 @@
 //                 filter, quick create, and bulk select/delete.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useMemo, useLayoutEffect, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChats, useBulkDeleteChats } from '@/hooks/queries.js';
 import { CreateChatDialog } from '@/components/chat/CreateChatDialog.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
@@ -28,8 +28,12 @@ import type { Chat } from '@generatorai/shared';
 
 type StatusFilter = 'all' | 'active' | 'archived';
 
+/** Estimated row height fed to the virtualizer before it measures the real
+ * DOM node; @tanstack/react-virtual's `measureElement` corrects this after
+ * each row's first render, so it only needs to be in the right ballpark. */
+const CHAT_ROW_ESTIMATE = 76;
+
 export function ChatsListPage() {
-  const navigate = useNavigate();
   const [createChatOpen, setCreateChatOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -63,6 +67,45 @@ export function ChatsListPage() {
     result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     return result;
   }, [chats, search, statusFilter]);
+
+  // ── Virtualization ──
+  // Measured on /chats with 359 real chats: 7,538 DOM nodes, worst long task
+  // 334ms. Mounting only the rows near the viewport is the fix.
+  //
+  // PageContainer (variant="narrow") is the actual scroll parent here
+  // (`h-full overflow-y-auto` — see layout/PageContainer.tsx), not the
+  // window, so the virtualizer observes that node directly.
+  const scrollElRef = useRef<HTMLDivElement>(null);
+  // Wraps just the chat list. Everything above it (header, toolbar, the
+  // selection bar) scrolls in the same PageContainer, so its height has to
+  // be added to every virtual row's offset via `scrollMargin`.
+  const listStartRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  // Deliberately no dependency array: this has to re-measure after every
+  // commit, since the conditionally-rendered selection bar above the list can
+  // resize it. The `Math.abs` guard below keeps it from looping — once the
+  // measured offset stabilizes, `setScrollMargin` stops being called.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    const scrollEl = scrollElRef.current;
+    const listStart = listStartRef.current;
+    if (!scrollEl || !listStart) return;
+    // Content-relative offset of the list within the scroll container; stable
+    // across scroll position (scrollTop cancels the rect delta), so this only
+    // actually changes when something above the list resizes — e.g. toggling
+    // selection mode.
+    const next =
+      listStart.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop;
+    setScrollMargin((prev) => (Math.abs(prev - next) > 0.5 ? next : prev));
+  });
+
+  const rowVirtualizer = useVirtualizer({
+    count: filteredChats.length,
+    getScrollElement: () => scrollElRef.current,
+    estimateSize: () => CHAT_ROW_ESTIMATE,
+    overscan: 8,
+    scrollMargin,
+  });
 
   // ── Bulk selection helpers ──
 
@@ -107,7 +150,7 @@ export function ChatsListPage() {
   };
 
   return (
-    <PageContainer variant="narrow" className="animate-fade-in">
+    <PageContainer ref={scrollElRef} variant="narrow" className="animate-fade-in">
       {/* Bulk-delete confirmation dialog */}
       <ConfirmDialog
         open={bulkDeleteOpen}
@@ -151,18 +194,22 @@ export function ChatsListPage() {
 
         {/* ── Selection Toolbar — shown when in bulk selection mode ── */}
         {selectionMode && (
-          <div className="mb-4 flex items-center gap-3 rounded-lg border border-border bg-accent/50 px-4 py-2">
-            <button
+          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-accent/50 px-4 py-2">
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={selectedIds.size === filteredChats.length ? deselectAll : selectAll}
-              className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:opacity-80"
+              className="text-foreground"
+              leftIcon={
+                selectedIds.size === filteredChats.length ? (
+                  <CheckSquare className="h-4 w-4 text-primary" />
+                ) : (
+                  <Square className="h-4 w-4" />
+                )
+              }
             >
-              {selectedIds.size === filteredChats.length ? (
-                <CheckSquare className="h-4 w-4 text-primary" />
-              ) : (
-                <Square className="h-4 w-4" />
-              )}
               {selectedIds.size === filteredChats.length ? 'Deselect All' : 'Select All'}
-            </button>
+            </Button>
             <span className="text-xs text-muted-foreground">
               {selectedIds.size} of {filteredChats.length} selected
             </span>
@@ -182,6 +229,7 @@ export function ChatsListPage() {
               size="icon-sm"
               onClick={exitSelectionMode}
               title="Cancel selection"
+              aria-label="Cancel selection"
             >
               <X className="h-4 w-4" />
             </Button>
@@ -190,7 +238,7 @@ export function ChatsListPage() {
 
         {/* Search & Filter */}
         <Toolbar
-          className="mb-6"
+          className="mb-6 flex-wrap sm:flex-nowrap"
           end={
             <FilterTabs
               options={(['all', 'active', 'archived'] as StatusFilter[]).map((s) => ({
@@ -206,7 +254,8 @@ export function ChatsListPage() {
             value={search}
             onChange={setSearch}
             placeholder="Search chats..."
-            className="flex-1"
+            aria-label="Search chats"
+            className="min-w-0 flex-1"
           />
         </Toolbar>
 
@@ -239,20 +288,39 @@ export function ChatsListPage() {
             }
           />
         ) : (
-          <div className="space-y-2">
-            {filteredChats.map((chat) => (
-              <ChatCard
-                key={chat.id}
-                chat={chat}
-                selectionMode={selectionMode}
-                selected={selectedIds.has(chat.id)}
-                onToggleSelect={() => toggleSelect(chat.id)}
-                onClick={() => {
-                  if (selectionMode) toggleSelect(chat.id);
-                  else navigate(`/chats/${chat.id}`);
-                }}
-              />
-            ))}
+          <div ref={listStartRef} style={{ position: 'relative', height: rowVirtualizer.getTotalSize() }}>
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${
+                  (rowVirtualizer.getVirtualItems()[0]?.start ?? 0) - rowVirtualizer.options.scrollMargin
+                }px)`,
+              }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const chat = filteredChats[virtualRow.index];
+                if (!chat) return null;
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    className="pb-2"
+                  >
+                    <ChatCard
+                      chat={chat}
+                      selectionMode={selectionMode}
+                      selected={selectedIds.has(chat.id)}
+                      onToggleSelect={() => toggleSelect(chat.id)}
+                      onClick={() => toggleSelect(chat.id)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -280,7 +348,10 @@ function ChatCard({
 }) {
   return (
     <EntityListRow
-      onClick={onClick}
+      // A link when the row navigates, so middle-click, ctrl-click and "copy
+      // link address" all work; a plain click handler in selection mode,
+      // where the row toggles a checkbox and goes nowhere.
+      {...(selectionMode ? { onClick } : { href: `/chats/${chat.id}` })}
       className={cn(selectionMode && selected && 'ring-2 ring-ring bg-primary/5')}
       leading={
         selectionMode ? (

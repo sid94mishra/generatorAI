@@ -6,18 +6,19 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, CheckCircle2, XCircle, Clock, Eye, ExternalLink, Ban } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Eye, ExternalLink, Ban } from 'lucide-react';
 import { useBackgroundTasks, useBackgroundTaskDigest } from '@/hooks/queries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
 import { cn } from '@/lib/utils.js';
+import { Button, Spinner } from '@/components/ui/index.js';
 
 interface BackgroundTasksPanelProps {
   chatId: string | undefined;
 }
 
 const STATUS_META: Record<string, { label: string; icon: React.ReactNode; cls: string }> = {
-  running: { label: 'Running', icon: <Loader2 className="h-3 w-3 animate-spin" />, cls: 'text-blue-500 bg-blue-500/10' },
+  running: { label: 'Running', icon: <Spinner size="xs" />, cls: 'text-blue-500 bg-blue-500/10' },
   needs_review: { label: 'Needs review', icon: <Eye className="h-3 w-3" />, cls: 'text-amber-500 bg-amber-500/10' },
   completed: { label: 'Completed', icon: <CheckCircle2 className="h-3 w-3" />, cls: 'text-green-500 bg-green-500/10' },
   failed: { label: 'Failed', icon: <XCircle className="h-3 w-3" />, cls: 'text-red-500 bg-red-500/10' },
@@ -134,23 +135,27 @@ export function BackgroundTasksPanel({ chatId }: BackgroundTasksPanelProps) {
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon-sm"
                         title="Open worker chat"
-                        className="rounded p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+                        className="h-auto w-auto rounded p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
                         onClick={(e) => { e.stopPropagation(); navigate(`/chats/${t.taskId}`); }}
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
-                      </button>
+                      </Button>
                       {(t.status === 'running' || t.status === 'spawned') && (
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="icon-sm"
                           title="Cancel"
-                          className="rounded p-1 text-[var(--color-muted-foreground)] hover:bg-red-500/10 hover:text-red-500"
+                          className="h-auto w-auto rounded p-1 text-[var(--color-muted-foreground)] hover:bg-red-500/10 hover:text-red-500"
                           onClick={(e) => { e.stopPropagation(); if (chatId) void platform.cancelBackgroundTask(chatId, t.taskId); }}
                         >
                           <Ban className="h-3.5 w-3.5" />
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </div>

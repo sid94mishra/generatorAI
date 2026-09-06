@@ -6,7 +6,7 @@ import React, { useCallback, useState } from 'react';
 import { Plus, Trash2, ChevronDown, ChevronRight, Info } from 'lucide-react';
 import type { VariableDefinition } from '@generatorai/shared';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
-import { Input, Select } from '@/components/ui/index.js';
+import { Button, Input, Select } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 
 const TYPE_LABELS: Record<string, { label: string; color: string }> = {
@@ -93,13 +93,15 @@ export function VariablesTab() {
         <label className="text-sm font-medium text-foreground">
           Variables ({variables.length})
         </label>
-        <button
+        <Button
           onClick={addVariable}
-          className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-subtle"
+          variant="ghost"
+          size="sm"
+          className="h-auto flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-subtle"
         >
           <Plus className="h-3.5 w-3.5" />
           Add Variable
-        </button>
+        </Button>
       </div>
 
       {/* Variable list */}
@@ -108,12 +110,14 @@ export function VariablesTab() {
           <p className="text-sm text-muted-foreground">
             No variables defined. Runs will start without asking for input.
           </p>
-          <button
+          <Button
             onClick={addVariable}
-            className="mt-2 text-xs font-medium text-primary hover:underline"
+            variant="ghost"
+            size="sm"
+            className="h-auto mt-2 bg-transparent p-0 text-xs font-medium text-primary hover:bg-transparent hover:underline"
           >
             + Add your first variable
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="space-y-1">
@@ -154,16 +158,18 @@ export function VariablesTab() {
                       Required
                     </span>
                   )}
-                  <button
+                  <Button
                     onClick={(e) => {
                       e.stopPropagation();
                       removeVariable(index);
                     }}
                     aria-label={`Delete variable ${variable.name}`}
-                    className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-danger-muted hover:text-danger transition-colors"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-auto w-auto rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-danger-muted hover:text-danger transition-colors"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  </Button>
                 </div>
 
                 {/* Expanded edit form */}
@@ -196,6 +202,7 @@ export function VariablesTab() {
                         <label className="block text-[11px] font-medium text-muted-foreground mb-1">Type</label>
                         <Select
                           value={variable.type}
+                          aria-label={`${variable.label || 'Variable'} type`}
                           onChange={(v) => {
                             const type = v as VariableDefinition['type'];
                             updateVariable(index, {
@@ -267,13 +274,15 @@ export function VariablesTab() {
                       />
                     </div>
                     <div className="flex justify-end">
-                      <button
+                      <Button
                         onClick={() => removeVariable(index)}
-                        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-danger hover:bg-danger-muted transition-colors"
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-danger hover:bg-danger-muted transition-colors"
                       >
                         <Trash2 className="h-3 w-3" />
                         Delete
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}

@@ -43,7 +43,7 @@ import type {
   WorktreeDetail,
   WorktreeInfo,
 } from '@generatorai/shared';
-import { json, jsonWith, qs, request, requestAllowing, type ApiFetch } from './client.js';
+import { json, jsonWith, qs, request, requestAllowing, requestText, type ApiFetch } from './client.js';
 
 /**
  * One finding from `definitions.validate`, carrying the graph element it is
@@ -216,6 +216,7 @@ export interface DeviceRecord {
  */
 export function createAdminApi(fetchImpl: ApiFetch) {
   const req = <T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init);
+  const reqText = (path: string, init?: RequestInit) => requestText(fetchImpl, path, init);
 
   return {
     // ── workflowDefinitions.ts ──────────────────────────────────
@@ -588,8 +589,12 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         req<{ terminals: TerminalSessionDescriptor[] }>(
           `/api/workspaces/${workspaceId}/terminals`,
         ).then((body) => body.terminals),
+      // Serves `application/octet-stream` — a raw VT byte ring, not JSON.
+      // Reading it with `req` made the command fail on its own output.
       scrollback: (workspaceId: string, sid: string) =>
-        req<{ data: string }>(`/api/workspaces/${workspaceId}/terminals/${sid}/scrollback`),
+        reqText(`/api/workspaces/${workspaceId}/terminals/${sid}/scrollback`).then((data) => ({
+          data,
+        })),
       resize: (workspaceId: string, sid: string, cols: number, rows: number) =>
         req<void>(
           `/api/workspaces/${workspaceId}/terminals/${sid}/resize`,
@@ -963,6 +968,14 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       computerUse: () => req<Record<string, unknown>>('/api/system/computer-use'),
       setComputerUse: (body: Record<string, unknown>) =>
         req<Record<string, unknown>>('/api/system/computer-use', jsonWith('PUT', body)),
+      workspaceRetention: () => req<Record<string, unknown>>('/api/system/workspace-retention'),
+      setWorkspaceRetention: (body: Record<string, unknown>) =>
+        req<Record<string, unknown>>('/api/system/workspace-retention', jsonWith('PUT', body)),
+      runWorkspaceRetention: (body: Record<string, unknown> = {}) =>
+        req<{ tracked: number; orphans: number; failed: number }>(
+          '/api/system/workspace-retention/run',
+          json(body),
+        ),
     },
 
     copilot: {

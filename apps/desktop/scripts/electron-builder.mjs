@@ -23,11 +23,13 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  assertPublishAllowed,
   createBuildConfig,
   resolveChannel,
   resolveSigning,
   unpublishableManifests,
   PartialSigningConfigError,
+  UnsignedPublishError,
 } from './lib/build-config.mjs';
 
 const require = createRequire(import.meta.url);
@@ -123,6 +125,18 @@ try {
   throw err;
 }
 console.log(`[electron-builder] ${signing.reason}`);
+
+// An unsigned build may be packaged (local testing, CI artifacts) but not
+// PUBLISHED without an explicit ALLOW_UNSIGNED_RELEASE=1 — see build-config.
+try {
+  assertPublishAllowed({ argv, signed: signing.signed, platform, env });
+} catch (err) {
+  if (err instanceof UnsignedPublishError) fail(err.message);
+  throw err;
+}
+if (!signing.signed && env.ALLOW_UNSIGNED_RELEASE === '1') {
+  console.warn('[electron-builder] ALLOW_UNSIGNED_RELEASE=1 — publishing an unsigned build on request.');
+}
 
 const config = createBuildConfig({
   platform,

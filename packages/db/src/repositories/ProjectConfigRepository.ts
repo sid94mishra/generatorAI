@@ -26,6 +26,7 @@ export class DrizzleProjectConfigRepository implements IProjectConfigRepository 
         description: config.description ?? null,
         filePath: config.filePath,
         metadata: config.metadata ?? {},
+        credentialRefs: config.credentialRefs ?? null,
         createdAt: config.createdAt,
         updatedAt: config.updatedAt,
       });
@@ -75,6 +76,7 @@ export class DrizzleProjectConfigRepository implements IProjectConfigRepository 
     if (updates.description !== undefined) values['description'] = updates.description;
     if (updates.filePath !== undefined) values['filePath'] = updates.filePath;
     if (updates.metadata !== undefined) values['metadata'] = updates.metadata;
+    if (updates.credentialRefs !== undefined) values['credentialRefs'] = updates.credentialRefs;
     values['updatedAt'] = new Date();
 
     await this.db.update(projectConfigs).set(values).where(eq(projectConfigs.id, id));
@@ -98,6 +100,7 @@ export class DrizzleProjectConfigRepository implements IProjectConfigRepository 
       description: row.description ?? undefined,
       filePath: row.filePath,
       metadata: safeJsonColumn(row.metadata, jsonRecord, { fallback: {} }) ?? {},
+      ...(row.credentialRefs ? { credentialRefs: row.credentialRefs } : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

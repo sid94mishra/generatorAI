@@ -20,8 +20,12 @@ import type {
   PtyScrollbackResponse,
   PtySessionReadyNotification,
 } from '@generatorai/shared';
-import { isPtyHostResponse } from '@generatorai/shared';
+import { HOST_PROTOCOL_VERSIONS, assertHostHello, isPtyHostResponse } from '@generatorai/shared';
+import { readBuildStamp } from '@generatorai/shared/node';
 import type { ILogger } from '@generatorai/shared';
+
+/** Plan item 43 — the protocol this gateway build speaks to pty-host. */
+const EXPECTED_PROTOCOL_VERSION = HOST_PROTOCOL_VERSIONS['pty-host'];
 
 /* W14 — restart cap defaults */
 const MAX_RESTARTS = 5;
@@ -69,6 +73,13 @@ export class PtyHostClient {
    * in-process host instead of throwing forever.
    */
   private fatal = false;
+  /**
+   * Plan item 43 — the `hello` the CURRENT child sent, judged when its ready
+   * pong arrives. Reset per spawn so a restarted host is checked on its own.
+   */
+  private helloFrame: unknown = undefined;
+  /** This gateway build's own stamp, compared (advisory) against the host's. */
+  private readonly buildStamp = readBuildStamp(import.meta.url);
   private readonly logger: ILogger;
   private readonly hostEntryPath: string;
   private readonly hostEnv: Record<string, string>;
@@ -101,7 +112,7 @@ export class PtyHostClient {
   async start(): Promise<void> {
     await this.spawn();
     await this.waitForReady();
-    this.logger.info('[PtyHostClient] PTY host ready');
+    this.logger.info(`[PtyHostClient] PTY host ready (protocol v${EXPECTED_PROTOCOL_VERSION})`);
   }
 
   /** True once the restart budget is exhausted — the host is permanently down. */
@@ -262,6 +273,9 @@ export class PtyHostClient {
   private async spawn(): Promise<void> {
     if (this.stopped) throw new Error('[PtyHostClient] Supervisor is stopped');
 
+    // A new process, a new handshake. `process.env` is spread into the child,
+    // so a `GENERATORAI_BUILD_STAMP` set on the gateway reaches the host too.
+    this.helloFrame = undefined;
     const child = fork(this.hostEntryPath, [], {
       env: { ...process.env, ...this.hostEnv },
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -369,10 +383,37 @@ export class PtyHostClient {
       return;
     }
 
+    // Plan item 43 — the handshake frame. Recorded here, judged at the ready
+    // pong below, so "hello never came" and "hello came wrong" fail the same way.
+    if (msg.type === 'hello') {
+      this.helloFrame = msg;
+      return;
+    }
+
     // Ready pong from boot
     if (msg.type === 'pong' && (msg as { reqId: string }).reqId === '__ready__') {
-      this.pendingRequests.get('__ready__')?.resolve(msg);
+      const pending = this.pendingRequests.get('__ready__');
       this.pendingRequests.delete('__ready__');
+      let warning: string | undefined;
+      try {
+        warning = assertHostHello('pty-host', EXPECTED_PROTOCOL_VERSION, this.buildStamp, this.helloFrame);
+      } catch (err: unknown) {
+        // A stale dist fails identically on every restart, so latch fatal (which
+        // is what makes `PtyHostAdapter.isAvailable()` fall through to the
+        // in-process host) and kill the child. `stopped` is set BEFORE the kill
+        // so the exit handler neither synthesises exits nor schedules a restart.
+        const reason = err instanceof Error ? err.message : String(err);
+        this.logger.error(`[PtyHostClient] ${reason}`);
+        this.stopped = true;
+        this.fatal = true;
+        const child = this.child;
+        this.child = null;
+        child?.kill('SIGTERM');
+        pending?.reject(new Error(`[PtyHostClient] ${reason}`));
+        return;
+      }
+      if (warning) this.logger.warn(`[PtyHostClient] ${warning}`);
+      pending?.resolve(msg);
       return;
     }
 

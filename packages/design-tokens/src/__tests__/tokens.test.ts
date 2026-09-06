@@ -318,6 +318,41 @@ describe('WCAG AA compliance — every theme × appearance', () => {
     }
   });
 
+  it('input borders clear the 3:1 non-text bar (WCAG 1.4.11) on background and card', () => {
+    // An input's edge is the only affordance telling a user where the field
+    // is. Decorative `border` may stay soft; `input` may not. Before this
+    // derivation existed, 32 of 34 variants shipped between 1.3:1 and 2.4:1.
+    for (const { label, tokens: t } of MATRIX) {
+      for (const [name, surface] of [
+        ['background', t.background],
+        ['card', t.card],
+      ] as const) {
+        const ratio = contrastRatio(t.input, surface);
+        expect(
+          ratio,
+          `${label}: input ${t.input} on ${name} ${surface} = ${ratio.toFixed(2)}:1`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it('input borders are never nudged when the authored border already clears the bar', () => {
+    const contrast = THEMES.find((t) => t.id === 'contrast')!;
+    for (const appearance of APPEARANCES) {
+      const t = resolveAppearanceTokens(contrast, appearance);
+      expect(t.input).toBe(contrast[appearance].border);
+    }
+  });
+
+  it('defines surface / surface-hover for every theme as aliases of card / subtle', () => {
+    // These two were referenced by WidgetFrame and ChatPage but never
+    // defined, so every dark theme rendered a hardcoded white widget panel.
+    for (const { label, tokens: t } of MATRIX) {
+      expect(t.surface, `${label}: surface`).toBe(t.card);
+      expect(t.surfaceHover, `${label}: surfaceHover`).toBe(t.subtle);
+    }
+  });
+
   it('borders are visible against the surfaces they divide', () => {
     for (const { label, tokens: t } of MATRIX) {
       for (const surface of [t.background, t.card, t.popover] as const) {

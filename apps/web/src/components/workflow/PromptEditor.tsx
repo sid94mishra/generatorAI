@@ -7,7 +7,7 @@ import React, { useState, useCallback } from 'react';
 import { Plus, Trash2, Eye, Edit3, ChevronUp, ChevronDown } from 'lucide-react';
 import type { PromptDefinition } from '@generatorai/shared';
 import { cn } from '@/lib/utils.js';
-import { Input, Textarea } from '@/components/ui/index.js';
+import { Button, Input, Textarea } from '@/components/ui/index.js';
 
 interface PromptEditorProps {
   prompts: PromptDefinition[];
@@ -85,13 +85,15 @@ export function PromptEditor({ prompts, onChange, readonly, contentLabel = 'Prom
           {contentLabel}s ({prompts.length})
         </label>
         {!readonly && (
-          <button
+          <Button
             onClick={addPrompt}
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-subtle"
+            variant="ghost"
+            size="sm"
+            className="h-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-subtle"
           >
             <Plus className="h-3.5 w-3.5" />
             Add {contentLabel}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -143,42 +145,50 @@ export function PromptEditor({ prompts, onChange, readonly, contentLabel = 'Prom
               {/* Action buttons */}
               {!readonly && (
                 <div className="flex items-center gap-0.5">
-                  <button
+                  <Button
                     onClick={() => movePrompt(index, 'up')}
                     disabled={index === 0}
-                    className="rounded p-1 text-muted-foreground hover:bg-subtle disabled:opacity-30"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-subtle disabled:opacity-30"
                     title="Move up"
                   >
                     <ChevronUp className="h-3.5 w-3.5" />
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => movePrompt(index, 'down')}
                     disabled={index === prompts.length - 1}
-                    className="rounded p-1 text-muted-foreground hover:bg-subtle disabled:opacity-30"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-subtle disabled:opacity-30"
                     title="Move down"
                   >
                     <ChevronDown className="h-3.5 w-3.5" />
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() =>
                       setEditingIndex(editingIndex === index ? null : index)
                     }
+                    variant="ghost"
+                    size="icon-sm"
                     className={cn(
-                      'rounded p-1 transition-colors',
+                      'h-auto w-auto rounded p-1 transition-colors',
                       editingIndex === index
-                        ? 'bg-primary text-primary-foreground'
+                        ? 'bg-primary text-primary-foreground hover:bg-primary'
                         : 'text-muted-foreground hover:bg-subtle',
                     )}
                     title="Edit prompt"
                   >
                     <Edit3 className="h-3.5 w-3.5" />
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() =>
                       setPreviewIndex(previewIndex === index ? null : index)
                     }
+                    variant="ghost"
+                    size="icon-sm"
                     className={cn(
-                      'rounded p-1 transition-colors',
+                      'h-auto w-auto rounded p-1 transition-colors',
                       previewIndex === index
                         ? 'bg-subtle text-foreground'
                         : 'text-muted-foreground hover:bg-subtle',
@@ -186,14 +196,16 @@ export function PromptEditor({ prompts, onChange, readonly, contentLabel = 'Prom
                     title="Preview prompt"
                   >
                     <Eye className="h-3.5 w-3.5" />
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => removePrompt(index)}
-                    className="rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger"
                     title="Delete prompt"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>

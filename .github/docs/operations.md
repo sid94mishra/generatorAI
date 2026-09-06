@@ -59,20 +59,20 @@ Transient `500` errors in the browser console can appear during `tsx watch` reco
 
 | Var | Default | Purpose |
 |---|---|---|
-| `GENERATORAI_PORT` | `3100` | API server port |
-| `GENERATORAI_WEB_PORT` | `5173` | Vite dev port (dev only) |
-| `GENERATORAI_DB_PATH` | `~/.generatorai/data.db` | SQLite path |
-| `GENERATORAI_ARTIFACTS_DIR` | `~/.generatorai/artifacts` | Projects + global artifacts root |
-| `GENERATORAI_WORKSPACES_DIR` | `~/.generatorai/workspaces` | Execution workspaces + worktrees |
-| `GENERATORAI_TEMPLATES_DIR` | `~/.generatorai/templates` | System templates + system MCP / artifacts |
-| `GENERATORAI_SCRIPTS_DIR` | `<templatesDir>/scripts` | `.workflow.mjs` discovery |
+| `PORT` | `3100` | API server port |
+| `DB_PATH` | `~/.generatorai/data.db` | SQLite path |
+| `GENERATORAI_DATABASE_URL` | — | Overrides `DB_PATH` outright when set |
+| `ARTIFACTS_DIR` | `~/.generatorai/artifacts` | Projects + global artifacts root |
+| `WORKSPACES_DIR` | `~/.generatorai/workspaces` | Execution workspaces + worktrees |
+| `TEMPLATES_DIR` | `~/.generatorai/templates` | System templates + system MCP / artifacts. `.workflow.mjs` scripts are discovered under `<templatesDir>/scripts` — there is no separate directory override for that path. |
+
+The Vite dev port (`5173`) is hardcoded in `apps/web/vite.config.ts`; there is no env var to change it.
 
 ### Harness provider
 
 | Var | Default | Purpose |
 |---|---|---|
-| `HARNESS_TYPE` | `copilot` | `copilot` or `claude-agent` |
-| `GENERATORAI_HARNESS_TYPE` | (alias) | same |
+| `HARNESS_TYPE` | `copilot` | `copilot` or `claude-agent`. (There is no GENERATORAI_HARNESS_TYPE alias — only the unprefixed name is read.) |
 | `COPILOT_CLI_PATH` | auto-resolved | Override platform binary path |
 | `COPILOT_GH_HOST` | (none) | Set for GHEC tenants (`https://<tenant>.ghe.com/`) |
 | `COPILOT_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN` | (none) | Fallback auth. **Scrub these when using `COPILOT_GH_HOST`** to avoid 401. |
@@ -96,36 +96,66 @@ only `read:workflows`. See [feature-agents.md](./feature-agents.md).
 | Var | Default | Purpose |
 |---|---|---|
 | `GENERATORAI_LOG_LEVEL` | `info` | `trace` / `debug` / `info` / `warn` / `error` / `fatal` |
-| `GENERATORAI_LOG_PRETTY` | `true` in dev | Pretty-print pino logs |
 | `OTEL_SERVICE_NAME` | `generatorai-server` / `generatorai-cli` | OTel service name |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | OTLP collector endpoint (HTTP) |
-| `OTEL_SDK_DISABLED` | `false` | Disable OTel entirely |
+| `OTEL_SDK_DISABLED` | `false` | Read by the OTel SDK itself (`@opentelemetry/sdk-node`), not by our code. Disables OTel entirely regardless of `OTEL_ENABLED`. |
+
+Pretty-printing is NOT configurable — pino auto-selects `pino-pretty` when `NODE_ENV=development` and structured JSON otherwise. There is no GENERATORAI_LOG_PRETTY env var.
 
 ### Sandbox
 
 | Var | Default | Purpose |
 |---|---|---|
 | `SANDBOX_ENABLED` | `false` | Enable Docker sandbox for hooks + script runner |
-| `SANDBOX_DOCKER_IMAGE` | `generatorai/sandbox:latest` | Override sandbox image |
-| `SANDBOX_PREFER_DOCKER` | `true` | If Docker unavailable, fall back to `HostProcessSandboxProvider` |
+| `SANDBOX_IMAGE` | `generatorai/sandbox:latest` | Override sandbox image |
+| `SANDBOX_PROVIDER` | `auto` | `docker` (require Docker, error if unavailable), `host` (explicit unsandboxed opt-in), or `auto` (prefer Docker, fall back to host-process — but only if `GENERATORAI_ALLOW_HOST_SANDBOX=true` is also set; otherwise boot fails rather than running agent code unsandboxed) |
+| `GENERATORAI_ALLOW_HOST_SANDBOX` | `false` | Required alongside `SANDBOX_PROVIDER=auto` to permit the unsandboxed host-process fallback when Docker is unavailable |
 
 ### Streaming
 
 | Var | Default | Purpose |
 |---|---|---|
 | `GENERATORAI_SSE_CAP_PER_SCOPE` | session/run/chat=6, global=32 | Per-(scope,id) SSE connection cap |
-| `GENERATORAI_HEARTBEAT_MS` | `15000` | SSE heartbeat interval |
-| `GENERATORAI_EVENT_TTL_DAYS` | `30` | Event retention (events + stream_cursors) |
+| `SSE_HEARTBEAT_MS` | `15000` | SSE heartbeat interval |
+
+Event retention (`events` + `stream_cursors`, TTL 30 days) is NOT configurable via env var — `retention.eventPayloadTtlDays` has no env override wired up; changing it requires editing the Zod default in `packages/shared/src/config/AppConfig.ts`. There is no GENERATORAI_EVENT_TTL_DAYS env var.
 
 ### Speech-to-text (voice input)
 
-Local Whisper transcription behind a dedicated WebSocket (`apps/server/src/stt-ws.ts`). No cloud key required. See [feature-chat.md](./feature-chat.md#42-voice-input-speech-to-text).
+Local, on-device transcription behind a dedicated WebSocket (`apps/server/src/stt-ws.ts`). No cloud key required. `auto` prefers Nemotron when its weights are present (streaming, multilingual, punctuated) and Moonshine otherwise, with Whisper always last. See [feature-chat.md](./feature-chat.md#42-voice-input-speech-to-text) for the full table.
 
 | Var | Default | Purpose |
 |---|---|---|
 | `GENERATORAI_STT` | `1` | Set `0` to disable voice input entirely (mic button hidden, WS returns 501). |
+| `GENERATORAI_STT_ENGINE` | `auto` | Pin one engine; anything but `auto` gives up the fallback cascade. |
+| `GENERATORAI_STT_PREFERRED` | per machine | Which engine `auto` tries first. |
+| `GENERATORAI_NEMOTRON_ONNX_DIR` | our cache | Explicit path to the Nemotron ONNX export (~790MB, never auto-downloaded; fetched from Settings → Audio). |
 | `STT_MODEL` | `Xenova/whisper-base.en` | Whisper model id. Larger models = better accuracy, slower first load. |
 | `STT_CACHE_DIR` | platform cache dir | Where model weights are cached after the first download. |
+
+### Workspace retention (nightly cleanup)
+
+Every chat and workflow run gets a directory under `<WORKSPACES_DIR>/executions/<ownerId>`, and until this existed nothing ever removed them: `WorkspaceManager.cleanupExpiredWorkspaces()` was reachable only from `POST /api/workspaces/cleanup`, so it ran when somebody remembered. Measured on a developer machine after a few months: 1,136 directories, 6.3GB, growing ~50/day.
+
+`WorkspaceRetentionService` now runs a sweep **once per calendar day, on the first check at or after 03:00 local**. It is deliberately not a 24-hour interval anchored to boot — a desktop install closed overnight would never fire a job pinned to 03:00, so a machine launched at noon sweeps shortly after launch instead.
+
+**It is opt-in and OFF by default.** This is the only scheduled job in the product that deletes the user's files, so it waits for an explicit choice in **Settings → Storage** rather than deleting work on upgrade. Preferences are re-read on every tick, so toggling it off applies without a restart.
+
+Each sweep does two passes:
+
+| Pass | What it removes |
+|---|---|
+| Tracked | Workspaces the database knows about, deleted through `WorkspaceManager` (rows + files). Includes `active` workspaces untouched for the retention period — chat-owned workspaces never reach `completed`, because only `WorkflowRunService` calls `completeWorkspace()`. |
+| Orphans | Directories under `executions/` that **no** database row claims. Changing `DB_PATH` orphans the whole previous tree, and a row-driven sweep can never see those. |
+
+Protections: workspaces with uncommitted changes are archived rather than deleted; anything still held open is skipped and retried the next night; a directory any row claims is never touched by the orphan pass, whatever its age; and if the workspace list cannot be read the orphan pass deletes **nothing**, because without a reliable claim set every directory looks orphaned.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| Settings → Storage → *Run a nightly cleanup* | off | Opt in to the scheduled sweep. Persisted server-side in `workspace-retention.json` next to the database. |
+| Settings → Storage → *Keep workspaces for* | 30 days | Retention period, 1–365. An out-of-range or corrupt value resolves to 30 — never to the minimum, so a typo cannot become the most destructive setting. |
+
+`POST /api/system/workspace-retention/run` sweeps immediately, and works even while the nightly job is off — "clean up now" is an explicit instruction, not a scheduled deletion.
 
 ### Widget asset origin
 
@@ -164,29 +194,32 @@ See [feature-integrated-terminal.md](./feature-integrated-terminal.md).
 | `GENERATORAI_TERMINAL_PWSH_PROFILE` | (unset) | Set `1` to load `$PROFILE` in PowerShell. Off by default for fast startup. |
 | `GENERATORAI_TERMINAL_ALLOW_SECRETS` | (unset) | Set `1` to inherit `SSH_AUTH_SOCK` / AWS session tokens into the shell env. Off by default for safety. |
 
-Phase 2 opt-in flags (see [docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md](../../docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md)):
+### Not implemented (planned)
 
-| Var | Purpose |
-|---|---|
-| `GENERATORAI_TERMINAL_SANDBOX=1` | Enable the sandbox-attached terminal toggle on workflow-run pages. |
-| `GENERATORAI_TERMINAL_PROPOSALS=1` | Enable the `terminal.propose` agent tool + inline confirmation card. |
-| `GENERATORAI_TERMINAL_PERSIST=1` | Enable DB-backed session + scrollback persistence (survives server restart). |
-| `GENERATORAI_TERMINAL_RECORD=1` | Enable session recording (asciinema `.cast` files). |
+The Phase 2 plan (see [docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md](../../docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md)) describes flags for features that have not been built yet. None of the following are read anywhere in the codebase today — setting them has **no effect**. Do not configure them expecting a result:
+
+- GENERATORAI_TERMINAL_SANDBOX — would-be sandbox-attached terminal toggle on workflow-run pages.
+- GENERATORAI_TERMINAL_PROPOSALS — would-be `terminal.propose` agent tool + inline confirmation card.
+- GENERATORAI_TERMINAL_PERSIST — would-be DB-backed session + scrollback persistence (survives server restart).
+- GENERATORAI_TERMINAL_RECORD — would-be session recording (asciinema `.cast` files).
 
 ### Git
 
 | Var | Default | Purpose |
 |---|---|---|
-| `GENERATORAI_GIT_TIMEOUT_MS` | `60000` | Per-operation timeout |
-| `GIT_SSH_COMMAND` | (system) | Override SSH command for git pull/clone |
+| `GIT_SSH_COMMAND` | (system) | Read by the `git` binary itself, not by our code. Override SSH command for git pull/clone. |
+
+Per-operation git timeout is hardcoded (120s in `GitClient`, shorter for individual read-only calls) — there is no GENERATORAI_GIT_TIMEOUT_MS env var.
 
 ### Webhooks
 
 | Var | Default | Purpose |
 |---|---|---|
 | `WEBHOOKS_ENABLED` | `false` | Master switch for incoming webhook handlers |
-| `WEBHOOK_GITHUB_SECRET` | (none) | HMAC shared secret for GitHub webhooks |
-| `WEBHOOK_AUTOMATION_BASE_URL` | (server URL) | Used when emitting webhook URLs in API responses |
+| `GITHUB_WEBHOOK_SECRET` | (none) | HMAC shared secret for GitHub webhooks |
+| `WEBHOOK_TOKEN` | (none) | Shared token required on inbound custom-automation webhook triggers (`x-webhook-token` header) |
+
+There is no WEBHOOK_AUTOMATION_BASE_URL env var — nothing in the codebase constructs webhook URLs from a configurable base; there is no such mechanism today.
 
 ---
 
@@ -197,10 +230,10 @@ Phase 2 opt-in flags (see [docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md](../../docs/I
 ```powershell
 pnpm build
 HARNESS_TYPE=copilot \
-GENERATORAI_DB_PATH=/var/lib/generatorai/data.db \
-GENERATORAI_ARTIFACTS_DIR=/var/lib/generatorai/artifacts \
-GENERATORAI_WORKSPACES_DIR=/var/lib/generatorai/workspaces \
-GENERATORAI_PORT=3100 \
+DB_PATH=/var/lib/generatorai/data.db \
+ARTIFACTS_DIR=/var/lib/generatorai/artifacts \
+WORKSPACES_DIR=/var/lib/generatorai/workspaces \
+PORT=3100 \
 node apps/server/dist/index.js
 ```
 
@@ -229,7 +262,7 @@ Build images:
 docker build -t generatorai/server -f docker/server.Dockerfile .
 docker run -p 3100:3100 \
   -e HARNESS_TYPE=copilot \
-  -e GENERATORAI_DB_PATH=/data/data.db \
+  -e DB_PATH=/data/data.db \
   -v generatorai_data:/data \
   generatorai/server
 ```
@@ -329,7 +362,7 @@ For deploying to others (org users / public web):
 2. **Restrict CORS** to your own origins in `apps/server/src/app.ts`.
 3. **Enable sandbox** (`SANDBOX_ENABLED=true`) so user-supplied `script` hooks run isolated.
 4. **Don't expose `/api/copilot/*` publicly** — those endpoints reveal model lists and harness state.
-5. **Webhook secrets** — set `WEBHOOK_GITHUB_SECRET`; rotate automation webhook tokens regularly.
+5. **Webhook secrets** — set `GITHUB_WEBHOOK_SECRET`; rotate automation webhook tokens regularly.
 6. **DB at rest** — encrypt the volume if persisting on shared infra. SQLite plain text is the default.
 7. **Path traversal** — enforced by `PathResolver`; don't bypass it in custom code.
 8. **GHEC tokens** — never log them; scrub from spawned environments.
@@ -409,7 +442,7 @@ A write is trying to put an invalid shape into a JSON column. Likely a schema dr
 - **`reasoningEffort: 'low'`** halves Claude/Copilot latency at the cost of quality.
 - **`harnessConfig.availableTools`** — restricting tools speeds up model decision-making.
 - **`contextFilter: 'summary-only'`** (default) is much smaller than `'full'` for long predecessor outputs.
-- **`stream_cursors` retention** — shorten `GENERATORAI_EVENT_TTL_DAYS` if disk is tight.
+- **`stream_cursors` retention** — the 30-day TTL is not env-configurable (see §4 Streaming); shorten `retention.eventPayloadTtlDays` in `AppConfig` if disk is tight.
 - **`SANDBOX_ENABLED=false`** — host execution is faster than Docker; only enable in shared environments.
 
 ---
@@ -489,3 +522,4 @@ curl -X POST http://localhost:3100/api/workflow-scripts/reload
 # Switch harness at runtime (web UI alternative)
 curl -X POST http://localhost:3100/api/harness/switch -H 'Content-Type: application/json' -d '{"type":"claude-agent"}'
 ```
+

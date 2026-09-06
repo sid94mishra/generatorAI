@@ -98,12 +98,14 @@ export function HooksTab() {
             <span className="text-sm font-medium text-foreground">
               Hooks ({hooks.length})
             </span>
-            <button
+            <Button
               onClick={addHook}
-              className="flex items-center gap-1 text-xs text-primary hover:underline"
+              variant="ghost"
+              size="sm"
+              className="h-auto gap-1 bg-transparent p-0 text-xs text-primary hover:bg-transparent hover:underline"
             >
               <Plus className="h-3 w-3" /> Add
-            </button>
+            </Button>
           </div>
 
           {hooks.map((hook, idx) => (
@@ -113,6 +115,7 @@ export function HooksTab() {
                   type="text"
                   value={hook.name}
                   onChange={(e) => updateHook(idx, { name: e.target.value })}
+                  aria-label={`Hook ${idx + 1} name`}
                   className="flex-1 h-auto rounded border-none bg-transparent px-1 py-0.5 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-ring"
                 />
                 <div className="flex items-center gap-2">
@@ -121,12 +124,15 @@ export function HooksTab() {
                     onChange={(checked) => updateHook(idx, { enabled: checked })}
                     label=""
                   />
-                  <button
+                  <Button
                     onClick={() => removeHook(idx)}
-                    className="p-1 text-muted-foreground hover:text-danger"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Remove ${hook.name || `hook ${idx + 1}`}`}
+                    className="h-auto w-auto p-1 text-muted-foreground hover:bg-transparent hover:text-danger"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  </Button>
                 </div>
               </div>
 

@@ -3,6 +3,21 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { WorkflowSessionMode } from './WorkflowDefinition.js';
+import type { StageDefinition, StageEdge } from './StageDefinition.js';
+
+/**
+ * WS-D1 — the stage definitions + edges a run was started against, frozen
+ * at `startRun`. The scheduler builds an in-flight run's DAG from this, so
+ * editing the definition mid-run cannot change the part of the run that has
+ * not executed yet. Absent on runs that started before the column landed
+ * (the scheduler falls back to the live definition for those).
+ */
+export interface WorkflowDefinitionSnapshot {
+  stages: StageDefinition[];
+  edges: StageEdge[];
+  /** ISO timestamp of when the snapshot was taken. */
+  capturedAt: string;
+}
 
 /** WorkflowRun lifecycle statuses */
 export type WorkflowRunStatus =
@@ -105,6 +120,8 @@ export interface WorkflowRun {
    * Absent on first-attempt runs (undefined).
    */
   ancestorRunId?: string;
+  /** WS-D1 — frozen topology this run executes against (see type doc). */
+  definitionSnapshot?: WorkflowDefinitionSnapshot;
   createdAt: Date;
   updatedAt: Date;
   startedAt?: Date;
@@ -163,6 +180,15 @@ export interface StageRun {
    * clients can re-render the pending request.
    */
   interruptData?: unknown;
+  /**
+   * WS-D1 — last liveness beat written by the executor while the stage is
+   * `queued`/`running`. The run reconciler fails a stage whose beat is older
+   * than the configured stale window, which is the only reaper that still
+   * works when the process that was running the stage is gone.
+   */
+  heartbeatAt?: Date;
+  /** WS-D1 — identity of the process/executor that last claimed the stage. */
+  leaseOwner?: string;
   createdAt: Date;
   startedAt?: Date;
   completedAt?: Date;
@@ -183,6 +209,11 @@ export interface CreateWorkflowRunParams {
    * id of the failed/cancelled ancestor. Absent on first-attempt runs.
    */
   ancestorRunId?: string;
+  /**
+   * WS-D1 — when retrying a run, the ancestor's frozen topology is carried
+   * over so the copied stage results line up with the DAG they came from.
+   */
+  definitionSnapshot?: WorkflowDefinitionSnapshot;
 }
 
 // ────────────────────────────────────────────────────────────────

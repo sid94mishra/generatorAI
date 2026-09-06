@@ -20,6 +20,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Device from 'expo-application';
 import { router } from 'expo-router';
 import { PairingCodeError, parsePairingCode, type PairingConsent } from '@generatorai/client-runtime';
+import { isPairingCode } from '@generatorai/shared';
 
 import { useAuth } from '../src/auth/AuthProvider';
 import { describeScope } from '../src/auth/scopeLabels';
@@ -52,10 +53,17 @@ export default function PairScreen(): React.ReactElement {
       setPhase('consent');
       return true;
     } catch (err) {
+      // The short code (`4H7K-2M9P-XQ3T`) carries no server address, so this
+      // app cannot resolve it: the web flow works only because that device
+      // opened the server in a browser first, which IS the address. Say so,
+      // rather than reporting "does not contain valid JSON" at a user who
+      // typed exactly what the host screen showed them.
       setError(
-        err instanceof PairingCodeError
-          ? err.message
-          : 'That is not a GeneratorAI pairing code.',
+        isPairingCode(data)
+          ? 'That short code only works in a browser opened at the server’s address. On this app, scan the QR code instead.'
+          : err instanceof PairingCodeError
+            ? err.message
+            : 'That is not a GeneratorAI pairing code.',
       );
       return false;
     }
@@ -99,9 +107,13 @@ export default function PairScreen(): React.ReactElement {
       <ScrollView contentContainerClassName="gap-5 px-6 py-8">
         <View className="gap-1">
           <Text className="text-xl font-semibold text-foreground">Enter pairing code</Text>
+          {/* Deliberately NOT "the code shown under the QR image": that is the
+              short code, which carries no server address and only works in a
+              browser already opened at the host. Naming it here sent users
+              down a path this screen cannot complete. */}
           <Text className="text-sm text-muted-foreground">
-            On your GeneratorAI server open Settings → Security → Pair a device, then copy the
-            code shown under the QR image.
+            Paste a pairing link from your GeneratorAI server. The short code shown next to the QR
+            image will not work here — scan the QR instead.
           </Text>
         </View>
 

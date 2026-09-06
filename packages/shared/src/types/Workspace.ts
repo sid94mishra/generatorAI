@@ -200,6 +200,19 @@ export interface WorkspaceRetentionPolicy {
   protectUnpushed: boolean;
   maxTotalDiskMB: number;
   respectAutomationRetention: boolean;
+  /**
+   * Also sweep `active` workspaces untouched for the same period.
+   *
+   * Retention was written to consider only `completed` workspaces, but
+   * `completeWorkspace()` is called from exactly one place —
+   * `WorkflowRunService`. Chat-owned workspaces therefore stay `active`
+   * for ever and were permanently exempt, which is most of what accumulates.
+   *
+   * Off by default so the historical contract is unchanged; the nightly
+   * sweep turns it on. Eligibility is `updatedAt` age, i.e. "nothing has
+   * touched this in N days", which is what a user means by old.
+   */
+  includeStaleActive?: boolean;
 }
 
 // ── Workspace Manifest (.workspace.json) ──

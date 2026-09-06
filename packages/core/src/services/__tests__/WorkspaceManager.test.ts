@@ -562,6 +562,57 @@ describe('WorkspaceManager filesystem failure handling', () => {
     // Still `completed` and still past the cutoff → the next sweep retries it.
     expect(h.workspaceRepo.rows.get(stuck.id)?.status).toBe('completed');
   });
+
+  // ── includeStaleActive ─────────────────────────────────────────
+  //
+  // Retention originally considered only `completed` workspaces, and
+  // `completeWorkspace()` is called from exactly one place —
+  // `WorkflowRunService`. Chat-owned workspaces therefore stay `active` for
+  // ever and were permanently exempt, which is the bulk of what accumulates
+  // on a real machine. The nightly sweep opts in to this; the historical
+  // contract (below) is unchanged without it.
+
+  it('leaves stale ACTIVE workspaces alone by default', async () => {
+    const h = await makeHarness();
+    const stale = await seedWorkspace(h, {
+      status: 'active',
+      updatedAt: new Date(Date.now() - 90 * 24 * 3600_000),
+    });
+
+    const removed = await h.manager.cleanupExpiredWorkspaces({
+      completedRetentionHours: 24,
+      archiveIfDirty: false,
+      protectUnpushed: false,
+      maxTotalDiskMB: 1024,
+      respectAutomationRetention: false,
+    });
+
+    expect(removed).toBe(0);
+    expect(h.workspaceRepo.rows.has(stale.id)).toBe(true);
+  });
+
+  it('sweeps stale ACTIVE workspaces when asked, judging them on updatedAt', async () => {
+    const h = await makeHarness();
+    const stale = await seedWorkspace(h, {
+      status: 'active',
+      updatedAt: new Date(Date.now() - 90 * 24 * 3600_000),
+    });
+    const recent = await seedWorkspace(h, { status: 'active', updatedAt: new Date() });
+
+    const removed = await h.manager.cleanupExpiredWorkspaces({
+      completedRetentionHours: 24,
+      archiveIfDirty: false,
+      protectUnpushed: false,
+      maxTotalDiskMB: 1024,
+      respectAutomationRetention: false,
+      includeStaleActive: true,
+    });
+
+    expect(removed).toBe(1);
+    expect(h.workspaceRepo.rows.has(stale.id)).toBe(false);
+    // A workspace touched today is not stale, whatever its status.
+    expect(h.workspaceRepo.rows.has(recent.id)).toBe(true);
+  });
 });
 
 // ── F3: concurrent create with a conflicting code root ───────────

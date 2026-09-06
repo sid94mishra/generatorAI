@@ -382,6 +382,18 @@ function ChatPane({ paneId, content, focused, height }: PaneProps): React.JSX.El
               </Text>
               <Text wrap="wrap">{pendingInteraction.summary}</Text>
             </>
+          ) : pendingInteraction.kind === 'permission' ? (
+            <>
+              <Text bold color={theme.c('warning')}>
+                {theme.glyphs.warning} Allow {pendingInteraction.toolName}?
+              </Text>
+              <Text wrap="wrap">{pendingInteraction.description}</Text>
+              {pendingInteraction.inputSummary ? (
+                <Text color={theme.c('muted')} wrap="truncate-end">
+                  {pendingInteraction.inputSummary}
+                </Text>
+              ) : null}
+            </>
           ) : (
             <>
               <Text bold color={theme.c('warning')}>

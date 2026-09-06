@@ -126,13 +126,21 @@ export function planNotification(event: NotifiableEvent): NotificationPlan | nul
     };
   }
 
-  if (kind === 'automation_execution.failed') {
+  // `partial` (some iterations failed) and a recovery that settled on
+  // failed/partial travel the SAME alert path as an outright failure: a
+  // mostly-failed batch reported silently is exactly what made unattended
+  // operation unsafe (APPLICATION-REVIEW §6.3, item 28).
+  const recoveredBadly =
+    kind === 'automation_execution.recovered' &&
+    (str(data, 'finalStatus') === 'failed' || str(data, 'finalStatus') === 'partial');
+  if (kind === 'automation_execution.failed' || kind === 'automation_execution.partial' || recoveredBadly) {
     const automationId = str(data, 'automationId');
     if (!automationId) return null;
+    const partial = kind === 'automation_execution.partial' || str(data, 'finalStatus') === 'partial';
     return {
       category: 'failed',
-      title: 'Automation failed',
-      body: clip(str(data, 'error') ?? 'An automation run did not complete.'),
+      title: partial ? 'Automation partially failed' : 'Automation failed',
+      body: clip(str(data, 'error') ?? (partial ? 'Some iterations of an automation run failed.' : 'An automation run did not complete.')),
       route: `/automations/${automationId}`,
       requiredScope: 'read:workflows',
       threadId: `automation:${automationId}`,

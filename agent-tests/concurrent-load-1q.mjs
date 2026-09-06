@@ -40,7 +40,7 @@ import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -120,6 +120,41 @@ async function apiRequest(method, path, body) {
 //      "runnable by plain `node` with nothing else present".
 const BUNDLE_ENTRY = join(SERVER_DIR, 'dist-bundle', 'server.mjs');
 
+/**
+ * Refuse to grade a stale bundle. This test once ran for weeks against a
+ * `dist-bundle/server.mjs` from a previous month — every terminal, browser and
+ * workflow leg failed on a bug the source had already fixed, and the report
+ * looked like a server regression. Set LOAD_TEST_ALLOW_STALE_BUNDLE=1 to
+ * override deliberately.
+ */
+function assertBundleFresh() {
+  if (process.env.LOAD_TEST_ALLOW_STALE_BUNDLE === '1') return;
+  if (!existsSync(BUNDLE_ENTRY)) {
+    throw new Error(`bundle not found at ${BUNDLE_ENTRY} — run \`pnpm --filter @generatorai/server bundle\` first`);
+  }
+  const builtAt = statSync(BUNDLE_ENTRY).mtimeMs;
+  const newest = newestMtime(join(SERVER_DIR, 'src'), Math.max(newestMtime(join(ROOT, 'packages', 'core', 'src'), 0), 0));
+  if (newest > builtAt) {
+    throw new Error(
+      `bundle at ${BUNDLE_ENTRY} (built ${new Date(builtAt).toISOString()}) is older than the sources ` +
+        `(newest ${new Date(newest).toISOString()}) — run \`pnpm --filter @generatorai/server bundle\` first, ` +
+        'or set LOAD_TEST_ALLOW_STALE_BUNDLE=1',
+    );
+  }
+}
+function newestMtime(dir, acc) {
+  let newest = acc;
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return newest; }
+  for (const e of entries) {
+    if (e.name === '__tests__' || e.name === 'node_modules') continue;
+    const full = join(dir, e.name);
+    if (e.isDirectory()) newest = newestMtime(full, newest);
+    else if (e.name.endsWith('.ts')) newest = Math.max(newest, statSync(full).mtimeMs);
+  }
+  return newest;
+}
+
 function bootServerPortable(dbDir) {
   if (!existsSync(BUNDLE_ENTRY)) {
     throw new Error(
@@ -134,9 +169,21 @@ function bootServerPortable(dbDir) {
       ...process.env,
       PORT: String(PORT),
       WIDGET_PORT: String(WIDGET_PORT),
-      GENERATORAI_DB_PATH: join(dbDir, 'load-test.db'),
-      GENERATORAI_ARTIFACTS_DIR: join(dbDir, 'artifacts'),
+      // The server reads the BARE names (`apps/server/src/index.ts`). These
+      // were `GENERATORAI_DB_PATH` / `GENERATORAI_ARTIFACTS_DIR`, which nothing
+      // reads, so the "temporary" database below was never used: the load
+      // test ran against the machine's default `~/.generatorai/data.db` and,
+      // on a developer box, failed the vault integrity check against the
+      // user's own secret store.
+      DB_PATH: join(dbDir, 'load-test.db'),
+      ARTIFACTS_DIR: join(dbDir, 'artifacts'),
+      WORKSPACES_DIR: join(dbDir, 'workspaces'),
       GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK: '1',
+      // The override above is only honoured on a loopback listener, and the
+      // server's default bind host is not loopback everywhere (measured: it
+      // refused to start with bindHost=0.0.0.0 on a developer machine and the
+      // test timed out waiting for health). Pin it — this test owns its server.
+      GENERATORAI_BIND_HOST: '127.0.0.1',
       GENERATORAI_LOAD_TEST_FAUX_HARNESS: process.env.LOAD_TEST_REAL_HARNESS === '1' ? 'false' : 'true',
     },
     // The 4th ('ipc') stdio slot matters beyond messaging: on Windows,
@@ -417,6 +464,7 @@ async function shutdownAndVerify(server) {
 // ── Main ─────────────────────────────────────────────────────────
 
 async function main() {
+  assertBundleFresh();
   console.log('§1.Q concurrent-load test');
   console.log(`  scenario: 5 chats + 3 workflow runs + 1 automation×20 + 5 terminals + 3 browsers + 2 computer-use`);
   console.log(`  harness: ${process.env.LOAD_TEST_REAL_HARNESS === '1' ? 'REAL provider (manual/local only)' : 'FauxProvider (deterministic, CI-safe)'}`);
@@ -434,7 +482,25 @@ async function main() {
     // a chat (see file header: no standalone workspace-create endpoint).
     const wsChat = await apiRequest('POST', '/chats', { name: 'load-1q-workspace-holder' });
     if (!wsChat.ok) throw new Error(`workspace-holder chat create failed (${wsChat.status})`);
-    const workspaceId = wsChat.data.workspaceId;
+    // A chat gets its execution workspace on its FIRST TURN, not at creation
+    // (the UI says so: "Send a message first to create a workspace"). Reading
+    // `workspaceId` off the create response gave `undefined`, so every
+    // terminal, browser and computer-use leg below hit
+    // `/workspaces/undefined/...` and the whole scenario failed on a script
+    // defect. Prompt it once (FauxProvider answers instantly), then re-read.
+    let workspaceId = wsChat.data.workspaceId;
+    if (!workspaceId) {
+      const holderPrompt = await apiRequest('POST', `/chats/${wsChat.data.id}/prompt`, { prompt: 'warm-up' });
+      if (!holderPrompt.ok) throw new Error(`workspace-holder prompt failed (${holderPrompt.status})`);
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        const again = await apiRequest('GET', `/chats/${wsChat.data.id}`);
+        workspaceId = again.data?.workspaceId;
+        if (workspaceId) break;
+        await delay(250);
+      }
+      if (!workspaceId) throw new Error('workspace-holder chat never received a workspace after its first turn');
+    }
 
     const [chats, workflows, terminals, browsers, computerUse] = await Promise.all([
       runChats(),

@@ -99,6 +99,7 @@ function hasRenderableContent(message: ChatMessage): boolean {
       meta.toolCalls?.length ||
       meta.planCards?.length ||
       meta.questionCards?.length ||
+      meta.permissionCards?.length ||
       meta.widgetInstanceIds?.length ||
       meta.systemMessages?.length,
   );
