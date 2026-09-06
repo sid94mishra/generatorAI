@@ -18,6 +18,16 @@ const RETENTION_MS: Record<string, number> = {
 export class WorktreeCleanupService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private sweepInFlight = false;
+  /**
+   * Releases the worktree DIRECTORIES of archived chats (mount model) once
+   * their retention has passed, keeping branches and rows. Wired by the
+   * composition root; returns how many were released.
+   */
+  private releaseArchived?: () => Promise<number>;
+
+  setArchivedReleaser(fn: () => Promise<number>): void {
+    this.releaseArchived = fn;
+  }
 
   constructor(
     private readonly worktreeService: WorktreeService,
@@ -102,6 +112,16 @@ export class WorktreeCleanupService {
       const result = await this._cleanupProject(project);
       cleaned += result.cleaned;
       orphaned += result.orphaned;
+    }
+
+    if (this.releaseArchived) {
+      try {
+        cleaned += await this.releaseArchived();
+      } catch (err) {
+        this.logger.warn('[WorktreeCleanup] archived-chat release failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
 
     if (cleaned > 0 || orphaned > 0) {

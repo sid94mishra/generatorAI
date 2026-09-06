@@ -26,6 +26,8 @@ export interface ChatMessageMetadata {
     fileOp?: FileOpStat;
     /** callId of the Agent tool call this ran inside (SDK subagent). */
     parentId?: string;
+    /** False when the provider reported the call as failed. */
+    success?: boolean;
   }>;
   /** System messages emitted during this response */
   systemMessages?: string[];
@@ -99,7 +101,14 @@ export interface ChatMessage {
   chatId?: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
-  attachments?: Array<{ name: string; path: string; mimeType: string }>;
+  attachments?: Array<{
+    name: string;
+    path: string;
+    mimeType: string;
+    /** Artifact id when the file is stored as a chat artifact — lets clients
+     *  fetch it back (`GET /chats/:id/attachments/:artifactId`). */
+    artifactId?: string;
+  }>;
   toolName?: string;
   toolArgs?: unknown;
   toolResult?: unknown;

@@ -6,6 +6,8 @@ export {
   hasLocalGit,
   nestedRepoPrefixes,
   isNestedRepoPath,
+  shadowGitDirFor,
+  shadowSlug,
   RESERVED_DIRS,
 } from './RepoDiscovery.js';
 export type { DiscoveredRepo, DiscoverReposParams } from './RepoDiscovery.js';
@@ -49,4 +51,5 @@ export type {
   ChangeStatus,
   GetChangeSetParams,
   WorktreeRef,
+  MountRef,
 } from './types.js';

@@ -71,11 +71,38 @@ export class ChangeSummaryService {
    */
   static readonly WORKING_TREE_TTL_MS = 2_500;
 
+  /** repoDir → shadow git dir, learned from every discovery. */
+  private readonly shadows = new Map<string, string>();
+  private readonly scopedClients = new Map<string, IGitClient>();
+
   constructor(
     private readonly git: IGitClient,
     private readonly checkpoints: CheckpointLookup,
     private readonly logger: ILogger,
   ) {}
+
+  /**
+   * The git client for a repository: scoped to its shadow store when the
+   * repo has one, the plain client otherwise. Shadow stores are what keep
+   * snapshot objects, refs and index files out of the user's own `.git`.
+   */
+  private gitAt(repoDir: string): IGitClient {
+    const gitDir = this.shadows.get(path.resolve(repoDir));
+    if (!gitDir) return this.git;
+    let client = this.scopedClients.get(gitDir);
+    if (!client) {
+      client = this.git.withGitDir(gitDir);
+      this.scopedClients.set(gitDir, client);
+    }
+    return client;
+  }
+
+  private registerRepos(repos: readonly DiscoveredRepo[]): void {
+    for (const r of repos) {
+      if (r.gitDir) this.shadows.set(path.resolve(r.repoDir), r.gitDir);
+      else this.shadows.delete(path.resolve(r.repoDir));
+    }
+  }
 
   /** Per-file metadata for every repo in the workspace. No file bodies. */
   async getSummary(params: GetChangeSummaryParams): Promise<ChangeSummary> {
@@ -87,10 +114,16 @@ export class ChangeSummaryService {
       head = { kind: 'working' as const },
       repoAlias,
       includeTree = false,
-      autoInit = true,
+      autoInit = false,
     } = params;
 
-    const allRepos = await discoverRepos(this.git, { rootPath, worktrees, autoInit });
+    const allRepos = await discoverRepos(this.git, {
+      rootPath,
+      worktrees,
+      ...(params.mounts ? { mounts: params.mounts } : {}),
+      autoInit,
+    });
+    this.registerRepos(allRepos);
     const repos = repoAlias ? allRepos.filter((r) => r.alias === repoAlias) : allRepos;
 
     if (repos.length === 0) {
@@ -111,7 +144,12 @@ export class ChangeSummaryService {
     for (const repo of repos) {
       try {
         const resolvedBase = await this.resolveRevision(workspaceId, repo, base);
-        const resolvedHead = await this.resolveRevision(workspaceId, repo, head);
+        // A commit on one side (`ref`, or the linked-worktree HEAD fallback)
+        // means the working tree must be staged with the repo's own EOL
+        // config — see `WriteTreeOptions.honourEol`.
+        const resolvedHead = await this.resolveRevision(workspaceId, repo, head, {
+          honourEol: resolvedBase.normalized === true,
+        });
         // Report the first repo's resolution as the response-level revision —
         // aliases share the same logical selector, only the SHA differs.
         if (summaries.length === 0) {
@@ -142,7 +180,7 @@ export class ChangeSummaryService {
           files,
         };
         if (includeTree) {
-          summary.paths = (await this.git.lsFiles(repo.repoDir)).filter(
+          summary.paths = (await this.gitAt(repo.repoDir).lsFiles(repo.repoDir)).filter(
             (p) => !isMetadataPath(p),
           );
         }
@@ -209,14 +247,14 @@ export class ChangeSummaryService {
     const head = await this.resolveRevision(params.workspaceId, repo, params.head ?? { kind: 'working' });
 
     const oldBlob = base.treeish
-      ? await this.git.blobShaAt(repo.repoDir, base.treeish, relPath)
+      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, base.treeish, relPath)
       : null;
     const newBlob = head.treeish
-      ? await this.git.blobShaAt(repo.repoDir, head.treeish, relPath)
+      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, head.treeish, relPath)
       : await this.workingBlobSha(repo.repoDir, relPath);
 
-    const oldSize = oldBlob ? await this.git.blobSize(repo.repoDir, oldBlob) : null;
-    const newSize = newBlob ? await this.git.blobSize(repo.repoDir, newBlob) : null;
+    const oldSize = oldBlob ? await this.gitAt(repo.repoDir).blobSize(repo.repoDir, oldBlob) : null;
+    const newSize = newBlob ? await this.gitAt(repo.repoDir).blobSize(repo.repoDir, newBlob) : null;
     const isTooLarge =
       (oldSize ?? 0) > MAX_FILE_BODY_BYTES || (newSize ?? 0) > MAX_FILE_BODY_BYTES;
 
@@ -314,7 +352,7 @@ export class ChangeSummaryService {
       }
     }
 
-    const contents = await this.git.readBlobById(repoDir, sha);
+    const contents = await this.gitAt(repoDir).readBlobById(repoDir, sha);
     if (contents === null) return null;
     this.cacheBlob(key, contents);
     return contents;
@@ -406,7 +444,7 @@ export class ChangeSummaryService {
     const head = await this.resolveRevision(params.workspaceId, repo, params.head ?? { kind: 'working' });
     const relPath = stripAliasPrefix(params.filePath, repo.alias);
 
-    let patch = await this.git.diffPatch(
+    let patch = await this.gitAt(repo.repoDir).diffPatch(
       repo.repoDir,
       base.treeish ?? EMPTY_TREE_SHA,
       head.treeish,
@@ -421,10 +459,10 @@ export class ChangeSummaryService {
     }
 
     const oldBlob = base.treeish
-      ? await this.git.blobShaAt(repo.repoDir, base.treeish, relPath)
+      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, base.treeish, relPath)
       : null;
     const newBlob = head.treeish
-      ? await this.git.blobShaAt(repo.repoDir, head.treeish, relPath)
+      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, head.treeish, relPath)
       : await this.workingBlobSha(repo.repoDir, relPath);
 
     return {
@@ -459,8 +497,8 @@ export class ChangeSummaryService {
     // file" lookup is gone. On Windows each spawn costs ~250 ms, so this is
     // the difference between a snappy panel and a multi-second stall.
     const [numstat, raw] = await Promise.all([
-      this.git.diffNumstat(repo.repoDir, from, to),
-      this.git.diffRaw(repo.repoDir, from, to),
+      this.gitAt(repo.repoDir).diffNumstat(repo.repoDir, from, to),
+      this.gitAt(repo.repoDir).diffRaw(repo.repoDir, from, to),
     ]);
 
     if (raw.length === 0) return [];
@@ -524,10 +562,11 @@ export class ChangeSummaryService {
     workspaceId: string,
     repo: DiscoveredRepo,
     selector: { kind: ChangeRevision['kind']; id?: string },
+    opts: { honourEol?: boolean } = {},
   ): Promise<ChangeRevision> {
     switch (selector.kind) {
       case 'working': {
-        const treeish = await this.materializeWorkingTree(repo.repoDir);
+        const treeish = await this.materializeWorkingTree(repo.repoDir, opts.honourEol === true);
         return {
           kind: 'working',
           ...(treeish ? { treeish } : {}),
@@ -536,12 +575,13 @@ export class ChangeSummaryService {
       }
 
       case 'ref': {
-        const sha = selector.id ? await this.git.revParse(repo.repoDir, selector.id) : null;
+        const sha = selector.id ? await this.gitAt(repo.repoDir).revParse(repo.repoDir, selector.id) : null;
         return {
           kind: 'ref',
           ...(selector.id ? { id: selector.id } : {}),
           ...(sha ? { treeish: sha } : {}),
           label: selector.id ?? 'ref',
+          normalized: true,
         };
       }
 
@@ -582,7 +622,7 @@ export class ChangeSummaryService {
     const hit = this.lsTreeCache.get(key);
     if (hit) return hit;
 
-    const blobs = await this.git.lsTreeBlobs(repoDir, treeish);
+    const blobs = await this.gitAt(repoDir).lsTreeBlobs(repoDir, treeish);
     if (this.lsTreeCache.size >= ChangeSummaryService.LS_TREE_CACHE_MAX) {
       // Simple FIFO eviction — insertion order is Map's iteration order.
       const oldest = this.lsTreeCache.keys().next().value;
@@ -603,21 +643,25 @@ export class ChangeSummaryService {
    * batch read a CONSISTENT snapshot, so the file list and the file bodies
    * can't disagree because the agent wrote something in between.
    */
-  private async materializeWorkingTree(repoDir: string): Promise<string | undefined> {
-    const cached = this.workingTreeCache.get(repoDir);
+  private async materializeWorkingTree(repoDir: string, honourEol = false): Promise<string | undefined> {
+    // The two flavours are different trees (CRLF-exact vs EOL-normalised), so
+    // they get their own index file and cache slot.
+    const cacheKey = honourEol ? `${repoDir}#eol` : repoDir;
+    const cached = this.workingTreeCache.get(cacheKey);
     if (cached && Date.now() - cached.at < ChangeSummaryService.WORKING_TREE_TTL_MS) {
       return cached.tree;
     }
 
-    let indexFile = this.workingIndexCache.get(repoDir);
+    let indexFile = this.workingIndexCache.get(cacheKey);
     if (!indexFile) {
-      const gitDir = await this.git.absoluteGitDir(repoDir);
+      const gitDir =
+        this.shadows.get(path.resolve(repoDir)) ?? (await this.gitAt(repoDir).absoluteGitDir(repoDir));
       if (!gitDir) return undefined;
-      indexFile = path.join(gitDir, 'generatorai-readonly.index');
-      this.workingIndexCache.set(repoDir, indexFile);
+      indexFile = path.join(gitDir, honourEol ? 'generatorai-readonly-eol.index' : 'generatorai-readonly.index');
+      this.workingIndexCache.set(cacheKey, indexFile);
     }
-    const tree = (await this.git.writeTreeFromWorktree(repoDir, indexFile)) ?? undefined;
-    this.workingTreeCache.set(repoDir, { tree, at: Date.now() });
+    const tree = (await this.gitAt(repoDir).writeTreeFromWorktree(repoDir, indexFile, { honourEol })) ?? undefined;
+    this.workingTreeCache.set(cacheKey, { tree, at: Date.now() });
     return tree;
   }
 
@@ -639,8 +683,12 @@ export class ChangeSummaryService {
    * tests in this suite. Verified in the browser instead.
    */
   invalidateWorkingTree(repoDir?: string): void {
-    if (repoDir) this.workingTreeCache.delete(repoDir);
-    else this.workingTreeCache.clear();
+    if (repoDir) {
+      this.workingTreeCache.delete(repoDir);
+      this.workingTreeCache.delete(`${repoDir}#eol`);
+    } else {
+      this.workingTreeCache.clear();
+    }
   }
 
   private async resolveBaseline(
@@ -657,10 +705,33 @@ export class ChangeSummaryService {
         createdAt: baseline.createdAt,
       };
     }
-    // No checkpoint yet (legacy workspace, or checkpointing disabled). Fall
-    // back to the repo's root commit so the panel still shows something
-    // meaningful rather than an empty list.
-    const first = await this.git.firstCommit(repo.repoDir);
+    // No checkpoint yet (legacy workspace, checkpointing disabled, or — the
+    // common case — a linked worktree that became visible only after the
+    // baseline was captured for `.`).
+    //
+    // For a LINKED worktree the root commit is the wrong anchor: it is the
+    // first commit of somebody's real repository, so diffing against it
+    // reports the entire project history as additions. The branch the
+    // worktree was cut on is what "unchanged" means here, so fall back to its
+    // HEAD; only the agent's own edits then show up. Going forward the
+    // self-healing baseline in WorkspaceCheckpointService.capture writes a
+    // real baseline for the alias on the next turn.
+    // A mount knows the commit it was cut from; until its baseline
+    // checkpoint lands (moments after preparation) that is the right anchor
+    // — and it is exactly what "Branch base" means afterwards.
+    if (repo.baseCommit) {
+      return { kind: 'baseline', treeish: repo.baseCommit, label: 'Branch base', normalized: true };
+    }
+    if (repo.kind === 'linked' || repo.kind === 'mount' || repo.kind === 'nested') {
+      const head = await this.gitAt(repo.repoDir).revParse(repo.repoDir, 'HEAD');
+      if (head) {
+        return { kind: 'baseline', treeish: head, label: 'Worktree HEAD', normalized: true };
+      }
+    }
+
+    // Root / generated repos are created by the workspace itself, so their
+    // root commit really is "the start".
+    const first = await this.gitAt(repo.repoDir).firstCommit(repo.repoDir);
     return {
       kind: 'baseline',
       ...(first ? { treeish: first } : { treeish: EMPTY_TREE_SHA }),
@@ -675,8 +746,10 @@ export class ChangeSummaryService {
     const repos = await discoverRepos(this.git, {
       rootPath: params.rootPath,
       worktrees: params.worktrees ?? [],
+      ...(params.mounts ? { mounts: params.mounts } : {}),
       autoInit: params.autoInit ?? false,
     });
+    this.registerRepos(repos);
     const match = repos.find((r) => r.alias === alias);
     if (match) return match;
     // Unknown alias — treat the workspace root as the repo so the request
@@ -739,7 +812,7 @@ export class ChangeSummaryService {
     relPath: string,
   ): Promise<string | null> {
     try {
-      return await this.git.showFile(repoDir, relPath, treeish);
+      return await this.gitAt(repoDir).showFile(repoDir, relPath, treeish);
     } catch {
       return null;
     }

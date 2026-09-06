@@ -10,8 +10,9 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import type { ILogger } from '@generatorai/shared';
 import { GitError } from '@generatorai/shared';
-import type { IGitProcessRunner } from './ports/IGitProcessRunner.js';
+import type { GitProcessRunOptions, IGitProcessRunner } from './ports/IGitProcessRunner.js';
 import type {
+  AddWorktreeOptions,
   GitBlobEntry,
   GitClientOptions,
   GitNameStatusEntry,
@@ -20,7 +21,36 @@ import type {
   GitRef,
   GitTreeEntry,
   IGitClient,
+  ShadowRepoOptions,
+  WriteTreeOptions,
 } from './ports/IGitClient.js';
+
+/**
+ * Runner decorator that pins every command to a shadow git directory.
+ *
+ * `GIT_WORK_TREE` is the command's cwd, so the same client works for any
+ * mount; `GIT_DIR` is the private repository that receives objects, refs
+ * and index files. Because both are explicit, git never looks for (or
+ * touches) a `.git` inside the work tree — a linked worktree's `.git` file
+ * and a nested repository's `.git` directory are just ordinary entries.
+ */
+class ShadowGitRunner implements IGitProcessRunner {
+  constructor(
+    private readonly base: IGitProcessRunner,
+    private readonly gitDir: string,
+  ) {}
+
+  run(command: string, args: string[], options: GitProcessRunOptions) {
+    return this.base.run(command, args, {
+      ...options,
+      env: {
+        ...(options.env ?? {}),
+        GIT_DIR: this.gitDir,
+        GIT_WORK_TREE: options.cwd,
+      },
+    });
+  }
+}
 
 /** git uses an all-zero SHA to mean "absent on this side". */
 function normalizeSha(sha: string | undefined): string | undefined {
@@ -41,6 +71,10 @@ const REPO_PROBE_TTL_MS = 5 * 60_000;
 export class GitClient implements IGitClient {
   private readonly workspacesDir: string;
   private readonly timeout: number;
+  private readonly runner: IGitProcessRunner;
+  private readonly options: GitClientOptions;
+  /** Set on clients produced by `withGitDir`. */
+  private readonly scopedGitDir: string | undefined;
   /**
    * Directories already known to be inside a work tree.
    *
@@ -57,12 +91,201 @@ export class GitClient implements IGitClient {
   private readonly repoProbeCache = new Map<string, number>();
 
   constructor(
-    private readonly runner: IGitProcessRunner,
+    private readonly baseRunner: IGitProcessRunner,
     private readonly logger: ILogger,
     options: GitClientOptions,
+    scope?: { gitDir: string },
   ) {
+    this.options = options;
     this.workspacesDir = options.workspacesDir;
     this.timeout = options.defaultTimeoutMs ?? 120_000;
+    this.scopedGitDir = scope?.gitDir;
+    this.runner = scope ? new ShadowGitRunner(baseRunner, scope.gitDir) : baseRunner;
+  }
+
+  withGitDir(gitDir: string): IGitClient {
+    return new GitClient(this.baseRunner, this.logger, this.options, { gitDir });
+  }
+
+  async initShadowRepo(gitDir: string, workTree: string, opts: ShadowRepoOptions = {}): Promise<boolean> {
+    try {
+      await fs.mkdir(gitDir, { recursive: true });
+      const env = { GIT_DIR: gitDir, GIT_WORK_TREE: workTree };
+      const exists = await fs
+        .access(path.join(gitDir, 'HEAD'))
+        .then(() => true)
+        .catch(() => false);
+      if (!exists) {
+        const init = await this.baseRunner.run('git', ['init', '-q', '-b', 'main'], {
+          cwd: workTree,
+          timeout: 10_000,
+          env,
+        });
+        if (init.exitCode !== 0) {
+          this.logger.warn(`[Git] shadow init failed at ${gitDir}: ${init.stderr}`);
+          return false;
+        }
+      }
+      if (!exists) {
+        // Explicit, because `git init` with GIT_DIR outside the tree may
+        // record the repository as bare on some versions.
+        await this.baseRunner.run('git', ['config', 'core.bare', 'false'], { cwd: workTree, timeout: 5_000, env });
+        await this.baseRunner.run('git', ['config', 'core.autocrlf', opts.autocrlf ?? 'false'], {
+          cwd: workTree,
+          timeout: 5_000,
+          env,
+        });
+      } else if (opts.autocrlf !== undefined) {
+        await this.baseRunner.run('git', ['config', 'core.autocrlf', opts.autocrlf], {
+          cwd: workTree,
+          timeout: 5_000,
+          env,
+        });
+      }
+      if (opts.alternatesObjectsDir) {
+        const infoDir = path.join(gitDir, 'objects', 'info');
+        await fs.mkdir(infoDir, { recursive: true });
+        await fs.writeFile(path.join(infoDir, 'alternates'), opts.alternatesObjectsDir + '\n', 'utf-8');
+      }
+      if (opts.excludes?.length) {
+        const infoDir = path.join(gitDir, 'info');
+        await fs.mkdir(infoDir, { recursive: true });
+        await fs.writeFile(path.join(infoDir, 'exclude'), opts.excludes.join('\n') + '\n', 'utf-8');
+      }
+      return true;
+    } catch (err) {
+      this.logger.warn(`[Git] initShadowRepo failed at ${gitDir}: ${err}`);
+      return false;
+    }
+  }
+
+  async isClean(repoDir: string): Promise<boolean> {
+    const result = await this.runner.run('git', ['status', '--porcelain', '--untracked-files=normal'], {
+      cwd: repoDir,
+      timeout: 30_000,
+    });
+    if (result.exitCode !== 0) {
+      throw new GitError(`Failed to read status in ${repoDir}: ${result.stderr}`);
+    }
+    return result.stdout.trim().length === 0;
+  }
+
+  async branchExists(repoDir: string, branch: string): Promise<boolean> {
+    const sha = await this.revParse(repoDir, `refs/heads/${branch}`);
+    return sha !== null;
+  }
+
+  async createBranch(repoDir: string, name: string, base?: string): Promise<void> {
+    const args = ['branch', name];
+    if (base) args.push(base);
+    const result = await this.runner.run('git', args, { cwd: repoDir, timeout: 15_000 });
+    if (result.exitCode !== 0) {
+      throw new GitError(`Failed to create branch ${name}: ${result.stderr}`);
+    }
+  }
+
+  async checkoutBranch(repoDir: string, branch: string): Promise<void> {
+    const result = await this.runner.run('git', ['checkout', '-q', branch], { cwd: repoDir, timeout: 60_000 });
+    if (result.exitCode !== 0) {
+      throw new GitError(`Failed to check out ${branch}: ${result.stderr}`);
+    }
+  }
+
+  async worktreeHoldingBranch(repoPath: string, branch: string): Promise<string | null> {
+    const result = await this.runner.run('git', ['worktree', 'list', '--porcelain'], {
+      cwd: repoPath,
+      timeout: 10_000,
+    });
+    if (result.exitCode !== 0) return null;
+    let current: string | null = null;
+    for (const line of result.stdout.split('\n')) {
+      if (line.startsWith('worktree ')) current = line.slice('worktree '.length).trim();
+      else if (line.startsWith('branch ')) {
+        const ref = line.slice('branch '.length).trim();
+        if (ref === `refs/heads/${branch}` || ref === branch) return current;
+      }
+    }
+    return null;
+  }
+
+  async addWorktree(repoPath: string, worktreePath: string, opts: AddWorktreeOptions): Promise<void> {
+    await fs.mkdir(path.dirname(worktreePath), { recursive: true });
+    const args = ['worktree', 'add'];
+    if (opts.newBranch) {
+      args.push('-b', opts.newBranch, worktreePath);
+      const start = opts.base ?? opts.branch;
+      if (start) args.push(start);
+    } else if (opts.branch) {
+      args.push(worktreePath, opts.branch);
+    } else {
+      args.push('--detach', worktreePath);
+    }
+    const result = await this.runner.run('git', args, { cwd: repoPath, timeout: this.timeout });
+    if (result.exitCode !== 0) {
+      throw new GitError(`Failed to create worktree at ${worktreePath}: ${result.stderr}`);
+    }
+    this.logger.info(`[Git] Created worktree at ${worktreePath}${opts.newBranch ? ` (new branch ${opts.newBranch})` : opts.branch ? ` (branch ${opts.branch})` : ''}`);
+  }
+
+  async commonObjectsDir(repoDir: string): Promise<string | null> {
+    try {
+      const result = await this.runner.run('git', ['rev-parse', '--git-common-dir'], {
+        cwd: repoDir,
+        timeout: 5_000,
+      });
+      if (result.exitCode !== 0) return null;
+      const common = result.stdout.trim();
+      if (!common) return null;
+      return path.join(path.resolve(repoDir, common), 'objects');
+    } catch {
+      return null;
+    }
+  }
+
+  async getConfig(repoDir: string, key: string): Promise<string | null> {
+    try {
+      const result = await this.runner.run('git', ['config', '--get', key], { cwd: repoDir, timeout: 5_000 });
+      if (result.exitCode !== 0) return null;
+      const value = result.stdout.trim();
+      return value.length > 0 ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async scrubLegacyCheckpointData(repoDir: string, opts: { dryRun?: boolean } = {}): Promise<{ refs: string[]; files: string[] }> {
+    const refs = (await this.listRefs(repoDir, 'refs/generatorai/')).map((r) => r.ref);
+    const files: string[] = [];
+    const gitDir = await this.absoluteGitDir(repoDir);
+    if (gitDir) {
+      for (const name of await fs.readdir(gitDir).catch(() => [] as string[])) {
+        if (/^generatorai-.*\.index$/.test(name)) files.push(path.join(gitDir, name));
+      }
+    }
+    if (!opts.dryRun) {
+      for (const ref of refs) await this.deleteRef(repoDir, ref);
+      for (const file of files) await fs.rm(file, { force: true }).catch(() => undefined);
+    }
+    return { refs, files };
+  }
+
+  async nestedRepos(dir: string): Promise<string[]> {
+    const out: string[] = [];
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name === '.git' || entry.name === 'node_modules') continue;
+        try {
+          await fs.access(path.join(dir, entry.name, '.git'));
+          out.push(entry.name);
+        } catch {
+          /* not a repo */
+        }
+      }
+    } catch {
+      /* unreadable */
+    }
+    return out.sort();
   }
 
   /**
@@ -648,13 +871,15 @@ export class GitClient implements IGitClient {
     }
   }
 
-  async writeTreeFromWorktree(repoDir: string, indexFile: string): Promise<string | null> {
+  async writeTreeFromWorktree(repoDir: string, indexFile: string, opts?: WriteTreeOptions): Promise<string | null> {
     try {
       await fs.mkdir(path.dirname(indexFile), { recursive: true });
 
       // `add -A` against the throwaway index picks up creations, edits and
-      // deletions while still honouring .gitignore.
-      const add = await this.runner.run('git', this.snapshotArgs(['add', '-A', '--', '.']), {
+      // deletions while still honouring .gitignore. With `honourEol` the
+      // repo's own autocrlf applies, so the tree is comparable to a commit.
+      const addArgs = ['add', '-A', '--', '.'];
+      const add = await this.runner.run('git', opts?.honourEol ? addArgs : this.snapshotArgs(addArgs), {
         cwd: repoDir,
         timeout: 120_000,
         env: this.snapshotEnv(indexFile),

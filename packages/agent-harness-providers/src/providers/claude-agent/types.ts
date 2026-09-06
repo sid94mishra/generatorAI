@@ -161,6 +161,16 @@ export interface StoredConversationConfig {
   model?: string;
   systemPrompt?: string | { type: 'preset'; preset: 'claude_code'; append?: string };
   workingDirectory?: string;
+  /**
+   * Roots beyond `workingDirectory` the agent may read and write — the chat's
+   * other mounts plus its managed workspace root. Maps 1:1 onto the SDK's
+   * `Options.additionalDirectories`.
+   *
+   * Part of the session fingerprint: like `cwd`, the installed SDK (0.3.220)
+   * has no live setter for it, so changing the mounts must rebuild the
+   * session rather than silently leave the old roots in force.
+   */
+  additionalDirectories?: string[];
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   maxTurns?: number;
   maxBudgetUsd?: number;
@@ -177,6 +187,13 @@ export interface StoredConversationConfig {
   hooks?: unknown;
   sdkSessionId?: string;
   env?: Record<string, string | undefined>;
+  /**
+   * The `GENERATORAI_*` subset of `CreateConversationParams.env`, filtered at
+   * conversation-creation time by `filterDelegatedHarnessEnv`. Merged into the
+   * child environment BELOW `options.env` so a provider-level setting always
+   * wins over one handed down per conversation.
+   */
+  delegatedEnv?: Record<string, string>;
   /**
    * Item 16 — last time this conversation was created, resumed, or had a
    * turn start or finish. The idle sweep and the LRU cap read it.

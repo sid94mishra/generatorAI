@@ -95,7 +95,7 @@ import {
   isPlanGateTool,
   normaliseClaudeQuestions,
 } from './plan-gate.js';
-import { buildHarnessEnv } from '../../childEnv.js';
+import { buildHarnessEnv, filterDelegatedHarnessEnv } from '../../childEnv.js';
 
 // ── W41 — lazy SDK module singleton ──────────────────────────────
 //
@@ -279,11 +279,20 @@ const MAX_TRANSCRIPT_MESSAGES = 400;
  */
 const PING_UNHEALTHY_AFTER_FAILURES = 3;
 
-function sessionFingerprint(options: ClaudeOptions): string {
+/**
+ * Exported for tests: the fingerprint decides whether a live session can be
+ * reused or must be torn down and rebuilt, so "is this field in it?" is a
+ * behavioural question, not an implementation detail.
+ */
+export function sessionFingerprint(options: ClaudeOptions): string {
   const o = options as unknown as Record<string, unknown>;
   const hooks = (o['hooks'] as Record<string, unknown[] | undefined> | undefined) ?? {};
   return JSON.stringify({
     cwd: o['cwd'],
+    // Same reason as `cwd`: no live setter exists for the extra roots, so a
+    // chat that gains or loses a mount must rebuild rather than keep running
+    // against the roots it was launched with.
+    additionalDirectories: o['additionalDirectories'],
     systemPrompt: o['systemPrompt'],
     tools: o['tools'],
     allowedTools: o['allowedTools'],
@@ -890,7 +899,14 @@ export class ClaudeAgentProvider implements IAgentHarness {
       maxParallelTools: MAX_PARALLEL_TOOLS > 0 ? MAX_PARALLEL_TOOLS : undefined,
       planMode: true,
       mcpServers: true,
-      skillDirectories: true,
+      // The installed SDK (0.3.220) has NO option that takes skill
+      // DIRECTORIES. `Options.skills` filters by name and `Options.plugins`
+      // loads plugin roots (a plugin is not a skill directory); neither
+      // accepts the staged directories `AgentStagingService` produces. This
+      // used to read `true` while `params.skillDirectories` was dropped on
+      // the floor — declaring a capability the adapter did not have. It is
+      // now declared honestly and the drop is reported as a warning.
+      skillDirectories: false,
       // W35 / N-5 — true only when a policy is genuinely attached to every
       // conversation. The hook itself is always installed; a hook with no
       // policy behind it defers to the SDK's own permission evaluation and
@@ -1219,6 +1235,14 @@ export class ClaudeAgentProvider implements IAgentHarness {
         if (!resolvedAllowedTools.includes('Skill')) resolvedAllowedTools.push('Skill');
         if (builtinAllowList && !builtinAllowList.includes('Skill')) builtinAllowList.push('Skill');
       }
+      // No SDK option accepts skill DIRECTORIES (see `capabilities()`), so
+      // say so rather than accepting the field and ignoring it.
+      if (params.skillDirectories?.length) {
+        warnings.push({
+          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+          params: { field: 'skillDirectories', provider: 'claude-agent' },
+        });
+      }
       for (const field of ['contextTier', 'configDir', 'streaming'] as const) {
         if (params[field] !== undefined) {
           warnings.push({
@@ -1281,6 +1305,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
         model: nextModel,
         systemPrompt,
         workingDirectory: params.workingDirectory ?? this.options.defaultCwd,
+        ...(params.additionalDirectories?.length
+          ? { additionalDirectories: [...new Set(params.additionalDirectories)] }
+          : {}),
         effort: (params.reasoningEffort as StoredConversationConfig['effort']) ?? this.options.defaultEffort,
         maxTurns: params.maxTurns ?? this.options.defaultMaxTurns,
         maxBudgetUsd: this.options.defaultMaxBudgetUsd,
@@ -1306,6 +1333,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
           : {}),
         ...(params.hooks ? { hooks: params.hooks } : {}),
         env: this.options.env,
+        // Per-conversation env from the core (workspace root / scratch dir).
+        // Filtered to `GENERATORAI_*` here, at the boundary, so nothing else
+        // the caller happened to put in the map can reach a process that runs
+        // model-authored shell commands.
+        delegatedEnv: filterDelegatedHarnessEnv(params.env),
         // HITL-06 (Claude parity) — persist the domain permission callback
         // so `buildQueryOptions` can wire it into the SDK's `canUseTool`.
         onPermissionRequest: params.onPermissionRequest,
@@ -2298,6 +2330,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
       ...this.baseQueryOptions(),
       model: config.model ?? this.options.defaultModel,
       cwd: config.workingDirectory ?? this.options.defaultCwd,
+      ...(config.additionalDirectories?.length
+        ? { additionalDirectories: config.additionalDirectories }
+        : {}),
       effort: config.effort ?? this.options.defaultEffort ?? 'high',
       maxTurns: config.maxTurns ?? this.options.defaultMaxTurns,
       maxBudgetUsd: config.maxBudgetUsd ?? this.options.defaultMaxBudgetUsd,
@@ -2386,6 +2421,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
     options.env = buildHarnessEnv({
       // Operator-set CLI overrides the SDK genuinely needs to find `claude`.
       passthrough: ['CLAUDE_CLI_PATH', 'CLAUDE_CODE_PATH', 'CLAUDE_CONFIG_DIR'],
+      // Handed down per conversation by the core, already reduced to
+      // `GENERATORAI_*` at `createConversation`. Kept OUT of `extra` on
+      // purpose: `extra` grants an own-credential exemption from the deny
+      // list, and these values are not this provider's to exempt.
+      delegated: config.delegatedEnv,
       extra: {
         ...this.options.env,
         ...config.env,

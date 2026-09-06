@@ -7,6 +7,7 @@ import type { HarnessConfig } from './Workflow.js';
 import type { BrowserConfig } from './BrowserSession.js';
 import type { AgentMode } from './AgentMode.js';
 import type { AgentOverrides, ResolvedAgentProjection } from './Agent.js';
+import type { ChatSourceSpec, WorkspacePrepStatus } from './Workspace.js';
 
 /**
  * Chat-scoped permission policy. Mirrors the harness permission modes so the
@@ -66,8 +67,21 @@ export interface Chat {
   createWorktree?: boolean;
   /** Workspace ID — links to the execution workspace for this chat */
   workspaceId?: string;
-  /** Local folder paths linked at creation (read-only after creation) */
+  /** Local folder paths linked at creation (legacy; superseded by `sources`) */
   gitRepositories?: ChatLocalFolder[];
+  /**
+   * The mount plan this chat was created with (or last updated to). The
+   * workspace's mounts are derived from it; kept so an unarchived chat can be
+   * re-prepared and so the UI can show what is linked.
+   */
+  sources?: ChatSourceSpec[];
+  /** Alias of the primary mount (the agent's cwd). */
+  primarySource?: string;
+  /**
+   * Readiness of the chat's workspace mounts. Populated on API responses;
+   * `pending` / `preparing` means the first prompt will wait.
+   */
+  workspacePrep?: { status: WorkspacePrepStatus; error?: string };
   tags: string[];
   status: ChatStatus;
   /** Integrated Browser configuration (per-chat opt-in). */
@@ -120,8 +134,15 @@ export interface CreateChatParams {
   createWorktree?: boolean;
   /** Whether to use a worktree (alias for createWorktree, used by workspace management) */
   useWorktree?: boolean;
-  /** Local folder paths to link at creation (sets SDK workingDirectory) */
+  /** Local folder paths to link at creation (legacy; mapped onto `sources`) */
   gitRepositories?: ChatLocalFolder[];
+  /**
+   * What the agent works on: project codebases and/or local folders, each
+   * mounted in place or as a worktree, optionally on a chosen branch.
+   */
+  sources?: ChatSourceSpec[];
+  /** Alias of the primary mount; defaults to the first source. */
+  primary?: string;
   tags?: string[];
   /** Integrated Browser configuration (per-chat opt-in). */
   browserConfig?: BrowserConfig;

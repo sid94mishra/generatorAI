@@ -10,6 +10,7 @@ import type {
   WorkspaceFilters,
   WorkspaceOwnerType,
   WorkspaceStatus,
+  WorkspacePrepStatus,
 } from '@generatorai/shared';
 import { StorageError } from '@generatorai/shared';
 import { executionWorkspaces } from '../schema.js';
@@ -28,6 +29,8 @@ export class DrizzleExecutionWorkspaceRepository implements IExecutionWorkspaceR
         rootPath: workspace.rootPath,
         codeRoot: workspace.codeRoot ?? null,
         status: workspace.status,
+        prepStatus: workspace.prepStatus ?? 'ready',
+        prepError: workspace.prepError ?? null,
         gitEnabled: workspace.gitEnabled,
         useWorktree: workspace.useWorktree,
         snapshotPath: workspace.snapshotPath ?? null,
@@ -138,6 +141,13 @@ export class DrizzleExecutionWorkspaceRepository implements IExecutionWorkspaceR
     await this.db.update(executionWorkspaces).set(values).where(eq(executionWorkspaces.id, id));
   }
 
+  async updatePrep(id: string, prepStatus: WorkspacePrepStatus, prepError?: string | null): Promise<void> {
+    await this.db
+      .update(executionWorkspaces)
+      .set({ prepStatus, prepError: prepError ?? null, updatedAt: new Date() })
+      .where(eq(executionWorkspaces.id, id));
+  }
+
   async delete(id: string): Promise<void> {
     await this.db.delete(executionWorkspaces).where(eq(executionWorkspaces.id, id));
   }
@@ -151,6 +161,8 @@ export class DrizzleExecutionWorkspaceRepository implements IExecutionWorkspaceR
       rootPath: row.rootPath,
       codeRoot: row.codeRoot ?? undefined,
       status: row.status as WorkspaceStatus,
+      prepStatus: (row.prepStatus as WorkspacePrepStatus | null) ?? 'ready',
+      prepError: row.prepError ?? undefined,
       gitEnabled: row.gitEnabled,
       useWorktree: row.useWorktree,
       snapshotPath: row.snapshotPath ?? undefined,

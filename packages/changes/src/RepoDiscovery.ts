@@ -9,7 +9,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import type { IGitClient } from '@generatorai/git';
-import type { ChangeRepoKind, WorktreeRef } from './types.js';
+import type { ChangeRepoKind, MountRef, WorktreeRef } from './types.js';
 
 /**
  * Directory names managed by the workflow runtime itself — never tracked as
@@ -36,16 +36,41 @@ export interface DiscoveredRepo {
   alias: string;
   repoDir: string;
   kind: ChangeRepoKind;
+  /** Private shadow git dir for snapshots; absent = use the repo's own `.git`. */
+  gitDir?: string;
+  /** Commit the mount was cut from — the "Branch base" diff anchor. */
+  baseCommit?: string;
 }
 
 export interface DiscoverReposParams {
   rootPath: string;
   worktrees?: WorktreeRef[];
   /**
-   * Auto-run `git init` in agent-generated subdirectories that have code but
-   * no repo yet, so newly-generated codebases get a real change set.
+   * Workspace mounts. When present the workspace root is NOT scanned: the
+   * mounts (and their nested repositories) are exactly what is tracked, and
+   * the managed root — plans, scratch, screenshots — is deliberately not.
+   */
+  mounts?: MountRef[];
+  /**
+   * Legacy: auto-run `git init` in agent-generated subdirectories. Off by
+   * default so a read request never mutates the filesystem.
    */
   autoInit?: boolean;
+}
+
+/** Filesystem-safe slug for a mount alias (aliases may contain `/` for nested repos). */
+export function shadowSlug(alias: string): string {
+  const cleaned = alias.replace(/[^A-Za-z0-9._-]+/g, '__').replace(/^\.+/, '');
+  return cleaned.length > 0 ? cleaned : 'root';
+}
+
+/**
+ * Where a mount's shadow repository lives: `<workspaceRoot>/.checkpoints/<alias>.git`.
+ * One definition, shared by the mount service (which creates it) and the
+ * change/checkpoint engines (which read it), so the two can never disagree.
+ */
+export function shadowGitDirFor(rootPath: string, alias: string): string {
+  return path.join(rootPath, '.checkpoints', `${shadowSlug(alias)}.git`);
 }
 
 /**
@@ -59,9 +84,35 @@ export async function discoverRepos(
   git: IGitClient,
   params: DiscoverReposParams,
 ): Promise<DiscoveredRepo[]> {
-  const { rootPath, worktrees = [], autoInit = true } = params;
+  const { rootPath, worktrees = [], autoInit = false } = params;
   const repos: DiscoveredRepo[] = [];
   const seen = new Set<string>();
+
+  if (params.mounts) {
+    for (const m of params.mounts) {
+      if (seen.has(m.alias)) continue;
+      repos.push({
+        alias: m.alias,
+        repoDir: m.path,
+        kind: 'mount',
+        ...(m.gitDir ? { gitDir: m.gitDir } : {}),
+        ...(m.baseCommit ? { baseCommit: m.baseCommit } : {}),
+      });
+      seen.add(m.alias);
+      for (const sub of m.nested ?? []) {
+        const alias = `${m.alias}/${sub.name}`;
+        if (seen.has(alias)) continue;
+        repos.push({
+          alias,
+          repoDir: path.join(m.path, sub.name),
+          kind: 'nested',
+          ...(sub.gitDir ? { gitDir: sub.gitDir } : {}),
+        });
+        seen.add(alias);
+      }
+    }
+    return repos;
+  }
 
   for (const wt of worktrees) {
     const alias = path.basename(wt.worktreePath);

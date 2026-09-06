@@ -134,9 +134,20 @@ export {
 export type { ParsedAgentMarkdown } from './agentMarkdown.js';
 
 // Workspace Management services
-export { WorkspaceManager, WorkspaceTreeBusyError } from './WorkspaceManager.js';
+export { WorkspaceManager, WorkspaceTreeBusyError, resolveWorktreePath } from './WorkspaceManager.js';
 export type { WorkspaceManagerConfig, WorkspaceTeardownPhase } from './WorkspaceManager.js';
 export { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
+export type { MountSource } from './WorkspaceCheckpointService.js';
+export {
+  MountService,
+  buildExposure,
+  branchSlugFor,
+  GENERATED_MOUNT_ALIAS,
+  SCRATCH_DIR,
+  SOURCE_DIR,
+} from './MountService.js';
+export type { PlannedMount, PlanOptions, MountServiceDeps, PrepareScope } from './MountService.js';
+export { buildWorkspaceHint } from './chatSystemHints.js';
 export type {
   CaptureWorkspaceCheckpointParams,
   WorkspaceRepoRef,

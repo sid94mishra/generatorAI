@@ -5554,6 +5554,83 @@ pre.hljs-pre { background: var(--color-subtle); }
   background: color-mix(in srgb, var(--color-success) 2%, white);
 }
 
+/* Timeline row entrance — a short settle, not a slide. Rows arrive several
+   times a second during a tool storm; anything longer than ~180 ms stacks
+   visibly. Animates opacity/transform only (compositor-friendly). */
+@keyframes step-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-step-in { animation: step-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Running tool — one thin indeterminate bar under the row. Replaces the two
+   shimmer "paragraph" bars, which read as content about to appear. */
+@keyframes step-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+.step-progress {
+  position: relative;
+  height: 2px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+.step-progress::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 33%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+  animation: step-progress-slide 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Expanded tool detail — capped and scrollable; slim scrollbar so the panel
+   does not grow a chunky OS bar the moment it overflows. */
+.step-detail-panel { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent) transparent; }
+.step-detail-panel::-webkit-scrollbar { width: 8px; height: 8px; }
+.step-detail-panel::-webkit-scrollbar-thumb { border-radius: 9999px; background: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent); border: 2px solid transparent; background-clip: padding-box; }
+
+/* "Thinking" label — a soft highlight sweeping across the text. Calmer than
+   bouncing dots and reads as activity without demanding attention. */
+@keyframes text-shimmer {
+  0% { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+.text-shimmer {
+  background: linear-gradient(90deg,
+    var(--color-muted-foreground) 0%,
+    var(--color-muted-foreground) 35%,
+    var(--color-foreground) 50%,
+    var(--color-muted-foreground) 65%,
+    var(--color-muted-foreground) 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: text-shimmer 2.4s linear infinite;
+}
+
+/* Thinking orb — a breathing gradient disc, the one "spinner" of the
+   pre-first-token state. */
+@keyframes orb-breathe {
+  0%, 100% { transform: scale(0.92); opacity: 0.75; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+.thinking-orb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 30% 30%,
+    color-mix(in srgb, var(--color-primary) 55%, white),
+    var(--color-primary) 55%,
+    color-mix(in srgb, var(--color-primary) 55%, #a855f7));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 12%, transparent), 0 0 12px color-mix(in srgb, var(--color-primary) 45%, transparent);
+  animation: orb-breathe 1.8s ease-in-out infinite;
+}
+
 /* Streaming container — GPU-composited, no layout thrashing */
 .stream-container {
   contain: content;

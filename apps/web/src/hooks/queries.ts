@@ -318,6 +318,7 @@ export function useSendPrompt(sessionId: string) {
       }
       return platform.sendPrompt(sessionId, params.prompt);
     },
+    meta: { errorTitle: 'Message not sent' },
     // NOTE: No onSuccess chatHistory invalidation here.
     // The server route is fire-and-forget: the HTTP 202 returns BEFORE the
     // server saves the user message to the DB.  Invalidating here would
@@ -620,8 +621,8 @@ export function useRestoreWorkspaceCheckpoint(workspaceId: string | undefined) {
   const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { checkpointId: string; paths?: string[] }) =>
-      platform.restoreWorkspaceCheckpoint(workspaceId!, params.checkpointId, params.paths),
+    mutationFn: (params: { checkpointId: string; paths?: string[]; alias?: string }) =>
+      platform.restoreWorkspaceCheckpoint(workspaceId!, params.checkpointId, params.paths, params.alias),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['workspace-change-summary', workspaceId] });
       void queryClient.invalidateQueries({ queryKey: ['workspace-change-file', workspaceId] });
@@ -809,6 +810,9 @@ export function useSendChatPrompt(chatId: string) {
       }
       return platform.sendChatPrompt(chatId, params.prompt, undefined, params.mode);
     },
+    // A refused send used to restore the draft in silence — the 409's reason
+    // (still generating, waiting on a review) never reached the user.
+    meta: { errorTitle: 'Message not sent' },
     // Fire-and-forget: SSE events handle chatMessages invalidation
   });
 }

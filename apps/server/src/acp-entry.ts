@@ -110,17 +110,15 @@ async function main(): Promise<void> {
       const model = acpModel();
       const chat = await chats.createChat({
         name: `ACP ${basename(cwd) || cwd}`,
-        // ACP clients edit THEIR checkout. Binding the chat to `cwd` as a
-        // local folder (and disabling worktrees) is what stops GeneratorAI
-        // from silently doing the work in a copy the editor cannot see.
-        gitRepositories: [
-          { url: cwd, alias: basename(cwd) || 'workspace' },
-          ...(additionalDirectories ?? []).map((dir) => ({
-            url: dir,
-            alias: basename(dir) || dir,
-          })),
+        // ACP clients edit THEIR checkout. Mounting `cwd` in place (never a
+        // worktree) is what stops GeneratorAI from silently doing the work
+        // in a copy the editor cannot see; the extra directories become
+        // further in-place mounts, exposed to the agent as additional
+        // directories.
+        sources: [
+          { kind: 'folder', path: cwd, mode: 'in-place' },
+          ...(additionalDirectories ?? []).map((dir) => ({ kind: 'folder' as const, path: dir, mode: 'in-place' as const })),
         ],
-        createWorktree: false,
         ...(model ? { model } : {}),
         harnessConfig: {
           streaming: true,

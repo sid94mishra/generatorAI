@@ -2,6 +2,8 @@
 export type {
   AgentEvent,
   AgentEventKind,
+  FileOpHunk,
+  FileOpStat,
   PersistedEvent,
 } from './AgentEvent.js';
 export {
@@ -334,12 +336,18 @@ export type {
 export type {
   WorkspaceOwnerType,
   WorkspaceStatus,
-  WorkspaceWorktreeStatus,
   WorkspaceArtifactType,
   BrowserSessionStatus,
   WorktreeDetail,
   ExecutionWorkspace,
-  WorkspaceWorktreeRecord,
+  MountMode,
+  MountOriginKind,
+  MountStatus,
+  MountGitState,
+  WorkspaceMount,
+  WorkspacePrepStatus,
+  ChatSourceSpec,
+  WorkspaceExposure,
   WorkspaceArtifactRecord,
   WorkspaceInfo,
   CreateWorkspaceParams,

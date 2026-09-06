@@ -111,6 +111,40 @@ function isOwnCredential(
   return extra !== undefined && Object.prototype.hasOwnProperty.call(extra, name);
 }
 
+/**
+ * The ONLY names a caller further up the stack may push into a child through
+ * `delegated`.
+ *
+ * `CreateConversationParams.env` travels from the core down to whichever
+ * provider happens to serve the chat, carrying the chat's workspace paths
+ * (`GENERATORAI_WORKSPACE_ROOT`, `GENERATORAI_SCRATCH_DIR`). That is a useful
+ * hand-off and a terrible general-purpose escape hatch, so it is an allowlist
+ * by shape: only `GENERATORAI_*` names are considered at all, and the deny
+ * patterns still strike out `GENERATORAI_SECRET_KEY` and friends. Unlike
+ * `extra`, delegated values get NO own-credential exemption — the call site
+ * passing them does not own them.
+ */
+export const DELEGATED_ENV_NAME_PATTERN = /^GENERATORAI_[A-Z0-9_]+$/;
+
+/**
+ * Reduce an untrusted map of environment variables to the delegable subset.
+ *
+ * Exported so providers can filter once (at conversation creation) and store
+ * the result, rather than re-deriving the rule per turn.
+ */
+export function filterDelegatedChildEnv(
+  input: Record<string, string | undefined> | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(input ?? {})) {
+    if (value === undefined) continue;
+    if (!DELEGATED_ENV_NAME_PATTERN.test(name)) continue;
+    if (isDenied(name)) continue;
+    out[name] = value;
+  }
+  return out;
+}
+
 export interface ChildEnvOptions {
   /** Source environment. Defaults to `process.env`; injectable for tests. */
   source?: Record<string, string | undefined>;
@@ -126,6 +160,14 @@ export interface ChildEnvOptions {
    * intent rather than an accident of inheritance.
    */
   extra?: Record<string, string | undefined>;
+  /**
+   * Values handed DOWN from a caller (the core's per-conversation `env`), not
+   * owned by this call site. Filtered by {@link filterDelegatedChildEnv}:
+   * `GENERATORAI_*` only, deny patterns still enforced, no exemption.
+   *
+   * Applied before `extra`, so a provider's own injection always wins.
+   */
+  delegated?: Record<string, string | undefined>;
 }
 
 /**
@@ -145,6 +187,8 @@ export function buildChildEnv(options: ChildEnvOptions = {}): Record<string, str
     if (value === undefined || isDenied(name)) continue;
     env[name] = value;
   }
+
+  Object.assign(env, filterDelegatedChildEnv(options.delegated));
 
   for (const [name, value] of Object.entries(options.extra ?? {})) {
     if (value === undefined) continue;

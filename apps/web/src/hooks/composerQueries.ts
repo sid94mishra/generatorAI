@@ -96,8 +96,13 @@ export function useSlashCommands(projectId?: string): SlashCommand[] {
 
 /**
  * Flatten a workspace's file listing into a deduplicated `MentionFile[]` for
- * the `@` mention menu. Source files + workspace outputs + per-worktree files
- * are merged; filtering happens client-side in the menu.
+ * the `@` mention menu.
+ *
+ * Under the mount model `worktrees` carries ONE entry per mount — in-place
+ * mounts included, despite the legacy field name — with repo-relative paths,
+ * and `sourceFiles` is always empty (the `source/<alias>` layout is gone).
+ * The mount alias is the badge, so a file picked from the menu says which of
+ * the chat's sources it came from.
  */
 export function useWorkspaceFileIndex(workspaceId?: string): {
   files: MentionFile[];
@@ -123,10 +128,21 @@ export function useWorkspaceFileIndex(workspaceId?: string): {
       const label = path.split('/').pop() || path;
       out.push({ path, source, worktreeAlias, label });
     };
-    for (const wt of data.worktrees ?? []) {
-      for (const f of wt.files ?? []) push(f, 'worktree', wt.alias);
+    const aliases = new Set<string>();
+    // Mounts first: they are the code, and the menu is ranked by insertion.
+    for (const mount of data.worktrees ?? []) {
+      aliases.add(mount.alias);
+      for (const f of mount.files ?? []) push(f, 'worktree', mount.alias);
     }
-    for (const f of data.sourceFiles ?? []) push(f, 'source');
+    // Legacy servers still send `sourceFiles`; skip anything a mount already
+    // listed so a file cannot appear twice in the menu.
+    for (const f of data.sourceFiles ?? []) {
+      const top = f.split('/')[0] ?? '';
+      if (aliases.has(top)) continue;
+      push(f, 'source');
+    }
+    // Managed scratch + plans, then artifacts: supporting material, offered
+    // after the code rather than mixed into it.
     for (const f of data.workspaceFiles ?? []) push(f, 'workspace');
     for (const f of data.artifactFiles ?? []) push(f, 'artifacts');
     return out;

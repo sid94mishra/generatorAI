@@ -20,12 +20,13 @@ import type {
   CaptureSource,
 } from './composer/types.js';
 import type { ChatModel } from '@/platform/HttpPlatformClient.js';
-import type { AgentMode } from '@generatorai/shared';
+import type { AgentMode, WorkspacePrepStatus } from '@generatorai/shared';
+import { WorkspacePrepBar, isPreparing } from './sources/WorkspacePrepBar.js';
 import { AGENT_MODES, AGENT_MODE_REGISTRY, DEFAULT_AGENT_MODE } from '@generatorai/shared';
 import {
   Paperclip, X, Plus,
   FolderOpen, FolderGit2, GitBranch, ChevronDown, ChevronUp,
-  Square, ArrowUp, Gauge, Search, Check, Info,
+  Square, ArrowUp, Gauge, Search, Check, Info, Image as ImageIcon,
   Eye, Globe, Cpu, SlidersHorizontal, Lock,
   Sparkles, ScrollText, Wrench, FileText, TerminalSquare, AtSign,
   ClipboardList, Zap, Bot,
@@ -39,6 +40,14 @@ import { VoiceRecorder } from './VoiceRecorder.js';
 import { useSpeechToText } from '@/hooks/useSpeechToText.js';
 import { composerAffordances } from '@/platform/surfaceCapabilities.js';
 import { toast } from '@/components/Toast.js';
+import { ImageHoverPreview, useObjectUrl, isPreviewableImage } from '@/components/shared/ImageHoverPreview.js';
+import {
+  caretLine,
+  materializeAttachment,
+  mergePromptHistory,
+  stepHistory,
+  type PromptHistoryEntry,
+} from './composer/promptHistory.js';
 
 /**
  * W29 — what the composer offers on THIS surface, read from the capability
@@ -126,12 +135,36 @@ interface ChatInputProps {
   pendingInteractionLabel?: string | null;
   onCancelPendingInteraction?: () => void;
   /**
+   * Readiness of this chat's workspace mounts. While it is `pending` or
+   * `preparing` the agent has nowhere to work, so Send is held back — typing
+   * stays enabled, and nothing is queued: the user presses Send when the bar
+   * clears. On `error` the bar offers the two ways out (retry preparation, or
+   * change what the chat is pointed at).
+   */
+  workspacePrep?: { status: WorkspacePrepStatus; error?: string } | undefined;
+  onRetryWorkspacePrep?: (() => void) | undefined;
+  workspacePrepRetrying?: boolean;
+  onEditSources?: (() => void) | undefined;
+  /**
    * AGT-01 — name of the agent driving this chat, when one is bound. Shown as
    * a read-only chip: the binding is frozen for the life of the conversation
    * (rebinding mid-thread would invalidate the prompt-cache prefix), so it is
    * deliberately not editable from the composer.
    */
   agentName?: string | undefined;
+  /**
+   * Rendered inside the composer column directly above the input card — the
+   * chat's changed-files tray lives here so it shares the card's width and
+   * horizontal alignment exactly.
+   */
+  aboveComposer?: React.ReactNode;
+  /**
+   * Prompts already sent in this chat (oldest → newest), with their
+   * attachments. ↑ on the first line of the box recalls them, ↓ walks forward
+   * again. Prompts sent this session are remembered here too, so the list
+   * only needs to reflect what the server has persisted.
+   */
+  promptHistory?: PromptHistoryEntry[];
 }
 
 /**
@@ -175,7 +208,13 @@ export function ChatInput({
   showAgentModePicker = true,
   pendingInteractionLabel,
   onCancelPendingInteraction,
+  workspacePrep,
+  onRetryWorkspacePrep,
+  workspacePrepRetrying = false,
+  onEditSources,
   agentName,
+  aboveComposer,
+  promptHistory,
 }: ChatInputProps) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -211,6 +250,22 @@ export function ChatInput({
   const activeProvider = harnessConfig?.harness?.type ?? 'copilot';
   const sendingRef = useRef(false);
 
+  // ── Prompt history (↑ / ↓) ──
+  // `historyIdx` is null while the user's own draft is showing. The draft is
+  // parked in `draftRef` when they start browsing so ↓ past the newest entry
+  // brings it back untouched.
+  const [historyIdx, setHistoryIdx] = useState<number | null>(null);
+  const draftRef = useRef<{ text: string; attachments: ComposerAttachment[] } | null>(null);
+  const localHistoryRef = useRef<PromptHistoryEntry[]>([]);
+  const recallTokenRef = useRef(0);
+  const history = useMemo(
+    () => mergePromptHistory(promptHistory ?? [], localHistoryRef.current),
+    // localHistoryRef is mutated on send; `text` clearing after a send is the
+    // re-render that picks the new entry up.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [promptHistory, text],
+  );
+
   // ── Composer data (slash commands + `@` file index) ──
   const platform = usePlatform();
   const slashCommands = useSlashCommands(projectId);
@@ -220,11 +275,14 @@ export function ChatInput({
   // PLN-01 — the server rejects prompts with 409 while a human gate is open,
   // so surface that as a disabled composer instead of a failed request.
   const blockedByInteraction = !!pendingInteractionLabel;
+  // Mounts still being created: the prompt would have nowhere to run.
+  const blockedByWorkspacePrep = isPreparing(workspacePrep?.status);
   const canSend =
     (text.trim().length > 0 || activeCommand !== null) &&
     !disabled &&
     !isLoading &&
-    !blockedByInteraction;
+    !blockedByInteraction &&
+    !blockedByWorkspacePrep;
 
   const { data: projectCodebases, isLoading: codebasesLoading } = useProjectCodebases(projectId);
 
@@ -433,9 +491,78 @@ export function ChatInput({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const value = e.target.value;
       setText(value);
+      // Editing a recalled prompt makes it the user's own draft again.
+      if (historyIdx !== null) setHistoryIdx(null);
       detectMenu(value, e.target.selectionStart ?? value.length);
     },
-    [detectMenu],
+    [detectMenu, historyIdx],
+  );
+
+  /**
+   * Show history entry `idx` (or the parked draft when `null`). Attachments
+   * that live on the server are fetched back into real `File`s; a fetch that
+   * fails drops that one chip with a toast rather than blocking the recall.
+   */
+  const showHistoryEntry = useCallback(
+    (idx: number | null) => {
+      const token = ++recallTokenRef.current;
+      setMenu(null);
+      if (idx === null) {
+        const draft = draftRef.current;
+        setText(draft?.text ?? '');
+        setAttachments(draft?.attachments ?? []);
+        draftRef.current = null;
+        setHistoryIdx(null);
+        return;
+      }
+      const entry = history[idx];
+      if (!entry) return;
+      if (historyIdx === null) draftRef.current = { text, attachments };
+      setHistoryIdx(idx);
+      setText(entry.text);
+      setAttachments([]);
+      const el = textareaRef.current;
+      requestAnimationFrame(() => {
+        if (el) {
+          el.focus();
+          el.selectionStart = el.selectionEnd = entry.text.length;
+        }
+      });
+      if (entry.attachments.length === 0) return;
+      void Promise.all(
+        entry.attachments.map(async (att) => {
+          try {
+            return await materializeAttachment(att);
+          } catch {
+            toast({ variant: 'warning', title: `Could not restore attachment "${att.name}"` });
+            return null;
+          }
+        }),
+      ).then((files) => {
+        if (recallTokenRef.current !== token) return; // user moved on
+        setAttachments(
+          files.flatMap((file, i) =>
+            file ? [{ id: `history:${entry.id}:${i}`, file, source: 'file' as CaptureSource }] : [],
+          ),
+        );
+      });
+    },
+    [history, historyIdx, text, attachments],
+  );
+
+  /** ↑ / ↓ inside the textarea. Returns true when the key was consumed. */
+  const navigateHistory = useCallback(
+    (dir: -1 | 1, el: HTMLTextAreaElement): boolean => {
+      if (el.selectionStart !== el.selectionEnd) return false;
+      const { first, last } = caretLine(text, el.selectionStart);
+      if (dir === -1 && !first) return false;
+      if (dir === 1 && !last) return false;
+      const next = stepHistory(historyIdx, history.length, dir);
+      if (next === undefined) return false;
+      showHistoryEntry(next);
+      return true;
+    },
+    [text, historyIdx, history.length, showHistoryEntry],
   );
 
   const applySlashCommand = useCallback((cmd: SlashCommand) => {
@@ -522,6 +649,20 @@ export function ChatInput({
     setAttachments([]);
     setActiveCommand(null);
     setMenu(null);
+    // Remember what was sent so ↑ works before the server echoes it back.
+    setHistoryIdx(null);
+    draftRef.current = null;
+    if (rawInput || currentAttachments.length) {
+      localHistoryRef.current = [
+        ...localHistoryRef.current.slice(-49),
+        {
+          id: `local:${Date.now()}`,
+          text: rawInput,
+          ts: Date.now(),
+          attachments: currentAttachments.map((a) => ({ name: a.file.name, mimeType: a.file.type, file: a.file })),
+        },
+      ];
+    }
 
     let prompt = rawInput;
     try {
@@ -570,6 +711,10 @@ export function ChatInput({
         await sendMutation.mutateAsync({ prompt, attachments: files });
       }
     } catch {
+      // The draft comes back; the reason the server refused it (still
+      // generating, waiting on a review, …) is toasted by the mutation's
+      // global error handler under the "Message not sent" title — see
+      // `useSendChatPrompt` / `useSendPrompt` meta.
       setText(rawInput);
       setActiveCommand(cmd);
       setAttachments(currentAttachments);
@@ -1001,6 +1146,15 @@ export function ChatInput({
         return;
       }
 
+      // ↑ / ↓ — recall earlier prompts (shell-style; only from the first /
+      // last line so multi-line editing still works).
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        if (navigateHistory(e.key === 'ArrowUp' ? -1 : 1, e.currentTarget)) {
+          e.preventDefault();
+          return;
+        }
+      }
+
       if (e.key !== 'Enter') return;
       // W29 — a surface that does not declare composer key bindings leaves
       // Enter to the textarea's own newline behaviour, so the only way to
@@ -1015,7 +1169,7 @@ export function ChatInput({
       e.preventDefault();
       handleSend();
     },
-    [menu, filteredCommands, filteredMentions, menuIndex, applyMenuSelection, activeCommand, text, handleSend, insertNewline, pauseVoiceIfListening],
+    [menu, filteredCommands, filteredMentions, menuIndex, applyMenuSelection, activeCommand, text, handleSend, insertNewline, pauseVoiceIfListening, navigateHistory],
   );
 
   const handleFileSelect = useCallback(() => {
@@ -1085,6 +1239,19 @@ export function ChatInput({
       onDragOver={handleDragOver}
     >
       <div className="mx-auto w-full max-w-3xl">
+      {aboveComposer}
+      {/* ── Workspace preparation ──
+          Worktrees and branch checkouts finish after the chat exists, so this
+          is a real (short) window in which Send cannot work. */}
+      {workspacePrep && workspacePrep.status !== 'ready' && (
+        <WorkspacePrepBar
+          status={workspacePrep.status}
+          error={workspacePrep.error}
+          onRetry={onRetryWorkspacePrep}
+          retrying={workspacePrepRetrying}
+          onEditSources={onEditSources}
+        />
+      )}
       {/* ── PLN-01: blocked-by-gate banner ──
           The server answers 409 INTERACTION_PENDING while a plan review or
           question is open, so explain that here rather than letting a send
@@ -1203,30 +1370,15 @@ export function ChatInput({
         {/* ── Attachment Chips ── */}
         {(attachments.length > 0 || (pendingCaptures?.length ?? 0) > 0 || mentionLoading) && (
           <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
-            {attachments.map((att) => {
-              const isMention = att.source === 'mention';
-              const label = att.label ?? att.file.name;
-              return (
-                <div
-                  key={att.id}
-                  className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)]/8 border border-[var(--color-primary)]/20 px-2.5 py-1 text-[11px] text-[var(--color-primary)] font-medium"
-                  title={label}
-                >
-                  {isMention ? <AtSign className="h-3 w-3" /> : <Paperclip className="h-3 w-3" />}
-                  <span className="max-w-[140px] truncate">{label}</span>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => removeAttachment(att.id)}
-                    className="h-auto w-auto rounded-full p-0.5 hover:bg-[var(--color-primary)]/15"
-                    title="Remove"
-                    aria-label={`Remove ${label}`}
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </Button>
-                </div>
-              );
-            })}
+            {attachments.map((att) => (
+              <ComposerChip
+                key={att.id}
+                file={att.file}
+                label={att.label ?? att.file.name}
+                icon={att.source === 'mention' ? <AtSign className="h-3 w-3" /> : undefined}
+                onRemove={() => removeAttachment(att.id)}
+              />
+            ))}
             {mentionLoading && (
               <div className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11px] text-[var(--color-muted-foreground)]">
                 <Spinner size="xs" /> Attaching…
@@ -1234,28 +1386,16 @@ export function ChatInput({
             )}
             {(pendingCaptures ?? []).map((cap) => {
               const Icon = cap.source === 'browser' ? Globe : cap.source === 'terminal' ? TerminalSquare : Paperclip;
-              const label = cap.label ?? cap.file.name;
               return (
-                <div
+                <ComposerChip
                   key={cap.id}
-                  className="flex items-center gap-1.5 rounded-md bg-[var(--color-accent)] border border-[var(--color-border)] px-2.5 py-1 text-[11px] text-[var(--color-foreground)] font-medium"
-                  title={`${cap.source} capture — ${label}`}
-                >
-                  <Icon className="h-3 w-3" />
-                  <span className="max-w-[140px] truncate">{label}</span>
-                  {onRemovePendingCapture && (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => onRemovePendingCapture(cap.id)}
-                      className="h-auto w-auto rounded-full p-0.5 hover:bg-[var(--color-background)]"
-                      title="Remove"
-                      aria-label={`Remove ${label}`}
-                    >
-                      <X className="h-2.5 w-2.5" />
-                    </Button>
-                  )}
-                </div>
+                  file={cap.file}
+                  label={cap.label ?? cap.file.name}
+                  title={`${cap.source} capture — ${cap.label ?? cap.file.name}`}
+                  icon={<Icon className="h-3 w-3" />}
+                  muted
+                  onRemove={onRemovePendingCapture ? () => onRemovePendingCapture(cap.id) : undefined}
+                />
               );
             })}
           </div>
@@ -1295,7 +1435,23 @@ export function ChatInput({
             value={text}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
-            onPaste={pauseVoiceIfListening}
+            onPaste={(e) => {
+              pauseVoiceIfListening();
+              // A pasted image (screenshot from the clipboard) becomes an
+              // attachment instead of being silently dropped.
+              if (!COMPOSER.attachments) return;
+              const files = Array.from(e.clipboardData?.files ?? []);
+              if (files.length === 0) return;
+              e.preventDefault();
+              setAttachments((prev) => [
+                ...prev,
+                ...files.map((file, i) => ({
+                  id: `paste:${Date.now()}:${i}:${file.name}`,
+                  file: file.name ? file : new File([file], `pasted-${Date.now()}.${(file.type.split('/')[1] ?? 'png').replace('jpeg', 'jpg')}`, { type: file.type }),
+                  source: 'file' as CaptureSource,
+                })),
+              ]);
+            }}
             onClick={(e) => {
               noteManualCaretMove();
               detectMenu(e.currentTarget.value, e.currentTarget.selectionStart ?? 0);
@@ -1729,6 +1885,56 @@ export function ChatInput({
       </div>
     </div>
   );
+}
+
+/**
+ * One attachment chip above the textarea. Images get a thumbnail glyph and a
+ * hover preview of the actual picture (object URL, revoked on unmount).
+ */
+function ComposerChip({
+  file, label, title, icon, muted, onRemove,
+}: {
+  file: File;
+  label: string;
+  title?: string;
+  icon?: React.ReactNode;
+  muted?: boolean;
+  onRemove?: (() => void) | undefined;
+}) {
+  const previewUrl = useObjectUrl(file);
+  const image = isPreviewableImage(file.type, file.name);
+  const chip = (
+    <div
+      data-testid="composer-attachment"
+      className={cn(
+        'flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium',
+        muted
+          ? 'border-[var(--color-border)] bg-[var(--color-accent)] text-[var(--color-foreground)]'
+          : 'border-[var(--color-primary)]/20 bg-[var(--color-primary)]/8 text-[var(--color-primary)]',
+      )}
+      title={title ?? label}
+    >
+      {icon ?? (image ? <ImageIcon className="h-3 w-3" /> : <Paperclip className="h-3 w-3" />)}
+      <span className="max-w-[140px] truncate">{label}</span>
+      {onRemove && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onRemove}
+          className={cn('h-auto w-auto rounded-full p-0.5', muted ? 'hover:bg-[var(--color-background)]' : 'hover:bg-[var(--color-primary)]/15')}
+          title="Remove"
+          aria-label={`Remove ${label}`}
+        >
+          <X className="h-2.5 w-2.5" />
+        </Button>
+      )}
+    </div>
+  );
+  return previewUrl ? (
+    <ImageHoverPreview src={previewUrl} alt={label}>
+      {chip}
+    </ImageHoverPreview>
+  ) : chip;
 }
 
 /**

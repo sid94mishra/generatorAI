@@ -15,6 +15,14 @@ export interface StreamActions {
   onOpenChanges?: (filePath?: string) => void;
   /** Open the integrated terminal's agent-command console at one call. */
   onOpenShell?: (callId: string) => void;
+  /** Workspace the transcript belongs to — resolves agent screenshot URLs. */
+  workspaceId?: string;
+}
+
+/** URL of a browser artifact (`browser/…` under the workspace root). */
+export function browserArtifactUrl(workspaceId: string, relativePath: string): string {
+  const clean = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  return `/api/workspaces/${encodeURIComponent(workspaceId)}/browser/files/${clean.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 export const StreamActionsContext = createContext<StreamActions>({});

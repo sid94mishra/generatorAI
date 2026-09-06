@@ -17,11 +17,15 @@ import type {
   ILogger,
 } from '@generatorai/shared';
 import type { CheckpointService } from '@generatorai/checkpoints';
-import { discoverRepos, type DiscoveredRepo } from '@generatorai/changes';
+import { discoverRepos, type DiscoveredRepo, type MountRef } from '@generatorai/changes';
 import type { IGitClient } from '@generatorai/git';
 import type { IExecutionWorkspaceRepository } from '../domain/ports/IExecutionWorkspaceRepository.js';
-import type { IWorkspaceWorktreeRepository } from '../domain/ports/IWorkspaceWorktreeRepository.js';
 import type { EventBus } from '../events/EventBus.js';
+
+/** Where the workspace's mounts come from (the WorkspaceManager). */
+export interface MountSource {
+  toMountRefs(workspace: ExecutionWorkspace): Promise<MountRef[]>;
+}
 
 export interface CaptureWorkspaceCheckpointParams extends CheckpointProvenance {
   workspaceId: string;
@@ -61,7 +65,7 @@ export class WorkspaceCheckpointService {
   constructor(
     private readonly checkpoints: CheckpointService,
     private readonly workspaceRepo: IExecutionWorkspaceRepository,
-    private readonly worktreeRepo: IWorkspaceWorktreeRepository,
+    private readonly mounts: MountSource,
     private readonly git: IGitClient,
     private readonly logger: ILogger,
   ) {}
@@ -155,6 +159,17 @@ export class WorkspaceCheckpointService {
       for (const record of created) {
         await this.emitCheckpointEvents(record, params);
       }
+      // Retention was never enforced before (no caller): snapshots accumulated
+      // for the life of the workspace. Prune after every durable capture.
+      if (created.length > 0 && params.kind !== 'live') {
+        for (const repo of targets) {
+          try {
+            await this.checkpoints.prune(params.workspaceId, repo.repoDir, repo.alias);
+          } catch {
+            /* logged by the service */
+          }
+        }
+      }
       return created;
     } catch (err) {
       this.logger.warn(
@@ -196,15 +211,17 @@ export class WorkspaceCheckpointService {
    * the change-set engine.
    */
   async resolveRepos(workspace: ExecutionWorkspace): Promise<WorkspaceRepoRef[]> {
-    // Checkpoints track the tree the agent edits, which is the local folder
-    // when one is bound — not the managed artifact root.
-    const codeRoot = workspace.codeRoot ?? workspace.rootPath;
-    const worktreeRows = await this.worktreeRepo.findByWorkspace(workspace.id);
-    const worktrees = worktreeRows.map((wt) => ({
-      alias: wt.alias,
-      worktreePath: resolveWorktreePath(codeRoot, wt.relativePath),
-    }));
-    return discoverRepos(this.git, { rootPath: codeRoot, worktrees, autoInit: true });
+    // The mounts ARE the tracked set: the directories the agent edits, each
+    // with its private shadow store. The managed root (scratch, plans,
+    // screenshots) is deliberately not among them.
+    const mounts = await this.mounts.toMountRefs(workspace);
+    const repos = await discoverRepos(this.git, {
+      rootPath: workspace.codeRoot ?? workspace.rootPath,
+      mounts,
+      autoInit: false,
+    });
+    for (const repo of repos) this.checkpoints.registerShadow(repo.repoDir, repo.gitDir);
+    return repos;
   }
 
   /** Resolve a single repo alias to its absolute directory. */
@@ -360,13 +377,4 @@ export class WorkspaceCheckpointService {
       this.logger.warn(`[WorkspaceCheckpoints] event emit failed: ${err}`);
     }
   }
-}
-
-/**
- * Worktree rows store a workspace-relative path, but older rows (and the
- * change-set engine) may hand back an absolute one. Accept both.
- */
-function resolveWorktreePath(rootPath: string, relativePath: string): string {
-  if (/^(?:[a-zA-Z]:[\\/]|\/)/.test(relativePath)) return relativePath;
-  return `${rootPath}/${relativePath}`.replace(/\/+/g, '/');
 }

@@ -27,6 +27,7 @@ import { createOpenApiRoutes } from './openapi.js';
 import { createProjectRoutes } from './projects.js';
 import { createSystemRoutes } from './system.js';
 import { createWorkspaceRoutes } from './workspaces.js';
+import { createFsRoutes } from './fs.js';
 import { createReviewRoutes } from './review.js';
 import { createHarnessRoutes } from './harness.js';
 import { createSourceControlRoutes } from './sourceControl.js';
@@ -74,6 +75,8 @@ export function createApiRouter(container: Container): Router {
 
   // Workspaces — workspace management + worktrees
   router.use('/workspaces', createWorkspaceRoutes(container));
+  // Directory browsing for the chat source picker (loopback / admin only).
+  router.use('/fs', createFsRoutes(container));
   // Review threads annotate a workspace's files, so they nest under it.
   router.use('/workspaces/:id/review', createReviewRoutes(container));
 

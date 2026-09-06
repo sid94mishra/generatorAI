@@ -8,13 +8,15 @@
 
 import React, { useCallback, useMemo } from 'react';
 import type { ChatMessage } from '@generatorai/shared';
-import { Bot, Download, CircleSlash, Volume2, Square } from 'lucide-react';
+import { Bot, CircleSlash, Volume2, Square } from 'lucide-react';
 import { StreamPanel } from '@/components/agent/StreamPanel.js';
 import { chatMessageToBlocks } from '@/components/agent/chatMessageToBlocks.js';
 import { deriveStreamView } from '@/components/agent/deriveTimeline.js';
 import { useTextToSpeech } from '@/hooks/useTextToSpeech.js';
 import { toast } from '@/components/Toast.js';
 import { Button, Spinner } from '@/components/ui/index.js';
+import { READ_ALOUD_ENABLED } from '@/components/chat/featureFlags.js';
+import { AttachmentChips } from '@/components/chat/AttachmentChips.js';
 
 interface AssistantMessageProps {
   message: ChatMessage;
@@ -32,9 +34,11 @@ interface AssistantMessageProps {
   /** Click-throughs for per-op diff icons / shell console / summary card. */
   onOpenChanges?: (filePath?: string) => void;
   onOpenShell?: (callId: string) => void;
+  /** Workspace behind this chat — resolves agent screenshot previews. */
+  workspaceId?: string;
 }
 
-export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOpenChanges, onOpenShell }: AssistantMessageProps) {
+export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOpenChanges, onOpenShell, workspaceId }: AssistantMessageProps) {
   // Persisted history is never active — sub-agent steps resolve to done.
   const view = useMemo(
     () => deriveStreamView(chatMessageToBlocks(message), { active: false }),
@@ -90,11 +94,12 @@ export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOp
           {...(onOpenPlan ? { onOpenPlan } : {})}
           {...(onOpenChanges ? { onOpenChanges } : {})}
           {...(onOpenShell ? { onOpenShell } : {})}
+          {...(workspaceId ? { workspaceId } : {})}
         />
 
         {/* Read this message aloud (Phase 3) — only offered once there's
             actual answer text and the platform supports playback. */}
-        {ttsSupported && view.answer.trim() && (
+        {READ_ALOUD_ENABLED && ttsSupported && view.answer.trim() && (
           <Button
             type="button"
             variant="ghost"
@@ -126,19 +131,7 @@ export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOp
 
         {/* Attachments (generated artifacts) */}
         {message.attachments && message.attachments.length > 0 && (
-          <div className="mt-2.5 flex flex-wrap gap-2">
-            {message.attachments.map((attachment, i) => (
-              <a
-                key={i}
-                href={attachment.path}
-                download={attachment.name}
-                className="flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)]/10 px-3 py-2 text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary)]/15 transition-colors"
-              >
-                <Download className="h-3.5 w-3.5" />
-                {attachment.name}
-              </a>
-            ))}
-          </div>
+          <AttachmentChips attachments={message.attachments} chatId={message.chatId} className="mt-2.5" download />
         )}
       </div>
     </div>

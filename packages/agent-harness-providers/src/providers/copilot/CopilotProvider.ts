@@ -955,6 +955,31 @@ export class CopilotProvider implements IAgentHarness {
       });
     }
 
+    // `SessionConfig` has exactly one root — `workingDirectory`. There is no
+    // field for extra readable/writable directories, so a chat's other mounts
+    // and its managed workspace root reach the model only through the
+    // `[Workspace]` block the caller puts in the system prompt.
+    if (params.additionalDirectories?.length) {
+      warnings.push({
+        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+        params: { field: 'additionalDirectories', provider: 'copilot' },
+      });
+    }
+
+    // The CLI's environment is fixed when the workspace client spawns it, and
+    // `WorkspacedCopilotPool` keys those clients by cwd — one process serves
+    // every conversation rooted in the same directory. Per-conversation
+    // variables therefore have no process of their own to land in; injecting
+    // them into the shared one would give one chat another chat's workspace
+    // paths. Provider-wide values still go through the client `env` built in
+    // `buildDefaultClientOptions` / `buildWorkspaceClient`.
+    if (params.env && Object.keys(params.env).length > 0) {
+      warnings.push({
+        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+        params: { field: 'env', provider: 'copilot', reason: 'CLI process is shared per workspace' },
+      });
+    }
+
     return registered;
   }
 

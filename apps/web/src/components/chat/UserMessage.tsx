@@ -7,7 +7,8 @@
 
 import React from 'react';
 import type { ChatMessage } from '@generatorai/shared';
-import { User, Paperclip } from 'lucide-react';
+import { User } from 'lucide-react';
+import { AttachmentChips } from '@/components/chat/AttachmentChips.js';
 
 interface UserMessageProps {
   message: ChatMessage;
@@ -31,19 +32,9 @@ export function UserMessage({ message }: UserMessageProps) {
           </p>
         </div>
 
-        {/* Attachments */}
+        {/* Attachments — hover an image for a preview */}
         {message.attachments && message.attachments.length > 0 && (
-          <div className="mt-2 flex flex-wrap justify-end gap-2">
-            {message.attachments.map((attachment, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-1.5 rounded-full bg-[var(--color-primary)]/10 px-3 py-1.5 text-xs font-medium text-[var(--color-primary)]"
-              >
-                <Paperclip className="h-3 w-3" />
-                {attachment.name}
-              </div>
-            ))}
-          </div>
+          <AttachmentChips attachments={message.attachments} chatId={message.chatId} className="mt-2 justify-end" />
         )}
       </div>
     </div>

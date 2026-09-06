@@ -32,12 +32,81 @@ import type {
   ResolvedAgentProjection,
   ResolutionWarning,
 } from '@generatorai/shared';
+// Workspace mounts — what the chat actually works on.
+import type {
+  ChatSourceSpec,
+  WorkspaceMount,
+  WorkspacePrepStatus,
+} from '@generatorai/shared';
 
 /** Response of `GET /api/agents/:id/usage`. */
 export interface AgentUsageResponse {
   chats: Array<{ id: string; name: string }>;
   stages: Array<{ id: string; name: string; workflowDefinitionId: string }>;
   workflows: Array<{ id: string; name: string }>;
+}
+
+/** One directory entry from `GET /api/fs/dirs`. */
+export interface FsDirEntry {
+  name: string;
+  path: string;
+  /** The directory is itself a git repository. */
+  isGit: boolean;
+}
+
+/** Response of `GET /api/fs/dirs?path=`. An empty path lists `roots`. */
+export interface FsDirListing {
+  path: string;
+  parent: string | null;
+  entries: FsDirEntry[];
+  /** Only for the empty-path listing: home + drive roots. */
+  roots?: string[];
+  /** Whether `path` itself is a repository. */
+  isGit?: boolean;
+}
+
+/** Response of `GET /api/fs/git-info?path=`. */
+export interface FsGitInfo {
+  path: string;
+  isRepo: boolean;
+  currentBranch: string | null;
+  branches: string[];
+  dirty: boolean;
+  nestedRepos: string[];
+}
+
+/** `GET /api/workspaces/:id` — the mount plan as it was actually realised. */
+export interface WorkspaceInfoDto {
+  id: string;
+  ownerType: string;
+  ownerId: string;
+  projectId?: string;
+  rootPath: string;
+  workingDirectory: string;
+  scratchPath: string;
+  status: string;
+  prepStatus: WorkspacePrepStatus;
+  prepError?: string;
+  mounts: WorkspaceMount[];
+  worktrees?: unknown[];
+  createdAt: string;
+}
+
+/** `GET /api/workspaces/:id/files` — the @-mention / file-panel index. */
+export interface WorkspaceFilesDto {
+  workspaceId: string;
+  rootPath: string;
+  scratchPath?: string;
+  codeRoot?: string;
+  /** One entry per mount, in workspace order. */
+  mounts?: Array<{ alias: string; path: string; mode: string }>;
+  /** Managed scratch + plans files, relative to `rootPath`. */
+  workspaceFiles: string[];
+  artifactFiles: string[];
+  /** Always empty since the mount rewrite; kept so old servers still work. */
+  sourceFiles: string[];
+  /** One entry per mount (in-place mounts included), files repo-relative. */
+  worktrees: Array<{ alias: string; worktreePath: string; mode?: string; files: string[] }>;
 }
 
 /** Driver process health, from `GET /api/workspaces/:id/computer/runtime`. */
@@ -568,6 +637,43 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<Chat>(`${this.baseUrl}/api/chats/${chatId}`);
   }
 
+  /**
+   * Replace what the chat works on. Rejected with 409 CHAT_BUSY while a turn
+   * is running (mounts cannot move under a live agent) and with 400 and a
+   * readable message when a source does not validate — both are surfaced
+   * inline by the editor rather than as a toast.
+   */
+  async updateChatSources(
+    chatId: string,
+    sources: ChatSourceSpec[],
+    primary?: string,
+  ): Promise<Chat> {
+    return apiFetch<Chat>(`${this.baseUrl}/api/chats/${chatId}/sources`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sources, ...(primary ? { primary } : {}) }),
+    });
+  }
+
+  /** Re-run mount preparation after it failed. Answers 202; progress arrives on SSE. */
+  async prepareChatWorkspace(chatId: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/chats/${chatId}/workspace/prepare`, { method: 'POST' });
+  }
+
+  // ── Filesystem browsing (local-folder source picker) ──
+
+  /** Child directories of `path`; an empty path lists the drive / home roots. */
+  async listFsDirs(path?: string): Promise<FsDirListing> {
+    const qs = new URLSearchParams({ path: path ?? '' });
+    return apiFetch<FsDirListing>(`${this.baseUrl}/api/fs/dirs?${qs.toString()}`);
+  }
+
+  /** Branches, dirty state and nested repositories of a folder. */
+  async getFsGitInfo(path: string): Promise<FsGitInfo> {
+    const qs = new URLSearchParams({ path });
+    return apiFetch<FsGitInfo>(`${this.baseUrl}/api/fs/git-info?${qs.toString()}`);
+  }
+
   // ── Orchestrator background tasks ──
 
   async getBackgroundTasks(chatId: string): Promise<{
@@ -1091,16 +1197,13 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<RunWorkspaceInfo>(`${this.baseUrl}/api/orchestrator/runs/${runId}/workspace`);
   }
 
-  /** Get workspace files listing by workspace ID (used by chat files panel) */
-  async getWorkspaceFiles(workspaceId: string): Promise<{
-    workspaceId: string;
-    rootPath: string;
-    workspaceFiles: string[];
-    artifactFiles: string[];
-    sourceFiles: string[];
-    worktrees: Array<{ alias: string; worktreePath: string; files: string[] }>;
-  }> {
-    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/files`);
+  /**
+   * Workspace file index — one `worktrees` entry per mount (in-place mounts
+   * included), plus the managed scratch/plans files. `sourceFiles` is empty
+   * since mounts replaced the `source/<alias>` layout.
+   */
+  async getWorkspaceFiles(workspaceId: string): Promise<WorkspaceFilesDto> {
+    return apiFetch<WorkspaceFilesDto>(`${this.baseUrl}/api/workspaces/${workspaceId}/files`);
   }
 
   /** Get a file's content from a workspace */
@@ -1276,10 +1379,16 @@ export class HttpPlatformClient implements IPlatformClient {
     workspaceId: string,
     checkpointId: string,
     paths?: string[],
+    /**
+     * Mount to restore. A checkpoint belongs to one mount; naming another
+     * makes the server pick that mount's equivalent snapshot (same turn, or
+     * its baseline), which is what a per-file discard on a second mount needs.
+     */
+    alias?: string,
   ): Promise<RestoreCheckpointResult> {
     return apiFetch(
       `${this.baseUrl}/api/workspaces/${workspaceId}/checkpoints/${checkpointId}/restore`,
-      { method: 'POST', body: JSON.stringify(paths ? { paths } : {}) },
+      { method: 'POST', body: JSON.stringify({ ...(paths ? { paths } : {}), ...(alias ? { alias } : {}) }) },
     );
   }
 
@@ -1386,7 +1495,7 @@ export class HttpPlatformClient implements IPlatformClient {
     hasGit: boolean;
     repos: Array<{
       alias: string;
-      kind: 'linked' | 'generated' | 'root';
+      kind: 'mount' | 'nested' | 'linked' | 'generated' | 'root';
       files: Array<{ path: string; status: string; diff: string }>;
     }>;
   }> {
@@ -2080,6 +2189,10 @@ export class HttpPlatformClient implements IPlatformClient {
   }
   async getWorkspace(id: string): Promise<any> {
     return apiFetch<any>(`${this.baseUrl}/api/workspaces/${id}`);
+  }
+  /** The same document as `getWorkspace`, typed around its mounts. */
+  async getWorkspaceInfo(id: string): Promise<WorkspaceInfoDto> {
+    return apiFetch<WorkspaceInfoDto>(`${this.baseUrl}/api/workspaces/${id}`);
   }
   async archiveWorkspace(id: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/workspaces/${id}/archive`, { method: 'POST' });

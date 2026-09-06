@@ -3,7 +3,15 @@
 // ────────────────────────────────────────────────────────────────
 
 export type ChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed';
-export type ChangeRepoKind = 'linked' | 'generated' | 'root';
+/**
+ * What a repo in a change summary IS.
+ *
+ *   mount   — one of the chat's mounts (codebase or folder, any mode)
+ *   nested  — a repository that lives inside a mount (`<alias>/<sub>`)
+ *   linked / generated / root — the pre-mount vocabulary; still returned for
+ *     workspaces created before the rewrite.
+ */
+export type ChangeRepoKind = 'mount' | 'nested' | 'linked' | 'generated' | 'root';
 export type ChangeRevisionKind = 'baseline' | 'checkpoint' | 'working' | 'ref';
 
 export interface ChangeRevision {

@@ -15,12 +15,12 @@
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { AlertTriangle, FileDiff, FilePlus2, FilePen } from 'lucide-react';
-import { Button } from '@/components/ui/index.js';
+import { AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import { IncrementalMarkdown } from '@/components/chat/IncrementalMarkdown.js'; // P0-47
-import { StepRow } from '@/components/agent/StepRow.js';
+import { StepRow, StepGroupRow } from '@/components/agent/StepRow.js';
+import { groupSteps } from '@/components/agent/groupSteps.js';
 import { UsageChip } from '@/components/agent/UsageChip.js';
 import { WidgetFrame } from '@/components/widgets/WidgetFrame.js';
 import { PlanCard } from '@/components/chat/PlanCard.js';
@@ -107,17 +107,20 @@ export interface StreamPanelProps {
   /** True while a plan/question/permission decision request is in flight. */
   planBusy?: boolean;
   /** Open the Changes tab (optionally at one file). Enables the per-op diff
-   *  icons and the end-of-turn changed-files summary card. */
+   *  icons on file-op steps. The conversation-wide list of changed files
+   *  lives on the composer (ChatChangesTray), not in the transcript. */
   onOpenChanges?: (filePath?: string) => void;
   /** Open the terminal's agent-command console at one shell call. */
   onOpenShell?: (callId: string) => void;
+  /** Workspace behind this transcript — resolves agent screenshot previews. */
+  workspaceId?: string;
 }
 
 export function StreamPanel({
   segments, steps, answer, widgets, streamKey, answerStreaming = false, active, loading = false,
   usage, prevUsage, prevCompletedAt, error, className,
   onOpenPlan, onApprovePlan, onRequestPlanChanges, onAnswerQuestion, onAnswerPermission, planBusy,
-  onOpenChanges, onOpenShell,
+  onOpenChanges, onOpenShell, workspaceId,
 }: StreamPanelProps) {
   const isActive = active ?? answerStreaming;
   const showAnswer = !!answer || loading;
@@ -126,15 +129,10 @@ export function StreamPanel({
     () => ({
       ...(onOpenChanges ? { onOpenChanges } : {}),
       ...(onOpenShell ? { onOpenShell } : {}),
+      ...(workspaceId ? { workspaceId } : {}),
     }),
-    [onOpenChanges, onOpenShell],
+    [onOpenChanges, onOpenShell, workspaceId],
   );
-  const allSteps = React.useMemo(() => {
-    const fromSegments = (segments ?? [])
-      .filter((seg): seg is Extract<StreamSegment, { type: 'steps' }> => seg.type === 'steps')
-      .flatMap((seg) => seg.steps);
-    return fromSegments.length > 0 ? fromSegments : steps;
-  }, [segments, steps]);
 
   // ── Temporal-order render path ──────────────────────────────────
   // When ordered segments are supplied, render them in sequence so prose
@@ -258,12 +256,6 @@ export function StreamPanel({
           </div>
         )}
 
-        {/* End-of-turn changed-files summary — the at-a-glance record of what
-            this turn touched, with a click-through to the authoritative diff. */}
-        {!isActive && (
-          <TurnChangesSummary steps={allSteps} onOpenChanges={onOpenChanges} />
-        )}
-
         {/* Usage footer — W30: prevUsage enables the cache-miss notice, and
             streamKey scopes its sticky `reportedCache` ledger. */}
         {usage && (
@@ -344,11 +336,6 @@ export function StreamPanel({
         </div>
       )}
 
-      {/* End-of-turn changed-files summary */}
-      {!isActive && (
-        <TurnChangesSummary steps={allSteps} onOpenChanges={onOpenChanges} />
-      )}
-
       {/* Usage footer */}
       {usage && (
         <UsageChip
@@ -363,144 +350,22 @@ export function StreamPanel({
   );
 }
 
-// -- End-of-turn changed-files summary -----------------------------
-
-interface FileAggregate {
-  filePath: string;
-  additions: number;
-  deletions: number;
-  created: boolean;
-}
-
-/** Fold every step's per-op stats into one row per file, children included. */
-function aggregateFileOps(steps: TimelineStep[]): FileAggregate[] {
-  const byPath = new Map<string, FileAggregate>();
-  const walk = (list: TimelineStep[]): void => {
-    for (const step of list) {
-      const op = step.fileOp;
-      if (op) {
-        const existing = byPath.get(op.filePath);
-        if (existing) {
-          existing.additions += op.additions;
-          existing.deletions += op.deletions;
-          existing.created = existing.created || op.kind === 'create';
-        } else {
-          byPath.set(op.filePath, {
-            filePath: op.filePath,
-            additions: op.additions,
-            deletions: op.deletions,
-            created: op.kind === 'create',
-          });
-        }
-      }
-      if (step.children) walk(step.children);
-    }
-  };
-  walk(steps);
-  return [...byPath.values()];
-}
-
-/** Compact display path: strip the workspace prefix, keep it mono-short. */
-function displayPath(p: string): string {
-  const norm = p.replace(/\\/g, '/');
-  const marker = '/workspaces/executions/';
-  const i = norm.indexOf(marker);
-  if (i !== -1) {
-    const rest = norm.slice(i + marker.length);
-    const slash = rest.indexOf('/');
-    if (slash !== -1) return rest.slice(slash + 1);
-  }
-  const parts = norm.split('/');
-  return parts.length > 4 ? parts.slice(-4).join('/') : norm;
-}
-
-/**
- * The at-a-glance record of what a settled turn changed: one row per file
- * with its net +/- line counts, plus a click-through to the Changes tab for
- * the authoritative diff. Renders nothing for turns that touched no files.
- */
-function TurnChangesSummary({
-  steps,
-  onOpenChanges,
-}: {
-  steps: TimelineStep[];
-  onOpenChanges?: ((filePath?: string) => void) | undefined;
-}) {
-  const files = React.useMemo(() => aggregateFileOps(steps), [steps]);
-  if (files.length === 0) return null;
-  const totalAdd = files.reduce((n, f) => n + f.additions, 0);
-  const totalDel = files.reduce((n, f) => n + f.deletions, 0);
-
-  return (
-    <div
-      className="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)]/60"
-      data-testid="turn-changes-summary"
-    >
-      <div className="flex items-center gap-2 border-b border-[var(--color-border)]/60 px-3 py-1.5">
-        <FileDiff className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" />
-        <span className="text-[11.5px] font-medium text-[var(--color-foreground)]/85">
-          {files.length} {files.length === 1 ? 'file' : 'files'} changed
-        </span>
-        <span className="font-mono text-[10.5px]">
-          <span className="text-[var(--color-success)]">+{totalAdd}</span>{' '}
-          <span className="text-[var(--color-danger)]">−{totalDel}</span>
-        </span>
-        {onOpenChanges && (
-          <Button
-            type="button"
-            variant="ghost"
-            title="Open the diff view"
-            aria-label="Open the diff view"
-            className="ml-auto h-auto w-auto rounded p-0.5 text-[var(--color-muted-foreground)]/70 hover:bg-[var(--color-subtle)] hover:text-[var(--color-primary)]"
-            onClick={() => onOpenChanges()}
-          >
-            <FileDiff className="h-3.5 w-3.5" />
-          </Button>
-        )}
-      </div>
-      <div className="max-h-48 overflow-y-auto px-1.5 py-1">
-        {files.map((f) => (
-          <Button
-            key={f.filePath}
-            type="button"
-            variant="ghost"
-            disabled={!onOpenChanges}
-            onClick={() => onOpenChanges?.(f.filePath)}
-            className={cn(
-              'h-auto w-full items-center gap-2 rounded px-1.5 py-[3px] text-left',
-              onOpenChanges && 'cursor-pointer hover:bg-[var(--color-subtle)]/70',
-            )}
-          >
-            {f.created ? (
-              <FilePlus2 className="h-3 w-3 shrink-0 text-[var(--color-success)]" />
-            ) : (
-              <FilePen className="h-3 w-3 shrink-0 text-[var(--color-warning,#b8860b)]" />
-            )}
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--color-foreground)]/80">
-              {displayPath(f.filePath)}
-            </span>
-            <span className="shrink-0 font-mono text-[10.5px]">
-              <span className="text-[var(--color-success)]">+{f.additions}</span>{' '}
-              <span className="text-[var(--color-danger)]">−{f.deletions}</span>
-            </span>
-          </Button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /** Connected vertical activity timeline for a run of steps. Shared by the
  *  legacy split view and each `steps` segment in the temporal-order path. */
 function StepsTimeline({ steps }: { steps: TimelineStep[] }) {
+  // Runs of related tool calls collapse to one row each (see groupSteps), so
+  // an eight-file read costs the reader one line, not eight.
+  const entries = React.useMemo(() => groupSteps(steps), [steps]);
   return (
     <div className="relative">
       {/* connector line through center of each step dot (x=16px) */}
       <div className="pointer-events-none absolute left-[16px] top-3 bottom-3 w-px bg-[var(--color-border)]" aria-hidden />
       <div className="space-y-0">
-        {steps.map((step) => (
-          <StepRow key={step.id} step={step} />
-        ))}
+        {entries.map((entry) =>
+          entry.type === 'group'
+            ? <StepGroupRow key={entry.id} group={entry} />
+            : <StepRow key={entry.step.id} step={entry.step} />,
+        )}
       </div>
     </div>
   );

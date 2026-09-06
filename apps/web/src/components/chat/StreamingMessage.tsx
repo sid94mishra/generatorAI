@@ -18,8 +18,10 @@ import { StreamPanel } from '@/components/agent/StreamPanel.js';
 import { deriveStreamView } from '@/components/agent/deriveTimeline.js';
 import { useTextToSpeech } from '@/hooks/useTextToSpeech.js';
 import { toast } from '@/components/Toast.js';
-import { AudioLines, Square } from 'lucide-react';
+import { AudioLines, Square, CircleSlash } from 'lucide-react';
 import { Button, Spinner } from '@/components/ui/index.js';
+import { READ_ALOUD_ENABLED } from '@/components/chat/featureFlags.js';
+import { ThinkingPlaceholder } from '@/components/chat/ThinkingPlaceholder.js';
 
 interface StreamingMessageProps {
   stream: StreamState;
@@ -56,6 +58,8 @@ interface StreamingMessageProps {
   /** Click-throughs for per-op diff icons / shell console / summary card. */
   onOpenChanges?: (filePath?: string) => void;
   onOpenShell?: (callId: string) => void;
+  /** Workspace behind this chat — resolves agent screenshot previews. */
+  workspaceId?: string;
 }
 
 export function StreamingMessage({
@@ -71,6 +75,7 @@ export function StreamingMessage({
   onAnswerQuestion,
   onAnswerPermission,
   planBusy,
+  workspaceId,
 }: StreamingMessageProps) {
   const isActive = stream.status === 'streaming' || stream.status === 'thinking';
   const hasContent = stream.blocks.length > 0;
@@ -119,7 +124,8 @@ export function StreamingMessage({
     if (sessionId) void speakStream(sessionId);
   }, [isSpeakingOrConnecting, stopSpeaking, speakStream, sessionId]);
 
-  if (!hasContent && !isActive) return null;
+  const stopped = stream.cancelRequested && !isActive;
+  if (!hasContent && !isActive && !stopped) return null;
 
   return (
     <div>
@@ -139,6 +145,7 @@ export function StreamingMessage({
           {...(onOpenPlan ? { onOpenPlan } : {})}
           {...(onOpenChanges ? { onOpenChanges } : {})}
           {...(onOpenShell ? { onOpenShell } : {})}
+          {...(workspaceId ? { workspaceId } : {})}
           {...(onApprovePlan ? { onApprovePlan } : {})}
           {...(onRequestPlanChanges ? { onRequestPlanChanges } : {})}
           {...(onAnswerQuestion ? { onAnswerQuestion } : {})}
@@ -147,10 +154,20 @@ export function StreamingMessage({
         />
       )}
 
+      {/* The user stopped this turn. Mirrors AssistantMessage's persisted
+          marker so a stopped turn is never a silent gap in the transcript —
+          including one stopped before it produced a single block. */}
+      {stopped && (
+        <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[var(--color-muted-foreground)]" data-testid="stream-stopped-note">
+          <CircleSlash className="h-3 w-3" />
+          {hasContent ? 'Stopped before the response finished.' : 'Stopped before the agent responded.'}
+        </p>
+      )}
+
       {/* Speak this turn aloud AS IT GENERATES (Phase 4). Only offered while
           the turn is actually live — once it completes, AssistantMessage's
           "Read aloud" is the right control for the finished text. */}
-      {isActive && ttsSupported && sessionId && (
+      {READ_ALOUD_ENABLED && isActive && ttsSupported && sessionId && (
         <Button
           type="button"
           variant="ghost"
@@ -171,34 +188,11 @@ export function StreamingMessage({
         </Button>
       )}
 
-      {/* Initial loading state — spinner + shimmer skeleton with contextual text */}
+      {/* Initial loading state — the one shared placeholder (also used by
+          ChatPage for the pending-turn gap), so the cue never changes shape
+          between "sent" and "first block". */}
       {!hasContent && isActive && (
-        <div className="animate-block-in mt-4">
-          <div className="flex gap-3">
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-white">
-              <Spinner size="md" />
-            </div>
-            <div className="flex-1 space-y-3 pt-1">
-              {/* Status indicator with spinner */}
-              <div className="flex items-center gap-2.5">
-                <div className="flex gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-[var(--color-primary)] dot-pulse-1" />
-                  <span className="h-2 w-2 rounded-full bg-[var(--color-primary)] dot-pulse-2" />
-                  <span className="h-2 w-2 rounded-full bg-[var(--color-primary)] dot-pulse-3" />
-                </div>
-                <span className="text-sm font-medium text-[var(--color-foreground)]">
-                  {stream.status === 'thinking' ? 'Analyzing your request...' : 'Generating response...'}
-                </span>
-              </div>
-              {/* Shimmer skeleton lines */}
-              <div className="space-y-2.5 max-w-lg">
-                <div className="skeleton-shimmer h-3.5 w-[85%] rounded-md" />
-                <div className="skeleton-shimmer h-3.5 w-[70%] rounded-md" />
-                <div className="skeleton-shimmer h-3.5 w-[55%] rounded-md" />
-              </div>
-            </div>
-          </div>
-        </div>
+        <ThinkingPlaceholder label={stream.status === 'thinking' ? 'Analyzing your request' : 'Generating response'} />
       )}
     </div>
   );

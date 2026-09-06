@@ -363,6 +363,25 @@ describe('ChangeSummaryService (real git)', () => {
     expect(summary.repos[0]!.files.map((f) => f.path)).toContain('a.txt');
   });
 
+  it('a commit base against a CRLF checkout reports only real edits (EOL-normalised working tree)', async () => {
+    // Windows default: files are checked out with CRLF while the commit's
+    // blobs are LF. Snapshots are byte-exact (autocrlf off), so diffing one
+    // against a real commit used to mark every line of every file changed.
+    const g = (...args: string[]) =>
+      realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repoDir, timeout: 15_000 });
+    await g('config', 'core.autocrlf', 'true');
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'one\r\r\ntwo\r\r\n');
+    await fs.writeFile(path.join(repoDir, 'b.txt'), 'x\r\r\n');
+    await g('add', '-A');
+    await g('commit', '-q', '-m', 'initial');
+    await fs.writeFile(path.join(repoDir, 'b.txt'), 'x\r\r\ny\r\r\n');
+
+    const summary = await service.getSummary({ ...params(), base: { kind: 'ref', id: 'HEAD' } });
+    expect(summary.base.normalized).toBe(true);
+    expect(summary.repos[0]!.files.map((f) => f.path)).toEqual(['b.txt']);
+    expect(summary.repos[0]!.files[0]).toMatchObject({ additions: 1, deletions: 0 });
+  });
+
   it('includes the full path list only when the tree view asks for it', async () => {
     await fs.writeFile(path.join(repoDir, 'a.txt'), 'a\n');
     await fs.mkdir(path.join(repoDir, 'src'), { recursive: true });

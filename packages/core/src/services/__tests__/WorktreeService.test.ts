@@ -102,6 +102,7 @@ function makeService(opts: {
       await realFs.rm(worktreePath, { recursive: true, force: true });
     }),
     pruneWorktrees: vi.fn(async () => {}),
+    revParse: vi.fn(async () => ''),
   };
   const logger = makeLogger();
   const service = new WorktreeService(
@@ -146,6 +147,74 @@ afterEach(async () => {
     await realFs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
   tmpRoots = [];
+});
+
+// ── local-dir codebases are used IN PLACE ────────────────────────
+//
+// A plain folder has no git to carve a worktree from, and copying it whole
+// (node_modules, .git, build output) on every run is what made disk usage grow
+// without bound. It is now used where it lives: the row records the folder's
+// own path, carries no branch, and removing the row must never delete the
+// user's directory.
+
+describe('WorktreeService local-dir codebases', () => {
+  it('records the folder in place instead of copying it', async () => {
+    const dir = await tmpDir();
+    const localPath = path.join(dir, 'notes');
+    await realFs.mkdir(localPath, { recursive: true });
+    await realFs.writeFile(path.join(localPath, 'todo.md'), 'mine\n', 'utf-8');
+    const targetDir = path.join(dir, 'workspace', 'source');
+    await realFs.mkdir(targetDir, { recursive: true });
+
+    const repo = new FakeWorktreeRepo();
+    const { service, gitManager } = makeService({
+      worktreeRepo: repo,
+      codebase: {
+        ...gitCodebase,
+        type: 'local-dir',
+        alias: 'notes',
+        localPath,
+        clonePath: localPath,
+      } as ProjectCodebase,
+    });
+
+    const wt = await service.createWorktree('cb', 'run-1', { targetDir });
+
+    // The row points at the user's own folder, and no branch was cut.
+    expect(wt.worktreePath).toBe(path.resolve(localPath));
+    expect(wt.branchName).toBe('');
+    expect(gitManager.createWorktree).not.toHaveBeenCalled();
+    // Nothing was copied into the workspace source dir.
+    await expect(realFs.readdir(targetDir)).resolves.toEqual([]);
+    expect(repo.rows).toHaveLength(1);
+  });
+
+  it('removing the in-place row leaves the user folder untouched', async () => {
+    const dir = await tmpDir();
+    const localPath = path.join(dir, 'notes');
+    await realFs.mkdir(localPath, { recursive: true });
+    await realFs.writeFile(path.join(localPath, 'todo.md'), 'mine\n', 'utf-8');
+
+    const repo = new FakeWorktreeRepo();
+    await repo.create(seedRow({ worktreePath: path.resolve(localPath), branchName: '' }));
+    const { service, gitManager } = makeService({
+      worktreeRepo: repo,
+      codebase: {
+        ...gitCodebase,
+        type: 'local-dir',
+        alias: 'notes',
+        localPath,
+        clonePath: localPath,
+      } as ProjectCodebase,
+    });
+
+    await service.removeWorktree('wt-1');
+
+    expect(repo.rows).toHaveLength(0);
+    expect(gitManager.removeWorktree).not.toHaveBeenCalled();
+    // Deleting the user's own folder because a run ended is data loss.
+    await expect(realFs.readFile(path.join(localPath, 'todo.md'), 'utf-8')).resolves.toBe('mine\n');
+  });
 });
 
 describe('WorktreeService.removeWorktree', () => {

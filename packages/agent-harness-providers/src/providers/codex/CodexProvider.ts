@@ -75,6 +75,7 @@ import type {
   V2Model,
   V2ModelListResponse,
   V2SandboxMode,
+  V2SandboxPolicy,
   V2ThreadItemsListResponse,
   V2ThreadResumeResponse,
   V2ThreadStartParams,
@@ -106,6 +107,19 @@ interface ConversationState {
   /** The Codex thread id (`thread/start` → `thread.id`). */
   threadId: string;
   params: CreateConversationParams;
+  /**
+   * Per-turn sandbox override carrying the chat's extra writable roots.
+   *
+   * `V2ThreadStartParams` has no sandbox-policy field — only `sandbox`, a
+   * `V2SandboxMode` enum — so the roots cannot be attached to the thread.
+   * `V2TurnStartParams.sandboxPolicy` ("Override the sandbox policy for this
+   * turn and subsequent turns") is the only place the pinned protocol accepts
+   * `writableRoots`, so it is sent with every turn. Undefined when the caller
+   * asked for no extra directories, or when the sandbox is not
+   * `workspace-write` (a read-only or full-access sandbox has no notion of an
+   * extra writable root).
+   */
+  sandboxPolicy?: V2SandboxPolicy;
   listeners: Set<Listener<AgentEvent>>;
   warnings: ConversationWarning[];
   inFlight: boolean;
@@ -592,7 +606,10 @@ export class CodexProvider implements IAgentHarness {
       const resumed = await this.rpc<V2ThreadResumeResponse>('thread/resume', {
         threadId: params.resumeProviderSessionId,
         ...(params.model ? { model: params.model } : {}),
-        cwd: this.opts.defaultCwd,
+        // The chat's own primary mount, NOT the server's cwd. Resuming a
+        // thread rooted somewhere else is how a chat bound to a worktree ends
+        // up reading and writing the GeneratorAI checkout instead.
+        cwd: params.workingDirectory ?? this.opts.defaultCwd,
         excludeTurns: true,
       });
       threadId = resumed.thread.id;
@@ -601,7 +618,7 @@ export class CodexProvider implements IAgentHarness {
         ...(params.model ?? this.opts.defaultModel
           ? { model: params.model ?? this.opts.defaultModel }
           : {}),
-        cwd: this.opts.defaultCwd,
+        cwd: params.workingDirectory ?? this.opts.defaultCwd,
         approvalPolicy: this.opts.approvalPolicy,
         sandbox: this.opts.sandboxMode,
         ...(this.buildInstructions(params, warnings)),
@@ -613,6 +630,7 @@ export class CodexProvider implements IAgentHarness {
     this.conversations.set(params.conversationId, {
       threadId,
       params,
+      ...(this.buildSandboxPolicy(params, warnings)),
       listeners: new Set(),
       warnings,
       inFlight: false,
@@ -648,7 +666,51 @@ export class CodexProvider implements IAgentHarness {
         params: { field: 'maxTurns', provider: 'codex' },
       });
     }
+    // `codex app-server` is ONE shared child process for the whole provider,
+    // spawned in `initialize()` before any conversation exists (see the
+    // `spawn` there). A process environment is fixed at spawn time and the
+    // protocol has no per-thread env field, so per-conversation variables
+    // (`GENERATORAI_WORKSPACE_ROOT`, `GENERATORAI_SCRATCH_DIR`) cannot be
+    // delivered without giving every chat its own binary. Say so rather than
+    // silently dropping them — provider-wide values still go through
+    // `CodexProviderOptions.env`.
+    if (params.env && Object.keys(params.env).length > 0) {
+      warnings.push({
+        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+        params: { field: 'env', provider: 'codex', reason: 'shared app-server process' },
+      });
+    }
     return out;
+  }
+
+  /**
+   * Map `additionalDirectories` onto the only field in the pinned protocol
+   * that accepts extra writable roots.
+   *
+   * Codex's sandbox is a policy, not a list of mounts: outside
+   * `workspace-write` there is nothing for a writable root to widen (a
+   * `readOnly` policy has no `writableRoots` member at all, and
+   * `dangerFullAccess` already grants everything), so anything else is
+   * reported as unsupported instead of being quietly reshaped.
+   */
+  private buildSandboxPolicy(
+    params: CreateConversationParams,
+    warnings: ConversationWarning[],
+  ): Pick<ConversationState, 'sandboxPolicy'> {
+    const dirs = [...new Set(params.additionalDirectories ?? [])];
+    if (dirs.length === 0) return {};
+    if (this.opts.sandboxMode !== 'workspace-write') {
+      warnings.push({
+        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+        params: {
+          field: 'additionalDirectories',
+          provider: 'codex',
+          reason: `sandbox mode "${this.opts.sandboxMode}" has no writable roots`,
+        },
+      });
+      return {};
+    }
+    return { sandboxPolicy: { type: 'workspaceWrite', writableRoots: dirs } };
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
@@ -818,6 +880,9 @@ export class CodexProvider implements IAgentHarness {
       // nearest analogue of a permission mode: a caller asking for `plan` or
       // `dontAsk` must not silently get the thread's default.
       ...(this.approvalPolicyForTurn(options)),
+      // The chat's extra writable roots. `thread/start` cannot carry them, so
+      // every turn re-asserts the policy (see `ConversationState.sandboxPolicy`).
+      ...(conv.sandboxPolicy ? { sandboxPolicy: conv.sandboxPolicy } : {}),
     };
 
     let assistantText = '';

@@ -70,9 +70,13 @@ export class WorktreeService {
       }
     }
 
-    // For local-dir type, just copy the directory
+    // A plain folder has no git to carve a worktree from and copying it
+    // whole (node_modules, .git, build output — every run) is what made
+    // disk usage grow without bound. It is used IN PLACE: the run works in
+    // the folder itself, and the row records that path so the run's
+    // `repo_path_<alias>` still resolves.
     if (codebase.type === 'local-dir') {
-      return this.createLocalDirWorktree(codebase, runId, worktreePath, branchName, options?.runType);
+      return this.createLocalDirWorktree(codebase, runId, options?.runType);
     }
 
     // Create git worktree
@@ -161,6 +165,14 @@ export class WorktreeService {
       codebase = await this.codebaseRepo.getById(worktree.codebaseId);
     } catch {
       codebase = undefined;
+    }
+
+    // An in-place local-dir "worktree" IS the user's folder. Forget the row,
+    // never delete the directory.
+    if (codebase?.type === 'local-dir' && codebase.localPath && path.resolve(codebase.localPath) === path.resolve(worktree.worktreePath)) {
+      await this.worktreeRepo.delete(worktreeId);
+      this.logger.info(`[Worktree] Unlinked in-place folder ${worktreeId}`);
+      return;
     }
 
     if (codebase && codebase.type !== 'local-dir' && codebase.clonePath) {
@@ -280,14 +292,10 @@ export class WorktreeService {
   private async createLocalDirWorktree(
     codebase: ProjectCodebase,
     runId: string,
-    worktreePath: string,
-    branchName: string,
     runType?: WorktreeRunType,
   ): Promise<WorktreeInfo> {
-    // For local-dir type, copy the directory contents
     if (!codebase.localPath) throw new Error('Local path is required');
-    await fs.mkdir(worktreePath, { recursive: true });
-    await fs.cp(codebase.localPath, worktreePath, { recursive: true });
+    await fs.access(codebase.localPath);
 
     const id = randomUUID();
     const worktree: WorktreeInfo = {
@@ -296,14 +304,14 @@ export class WorktreeService {
       codebaseId: codebase.id,
       runId,
       runType: runType ?? 'workflow',
-      worktreePath,
-      branchName,
+      worktreePath: path.resolve(codebase.localPath),
+      branchName: '',
       status: 'active',
       createdAt: new Date(),
     };
 
     await this.worktreeRepo.create(worktree);
-    this.logger.info(`[Worktree] Created local dir copy for "${codebase.alias}" at ${worktreePath}`);
+    this.logger.info(`[Worktree] Using local folder "${codebase.alias}" in place at ${codebase.localPath}`);
     return worktree;
   }
 }

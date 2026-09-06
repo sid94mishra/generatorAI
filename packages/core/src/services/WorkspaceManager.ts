@@ -15,15 +15,18 @@ import type {
   WorkspaceRetentionPolicy,
   WorkspaceManifest,
   WorktreeDetail,
-  WorkspaceWorktreeRecord,
   WorkspaceArtifactRecord,
+  WorkspaceMount,
+  WorkspaceExposure,
 } from '@generatorai/shared';
 import type { IExecutionWorkspaceRepository } from '../domain/ports/IExecutionWorkspaceRepository.js';
-import type { IWorkspaceWorktreeRepository } from '../domain/ports/IWorkspaceWorktreeRepository.js';
+import type { IWorkspaceMountRepository } from '../domain/ports/IWorkspaceMountRepository.js';
 import type { IWorkspaceArtifactRepository } from '../domain/ports/IWorkspaceArtifactRepository.js';
 import type { IWorktreeRepository } from '../domain/ports/IWorktreeRepository.js';
 import { PathResolver } from './PathResolver.js';
 import type { IGitClient } from '@generatorai/git';
+import { shadowGitDirFor, type MountRef } from '@generatorai/changes';
+import { buildExposure, SCRATCH_DIR } from './MountService.js';
 
 export interface WorkspaceManagerConfig {
   workspacesDir: string;
@@ -115,21 +118,17 @@ export class WorkspaceManager {
 
   constructor(
     private readonly workspaceRepo: IExecutionWorkspaceRepository,
-    private readonly worktreeRepo: IWorkspaceWorktreeRepository,
+    private readonly mountRepo: IWorkspaceMountRepository,
     private readonly artifactRepo: IWorkspaceArtifactRepository,
     private readonly config: WorkspaceManagerConfig,
     private readonly logger: ILogger,
     /** Optional git client — when provided, commits go through it. */
     private readonly gitClient?: IGitClient,
     /**
-     * The AUTHORITATIVE worktree table (`worktrees`), keyed by runId.
-     *
-     * P0-e: `deleteWorkspace` used to consult only `workspace_worktrees`, the
-     * table `trackWorktree` writes — and `trackWorktree` has no callers, so
-     * that table is always empty and the whole removal path was dead. Real
-     * worktrees are written here by `WorktreeService.createWorktree` under
-     * `runId = workspace.ownerId`. Optional so embedders that never create
-     * worktrees can omit it.
+     * The legacy `worktrees` table, keyed by runId. Still written by
+     * `WorktreeService` for workflow runs, and read here to (a) back-fill
+     * mounts for workspaces created before mounts existed and (b) unregister
+     * those worktrees on delete. Optional for embedders without worktrees.
      */
     private readonly runWorktreeRepo?: IWorktreeRepository,
   ) {
@@ -238,7 +237,7 @@ export class WorkspaceManager {
     const id = randomUUID();
     // The workspace root is ALWAYS managed: plans, artifacts, orchestrator state
     // and task scratch live here and must never be written into a user's repo.
-    const rootPath = path.join(this.config.workspacesDir, 'executions', params.ownerId);
+    const rootPath = this.rootPathFor(params.ownerId);
     const codeRoot = params.codeRootOverride?.trim() || undefined;
     const now = new Date();
 
@@ -250,6 +249,9 @@ export class WorkspaceManager {
       rootPath,
       ...(codeRoot ? { codeRoot } : {}),
       status: 'creating',
+      // Mount-backed workspaces start `pending` and the mount service flips
+      // them to `ready`; everything else is ready the moment it exists.
+      prepStatus: params.sources ? 'pending' : 'ready',
       gitEnabled: params.gitEnabled ?? this.config.defaultGitEnabled,
       useWorktree: params.useWorktree ?? true,
       metadata: {},
@@ -268,16 +270,13 @@ export class WorkspaceManager {
       // Create directory structure
       await this.setupDirectories(rootPath);
 
-      // Initialize git repository if enabled
+      // Initialize git repository if enabled (workflow runs commit the root
+      // on completion). Chats pass `gitEnabled: false`: their code lives in
+      // mounts and the managed root is scratch. A linked user folder is
+      // NEVER initialised, configured or committed — its change tracking
+      // runs through a private shadow store.
       if (workspace.gitEnabled) {
         await this.initGitRepo(rootPath);
-        // The code root needs its own repo or nothing can diff it — and repo
-        // discovery would otherwise auto-init each code-bearing subdirectory
-        // (src/, test/, …) as a separate repo and drop a .gitignore in each.
-        // `git init` is a no-op on an existing repository.
-        if (codeRoot && codeRoot !== rootPath) {
-          await this.initCodeRootRepo(codeRoot);
-        }
       }
 
       // Write workspace manifest
@@ -308,6 +307,137 @@ export class WorkspaceManager {
    */
   getWorkingDirectory(workspace: ExecutionWorkspace): string {
     return workspace.codeRoot ?? workspace.rootPath;
+  }
+
+  /** Where a workspace for `ownerId` lives (or would live). Deterministic. */
+  rootPathFor(ownerId: string): string {
+    return path.join(this.config.workspacesDir, 'executions', ownerId);
+  }
+
+  /** Managed scratch directory the agent is told to use for non-deliverables. */
+  getScratchDir(workspace: ExecutionWorkspace): string {
+    return path.join(workspace.rootPath, SCRATCH_DIR);
+  }
+
+  /**
+   * The workspace's mounts, in position order.
+   *
+   * Workspaces created before mounts existed get their rows synthesised on
+   * first read from what they had: a bound local folder becomes an in-place
+   * mount, legacy worktree rows become worktree mounts, and a workspace with
+   * neither becomes one `generated` mount at its root. Those back-filled
+   * mounts keep using their own `.git` (`git.shadow === false`) so the
+   * checkpoints they already have stay valid.
+   */
+  async listMounts(workspace: ExecutionWorkspace): Promise<WorkspaceMount[]> {
+    const rows = await this.mountRepo.findByWorkspace(workspace.id);
+    if (rows.length > 0 || workspace.prepStatus === 'pending' || workspace.prepStatus === 'preparing') {
+      return rows;
+    }
+    const backfilled = await this.backfillMounts(workspace);
+    for (const m of backfilled) {
+      try {
+        await this.mountRepo.create(m);
+      } catch (err) {
+        this.logger.warn(`[WorkspaceManager] Could not persist back-filled mount ${m.alias}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return backfilled;
+  }
+
+  private async backfillMounts(workspace: ExecutionWorkspace): Promise<WorkspaceMount[]> {
+    const now = new Date();
+    const out: WorkspaceMount[] = [];
+    const base = {
+      workspaceId: workspace.id,
+      status: 'ready' as const,
+      hasUncommittedChanges: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (this.runWorktreeRepo) {
+      try {
+        const rows = await this.runWorktreeRepo.getByRunId(workspace.ownerId);
+        for (const row of rows) {
+          const abs = row.worktreePath?.trim();
+          if (!abs) continue;
+          if (row.status === 'orphaned' || row.status === 'cleanup-pending') continue;
+          if (!(await this.pathExists(abs))) continue;
+          const resolved = path.resolve(abs);
+          out.push({
+            ...base,
+            id: randomUUID(),
+            position: out.length,
+            alias: path.basename(resolved),
+            originKind: 'codebase',
+            codebaseId: row.codebaseId,
+            projectId: row.projectId,
+            mode: 'worktree',
+            path: resolved,
+            git: { isRepo: true, branch: row.branchName, shadow: false },
+          });
+        }
+      } catch (err) {
+        this.logger.warn(`[WorkspaceManager] Could not list legacy worktrees for ${workspace.ownerId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    if (workspace.codeRoot && workspace.codeRoot !== workspace.rootPath) {
+      const isRepo = await this.pathExists(path.join(workspace.codeRoot, '.git'));
+      out.push({
+        ...base,
+        id: randomUUID(),
+        position: out.length,
+        alias: '.',
+        originKind: 'folder',
+        originPath: workspace.codeRoot,
+        mode: 'in-place',
+        path: workspace.codeRoot,
+        git: { isRepo, shadow: false },
+      });
+    } else if (out.length === 0) {
+      out.push({
+        ...base,
+        id: randomUUID(),
+        position: 0,
+        alias: '.',
+        originKind: 'generated',
+        mode: 'generated',
+        path: workspace.rootPath,
+        git: { isRepo: await this.pathExists(path.join(workspace.rootPath, '.git')), shadow: false },
+      });
+    }
+    return out;
+  }
+
+  /** Mounts as the change/checkpoint engines see them (with shadow dirs). */
+  async toMountRefs(workspace: ExecutionWorkspace): Promise<MountRef[]> {
+    const mounts = await this.listMounts(workspace);
+    return mounts
+      .filter((m) => m.status === 'ready' || m.status === 'preparing')
+      .map((m) => {
+        const shadow = m.git?.shadow !== false;
+        return {
+          alias: m.alias,
+          path: m.path,
+          ...(shadow ? { gitDir: shadowGitDirFor(workspace.rootPath, m.alias) } : {}),
+          ...(m.git?.baseCommit ? { baseCommit: m.git.baseCommit } : {}),
+          ...(m.git?.nested?.length
+            ? {
+                nested: m.git.nested.map((name) => ({
+                  name,
+                  gitDir: shadowGitDirFor(workspace.rootPath, `${m.alias}/${name}`),
+                })),
+              }
+            : {}),
+        };
+      });
+  }
+
+  /** Everything a harness needs: cwd, extra directories, env and the hint block. */
+  async getExposure(workspace: ExecutionWorkspace): Promise<WorkspaceExposure> {
+    return buildExposure(workspace, await this.listMounts(workspace));
   }
 
   /**
@@ -347,35 +477,6 @@ export class WorkspaceManager {
     };
 
     await this.artifactRepo.create(artifact);
-  }
-
-  /**
-   * Register a worktree in the workspace.
-   */
-  async trackWorktree(
-    workspaceId: string,
-    codebaseId: string,
-    alias: string,
-    branchName: string,
-    baseBranch: string,
-    relativePath: string,
-  ): Promise<WorkspaceWorktreeRecord> {
-    const record: WorkspaceWorktreeRecord = {
-      id: randomUUID(),
-      workspaceId,
-      codebaseId,
-      alias,
-      branchName,
-      baseBranch,
-      relativePath,
-      status: 'active',
-      hasUncommittedChanges: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    await this.worktreeRepo.create(record);
-    return record;
   }
 
   /**
@@ -497,7 +598,7 @@ export class WorkspaceManager {
       }
     }
     await this.artifactRepo.deleteByWorkspace(workspaceId);
-    await this.worktreeRepo.deleteByWorkspace(workspaceId);
+    await this.mountRepo.deleteByWorkspace(workspaceId);
     await this.workspaceRepo.delete(workspaceId);
 
     this.logger.info(`[WorkspaceManager] Workspace ${workspaceId} deleted`);
@@ -509,20 +610,13 @@ export class WorkspaceManager {
    *
    * Two sources, deliberately both:
    *
-   *  - `runWorktreeRepo` (the `worktrees` table) is the AUTHORITATIVE record.
-   *    It is what `WorktreeService.createWorktree` actually writes, keyed by
-   *    `runId` — which for every workspace-backed run *is* `workspace.ownerId`
-   *    (chats pass `chatId`, workflow runs pass `runId`). It stores absolute
-   *    paths, so it also covers legacy worktrees placed outside the workspace
-   *    root in the project worktrees dir.
-   *  - `worktreeRepo` (the `workspace_worktrees` tracking table) is what
-   *    `trackWorktree` writes. It has no production writers today, but it is
-   *    kept in the union so that any caller which does populate it still gets
-   *    its worktrees cleaned up.
-   *
-   * P0-e: consulting only the tracking table made this whole path dead code —
-   * the table was always empty while real worktrees accumulated in the parent
-   * clone forever.
+   *  - `runWorktreeRepo` (the legacy `worktrees` table) — what
+   *    `WorktreeService.createWorktree` writes for workflow runs and for chats
+   *    created before mounts existed, keyed by `runId = workspace.ownerId`.
+   *    Absolute paths, so it also covers worktrees placed outside the
+   *    workspace root in the old project worktrees dir.
+   *  - `mountRepo` — worktree mounts (`mode === 'worktree'`). In-place mounts
+   *    are the user's own directories and are never candidates for removal.
    */
   private async collectWorktreeTargets(
     workspace: ExecutionWorkspace,
@@ -547,24 +641,14 @@ export class WorkspaceManager {
       }
     }
 
-    const tracked = await this.worktreeRepo.findByWorkspace(workspace.id);
-    for (const record of tracked) {
-      // `relativePath` comes from a DB column and is interpolated straight into
-      // `git worktree remove --force`. Force it through the workspace boundary
-      // check first: a row carrying `../../..` (or an absolute path) would
-      // otherwise aim a forced removal at an arbitrary directory.
-      let resolved: string;
-      try {
-        resolved = await this.pathResolver.resolveWithinWorkspace(
-          workspace.rootPath,
-          record.relativePath,
-        );
-      } catch (err) {
-        this.logger.warn(
-          `[WorkspaceManager] Skipping worktree record ${record.id}: relativePath ` +
-            `"${record.relativePath}" escapes workspace ${workspace.id} ` +
-            `(${err instanceof Error ? err.message : String(err)})`,
-        );
+    // Worktree mounts live under the workspace root; in-place mounts are the
+    // user's own directories and are never candidates for removal.
+    for (const mount of await this.mountRepo.findByWorkspace(workspace.id, { includeRemoved: true })) {
+      if (mount.mode !== 'worktree' || mount.status === 'removed') continue;
+      const resolved = path.resolve(mount.path);
+      const root = path.resolve(workspace.rootPath);
+      if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+        this.logger.warn(`[WorkspaceManager] Skipping worktree mount ${mount.id}: ${mount.path} is outside workspace ${workspace.id}`);
         continue;
       }
       if (!byPath.has(resolved)) byPath.set(resolved, { worktreePath: resolved });
@@ -702,32 +786,46 @@ export class WorkspaceManager {
     const results: WorkspaceInfo[] = [];
 
     for (const ws of workspaces) {
-      const worktreeRecords = await this.worktreeRepo.findByWorkspace(ws.id);
-      const worktreeDetails: WorktreeDetail[] = worktreeRecords.map(r => ({
-        codebaseId: r.codebaseId,
-        alias: r.alias,
-        branchName: r.branchName,
-        baseBranch: r.baseBranch,
-        worktreePath: r.relativePath,
-        status: r.status,
-      }));
-
-      results.push({
-        id: ws.id,
-        ownerType: ws.ownerType,
-        ownerId: ws.ownerId,
-        projectId: ws.projectId,
-        rootPath: ws.rootPath,
-        workingDirectory: this.getWorkingDirectory(ws),
-        sourcePaths: worktreeDetails.map(w => path.join(ws.rootPath, w.worktreePath)),
-        artifactsPath: path.join(ws.rootPath, 'artifacts'),
-        status: ws.status,
-        worktrees: worktreeDetails,
-        createdAt: ws.createdAt,
-      });
+      results.push(await this.toInfo(ws));
     }
 
     return results;
+  }
+
+  /** `WorktreeDetail`s derived from worktree mounts (kept for older API clients). */
+  private worktreeDetailsFromMounts(ws: ExecutionWorkspace, mounts: WorkspaceMount[]): WorktreeDetail[] {
+    return mounts
+      .filter((m) => m.mode === 'worktree' && m.status !== 'removed')
+      .map((m) => ({
+        codebaseId: m.codebaseId ?? '',
+        alias: m.alias,
+        branchName: m.git?.branch ?? '',
+        baseBranch: m.git?.baseRef ?? '',
+        worktreePath: relativizeToRoot(ws.rootPath, path.resolve(m.path)),
+        status: m.status === 'error' ? 'error' : 'active',
+      }));
+  }
+
+  private async toInfo(ws: ExecutionWorkspace): Promise<WorkspaceInfo> {
+    const mounts = await this.listMounts(ws);
+    const exposure = buildExposure(ws, mounts);
+    return {
+      id: ws.id,
+      ownerType: ws.ownerType,
+      ownerId: ws.ownerId,
+      projectId: ws.projectId,
+      rootPath: ws.rootPath,
+      workingDirectory: exposure.workingDirectory,
+      sourcePaths: exposure.mounts.map((m) => m.path),
+      artifactsPath: path.join(ws.rootPath, 'artifacts'),
+      status: ws.status,
+      prepStatus: ws.prepStatus ?? 'ready',
+      ...(ws.prepError ? { prepError: ws.prepError } : {}),
+      mounts: exposure.mounts,
+      scratchPath: exposure.scratchDir,
+      worktrees: this.worktreeDetailsFromMounts(ws, mounts),
+      createdAt: ws.createdAt,
+    };
   }
 
   /**
@@ -749,30 +847,7 @@ export class WorkspaceManager {
   async getWorkspaceInfo(workspaceId: string): Promise<WorkspaceInfo | null> {
     const ws = await this.workspaceRepo.findById(workspaceId);
     if (!ws) return null;
-
-    const worktreeRecords = await this.worktreeRepo.findByWorkspace(ws.id);
-    const worktreeDetails: WorktreeDetail[] = worktreeRecords.map(r => ({
-      codebaseId: r.codebaseId,
-      alias: r.alias,
-      branchName: r.branchName,
-      baseBranch: r.baseBranch,
-      worktreePath: r.relativePath,
-      status: r.status,
-    }));
-
-    return {
-      id: ws.id,
-      ownerType: ws.ownerType,
-      ownerId: ws.ownerId,
-      projectId: ws.projectId,
-      rootPath: ws.rootPath,
-      workingDirectory: this.getWorkingDirectory(ws),
-      sourcePaths: worktreeDetails.map(w => path.join(ws.rootPath, w.worktreePath)),
-      artifactsPath: path.join(ws.rootPath, 'artifacts'),
-      status: ws.status,
-      worktrees: worktreeDetails,
-      createdAt: ws.createdAt,
-    };
+    return this.toInfo(ws);
   }
 
   /**
@@ -795,8 +870,8 @@ export class WorkspaceManager {
       const expiredAt = ws.completedAt ?? (policy.includeStaleActive ? ws.updatedAt : undefined);
       if (expiredAt && expiredAt.getTime() < cutoff) {
         if (policy.protectUnpushed) {
-          const worktrees = await this.worktreeRepo.findByWorkspace(ws.id);
-          const hasUnpushed = worktrees.some(w => w.status === 'active' && w.hasUncommittedChanges);
+          const mounts = await this.mountRepo.findByWorkspace(ws.id);
+          const hasUnpushed = mounts.some((m) => m.status === 'ready' && m.hasUncommittedChanges);
           if (hasUnpushed) {
             if (policy.archiveIfDirty) {
               await this.archiveWorkspace(ws.id);
@@ -903,7 +978,7 @@ export class WorkspaceManager {
       // Best effort — may not exist
     }
     try {
-      await this.worktreeRepo.deleteByWorkspace(workspaceId);
+      await this.mountRepo.deleteByWorkspace(workspaceId);
     } catch {
       // Best effort — may not exist
     }
@@ -921,7 +996,7 @@ export class WorkspaceManager {
     const dirs = [
       rootPath,
       path.join(rootPath, 'source'),
-      path.join(rootPath, 'output'),
+      path.join(rootPath, SCRATCH_DIR),
       path.join(rootPath, 'artifacts'),
       path.join(rootPath, 'artifacts', 'stage-responses'),
       path.join(rootPath, 'artifacts', 'attachments'),
@@ -966,42 +1041,6 @@ export class WorkspaceManager {
   }
 
   /**
-   * Ensure the agent's code root is a repository, without touching its contents.
-   *
-   * Unlike `initGitRepo` this writes no `.gitignore`: the code root is the
-   * user's own folder and may already have one.
-   */
-  private async initCodeRootRepo(codeRoot: string): Promise<void> {
-    try {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      const opts = { cwd: codeRoot, timeout: 15_000 };
-      await execFileAsync('git', ['init'], opts);
-      await execFileAsync('git', ['config', 'user.email', 'generatorai@local'], opts);
-      await execFileAsync('git', ['config', 'user.name', 'GeneratorAI'], opts);
-
-      // A repo with no commits has no baseline, so every diff comes back empty.
-      // Only seed one when the history is genuinely empty — never rewrite a
-      // user's existing repository.
-      try {
-        await execFileAsync('git', ['rev-parse', '--verify', 'HEAD'], opts);
-      } catch {
-        await execFileAsync('git', ['add', '-A'], opts);
-        await execFileAsync(
-          'git',
-          ['commit', '-m', 'GeneratorAI baseline', '--allow-empty', '--allow-empty-message'],
-          opts,
-        );
-      }
-    } catch (err) {
-      this.logger.warn(
-        `[WorkspaceManager] Could not initialise git in code root ${codeRoot}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
-  /**
    * Initialize a git repository in the workspace directory.
    */
   private async initGitRepo(rootPath: string): Promise<void> {
@@ -1031,6 +1070,10 @@ export class WorkspaceManager {
         '# service-worker state). Hundreds of binary files that churn on every',
         '# page load and drowned the Changes tab in "binary A" rows.',
         'browser/',
+        '',
+        '# Orchestrator runtime state (task ledger, wave bookkeeping). Not a',
+        '# code change: it churns on every worker event and is regenerated.',
+        'orchestrator/',
         '',
         '# Standard vendored / build output',
         'node_modules/',
@@ -1065,4 +1108,29 @@ export class WorkspaceManager {
       this.logger.warn(`[WorkspaceManager] Git init failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+}
+
+/**
+ * Resolve a `WorktreeDetail.worktreePath` against a workspace root.
+ *
+ * The field is normally relative to `rootPath`, but legacy worktrees living
+ * outside the workspace (the old project-worktrees layout) can only be
+ * expressed absolutely. A bare `path.join` would produce
+ * `<root>\C:\Users\...` for those, so every consumer must go through this.
+ */
+export function resolveWorktreePath(rootPath: string, worktreePath: string): string {
+  return path.isAbsolute(worktreePath) ? worktreePath : path.join(rootPath, worktreePath);
+}
+
+/**
+ * `abs` expressed relative to `rootPath` when it lives inside it, otherwise
+ * `abs` unchanged. Keeps the common (in-workspace) case matching what
+ * `WorktreeDetail.worktreePath` documents, while still surfacing worktrees
+ * that predate the in-workspace layout.
+ */
+function relativizeToRoot(rootPath: string, abs: string): string {
+  const root = path.resolve(rootPath);
+  if (abs === root) return '.';
+  if (!abs.startsWith(root + path.sep)) return abs;
+  return abs.slice(root.length + 1);
 }

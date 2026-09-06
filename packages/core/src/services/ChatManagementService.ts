@@ -23,6 +23,7 @@ import type {
 } from '@generatorai/shared';
 import { generateId, DEFAULT_AGENT_MODE, ValidationError, COMPUTER_USE_SKILL_ID, COMPUTER_USE_SKILL_NAME } from '@generatorai/shared';
 import * as path from 'node:path';
+import type { ChatSourceSpec, ExecutionWorkspace } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
 import type { IChatRepository } from '../domain/ports/IChatRepository.js';
 import type { ISessionRepository, IChatMessageRepository } from '../domain/ports/IRepositories.js';
@@ -64,6 +65,7 @@ import type { OrchestratorService } from './orchestrator/OrchestratorService.js'
 import type { IMcpHub } from '../mcp/IMcpHub.js';
 import type { WorktreeService } from './WorktreeService.js';
 import type { WorkspaceManager } from './WorkspaceManager.js';
+import { branchSlugFor, type MountService, type PlannedMount } from './MountService.js';
 import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
 import type { BrowserService } from './BrowserService.js';
 import type { ComputerService } from './ComputerService.js';
@@ -137,6 +139,12 @@ export interface ChatManagementServiceExtensions {
   worktreeService?: WorktreeService;
   /** Workspace manager for creating per-chat isolated workspaces. */
   workspaceManager?: WorkspaceManager;
+  /**
+   * Mounts — turns a chat's sources (codebases / folders, in place or as
+   * worktrees, on a branch) into the directories the agent edits, and gates
+   * the first prompt until they exist.
+   */
+  mountService?: MountService;
   /** Codebase repo for resolving alias from codebase IDs (used for pre-computing worktree paths). */
   codebaseRepo?: IProjectCodebaseRepository;
   /**
@@ -1307,6 +1315,86 @@ export class ChatManagementService {
     if (pending) {
       await pending;
     }
+    if (!this.extensions.mountService) return;
+    const chat = await this.chatRepo.getById(chatId);
+    if (chat.workspaceId) await this.extensions.mountService.ready(chat.workspaceId);
+  }
+
+  /**
+   * Put the workspace's exposure on a conversation config: cwd, the other
+   * mounts + managed root as additional directories, and the env the agent
+   * process gets. The `[Workspace]` hint is appended separately (see
+   * `appendWorkspaceHint`) because it must land AFTER the caller's own
+   * system message, which is applied later in both build paths.
+   */
+  private async applyWorkspaceExposure(
+    conversationConfig: Record<string, unknown>,
+    workspace: ExecutionWorkspace,
+  ): Promise<string | undefined> {
+    const manager = this.extensions.workspaceManager;
+    if (!manager) return undefined;
+    const exposure = await manager.getExposure(workspace);
+    conversationConfig['workingDirectory'] = exposure.workingDirectory;
+    if (exposure.additionalDirectories.length > 0) {
+      conversationConfig['additionalDirectories'] = exposure.additionalDirectories;
+    }
+    conversationConfig['env'] = {
+      ...((conversationConfig['env'] as Record<string, string> | undefined) ?? {}),
+      ...exposure.env,
+    };
+    return exposure.hint;
+  }
+
+  private appendWorkspaceHint(conversationConfig: Record<string, unknown>, hint: string | undefined): void {
+    if (!hint) return;
+    const existing = conversationConfig['systemMessage'] as { mode?: string; content?: string } | undefined;
+    conversationConfig['systemMessage'] = {
+      mode: (existing?.mode as 'append' | 'replace' | undefined) ?? 'append',
+      content: (existing?.content ?? '') + hint,
+    };
+  }
+
+  /**
+   * Replace the mount plan of an idle chat. Mounts that are unchanged are
+   * kept (their checkpoints survive); the rest are removed and the new ones
+   * prepared in the background. The next prompt waits for readiness.
+   */
+  async updateChatSources(
+    chatId: string,
+    sources: ChatSourceSpec[],
+    primary?: string,
+  ): Promise<Chat> {
+    const chat = await this.chatRepo.getById(chatId);
+    if (chat.status !== 'active') throw new ValidationError('Archived chats cannot be re-mounted');
+    if (this.isTurnActive(chatId)) {
+      const err = new Error('Finish or stop the current response before changing what this chat works on') as Error & { code?: string };
+      err.code = 'CHAT_BUSY';
+      throw err;
+    }
+    const manager = this.extensions.workspaceManager;
+    const mounts = this.extensions.mountService;
+    if (!manager || !mounts || !chat.workspaceId) {
+      throw new ValidationError('This chat has no workspace to update');
+    }
+    const workspace = await manager.getExecutionWorkspace(chat.workspaceId);
+    if (!workspace) throw new ValidationError('This chat has no workspace to update');
+    if (workspace.ownerId !== chatId) {
+      throw new ValidationError('Worker chats share their orchestrator\'s workspace; change the sources there');
+    }
+
+    await mounts.replace(workspace, chat.projectId, sources, {
+      ...(primary ? { primary } : {}),
+      branchSlug: branchSlugFor(chat.name, chatId),
+    });
+    const updated = await this.chatRepo.update(chatId, {
+      sources,
+      primarySource: primary ?? sources[0]?.alias,
+    });
+    const session = await this.sessionRepo.getById(chat.sessionId);
+    void mounts.prepare(workspace.id, { sessionId: chat.sessionId, chatId });
+    // The cwd / hint changed: force the next turn to rebind the conversation.
+    if (session.conversationId) this.conversationBindings.delete(session.conversationId);
+    return updated;
   }
 
   /**
@@ -1354,6 +1442,10 @@ export class ChatManagementService {
     const warmBaseline = async (): Promise<void> => {
       const checkpoints = this.extensions.workspaceCheckpointService;
       if (!workspaceId || !checkpoints) return;
+      // With mounts the baseline is captured by the mount service the moment
+      // every mount is ready — capturing here would snapshot a worktree that
+      // does not exist yet, or an in-place repo before its branch switch.
+      if (this.extensions.mountService) return;
       // `kind: 'baseline'` is what the first capture would have written
       // anyway; asking for it explicitly just moves it off the turn path.
       // `capture` is documented never to throw.
@@ -1380,6 +1472,39 @@ export class ChatManagementService {
     const conversationId = `chat-${chatId}-${Date.now()}`;
     const now = new Date();
 
+    // 0. Sources → mount plan. Validated BEFORE anything is written so a bad
+    // path, a missing branch or a dirty checkout fails this request instead
+    // of leaving a half-created chat behind. Legacy fields (`codebaseIds`,
+    // `createWorktree`, `gitRepositories`) are mapped onto sources here.
+    const sources = normaliseSources(params);
+    const primarySource = params.primary ?? firstAlias(sources);
+    let sharedWorkspace: ExecutionWorkspace | undefined;
+    let planned: PlannedMount[] | undefined;
+    if (params.workspaceId && this.extensions.workspaceManager) {
+      // Orchestrator workers pass an existing `workspaceId` to SHARE the
+      // orchestrator's workspace — reuse it so their file changes land where
+      // the orchestrator can see them. Their own sources are ignored.
+      try {
+        sharedWorkspace = (await this.extensions.workspaceManager.getExecutionWorkspace(params.workspaceId)) ?? undefined;
+        if (!sharedWorkspace) {
+          console.warn(`[ChatManagement] Shared workspace ${params.workspaceId} not found for chat ${chatId}; creating own.`);
+        }
+      } catch (err) {
+        console.warn(`[ChatManagement] Failed to attach shared workspace for chat ${chatId}:`, err);
+      }
+    }
+    if (!sharedWorkspace && this.extensions.workspaceManager && this.extensions.mountService) {
+      planned = await this.extensions.mountService.plan(
+        this.extensions.workspaceManager.rootPathFor(chatId),
+        params.projectId,
+        sources,
+        {
+          ...(primarySource ? { primary: primarySource } : {}),
+          branchSlug: branchSlugFor(params.name, chatId),
+        },
+      );
+    }
+
     // 1. Create backing Session
     const session: Session = {
       id: sessionId,
@@ -1405,115 +1530,45 @@ export class ChatManagementService {
       streaming: params.harnessConfig?.streaming ?? true,
     };
 
-    // 2.1: Create execution workspace (ALWAYS — even without project)
+    // 2.1: Execution workspace (ALWAYS — even without a project). The
+    // managed root holds plans, scratch, screenshots and staged skills; the
+    // code the agent edits lives in MOUNTS (see MountService).
     let workspaceId: string | undefined;
     let workspaceRootPath: string | undefined;
-    // A chat bound to a local folder works THERE, while plans, artifacts,
-    // orchestrator state and task scratch stay in the managed root.
-    const localFolderRoot = params.gitRepositories?.[0]?.url?.trim() || undefined;
-    // Orchestrator workers pass an existing `workspaceId` to SHARE the
-    // orchestrator's workspace — reuse it instead of creating a fresh one so
-    // their file changes land where the orchestrator can see them.
-    if (params.workspaceId && this.extensions.workspaceManager) {
-      try {
-        const shared = await this.extensions.workspaceManager.getExecutionWorkspace(params.workspaceId);
-        if (shared) {
-          workspaceId = shared.id;
-          workspaceRootPath = shared.rootPath;
-          conversationConfig['workingDirectory'] = this.extensions.workspaceManager.getWorkingDirectory(shared);
-        } else {
-          console.warn(`[ChatManagement] Shared workspace ${params.workspaceId} not found for chat ${chatId}; creating own.`);
-        }
-      } catch (err) {
-        console.warn(`[ChatManagement] Failed to attach shared workspace for chat ${chatId}:`, err);
+    let workspaceHint: string | undefined;
+    if (sharedWorkspace) {
+      workspaceId = sharedWorkspace.id;
+      workspaceRootPath = sharedWorkspace.rootPath;
+      workspaceHint = await this.applyWorkspaceExposure(conversationConfig, sharedWorkspace);
+    } else if (this.extensions.workspaceManager) {
+      // Not swallowed any more: a chat whose workspace could not be created
+      // would run the agent in the shared artifacts directory.
+      const workspace = await this.extensions.workspaceManager.createWorkspace({
+        ownerType: 'chat',
+        ownerId: chatId,
+        projectId: params.projectId,
+        codebaseIds: params.codebaseIds,
+        useWorktree: sources.some((s) => s.mode === 'worktree'),
+        // The managed root is scratch, not a repository. Change tracking
+        // runs per mount through private shadow stores.
+        gitEnabled: false,
+        stageSystemArtifacts: true,
+        stageProjectArtifacts: !!params.projectId,
+        stageMcpConfig: true,
+        ...(planned ? { sources, ...(primarySource ? { primary: primarySource } : {}) } : {}),
+        // Seed the workspace's browserConfig from the chat request so the
+        // built-in browser tools honour visibility/evalAllowed/allowedHosts
+        // set by the user on chat create.
+        ...(params.browserConfig
+          ? { browserConfig: params.browserConfig as Record<string, unknown> }
+          : {}),
+      });
+      workspaceId = workspace.id;
+      workspaceRootPath = workspace.rootPath;
+      if (planned && this.extensions.mountService) {
+        await this.extensions.mountService.stage(workspace.id, planned);
       }
-    }
-    if (!workspaceId && this.extensions.workspaceManager) {
-      try {
-        const workspace = await this.extensions.workspaceManager.createWorkspace({
-          ownerType: 'chat',
-          ownerId: chatId,
-          projectId: params.projectId,
-          codebaseIds: params.codebaseIds,
-          useWorktree: params.createWorktree ?? true,
-          ...(localFolderRoot ? { codeRootOverride: localFolderRoot } : {}),
-          gitEnabled: true,
-          stageSystemArtifacts: true,
-          stageProjectArtifacts: !!params.projectId,
-          stageMcpConfig: true,
-          // Seed the workspace's browserConfig from the chat request so the
-          // built-in browser tools honour visibility/evalAllowed/allowedHosts
-          // set by the user on chat create.
-          ...(params.browserConfig
-            ? { browserConfig: params.browserConfig as Record<string, unknown> }
-            : {}),
-        });
-        workspaceId = workspace.id;
-        workspaceRootPath = workspace.rootPath;
-
-        // Set the SDK working directory to workspace output/ by default
-        conversationConfig['workingDirectory'] = this.extensions.workspaceManager.getWorkingDirectory(workspace);
-      } catch (err) {
-        // Non-fatal — continue without workspace
-        console.warn(`[ChatManagement] Failed to create workspace for chat ${chatId}:`, err);
-      }
-    }
-
-    // 2.5: Create worktrees for project codebases (if project-scoped with codebases)
-    // Worktrees are placed in workspace source/ directory.
-    // Pre-compute the expected worktree path synchronously so the SDK session
-    // gets the right workingDirectory immediately, then fire-and-forget the
-    // actual git worktree creation (which can take 10-30s for large repos).
-    // Skipped when sharing an existing workspace (params.workspaceId): the
-    // orchestrator already created any worktrees in the shared source/ dir.
-    if (!params.workspaceId && params.projectId && params.codebaseIds?.length && this.extensions.worktreeService) {
-      const targetDir = workspaceRootPath ? path.join(workspaceRootPath, 'source') : undefined;
-
-      // Pre-compute the primary worktree path without blocking on git operations.
-      // The path formula is deterministic: {targetDir}/{codebase.alias}
-      if (targetDir && this.extensions.codebaseRepo) {
-        try {
-          let firstAlias: string | undefined;
-          for (const aliasOrId of params.codebaseIds) {
-            const cb = await this.extensions.codebaseRepo.getByAlias(params.projectId, aliasOrId)
-              ?? await this.extensions.codebaseRepo.getById(aliasOrId);
-            if (cb) { firstAlias = cb.alias; break; }
-          }
-          if (firstAlias) {
-            conversationConfig['workingDirectory'] = path.join(targetDir, firstAlias);
-          }
-        } catch {
-          // Fall through — workingDirectory stays at workspace root
-        }
-      }
-
-      // P1-45: Track the promise instead of fire-and-forget. The physical
-      // worktree directory is created asynchronously (large repos can take
-      // 10-30s), but workingDirectory is already set synchronously above.
-      // Callers that need the directory to exist before running tools should
-      // await `waitForWorktree(chatId)`.
-      const worktreeProjectId = params.projectId;
-      const worktreeCodebaseIds = [...params.codebaseIds];
-      const worktreePromise = this.extensions.worktreeService.createRunWorktrees(
-        worktreeProjectId,
-        chatId,
-        worktreeCodebaseIds,
-        'manual',
-        targetDir,
-      ).catch(err => {
-        console.warn(`[ChatManagement] Background worktree creation failed for chat ${chatId}:`, err);
-      }).finally(() => {
-        // Drop the entry once settled — the directory now exists (or the
-        // attempt failed and future calls should not block on a dead promise).
-        this.pendingWorktrees.delete(chatId);
-      }) as Promise<void>;
-      this.pendingWorktrees.set(chatId, worktreePromise);
-    }
-
-    // 2.6: Local folder paths override workingDirectory (highest priority)
-    // If the user specified a local folder, it takes precedence over worktrees/output
-    if (localFolderRoot) {
-      conversationConfig['workingDirectory'] = localFolderRoot;
+      workspaceHint = await this.applyWorkspaceExposure(conversationConfig, workspace);
     }
 
     // Skills are staged into the MANAGED root, never the user's repository.
@@ -1554,6 +1609,7 @@ export class ChatManagementService {
     // Everything appended to `systemMessage` below this line is a PLATFORM block.
     const baseSystemMessage =
       (conversationConfig['systemMessage'] as { content?: string } | undefined)?.content ?? '';
+    this.appendWorkspaceHint(conversationConfig, workspaceHint);
 
     // 2.7: Integrated Browser — VSCode-parity built-in tool set.
     //
@@ -1631,9 +1687,9 @@ export class ChatManagementService {
     if (this.extensions.computerService?.isEnabled() && workspaceId) {
       try {
         const workspace = await this.extensions.workspaceManager?.getExecutionWorkspace(workspaceId);
-        const workspaceRoot = workspace
-          ? this.extensions.workspaceManager?.getWorkingDirectory(workspace)
-          : undefined;
+        // Screenshots and the staged computer-use skill are platform
+        // artifacts: managed root, never the directory the agent edits.
+        const workspaceRoot = workspace?.rootPath;
         if (workspaceRoot) {
           const computerTools = buildComputerToolSet({
             computerService: this.extensions.computerService,
@@ -1805,6 +1861,11 @@ export class ChatManagementService {
     // above is a valid CreateConversationParams field, so assert the final shape
     // rather than leaking `any` into the harness boundary.
     await this.harness.createConversation(conversationConfig as unknown as CreateConversationParams);
+    // Materialise the mounts (worktrees, branch checkouts, shadow stores) in
+    // the background. The first prompt awaits readiness — see `sendPrompt`.
+    if (planned && workspaceId && this.extensions.mountService) {
+      void this.extensions.mountService.prepare(workspaceId, { sessionId, chatId });
+    }
     // Bring the first turn's fixed costs forward into the time the user spends
     // writing that first message. Fire-and-forget by design — see `prewarmChat`.
     const firstAgentMode = (params.orchestratorMode ? DEFAULT_AGENT_MODE : (params.defaultAgentMode ?? DEFAULT_AGENT_MODE));
@@ -1843,6 +1904,7 @@ export class ChatManagementService {
       createWorktree: params.createWorktree,
       workspaceId,
       gitRepositories: params.gitRepositories,
+      ...(sharedWorkspace ? {} : { sources, ...(primarySource ? { primarySource } : {}) }),
       tags: params.tags ?? [],
       status: 'active',
       projectId: params.projectId,
@@ -1961,12 +2023,17 @@ export class ChatManagementService {
       streaming: chat.harnessConfig?.streaming ?? true,
     };
 
-    // Working directory — prefer the workspace output/source dir.
+    // Working directory + additional directories + env, from the persisted
+    // mounts — the SAME exposure the create path used, so a restart, an
+    // eviction or a model switch never moves the agent out of its mount.
+    let workspaceHint: string | undefined;
+    let workspaceRootPath: string | undefined;
     if (chat.workspaceId && this.extensions.workspaceManager) {
       try {
         const workspace = await this.extensions.workspaceManager.getExecutionWorkspace(chat.workspaceId);
         if (workspace) {
-          conversationConfig['workingDirectory'] = this.extensions.workspaceManager.getWorkingDirectory(workspace);
+          workspaceRootPath = workspace.rootPath;
+          workspaceHint = await this.applyWorkspaceExposure(conversationConfig, workspace);
         }
       } catch {
         // Non-fatal — fall back to no explicit working directory.
@@ -1993,6 +2060,7 @@ export class ChatManagementService {
     // Everything appended to `systemMessage` below this line is a PLATFORM block.
     const baseSystemMessage =
       (conversationConfig['systemMessage'] as { content?: string } | undefined)?.content ?? '';
+    this.appendWorkspaceHint(conversationConfig, workspaceHint);
 
     // Agent binding. Resolution uses the FROZEN snapshot: resolving live would
     // let an agent edit change a resumed conversation's tool set and break the
@@ -2002,9 +2070,10 @@ export class ChatManagementService {
       ...(chat.agentOverrides ? { agentOverrides: chat.agentOverrides } : {}),
       ...(chat.harnessConfig ? { harnessConfig: chat.harnessConfig } : {}),
       ...(chat.projectId ? { projectId: chat.projectId } : {}),
-      ...(typeof conversationConfig['workingDirectory'] === 'string'
-        ? { workspaceRoot: conversationConfig['workingDirectory'] as string }
-        : {}),
+      // Skills are staged into the MANAGED root — same as the create path.
+      // Staging into the working directory put `.generatorai/` inside the
+      // user's repository on every resume.
+      ...(workspaceRootPath ? { workspaceRoot: workspaceRootPath } : {}),
       ...(chat.agentSnapshot ? { snapshot: chat.agentSnapshot } : {}),
     });
 
@@ -2063,9 +2132,7 @@ export class ChatManagementService {
     if (this.extensions.computerService?.isEnabled() && chat.workspaceId) {
       try {
         const workspace = await this.extensions.workspaceManager?.getExecutionWorkspace(chat.workspaceId);
-        const workspaceRoot = workspace
-          ? this.extensions.workspaceManager?.getWorkingDirectory(workspace)
-          : undefined;
+        const workspaceRoot = workspace?.rootPath;
         if (workspaceRoot) {
           const computerTools = buildComputerToolSet({
             computerService: this.extensions.computerService,
@@ -2261,9 +2328,20 @@ export class ChatManagementService {
     // That is the very bug this guard exists to prevent, so the claim has to be
     // atomic with the test.
     this.startingTurns.add(chatId);
+    // A Stop from an EARLIER turn that never surfaced as an abort rejection
+    // must not be mistaken for a Stop of this one (see the check just before
+    // the provider send below).
+    this.cancelledTurns.delete(chatId);
     try {
 
     const agentMode = this.resolveAgentMode(chat, options?.mode);
+
+    // The static pre-step: worktrees created, branches checked out, shadow
+    // stores in place. Resolves immediately once the workspace is ready;
+    // surfaces the preparation error to the caller otherwise.
+    if (chat.workspaceId && this.extensions.mountService) {
+      await this.extensions.mountService.ready(chat.workspaceId);
+    }
 
     const session = await this.sessionRepo.getById(chat.sessionId);
     if (!session.conversationId) {
@@ -2401,17 +2479,28 @@ export class ChatManagementService {
               sessionId: chat.sessionId,
               phase: 'before',
               promptExcerpt: prompt,
+              // Always written, even when identical to the previous snapshot:
+              // the turn's rewind target must exist for every mount.
+              skipIfUnchanged: false,
             })
             .catch(() => undefined)
         : undefined;
 
-    // Save user message
+    // Save user message — with what was attached to it. The transcript shows
+    // the chips and the composer's ↑ history restores the files from them.
+    const persistedAttachments = (attachments ?? []).map((a) => ({
+      name: a.displayName ?? a.path.split(/[\\/]/).pop() ?? a.path,
+      path: a.path,
+      mimeType: a.mimeType ?? 'application/octet-stream',
+      ...(a.artifactId ? { artifactId: a.artifactId } : {}),
+    }));
     await this.messageRepo.create({
       id: generateId(),
       sessionId: chat.sessionId,
       chatId,
       role: 'user',
       content: prompt,
+      ...(persistedAttachments.length > 0 ? { attachments: persistedAttachments } : {}),
       metadata: { turnId, agentMode },
       timestamp: new Date(),
     });
@@ -2647,6 +2736,10 @@ export class ChatManagementService {
             if (tc) {
               tc.result = data?.['result'];
               tc.status = 'complete';
+              // A failed call renders with a red cross instead of a tick, in
+              // history as well as live.
+              const success = data?.['success'];
+              if (typeof success === 'boolean') tc.success = success;
               // Per-op +/− line stats (see FileOpStat) — derived once by the
               // provider from structured tool output, persisted so history
               // renders the same chips as the live stream.
@@ -2704,6 +2797,9 @@ export class ChatManagementService {
               phase: 'after',
             });
           }
+          if (chat.workspaceId && this.extensions.mountService) {
+            void this.extensions.mountService.refreshStatus(chat.workspaceId).catch(() => undefined);
+          }
 
           this.turnFinalizers.delete(chatId);
           this.activeSubscriptions.delete(chatId);
@@ -2753,6 +2849,27 @@ export class ChatManagementService {
       // working tree. This is the last moment that holds, and by now it has
       // been running concurrently with message persistence and event emission.
       if (beforeCheckpoint) await beforeCheckpoint;
+
+      // The user pressed Stop while this turn was still being set up (the
+      // resume, config build and pre-turn checkpoint above take seconds on a
+      // cold chat). `cancelTurn` had no query to abort and no finaliser to
+      // run at that point, so honour the stop here: never start the provider
+      // query, settle the turn, and release the claim. Without this the
+      // query started anyway — after the client had already been told the
+      // turn was over — and the chat stayed CHAT_BUSY until it finished, or
+      // for good when the abandoned query never settled.
+      if (this.cancelledTurns.has(chatId)) {
+        this.cancelledTurns.delete(chatId);
+        await finalizeTurn({ partial: true });
+        this.turnFinalizers.delete(chatId);
+        this.activeSubscriptions.delete(chatId);
+        unsub();
+        await this.eventBus.emit(
+          chat.sessionId,
+          this.enrichWithChatId({ kind: 'harness.idle', data: {} } as AgentEvent, chatId),
+        );
+        return;
+      }
 
       await this.harness.sendPrompt(session.conversationId, promptForHarness, attachments, {
         agentMode,
@@ -2981,4 +3098,33 @@ export class ChatManagementService {
     await this.eventBus.deleteSessionEvents(chat.sessionId);
     await this.sessionRepo.delete(chat.sessionId);
   }
+}
+
+// ── Sources ──────────────────────────────────────────────────
+
+/**
+ * The mount plan a create request asks for. `sources` wins; the legacy
+ * trio is mapped for older clients: each codebase becomes a worktree mount
+ * (in place when `createWorktree === false`), each local folder an in-place
+ * mount. Folders come first because that is where the legacy cwd rule put
+ * them.
+ */
+function normaliseSources(params: CreateChatParams): ChatSourceSpec[] {
+  if (params.sources && params.sources.length > 0) return params.sources;
+  const out: ChatSourceSpec[] = [];
+  for (const folder of params.gitRepositories ?? []) {
+    const p = folder.url?.trim();
+    if (!p) continue;
+    out.push({ kind: 'folder', path: p, mode: 'in-place', ...(folder.alias && folder.alias !== 'local' ? { alias: folder.alias } : {}) });
+  }
+  const worktree = params.createWorktree ?? params.useWorktree ?? true;
+  for (const id of params.codebaseIds ?? []) {
+    out.push({ kind: 'codebase', codebaseId: id, mode: worktree ? 'worktree' : 'in-place' });
+  }
+  return out;
+}
+
+function firstAlias(sources: ChatSourceSpec[]): string | undefined {
+  const first = sources[0];
+  return first?.alias;
 }

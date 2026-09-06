@@ -2354,6 +2354,52 @@ export const MIGRATIONS: readonly Migration[] = [
         `DROP TABLE IF EXISTS usage_ledger;`,
       ],
     },
+    // v51 — workspace mounts.
+    //
+    // A chat's workspace is a managed scratch root plus an ORDERED list of
+    // mounts (directories the agent may edit): a project codebase or a local
+    // folder, edited in place or through a git worktree, on a chosen branch.
+    // `workspace_worktrees` had no production writer (`trackWorktree` was
+    // never called) and is replaced. `execution_workspaces.prep_status`
+    // gates the first prompt until every mount is materialised; existing
+    // rows default to 'ready' because their directories already exist.
+    // `chats.sources` keeps the plan the chat was created with so it can be
+    // shown, edited and re-prepared after an unarchive.
+    {
+      version: 51,
+      name: 'workspace_mounts',
+      sql: [
+        `CREATE TABLE IF NOT EXISTS workspace_mounts (
+           id TEXT PRIMARY KEY,
+           workspace_id TEXT NOT NULL REFERENCES execution_workspaces(id) ON DELETE CASCADE,
+           position INTEGER NOT NULL DEFAULT 0,
+           alias TEXT NOT NULL,
+           origin_kind TEXT NOT NULL,
+           codebase_id TEXT,
+           project_id TEXT,
+           origin_path TEXT,
+           mode TEXT NOT NULL,
+           path TEXT NOT NULL,
+           git TEXT,
+           status TEXT NOT NULL DEFAULT 'preparing',
+           error TEXT,
+           has_uncommitted_changes INTEGER NOT NULL DEFAULT 0,
+           created_at INTEGER NOT NULL,
+           updated_at INTEGER NOT NULL
+         );`,
+        `CREATE INDEX IF NOT EXISTS idx_workspace_mounts_workspace ON workspace_mounts(workspace_id);`,
+        `CREATE INDEX IF NOT EXISTS idx_workspace_mounts_codebase ON workspace_mounts(codebase_id);`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_mounts_alias ON workspace_mounts(workspace_id, alias);`,
+        `ALTER TABLE execution_workspaces ADD COLUMN prep_status TEXT NOT NULL DEFAULT 'ready';`,
+        `ALTER TABLE execution_workspaces ADD COLUMN prep_error TEXT;`,
+        `ALTER TABLE chats ADD COLUMN sources TEXT;`,
+        `ALTER TABLE chats ADD COLUMN primary_source TEXT;`,
+        `DROP INDEX IF EXISTS idx_workspace_worktrees_workspace;`,
+        `DROP INDEX IF EXISTS idx_workspace_worktrees_codebase;`,
+        `DROP INDEX IF EXISTS idx_workspace_worktrees_alias;`,
+        `DROP TABLE IF EXISTS workspace_worktrees;`,
+      ],
+    },
   ];
 
 

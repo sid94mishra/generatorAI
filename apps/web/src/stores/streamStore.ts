@@ -87,6 +87,7 @@ interface StreamStore {
     toolOrCallId: string,
     result: unknown,
     fileOp?: ToolFileOp,
+    success?: boolean,
   ) => void;
 
   /** Append a system/subagent/error note. */

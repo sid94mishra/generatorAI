@@ -191,6 +191,7 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   // checkpoint
   'checkpoint.created': 'item',
   'checkpoint.restored': 'item',
+  'workspace.prep': 'item',
 
   // script
   'script.stdout': 'delta',

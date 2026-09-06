@@ -96,7 +96,7 @@ export { DrizzleSystemConfigRepository } from './repositories/SystemConfigReposi
 
 // Workspace Management repositories
 export { DrizzleExecutionWorkspaceRepository } from './repositories/ExecutionWorkspaceRepository.js';
-export { DrizzleWorkspaceWorktreeRepository } from './repositories/WorkspaceWorktreeRepository.js';
+export { DrizzleWorkspaceMountRepository } from './repositories/WorkspaceMountRepository.js';
 export { DrizzleCheckpointRepository } from './repositories/CheckpointRepository.js';
 export { DrizzleReviewRepository } from './repositories/ReviewRepository.js';
 export { DrizzlePlanRepository } from './repositories/PlanRepository.js';
@@ -474,7 +474,7 @@ import { DrizzleProjectConfigRepository } from './repositories/ProjectConfigRepo
 import { DrizzleWorktreeRepository } from './repositories/WorktreeRepository.js';
 import { DrizzleSystemConfigRepository } from './repositories/SystemConfigRepository.js';
 import { DrizzleExecutionWorkspaceRepository } from './repositories/ExecutionWorkspaceRepository.js';
-import { DrizzleWorkspaceWorktreeRepository } from './repositories/WorkspaceWorktreeRepository.js';
+import { DrizzleWorkspaceMountRepository } from './repositories/WorkspaceMountRepository.js';
 import { DrizzleWorkspaceArtifactRepository } from './repositories/WorkspaceArtifactRepository.js';
 import { DrizzleCheckpointRepository } from './repositories/CheckpointRepository.js';
 import { DrizzleReviewRepository } from './repositories/ReviewRepository.js';
@@ -505,7 +505,7 @@ export function createAllRepositories(db: AppDatabase) {
     worktreeRepo: new DrizzleWorktreeRepository(db),
     systemConfigRepo: new DrizzleSystemConfigRepository(db),
     executionWorkspaceRepo: new DrizzleExecutionWorkspaceRepository(db),
-    workspaceWorktreeRepo: new DrizzleWorkspaceWorktreeRepository(db),
+    workspaceMountRepo: new DrizzleWorkspaceMountRepository(db),
     workspaceArtifactRepo: new DrizzleWorkspaceArtifactRepository(db),
     checkpointRepo: new DrizzleCheckpointRepository(db),
     reviewRepo: new DrizzleReviewRepository(db),

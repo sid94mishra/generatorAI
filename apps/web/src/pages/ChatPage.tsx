@@ -8,7 +8,11 @@
 
 import React, { useEffect, useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useChat, useChatMessages, useSendChatPrompt, useUpdateChat, useCancelChat, useBackgroundTasks, useHarnessConfig } from '@/hooks/queries.js';
+import { useChat, useChatMessages, useSendChatPrompt, useUpdateChat, useCancelChat, useBackgroundTasks, useHarnessConfig, useModels } from '@/hooks/queries.js';
+import { ChatChangesTray } from '@/components/chat/ChatChangesTray.js';
+import { PathRootsContext, toDisplayPath, type PathRoot } from '@/components/chat/changes/changePaths.js';
+import { useWorkspaceInfo, usePrepareChatWorkspace } from '@/hooks/sourceQueries.js';
+import { EditSourcesDialog } from '@/components/chat/sources/EditSourcesDialog.js';
 import { providerLabel } from '@/components/shared/ModelPicker.js';
 // PLN-01 — plan mode
 import { useDecidePlan, useAnswerQuestion, useAnswerPermission, usePendingInteractions } from '@/hooks/queries.js';
@@ -25,11 +29,14 @@ import { usePlatform } from '@/providers/PlatformProvider.js';
 import { connectChatSession } from '@/stores/sseManager.js';
 import { AgentConsole } from '@/components/chat/AgentConsole.js';
 import { hydrateWidgetsForChat } from '@/utils/hydrateWidgets.js';
+import { ThinkingPlaceholder } from '@/components/chat/ThinkingPlaceholder.js';
 import { ChatMessageList } from '@/components/chat/ChatMessageList.js';
 import { StreamingMessage } from '@/components/chat/StreamingMessage.js';
 import { awaitsUserDecision } from '@/components/agent/deriveTimeline.js';
 import { ChatInput } from '@/components/chat/ChatInput.js';
 import type { ComposerAttachment } from '@/components/chat/composer/types.js';
+import type { PromptHistoryEntry } from '@/components/chat/composer/promptHistory.js';
+import { attachmentUrl } from '@/components/chat/AttachmentChips.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
 import { useFileTabs } from '@/components/diff/useFileTabs.js';
 import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
@@ -86,6 +93,7 @@ const LiveTranscript = React.memo(function LiveTranscript({
   onOpenPlan,
   onOpenChanges,
   onOpenShell,
+  workspaceId,
   onApprovePlan,
   onRequestPlanChanges,
   onAnswerQuestion,
@@ -98,6 +106,7 @@ const LiveTranscript = React.memo(function LiveTranscript({
   onOpenPlan: (planId: string) => void;
   onOpenChanges: (filePath?: string) => void;
   onOpenShell: (callId: string) => void;
+  workspaceId: string | undefined;
   onApprovePlan: (planId: string, action: 'implement_interactive' | 'implement_autopilot') => void;
   onRequestPlanChanges: (planId: string, feedback: string) => void;
   onAnswerQuestion: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) => void;
@@ -111,7 +120,9 @@ const LiveTranscript = React.memo(function LiveTranscript({
     (b) => b.type === 'widget' && b.surface === 'inline' && b.status !== 'closed',
   );
   const showStreamingMessage =
-    stream != null && stream.blocks.length > 0 && (stream.status !== 'idle' || hasActiveWidgetBlock);
+    stream != null &&
+    (stream.blocks.length > 0 || stream.cancelRequested) &&
+    (stream.status !== 'idle' || hasActiveWidgetBlock);
 
   if (!showStreamingMessage || !stream) return null;
 
@@ -124,6 +135,7 @@ const LiveTranscript = React.memo(function LiveTranscript({
       onOpenPlan={onOpenPlan}
       onOpenChanges={onOpenChanges}
       onOpenShell={onOpenShell}
+      {...(workspaceId ? { workspaceId } : {})}
       onApprovePlan={onApprovePlan}
       onRequestPlanChanges={onRequestPlanChanges}
       onAnswerQuestion={onAnswerQuestion}
@@ -165,9 +177,18 @@ export function ChatPage() {
   // wrong for a self-hosted install running HARNESS_TYPE=claude-agent — it
   // told the user they were talking to a provider they had not configured.
   const { data: harnessConfig } = useHarnessConfig();
-  const activeHarnessLabel = harnessConfig?.harness?.type
-    ? providerLabel(harnessConfig.harness.type)
-    : null;
+  const { data: catalogModels } = useModels();
+  // The chat's MODEL decides the provider (a `sonnet` chat runs on the Claude
+  // agent even when the server's primary harness is Copilot), so the label
+  // follows the model's provider and only falls back to the server default.
+  const chatModelProvider = chat?.model
+    ? catalogModels?.find((m) => m.id === chat.model)?.provider
+    : undefined;
+  const activeHarnessLabel = chatModelProvider
+    ? providerLabel(chatModelProvider)
+    : harnessConfig?.harness?.type
+      ? providerLabel(harnessConfig.harness.type)
+      : null;
   // P0-48 fix: pagination — start with the most recent PAGE_SIZE messages.
   // The "Load more" button increases the limit incrementally so the user can
   // page back through history without fetching the entire corpus at once.
@@ -199,6 +220,7 @@ export function ChatPage() {
   const pendingUserMessage = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.pendingUserMessage : undefined)) ?? null;
   const serverTurnId = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.serverTurnId : undefined)) ?? null;
   const blocksLength = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.blocks.length ?? 0 : 0));
+  const stoppedByUser = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.cancelRequested ?? false : false));
   const hasNewTurnContent = useStreamStore((state) => {
     if (!sessionId) return false;
     const s = state.streams[sessionId];
@@ -323,10 +345,16 @@ export function ChatPage() {
   // Files tab + per-file tabs. Opening a file expands the pane first, so the
   // gesture works even when the user has it collapsed. Declared before the
   // close handler because that handler has to forget this tab's selection.
+  // Workspace preparation — the composer's Send is held back while mounts are
+  // still being created, and the error state offers the two ways out.
+  const prepareWorkspace = usePrepareChatWorkspace(chatId);
+  const [editingSources, setEditingSources] = useState(false);
+
   const fileTabs = useFileTabs({
     workspaceId: chat?.workspaceId,
     requestFocus: setBrowserTabFocusRequest,
     openPane: () => setRightPaneOpen(true),
+    onEditSources: () => setEditingSources(true),
   });
 
   // Closing a tab for good drops whatever that tab remembered.
@@ -407,15 +435,30 @@ export function ChatPage() {
     [setRightPaneOpen],
   );
 
-  // Per-op diff icons + the end-of-turn summary card land here. The file
-  // path is accepted for future per-file scrolling; today the Changes tab
-  // itself is the destination.
+  // The chat's mounts — the authority for naming a changed file (which mount
+  // it belongs to, and what the chat calls that mount). Falls back to the
+  // legacy local-folder list for chats created before mounts existed.
+  const { data: workspaceInfo } = useWorkspaceInfo(chat?.workspaceId);
+  const workspaceMounts = workspaceInfo?.mounts;
+  const legacyFolders = chat?.gitRepositories;
+  const pathRoots = useMemo<PathRoot[]>(() => {
+    const mounts = (workspaceMounts ?? []).filter((m) => m.status !== 'removed');
+    if (mounts.length > 0) return mounts.map((m) => ({ alias: m.alias, path: m.path }));
+    return (legacyFolders ?? []).map((r) => r.url).filter((u): u is string => !!u);
+  }, [workspaceMounts, legacyFolders]);
+
+
+  // Per-op diff icons, the end-of-turn summary card and the composer tray all
+  // land here. With a path, the Changes tab opens focused on that file.
+  const [changesFocusFile, setChangesFocusFile] = useState<{ path: string; token: number } | null>(null);
   const openChangesTab = useCallback(
-    (_filePath?: string) => {
+    (filePath?: string) => {
       setRightPaneOpen(true);
-      setBrowserTabFocusRequest({ type: 'changes', token: Date.now() });
+      const token = Date.now();
+      setBrowserTabFocusRequest({ type: 'changes', token });
+      if (filePath) setChangesFocusFile({ path: toDisplayPath(filePath, pathRoots), token });
     },
-    [setRightPaneOpen],
+    [setRightPaneOpen, pathRoots],
   );
 
   /** Which agent shell command the Terminal tab's console is focused on. */
@@ -838,7 +881,8 @@ export function ChatPage() {
 
   // Whether the transcript has anything to show right now — gates both the
   // empty state below and whether `<LiveTranscript>` renders anything.
-  const showStreamingMessage = hasStream && blocksLength > 0 && (streamStatus !== 'idle' || hasActiveWidgetBlock);
+  const showStreamingMessage =
+    hasStream && (blocksLength > 0 || stoppedByUser) && (streamStatus !== 'idle' || hasActiveWidgetBlock);
 
   // Display messages dedup (same logic as ChatView)
   const isInActiveTurn = hasStream && streamStatus !== 'idle' && !!turnUserMessage;
@@ -885,6 +929,28 @@ export function ChatPage() {
 
     return messages;
   }, [messages, isInActiveTurn, turnUserMessage, serverTurnId]);
+
+  // ↑ / ↓ prompt history for the composer — every prompt the human typed in
+  // this chat (widget- and system-originated user rows are not "theirs").
+  const promptHistory = useMemo<PromptHistoryEntry[]>(() => {
+    const out: PromptHistoryEntry[] = [];
+    for (const m of messages ?? []) {
+      if (m.role !== 'user') continue;
+      const origin = m.metadata?.origin;
+      if (origin === 'widget' || origin === 'system') continue;
+      if (!m.content?.trim() && !(m.attachments?.length)) continue;
+      out.push({
+        id: m.id,
+        text: m.content,
+        ts: new Date(m.timestamp).getTime(),
+        attachments: (m.attachments ?? []).flatMap((a) => {
+          const url = attachmentUrl(a, m.chatId ?? chatId);
+          return url ? [{ name: a.name, mimeType: a.mimeType, url }] : [];
+        }),
+      });
+    }
+    return out;
+  }, [messages, chatId]);
 
   // Optimistic user message
   const showOptimisticUserMessage = useMemo(
@@ -975,6 +1041,7 @@ export function ChatPage() {
               // chat, so "Send all" posts the batch as a new user turn.
               reviewScope={{ scope: 'chat', scopeId: chatId ?? '' }}
               {...(chatId ? { reviewTarget: { kind: 'chat', chatId } } : {})}
+              focusFile={changesFocusFile}
             />
           </React.Suspense>
         ),
@@ -993,7 +1060,7 @@ export function ChatPage() {
         },
         getTabIcon: ({ id }) => <BrowserTabIcon state={browserTabs[id] ?? null} />,
         disabled: !chat?.workspaceId,
-        disabledReason: 'Send a message first to create a workspace',
+        disabledReason: 'No workspace for this chat',
         render: (ctx) => (
           chat?.workspaceId ? (
             <div className="flex h-full min-h-0 flex-1 flex-col">
@@ -1044,7 +1111,7 @@ export function ChatPage() {
         // host. 4 is above any observed real use of parallel shells.
         maxInstances: 4,
         disabled: !chat?.workspaceId,
-        disabledReason: 'Send a message first to create a workspace',
+        disabledReason: 'No workspace for this chat',
         render: (ctx) => (
           <React.Suspense fallback={<PanelFallback />}>
             {agentConsoleCallId != null ? (
@@ -1076,7 +1143,7 @@ export function ChatPage() {
         description: 'Watch the desktop windows the agent reads and acts on',
         icon: <MonitorCog className="h-3.5 w-3.5" />,
         disabled: !chat?.workspaceId,
-        disabledReason: 'Send a message first to create a workspace',
+        disabledReason: 'No workspace for this chat',
         render: (ctx) => (
           <React.Suspense fallback={<PanelFallback />}>
             <ComputerPanel embedded workspaceId={chat?.workspaceId} active={ctx.active} />
@@ -1154,6 +1221,7 @@ export function ChatPage() {
     activePlanId,
     openWidgetTab,
     widgetTitlesKey,
+    changesFocusFile,
   ]);
 
   // Loading
@@ -1185,6 +1253,7 @@ export function ChatPage() {
   }
 
   return (
+    <PathRootsContext.Provider value={pathRoots}>
     <div className="relative flex h-full">
       {/* Main chat column */}
       <div className="flex flex-1 flex-col min-w-0">
@@ -1242,6 +1311,7 @@ export function ChatPage() {
             onOpenPlan={openPlanTab}
             onOpenChanges={openChangesTab}
             onOpenShell={openAgentShell}
+            {...(chat?.workspaceId ? { workspaceId: chat.workspaceId } : {})}
             // Thread the page-level scroll ref so VirtualChatList can attach
             // to the outer scroll container rather than creating a nested one.
             // This avoids dual scroll bars and the 60-vh height cap (W30 fix).
@@ -1275,6 +1345,7 @@ export function ChatPage() {
             onOpenPlan={openPlanTab}
             onOpenChanges={openChangesTab}
             onOpenShell={openAgentShell}
+            workspaceId={chat?.workspaceId}
             onApprovePlan={handleApprovePlan}
             onRequestPlanChanges={handleRequestPlanChanges}
             onAnswerQuestion={handleAnswerQuestion}
@@ -1307,28 +1378,7 @@ export function ChatPage() {
             and hasn't produced its own content yet; carried-over widget
             blocks (preserved across the turn barrier) must not suppress it. */}
         {isPending && !hasNewTurnContent && (
-          <div className="animate-block-in mt-4">
-            <div className="space-y-3">
-              {/* Spinner + status text */}
-              <div className="flex items-center gap-2.5">
-                <div className="flex gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-[var(--color-primary)] dot-pulse-1" />
-                  <span className="h-2 w-2 rounded-full bg-[var(--color-primary)] dot-pulse-2" />
-                  <span className="h-2 w-2 rounded-full bg-[var(--color-primary)] dot-pulse-3" />
-                </div>
-                <span className="text-sm font-medium text-[var(--color-foreground)]">
-                  {activeHarnessLabel ?? 'Agent'} is thinking...
-                </span>
-              </div>
-              {/* Shimmer skeleton lines */}
-              <div className="space-y-2.5 max-w-md">
-                <div className="skeleton-shimmer h-3.5 w-[90%] rounded-md" />
-                <div className="skeleton-shimmer h-3.5 w-[75%] rounded-md" />
-                <div className="skeleton-shimmer h-3.5 w-[60%] rounded-md" />
-                <div className="skeleton-shimmer h-3.5 w-[45%] rounded-md" />
-              </div>
-            </div>
-          </div>
+          <ThinkingPlaceholder label={`${activeHarnessLabel ?? 'Agent'} is thinking`} className="mt-4" />
         )}
         </div>
       </div>
@@ -1359,12 +1409,17 @@ export function ChatPage() {
             projectId={chat?.projectId}
             codebaseIds={selectedCodebaseIds}
             workspaceId={chat?.workspaceId}
+            {...(chat?.workspacePrep ? { workspacePrep: chat.workspacePrep } : {})}
+            onRetryWorkspacePrep={() => prepareWorkspace.mutate()}
+            workspacePrepRetrying={prepareWorkspace.isPending}
+            onEditSources={() => setEditingSources(true)}
             showModelSelector={true}
             showGitConnector={true}
             onToggleFilesPanel={toggleRightPane}
             filesPanelOpen={rightPaneOpen}
             isStreaming={isCopilotWorking}
             pendingCaptures={pendingCaptures}
+            promptHistory={promptHistory}
             onRemovePendingCapture={(id) => setPendingCaptures((prev) => prev.filter((c) => c.id !== id))}
             onBuiltinCommand={async (commandId) => {
               const wsId = chat?.workspaceId;
@@ -1428,6 +1483,14 @@ export function ChatPage() {
             }
             cancelMutation.mutate(chatId);
           }}
+          aboveComposer={
+            <ChatChangesTray
+              workspaceId={chat?.workspaceId}
+              sessionId={sessionId}
+              streaming={isCopilotWorking}
+              onOpenChanges={openChangesTab}
+            />
+          }
         />
         </>
       )}
@@ -1445,7 +1508,16 @@ export function ChatPage() {
         onTabClose={handleRightPaneTabClose}
         tabs={tabs}
       />
+
+      {/* Source editor — reachable from the preparation banner and from the
+          Sources block at the top of the Files tab. */}
+      <EditSourcesDialog
+        open={editingSources}
+        onClose={() => setEditingSources(false)}
+        chat={chat}
+      />
     </div>
+    </PathRootsContext.Provider>
   );
 }
 

@@ -124,6 +124,21 @@ interface ConversationState {
   model: ModelRef | null;
   /** System prompt, sent on every prompt for the same reason. */
   system: string | undefined;
+  /**
+   * Project root for this conversation, sent as `?directory=` on every
+   * session-scoped request.
+   *
+   * `opencode serve` is one process serving many roots: every endpoint in
+   * `schemas/opencode/openapi.json` — `POST /session` included — takes an
+   * optional `directory` query parameter naming the project the call applies
+   * to, and `Session.directory` is what the server echoes back. Without it a
+   * session inherits the SERVER's cwd, so a chat bound to a worktree read and
+   * wrote the directory the GeneratorAI server happened to start in.
+   *
+   * Undefined when neither the conversation nor `opts.defaultCwd` names one —
+   * then the server's own default applies, as before.
+   */
+  directory: string | undefined;
   listeners: Set<Listener<AgentEvent>>;
   warnings: ConversationWarning[];
   turn: TurnState | null;
@@ -246,6 +261,11 @@ export class OpenCodeProvider implements IAgentHarness {
     ];
 
     const proc = spawn(bin, args, {
+      // Without an explicit cwd the server inherits the GeneratorAI server's
+      // own working directory and treats it as the default project root.
+      // Per-conversation roots ride on `?directory=` (see
+      // `ConversationState.directory`); this is only the fallback.
+      ...(this.opts.defaultCwd ? { cwd: this.opts.defaultCwd } : {}),
       // OpenCode runs model-authored tool calls, so it gets the allowlisted
       // harness environment, never the full parent env — the same rule
       // `childEnv.ts` enforces for every other spawned provider.
@@ -484,6 +504,30 @@ export class OpenCodeProvider implements IAgentHarness {
       });
     }
 
+    // The chat's primary mount. `opencode serve` has no notion of extra
+    // roots — `Session` carries a single `directory`, and no endpoint in the
+    // pinned OpenAPI document accepts a list — so the other mounts and the
+    // managed workspace root cannot be granted here.
+    const directory = params.workingDirectory ?? this.opts.defaultCwd;
+    if (params.additionalDirectories?.length) {
+      warnings.push({
+        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+        params: {
+          field: 'additionalDirectories',
+          provider: 'opencode',
+          reason: 'a session has exactly one project directory',
+        },
+      });
+    }
+    // The server process is shared by every conversation and is spawned before
+    // any of them exists, so per-conversation variables cannot reach it.
+    if (params.env && Object.keys(params.env).length > 0) {
+      warnings.push({
+        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+        params: { field: 'env', provider: 'opencode', reason: 'shared server process' },
+      });
+    }
+
     let sessionId: string;
     if (params.resumeProviderSessionId) {
       // W12 — rejoin the existing server-side session rather than starting the
@@ -491,6 +535,8 @@ export class OpenCodeProvider implements IAgentHarness {
       sessionId = params.resumeProviderSessionId;
       const resp = await this.fetch(
         this.route(OPENCODE_OPERATIONS['session.get'].path, { sessionID: sessionId }),
+        undefined,
+        directory,
       );
       await resp.arrayBuffer().catch(() => undefined);
       if (!resp.ok) {
@@ -502,10 +548,11 @@ export class OpenCodeProvider implements IAgentHarness {
       // `POST /session` accepts only `{ parentID?, title? }`. Sending `model`
       // or `systemPrompt` here — as the previous version did — is silently
       // ignored; both belong on each prompt instead.
-      const resp = await this.fetch(OPENCODE_OPERATIONS['session.create'].path, {
-        method: 'POST',
-        body: JSON.stringify({ title: params.conversationId }),
-      });
+      const resp = await this.fetch(
+        OPENCODE_OPERATIONS['session.create'].path,
+        { method: 'POST', body: JSON.stringify({ title: params.conversationId }) },
+        directory,
+      );
       if (!resp.ok) {
         throw new Error(`OpenCodeProvider: POST /session failed with ${resp.status}`);
       }
@@ -518,6 +565,7 @@ export class OpenCodeProvider implements IAgentHarness {
       params,
       model,
       system: this.extractSystemPrompt(params),
+      directory,
       listeners: new Set(),
       warnings,
       turn: null,
@@ -557,6 +605,7 @@ export class OpenCodeProvider implements IAgentHarness {
         const resp = await this.fetch(
           this.route(OPENCODE_OPERATIONS['session.delete'].path, { sessionID: conv.sessionId }),
           { method: 'DELETE' },
+          conv.directory,
         );
         await resp.arrayBuffer().catch(() => undefined);
       } catch { /* best effort */ }
@@ -709,6 +758,7 @@ export class OpenCodeProvider implements IAgentHarness {
       const httpSettled = this.fetch(
         this.route(OPENCODE_OPERATIONS['session.prompt'].path, { sessionID: conv.sessionId }),
         { method: 'POST', body: JSON.stringify(body) },
+        conv.directory,
       ).then(
         (resp) => ({ ok: true as const, resp }),
         (err: unknown) => ({ ok: false as const, err }),
@@ -855,6 +905,8 @@ export class OpenCodeProvider implements IAgentHarness {
       // returned `[]` unconditionally.
       const resp = await this.fetch(
         this.route(OPENCODE_OPERATIONS['session.messages'].path, { sessionID: conv.sessionId }),
+        undefined,
+        conv.directory,
       );
       if (!resp.ok) return [];
       const rows = await resp.json() as Array<{ info?: { role?: string }; parts?: OpenCodePart[] }>;
@@ -872,6 +924,7 @@ export class OpenCodeProvider implements IAgentHarness {
       const resp = await this.fetch(
         this.route(OPENCODE_OPERATIONS['session.abort'].path, { sessionID: conv.sessionId }),
         { method: 'POST' },
+        conv.directory,
       );
       await resp.arrayBuffer().catch(() => undefined);
     } catch { /* best effort */ }
@@ -1200,7 +1253,14 @@ export class OpenCodeProvider implements IAgentHarness {
     return params.systemMessage?.content ?? params.systemPromptAppend;
   }
 
-  private async fetch(path: string, init?: RequestInit): Promise<Response> {
+  /**
+   * One HTTP call against `opencode serve`.
+   *
+   * `directory` is appended as the `?directory=` query parameter every
+   * endpoint in the pinned OpenAPI document accepts; it is what makes one
+   * shared server usable by chats rooted in different projects.
+   */
+  private async fetch(path: string, init?: RequestInit, directory?: string): Promise<Response> {
     if (!this.baseUrl) throw new Error('OpenCodeProvider: no base URL — call initialize() first.');
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -1219,7 +1279,10 @@ export class OpenCodeProvider implements IAgentHarness {
     // `opencode serve` must not be able to stall the caller — least of all
     // `initialize()`, which sits on the harness bring-up path.
     const signal = init?.signal ?? AbortSignal.timeout(this.requestTimeoutMs);
-    return globalThis.fetch(`${this.baseUrl}${path}`, {
+    const url = directory
+      ? `${this.baseUrl}${path}${path.includes('?') ? '&' : '?'}directory=${encodeURIComponent(directory)}`
+      : `${this.baseUrl}${path}`;
+    return globalThis.fetch(url, {
       ...init,
       signal,
       headers: { ...headers, ...((init?.headers ?? {}) as Record<string, string>) },

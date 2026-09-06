@@ -74,7 +74,8 @@ By default workers SHARE your workspace and your working directory, so code they
 write is already where you can see it. Their notes and digests land in the task
 directory named in each brief, and the digest's artifact paths point right at
 them — you do NOT need the worker to paste content back. You may keep your own
-plan/notes in orchestrator/plan.md if it helps you track a long run; a
+plan/notes under the scratch directory named in the [Workspace] block (never
+inside a mounted repository) if it helps you track a long run; a
 machine-written orchestrator/state.json (the task tree + statuses) is maintained
 for you automatically.
 

@@ -13,6 +13,10 @@
 //     so a prompt may also carry "TITLE:<word>" to set it.
 //   - FAKE_ACP_NO_INIT=1 / FAKE_ACP_NO_SESSION_NEW=1 accept that request and
 //     never answer it, so the client's own deadlines are what must fire.
+//   - A prompt containing "ECHO_SESSION" replies with a JSON dump of the
+//     `session/new` request this session was created from, so a test can
+//     assert what actually crossed the wire (cwd, additionalDirectories)
+//     rather than trusting a mock.
 //   - A prompt containing "CANCEL_ME" never resolves on its own; it waits
 //     for a `session/cancel` notification and then returns
 //     `{ stopReason: 'cancelled' }` — exercising AcpProvider's real
@@ -28,12 +32,28 @@ import { Readable, Writable } from 'node:stream';
 
 /** sessionId -> AbortController for the in-flight prompt, if any. */
 const pending = new Map();
+/** sessionId -> the `session/new` request that created it. */
+const sessionRequests = new Map();
 
 async function handlePrompt(params, cx) {
   const sessionId = params.sessionId;
   const text = params.prompt.map((b) => (b.type === 'text' ? b.text : '')).join('');
   const ac = new AbortController();
   pending.set(sessionId, ac);
+
+  // Answered BEFORE the greeting so the turn's whole content is the JSON — a
+  // test can then parse it without stripping anything.
+  if (text.includes('ECHO_SESSION')) {
+    await cx.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: JSON.stringify(sessionRequests.get(sessionId) ?? null) },
+      },
+    });
+    pending.delete(sessionId);
+    return { stopReason: 'end_turn' };
+  }
 
   await cx.notify(acp.methods.client.session.update, {
     sessionId,
@@ -136,9 +156,11 @@ acp
       agentInfo: { name: 'fake-acp-agent', version: '0.0.1' },
     };
   })
-  .onRequest(acp.methods.agent.session.new, async () => {
+  .onRequest(acp.methods.agent.session.new, async (ctx) => {
     if (process.env['FAKE_ACP_NO_SESSION_NEW'] === '1') await never();
-    return { sessionId: crypto.randomUUID() };
+    const sessionId = crypto.randomUUID();
+    sessionRequests.set(sessionId, ctx.params ?? null);
+    return { sessionId };
   })
   .onRequest(acp.methods.agent.session.prompt, (ctx) => handlePrompt(ctx.params, ctx.client))
   .onNotification(acp.methods.agent.session.cancel, (ctx) => {

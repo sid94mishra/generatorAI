@@ -15,6 +15,7 @@
 
 import type { StreamBlock } from '@/stores/streamStore.js';
 import type { TimelineStep, StepKind, StepStatus } from '@/components/chat/redesign/types.js';
+import { resolveInlineHunks } from '@/components/chat/changes/changePaths.js';
 
 // ── Step identity ────────────────────────────────────────────────
 //
@@ -145,6 +146,52 @@ export function humanizeToolName(tool: string): string {
  *  command console (and so get the "open in terminal" affordance). */
 export function isShellTool(tool: string): boolean {
   return /^(bash|powershell|shell)$/i.test(tool);
+}
+
+/**
+ * Did a completed tool call fail?
+ *
+ * The provider's `is_error` flag is authoritative (`block.error`). The
+ * in-process browser tools never set it — they catch and answer with an
+ * `{ ok: false, error }` envelope the model can read — so that shape counts
+ * too, whether it arrives as an object or as the JSON string the MCP bridge
+ * serialises it to.
+ */
+export function toolCallFailed(b: Extract<StreamBlock, { type: 'tool_call' }>): boolean {
+  if (b.error) return true;
+  const env = resultObject(b.result);
+  return !!env && env['ok'] === false && typeof env['error'] === 'string';
+}
+
+/** The tool result as an object when it is one (or a JSON string of one). */
+function resultObject(result: unknown): Record<string, unknown> | null {
+  if (result && typeof result === 'object' && !Array.isArray(result)) return result as Record<string, unknown>;
+  if (typeof result === 'string') {
+    const s = result.trim();
+    if (s.length > 20_000 || !s.startsWith('{')) return null;
+    try {
+      const parsed: unknown = JSON.parse(s);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * A screenshot the agent took (`screenshot_page` and friends answer with the
+ * workspace-relative `artifactPath` of the PNG). Surfaced on the step so the
+ * row can offer a hover preview instead of a file name.
+ */
+function screenshotOf(result: unknown): { relativePath: string; label: string } | undefined {
+  const env = resultObject(result);
+  if (!env || env['ok'] === false) return undefined;
+  const p = env['artifactPath'];
+  if (typeof p !== 'string' || !/\.(png|jpe?g|webp)$/i.test(p)) return undefined;
+  if (env['artifactType'] != null && env['artifactType'] !== 'browser_screenshot') return undefined;
+  const base = p.split(/[\\/]/).pop() ?? p;
+  return { relativePath: p, label: base };
 }
 
 function summarizeArgs(toolName: string, args: unknown): { target: string; meta?: string } {
@@ -290,7 +337,7 @@ export function deriveTimeline(
         // forever after the turn ended. Once the turn is settled, an
         // unresolved call degrades to a neutral terminal state instead.
         const status: StepStatus = b.status === 'complete'
-          ? 'done'
+          ? (toolCallFailed(b) ? 'failed' : 'done')
           : awaitingDecision
             ? 'waiting'
             : opts.active ? 'running' : 'pending';
@@ -315,6 +362,7 @@ export function deriveTimeline(
             return parts.join('\n\n');
           };
         const fileOp = b.fileOp;
+        const image = b.status === 'complete' ? screenshotOf(b.result) : undefined;
         const step: TimelineStep = {
           id: `tool-${b.blockId}`,
           kind,
@@ -328,7 +376,10 @@ export function deriveTimeline(
           detail,
           callId: b.callId,
           ...(fileOp ? { fileOp } : {}),
+          // Inline diff — only file ops carry one; resolved on expand.
+          ...(fileOp ? { diff: () => resolveInlineHunks(fileOp, b.tool, args) } : {}),
           ...(isShellTool(b.tool) ? { isShell: true } : {}),
+          ...(image ? { image } : {}),
         };
         // `status` is the only derived field that can change while the block
         // object stays the same (it folds in `opts.active` / the gate state).
@@ -378,6 +429,23 @@ export function deriveTimeline(
             steps.push(subStep);
             subagentEmitted = true;
           }
+          break;
+        }
+        if (b.category === 'warning') {
+          // Non-fatal, but the user has to see it: an MCP server that failed
+          // to start, a credential that could not be resolved. Dropping it
+          // here (as plain 'system' notes are) is how "its tools are
+          // unavailable for this turn" used to reach nobody.
+          const warnStep: TimelineStep = {
+            id: `warn-${b.blockId}`,
+            kind: 'warning',
+            verb: 'Warning',
+            target: b.message,
+            mono: false,
+            status: 'done',
+          };
+          anchors.set(warnStep, { anchor: b, key: 'warning' });
+          steps.push(warnStep);
           break;
         }
         if (b.category === 'error') {

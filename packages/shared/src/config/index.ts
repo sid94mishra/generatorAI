@@ -15,7 +15,9 @@ export type { ConfigReadAction, ConfigReadRecord, ReadBoundedIntOptions } from '
 export {
   buildChildEnv,
   isBlockedChildEnvVar,
+  filterDelegatedChildEnv,
   BASE_CHILD_ENV_ALLOWLIST,
+  DELEGATED_ENV_NAME_PATTERN,
 } from './childEnv.js';
 export type { ChildEnvOptions } from './childEnv.js';
 
@@ -82,6 +84,8 @@ export type {
 export {
   AgentModeSchema,
   CreateChatSchema,
+  ChatSourceSpecSchema,
+  UpdateChatSourcesSchema,
   SendChatPromptSchema,
   UpdatePlanContentSchema,
   CreatePlanCommentSchema,

@@ -620,3 +620,99 @@ describe('OpenCodeProvider — exposes and resumes its session id', () => {
     } as CreateConversationParams)).rejects.toThrow(/cannot resume session/i);
   }, 30_000);
 });
+
+// ── Defect: every session inherited the SERVER's cwd ──
+//
+// The provider spawned `opencode serve` with no `cwd` and created every
+// session with no project, so one shared server rooted every chat — whatever
+// workspace it was bound to — in whatever directory the GeneratorAI server
+// happened to start in. `?directory=` is the query parameter every endpoint in
+// `schemas/opencode/openapi.json` accepts for exactly this.
+
+describe('OpenCodeProvider — per-conversation project directory', () => {
+  /** A server that answers just enough to create a session and read it back. */
+  async function directoryHarness(): Promise<Harness> {
+    return startHarness((req, res, _body, _h) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/event') { sse(res); return; }
+      if (url.pathname === '/session' && req.method === 'GET') { json(res, 200, []); return; }
+      if (url.pathname === '/session' && req.method === 'POST') {
+        json(res, 200, { id: 'ses_1', directory: url.searchParams.get('directory') });
+        return;
+      }
+      if (url.pathname === '/session/ses_1/message') { json(res, 200, []); return; }
+      json(res, 200, {});
+    });
+  }
+
+  /** The `?directory=` value of the first request to `path`. */
+  function directoryOf(h: Harness, method: string, pathname: string): string | null | undefined {
+    const rec = h.requests.find(
+      (r) => r.method === method && new URL(r.url, 'http://x').pathname === pathname,
+    );
+    if (!rec) return undefined;
+    return new URL(rec.url, 'http://x').searchParams.get('directory');
+  }
+
+  it('creates the session against params.workingDirectory', async () => {
+    const h = await directoryHarness();
+    const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
+    await p.initialize();
+    await p.createConversation({
+      conversationId: 'c-dir',
+      workingDirectory: '/work/repo',
+    } as CreateConversationParams);
+
+    expect(directoryOf(h, 'POST', '/session')).toBe('/work/repo');
+  }, 20_000);
+
+  it('carries the directory on session-scoped calls too, not just the create', async () => {
+    const h = await directoryHarness();
+    const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
+    await p.initialize();
+    await p.createConversation({
+      conversationId: 'c-dir2',
+      workingDirectory: '/work/repo',
+    } as CreateConversationParams);
+    await p.getMessages('c-dir2');
+
+    expect(directoryOf(h, 'GET', '/session/ses_1/message')).toBe('/work/repo');
+  }, 20_000);
+
+  it('falls back to opts.defaultCwd, and sends nothing when neither is set', async () => {
+    const h1 = await directoryHarness();
+    const p1 = makeProvider({ baseUrl: h1.baseUrl, defaultCwd: '/server/root', defaultProviderId: 'opencode' });
+    await p1.initialize();
+    await p1.createConversation(CONV('c-dir3'));
+    expect(directoryOf(h1, 'POST', '/session')).toBe('/server/root');
+
+    const h2 = await directoryHarness();
+    const p2 = makeProvider({ baseUrl: h2.baseUrl, defaultProviderId: 'opencode' });
+    await p2.initialize();
+    await p2.createConversation(CONV('c-dir4'));
+    expect(directoryOf(h2, 'POST', '/session')).toBeNull();
+  }, 20_000);
+
+  it('warns that extra roots cannot be honoured — a session has exactly one', async () => {
+    // `Session` carries a single `directory` and no endpoint in the pinned
+    // OpenAPI document accepts a list, so the chat's other mounts reach the
+    // model only through the caller's system prompt.
+    const h = await directoryHarness();
+    const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
+    await p.initialize();
+    await p.createConversation({
+      conversationId: 'c-dir5',
+      workingDirectory: '/work/repo',
+      additionalDirectories: ['/work/docs'],
+    } as CreateConversationParams);
+
+    expect(p.getConversationWarnings('c-dir5')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+          params: expect.objectContaining({ field: 'additionalDirectories' }),
+        }),
+      ]),
+    );
+  }, 20_000);
+});

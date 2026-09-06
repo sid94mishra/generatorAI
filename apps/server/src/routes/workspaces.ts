@@ -7,8 +7,9 @@ import type { Response } from 'express';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Container } from '../composition-root.js';
-import type { WorkspaceTreeRepo } from '@generatorai/core';
-import type { WorkspaceFilters, WorkspaceOwnerType, WorkspaceStatus } from '@generatorai/shared';
+import { resolveWorktreePath, type WorkspaceTreeRepo } from '@generatorai/core';
+import { stripAliasPrefix, type MountRef } from '@generatorai/changes';
+import type { WorkspaceFilters, WorkspaceInfo, WorkspaceOwnerType, WorkspaceStatus } from '@generatorai/shared';
 
 /**
  * Cheap, order-sensitive digest of a tree's path set, used only to build an
@@ -73,8 +74,12 @@ export function createWorkspaceRoutes(container: Container): Router {
       case 'ref':
         return { kind: 'ref', id };
       case 'turn': {
+        // A turn writes two checkpoints (before/after) sharing the id; the
+        // base of "what did this turn change?" is the BEFORE one.
         const rows = await checkpointService.list({ workspaceId, limit: 500 });
-        const match = rows.find((c) => c.turnId === id);
+        const match =
+          rows.find((c) => c.turnId === id && c.phase === 'before') ??
+          rows.find((c) => c.turnId === id);
         return match ? { kind: 'checkpoint', id: match.id } : { kind: fallback };
       }
       case 'stage': {
@@ -87,20 +92,42 @@ export function createWorkspaceRoutes(container: Container): Router {
     }
   }
 
-  /** Resolve a workspace + its worktree refs, or send a 404. */
+  /**
+   * Resolve a workspace + the mounts the change engine tracks, or send a 404.
+   *
+   * The mounts (each with its shadow store) are the ONE definition of "which
+   * directories are tracked", shared with checkpoint capture — the two must
+   * never disagree, or a repo gets diffed against a baseline that was never
+   * captured for it.
+   */
   async function loadWorkspace(id: string, res: Response) {
-    const info = await workspaceManager.getWorkspaceInfo(id);
-    if (!info) {
+    const ws = await workspaceManager.getExecutionWorkspace(id);
+    const info = ws ? await workspaceManager.getWorkspaceInfo(id) : null;
+    if (!ws || !info) {
       res
         .status(404)
         .json({ error: { code: 'NOT_FOUND', message: `Workspace not found: ${id}` } });
       return null;
     }
+    const mounts: MountRef[] = await workspaceManager.toMountRefs(ws);
     const worktrees = (info.worktrees ?? []).map((wt) => ({
       alias: wt.alias,
-      worktreePath: path.join(info.rootPath, wt.worktreePath),
+      worktreePath: resolveWorktreePath(info.rootPath, wt.worktreePath),
     }));
-    return { info, worktrees };
+    return { info, worktrees, mounts, rootPath: ws.codeRoot ?? ws.rootPath };
+  }
+
+  /** Directory behind a mount alias (nested `<alias>/<sub>` included). */
+  function mountDir(info: WorkspaceInfo, alias: string): string | null {
+    if (!alias || alias === '.') return info.workingDirectory;
+    const direct = info.mounts.find((m) => m.alias === alias);
+    if (direct) return direct.path;
+    const slash = alias.indexOf('/');
+    if (slash > 0) {
+      const parent = info.mounts.find((m) => m.alias === alias.slice(0, slash));
+      if (parent) return path.join(parent.path, alias.slice(slash + 1));
+    }
+    return null;
   }
 
   // GET /workspaces — List workspaces with filters
@@ -174,13 +201,15 @@ export function createWorkspaceRoutes(container: Container): Router {
       const id = String(req.params['id']);
       const loaded = await loadWorkspace(id, res);
       if (!loaded) return;
-      const { info, worktrees } = loaded;
-      const autoInit = String(req.query['autoInit'] ?? 'true') !== 'false';
+      const { worktrees, mounts, rootPath } = loaded;
+      // Reads never mutate the workspace; `autoInit` is legacy and off.
+      const autoInit = false;
 
       if (String(req.query['v'] ?? '2') === '1') {
         const changeSet = await changeSetService.getChangeSet({
-          rootPath: info.workingDirectory,
+          rootPath,
           worktrees,
+          mounts,
           autoInit,
         });
         res.json({
@@ -199,8 +228,9 @@ export function createWorkspaceRoutes(container: Container): Router {
       const head = await parseRevision(req.query['head'], 'working', id);
       const summary = await changeSummaryService.getSummary({
         workspaceId: id,
-        rootPath: info.workingDirectory,
+        rootPath,
         worktrees,
+        mounts,
         base,
         head,
         autoInit,
@@ -236,7 +266,7 @@ export function createWorkspaceRoutes(container: Container): Router {
       }
       const loaded = await loadWorkspace(id, res);
       if (!loaded) return;
-      const { info, worktrees } = loaded;
+      const { worktrees, mounts, rootPath } = loaded;
 
       const alias = String(req.query['alias'] ?? '.');
       const base = await parseRevision(req.query['base'], 'baseline', id);
@@ -245,8 +275,9 @@ export function createWorkspaceRoutes(container: Container): Router {
 
       const common = {
         workspaceId: id,
-        rootPath: info.workingDirectory,
+        rootPath,
         worktrees,
+        mounts,
         base,
         head,
         autoInit: false,
@@ -338,12 +369,34 @@ export function createWorkspaceRoutes(container: Container): Router {
       const id = String(req.params['id']);
       const checkpointId = String(req.params['checkpointId']);
 
-      const checkpoint = await checkpointService.getById(checkpointId);
+      let checkpoint = await checkpointService.getById(checkpointId);
       if (!checkpoint || checkpoint.workspaceId !== id) {
         res.status(404).json({
           error: { code: 'NOT_FOUND', message: `Checkpoint not found: ${checkpointId}` },
         });
         return;
+      }
+
+      // A checkpoint belongs to ONE mount. When the caller names a different
+      // mount (`alias`), swap in that mount's equivalent snapshot: the same
+      // turn+phase, or its baseline — otherwise a discard on the second mount
+      // of a workspace would silently restore nothing.
+      const wantedAlias = typeof req.body?.alias === 'string' ? req.body.alias.trim() : '';
+      if (wantedAlias && wantedAlias !== checkpoint.repoAlias) {
+        const rows = await checkpointService.list({ workspaceId: id, repoAlias: wantedAlias, limit: 500, excludeLive: false });
+        const match =
+          (checkpoint.turnId
+            ? rows.find((c) => c.turnId === checkpoint!.turnId && (c.phase ?? null) === (checkpoint!.phase ?? null))
+            : undefined) ??
+          (checkpoint.kind === 'baseline' ? rows.find((c) => c.kind === 'baseline') : undefined) ??
+          rows.find((c) => Math.abs(c.createdAt.getTime() - checkpoint!.createdAt.getTime()) < 15_000 && c.kind === checkpoint!.kind);
+        if (!match) {
+          res.status(409).json({
+            error: { code: 'CONFLICT', message: `No matching checkpoint for mount "${wantedAlias}"` },
+          });
+          return;
+        }
+        checkpoint = match;
       }
 
       const repoDir = await workspaceCheckpointService.resolveRepoDir(
@@ -360,8 +413,14 @@ export function createWorkspaceRoutes(container: Container): Router {
         return;
       }
 
+      // Paths are repo-relative. An `<alias>/` prefix is stripped so a client
+      // passing tree ids verbatim still restores the right file — before this
+      // the pathspec matched nothing inside the repo and the discard was a
+      // silent no-op that still wrote a pre_restore checkpoint.
       const paths = Array.isArray(req.body?.paths)
-        ? (req.body.paths as unknown[]).filter((p): p is string => typeof p === 'string')
+        ? (req.body.paths as unknown[])
+            .filter((p): p is string => typeof p === 'string')
+            .map((p) => stripAliasPrefix(p, checkpoint.repoAlias))
         : undefined;
 
       const result = await checkpointService.restore(checkpoint, repoDir, paths);
@@ -388,7 +447,7 @@ export function createWorkspaceRoutes(container: Container): Router {
         `[WorkspaceRoutes] Restored checkpoint ${checkpointId} in workspace ${id}`,
         { requestId: req.requestId },
       );
-      res.json({ workspaceId: id, checkpointId, ...result });
+      res.json({ workspaceId: id, checkpointId: checkpoint.id, repoAlias: checkpoint.repoAlias, ...result });
     } catch (err) {
       next(err);
     }
@@ -407,12 +466,13 @@ export function createWorkspaceRoutes(container: Container): Router {
       const id = String(req.params['id']);
       const loaded = await loadWorkspace(id, res);
       if (!loaded) return;
-      const { info, worktrees } = loaded;
+      const { worktrees, mounts, rootPath } = loaded;
 
       const tree = await workspaceTreeService.listTree({
         workspaceId: id,
-        rootPath: info.workingDirectory,
+        rootPath,
         worktrees,
+        mounts,
         ...(typeof req.query['alias'] === 'string' && req.query['alias']
           ? { repoAlias: String(req.query['alias']) }
           : {}),
@@ -449,11 +509,12 @@ export function createWorkspaceRoutes(container: Container): Router {
       }
       const loaded = await loadWorkspace(id, res);
       if (!loaded) return;
-      const { info, worktrees } = loaded;
+      const { worktrees, mounts, rootPath } = loaded;
 
       const file = await workspaceTreeService.readFile({
-        rootPath: info.workingDirectory,
+        rootPath,
         worktrees,
+        mounts,
         alias: String(req.query['alias'] ?? '.'),
         filePath,
       });
@@ -497,14 +558,8 @@ export function createWorkspaceRoutes(container: Container): Router {
         return;
       }
       // Resolve repo directory for the alias.
-      let repoDir = info.workingDirectory;
-      let fileRel = relPath;
-      if (alias && alias !== '.') {
-        const wt = (info.worktrees ?? []).find((w) => w.alias === alias);
-        repoDir = wt ? path.join(info.rootPath, wt.worktreePath) : path.join(info.rootPath, alias);
-        // Strip the alias prefix from the path if present.
-        fileRel = relPath.startsWith(`${alias}/`) ? relPath.slice(alias.length + 1) : relPath;
-      }
+      const repoDir = mountDir(info, alias) ?? info.workingDirectory;
+      const fileRel = stripAliasPrefix(relPath, alias);
       const versions = await changeSetService.getFileVersions(repoDir, fileRel);
       res.json({ path: relPath, ...versions });
     } catch (err) {
@@ -527,11 +582,7 @@ export function createWorkspaceRoutes(container: Container): Router {
         return;
       }
       const alias = String(req.body?.alias ?? req.query['alias'] ?? '.');
-      let repoDir = info.workingDirectory;
-      if (alias && alias !== '.') {
-        const wt = (info.worktrees ?? []).find((w) => w.alias === alias);
-        repoDir = wt ? path.join(info.rootPath, wt.worktreePath) : path.join(info.rootPath, alias);
-      }
+      const repoDir = mountDir(info, alias) ?? info.workingDirectory;
       const pr = await sourceControlService.createPullRequest({
         repoDir,
         title,
@@ -556,11 +607,7 @@ export function createWorkspaceRoutes(container: Container): Router {
         return;
       }
       const alias = String(req.query['alias'] ?? '.');
-      let repoDir = info.workingDirectory;
-      if (alias && alias !== '.') {
-        const wt = (info.worktrees ?? []).find((w) => w.alias === alias);
-        repoDir = wt ? path.join(info.rootPath, wt.worktreePath) : path.join(info.rootPath, alias);
-      }
+      const repoDir = mountDir(info, alias) ?? info.workingDirectory;
       const prs = await sourceControlService.listPullRequests(repoDir);
       res.json({ provider: sourceControlService.getActiveProviderId(), pullRequests: prs });
     } catch (err) {
@@ -613,97 +660,68 @@ export function createWorkspaceRoutes(container: Container): Router {
     }
   });
 
-  // GET /workspaces/:id/files — List all files in workspace (similar to run workspace endpoint)
+  // GET /workspaces/:id/files — every file the composer can @-mention
+  //
+  // One entry per MOUNT (in-place folders included), listed through the same
+  // tree service the Files tab uses (git ls-files via the mount's shadow
+  // store), so .gitignore is honoured and the answer costs one subprocess per
+  // mount instead of a stat per file. `workspaceFiles` are the managed
+  // root's scratch/plans files; `sourceFiles` is kept (empty) for older
+  // clients.
   router.get('/:id/files', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
-      const info = await workspaceManager.getWorkspaceInfo(id);
-      if (!info) {
-        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Workspace not found: ${id}` } });
-        return;
-      }
+      const loaded = await loadWorkspace(id, res);
+      if (!loaded) return;
+      const { info, mounts, rootPath } = loaded;
 
-      // Helper: list only files (not directories), excluding .git internals.
-      // Paths are returned POSIX-style: the web client derives a display label
-      // with `path.split('/')`, so native separators made every Windows entry
-      // render as its full path instead of a filename.
-      async function listFiles(dir: string): Promise<string[]> {
+      const tree = await workspaceTreeService.listTree({ workspaceId: id, rootPath, mounts });
+      const byAlias = new Map(tree.repos.map((r) => [r.alias, r.paths]));
+      const worktreeEntries = info.mounts
+        .filter((m) => m.status !== 'removed')
+        .map((m) => {
+          // Nested repos are listed under their parent mount with a prefix.
+          const own = byAlias.get(m.alias) ?? [];
+          const nested = (m.git?.nested ?? []).flatMap((sub) =>
+            (byAlias.get(`${m.alias}/${sub}`) ?? []).map((p) => `${sub}/${p}`),
+          );
+          return { alias: m.alias, worktreePath: m.path, mode: m.mode, files: [...own, ...nested] };
+        });
+
+      // Managed-root files a person might reference: scratch and plans.
+      async function listManaged(sub: string): Promise<string[]> {
+        const dir = path.join(info.rootPath, sub);
         try {
-          const entries = await fs.readdir(dir, { recursive: true }) as unknown as string[];
-          const files: string[] = [];
+          const entries = (await fs.readdir(dir, { recursive: true })) as unknown as string[];
+          const out: string[] = [];
           for (const entry of entries) {
             if (entry === '.git' || entry.startsWith('.git/') || entry.startsWith('.git\\')) continue;
-            const fullPath = path.join(dir, entry);
-            const stat = await fs.stat(fullPath);
-            if (stat.isFile()) files.push(entry.split(path.sep).join('/'));
+            if (entry.includes('node_modules')) continue;
+            const full = path.join(dir, entry);
+            const stat = await fs.stat(full).catch(() => null);
+            if (stat?.isFile()) out.push(path.posix.join(sub, entry.split(path.sep).join('/')));
+            if (out.length >= 2000) break;
           }
-          return files;
+          return out;
         } catch {
           return [];
         }
       }
-
-      // The agent's working directory is `info.workingDirectory` — the managed
-      // root normally, or the user's folder when the chat is bound to one — so
-      // files it creates land directly there, NOT under an `output/` subdir.
-      // Artifacts and worktrees stay on the managed `rootPath`.
-      const RESERVED_WS_ENTRIES = new Set([
-        '.git', 'source', 'output', 'artifacts', 'scripts', 'config',
-        'node_modules', 'dist', 'build', '.cache', '.next', '.turbo', 'coverage',
+      const [scratchFiles, planFiles, artifactFiles] = await Promise.all([
+        listManaged('scratch'),
+        listManaged('plans'),
+        listManaged('artifacts'),
       ]);
-      async function listRootWorkspaceFiles(root: string): Promise<string[]> {
-        try {
-          const entries = await fs.readdir(root, { withFileTypes: true });
-          const files: string[] = [];
-          for (const e of entries) {
-            if (e.name.startsWith('.')) continue; // hide .workspace.json, .gitignore, etc.
-            if (e.isDirectory()) {
-              if (RESERVED_WS_ENTRIES.has(e.name)) continue;
-              const sub = await listFiles(path.join(root, e.name));
-              for (const f of sub) files.push(path.posix.join(e.name, f));
-            } else if (e.isFile()) {
-              files.push(e.name);
-            }
-          }
-          return files;
-        } catch {
-          return [];
-        }
-      }
-
-      const outputDir = path.join(info.rootPath, 'output');
-      const artifactsDir = path.join(info.rootPath, 'artifacts');
-      const sourceDir = path.join(info.rootPath, 'source');
-
-      // List worktree files
-      const worktreeEntries: Array<{ alias: string; worktreePath: string; files: string[] }> = [];
-      for (const wt of (info.worktrees ?? [])) {
-        const wtPath = path.join(info.rootPath, wt.worktreePath);
-        const files = await listFiles(wtPath);
-        worktreeEntries.push({ alias: wt.alias, worktreePath: wtPath, files });
-      }
-
-      const [rootFiles, legacyOutputFiles, artifactFiles, sourceFiles] = await Promise.all([
-        listRootWorkspaceFiles(info.workingDirectory),
-        listFiles(outputDir),
-        listFiles(artifactsDir),
-        listFiles(sourceDir),
-      ]);
-      // Merge legacy `output/`-dir files (older workspaces) with top-level
-      // root files, de-duplicated. Legacy output files keep an `output/`
-      // prefix so the content endpoint (baseDir = rootPath) resolves them.
-      const workspaceFiles = Array.from(new Set([
-        ...rootFiles,
-        ...legacyOutputFiles.map((f) => path.posix.join('output', f.split(path.sep).join('/'))),
-      ]));
 
       res.json({
         workspaceId: id,
         rootPath: info.rootPath,
+        scratchPath: info.scratchPath,
         codeRoot: info.workingDirectory,
-        workspaceFiles,
-        artifactFiles,
-        sourceFiles,
+        mounts: info.mounts.map((m) => ({ alias: m.alias, path: m.path, mode: m.mode })),
+        workspaceFiles: [...scratchFiles, ...planFiles],
+        artifactFiles: artifactFiles.map((f) => f.replace(/^artifacts\//, '')),
+        sourceFiles: [],
         worktrees: worktreeEntries,
       });
     } catch (err) {
@@ -732,25 +750,26 @@ export function createWorkspaceRoutes(container: Container): Router {
 
       let baseDir: string;
       if (source === 'worktree' && worktreeAlias) {
-        const wt = (info.worktrees ?? []).find(w => w.alias === worktreeAlias);
-        if (!wt) {
-          res.status(404).json({ error: { code: 'NOT_FOUND', message: `Worktree not found: ${worktreeAlias}` } });
+        const dir = mountDir(info, worktreeAlias);
+        if (!dir) {
+          res.status(404).json({ error: { code: 'NOT_FOUND', message: `Mount not found: ${worktreeAlias}` } });
           return;
         }
-        baseDir = path.join(info.rootPath, wt.worktreePath);
+        baseDir = dir;
       } else if (source === 'artifacts') {
         baseDir = path.join(info.rootPath, 'artifacts');
       } else if (source === 'source') {
         baseDir = path.join(info.rootPath, 'source');
       } else {
-        // 'workspace' source — resolve against the agent's working directory,
-        // which is the user's folder when the chat is bound to one.
-        baseDir = info.workingDirectory;
+        // 'workspace' source — the managed root (scratch, plans). Code lives
+        // in mounts and is addressed by alias above.
+        baseDir = info.rootPath;
       }
 
       // Prevent path traversal
-      const fullPath = path.resolve(baseDir, filePath);
-      if (!fullPath.startsWith(path.resolve(baseDir))) {
+      const resolvedBase = path.resolve(baseDir);
+      const fullPath = path.resolve(resolvedBase, filePath);
+      if (fullPath !== resolvedBase && !fullPath.startsWith(resolvedBase + path.sep)) {
         res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid file path' } });
         return;
       }
@@ -828,18 +847,18 @@ export function createWorkspaceRoutes(container: Container): Router {
 
       let baseDir: string;
       if (source === 'worktree' && worktreeAlias) {
-        const wt = (info.worktrees ?? []).find((w) => w.alias === worktreeAlias);
-        if (!wt) {
-          res.status(404).json({ error: { code: 'NOT_FOUND', message: `Worktree not found: ${worktreeAlias}` } });
+        const dir = mountDir(info, worktreeAlias);
+        if (!dir) {
+          res.status(404).json({ error: { code: 'NOT_FOUND', message: `Mount not found: ${worktreeAlias}` } });
           return;
         }
-        baseDir = path.join(info.rootPath, wt.worktreePath);
+        baseDir = dir;
       } else if (source === 'artifacts') {
         baseDir = path.join(info.rootPath, 'artifacts');
       } else if (source === 'source') {
         baseDir = path.join(info.rootPath, 'source');
       } else {
-        baseDir = info.workingDirectory;
+        baseDir = info.rootPath;
       }
 
       const resolvedBase = path.resolve(baseDir);

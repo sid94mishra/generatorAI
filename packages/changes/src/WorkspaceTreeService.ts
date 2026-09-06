@@ -25,7 +25,7 @@ import { discoverRepos, isNestedRepoPath, nestedRepoPrefixes } from './RepoDisco
 import { isMetadataPath } from './ChangeSetService.js';
 import { languageFor } from './ChangeSummaryService.js';
 import { MAX_FILE_BODY_BYTES } from './summaryTypes.js';
-import type { ChangeRepoKind, WorktreeRef } from './types.js';
+import type { ChangeRepoKind, MountRef, WorktreeRef } from './types.js';
 
 /** Hard cap per repo. Beyond this the tree stops being browsable anyway. */
 export const MAX_TREE_PATHS_PER_REPO = 20_000;
@@ -63,6 +63,7 @@ export interface ListWorkspaceTreeParams {
   workspaceId: string;
   rootPath: string;
   worktrees?: WorktreeRef[];
+  mounts?: MountRef[];
   /** Restrict to one repo alias. */
   repoAlias?: string;
 }
@@ -70,23 +71,41 @@ export interface ListWorkspaceTreeParams {
 export interface ReadWorkspaceFileParams {
   rootPath: string;
   worktrees?: WorktreeRef[];
+  mounts?: MountRef[];
   alias: string;
   /** Repo-relative path. An `alias/` prefix is tolerated and stripped. */
   filePath: string;
 }
 
 export class WorkspaceTreeService {
+  private readonly scopedClients = new Map<string, IGitClient>();
+
   constructor(
     private readonly git: IGitClient,
     private readonly logger: ILogger,
   ) {}
+
+  private gitFor(repo: { gitDir?: string }): IGitClient {
+    if (!repo.gitDir) return this.git;
+    let client = this.scopedClients.get(repo.gitDir);
+    if (!client) {
+      client = this.git.withGitDir(repo.gitDir);
+      this.scopedClients.set(repo.gitDir, client);
+    }
+    return client;
+  }
 
   /** Every browsable path in every repo of the workspace. */
   async listTree(params: ListWorkspaceTreeParams): Promise<WorkspaceTree> {
     const { workspaceId, rootPath, worktrees = [], repoAlias } = params;
 
     // `autoInit: false` — browsing files must never mutate the workspace.
-    const all = await discoverRepos(this.git, { rootPath, worktrees, autoInit: false });
+    const all = await discoverRepos(this.git, {
+      rootPath,
+      worktrees,
+      ...(params.mounts ? { mounts: params.mounts } : {}),
+      autoInit: false,
+    });
     const repos = repoAlias ? all.filter((r) => r.alias === repoAlias) : all;
 
     const out: WorkspaceTreeRepo[] = [];
@@ -95,7 +114,7 @@ export class WorkspaceTreeService {
     for (const repo of repos) {
       try {
         const nested = nestedRepoPrefixes(repo, all);
-        const listed = (await this.git.lsFiles(repo.repoDir)).filter(
+        const listed = (await this.gitFor(repo).lsFiles(repo.repoDir)).filter(
           (p) => !isMetadataPath(p) && !isNestedRepoPath(p, nested),
         );
         const truncated = listed.length > MAX_TREE_PATHS_PER_REPO;
@@ -120,7 +139,12 @@ export class WorkspaceTreeService {
   async readFile(params: ReadWorkspaceFileParams): Promise<WorkspaceTreeFile> {
     const { rootPath, worktrees = [], alias, filePath } = params;
 
-    const repos = await discoverRepos(this.git, { rootPath, worktrees, autoInit: false });
+    const repos = await discoverRepos(this.git, {
+      rootPath,
+      worktrees,
+      ...(params.mounts ? { mounts: params.mounts } : {}),
+      autoInit: false,
+    });
     const repo = repos.find((r) => r.alias === alias);
     const repoDir = repo?.repoDir ?? rootPath;
     const relPath = stripPrefix(filePath, alias);

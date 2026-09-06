@@ -411,10 +411,14 @@ function invalidateResource(
       // newly created file never appears at all; without the review threads a
       // thread sits on "Sent to agent" long after the agent addressed it.
       for (const prefix of [
+        // `workspace.prep` moves the mounts themselves — aliases, branches,
+        // per-mount status — which every surface below renders from.
+        'workspace-info',
         'workspace-change-summary',
         'workspace-change-file',
         'workspace-change-patch',
         'workspace-files',
+        'workspace-file-index',
         'workspace-tree',
         'workspace-tree-file',
         'workspace-checkpoints',

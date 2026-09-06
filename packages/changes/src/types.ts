@@ -13,7 +13,33 @@ export interface ChangedFile {
   diff: string;
 }
 
-export type ChangeRepoKind = 'linked' | 'generated' | 'root';
+export type ChangeRepoKind =
+  /** A workspace mount (the directory the agent was asked to work in). */
+  | 'mount'
+  /** A repository nested one level inside a mount (multi-repo folder). */
+  | 'nested'
+  /** Legacy: a registered worktree. */
+  | 'linked'
+  /** Legacy: an agent-generated subdirectory repo. */
+  | 'generated'
+  /** Legacy: the workspace root itself. */
+  | 'root';
+
+/**
+ * A mount as the change engine sees it. `gitDir` is the mount's private
+ * shadow repository (objects, refs, index files); when absent the mount's
+ * own `.git` is used, which is only the case for workspaces that predate
+ * shadow stores.
+ */
+export interface MountRef {
+  alias: string;
+  path: string;
+  gitDir?: string;
+  /** Commit the mount's branch started from / HEAD when it was mounted. */
+  baseCommit?: string;
+  /** Immediate child repositories, each with its own shadow store. */
+  nested?: Array<{ name: string; gitDir?: string }>;
+}
 
 /** All changes within one repository/worktree inside a workspace. */
 export interface ChangeRepo {
@@ -39,12 +65,13 @@ export interface WorktreeRef {
 export interface GetChangeSetParams {
   /** Absolute path to the workspace root directory. */
   rootPath: string;
-  /** Registered worktrees (linked codebases). */
+  /** Registered worktrees (linked codebases). Legacy — prefer `mounts`. */
   worktrees?: WorktreeRef[];
+  /** Workspace mounts. When present, ONLY these (and their nested repos) are tracked. */
+  mounts?: MountRef[];
   /**
-   * Auto-run `git init` in agent-generated subdirectories that have code but
-   * no repo yet, so newly-generated codebases get a real change set.
-   * Default true.
+   * Legacy: auto-run `git init` in agent-generated subdirectories. Off by
+   * default — a read request must never mutate the filesystem.
    */
   autoInit?: boolean;
 }

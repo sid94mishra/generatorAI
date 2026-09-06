@@ -11,7 +11,7 @@
 //
 // which keeps the file list O(files) instead of O(bytes-changed).
 
-import type { ChangeRepoKind, ChangeStatus } from './types.js';
+import type { ChangeRepoKind, ChangeStatus, MountRef } from './types.js';
 
 /** Which side of the comparison a revision selector refers to. */
 export type ChangeRevisionKind =
@@ -33,6 +33,12 @@ export interface ChangeRevision {
   /** Human label for the UI ("Session start", "Turn 3", "Stage: build"). */
   label?: string;
   createdAt?: Date;
+  /**
+   * True when `treeish` is a real commit's tree (blobs EOL-normalised by
+   * git) rather than a byte-exact snapshot. The other side of such a diff
+   * must be materialised the same way or every CRLF file reads as rewritten.
+   */
+  normalized?: boolean;
 }
 
 /** One changed file — metadata only, no content. */
@@ -92,6 +98,8 @@ export interface GetChangeSummaryParams {
   workspaceId: string;
   rootPath: string;
   worktrees?: Array<{ alias: string; worktreePath: string }>;
+  /** Workspace mounts; when present only these are tracked. */
+  mounts?: MountRef[];
   base?: ChangeRevisionSelector;
   head?: ChangeRevisionSelector;
   /** Restrict to a single repo alias. */

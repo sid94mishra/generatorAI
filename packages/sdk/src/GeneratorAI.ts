@@ -418,10 +418,12 @@ export class GeneratorAI {
     fs.mkdirSync(workspacesDir, { recursive: true });
     const workspaceManager = new WorkspaceManager(
       repos.executionWorkspaceRepo,
-      repos.workspaceWorktreeRepo,
+      repos.workspaceMountRepo,
       repos.workspaceArtifactRepo,
       { workspacesDir, defaultGitEnabled: true },
       logger,
+      gitManager,
+      repos.worktreeRepo,
     );
 
     // Late-wire workspace manager into services that were created before it

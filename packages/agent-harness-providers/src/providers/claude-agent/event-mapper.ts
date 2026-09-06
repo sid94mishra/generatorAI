@@ -12,7 +12,7 @@
 // two-phase pipeline.
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentEvent, AgentEventKind, McpServerStartupStatus } from '@generatorai/shared';
+import type { AgentEvent, AgentEventKind, FileOpHunk, FileOpStat, McpServerStartupStatus } from '@generatorai/shared';
 import { createAgentEvent, mcpStartupWarnings } from '@generatorai/shared';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
@@ -227,12 +227,72 @@ function buildSessionInfoPayload(infoType: string, message: string) {
 // client-side. `gitDiff.additions/deletions` is preferred when present (it
 // is git's own count); the hunk-line count is the fallback.
 interface StructuredPatchHunk {
+  oldStart?: unknown;
+  oldLines?: unknown;
+  newStart?: unknown;
+  newLines?: unknown;
   lines?: unknown[];
 }
 
-function deriveFileOp(
-  toolUseResult: unknown,
-): { kind: 'create' | 'update' | 'edit'; filePath: string; additions: number; deletions: number } | undefined {
+/**
+ * Hunk caps.
+ *
+ * The fileOp rides on `harness.tool_complete` and is persisted verbatim into
+ * `chat_messages.metadata.toolCalls[].fileOp` (ChatManagementService), so an
+ * unbounded patch would bloat every replay of the conversation as well as the
+ * live stream. 160 lines is enough to render a typical Write/Edit inline; past
+ * that the transcript links out to the Changes tab, which reads the real diff
+ * from git.
+ */
+const MAX_HUNK_LINES = 160;
+const MAX_HUNK_LINE_CHARS = 2_000;
+
+function toCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/** Truncate one diff line, preserving its leading ' ' / '+' / '-' marker. */
+function capLine(line: string): string {
+  return line.length <= MAX_HUNK_LINE_CHARS
+    ? line
+    : `${line.slice(0, MAX_HUNK_LINE_CHARS)}…`;
+}
+
+/**
+ * Copy `patch` into `FileOpHunk`s under the caps above.
+ *
+ * Cutting is all-or-nothing per LINE, not per hunk: a hunk is emitted with as
+ * many lines as fit and the remaining hunks are dropped, so the client never
+ * has to reason about a hunk whose header disagrees with its body — it just
+ * shows the "truncated" affordance.
+ */
+function capHunks(patch: StructuredPatchHunk[]): { hunks: FileOpHunk[]; truncated: boolean } {
+  const hunks: FileOpHunk[] = [];
+  let budget = MAX_HUNK_LINES;
+
+  for (const hunk of patch) {
+    if (!hunk || !Array.isArray(hunk.lines)) continue;
+    if (budget <= 0) return { hunks, truncated: true };
+
+    const source = hunk.lines.filter((l): l is string => typeof l === 'string');
+    // An empty hunk renders as an empty box; there is nothing to show.
+    if (source.length === 0) continue;
+    const lines = source.slice(0, budget).map(capLine);
+    budget -= lines.length;
+    hunks.push({
+      oldStart: toCount(hunk.oldStart),
+      oldLines: toCount(hunk.oldLines),
+      newStart: toCount(hunk.newStart),
+      newLines: toCount(hunk.newLines),
+      lines,
+    });
+    if (lines.length < source.length) return { hunks, truncated: true };
+  }
+
+  return { hunks, truncated: false };
+}
+
+function deriveFileOp(toolUseResult: unknown): FileOpStat | undefined {
   if (!toolUseResult || typeof toolUseResult !== 'object') return undefined;
   const r = toolUseResult as Record<string, unknown>;
   const filePath = typeof r['filePath'] === 'string' ? r['filePath'] : undefined;
@@ -242,11 +302,50 @@ function deriveFileOp(
   const kind: 'create' | 'update' | 'edit' =
     r['type'] === 'create' ? 'create' : r['type'] === 'update' ? 'update' : 'edit';
 
-  const gitDiff = r['gitDiff'] as { additions?: unknown; deletions?: unknown } | undefined;
-  if (gitDiff && typeof gitDiff.additions === 'number' && typeof gitDiff.deletions === 'number') {
-    return { kind, filePath, additions: gitDiff.additions, deletions: gitDiff.deletions };
+  // A brand-new file arrives as `type: 'create'` with an EMPTY
+  // `structuredPatch` and the whole body in `content` — there is no "before"
+  // to patch against. Without this branch every Write of a new file rendered
+  // as "+0 −0" with nothing to expand, which is exactly the case a user is
+  // most likely to want to read inline. Synthesise the all-`+` hunk (and the
+  // addition count) from `content`.
+  const content = typeof r['content'] === 'string' ? r['content'] : undefined;
+  if (kind === 'create' && patch.length === 0 && content !== undefined) {
+    // A trailing newline terminates the last line rather than starting a new
+    // empty one, so it must not be counted as a line of its own.
+    const body = content.endsWith('\n') ? content.slice(0, -1) : content;
+    const contentLines = body === '' ? [] : body.split('\n');
+    const { hunks, truncated } = capHunks([
+      {
+        oldStart: 0,
+        oldLines: 0,
+        newStart: 1,
+        newLines: contentLines.length,
+        lines: contentLines.map((l) => `+${l}`),
+      },
+    ]);
+    return {
+      kind,
+      filePath,
+      additions: contentLines.length,
+      deletions: 0,
+      ...(hunks.length > 0 ? { hunks } : {}),
+      ...(truncated ? { hunksTruncated: true } : {}),
+    };
   }
 
+  const { hunks, truncated } = capHunks(patch);
+  const hunkFields = {
+    ...(hunks.length > 0 ? { hunks } : {}),
+    ...(truncated ? { hunksTruncated: true } : {}),
+  };
+
+  const gitDiff = r['gitDiff'] as { additions?: unknown; deletions?: unknown } | undefined;
+  if (gitDiff && typeof gitDiff.additions === 'number' && typeof gitDiff.deletions === 'number') {
+    return { kind, filePath, additions: gitDiff.additions, deletions: gitDiff.deletions, ...hunkFields };
+  }
+
+  // Counts are derived from the FULL patch, never the capped copy — a
+  // truncated preview must not understate how much the file actually changed.
   let additions = 0;
   let deletions = 0;
   for (const hunk of patch) {
@@ -257,7 +356,7 @@ function deriveFileOp(
       else if (line.startsWith('-')) deletions += 1;
     }
   }
-  return { kind, filePath, additions, deletions };
+  return { kind, filePath, additions, deletions, ...hunkFields };
 }
 
 // ── Tool-name correlation (bounded) ──

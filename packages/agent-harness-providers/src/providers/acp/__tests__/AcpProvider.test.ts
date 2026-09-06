@@ -384,3 +384,54 @@ describe('AcpProvider — lifecycle hardening', () => {
     expect(rejections).toEqual([]);
   }, 15_000);
 });
+
+// ── The chat's mounts must reach `session/new` ──
+//
+// ACP models extra workspace roots natively
+// (`NewSessionRequest.additionalDirectories`, exposed by the SDK as
+// `SessionBuilder.withAdditionalDirectories`), but `buildSession(cwd)` sends
+// only the cwd — so the field was silently dropped. The fixture echoes the
+// `session/new` request it received, so these assert the wire.
+
+describe('AcpProvider — session/new carries the chat workspace', () => {
+  const liveProviders: AcpProvider[] = [];
+  afterEach(async () => {
+    await Promise.all(liveProviders.splice(0).map((p) => p.shutdown().catch(() => { /* best effort */ })));
+  });
+
+  async function newSessionRequest(
+    params: Partial<CreateConversationParams>,
+    opts: Partial<ConstructorParameters<typeof AcpProvider>[0]> = {},
+  ): Promise<Record<string, unknown>> {
+    const p = new AcpProvider({ command: process.execPath, args: [FIXTURE_AGENT], ...opts });
+    liveProviders.push(p);
+    await p.initialize();
+    const id = String(params.conversationId ?? 'conv-echo');
+    await p.createConversation({ conversationId: id, ...params } as CreateConversationParams);
+    const { content } = await p.sendPromptAndWait(id, 'ECHO_SESSION');
+    return JSON.parse(content) as Record<string, unknown>;
+  }
+
+  it('sends additionalDirectories alongside cwd', async () => {
+    const req = await newSessionRequest({
+      conversationId: 'conv-dirs',
+      workingDirectory: '/work/repo',
+      additionalDirectories: ['/work/docs', '/work/.generatorai/scratch'],
+    });
+
+    expect(req['cwd']).toBe('/work/repo');
+    expect(req['additionalDirectories']).toEqual(['/work/docs', '/work/.generatorai/scratch']);
+  }, 15_000);
+
+  it('de-duplicates the roots and omits the field entirely when there are none', async () => {
+    const dupes = await newSessionRequest({
+      conversationId: 'conv-dupes',
+      workingDirectory: '/work/repo',
+      additionalDirectories: ['/work/docs', '/work/docs'],
+    });
+    expect(dupes['additionalDirectories']).toEqual(['/work/docs']);
+
+    const none = await newSessionRequest({ conversationId: 'conv-none', workingDirectory: '/work/repo' });
+    expect(none['additionalDirectories']).toBeUndefined();
+  }, 20_000);
+});

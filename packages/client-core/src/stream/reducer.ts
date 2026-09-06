@@ -272,8 +272,12 @@ export function completeToolCall(
   toolOrCallId: string,
   result: unknown,
   fileOp?: ToolFileOp,
+  success?: boolean,
 ): StreamsRecord {
   const existing = existingOrDefault(streams, sessionId);
+  // Only an explicit failure marks the call; providers that never report
+  // `success` leave the flag off, exactly as before.
+  const failed = success === false ? { error: true as const } : {};
 
   // Match by callId first, then by tool name — and only the FIRST running
   // match, so two concurrent calls to the same tool complete independently.
@@ -282,7 +286,7 @@ export function completeToolCall(
     if (foundFlat || tc.status !== 'running') return tc;
     if (tc.id === toolOrCallId || tc.tool === toolOrCallId) {
       foundFlat = true;
-      return { ...tc, result, status: 'complete' as const, ...(fileOp ? { fileOp } : {}) };
+      return { ...tc, result, status: 'complete' as const, ...(fileOp ? { fileOp } : {}), ...failed };
     }
     return tc;
   });
@@ -292,7 +296,7 @@ export function completeToolCall(
     if (foundBlock || block.type !== 'tool_call' || block.status !== 'running') return block;
     if (block.callId === toolOrCallId || block.tool === toolOrCallId) {
       foundBlock = true;
-      return { ...block, result, status: 'complete' as const, ...(fileOp ? { fileOp } : {}) };
+      return { ...block, result, status: 'complete' as const, ...(fileOp ? { fileOp } : {}), ...failed };
     }
     return block;
   });
@@ -547,10 +551,34 @@ export function setTyping(
   return put(streams, sessionId, { ...existing, typing });
 }
 
-export function completeStream(streams: StreamsRecord, sessionId: string): StreamsRecord {
+export function completeStream(
+  streams: StreamsRecord,
+  sessionId: string,
+  opts: { force?: boolean } = {},
+): StreamsRecord {
   const existing = existingOrDefault(streams, sessionId);
-  // Do not overwrite 'pending' — a new turn has already started.
-  if (existing.status === 'pending') return streams;
+  // A terminal event that lands while the stream is 'pending' is one of two
+  // things. Either it is the PREVIOUS turn's idle arriving after the user has
+  // already sent the next prompt (`startPending` resets `serverTurnId`, so
+  // the new turn has no server id yet) — and must be ignored, or it is THIS
+  // turn's own end: `turn_start` has latched its id and the user stopped it
+  // before any token or tool call moved the status on. Treating both as
+  // "ignore" left a Stop pressed during the opening seconds of a turn stuck
+  // on "Processing…" forever, with the server long since idle.
+  if (existing.status === 'pending' && !opts.force && existing.serverTurnId == null) {
+    return streams;
+  }
+  // A forced settle is the user's own Stop: latch it, so the transcript can
+  // say the turn was stopped even when nothing had streamed yet.
+  if (opts.force) {
+    return put(streams, sessionId, {
+      ...existing,
+      status: 'complete',
+      typing: false,
+      cancelRequested: true,
+      pendingUserMessage: null,
+    });
+  }
   // A settled turn has no held text left (the router force-flushes before the
   // terminal event), so an indicator surviving here would never clear.
   return put(streams, sessionId, { ...existing, status: 'complete', typing: false });

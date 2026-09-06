@@ -119,12 +119,12 @@
   {
     "id": "system-mcp-puppeteer",
     "name": "Puppeteer (Browser Automation)",
-    "description": "Control a headless browser for web automation and scraping",
+    "description": "Control a headless browser for web automation and scraping. Requires a one-time ~270 MB Chromium download on first use; enable it in Settings → MCP Servers when you want it.",
     "serverType": "stdio",
     "command": "npx",
     "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
     "source": "system",
-    "enabled": true,
+    "enabled": false,
     "category": "automation"
   },
   {

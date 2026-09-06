@@ -11,6 +11,7 @@ import { useCallback, useState } from 'react';
 import { FolderTree } from 'lucide-react';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
 import type { RightPaneTabDef } from '@/components/layout/RightPane.js';
+import { SourcesPanel } from '@/components/chat/sources/SourcesPanel.js';
 import { FilesSurface } from './FilesSurface.js';
 import { fileTabId, fileTabLabel, parseFileTabId, type FileTabRef } from './fileTabId.js';
 
@@ -20,6 +21,12 @@ export interface UseFileTabsOptions {
   requestFocus: (request: { type: string; token: number; tabId?: string }) => void;
   /** Called before focusing, so a collapsed pane opens with the file. */
   openPane?: () => void;
+  /**
+   * Opens the chat's source editor. When given, the Files tab leads with a
+   * "Sources" block listing the mounts — the answer to "which of these
+   * folders am I looking at?" belongs next to the tree, not two tabs away.
+   */
+  onEditSources?: (() => void) | undefined;
 }
 
 export interface UseFileTabsResult {
@@ -37,6 +44,7 @@ export function useFileTabs({
   workspaceId,
   requestFocus,
   openPane,
+  onEditSources,
 }: UseFileTabsOptions): UseFileTabsResult {
   /**
    * Previewed file per Files-tab instance, so each tab can be titled after
@@ -80,7 +88,7 @@ export function useFileTabs({
       allowMultiple: true,
       maxInstances: 4,
       disabled: !workspaceId,
-      disabledReason: 'No workspace yet',
+      disabledReason: 'No workspace for this chat',
       getTabLabel: ({ id, index }) => {
         const ref = previewByTab[id];
         if (ref) return ref.path.split('/').pop() ?? ref.path;
@@ -95,14 +103,24 @@ export function useFileTabs({
         );
       },
       render: (ctx) => (
-        <FilesSurface
-          embedded
-          workspaceId={workspaceId}
-          onOpenFile={openFile}
-          onSelectionChange={(ref) =>
-            setPreviewByTab((prev) => (prev[ctx.id] === ref ? prev : { ...prev, [ctx.id]: ref }))
-          }
-        />
+        <div className="flex h-full min-h-0 flex-col">
+          <SourcesPanel
+            embedded
+            workspaceId={workspaceId}
+            {...(onEditSources ? { onEditSources } : {})}
+            className="shrink-0 border-b border-border"
+          />
+          <div className="min-h-0 flex-1">
+            <FilesSurface
+              embedded
+              workspaceId={workspaceId}
+              onOpenFile={openFile}
+              onSelectionChange={(ref) =>
+                setPreviewByTab((prev) => (prev[ctx.id] === ref ? prev : { ...prev, [ctx.id]: ref }))
+              }
+            />
+          </div>
+        </div>
       ),
     },
     fileTab: {

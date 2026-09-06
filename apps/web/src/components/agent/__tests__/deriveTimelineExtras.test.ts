@@ -84,3 +84,29 @@ describe('isShellTool', () => {
     expect(steps[0]!.isShell).toBe(true);
   });
 });
+
+describe('tool failure + screenshots', () => {
+  it('a provider-flagged failure renders as a failed step', () => {
+    const steps = deriveTimeline([tool('Bash', 'b1', { args: { command: 'x' }, result: 'boom', error: true })], { active: false });
+    expect(steps[0]!.status).toBe('failed');
+  });
+
+  it('the browser tools ok:false envelope counts as a failure (object or JSON string)', () => {
+    const asObject = deriveTimeline([tool('click_element', 'c1', { result: { ok: false, error: 'stale ref' } })], { active: false });
+    const asString = deriveTimeline([tool('click_element', 'c2', { result: JSON.stringify({ ok: false, error: 'stale ref' }) })], { active: false });
+    const fine = deriveTimeline([tool('click_element', 'c3', { result: { ok: true } })], { active: false });
+    expect(asObject[0]!.status).toBe('failed');
+    expect(asString[0]!.status).toBe('failed');
+    expect(fine[0]!.status).toBe('done');
+  });
+
+  it('surfaces a browser screenshot artifact on the step', () => {
+    const steps = deriveTimeline(
+      [tool('screenshot_page', 's1', { result: JSON.stringify({ ok: true, artifactPath: 'browser/screenshots/page-1.png', artifactType: 'browser_screenshot' }) })],
+      { active: false },
+    );
+    expect(steps[0]!.image).toEqual({ relativePath: 'browser/screenshots/page-1.png', label: 'page-1.png' });
+    const none = deriveTimeline([tool('read_page', 'r1', { result: { ok: true, artifactPath: 'browser/dom/x.html', artifactType: 'browser_dom' } })], { active: false });
+    expect(none[0]!.image).toBeUndefined();
+  });
+});

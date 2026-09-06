@@ -42,6 +42,14 @@ export class CheckpointService {
     this.retention = { ...DEFAULT_CHECKPOINT_RETENTION, ...options.retention };
   }
 
+  /**
+   * Tell the store which private git dir backs `repoDir`. The workspace
+   * layer calls this for every mount before capture / restore / prune.
+   */
+  registerShadow(repoDir: string, gitDir: string | undefined): void {
+    this.store.registerShadow(repoDir, gitDir);
+  }
+
   // ── Create ──────────────────────────────────────────────────
 
   /**
@@ -186,11 +194,11 @@ export class CheckpointService {
     maxBytes = 1_048_576,
   ): Promise<string | null> {
     try {
-      const blob = await this.git.blobShaAt(repoDir, treeSha, filePath);
+      const blob = await this.store.gitFor(repoDir).blobShaAt(repoDir, treeSha, filePath);
       if (!blob) return null;
-      const size = await this.git.blobSize(repoDir, blob);
+      const size = await this.store.gitFor(repoDir).blobSize(repoDir, blob);
       if (size !== null && size > maxBytes) return null;
-      return await this.git.showFile(repoDir, filePath, treeSha);
+      return await this.store.gitFor(repoDir).showFile(repoDir, filePath, treeSha);
     } catch {
       return null;
     }
@@ -235,8 +243,7 @@ export class CheckpointService {
       );
 
       // Working tree → target. `A` means present in target but missing now.
-      const delta = await this.git.diffNameStatusZ(
-        repoDir,
+      const delta = await this.store.gitFor(repoDir).diffNameStatusZ(repoDir,
         checkpoint.treeSha,
         // Diff tree-to-tree using the pre-restore snapshot as "current".
         // `git diff <tree>` alone would compare against the index+worktree
@@ -287,8 +294,7 @@ export class CheckpointService {
 
       const indexFile = await this.store.restoreIndexPath(repoDir);
       if (indexFile && safeRestore.length > 0) {
-        await this.git.restorePathsFromTree(
-          repoDir,
+        await this.store.gitFor(repoDir).restorePathsFromTree(repoDir,
           checkpoint.treeSha,
           indexFile,
           safeRestore,
@@ -382,7 +388,7 @@ export class CheckpointService {
     toTree: string,
   ): Promise<{ fileCount: number; additions: number; deletions: number }> {
     try {
-      const entries = await this.git.diffNumstat(repoDir, fromTree, toTree);
+      const entries = await this.store.gitFor(repoDir).diffNumstat(repoDir, fromTree, toTree);
       let additions = 0;
       let deletions = 0;
       for (const e of entries) {

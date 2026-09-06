@@ -433,12 +433,22 @@ export class AcpProvider implements IAgentHarness {
       });
     }
 
+    // The chat's other mounts and its managed workspace root. ACP models this
+    // natively (`NewSessionRequest.additionalDirectories`, protocol
+    // `acp.generated.ts`), and the SDK exposes it as
+    // `SessionBuilder.withAdditionalDirectories` — so unlike Copilot this
+    // provider can widen the session's file-system scope without changing cwd.
+    // Agents that do not advertise the capability ignore the field; the
+    // `session/new` failure path below already reports a rejection.
+    const extraRoots = [...new Set(params.additionalDirectories ?? [])];
+
     let session: acp.ActiveSession | null = null;
     try {
+      const builder = this.connection.agent
+        .buildSession(params.workingDirectory ?? this.opts.defaultCwd ?? process.cwd());
+      if (extraRoots.length > 0) builder.withAdditionalDirectories(extraRoots);
       session = await this.withDeadline(
-        this.connection.agent
-          .buildSession(params.workingDirectory ?? this.opts.defaultCwd ?? process.cwd())
-          .start(),
+        builder.start(),
         this.opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
         'ACP session/new',
       );

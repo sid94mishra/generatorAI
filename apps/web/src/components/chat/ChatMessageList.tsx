@@ -50,6 +50,8 @@ interface ChatMessageListProps {
   /** Click-throughs for per-op diff icons / shell console / summary card. */
   onOpenChanges?: (filePath?: string) => void;
   onOpenShell?: (callId: string) => void;
+  /** Workspace behind this chat — resolves agent screenshot previews. */
+  workspaceId?: string;
   /**
    * External scroll container ref.
    *
@@ -110,6 +112,7 @@ function renderMessage(
   onOpenPlan?: (planId: string) => void,
   onOpenChanges?: (filePath?: string) => void,
   onOpenShell?: (callId: string) => void,
+  workspaceId?: string,
 ): React.ReactNode {
   // System messages are always meaningful and tool messages display
   // toolName/toolArgs rather than content, so only user/assistant rows are
@@ -128,6 +131,7 @@ function renderMessage(
           {...(onOpenPlan ? { onOpenPlan } : {})}
           {...(onOpenChanges ? { onOpenChanges } : {})}
           {...(onOpenShell ? { onOpenShell } : {})}
+          {...(workspaceId ? { workspaceId } : {})}
         />
       );
     case 'system':
@@ -152,14 +156,16 @@ const MessageRow = React.memo(function MessageRow({
   onOpenPlan,
   onOpenChanges,
   onOpenShell,
+  workspaceId,
 }: {
   message: ChatMessage;
   contained: boolean;
   onOpenPlan?: (planId: string) => void;
   onOpenChanges?: (filePath?: string) => void;
   onOpenShell?: (callId: string) => void;
+  workspaceId?: string;
 }) {
-  const node = renderMessage(message, onOpenPlan, onOpenChanges, onOpenShell);
+  const node = renderMessage(message, onOpenPlan, onOpenChanges, onOpenShell, workspaceId);
   if (!node) return null;
   return (
     <div
@@ -178,7 +184,7 @@ const MessageRow = React.memo(function MessageRow({
   );
 });
 
-export function ChatMessageList({ messages, onOpenPlan, onOpenChanges, onOpenShell }: ChatMessageListProps) {
+export function ChatMessageList({ messages, onOpenPlan, onOpenChanges, onOpenShell, workspaceId }: ChatMessageListProps) {
   const contained = messages.length > CONTAINMENT_THRESHOLD;
   return (
     <div className="space-y-5">
@@ -190,6 +196,7 @@ export function ChatMessageList({ messages, onOpenPlan, onOpenChanges, onOpenShe
           {...(onOpenPlan ? { onOpenPlan } : {})}
           {...(onOpenChanges ? { onOpenChanges } : {})}
           {...(onOpenShell ? { onOpenShell } : {})}
+          {...(workspaceId ? { workspaceId } : {})}
         />
       ))}
     </div>

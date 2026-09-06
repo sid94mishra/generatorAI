@@ -18,6 +18,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { CodexProvider, CodexRpcError, CodexRateLimitedError } from '../CodexProvider.js';
 import {
   runCapabilityDeclarationConformance,
@@ -443,4 +444,109 @@ describe('CodexProvider — reads thread history', () => {
       { role: 'assistant', content: 'hello ' },
     ]);
   }, 15_000);
+});
+
+// ── Defect: every thread was rooted in the SERVER's cwd ──
+//
+// `thread/start` and `thread/resume` both hardcoded `cwd: opts.defaultCwd` and
+// never read `params.workingDirectory`, so a chat bound to a worktree read and
+// wrote the directory the GeneratorAI server happened to start in. The fixture
+// echoes back the params it was actually sent (`ECHO_PARAMS`), so these assert
+// the wire, not a mock.
+
+describe('CodexProvider — per-conversation workspace', () => {
+  // `defaultCwd` is also the spawn cwd of the app-server child, so it has to
+  // be a directory that really exists; the chat's own root does not.
+  const SERVER_CWD = tmpdir();
+
+  async function echo(p: CodexProvider, id: string): Promise<{
+    thread: Record<string, unknown>;
+    turn: Record<string, unknown>;
+  }> {
+    const { content } = await p.sendPromptAndWait(id, 'ECHO_PARAMS');
+    return JSON.parse(content) as { thread: Record<string, unknown>; turn: Record<string, unknown> };
+  }
+
+  it('starts the thread in params.workingDirectory, not opts.defaultCwd', async () => {
+    const p = await started({ defaultCwd: SERVER_CWD });
+    await p.createConversation({
+      conversationId: 'c-cwd',
+      workingDirectory: '/work/repo',
+    } as CreateConversationParams);
+
+    expect((await echo(p, 'c-cwd')).thread['cwd']).toBe('/work/repo');
+  }, 20_000);
+
+  it('falls back to opts.defaultCwd when the conversation names no directory', async () => {
+    const p = await started({ defaultCwd: SERVER_CWD });
+    await p.createConversation(CONV('c-cwd-default'));
+
+    expect((await echo(p, 'c-cwd-default')).thread['cwd']).toBe(SERVER_CWD);
+  }, 20_000);
+
+  it('resumes an existing thread in params.workingDirectory too', async () => {
+    const p = await started({ defaultCwd: SERVER_CWD });
+    await p.createConversation({
+      conversationId: 'c-cwd-resume',
+      resumeProviderSessionId: 'thr_existing',
+      workingDirectory: '/work/repo',
+    } as CreateConversationParams);
+
+    expect((await echo(p, 'c-cwd-resume')).thread['cwd']).toBe('/work/repo');
+  }, 20_000);
+
+  it('sends additionalDirectories as sandboxPolicy.writableRoots on every turn', async () => {
+    // `V2ThreadStartParams` has no sandbox-policy field — only `sandbox`, the
+    // mode enum — so `V2TurnStartParams.sandboxPolicy` is the only place the
+    // pinned protocol accepts writable roots.
+    const p = await started({ defaultCwd: SERVER_CWD, sandboxMode: 'workspace-write' });
+    await p.createConversation({
+      conversationId: 'c-roots',
+      workingDirectory: '/work/repo',
+      additionalDirectories: ['/work/docs', '/work/.generatorai/scratch', '/work/docs'],
+    } as CreateConversationParams);
+
+    expect((await echo(p, 'c-roots')).turn['sandboxPolicy']).toEqual({
+      type: 'workspaceWrite',
+      writableRoots: ['/work/docs', '/work/.generatorai/scratch'],
+    });
+  }, 20_000);
+
+  it('warns instead of reshaping the roots when the sandbox has none', async () => {
+    const p = await started({ sandboxMode: 'read-only' });
+    await p.createConversation({
+      conversationId: 'c-roots-ro',
+      additionalDirectories: ['/work/docs'],
+    } as CreateConversationParams);
+
+    expect(p.getConversationWarnings('c-roots-ro')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+          params: expect.objectContaining({ field: 'additionalDirectories' }),
+        }),
+      ]),
+    );
+    expect((await echo(p, 'c-roots-ro')).turn['sandboxPolicy']).toBeUndefined();
+  }, 20_000);
+
+  it('warns that per-conversation env cannot reach the shared app-server', async () => {
+    // One `codex app-server` child serves every conversation and is spawned in
+    // initialize(), before any of them exists — a process environment is fixed
+    // at spawn time and the protocol has no per-thread env field.
+    const p = await started();
+    await p.createConversation({
+      conversationId: 'c-env',
+      env: { GENERATORAI_SCRATCH_DIR: '/work/scratch' },
+    } as CreateConversationParams);
+
+    expect(p.getConversationWarnings('c-env')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+          params: expect.objectContaining({ field: 'env' }),
+        }),
+      ]),
+    );
+  }, 20_000);
 });

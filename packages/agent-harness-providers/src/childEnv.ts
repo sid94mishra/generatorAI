@@ -29,6 +29,7 @@
 import {
   BASE_CHILD_ENV_ALLOWLIST,
   buildChildEnv,
+  filterDelegatedChildEnv,
   isBlockedChildEnvVar,
 } from '@generatorai/shared';
 import { PARENT_PID_ENV, SPAWN_BOOT_ID, SPAWN_MARKER_ENV } from './childRegistry.js';
@@ -50,6 +51,17 @@ export interface HarnessEnvOptions {
    * (e.g. `CLAUDE_CLI_PATH`). Still subject to the deny list.
    */
   passthrough?: readonly string[] | undefined;
+  /**
+   * Per-conversation variables handed down by the core through
+   * `CreateConversationParams.env` — the chat's `GENERATORAI_WORKSPACE_ROOT`
+   * and `GENERATORAI_SCRATCH_DIR`.
+   *
+   * NOT the same trust level as `extra`: the provider does not own these, so
+   * they are reduced to `GENERATORAI_*` names and still filtered by the deny
+   * list, with no own-credential exemption. A caller cannot use this to push
+   * `GENERATORAI_SECRET_KEY` (or anything else) into a harness.
+   */
+  delegated?: Record<string, string | undefined> | undefined;
   /** Source environment. Defaults to `process.env`; injectable for tests. */
   source?: NodeJS.ProcessEnv;
 }
@@ -76,6 +88,7 @@ export function buildHarnessEnv(options: HarnessEnvOptions = {}): Record<string,
   const env = buildChildEnv({
     ...(options.source ? { source: options.source } : {}),
     ...(options.passthrough ? { passthrough: options.passthrough } : {}),
+    ...(options.delegated ? { delegated: options.delegated } : {}),
     ...(options.extra ? { extra: options.extra } : {}),
   });
 
@@ -109,3 +122,10 @@ export function isBlockedHarnessEnvVar(name: string): boolean {
 
 /** The base allowlist, exported for diagnostics and tests. */
 export const HARNESS_ENV_ALLOWLIST = BASE_CHILD_ENV_ALLOWLIST;
+
+/**
+ * Reduce `CreateConversationParams.env` to the delegable `GENERATORAI_*`
+ * subset. Providers call this once when the conversation is created and store
+ * the result, so the rule is applied at the boundary rather than per turn.
+ */
+export { filterDelegatedChildEnv as filterDelegatedHarnessEnv };

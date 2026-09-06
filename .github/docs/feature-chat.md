@@ -52,31 +52,27 @@ Body: `CreateChatParams` (validated by `CreateChatSchema`):
   model?: string;                     // overrides harness default; provider-specific
   tags?: string[];
   projectId?: string;                 // attach to project
-  codebaseIds?: string[];             // 0..3 codebases to mount as worktrees
-  createWorktree?: boolean;           // default true if projectId+codebaseIds present
-  gitRepositories?: Array<{           // alternative to projectId for ad-hoc paths
-    url: string;
-    alias: string;
-  }>;
-  useWorktree?: boolean;              // when projectId set
+  sources?: ChatSourceSpec[];         // what the agent works on — see feature-workspaces-files.md §3
+  primary?: string;                   // alias of the mount that becomes cwd (default: first source)
+  // legacy, still accepted and mapped onto `sources`:
+  codebaseIds?: string[]; createWorktree?: boolean; gitRepositories?: Array<{ url; alias }>;
   harnessConfig?: Partial<HarnessConfig>;  // model, reasoningEffort, mcpServers, etc.
 }
 ```
 
+`ChatSourceSpec` = `{ kind: 'codebase', codebaseId, mode?: 'in-place'|'worktree', branch?, newBranch?, baseRef?, alias? } | { kind: 'folder', path, mode?, branch?, newBranch?, baseRef?, alias? }`. No sources at all → one `generated` mount at `source/main`.
+
 Server-side flow ([ChatManagementService.createChat](../../packages/core/src/services/ChatManagementService.ts)):
 
-1. Validate input.
-2. `sessionService.createSession({ ownerType: 'chat', ownerId: chatId })` — allocates a Session row + transitions through `SessionStateMachine`.
-3. **If `workspaceManager` is wired and `projectId|gitRepositories` set:**
-   - `workspaceManager.createWorkspace({ ownerType: 'chat', ownerId, projectId, useWorktree, gitEnabled, stageSystemArtifacts: true })` — creates execution workspace + DB row.
-   - `worktreeService.createRunWorktrees(projectId, chatId, codebaseIds, 'manual', targetDir)` — copies/checks-out the selected codebases into `<workspace>/source/<alias>/`.
-   - First worktree path becomes `__workingDirectory`.
-4. Insert `chats` row.
-5. `harness.createConversation({ conversationId: sessionId, model, systemMessage, tools, workingDirectory, … })`.
-6. Emit `chat.created` event on EventBus.
-7. Return chat DTO.
+1. Validate input, then **plan the mounts** (`MountService.plan`): every folder/codebase/branch is checked against disk and git before anything is written — a bad path or branch is a 400, not a half-created chat.
+2. Create the Session row.
+3. `workspaceManager.createWorkspace({ ownerType: 'chat', ownerId, projectId, gitEnabled: false, sources, primary })` — managed scratch root + `prepStatus: 'pending'`; `MountService.stage` writes the `workspace_mounts` rows.
+4. Compute the exposure from the planned mounts (`workingDirectory` = primary mount, `additionalDirectories` = other mounts + managed root, `env`, the `[Workspace]` hint) and `harness.createConversation(...)` with it.
+5. Insert the `chats` row (with `sources`, `primarySource`).
+6. Kick off `MountService.prepare` in the background (worktrees, branch checkouts, shadow stores, baseline checkpoint → `prepStatus: 'ready'` + `workspace.prep` event) and the provider pre-warm.
+7. Return the chat DTO — `workspacePrep.status` is `preparing` until step 6 finishes.
 
-> **Edge case — worktree creation latency:** for large repos this can take 10-30s. The dialog shows the "create chat" mutation pending until the API returns. Frontend code already uses `mutateAsync()` — don't refactor to fire-and-forget without handling the pending state in the UI.
+> **The first prompt waits.** `sendPrompt` awaits `MountService.ready(workspaceId)`; the composer shows "Preparing workspace…" and disables Send until the `workspace.prep` event flips it to ready, or shows the error with Retry / Edit sources. Nothing runs in a directory that does not exist yet.
 
 ### 2.2 Send prompt
 
@@ -152,23 +148,44 @@ Tab state (which tabs are open, which is active, pane width) is persisted per-pa
 
 **Attach-to-chat pipeline (Browser Inspect + Terminal Attach):** both the BrowserPanel and TerminalPanel accept an `onCapture(file, kind)` callback wired to the ChatPage's `pendingCaptures` state. A yellow `📎 N capture pending` banner renders above `ChatInput`; the next `customSendFn` call merges the pending files into the outgoing message and clears the banner.
 
-### `GET /api/chats/:id/workspace` (Changes tab data)
+### 3.1 Changed files — in the transcript and on the composer
 
-```jsonc
-{
-  "workspaceId": "...",
-  "workspaceFiles": ["foo.ts", "src/util.ts"],       // generated files in workspace root
-  "artifactFiles":  ["responses/stage-1.md"],         // assistant response files
-  "sourceFiles":    [],                               // (typically empty for chat)
-  "worktrees": [
-    { "alias": "main-repo", "files": ["src/index.ts", …] }
-  ]
-}
-```
+Two surfaces show what the agent changed, and they all name files the same way as the Changes tab (`<alias>/<path>` for a linked codebase, bare `<path>` for the workspace root — see [`changes/changePaths.ts`](../../apps/web/src/components/chat/changes/changePaths.ts) `toDisplayPath`):
 
-`GET /api/chats/:id/workspace/files?filePath=...&source=workspace|artifacts|source|worktree&worktreeAlias=...` returns raw file content with syntax highlighting in the modal.
+- **Per-op step rows** — a `Write`/`Edit` step carries `+A −D` from `harness.tool_complete.fileOp`. Expanding the row renders an inline unified diff ([`InlineDiff.tsx`](../../apps/web/src/components/chat/InlineDiff.tsx)): the provider's `structuredPatch` hunks when it shipped them (Claude; capped at 160 lines, `hunksTruncated` links to the full diff), else rebuilt from the tool's `old_string`/`new_string`/`content`. The raw tool call stays one click away.
+- **Composer tray** ([`ChatChangesTray.tsx`](../../apps/web/src/components/chat/ChatChangesTray.tsx)) — docked above the input: "N files changed in this chat · +A −D", a live pulse while file ops are still landing, an expandable tree (status letter, +/−, click → Changes tab at that file) and a **Review changes** button. The list is the workspace change summary (baseline → working tree) with the live stream's file ops overlaid until the summary refetches (1.5 s after each op, and again when the turn settles).
 
-> **Edge case — `workspaceId` missing:** if the chat predates the workspace migration (v8) and `useWorktree: false`, the panel will be empty. The fix is to either re-create the chat or run `POST /api/chats/:id/workspace/create` (admin endpoint) to backfill.
+**What counts as a change.** When the workspace has a real codebase (a linked worktree or an agent-generated repo), files the agent scaffolds at the workspace root — an orchestrator's `orchestrator/state.json` (git-ignored by the workspace template), task summaries, notes — are hidden from the tray and from the Changes tab, behind a "+N workspace files" toggle ([`changeVisibility.ts`](../../apps/web/src/components/diff/changeVisibility.ts)). A workspace with no codebase keeps its root files: there they are the work. `artifacts/`, `uploads/`, `browser/` and `output/` never appear at all.
+
+> The worktree of a project-bound chat is written to the `worktrees` table (keyed by the chat id), not `workspace_worktrees`; `WorkspaceManager.getWorkspaceInfo` unions both so `discoverRepos` sees `source/<alias>`. Before that union the Changes tab was empty for every project chat.
+
+**Stopping a turn.** `harness.cancelled` force-settles the stream even when the turn had not produced a block yet, and the live transcript shows "Stopped before the agent responded." A Stop that lands while the server is still setting the turn up (resume, config, pre-turn checkpoint) is honoured in `ChatManagementService.sendPrompt` — the provider query is never started and the chat's busy claim is released. A send the server refuses (409 `CHAT_BUSY` / `INTERACTION_PENDING`) restores the draft and shows a "Message not sent" toast with the reason.
+
+### 3.2 The activity timeline — grouping, failures, previews, history
+
+**Grouped tool calls.** Consecutive steps of one kind (read / search / edit / run / generic tool / memory) fold into a single collapsible row — "Read 5 files", "Edited 3 files +54 −0", "navigate_page ×2" — with a count badge and the distinct targets as a sub-line; while the run is still live the row says "Reading files (3) <current target>". Thinking, sub-agent, warning and error steps never fold. The fold is pure data ([`groupSteps.ts`](../../apps/web/src/components/agent/groupSteps.ts)); the group's id is its first step's id so an open group stays open while the turn keeps appending to it. `StepGroupRow` in [`StepRow.tsx`](../../apps/web/src/components/agent/StepRow.tsx) renders it; expanding shows the ordinary rows.
+
+**Failed tool calls** get a red cross (not a tick) and a "Failed" label. The provider's `is_error` travels as `harness.tool_complete.success` → client-core `completeToolCall(…, success)` → `ToolCallBlock.error` → step status `failed`, and is persisted as `metadata.toolCalls[].success` so history renders the same. The in-process browser tools never set `is_error` — they answer `{ ok: false, error }` — so that envelope counts too (`toolCallFailed` in `deriveTimeline.ts`).
+
+**Expanded detail is capped**: whatever a row reveals (inline diff, raw args/result, sub-agent children) sits in a 260 px max-height panel that scrolls inside itself, so a multi-thousand-line result no longer pushes the transcript down by its full height.
+
+**Image previews on hover** ([`ImageHoverPreview.tsx`](../../apps/web/src/components/shared/ImageHoverPreview.tsx), a Radix tooltip holding an `<img>`): composer attachment chips (object URL of the local `File`), attachment chips on sent messages, and the picture icon on a `screenshot_page` step. The step resolves its URL from the tool result's workspace-relative `artifactPath` via `GET /api/workspaces/:id/browser/files/<path>`; the workspace id reaches the row through the stream-actions context. Pasting an image into the composer attaches it.
+
+**Attachments are persisted on the user message** (`ChatMessage.attachments[] = { name, path, mimeType, artifactId }`) and served by `GET /api/chats/:id/attachments/:artifactId` (artifact id scoped to the chat's session; images inline, everything else as a download). Before this the API stored the upload as an artifact but the message row never referenced it, so a reload showed a bare prompt.
+
+**↑ / ↓ prompt history** ([`composer/promptHistory.ts`](../../apps/web/src/components/chat/composer/promptHistory.ts)): ↑ on the first line of the box recalls the previous prompt and re-materialises its attachments (fetched back into `File`s from the route above), ↓ on the last line walks forward, past the newest entry the parked draft returns, and editing a recalled prompt leaves history mode. The page derives the list from persisted user messages (widget/system-originated rows excluded); prompts sent this session are remembered locally until the server echoes them.
+
+**Read aloud / Speak live** are hidden behind `READ_ALOUD_ENABLED` in [`featureFlags.ts`](../../apps/web/src/components/chat/featureFlags.ts); the feature stays intact.
+
+**Motion.** One `ThinkingPlaceholder` (breathing orb + shimmering label) covers both the pending-turn gap and the pre-first-block state. Timeline rows enter with a 180 ms settle; a running row shows one thin indeterminate bar rather than fake paragraph shimmer. `useStickToBottom` coalesces follow writes into one per animation frame (instant while pinned — a smooth scroll would lag the next flush) and reserves smooth scrolling for the explicit "Jump to latest".
+
+> **Line endings.** Checkpoint snapshots are byte-exact (`core.autocrlf=false`), so on Windows they hold CRLF blobs while a real commit's blobs are LF. When the Changes summary compares the working tree against a commit (a `ref` base, or the "Worktree HEAD" fallback for a linked worktree with no baseline yet) it materialises the working tree with the repo's own EOL config (`WriteTreeOptions.honourEol`, separate index file) — otherwise every file in a fresh project chat reported as fully rewritten (`+13 −13`).
+
+### Workspace data behind the right pane
+
+Every right-pane surface reads `chat.workspaceId` and calls the workspace routes: `GET /api/workspaces/:id` (mounts, prepStatus), `/changes` (per mount, kind `mount`/`nested`), `/tree` (Files tab), `/checkpoints` (rewind), `/files` (@-mention index: one `worktrees[]` entry per mount, in-place included). The **Sources** block lists the mounts (alias, mode, branch, path, status, dirty dot) and opens the same source editor as the create dialog, submitting `PUT /api/chats/:id/sources`. Full contract: [feature-workspaces-files.md](./feature-workspaces-files.md) §7.
+
+> **Legacy chats:** workspaces created before v51 get their mounts back-filled on first read, so the panel keeps working; their old checkpoints stay in the mount's own `.git`.
 
 ---
 

@@ -21,6 +21,7 @@ import {
   ChevronsUpDown,
   ExternalLink,
   FileDiff,
+  GitBranch,
   GitCommit,
   GitPullRequest,
   History,
@@ -40,6 +41,7 @@ import {
   PopoverContent,
   Spinner,
   Textarea,
+  Select,
 } from '@/components/ui/index.js';
 import {
   useWorkspaceChangeSummary,
@@ -71,6 +73,13 @@ import {
   type DiffLineRange,
 } from './DiffCodeView.js';
 import { ChangesTree, type TreeGitStatus } from './ChangesTree.js';
+import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
+import {
+  shouldPrefixAlias,
+  toRestorePath,
+  withAliasPrefix,
+} from '@/components/chat/changes/changePaths.js';
+import { splitWorkspaceChanges } from './changeVisibility.js';
 import { DiffProviders } from './DiffProviders.js';
 import { CheckpointTimeline } from './CheckpointTimeline.js';
 import { diffSourceId, useDiffSources, useExpandedDiffs } from './useDiffSources.js';
@@ -97,6 +106,13 @@ export interface ChangesSurfaceProps {
   /** Explains why sending is unavailable (shown on the disabled button). */
   reviewDisabledReason?: string;
   onOpenCheckpoints?: () => void;
+  /**
+   * Imperative "show me this file": the transcript's per-op diff icons, the
+   * end-of-turn summary and the composer tray all hand over a display path
+   * (`<alias>/<path>`, or `<path>` for the workspace root). A fresh `token`
+   * re-fires the focus even for the same path.
+   */
+  focusFile?: { path: string; token: number } | null;
 }
 
 /**
@@ -160,6 +176,7 @@ export function ChangesSurface({
   reviewTarget,
   reviewDisabledReason,
   onOpenCheckpoints,
+  focusFile,
 }: ChangesSurfaceProps) {
   const [base, setBase] = useState(defaultBase);
   const [viewMode, setViewMode] = useState<'split' | 'unified'>('unified');
@@ -189,6 +206,19 @@ export function ChangesSurface({
     base,
     head: 'working',
   });
+  /**
+   * The workspace's mounts — the authority for how many things this chat is
+   * working on, what each is called, and what each branch was cut from.
+   *
+   * Two things hang off it: whether a displayed path carries its alias (only
+   * worth it when there is more than one mount), and the "Branch base" entries
+   * in the compare picker, which need each mount's `git.baseCommit`.
+   */
+  const workspaceInfo = useWorkspaceInfo(workspaceId);
+  const mounts = useMemo(
+    () => (workspaceInfo.data?.mounts ?? []).filter((m) => m.status !== 'removed'),
+    [workspaceInfo.data],
+  );
   const checkpoints = useWorkspaceCheckpoints(workspaceId);
   const restoreCheckpoint = useRestoreWorkspaceCheckpoint(workspaceId);
   const scmStatus = useSourceControlStatus();
@@ -197,8 +227,80 @@ export function ChangesSurface({
   const scmEnabled = scmStatus.data?.enabled ?? false;
   const prs = useWorkspacePullRequests(workspaceId, '.', scmEnabled);
 
-  const summary = summaryQuery.data;
+  // Supporting files the agent scaffolds at the workspace root stay out of the
+  // way while a real codebase is being reviewed — see changeVisibility.ts.
+  const [showWorkspaceFiles, setShowWorkspaceFiles] = useState(false);
+  const { visible: summary, hiddenWorkspaceFiles } = useMemo(
+    () => splitWorkspaceChanges(summaryQuery.data, showWorkspaceFiles),
+    [summaryQuery.data, showWorkspaceFiles],
+  );
   const { expandedIds, toggle, expandAll, collapseAll } = useExpandedDiffs();
+
+  /**
+   * Whether a row's path is prefixed with its mount alias.
+   *
+   * Only when there is a choice to disambiguate. With one mount the alias is
+   * the same word on every row, and worse, it makes the path wrong to copy
+   * into a terminal. Falls back to the summary's repo count while the
+   * workspace document is still loading, so the prefix never flickers on.
+   */
+  const mountCount = mounts.length || (summary?.repos.length ?? 0);
+  const multiMount = shouldPrefixAlias(mountCount);
+  const display = useCallback(
+    (alias: string, path: string) => withAliasPrefix(alias, path, multiMount),
+    [multiMount],
+  );
+
+  /** Per-mount roll-up for the group bar: what changed, and where. */
+  const mountGroups = useMemo(() => {
+    const byAlias = new Map(mounts.map((m) => [m.alias, m]));
+    return (summary?.repos ?? []).map((repo) => ({
+      alias: repo.alias,
+      kind: repo.kind,
+      stats: repo.stats,
+      firstId: repo.files[0] ? diffSourceId(repo.alias, repo.files[0].path) : null,
+      mount: byAlias.get(repo.alias),
+    }));
+  }, [summary, mounts]);
+
+  /**
+   * What "compare against" offers.
+   *
+   * Turn checkpoints are grouped by `turnId`: one turn writes one checkpoint
+   * PER MOUNT, so listing them raw produced the same prompt three times over.
+   * `turn:<id>` is the selector the server resolves to that turn's snapshot.
+   *
+   * "Branch base" is the commit a mount's branch was cut from — the answer to
+   * "what does this branch add?", which no checkpoint can express because
+   * checkpoints only start at session start.
+   */
+  const baseOptions = useMemo(() => {
+    const options = [{ value: 'baseline', label: 'Since session start' }];
+
+    for (const mount of mounts) {
+      const sha = mount.git?.baseCommit;
+      if (!sha) continue;
+      options.push({
+        value: `ref:${sha}`,
+        label: `Branch base (${mount.git?.baseRef ?? mount.git?.branch ?? mount.alias})`,
+      });
+    }
+
+    const seenTurns = new Set<string>();
+    for (const c of checkpoints.data?.checkpoints ?? []) {
+      if (c.kind === 'baseline' || c.kind === 'pre_restore') continue;
+      if (c.turnId) {
+        if (seenTurns.has(c.turnId)) continue;
+        seenTurns.add(c.turnId);
+      }
+      options.push({
+        value: c.turnId ? `turn:${c.turnId}` : `checkpoint:${c.id}`,
+        label: `${c.label ?? c.kind} · ${new Date(c.createdAt).toLocaleTimeString()}`,
+      });
+      if (options.length > 30) break;
+    }
+    return options;
+  }, [mounts, checkpoints.data]);
 
   const { entries, sources, loadingIds } = useDiffSources({
     workspaceId,
@@ -456,15 +558,14 @@ export function ChangesSurface({
   const jumpToThread = useCallback(
     (thread: { id: string; repoAlias: string; path: string }) => {
       const id = diffSourceId(thread.repoAlias, thread.path);
-      const displayPath =
-        thread.repoAlias === '.' ? thread.path : `${thread.repoAlias}/${thread.path}`;
+      const displayPath = display(thread.repoAlias, thread.path);
       setCommentsOpen(false);
       setFocusedThreadId(thread.id);
       setActivePath(displayPath);
       if (!expandedIds.has(id)) toggle(id);
       pendingScrollRef.current = id;
     },
-    [expandedIds, toggle],
+    [expandedIds, toggle, display],
   );
 
   /** Overlay review annotations onto the sources. */
@@ -512,31 +613,41 @@ export function ChangesSurface({
   const treePaths = useMemo(() => {
     const out = new Set<string>();
     for (const repo of summary?.repos ?? []) {
-      const prefix = repo.alias === '.' ? '' : `${repo.alias}/`;
-      for (const f of repo.files) out.add(prefix + f.path);
+      for (const f of repo.files) out.add(display(repo.alias, f.path));
     }
     // No sort: the server already returns files in tree order, and the tree
     // component orders its own rows anyway.
     return [...out];
-  }, [summary]);
+  }, [summary, display]);
 
   const treeStatuses = useMemo(() => {
     if (!summary) return [];
     const out: Array<{ path: string; status: TreeGitStatus }> = [];
     for (const repo of summary.repos) {
-      const prefix = repo.alias === '.' ? '' : `${repo.alias}/`;
       for (const f of repo.files) {
-        out.push({ path: prefix + f.path, status: f.status as TreeGitStatus });
+        out.push({ path: display(repo.alias, f.path), status: f.status as TreeGitStatus });
       }
     }
     return out;
-  }, [summary]);
+  }, [summary, display]);
+
+  // External focus (transcript → this file). Waits for the summary to list
+  // the file: a click on a just-written file can arrive before the refetch
+  // that adds it, and the request must not be lost to that race.
+  const lastFocusToken = useRef<number | null>(null);
+  useEffect(() => {
+    if (!focusFile || lastFocusToken.current === focusFile.token) return;
+    const entry = entries.find((e) => display(e.alias, e.file.path) === focusFile.path);
+    if (!entry) return;
+    lastFocusToken.current = focusFile.token;
+    setActivePath(focusFile.path);
+    if (!expandedIds.has(entry.id)) toggle(entry.id);
+    pendingScrollRef.current = entry.id;
+  }, [focusFile, entries, expandedIds, toggle, display]);
 
   const handleTreeSelect = useCallback(
     (path: string) => {
-      const entry = entries.find(
-        (e) => (e.alias === '.' ? e.file.path : `${e.alias}/${e.file.path}`) === path,
-      );
+      const entry = entries.find((e) => display(e.alias, e.file.path) === path);
       if (!entry) return;
       setActivePath(path);
       if (!expandedIds.has(entry.id)) toggle(entry.id);
@@ -546,7 +657,7 @@ export function ChangesSurface({
       // rather than below the fold.
       pendingScrollRef.current = entry.id;
     },
-    [entries, expandedIds, toggle],
+    [entries, expandedIds, toggle, display],
   );
 
   /**
@@ -569,14 +680,21 @@ export function ChangesSurface({
   const revertFile = useCallback(
     async (alias: string, path: string) => {
       if (!baseCheckpointId) return;
-      // Restore takes workspace-relative paths; a non-root repo is addressed
-      // through its alias prefix.
-      const target = alias === '.' ? path : `${alias}/${path}`;
+      // REPO-RELATIVE, with no alias prefix.
+      //
+      // A checkpoint belongs to exactly one mount and its tree is that
+      // mount's tree, so `<alias>/<path>` names a file that does not exist in
+      // it — every discard silently restored nothing. (The server strips a
+      // leading alias defensively now, but sending the right path is what
+      // makes the behaviour correct rather than rescued.)
       setRevertError(null);
       try {
         await restoreCheckpoint.mutateAsync({
           checkpointId: baseCheckpointId,
-          paths: [target],
+          paths: [toRestorePath(path, alias)],
+          // The summary's base id is the FIRST mount's checkpoint; the server
+          // maps it onto this mount's equivalent snapshot.
+          ...(alias && alias !== '.' ? { alias } : {}),
         });
       } catch (err) {
         setRevertError(err instanceof Error ? err.message : String(err));
@@ -606,7 +724,7 @@ export function ChangesSurface({
       const expanded = expandedIds.has(item.id);
       const loading = loadingIds.has(item.id);
       const openable = !file?.isBinary && !file?.isTooLarge;
-      const displayPath = item.alias === '.' ? item.path : `${item.alias}/${item.path}`;
+      const displayPath = display(item.alias, item.path);
       const isActive = activePath === displayPath;
       const commentCount = openThreadCountByFile.get(item.id) ?? 0;
       return (
@@ -686,8 +804,8 @@ export function ChangesSurface({
             name={item.path.split('/').pop() ?? item.path}
             className="h-3.5 w-3.5 shrink-0"
           />
-          <span className="min-w-0 flex-1 truncate font-mono" title={item.path}>
-            {item.alias !== '.' && (
+          <span className="min-w-0 flex-1 truncate font-mono" title={displayPath}>
+            {multiMount && item.alias !== '.' && (
               <span className="text-muted-foreground">{item.alias}/</span>
             )}
             {file?.oldPath && (
@@ -790,6 +908,8 @@ export function ChangesSurface({
       toggle,
       activePath,
       openThreadCountByFile,
+      display,
+      multiMount,
     ],
   );
 
@@ -829,25 +949,39 @@ export function ChangesSurface({
           </span>
         )}
 
-        {/* Base revision picker — turns this surface into "since session
-            start" vs "since this turn/stage". */}
-        <select
+        {/* Base revision picker — "since session start", "since this turn",
+            or the commit each mount's branch was cut from. */}
+        <Select
           value={base}
-          onChange={(e) => setBase(e.target.value)}
-          className="ml-1 h-6 max-w-[190px] rounded border bg-transparent px-1 text-[11px]"
-          title="Compare against"
+          onChange={setBase}
           aria-label="Compare against"
-        >
-          <option value="baseline">Since session start</option>
-          {(checkpoints.data?.checkpoints ?? [])
-            .filter((c) => c.kind !== 'baseline' && c.kind !== 'pre_restore')
-            .slice(0, 25)
-            .map((c) => (
-              <option key={c.id} value={`checkpoint:${c.id}`}>
-                {c.label ?? c.kind} · {new Date(c.createdAt).toLocaleTimeString()}
-              </option>
-            ))}
-        </select>
+          className="ml-1 h-6 w-auto max-w-[220px] rounded-md px-2 py-0 text-[11px]"
+          options={baseOptions}
+        />
+
+        {(hiddenWorkspaceFiles > 0 || showWorkspaceFiles) && (
+          <button
+            type="button"
+            onClick={() => setShowWorkspaceFiles((v) => !v)}
+            aria-pressed={showWorkspaceFiles}
+            title={
+              showWorkspaceFiles
+                ? 'Hide files outside the linked codebases'
+                : 'Files the agent wrote at the workspace root (state, notes, summaries) — not part of a codebase'
+            }
+            className={cn(
+              'ml-1 rounded border px-1.5 py-0.5 text-[10.5px] transition-colors',
+              showWorkspaceFiles
+                ? 'border-primary/40 bg-primary/10 text-foreground'
+                : 'border-border text-muted-foreground hover:bg-subtle hover:text-foreground',
+            )}
+            data-testid="changes-workspace-files-toggle"
+          >
+            {showWorkspaceFiles
+              ? 'Hide workspace files'
+              : `+${hiddenWorkspaceFiles} workspace ${hiddenWorkspaceFiles === 1 ? 'file' : 'files'}`}
+          </button>
+        )}
 
         <div className="ml-auto flex items-center gap-0.5">
           {/* Every comment on this diff, in one list — the same affordance
@@ -971,6 +1105,49 @@ export function ChangesSurface({
           </IconButton>
         </div>
       </div>
+
+      {/* ── Mount groups ───────────────────────────────────────
+          The diff list below is already ordered mount by mount; this names
+          each group and says which branch it is on, which is the one thing a
+          multi-repo change set cannot be read without. Clicking a group jumps
+          to its first file. */}
+      {multiMount && stats.files > 0 && (
+        <div className="flex flex-wrap items-center gap-1 border-b px-2 py-1" data-testid="mount-groups">
+          {mountGroups.map((group) => (
+            <Button
+              key={group.alias}
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={!group.firstId}
+              onClick={() => {
+                if (!group.firstId) return;
+                pendingScrollRef.current = group.firstId;
+                setActivePath(null);
+              }}
+              title={group.mount?.path ?? group.alias}
+              className="h-auto gap-1.5 rounded-md border border-border px-1.5 py-0.5 text-[10.5px] font-normal hover:bg-subtle"
+            >
+              <span className="font-medium text-foreground">
+                {group.alias === '.' ? 'workspace' : group.alias}
+              </span>
+              {group.mount?.git?.branch && (
+                <span className="inline-flex items-center gap-0.5 text-muted-foreground">
+                  <GitBranch className="h-2.5 w-2.5" />
+                  {group.mount.git.branch}
+                </span>
+              )}
+              <span className="text-muted-foreground">
+                {group.stats.files} {group.stats.files === 1 ? 'file' : 'files'}
+              </span>
+              <span className="font-mono">
+                <span className="text-success">+{group.stats.additions}</span>{' '}
+                <span className="text-danger">−{group.stats.deletions}</span>
+              </span>
+            </Button>
+          ))}
+        </div>
+      )}
 
       {/* ── Review batch ───────────────────────────────────────── */}
       {reviewEnabled && (
@@ -1213,7 +1390,9 @@ export function ChangesSurface({
             <CheckpointTimeline
               workspaceId={workspaceId}
               onClose={() => setShowCheckpoints(false)}
-              onCompare={(id) => setBase(`checkpoint:${id}`)}
+              // The timeline hands over a ready-made selector (`turn:<id>` for
+              // a grouped turn, `checkpoint:<id>` for a lone snapshot).
+              onCompare={setBase}
             />
           </div>
         )}

@@ -106,7 +106,7 @@ export type StreamEffect =
    */
   | { op: 'appendTokenIfNoText'; key: string; text: string }
   | { op: 'addToolCall'; key: string; tool: string; args: unknown; callId?: string; parentCallId?: string }
-  | { op: 'completeToolCall'; key: string; toolOrCallId: string; result: unknown; fileOp?: ToolFileOp }
+  | { op: 'completeToolCall'; key: string; toolOrCallId: string; result: unknown; fileOp?: ToolFileOp; success?: boolean }
   | { op: 'addSystemMessage'; key: string; message: string; category: SystemCategory }
   /** `hook.started` — see `StreamHookInvocation`; routed to the stage-aware
    *  `key` so `deriveRunView` can read a stage's hooks off its own stream. */
@@ -132,7 +132,7 @@ export type StreamEffect =
       durationMs?: number;
     }
   | { op: 'processInlineToolCalls'; key: string; content: string }
-  | { op: 'completeStream'; key: string }
+  | { op: 'completeStream'; key: string; force?: boolean }
   | { op: 'errorStream'; key: string }
   | { op: 'setServerTurnId'; key: string; turnId: string }
   /** W30-d — the agent is writing, but this surface is holding the text. */
@@ -681,6 +681,7 @@ export class StreamEventRouter {
             toolOrCallId: id,
             result: data['result'],
             ...(fileOp && typeof fileOp === 'object' ? { fileOp: fileOp as ToolFileOp } : {}),
+            ...(typeof data['success'] === 'boolean' ? { success: data['success'] } : {}),
           });
         }
         break;
@@ -729,7 +730,9 @@ export class StreamEventRouter {
         // never treats the stage as finished.
         this.flushKey(key, out);
         if (internal) break;
-        out.push({ op: 'completeStream', key });
+        // Forced: the user pressed Stop, so this settles even a turn that had
+        // not produced a single block yet (status still 'pending').
+        out.push({ op: 'completeStream', key, force: true });
         out.push({ op: 'invalidate', resource: 'messages' });
         out.push({ op: 'invalidate', resource: 'session' });
         break;
@@ -1086,6 +1089,23 @@ export class StreamEventRouter {
           ...(optStr(data['workspaceId']) ? { id: str(data['workspaceId']) } : {}),
         });
         break;
+
+      // Mount preparation moved (preparing → ready / error): the workspace
+      // info and the chat DTO (which carries `workspacePrep`) both change.
+      case 'workspace.prep': {
+        out.push({
+          op: 'invalidate',
+          resource: 'workspace',
+          ...(optStr(data['workspaceId']) ? { id: str(data['workspaceId']) } : {}),
+        });
+        if (optStr(data['chatId'])) {
+          out.push({ op: 'invalidate', resource: 'chat', id: str(data['chatId']) });
+        }
+        if (data['status'] === 'error') {
+          note(`Workspace preparation failed: ${str(data['error'] ?? 'unknown error')}`);
+        }
+        break;
+      }
 
       case 'checkpoint.restored': {
         out.push({

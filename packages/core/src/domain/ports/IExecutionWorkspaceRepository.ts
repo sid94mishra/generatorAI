@@ -7,6 +7,7 @@ import type {
   WorkspaceFilters,
   WorkspaceOwnerType,
   WorkspaceStatus,
+  WorkspacePrepStatus,
 } from '@generatorai/shared';
 
 export interface IExecutionWorkspaceRepository {
@@ -16,5 +17,7 @@ export interface IExecutionWorkspaceRepository {
   findByProject(projectId: string): Promise<ExecutionWorkspace[]>;
   list(filters: WorkspaceFilters): Promise<ExecutionWorkspace[]>;
   updateStatus(id: string, status: WorkspaceStatus, updates?: Partial<ExecutionWorkspace>): Promise<void>;
+  /** Mount preparation state — gates the first prompt of a chat. */
+  updatePrep(id: string, prepStatus: WorkspacePrepStatus, prepError?: string | null): Promise<void>;
   delete(id: string): Promise<void>;
 }

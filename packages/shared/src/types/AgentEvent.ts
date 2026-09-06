@@ -27,6 +27,23 @@ export interface FileOpStat {
   filePath: string;
   additions: number;
   deletions: number;
+  /**
+   * Unified-diff hunks of the operation, for inline rendering in the
+   * transcript. Present only for providers that return a structured patch
+   * (Claude Write/Edit), and capped — see `hunksTruncated`.
+   */
+  hunks?: FileOpHunk[];
+  /** True when `hunks` was cut at the size cap; the Changes tab has the rest. */
+  hunksTruncated?: boolean;
+}
+
+/** One hunk of a unified diff: `lines` carry their leading ' ', '+' or '-'. */
+export interface FileOpHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
 }
 
 export type AgentEvent =
@@ -258,6 +275,18 @@ export type AgentEvent =
         stageRunId?: string;
         chatId?: string;
         workflowRunId?: string;
+      };
+    }
+  // Mount preparation (worktrees created, branches checked out). Gates the
+  // first prompt of a chat; the composer shows "Preparing workspace…" until
+  // `ready`, and the error text when preparation failed.
+  | {
+      kind: 'workspace.prep';
+      data: {
+        workspaceId: string;
+        status: 'preparing' | 'ready' | 'error';
+        error?: string;
+        chatId?: string;
       };
     }
   | {

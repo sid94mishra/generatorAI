@@ -46,6 +46,11 @@
 //   "HANG"           → deltas, then nothing (the turn never ends by itself)
 //   "ERROR"          → an `error` notification with a non-retryable info
 //   "SERVER_CANCEL"  → turn/completed with status "interrupted"
+//   "ECHO_PARAMS"    → the agent message is a JSON dump of the params this
+//                      thread was STARTED/RESUMED with and the params of the
+//                      turn itself, so a test can assert what actually went
+//                      over the wire (cwd, sandboxPolicy.writableRoots)
+//                      instead of trusting a mock.
 //   anything else    → an agent-message delta, then turn/completed
 // ────────────────────────────────────────────────────────────────
 
@@ -64,6 +69,8 @@ if (process.env['FAKE_CODEX_IGNORE_SIGTERM'] === '1') process.on('SIGTERM', () =
 
 /** threadId → { turnId } while a turn is running. */
 const running = new Map();
+/** threadId → the `thread/start` (or `thread/resume`) params it was created with. */
+const threadParams = new Map();
 let turnCount = 0;
 let threadCount = 0;
 let itemCount = 0;
@@ -130,7 +137,7 @@ function endTurn(threadId, turnId, status, error) {
   });
 }
 
-async function runTurn(threadId, turnId, prompt) {
+async function runTurn(threadId, turnId, prompt, turnStartParams) {
   // Backpressure arrives as an `error` NOTIFICATION carrying a
   // `codexErrorInfo`, never as JSON-RPC code -32001.
   if (turnCount <= RATE_LIMIT_TURNS) {
@@ -207,6 +214,18 @@ async function runTurn(threadId, turnId, prompt) {
     return;
   }
 
+  if (prompt.includes('ECHO_PARAMS')) {
+    const msg = nextItemId();
+    const text = JSON.stringify({
+      thread: threadParams.get(threadId) ?? null,
+      turn: turnStartParams ?? null,
+    });
+    notify('item/agentMessage/delta', { threadId, turnId, itemId: msg, delta: text });
+    notify('item/completed', { threadId, turnId, completedAtMs: 1, item: agentMessageItem(msg, text) });
+    endTurn(threadId, turnId, 'completed');
+    return;
+  }
+
   const msg = nextItemId();
   notify('item/agentMessage/delta', { threadId, turnId, itemId: msg, delta: 'hello ' });
   notify('item/completed', { threadId, turnId, completedAtMs: 1, item: agentMessageItem(msg, 'hello ') });
@@ -267,6 +286,7 @@ rl.on('line', (line) => {
     case 'thread/start': {
       if (THREAD_ERROR) { respondError(id, -32602, 'invalid thread params'); return; }
       const threadId = `thr_${++threadCount}`;
+      threadParams.set(threadId, params ?? null);
       respond(id, {
         thread: { id: threadId, sessionId: threadId, status: { type: 'idle' } },
         model: params?.model ?? 'gpt-5-codex',
@@ -284,6 +304,7 @@ rl.on('line', (line) => {
 
     case 'thread/resume': {
       const threadId = params?.threadId ?? `thr_${++threadCount}`;
+      threadParams.set(threadId, params ?? null);
       respond(id, {
         thread: { id: threadId, sessionId: threadId, status: { type: 'idle' } },
         model: 'gpt-5-codex',
@@ -332,7 +353,7 @@ rl.on('line', (line) => {
         .join(' ');
       // Deferred so the `turn/start` RESPONSE is written before any of the
       // turn's notifications — the provider learns the turn id from it.
-      setImmediate(() => { void runTurn(threadId, turnId, text); });
+      setImmediate(() => { void runTurn(threadId, turnId, text, params ?? null); });
       return;
     }
 

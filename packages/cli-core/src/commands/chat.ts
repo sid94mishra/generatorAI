@@ -217,13 +217,20 @@ export function chatCommands(): CommandSpec[] {
         { name: 'agent', description: 'Agent reference to bind', type: 'string', completes: 'agent' },
         {
           name: 'codebase',
-          description: 'Codebase alias to attach (repeatable, max 3)',
+          description: 'Codebase to mount: alias[:in-place|worktree[:branch]] (repeatable)',
           type: 'string',
           variadic: true,
           completes: 'codebase',
         },
-        { name: 'worktree', description: 'Create a git worktree (default when a project is set)', type: 'boolean' },
-        { name: 'noWorktree', description: 'Skip worktree creation', type: 'boolean' },
+        {
+          name: 'folder',
+          description: 'Local folder to mount: path[:in-place|worktree[:branch]] (repeatable)',
+          type: 'string',
+          variadic: true,
+        },
+        { name: 'worktree', description: 'Mount codebases as git worktrees (default)', type: 'boolean' },
+        { name: 'noWorktree', description: 'Mount codebases in place instead of as worktrees', type: 'boolean' },
+        { name: 'primary', description: 'Alias of the mount to use as the working directory', type: 'string' },
         { name: 'tags', description: 'Comma-separated tags', type: 'string' },
         {
           name: 'permissionMode',
@@ -240,6 +247,8 @@ export function chatCommands(): CommandSpec[] {
           project: z.string().optional(),
           agent: z.string().optional(),
           codebase: z.array(z.string()).optional(),
+          folder: z.array(z.string()).optional(),
+          primary: z.string().optional(),
           worktree: z.boolean().optional(),
           noWorktree: z.boolean().optional(),
           tags: z.string().optional(),
@@ -255,8 +264,11 @@ export function chatCommands(): CommandSpec[] {
         if (flags.worktree && flags.noWorktree) {
           throw CliError.usage('--worktree and --no-worktree are mutually exclusive.');
         }
-        if ((flags.codebase?.length ?? 0) > 3) {
-          throw CliError.usage('A chat can attach at most 3 codebases.');
+        if ((flags.codebase?.length ?? 0) + (flags.folder?.length ?? 0) > 8) {
+          throw CliError.usage('A chat can mount at most 8 sources.');
+        }
+        if (flags.codebase?.length && !(flags.project ?? ctx.config.cli.defaultProjectId)) {
+          throw CliError.usage('--codebase needs --project (or a default project).');
         }
 
         let projectId: string | undefined;
@@ -268,14 +280,48 @@ export function chatCommands(): CommandSpec[] {
           }).id;
         }
 
+        // "alias[:mode[:branch]]" → one mount spec. A branch given for a
+        // worktree is the branch to CREATE; for in-place it is checked out.
+        const defaultMode = flags.noWorktree ? 'in-place' : 'worktree';
+        const parseSpec = (raw: string): { id: string; mode?: 'in-place' | 'worktree'; branch?: string } => {
+          // Windows drive letters contain ':' — only split on ':' followed by a mode word.
+          const m = /^(.*?)(?::(in-place|worktree)(?::(.+))?)?$/.exec(raw);
+          const id = m?.[1] ?? raw;
+          const mode = m?.[2] as 'in-place' | 'worktree' | undefined;
+          const branch = m?.[3];
+          return { id, ...(mode ? { mode } : {}), ...(branch ? { branch } : {}) };
+        };
+        const sources = [
+          ...(flags.codebase ?? []).map((raw) => {
+            const spec = parseSpec(raw);
+            const mode = spec.mode ?? defaultMode;
+            return {
+              kind: 'codebase' as const,
+              codebaseId: spec.id,
+              mode,
+              ...(spec.branch ? (mode === 'worktree' ? { newBranch: spec.branch } : { branch: spec.branch }) : {}),
+            };
+          }),
+          ...(flags.folder ?? []).map((raw) => {
+            const spec = parseSpec(raw);
+            const mode = spec.mode ?? 'in-place';
+            return {
+              kind: 'folder' as const,
+              path: spec.id,
+              mode,
+              ...(spec.branch ? (mode === 'worktree' ? { newBranch: spec.branch } : { branch: spec.branch }) : {}),
+            };
+          }),
+        ];
+
         const body = compact({
           name: args.name,
           description: flags.description,
           model: flags.model ?? ctx.config.cli.defaultModel,
           projectId,
           agentRef: flags.agent,
-          codebaseAliases: flags.codebase,
-          useWorktree: flags.noWorktree ? false : flags.worktree,
+          ...(sources.length > 0 ? { sources } : {}),
+          primary: flags.primary,
           tags: parseList(flags.tags),
           permissionMode: flags.permissionMode,
         });

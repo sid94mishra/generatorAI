@@ -6,10 +6,14 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCreateChat } from '@/hooks/queries.js';
-import { useProjects, useProjectCodebases } from '@/hooks/projectQueries.js';
-import { X, MessageSquarePlus, Tag, Plus, GitBranch, FolderGit2, FolderOpen, Boxes, Bot, Network } from 'lucide-react';
-import { Select, Modal, Button, Input, Textarea, Badge, Spinner } from '@/components/ui/index.js';
-import { cn } from '@/lib/utils.js';
+import { X, MessageSquarePlus, Tag, Plus, Boxes, Bot, Network } from 'lucide-react';
+import { Modal, Button, Input, Textarea, Badge } from '@/components/ui/index.js';
+import { SourcePicker } from '@/components/chat/sources/SourcePicker.js';
+import {
+  draftsToSources,
+  validateDrafts,
+  type DraftSource,
+} from '@/components/chat/sources/sourceModel.js';
 import { getDefaultChatModel } from '@/lib/appPreferences.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
 import { AgentPicker } from '@/components/agents/AgentPicker.js';
@@ -40,8 +44,13 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
   const [tags, setTags] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
-  const [selectedCodebases, setSelectedCodebases] = useState<string[]>([]);
-  const [localFolderPath, setLocalFolderPath] = useState('');
+  /**
+   * The mount plan. `sources[0]` is the agent's cwd unless `primaryAlias`
+   * names another, which is exactly what the server's `primary` field means.
+   */
+  const [sourceDrafts, setSourceDrafts] = useState<DraftSource[]>([]);
+  const [primaryAlias, setPrimaryAlias] = useState<string | undefined>(undefined);
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const [browserPicker, setBrowserPicker] = useState<BrowserPickerValue>(DEFAULT_BROWSER_PICKER_VALUE);
   const [orchestratorMode, setOrchestratorMode] = useState(false);
 
@@ -53,9 +62,6 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
   const [showCapabilities, setShowCapabilities] = useState(false);
   const [projection, setProjection] = useState<ResolvedAgentProjection | undefined>(undefined);
   const resolvePreview = useResolveAgentPreview();
-
-  const { data: projects } = useProjects();
-  const { data: codebases, isLoading: codebasesLoading } = useProjectCodebases(selectedProjectId || undefined);
 
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -85,8 +91,9 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
       setTags([]);
       setShowAdvanced(false);
       setSelectedProjectId('');
-      setSelectedCodebases([]);
-      setLocalFolderPath('');
+      setSourceDrafts([]);
+      setPrimaryAlias(undefined);
+      setSourceError(null);
       setBrowserPicker(DEFAULT_BROWSER_PICKER_VALUE);
       setAgentRef(undefined);
       setSelectedAgent(undefined);
@@ -145,24 +152,31 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
   const handleCreate = useCallback(async () => {
     if (!name.trim()) return;
 
+    // Everything the client can judge is judged here; the server's own 400
+    // lands in the same place so the user never has to look in two spots.
+    const localProblem = validateDrafts(sourceDrafts);
+    if (localProblem) {
+      setSourceError(localProblem);
+      return;
+    }
+    setSourceError(null);
+
     try {
+      const sources = draftsToSources(sourceDrafts, name.trim());
       const params: CreateChatParams = {
         name: name.trim(),
         description: description.trim() || undefined,
         model: model || undefined,
         tags,
         projectId: selectedProjectId || undefined,
-        codebaseIds: selectedCodebases.length > 0 ? selectedCodebases : undefined,
-        createWorktree: selectedCodebases.length > 0 ? true : undefined,
+        // `sources` supersedes codebaseIds / createWorktree / gitRepositories:
+        // sending both would let the legacy mapping fight the explicit plan.
+        ...(sources.length > 0 ? { sources } : {}),
+        ...(sources.length > 0 && primaryAlias ? { primary: primaryAlias } : {}),
         orchestratorMode: orchestratorMode || undefined,
         agentRef: agentRef || undefined,
         agentOverrides: Object.keys(agentOverrides).length > 0 ? agentOverrides : undefined,
       };
-
-      // If a local folder path is provided, pass as gitRepositories
-      if (localFolderPath.trim()) {
-        params.gitRepositories = [{ url: localFolderPath.trim(), alias: 'local' }];
-      }
 
       // Browser config from the visibility picker.
       const bc = pickerValueToBrowserConfig(browserPicker);
@@ -171,21 +185,10 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
       const chat = await createMutation.mutateAsync(params);
       onOpenChange(false);
       navigate(`/chats/${chat.id}`);
-    } catch {
-      // Error displayed via mutation state
+    } catch (err) {
+      setSourceError(err instanceof Error ? err.message : 'Could not create the chat.');
     }
-  }, [name, description, model, tags, selectedProjectId, selectedCodebases, localFolderPath, browserPicker, orchestratorMode, agentRef, agentOverrides, createMutation, onOpenChange, navigate]);
-
-  const toggleCodebase = useCallback(
-    (alias: string) => {
-      if (selectedCodebases.includes(alias)) {
-        setSelectedCodebases(selectedCodebases.filter((a) => a !== alias));
-      } else if (selectedCodebases.length < 3) {
-        setSelectedCodebases([...selectedCodebases, alias]);
-      }
-    },
-    [selectedCodebases],
-  );
+  }, [name, description, model, tags, selectedProjectId, sourceDrafts, primaryAlias, browserPicker, orchestratorMode, agentRef, agentOverrides, createMutation, onOpenChange, navigate]);
 
   return (
     <Modal
@@ -371,102 +374,19 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
             </label>
           </div>
 
-          {/* Project & Codebase Selection */}
-          <div>
-            <label htmlFor="chat-project" className="mb-1.5 block text-sm font-medium text-foreground flex items-center gap-1.5">
-              <FolderGit2 className="h-4 w-4 text-primary" />
-              Project & Codebases
-            </label>
-            <Select
-              id="chat-project"
-              aria-label="Project"
-              value={selectedProjectId}
-              onChange={(v) => {
-                setSelectedProjectId(v);
-                setSelectedCodebases([]);
-              }}
-              options={[
-                { value: '', label: 'No Project' },
-                ...(projects ?? []).filter((p) => p.status === 'active').map((p) => ({ value: p.id, label: p.name })),
-              ]}
-            />
-            {selectedProjectId && (
-              <div className="mt-2 space-y-1.5">
-                {codebasesLoading ? (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Spinner size="sm" label="Loading codebases" /> Loading codebases...
-                  </div>
-                ) : !codebases || codebases.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    No codebases linked to this project.
-                  </p>
-                ) : (
-                  <>
-                    <p className="text-[10px] text-muted-foreground">
-                      Select codebases ({selectedCodebases.length}/3)
-                    </p>
-                    {codebases.map((cb) => {
-                      const isSelected = selectedCodebases.includes(cb.id);
-                      const isDisabled = !isSelected && selectedCodebases.length >= 3;
-                      const notReady = cb.status !== 'ready';
-                      return (
-                        <label
-                          key={cb.id}
-                          className={cn(
-                            'flex items-center gap-2 rounded-md border px-3 py-2 text-xs transition-all',
-                            notReady ? 'opacity-50 cursor-not-allowed border-border' :
-                            isSelected
-                              ? 'border-primary bg-primary/5 cursor-pointer'
-                              : isDisabled
-                                ? 'opacity-50 cursor-not-allowed border-border'
-                                : 'border-border hover:border-primary/50 cursor-pointer',
-                          )}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            disabled={isDisabled || notReady}
-                            onChange={() => toggleCodebase(cb.id)}
-                            className="h-3.5 w-3.5 rounded accent-primary"
-                          />
-                          <GitBranch className="h-3 w-3 text-muted-foreground" />
-                          <span className="font-medium">{cb.alias}</span>
-                          <span className={cn(
-                            'ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-                            cb.status === 'ready'
-                              ? 'bg-success-muted text-success'
-                              : 'bg-warning-muted text-warning',
-                          )}>
-                            {cb.status}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Local Folder Path (alternative to project codebases) */}
-          <div>
-            <label htmlFor="chat-local-folder" className="mb-1.5 block text-sm font-medium text-foreground flex items-center gap-1.5">
-              <FolderOpen className="h-4 w-4 text-primary" />
-              Local Folder Path
-            </label>
-            <Input
-              id="chat-local-folder"
-              type="text"
-              value={localFolderPath}
-              onChange={(e) => setLocalFolderPath(e.target.value)}
-              placeholder="C:\path\to\your\project (optional)"
-              className="font-mono"
-            />
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              The agent works directly in this folder, and Changes, checkpoints and discard all
-              track it. Leave empty to use an isolated managed workspace.
-            </p>
-          </div>
+          {/* Sources — what the agent works on. Each entry becomes a mount:
+              a project codebase or a local folder, edited in place or through
+              a worktree, on a branch of its own. */}
+          <SourcePicker
+            chatName={name}
+            projectId={selectedProjectId}
+            onProjectIdChange={setSelectedProjectId}
+            drafts={sourceDrafts}
+            onChange={setSourceDrafts}
+            primaryAlias={primaryAlias}
+            onPrimaryChange={(alias) => setPrimaryAlias(alias || undefined)}
+            error={sourceError}
+          />
 
           {/* Advanced toggle */}
           <Button
@@ -543,8 +463,9 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
             </>
           )}
 
-          {/* Error */}
-          {createMutation.isError && (
+          {/* Error — server failures that are not about the sources (those are
+              rendered inline by the picker, next to the field that caused them). */}
+          {createMutation.isError && !sourceError && (
             <p className="text-xs text-danger">
               Failed to create chat: {createMutation.error instanceof Error ? createMutation.error.message : 'Unknown error'}
             </p>

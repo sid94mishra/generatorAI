@@ -94,11 +94,11 @@ createdAt, updatedAt
 
 ### Codebase type semantics
 
-| Type | Storage | Worktree creation |
+| Type | Storage | How a chat mounts it (see [feature-workspaces-files.md](./feature-workspaces-files.md)) |
 |---|---|---|
-| `git-remote` | bare clone in `repos/<alias>` | `git worktree add` from the bare repo |
-| `git-local` | reference to existing local repo (`clonePath = localPath`) | `git worktree add` from that repo |
-| `local-dir` | reference only | directory **copy** (recursive `cp -r`) — no git |
+| `git-remote` | bare clone in `repos/<alias>` | worktree only (`git worktree add` from the bare repo) |
+| `git-local` | reference to existing local repo (`clonePath = localPath`) | worktree from that repo (default) or **in place**, on a chosen branch |
+| `local-dir` | reference only | **in place** — never copied any more (the old recursive copy is gone) |
 
 ### `project_configs` table
 
@@ -248,7 +248,7 @@ For each alias:
 1. Look up codebase.
 2. `worktreePath` = `targetDir ? path.join(targetDir, alias) : <project>/worktrees/<runId>/<alias>`.
 3. `branchName` = `generatorai/run-<shortRunId>-<alias>`.
-4. **`local-dir`** → recursive copy of `localPath` → `worktreePath`. No git ops.
+4. **`local-dir`** → used in place: the row records `localPath` itself (`branchName = ''`), nothing is copied, and removal never deletes the folder.
 5. **`git-remote` / `git-local`** → `GitManager.createWorktree(clonePath, worktreePath, branchName, baseBranch)`.
 6. **Apply `worktreeInclude`** — copy files like `.env` from the source repo into the worktree.
 7. Insert `worktrees` row (legacy) **and/or** `workspace_worktrees` row (new) depending on which workspace the worktree belongs to.
@@ -404,7 +404,7 @@ const codebases = await ai.services.codebaseService.getByProjectId(proj.id);
 
 1. **Alias uniqueness** — `project_codebases.alias` has a unique index per project. Reusing an alias on different projects is fine.
 2. **`git-remote` clones bare** — `repos/<alias>/` is a bare repo (`.git` directory style with no working tree). Necessary for `git worktree add`.
-3. **`local-dir` worktrees use `cp -r`** — heavy for large dirs. Prefer `git-local` if the user can `git init` their directory.
+3. **`local-dir` codebases are used in place** — no copy, so nothing isolates concurrent runs from each other; use `git-local` + worktrees when isolation matters.
 4. **`worktreeInclude`** — files copied verbatim from the source repo into each new worktree. Useful for `.env` files that aren't committed. Path traversal is *not* checked here because the source path is the codebase's own clone.
 5. **Project deletion with active worktrees** — cascades worktrees away but does not stop running workflows. Cancel runs first.
 6. **MCP server enable/disable** — `enabled` field on the JSON config. Workflow stages can additionally exclude via `harnessConfigOverrides.excludedTools`.

@@ -55,6 +55,7 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
         effect.toolOrCallId,
         effect.result,
         effect.fileOp,
+        effect.success,
       );
     case 'addSystemMessage':
       return r.addSystemMessage(streams, effect.key, effect.message, effect.category);
@@ -74,7 +75,7 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
     case 'processInlineToolCalls':
       return r.processInlineToolCalls(streams, effect.key, effect.content);
     case 'completeStream':
-      return r.completeStream(streams, effect.key);
+      return r.completeStream(streams, effect.key, effect.force ? { force: true } : {});
     case 'errorStream':
       return r.errorStream(streams, effect.key);
     case 'setServerTurnId':

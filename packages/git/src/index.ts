@@ -10,6 +10,9 @@ export type {
   GitNameStatusEntry,
   GitRawDiffEntry,
   GitBlobEntry,
+  WriteTreeOptions,
+  ShadowRepoOptions,
+  AddWorktreeOptions,
 } from './ports/IGitClient.js';
 export type {
   IGitProcessRunner,

@@ -127,7 +127,7 @@ export type { IWorktreeRepository } from './IWorktreeRepository.js';
 
 // ── Workspace Management Ports ──
 export type { IExecutionWorkspaceRepository } from './IExecutionWorkspaceRepository.js';
-export type { IWorkspaceWorktreeRepository } from './IWorkspaceWorktreeRepository.js';
+export type { IWorkspaceMountRepository, WorkspaceMountUpdate } from './IWorkspaceMountRepository.js';
 export type { IWorkspaceArtifactRepository } from './IWorkspaceArtifactRepository.js';
 
 // ── Integrated Browser Port ──

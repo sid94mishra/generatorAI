@@ -422,3 +422,28 @@ describe('stream reducer — inline tool calls', () => {
     expect(r.processInlineToolCalls(s, SID, 'just prose')).toBe(s);
   });
 });
+
+describe('stream reducer — settling a turn stopped before its first block', () => {
+  it('completeStream settles a pending turn once its own turn_start has latched', () => {
+    // The user pressed Stop before the first token: the turn is still
+    // 'pending', but the server has already named it. Its idle is not a stale
+    // echo from the previous turn and must land — otherwise the composer
+    // stays on "Processing…" with the server long since idle.
+    const s = run(
+      (x) => r.startPending(x, SID, 'refactor everything'),
+      (x) => r.setServerTurnId(x, SID, 'turn-7'),
+      (x) => r.completeStream(x, SID),
+    );
+    expect(r.getStream(s, SID).status).toBe('complete');
+  });
+
+  it('completeStream with force settles a pending turn that has no server id yet', () => {
+    // `harness.cancelled` is the user's own Stop; it settles even a turn whose
+    // turn_start never arrived.
+    const s = run(
+      (x) => r.startPending(x, SID, 'stop me'),
+      (x) => r.completeStream(x, SID, { force: true }),
+    );
+    expect(r.getStream(s, SID).status).toBe('complete');
+  });
+});

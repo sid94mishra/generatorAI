@@ -34,6 +34,18 @@ export interface ToolFileOp {
   filePath: string;
   additions: number;
   deletions: number;
+  /** Unified-diff hunks for inline rendering (capped; see `hunksTruncated`). */
+  hunks?: ToolFileOpHunk[];
+  hunksTruncated?: boolean;
+}
+
+/** One unified-diff hunk; `lines` keep their leading ' ', '+' or '-'. */
+export interface ToolFileOpHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
 }
 
 export interface ToolCallBlock {
@@ -48,6 +60,8 @@ export interface ToolCallBlock {
   fileOp?: ToolFileOp;
   /** callId of the Agent tool call this ran inside (SDK subagent nesting). */
   parentCallId?: string;
+  /** True when the provider reported the call as failed (`is_error`). */
+  error?: boolean;
 }
 
 /**
@@ -207,6 +221,7 @@ export interface StreamToolCall {
   status: 'running' | 'complete';
   fileOp?: ToolFileOp;
   parentCallId?: string;
+  error?: boolean;
 }
 
 /**

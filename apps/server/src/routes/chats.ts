@@ -16,6 +16,7 @@ import {
   AnswerQuestionSchema,
   ResolveToolPermissionSchema,
   UpdateChatSchema,
+  UpdateChatSourcesSchema,
   SetChatPermissionModeSchema,
   coerceAgentMode,
 } from '@generatorai/shared';
@@ -45,6 +46,28 @@ function canBypassPermissions(req: { principal?: { scopes?: readonly string[] } 
   // is already fully trusted by design.
   if (!scopes) return true;
   return scopes.includes('admin:settings');
+}
+
+/**
+ * Attach `workspacePrep` (mount readiness) to a chat DTO. The composer gates
+ * Send on it and shows the preparation error, so it travels with the chat
+ * rather than requiring a second request.
+ */
+async function withWorkspacePrep<T extends { workspaceId?: string }>(container: Container, chat: T): Promise<T> {
+  if (!chat.workspaceId) return chat;
+  try {
+    const ws = await container.workspaceManager.getExecutionWorkspace(chat.workspaceId);
+    if (!ws) return chat;
+    return {
+      ...chat,
+      workspacePrep: {
+        status: ws.prepStatus ?? 'ready',
+        ...(ws.prepError ? { error: ws.prepError } : {}),
+      },
+    };
+  } catch {
+    return chat;
+  }
 }
 
 export function createChatApiRoutes(container: Container): Router {
@@ -116,7 +139,7 @@ export function createChatApiRoutes(container: Container): Router {
 
       const chat = await chatManagementService.createChat(params);
       logger.info(`[ChatRoutes] Created chat ${chat.id}`, { requestId: req.requestId });
-      res.status(201).json(chat);
+      res.status(201).json(await withWorkspacePrep(container, chat));
     } catch (err) {
       next(err);
     }
@@ -164,7 +187,8 @@ export function createChatApiRoutes(container: Container): Router {
         statusFilter as 'active' | 'archived' | undefined,
         projectId,
       );
-      res.json(limit === undefined ? chats : chats.slice(0, limit));
+      const page = limit === undefined ? chats : chats.slice(0, limit);
+      res.json(await Promise.all(page.map((c) => withWorkspacePrep(container, c))));
     } catch (err) {
       next(err);
     }
@@ -175,7 +199,45 @@ export function createChatApiRoutes(container: Container): Router {
     try {
       const chatId = String(req.params['id']);
       const chat = await container.chatEntityRepo.getById(chatId);
-      res.json(chat);
+      res.json(await withWorkspacePrep(container, chat));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // PUT /chats/:id/sources — replace what the chat works on.
+  //
+  // Validated against the filesystem and git before anything changes;
+  // unchanged mounts keep their checkpoints, new ones are prepared in the
+  // background and the next prompt waits for them.
+  router.put('/:id/sources', validate(UpdateChatSourcesSchema), async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      const { sources, primary } = req.body as { sources: Parameters<typeof chatManagementService.updateChatSources>[1]; primary?: string };
+      const chat = await chatManagementService.updateChatSources(chatId, sources, primary);
+      res.json(await withWorkspacePrep(container, chat));
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === 'CHAT_BUSY') {
+        res.status(409).json({ error: { code, message: (err as Error).message } });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  // POST /chats/:id/workspace/prepare — re-run mount preparation after an
+  // error (a folder that was unreachable, a dirty checkout since committed).
+  router.post('/:id/workspace/prepare', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      const chat = await container.chatEntityRepo.getById(chatId);
+      if (!chat.workspaceId) {
+        res.status(409).json({ error: { code: 'CONFLICT', message: 'This chat has no workspace' } });
+        return;
+      }
+      void container.mountService.prepare(chat.workspaceId, { sessionId: chat.sessionId, chatId });
+      res.status(202).json({ status: 'preparing' });
     } catch (err) {
       next(err);
     }
@@ -376,7 +438,7 @@ export function createChatApiRoutes(container: Container): Router {
 
         // Store uploaded files as artifacts
         const files = (req.files ?? []) as Express.Multer.File[];
-        const attachmentRefs: Array<{ type: 'file'; path: string; displayName?: string }> = [];
+        const attachmentRefs: Array<{ type: 'file'; path: string; displayName?: string; artifactId?: string; mimeType?: string }> = [];
 
         // Look up the chat to get sessionId for artifact creation
         const chat = await container.chatEntityRepo.getById(chatId);
@@ -392,6 +454,8 @@ export function createChatApiRoutes(container: Container): Router {
             type: 'file',
             path: artifact.path,
             displayName: file.originalname,
+            artifactId: artifact.id,
+            mimeType: file.mimetype,
           });
         }
 
@@ -424,6 +488,37 @@ export function createChatApiRoutes(container: Container): Router {
   // P0#5 — bounded by default (latest page) so a multi-thousand-message chat
   // never ships its full history in one response. The body stays a plain
   // ChatMessage[] (backward-compatible); total/hasMore travel as headers.
+  // GET /chats/:id/attachments/:artifactId — the bytes of a file the user
+  // attached to a prompt. Addressed by artifact id (already scoped to the
+  // chat's session — a mismatch is a 404, not a leak) so no client-supplied
+  // path is ever resolved. Images render inline; everything else downloads.
+  router.get('/:id/attachments/:artifactId', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      const artifactId = String(req.params['artifactId']);
+      const chat = await container.chatEntityRepo.getById(chatId);
+      const artifact = await artifactService.getArtifact(artifactId);
+      if (!chat || !artifact || artifact.sessionId !== chat.sessionId) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attachment not found' } });
+        return;
+      }
+      const content = await artifactService.readArtifactContent(artifactId);
+      const mime = artifact.mimeType || 'application/octet-stream';
+      const inline = /^image\/|^text\/plain$|^application\/pdf$/.test(mime);
+      // Filename goes through RFC 5987 encoding — originals can carry
+      // anything the user's OS allowed.
+      const safeName = encodeURIComponent(artifact.name).replace(/['()]/g, escape);
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Length', String(content.length));
+      res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${safeName}`);
+      res.end(content);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get('/:id/messages', async (req, res, next) => {
     try {
       const chatId = String(req.params['id']);

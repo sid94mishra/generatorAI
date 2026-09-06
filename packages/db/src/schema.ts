@@ -307,6 +307,9 @@ export const chats = sqliteTable(
     projectId: text('project_id'),
     workspaceId: text('workspace_id'),
     useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
+    // ── Mount plan (v51) — what the agent works on ──
+    sources: text('sources', { mode: 'json' }),
+    primarySource: text('primary_source'),
     // ── Orchestrator mode (v17) ──
     orchestratorMode: integer('orchestrator_mode', { mode: 'boolean' }).notNull().default(false),
     // ── W24 fix (v41) — durable orchestrator termination state ──
@@ -943,6 +946,9 @@ export const executionWorkspaces = sqliteTable(
     status: text('status', {
       enum: ['creating', 'active', 'completed', 'archived', 'failed'],
     }).notNull().default('creating'),
+    // Mount preparation (v51). 'ready' for workspaces that predate mounts.
+    prepStatus: text('prep_status', { enum: ['pending', 'preparing', 'ready', 'error'] }).notNull().default('ready'),
+    prepError: text('prep_error'),
     gitEnabled: integer('git_enabled', { mode: 'boolean' }).notNull().default(true),
     useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
     snapshotPath: text('snapshot_path'),
@@ -975,32 +981,38 @@ export const executionWorkspaces = sqliteTable(
   }),
 );
 
-// ── Workspace Worktrees ──
+// ── Workspace Mounts ──
+//
+// One row per directory the agent may edit. Position 0 is the primary mount
+// (the agent's cwd); the rest are additional directories. Replaces the
+// never-written `workspace_worktrees` tracking table (v51).
 
-export const workspaceWorktrees = sqliteTable(
-  'workspace_worktrees',
+export const workspaceMounts = sqliteTable(
+  'workspace_mounts',
   {
     id: text('id').primaryKey(),
     workspaceId: text('workspace_id')
       .notNull()
       .references(() => executionWorkspaces.id, { onDelete: 'cascade' }),
-    codebaseId: text('codebase_id').notNull(),
+    position: integer('position').notNull().default(0),
     alias: text('alias').notNull(),
-    branchName: text('branch_name').notNull(),
-    baseBranch: text('base_branch').notNull().default('main'),
-    relativePath: text('relative_path').notNull(),
-    status: text('status', {
-      enum: ['active', 'committed', 'pushed', 'deleted', 'error'],
-    }).notNull().default('active'),
-    commitHash: text('commit_hash'),
-    hasUncommittedChanges: integer('has_uncommitted_changes', { mode: 'boolean' }).default(false),
+    originKind: text('origin_kind', { enum: ['codebase', 'folder', 'generated'] }).notNull(),
+    codebaseId: text('codebase_id'),
+    projectId: text('project_id'),
+    originPath: text('origin_path'),
+    mode: text('mode', { enum: ['in-place', 'worktree', 'generated'] }).notNull(),
+    path: text('path').notNull(),
+    git: text('git', { mode: 'json' }).$type<Record<string, unknown>>(),
+    status: text('status', { enum: ['preparing', 'ready', 'error', 'removed'] }).notNull().default('preparing'),
+    error: text('error'),
+    hasUncommittedChanges: integer('has_uncommitted_changes', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   },
   (table) => ({
-    workspaceIdx: index('idx_workspace_worktrees_workspace').on(table.workspaceId),
-    codebaseIdx: index('idx_workspace_worktrees_codebase').on(table.codebaseId),
-    aliasUnique: uniqueIndex('idx_workspace_worktrees_alias').on(table.workspaceId, table.alias),
+    workspaceIdx: index('idx_workspace_mounts_workspace').on(table.workspaceId),
+    codebaseIdx: index('idx_workspace_mounts_codebase').on(table.codebaseId),
+    aliasUnique: uniqueIndex('idx_workspace_mounts_alias').on(table.workspaceId, table.alias),
   }),
 );
 

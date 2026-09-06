@@ -83,6 +83,28 @@ const AgentHarnessConfigSchema = z.object({
   agentOverrides: AgentOverridesSchema.optional(),
 }).partial();
 
+const branchName = z.string().min(1).max(200).regex(/^[^\s~^:?*[\]\\]+$/, 'Invalid git ref name');
+
+const sourceCommon = {
+  mode: z.enum(['in-place', 'worktree']).optional(),
+  branch: branchName.optional(),
+  newBranch: branchName.optional(),
+  baseRef: branchName.optional(),
+  alias: z.string().min(1).max(64).regex(/^[A-Za-z0-9._-]+$/, 'Alias may contain letters, digits, . _ -').optional(),
+};
+
+/** One source to mount into a chat's workspace. */
+export const ChatSourceSpecSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('codebase'), codebaseId: z.string().min(1).max(200), ...sourceCommon }),
+  z.object({ kind: z.literal('folder'), path: z.string().min(1).max(1000), ...sourceCommon }),
+]);
+
+/** PUT /api/chats/:id/sources — replace the mount plan of an idle chat. */
+export const UpdateChatSourcesSchema = z.object({
+  sources: z.array(ChatSourceSpecSchema).max(8),
+  primary: z.string().max(64).optional(),
+});
+
 /** Zod schema for creating a Chat */
 export const CreateChatSchema = z.object({
   name: z.string().min(1).max(200),
@@ -105,6 +127,15 @@ export const CreateChatSchema = z.object({
     // `alias`, so an omitted alias would surface as `undefined` at runtime.
     alias: z.string().min(1).max(100),
   })).max(3).optional(),
+  /**
+   * What the agent works on. Each entry is a project codebase or a local
+   * folder, mounted in place or as a worktree, optionally on a branch.
+   * Supersedes `codebaseIds` + `createWorktree` + `gitRepositories`, which
+   * are still accepted and mapped onto sources.
+   */
+  sources: z.array(ChatSourceSpecSchema).max(8).optional(),
+  /** Alias of the primary mount (the agent's cwd). Defaults to the first source. */
+  primary: z.string().max(64).optional(),
   tags: z.array(z.string().max(50)).max(20).default([]),
   /**
    * Integrated Browser configuration (v13). When `enabled: true`, chat

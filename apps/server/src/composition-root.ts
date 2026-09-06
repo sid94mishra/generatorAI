@@ -12,7 +12,7 @@ import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, Age
 import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
 import { readAudioPreferences } from './settings/audio.js';
-import { AgentHostClient, HostSupervisor } from '@generatorai/core';
+import { AgentHostClient, HostSupervisor, resolveWorktreePath } from '@generatorai/core';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
 import { registerHarnessInstances } from './composition/harnessInstances.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
@@ -67,7 +67,7 @@ import {
   DrizzleSystemConfigRepository,
   // Workspace Management repositories
   DrizzleExecutionWorkspaceRepository,
-  DrizzleWorkspaceWorktreeRepository,
+  DrizzleWorkspaceMountRepository,
   DrizzleWorkspaceArtifactRepository,
   DrizzleComputerUseRepository,
   DrizzleCheckpointRepository,
@@ -176,6 +176,8 @@ import {
   buildReloadExtensionTool,
   // M8-fix: W18 admission controller — value import (cannot be `import type`)
   AdmissionController,
+  // Workspace mounts (chat sources → directories the agent edits)
+  MountService,
 } from '@generatorai/core';
 import type {
   IAgentHarness,
@@ -683,7 +685,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
   // ── Workspace Management Repositories ──
   const executionWorkspaceRepo = new DrizzleExecutionWorkspaceRepository(db);
-  const workspaceWorktreeRepo = new DrizzleWorkspaceWorktreeRepository(db);
+  const workspaceMountRepo = new DrizzleWorkspaceMountRepository(db);
   const workspaceArtifactRepo = new DrizzleWorkspaceArtifactRepository(db);
 
   // ── Widget & Extension Repositories ──
@@ -1125,7 +1127,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // ── Workspace Manager ──
   const workspaceManager = new WorkspaceManager(
     executionWorkspaceRepo,
-    workspaceWorktreeRepo,
+    workspaceMountRepo,
     workspaceArtifactRepo,
     {
       workspacesDir: config.workspacesDir,
@@ -1133,11 +1135,26 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     },
     logger,
     gitManager,
-    // P0-e: the authoritative worktree table. Without it `deleteWorkspace`
-    // reads only `workspace_worktrees` (which nothing writes) and every real
-    // worktree stays registered in its parent clone forever.
+    // The legacy `worktrees` table: back-fills mounts for pre-mount
+    // workspaces and is unregistered on delete.
     worktreeRepo,
   );
+
+  // ── Mounts ──
+  //
+  // A chat's sources (project codebases and/or local folders, each in place
+  // or as a worktree, on a chosen branch) become mounts: the directories the
+  // agent edits. The service validates them before the chat exists,
+  // materialises them in the background, and gates the first prompt.
+  const mountService = new MountService({
+    mountRepo: workspaceMountRepo,
+    workspaceRepo: executionWorkspaceRepo,
+    git: gitManager,
+    logger,
+    workspacesDir: config.workspacesDir,
+    codebaseRepo: projectCodebaseRepo,
+    eventBus,
+  });
 
   // ── Workspace retention (nightly) ──
   //
@@ -1176,10 +1193,41 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const workspaceCheckpointService = new WorkspaceCheckpointService(
     checkpointService,
     executionWorkspaceRepo,
-    workspaceWorktreeRepo,
+    // The mounts ARE the tracked set — same definition the Changes tab uses.
+    { toMountRefs: (ws) => workspaceManager.toMountRefs(ws) },
     gitManager,
     logger,
   );
+  // The "since the start" anchor is captured the moment every mount is
+  // ready — while the tree is pristine, after any branch switch.
+  mountService.setBaselineCapture((workspaceId) =>
+    workspaceCheckpointService.capture({ workspaceId, kind: 'baseline' }),
+  );
+  // Archived chats: reclaim worktree directories after the project's
+  // retention (default 24h), keeping branches so the work is recoverable.
+  worktreeCleanupService.setArchivedReleaser(async () => {
+    let released = 0;
+    const archived = await chatEntityRepo.getByStatus('archived');
+    for (const chat of archived) {
+      if (!chat.workspaceId) continue;
+      const ws = await executionWorkspaceRepo.findById(chat.workspaceId);
+      if (!ws || ws.ownerId !== chat.id) continue;
+      const since = ws.archivedAt ?? chat.updatedAt;
+      let retentionMs = 24 * 60 * 60 * 1000;
+      if (ws.projectId) {
+        try {
+          const project = await projectRepo.getById(ws.projectId);
+          const setting = project.settings?.worktreeRetention ?? 'hours-24';
+          retentionMs = setting === 'manual' ? Infinity : setting === 'immediate' ? 0 : setting === 'hours-72' ? 72 * 3_600_000 : 24 * 3_600_000;
+        } catch {
+          /* default retention */
+        }
+      }
+      if (!Number.isFinite(retentionMs) || Date.now() - since.getTime() < retentionMs) continue;
+      released += await mountService.releaseWorktrees(ws.id);
+    }
+    return released;
+  });
   // Checkpoint activity drives the Changes panel via `workspace.changed`,
   // which is what lets us drop the panel's polling loop entirely.
   workspaceCheckpointService.setEventBus(eventBus);
@@ -1215,15 +1263,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     reviewRepo,
     {
       readCurrent: async (workspaceId, repoAlias, filePath) => {
-        const info = await workspaceManager.getWorkspaceInfo(workspaceId);
-        if (!info) return null;
+        const ws = await workspaceManager.getExecutionWorkspace(workspaceId);
+        if (!ws) return null;
         const versions = await changeSummaryService.getFileVersions({
           workspaceId,
-          rootPath: info.rootPath,
-          worktrees: (info.worktrees ?? []).map((wt) => ({
-            alias: wt.alias,
-            worktreePath: path.join(info.rootPath, wt.worktreePath),
-          })),
+          rootPath: ws.codeRoot ?? ws.rootPath,
+          mounts: await workspaceManager.toMountRefs(ws),
           head: { kind: 'working' },
           autoInit: false,
           filePath,
@@ -1232,15 +1277,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         return versions.new?.contents ?? null;
       },
       readPatchSince: async (workspaceId, repoAlias, filePath, fromCheckpointId) => {
-        const info = await workspaceManager.getWorkspaceInfo(workspaceId);
-        if (!info) return null;
+        const ws = await workspaceManager.getExecutionWorkspace(workspaceId);
+        if (!ws) return null;
         const result = await changeSummaryService.getFilePatch({
           workspaceId,
-          rootPath: info.rootPath,
-          worktrees: (info.worktrees ?? []).map((wt) => ({
-            alias: wt.alias,
-            worktreePath: path.join(info.rootPath, wt.worktreePath),
-          })),
+          rootPath: ws.codeRoot ?? ws.rootPath,
+          mounts: await workspaceManager.toMountRefs(ws),
           base: { kind: 'checkpoint', id: fromCheckpointId },
           head: { kind: 'working' },
           autoInit: false,
@@ -1277,8 +1319,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
     void (async () => {
       try {
-        const info = await workspaceManager.getWorkspaceInfo(data.workspaceId!);
-        if (!info) return;
+        const ws = await workspaceManager.getExecutionWorkspace(data.workspaceId!);
+        if (!ws) return;
         // A checkpoint means the working tree just settled. Drop the memoised
         // snapshot first: it is only meant to keep ONE panel render
         // self-consistent, and reusing it here would re-anchor review threads
@@ -1287,11 +1329,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         changeSummaryService.invalidateWorkingTree();
         const summary = await changeSummaryService.getSummary({
           workspaceId: data.workspaceId!,
-          rootPath: info.rootPath,
-          worktrees: (info.worktrees ?? []).map((wt) => ({
-            alias: wt.alias,
-            worktreePath: path.join(info.rootPath, wt.worktreePath),
-          })),
+          rootPath: ws.codeRoot ?? ws.rootPath,
+          mounts: await workspaceManager.toMountRefs(ws),
           autoInit: false,
         });
         const files = summary.repos.flatMap((repo) =>
@@ -1522,6 +1561,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // so mutating it here takes effect inside ChatManagementService.
   chatExtensions.worktreeService = worktreeService;
   chatExtensions.workspaceManager = workspaceManager;
+  chatExtensions.mountService = mountService;
   // Per-turn snapshots: captured just before every prompt so the Changes
   // panel can answer "what did this message change?" and `/rewind` has an
   // anchor to restore to.
@@ -1693,7 +1733,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       recordingsRoot: async (workspaceId) => {
         const ws = await workspaceManager.getExecutionWorkspace(workspaceId);
         if (!ws) return null;
-        return resolve(workspaceManager.getWorkingDirectory(ws), 'computer', 'recordings');
+        return resolve(ws.rootPath, 'computer', 'recordings');
       },
       previewWindow: (workspaceId) => computerService.previewWindow(workspaceId),
       logger,
@@ -1752,7 +1792,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
     async (workspaceId) => {
       const ws = await executionWorkspaceRepo.findById(workspaceId);
-      return ws?.rootPath ?? null;
+      if (!ws) return null;
+      // The primary mount — the same directory the agent works in — so a
+      // command the user types acts on the same tree the agent edits.
+      try {
+        return (await workspaceManager.getExposure(ws)).workingDirectory;
+      } catch {
+        return ws.rootPath;
+      }
     },
   );
   terminalService.start();
@@ -2079,6 +2126,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
     // Workspace Management
     workspaceManager,
+    mountService,
 
     // Checkpoints (workspace snapshots / rewind)
     checkpointService,
@@ -2536,6 +2584,7 @@ export interface Container {
 
   // Workspace Management
   workspaceManager: WorkspaceManager;
+  mountService: MountService;
   checkpointService: CheckpointService;
   workspaceCheckpointService: WorkspaceCheckpointService;
   checkpointRepo: DrizzleCheckpointRepository;

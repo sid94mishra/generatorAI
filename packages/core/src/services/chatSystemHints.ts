@@ -223,3 +223,54 @@ export const EXTENSION_AUTHORING_HINT =
   `To drive it, use widget_action / widget_exec (complex) or update_widget ` +
   `(simple); to observe user changes, call read_widget(instanceId).`
 ;
+
+// ── Workspace ────────────────────────────────────────────────
+//
+// The ONLY place the agent is told where it is and where non-deliverables
+// go. Built from the persisted mounts on create AND resume, so the text is
+// byte-identical across restarts (the prompt-cache prefix depends on it).
+
+import type { WorkspaceMount } from '@generatorai/shared';
+
+export interface WorkspaceHintInput {
+  workingDirectory: string;
+  scratchDir: string;
+  rootPath: string;
+  mounts: WorkspaceMount[];
+}
+
+function describeMount(m: WorkspaceMount): string {
+  const bits: string[] = [`mount "${m.alias}"`];
+  if (m.mode === 'worktree') bits.push('git worktree');
+  else if (m.mode === 'generated') bits.push('empty, generate the project here');
+  else if (m.git?.isRepo) bits.push('git repository, edited in place');
+  else bits.push('plain folder, edited in place');
+  if (m.git?.branch) bits.push(`branch ${m.git.branch}`);
+  if (m.git?.baseRef && m.git.baseRef !== m.git.branch && m.git.baseRef !== 'HEAD') bits.push(`from ${m.git.baseRef}`);
+  if (m.git?.nested?.length) bits.push(`contains repos: ${m.git.nested.join(', ')}`);
+  return bits.join(', ');
+}
+
+export function buildWorkspaceHint(input: WorkspaceHintInput): string {
+  const [primary, ...rest] = input.mounts;
+  const lines: string[] = ['', '', '[Workspace]'];
+  if (primary) {
+    lines.push(`Working directory: ${primary.path}  (${describeMount(primary)})`);
+  } else {
+    lines.push(`Working directory: ${input.workingDirectory}`);
+  }
+  for (const m of rest) lines.push(`Also mounted: ${m.path}  (${describeMount(m)})`);
+  lines.push(`Scratch directory: ${input.scratchDir}`);
+  lines.push('Rules:');
+  lines.push(
+    '- Code changes go in the mounted directories above. Use relative paths from the working ' +
+      'directory and absolute paths for the other mounts.',
+  );
+  lines.push(
+    '- Anything that is not a deliverable — plans, notes, experiment scripts, downloads, ' +
+      'screenshots, temporary files — goes under the scratch directory, never inside a mounted repository.',
+  );
+  lines.push('- Do not run git checkout/switch/stash/reset in a mount; the user controls branches.');
+  lines.push(`- Do not create files in ${input.rootPath} outside scratch/ and plans/.`);
+  return lines.join('\n');
+}

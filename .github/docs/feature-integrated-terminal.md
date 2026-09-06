@@ -60,7 +60,7 @@ packages/core/src/domain/ports/ITerminalHost.ts
 
 ### `TerminalService`
 
-- **`spawn({ workspaceId, cols?, rows?, shell?, attachToSandbox?, runId? })`** — enforces caps (per-workspace 5, global 20; overflow returns HTTP 429), resolves `cwd` from `workspace.rootPath`, delegates to the first available host, wires `onData`/`onExit` → ring buffer + fanout.
+- **`spawn({ workspaceId, cols?, rows?, shell?, attachToSandbox?, runId? })`** — enforces caps (per-workspace 5, global 20; overflow returns HTTP 429), resolves `cwd` from the workspace exposure (the primary mount — the same directory the agent works in; the managed root only when the chat has no mounts), delegates to the first available host, wires `onData`/`onExit` → ring buffer + fanout.
 - **Idle reaper** — a `setInterval` (60 s default) kills sessions where `wsCount === 0` **and** `now - lastActivityAt > TERMINAL_IDLE_TTL_MS` (default 30 min). `lastActivityAt` bumps on CLIENT activity (attach/detach, input, resize, ACK) — **not** on PTY output, since a process printing into a terminal nobody is watching is not evidence that a human is present (P1-38).
 - **`kill(sid, reason)`** — sets `closeReason` for the outgoing SSE, then `handle.kill()`, then drops the record after a short drain window.
 - **`killAllForWorkspace(workspaceId, reason?)`** — invoked by `WorkspaceManager.registerBeforeDelete` so PTYs never outlive a deleted workspace.

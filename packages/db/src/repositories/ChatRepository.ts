@@ -38,6 +38,8 @@ export class DrizzleChatRepository implements IChatRepository {
         repoBranch: null,
         workspacePath: null,
         gitRepositories: chat.gitRepositories ?? null,
+        sources: chat.sources ?? null,
+        primarySource: chat.primarySource ?? null,
         workspaceId: chat.workspaceId ?? null,
         tags: chat.tags,
         status: chat.status,
@@ -145,6 +147,9 @@ export class DrizzleChatRepository implements IChatRepository {
     if (updates.agentOverrides !== undefined) values['agentOverrides'] = updates.agentOverrides ?? null;
     if (updates.agentSnapshot !== undefined) values['agentSnapshot'] = updates.agentSnapshot ?? null;
     if (updates.orchestratorMode !== undefined) values['orchestratorMode'] = updates.orchestratorMode;
+    // The mount plan is editable on an idle chat (PUT /chats/:id/sources).
+    if (updates.sources !== undefined) values['sources'] = updates.sources ?? null;
+    if (updates.primarySource !== undefined) values['primarySource'] = updates.primarySource ?? null;
     values['updatedAt'] = new Date();
 
     await this.db.update(chats).set(values).where(eq(chats.id, id));
@@ -248,6 +253,8 @@ export class DrizzleChatRepository implements IChatRepository {
       createWorktree: undefined,
       workspaceId: row.workspaceId ?? undefined,
       gitRepositories: safeJsonColumn(row.gitRepositories, objectArray, { fallback: undefined }) as ChatLocalFolder[] | undefined,
+      sources: safeJsonColumn(row.sources, objectArray, { fallback: undefined }) as Chat['sources'],
+      primarySource: row.primarySource ?? undefined,
       tags: safeJsonColumn(row.tags, stringArray, { fallback: [] }) ?? [],
       status: row.status as ChatStatus,
       projectId: row.projectId ?? undefined,

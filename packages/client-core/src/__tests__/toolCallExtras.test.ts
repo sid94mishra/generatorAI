@@ -92,3 +92,27 @@ describe('fileOp + parentCallId through the pipeline', () => {
     expect(block && block.type === 'tool_call' ? block.fileOp : 'sentinel').toBeUndefined();
   });
 });
+
+describe('tool failure flag', () => {
+  it('router forwards success:false and the reducer marks the block as failed', () => {
+    const router = new StreamEventRouter();
+    let streams: StreamsRecord = {};
+    streams = applyStreamEffects(streams, route(router, 'harness.tool_start', { tool: 'Bash', args: { command: 'x' }, callId: 'b1' }));
+    streams = applyStreamEffects(streams, route(router, 'harness.tool_complete', { tool: 'Bash', callId: 'b1', result: 'boom', success: false }));
+    const block = streams[KEY]!.blocks.find((b) => b.type === 'tool_call');
+    expect(block && block.type === 'tool_call' ? block.error : undefined).toBe(true);
+    expect(streams[KEY]!.toolCalls[0]).toMatchObject({ status: 'complete', error: true });
+  });
+
+  it('success:true and an absent flag leave the block unflagged', () => {
+    let streams: StreamsRecord = {};
+    streams = r.addToolCall(streams, KEY, 'Read', {}, 'r1');
+    streams = r.completeToolCall(streams, KEY, 'r1', 'ok', undefined, true);
+    let block = streams[KEY]!.blocks.find((b) => b.type === 'tool_call');
+    expect(block && block.type === 'tool_call' ? block.error : 'sentinel').toBeUndefined();
+    streams = r.addToolCall(streams, KEY, 'Read', {}, 'r2');
+    streams = r.completeToolCall(streams, KEY, 'r2', 'ok');
+    block = streams[KEY]!.blocks.filter((b) => b.type === 'tool_call')[1];
+    expect(block && block.type === 'tool_call' ? block.error : 'sentinel').toBeUndefined();
+  });
+});

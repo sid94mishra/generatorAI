@@ -35,17 +35,53 @@ const RESTORE_INDEX_FILE = 'generatorai-restore.index';
 export class GitShadowRefStore implements ISnapshotStore {
   /** Cache of repoDir → absolute git dir (avoids a rev-parse per capture). */
   private readonly gitDirCache = new Map<string, string>();
+  /**
+   * repoDir → private shadow git dir. Registered by the workspace layer for
+   * every mount that has one. With a shadow store NOTHING is written into
+   * the repository's own `.git` (no refs, no objects, no index files), and a
+   * plain folder is tracked without ever being `git init`-ed.
+   */
+  private readonly shadows = new Map<string, string>();
+  private readonly scopedClients = new Map<string, IGitClient>();
 
   constructor(
     private readonly git: IGitClient,
     private readonly logger: ILogger,
   ) {}
 
+  /** Route every snapshot command for `repoDir` through `gitDir`. */
+  registerShadow(repoDir: string, gitDir: string | undefined): void {
+    const key = path.resolve(repoDir);
+    if (gitDir) this.shadows.set(key, gitDir);
+    else this.shadows.delete(key);
+  }
+
+  shadowGitDir(repoDir: string): string | undefined {
+    return this.shadows.get(path.resolve(repoDir));
+  }
+
+  gitFor(repoDir: string): IGitClient {
+    const gitDir = this.shadowGitDir(repoDir);
+    if (!gitDir) return this.git;
+    let client = this.scopedClients.get(gitDir);
+    if (!client) {
+      client = this.git.withGitDir(gitDir);
+      this.scopedClients.set(gitDir, client);
+    }
+    return client;
+  }
+
   async prepare(repoDir: string): Promise<boolean> {
+    const shadow = this.shadowGitDir(repoDir);
+    if (shadow) {
+      // The mount service configured the store (alternates, EOL, excludes)
+      // when the mount was prepared; this only re-creates it if it vanished.
+      return this.git.initShadowRepo(shadow, repoDir);
+    }
     if (await this.git.isGitRepo(repoDir)) return true;
-    // Non-git directories are git-init'd so every workspace gets the same
-    // content-addressed snapshot machinery. `initIfNeeded` also writes a
-    // sane default .gitignore so node_modules never enters a snapshot.
+    // Legacy workspaces without a shadow store: the managed root is
+    // git-init'd so it gets the same content-addressed machinery. Never
+    // reached for a user's own folder — those always have a shadow store.
     return this.git.initIfNeeded(repoDir);
   }
 
@@ -59,15 +95,15 @@ export class GitShadowRefStore implements ISnapshotStore {
     const indexFile = await this.indexPath(repoDir, SNAPSHOT_INDEX_FILE);
     if (!indexFile) return null;
 
-    const treeSha = await this.git.writeTreeFromWorktree(repoDir, indexFile);
+    const treeSha = await this.gitFor(repoDir).writeTreeFromWorktree(repoDir, indexFile);
     if (!treeSha) return null;
 
     // Identical content → no new checkpoint (keeps the rewind list clean and
     // avoids unbounded ref growth during idle polling).
     if (previousTreeSha && treeSha === previousTreeSha) return null;
 
-    const refValue = await this.git.commitTree(repoDir, treeSha, message, parentRefValue);
-    await this.git.updateRef(repoDir, refName, refValue);
+    const refValue = await this.gitFor(repoDir).commitTree(repoDir, treeSha, message, parentRefValue);
+    await this.gitFor(repoDir).updateRef(repoDir, refName, refValue);
 
     return { refValue, treeSha };
   }
@@ -79,8 +115,8 @@ export class GitShadowRefStore implements ISnapshotStore {
     pathspec?: string[],
   ): Promise<CheckpointDiffFile[]> {
     const [numstat, nameStatus] = await Promise.all([
-      this.git.diffNumstat(repoDir, fromTree, toTree, pathspec),
-      this.git.diffNameStatusZ(repoDir, fromTree, toTree, pathspec),
+      this.gitFor(repoDir).diffNumstat(repoDir, fromTree, toTree, pathspec),
+      this.gitFor(repoDir).diffNameStatusZ(repoDir, fromTree, toTree, pathspec),
     ]);
 
     const statusByPath = new Map(nameStatus.map((e) => [e.path, e]));
@@ -124,15 +160,15 @@ export class GitShadowRefStore implements ISnapshotStore {
     filePath: string,
     contextLines = 3,
   ): Promise<string> {
-    return this.git.diffPatch(repoDir, fromTree, toTree, filePath, contextLines);
+    return this.gitFor(repoDir).diffPatch(repoDir, fromTree, toTree, filePath, contextLines);
   }
 
   async exists(repoDir: string, sha: string): Promise<boolean> {
-    return this.git.objectExists(repoDir, sha);
+    return this.gitFor(repoDir).objectExists(repoDir, sha);
   }
 
   async dropRef(repoDir: string, refName: string): Promise<void> {
-    await this.git.deleteRef(repoDir, refName);
+    await this.gitFor(repoDir).deleteRef(repoDir, refName);
   }
 
   /** Restore index path (used by CheckpointService during rewind). */
@@ -141,9 +177,11 @@ export class GitShadowRefStore implements ISnapshotStore {
   }
 
   private async indexPath(repoDir: string, fileName: string): Promise<string | null> {
+    const shadow = this.shadowGitDir(repoDir);
+    if (shadow) return path.join(shadow, fileName);
     let gitDir = this.gitDirCache.get(repoDir);
     if (!gitDir) {
-      const resolved = await this.git.absoluteGitDir(repoDir);
+      const resolved = await this.gitFor(repoDir).absoluteGitDir(repoDir);
       if (!resolved) {
         this.logger.warn(`[Checkpoints] Not a git repository: ${repoDir}`);
         return null;

@@ -351,6 +351,10 @@ export interface AttachmentRef {
   type: 'file';
   path: string;
   displayName?: string;
+  /** Artifact row backing this file, when the API stored it as one. Lets the
+   *  persisted user message reference it (`ChatMessage.attachments[].artifactId`). */
+  artifactId?: string;
+  mimeType?: string;
 }
 
 export interface CreateConversationParams {
@@ -439,6 +443,18 @@ export interface CreateConversationParams {
   // ── Behavior ──
   streaming?: boolean;
   workingDirectory?: string;
+  /**
+   * Directories beyond `workingDirectory` the agent may read and write: the
+   * chat's other mounts and its managed workspace root (scratch, plans,
+   * screenshots). Providers that cannot express this rely on the
+   * `[Workspace]` system-prompt block instead.
+   */
+  additionalDirectories?: string[];
+  /**
+   * Extra environment variables for the agent process (allow-listed by the
+   * provider). Carries `GENERATORAI_WORKSPACE_ROOT` / `GENERATORAI_SCRATCH_DIR`.
+   */
+  env?: Record<string, string>;
   configDir?: string;
   /** Reasoning effort for models that support it (low/medium/high/xhigh) */
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';

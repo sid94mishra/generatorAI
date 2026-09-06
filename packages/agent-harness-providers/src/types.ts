@@ -287,6 +287,17 @@ export interface OpenCodeProviderOptions {
    * never inherits the full parent environment.
    */
   env?: Record<string, string | undefined>;
+  /**
+   * Directory an `autoStart`ed `opencode serve` is spawned in, and the fallback
+   * project directory for conversations that name none.
+   *
+   * Without it the server inherited the GeneratorAI server's own cwd — i.e.
+   * every chat, whatever workspace it was bound to, rooted itself in the
+   * GeneratorAI checkout. Per-conversation roots still come from
+   * `CreateConversationParams.workingDirectory`, which the provider sends as
+   * the `?directory=` query parameter every `opencode serve` endpoint accepts.
+   */
+  defaultCwd?: string;
   logger?: ILogger;
 }
 

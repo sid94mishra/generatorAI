@@ -11,28 +11,27 @@
 // touching the working tree, so the immediate follow-up question ("how do I
 // get back?") is answered by the timeline itself.
 
-import { useState } from 'react';
-import { History, RotateCcw, X, AlertTriangle, Check } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { History, Layers, RotateCcw, X, AlertTriangle, Check } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button, Spinner } from '@/components/ui/index.js';
 import {
   useWorkspaceCheckpoints,
   useRestoreWorkspaceCheckpoint,
 } from '@/hooks/queries.js';
-import type { CheckpointRecord, RestoreCheckpointResult } from '@/types/changes.js';
+import type { RestoreCheckpointResult } from '@/types/changes.js';
+import {
+  checkpointLabel,
+  formatAliasList,
+  groupCheckpoints,
+  type CheckpointGroup,
+} from './checkpointGroups.js';
 
-const KIND_LABEL: Record<string, string> = {
-  baseline: 'Session start',
-  turn: 'Chat turn',
-  stage: 'Stage',
-  autorun: 'Automation',
-  live: 'Auto-save',
-  manual: 'Manual snapshot',
-  pre_restore: 'Before rewind',
-};
-
-/** Snapshots that exist for bookkeeping rather than as rewind targets. */
-const NOISE_KINDS = new Set(['live']);
+/** One rewind's outcome, per mount. */
+interface RewindReport {
+  group: CheckpointGroup;
+  perMount: Array<{ alias: string; result?: RestoreCheckpointResult; error?: string }>;
+}
 
 /**
  * Human-readable one-liner for the prompt that produced a checkpoint.
@@ -69,8 +68,13 @@ function formatTime(iso: string): string {
 export interface CheckpointTimelineProps {
   workspaceId: string;
   onClose: () => void;
-  /** Preview a checkpoint as the diff base instead of rewinding to it. */
-  onCompare?: (checkpointId: string) => void;
+  /**
+   * Preview this point as the diff base instead of rewinding to it. Receives
+   * a revision SELECTOR (`turn:<turnId>` for a grouped turn, otherwise
+   * `checkpoint:<id>`) — a turn spans several mounts, so a bare checkpoint id
+   * could only ever name one of them.
+   */
+  onCompare?: (revisionSelector: string) => void;
 }
 
 export function CheckpointTimeline({
@@ -81,23 +85,39 @@ export function CheckpointTimeline({
   const { data, isLoading } = useWorkspaceCheckpoints(workspaceId);
   const restore = useRestoreWorkspaceCheckpoint(workspaceId);
 
-  const [confirming, setConfirming] = useState<CheckpointRecord | null>(null);
-  const [result, setResult] = useState<RestoreCheckpointResult | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [report, setReport] = useState<RewindReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const checkpoints = (data?.checkpoints ?? []).filter(
-    (c) => !NOISE_KINDS.has(c.kind),
-  );
+  const groups = useMemo(() => groupCheckpoints(data?.checkpoints ?? []), [data]);
 
-  const doRestore = async (checkpoint: CheckpointRecord) => {
+  /**
+   * Rewind every mount the turn touched.
+   *
+   * One request per mount, because a checkpoint IS one mount's tree — there
+   * is no workspace-wide restore to call. They run in sequence rather than in
+   * parallel so a failure halfway through leaves a comprehensible state, and
+   * every outcome is reported per mount: a rewind that restored two of three
+   * repositories must not look like a clean success.
+   */
+  const doRestore = async (group: CheckpointGroup) => {
     setError(null);
-    try {
-      const res = await restore.mutateAsync({ checkpointId: checkpoint.id });
-      setResult(res);
-      setConfirming(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setConfirming(null);
+    const perMount: RewindReport['perMount'] = [];
+    for (const target of group.restoreTargets) {
+      try {
+        const res = await restore.mutateAsync({ checkpointId: target.id });
+        perMount.push({ alias: target.repoAlias, result: res });
+      } catch (err) {
+        perMount.push({
+          alias: target.repoAlias,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    setReport({ group, perMount });
+    setConfirming(null);
+    if (perMount.length > 0 && perMount.every((m) => m.error)) {
+      setError(perMount[0]?.error ?? 'The rewind failed.');
     }
   };
 
@@ -126,88 +146,61 @@ export function CheckpointTimeline({
         </div>
       )}
 
-      {result && (
-        <div className="m-2 rounded bg-emerald-500/10 p-2 text-emerald-600">
-          <div className="flex items-center gap-1.5 font-medium">
-            <Check className="h-3 w-3" />
-            Rewound the workspace
-          </div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
-            {result.restoredPaths.length} file(s) restored, {result.deletedPaths.length}{' '}
-            removed.
-            {result.preRestoreCheckpointId && (
-              <> A &ldquo;Before rewind&rdquo; checkpoint was saved so this is undoable.</>
-            )}
-          </div>
-          {result.skipped.length > 0 && (
-            // Symlinks and hard links can resolve outside the workspace, so the
-            // server refuses to write through them. Silently dropping them
-            // would leave the user believing the rewind was complete.
-            <div className="mt-1.5 rounded bg-amber-500/10 p-1.5 text-[11px] text-amber-600">
-              <div className="font-medium">
-                {result.skipped.length} path(s) skipped for safety:
-              </div>
-              <ul className="mt-0.5 space-y-px">
-                {result.skipped.slice(0, 8).map((s) => (
-                  <li key={s.path} className="font-mono">
-                    {s.path} — {s.reason}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setResult(null)}
-            className="mt-1.5 h-auto rounded-none p-0 text-[11px] font-normal normal-case text-current underline hover:bg-transparent hover:text-current"
-          >
-            Dismiss
-          </Button>
-        </div>
-      )}
+      {report && <RewindResult report={report} onDismiss={() => setReport(null)} />}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {isLoading ? (
           <div className="flex justify-center p-4">
             <Spinner />
           </div>
-        ) : checkpoints.length === 0 ? (
+        ) : groups.length === 0 ? (
           <p className="p-3 text-center text-muted-foreground">No checkpoints yet.</p>
         ) : (
           <ol className="space-y-1">
-            {checkpoints.map((c) => (
+            {groups.map((group) => (
               <li
-                key={c.id}
+                key={group.key}
                 className="rounded border border-border p-2 hover:bg-accent/40"
               >
                 <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-foreground">
-                    {c.label ?? KIND_LABEL[c.kind] ?? c.kind}
-                  </span>
-                  {c.phase && (
+                  <span className="font-medium text-foreground">{checkpointLabel(group)}</span>
+                  {group.phase && (
                     <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">
-                      {c.phase}
+                      {group.phase}
                     </span>
                   )}
                   <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-                    {formatTime(c.createdAt)}
+                    {formatTime(group.createdAt)}
                   </span>
                 </div>
 
-                {c.promptExcerpt && (
+                {group.promptExcerpt && (
                   <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
-                    {describePrompt(c.promptExcerpt)}
+                    {describePrompt(group.promptExcerpt)}
+                  </p>
+                )}
+
+                {/* Which mounts this turn touched. Without it a rewind in a
+                    multi-source chat is a blind action. */}
+                {group.aliases.length > 1 && (
+                  <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+                    <Layers className="h-2.5 w-2.5" />
+                    {group.aliases.map((alias) => (
+                      <span key={alias} className="rounded bg-muted px-1 font-mono">
+                        {alias === '.' ? 'workspace' : alias}
+                      </span>
+                    ))}
                   </p>
                 )}
 
                 <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
-                  <span>{c.fileCount} file(s)</span>
-                  {c.additions > 0 && (
-                    <span className="text-emerald-500">+{c.additions}</span>
+                  <span>{group.fileCount} file(s)</span>
+                  {group.additions > 0 && (
+                    <span className="text-success">+{group.additions}</span>
                   )}
-                  {c.deletions > 0 && <span className="text-rose-500">−{c.deletions}</span>}
+                  {group.deletions > 0 && (
+                    <span className="text-danger">−{group.deletions}</span>
+                  )}
 
                   <div className="ml-auto flex items-center gap-1">
                     {onCompare && (
@@ -215,7 +208,7 @@ export function CheckpointTimeline({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        onClick={() => onCompare(c.id)}
+                        onClick={() => onCompare(group.compareValue)}
                         className="h-5 px-1.5 text-[10px]"
                         title="Use as the diff base"
                       >
@@ -226,10 +219,10 @@ export function CheckpointTimeline({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => setConfirming(c)}
-                      disabled={restore.isPending}
+                      onClick={() => setConfirming(group.key)}
+                      disabled={restore.isPending || group.restoreTargets.length === 0}
                       className="h-5 gap-1 px-1.5 text-[10px]"
-                      title="Rewind the workspace to this checkpoint"
+                      title="Rewind the workspace to this point"
                       leftIcon={<RotateCcw className="h-3 w-3" />}
                     >
                       Rewind
@@ -237,22 +230,27 @@ export function CheckpointTimeline({
                   </div>
                 </div>
 
-                {confirming?.id === c.id && (
-                  <div className="mt-1.5 rounded bg-amber-500/10 p-2">
-                    <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                      Rewind every file to this point? Current work is saved to a
-                      &ldquo;Before rewind&rdquo; checkpoint first, so you can undo it.
+                {confirming === group.key && (
+                  <div className="mt-1.5 rounded bg-warning-muted p-2">
+                    <p className="text-[11px] text-warning">
+                      Rewind {formatAliasList(group.aliases)}{' '}
+                      {group.undoesTurn ? 'to before this turn' : 'to this checkpoint'}? Current
+                      work is saved to a &ldquo;Redo point&rdquo; first, so you can undo it.
                     </p>
                     <div className="mt-1.5 flex gap-1.5">
                       <Button
                         type="button"
                         variant="primary"
                         size="sm"
-                        onClick={() => void doRestore(c)}
+                        onClick={() => void doRestore(group)}
                         disabled={restore.isPending}
-                        className="h-auto rounded bg-amber-500 px-2 py-0.5 text-[11px] font-medium text-white"
+                        className="h-auto rounded bg-warning px-2 py-0.5 text-[11px] font-medium text-background"
                       >
-                        {restore.isPending ? 'Rewinding…' : 'Confirm rewind'}
+                        {restore.isPending
+                          ? 'Rewinding…'
+                          : group.restoreTargets.length > 1
+                            ? `Rewind ${String(group.restoreTargets.length)} sources`
+                            : 'Confirm rewind'}
                       </Button>
                       <Button
                         type="button"
@@ -275,6 +273,96 @@ export function CheckpointTimeline({
       <div className={cn('border-t border-border px-3 py-1.5 text-[10px] text-muted-foreground')}>
         Checkpoints are private snapshots. They never change your branches or commits.
       </div>
+    </div>
+  );
+}
+
+
+// ── Sub-components ─────────────────────────────────────────────
+
+/**
+ * What the rewind actually did, mount by mount.
+ *
+ * Per-mount rather than one total because a multi-source rewind can partly
+ * fail — a repository that went dirty in the meantime, a path the server
+ * refused to write through — and a single "restored 12 files" line would
+ * hide exactly the half the user needs to act on.
+ */
+function RewindResult({ report, onDismiss }: { report: RewindReport; onDismiss: () => void }) {
+  const failures = report.perMount.filter((m) => m.error);
+  const successes = report.perMount.filter((m) => m.result);
+  const undoable = successes.some((m) => m.result?.preRestoreCheckpointId);
+
+  return (
+    <div
+      className={cn(
+        'm-2 rounded p-2',
+        failures.length === 0 ? 'bg-success-muted text-success' : 'bg-warning-muted text-warning',
+      )}
+      role="status"
+    >
+      <div className="flex items-center gap-1.5 font-medium">
+        {failures.length === 0 ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+        {failures.length === 0
+          ? `Rewound ${formatAliasList(successes.map((m) => m.alias))}`
+          : `Rewound ${String(successes.length)} of ${String(report.perMount.length)} sources`}
+      </div>
+
+      <ul className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
+        {report.perMount.map((entry) => (
+          <li key={entry.alias}>
+            <span className="font-mono">{entry.alias === '.' ? 'workspace' : entry.alias}</span>
+            {entry.result ? (
+              <>
+                {' '}— {entry.result.restoredPaths.length} restored,{' '}
+                {entry.result.deletedPaths.length} removed
+                {entry.result.skipped.length > 0 && (
+                  <>
+                    ,{' '}
+                    <span className="text-warning">
+                      {entry.result.skipped.length} skipped for safety
+                    </span>
+                  </>
+                )}
+              </>
+            ) : (
+              <span className="text-danger"> — {entry.error}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {/* Symlinks and hard links can resolve outside the workspace, so the
+          server refuses to write through them. Naming the paths is the only
+          way the user can tell what was left behind. */}
+      {successes.some((m) => (m.result?.skipped.length ?? 0) > 0) && (
+        <ul className="mt-1.5 space-y-px rounded bg-warning-muted p-1.5 text-[11px] text-warning">
+          {successes.flatMap((m) =>
+            (m.result?.skipped ?? []).slice(0, 6).map((sk) => (
+              <li key={`${m.alias}:${sk.path}`} className="font-mono">
+                {m.alias === '.' ? '' : `${m.alias}/`}
+                {sk.path} — {sk.reason}
+              </li>
+            )),
+          )}
+        </ul>
+      )}
+
+      {undoable && (
+        <div className="mt-1 text-[11px] text-muted-foreground">
+          A &ldquo;Redo point&rdquo; was saved first, so this is undoable.
+        </div>
+      )}
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={onDismiss}
+        className="mt-1.5 h-auto rounded-none p-0 text-[11px] font-normal normal-case text-current underline hover:bg-transparent hover:text-current"
+      >
+        Dismiss
+      </Button>
     </div>
   );
 }

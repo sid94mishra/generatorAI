@@ -18,6 +18,7 @@ export type StepKind =
   | 'subagent'
   | 'memory'
   | 'note'
+  | 'warning'
   | 'error';
 
 export interface TimelineStep {
@@ -44,9 +45,24 @@ export interface TimelineStep {
   callId?: string;
   /** Per-op +/− line stats for file write/edit tools. */
   fileOp?: { kind: string; filePath: string; additions: number; deletions: number };
+  /**
+   * Inline unified diff for a file op, resolved lazily (the provider's hunks
+   * when shipped, else rebuilt from the tool arguments). `null` when neither
+   * is available. Thunk so history rows pay nothing until expanded.
+   */
+  diff?: () => {
+    hunks: Array<{ oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }>;
+    truncated: boolean;
+  } | null;
   /** True for shell-command tools (Bash / PowerShell) — enables the
    *  "open in terminal" affordance. */
   isShell?: boolean;
+  /**
+   * An image this step produced (a browser screenshot the agent took).
+   * `relativePath` is workspace-relative; the row resolves it to a URL via
+   * the stream-actions context, which knows the workspace.
+   */
+  image?: { relativePath: string; label: string };
 }
 
 export interface TodoItem {

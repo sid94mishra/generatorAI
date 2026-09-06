@@ -23,14 +23,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Code2,
   Eye,
+  FolderTree,
   ListTree,
   RefreshCw,
   WrapText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { Button, Spinner } from '@/components/ui/index.js';
+import { Button, Select, Spinner } from '@/components/ui/index.js';
 import { ApiError } from '@/platform/apiFetch.js';
 import { useWorkspaceTree, useWorkspaceTreeFile } from '@/hooks/queries.js';
+import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import { FileCodeView } from './FileCodeView.js';
@@ -83,54 +85,68 @@ export function FilesSurface({
   const repos = useMemo(() => treeQuery.data?.repos ?? [], [treeQuery.data]);
   const multiRepo = repos.length > 1;
 
-  /** Whether tree paths carry an `alias/` prefix — only when repos are mixed. */
-  const prefixed = multiRepo && repoAlias === '*';
-
-  /** Displayed path → its repo alias + repo-relative path. */
-  const pathIndex = useMemo(() => {
-    const map = new Map<string, FileTabRef>();
-    for (const repo of repos) {
-      if (repoAlias !== '*' && repo.alias !== repoAlias) continue;
-      const prefix = prefixed && repo.alias !== '.' ? `${repo.alias}/` : '';
-      for (const p of repo.paths) map.set(prefix + p, { alias: repo.alias, path: p });
+  // Mount metadata (mode + branch) for the section subtitles. The tree knows
+  // the aliases; only the workspace knows what each alias actually IS.
+  const workspaceInfo = useWorkspaceInfo(workspaceId);
+  const mountByAlias = useMemo(() => {
+    const map = new Map<string, { mode: string; branch?: string }>();
+    for (const m of workspaceInfo.data?.mounts ?? []) {
+      map.set(m.alias, { mode: m.mode, ...(m.git?.branch ? { branch: m.git.branch } : {}) });
     }
     return map;
-  }, [repos, repoAlias, prefixed]);
+  }, [workspaceInfo.data]);
 
-  const treePaths = useMemo(() => [...pathIndex.keys()].sort(), [pathIndex]);
-
-  /** The selection's path as the tree displays it, for reveal + highlight. */
-  const activeTreePath = useMemo(() => {
-    if (!selection) return null;
-    return prefixed && selection.alias !== '.'
-      ? `${selection.alias}/${selection.path}`
-      : selection.path;
-  }, [selection, prefixed]);
-
-  const handleSelect = useCallback(
-    (displayPath: string) => {
-      // Folder rows arrive with a trailing slash; only files open a preview.
-      if (displayPath.endsWith('/')) return;
-      const resolved = pathIndex.get(displayPath);
-      if (!resolved) return;
-      // Single click previews in place. Opening a whole tab per click made
-      // browsing hostile — skimming five files left five tabs behind, and the
-      // new tab stole focus from the tree you were reading.
-      setSelection(resolved);
-    },
-    [pathIndex],
+  /**
+   * One section per mount, in workspace order.
+   *
+   * The alias lives in the section HEADER rather than on every row, so the
+   * paths under it are the paths you would type in that repository — which is
+   * what makes them copy-pasteable. Nested repositories arrive from the tree
+   * as `<alias>/<sub>` and keep that name, so they read as what they are.
+   */
+  const sections = useMemo(
+    () =>
+      repos
+        .filter((repo) => repoAlias === '*' || repo.alias === repoAlias)
+        .map((repo) => ({
+          alias: repo.alias,
+          kind: repo.kind,
+          paths: [...repo.paths].sort(),
+          mount: mountByAlias.get(repo.alias),
+        })),
+    [repos, repoAlias, mountByAlias],
   );
+
+  /** Section headers are only worth their vertical space when there is a choice. */
+  const showSectionHeaders = sections.length > 1;
+
+  /** Every listed file, keyed alias + path, for the stale-selection check. */
+  const allKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const section of sections) {
+      for (const p of section.paths) set.add(`${section.alias}\u0000${p}`);
+    }
+    return set;
+  }, [sections]);
+
+  const handleSelect = useCallback((alias: string, path: string) => {
+    // Folder rows arrive with a trailing slash; only files open a preview.
+    if (path.endsWith('/')) return;
+    // Single click previews in place. Opening a whole tab per click made
+    // browsing hostile — skimming five files left five tabs behind, and the
+    // new tab stole focus from the tree you were reading.
+    setSelection({ alias, path });
+  }, []);
 
   /** Double-click / ⏎ — the deliberate "keep this open" gesture. */
   const handleActivate = useCallback(
-    (displayPath: string) => {
-      if (displayPath.endsWith('/')) return;
-      const resolved = pathIndex.get(displayPath);
-      if (!resolved) return;
-      setSelection(resolved);
-      onOpenFile?.(resolved);
+    (alias: string, path: string) => {
+      if (path.endsWith('/')) return;
+      const ref = { alias, path };
+      setSelection(ref);
+      onOpenFile?.(ref);
     },
-    [pathIndex, onOpenFile],
+    [onOpenFile],
   );
 
   // Follow the host's file when a tab is re-pointed (or restored on reload).
@@ -156,9 +172,10 @@ export function FilesSurface({
   // instead of the tab silently emptying itself.
   useEffect(() => {
     if (initialFile || !selection || treeQuery.isLoading) return;
-    if (!activeTreePath || treePaths.includes(activeTreePath)) return;
+    if (allKeys.size === 0) return;
+    if (allKeys.has(`${selection.alias}\u0000${selection.path}`)) return;
     setSelection(null);
-  }, [treePaths, activeTreePath, selection, initialFile, treeQuery.isLoading]);
+  }, [allKeys, selection, initialFile, treeQuery.isLoading]);
 
   const file = useWorkspaceTreeFile(
     workspaceId,
@@ -214,9 +231,9 @@ export function FilesSurface({
             <span
               className="min-w-0 flex-1 truncate text-xs font-medium"
               title={
-                selection.alias === '.'
-                  ? selection.path
-                  : `${selection.alias}/${selection.path}`
+                multiRepo && selection.alias !== '.'
+                  ? `${selection.alias}/${selection.path}`
+                  : selection.path
               }
             >
               {fileName}
@@ -228,24 +245,24 @@ export function FilesSurface({
           </span>
         )}
 
-        <div className={cn('flex shrink-0 items-center gap-0.5', !selection && 'ml-auto')}>          {multiRepo && (
-            <select
+        <div className={cn('flex shrink-0 items-center gap-0.5', !selection && 'ml-auto')}>
+          {multiRepo && (
+            <Select
               value={repoAlias}
-              onChange={(e) => {
-                setRepoAlias(e.target.value);
+              onChange={(next) => {
+                setRepoAlias(next);
                 setSelection(null);
               }}
-              className="mr-1 h-6 max-w-[130px] rounded border bg-transparent px-1 text-[11px]"
-              title="Repository"
-              aria-label="Repository"
-            >
-              <option value="*">All repos ({repos.length})</option>
-              {repos.map((r) => (
-                <option key={r.alias} value={r.alias}>
-                  {r.alias === '.' ? 'workspace root' : r.alias}
-                </option>
-              ))}
-            </select>
+              aria-label="Source"
+              className="mr-1 h-6 w-auto max-w-[150px] rounded-md px-2 py-0 text-[11px]"
+              options={[
+                { value: '*', label: `All sources (${String(repos.length)})` },
+                ...repos.map((r) => ({
+                  value: r.alias,
+                  label: r.alias === '.' ? 'workspace root' : r.alias,
+                })),
+              ]}
+            />
           )}
 
           {isMarkdown && (
@@ -302,24 +319,42 @@ export function FilesSurface({
       {/* ── Body ───────────────────────────────────────────────── */}
       <div className="flex min-h-0 flex-1">
         {showTree && (
-          <div className="w-60 shrink-0 border-r">
+          <div className="flex w-60 shrink-0 flex-col overflow-y-auto border-r">
             {treeQuery.isLoading ? (
               <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
                 <Spinner size="sm" /> Loading files…
               </div>
-            ) : treePaths.length === 0 ? (
+            ) : sections.every((section) => section.paths.length === 0) ? (
               <div className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground">
                 No files in this workspace yet.
               </div>
             ) : (
-              <ChangesTree
-                paths={treePaths}
-                activePath={activeTreePath}
-                onSelect={handleSelect}
-                {...(onOpenFile ? { onActivate: handleActivate } : {})}
-                searchPlaceholder="Filter files…"
-                style={{ height: '100%' }}
-              />
+              sections.map((section) => (
+                <div
+                  key={section.alias}
+                  className={cn('flex min-h-0 flex-col', showSectionHeaders && 'border-b last:border-b-0')}
+                >
+                  {showSectionHeaders && (
+                    <MountSectionHeader
+                      alias={section.alias}
+                      kind={section.kind}
+                      mode={section.mount?.mode}
+                      branch={section.mount?.branch}
+                      count={section.paths.length}
+                    />
+                  )}
+                  <ChangesTree
+                    paths={section.paths}
+                    activePath={selection?.alias === section.alias ? selection.path : null}
+                    onSelect={(p) => handleSelect(section.alias, p)}
+                    {...(onOpenFile
+                      ? { onActivate: (p: string) => handleActivate(section.alias, p) }
+                      : {})}
+                    searchPlaceholder="Filter files…"
+                    style={showSectionHeaders ? { maxHeight: '60vh' } : { height: '100%' }}
+                  />
+                </div>
+              ))
             )}
           </div>
         )}
@@ -350,6 +385,47 @@ export function FilesSurface({
 }
 
 // ── Sub-components ─────────────────────────────────────────────
+
+/**
+ * The alias of one mount, over its files.
+ *
+ * Mode and branch are the subtitle because they are what makes two sections
+ * different in kind: editing a folder in place and reading a worktree cut
+ * from the same repository look identical until you say which is which.
+ */
+function MountSectionHeader({
+  alias,
+  kind,
+  mode,
+  branch,
+  count,
+}: {
+  alias: string;
+  kind: string;
+  mode?: string | undefined;
+  branch?: string | undefined;
+  count: number;
+}) {
+  const modeLabel =
+    mode === 'worktree' ? 'Worktree' : mode === 'in-place' ? 'In place' : mode === 'generated' ? 'Generated' : null;
+  const subtitle = [kind === 'nested' ? 'Nested repo' : modeLabel, branch].filter(Boolean).join(' · ');
+  return (
+    <div className="sticky top-0 z-10 border-b bg-background px-2 py-1">
+      <div className="flex items-center gap-1.5">
+        <FolderTree className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-[11px] font-medium" title={alias}>
+          {alias === '.' ? 'workspace root' : alias}
+        </span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">{count}</span>
+      </div>
+      {subtitle && (
+        <div className="truncate pl-[18px] text-[10px] text-muted-foreground" title={subtitle}>
+          {subtitle}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function FilePreview({
   path,

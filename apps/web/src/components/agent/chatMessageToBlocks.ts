@@ -80,6 +80,7 @@ export function chatMessageToBlocks(message: ChatMessage): StreamBlock[] {
         status: 'complete',
         ...(tc.fileOp ? { fileOp: tc.fileOp } : {}),
         ...(tc.parentId ? { parentCallId: tc.parentId } : {}),
+        ...(tc.success === false ? { error: true } : {}),
       }),
     });
   }
