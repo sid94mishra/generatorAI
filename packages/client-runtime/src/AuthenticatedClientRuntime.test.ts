@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   AuthenticatedClientRuntime,
+  CredentialRejectedError,
   DeviceRevokedError,
 } from './AuthenticatedClientRuntime.js';
 import { MemoryDeviceKeyStore, MemorySessionStore } from './nodeStores.js';
@@ -83,7 +84,7 @@ describe('AuthenticatedClientRuntime endpoint trust', () => {
     expect(requests.filter((url) => url.endsWith('/api/stream/tickets'))).toHaveLength(2);
   });
 
-  it('clears persisted credentials when a request-time refresh is rejected', async () => {
+  it('keeps the pairing when a refresh is rejected but the device is not revoked', async () => {
     let now = 0;
     const sessionStore = new MemorySessionStore();
     const runtime = new AuthenticatedClientRuntime({
@@ -110,6 +111,61 @@ describe('AuthenticatedClientRuntime endpoint trust', () => {
           return Response.json(
             { error: { code: 'INVALID_GRANT', message: 'Credential rotated' } },
             { status: 400 },
+          );
+        }
+        return Response.json({ ok: true });
+      }),
+    });
+
+    await runtime.completePairing({
+      endpoint: 'http://127.0.0.1:3100',
+      serverId: SERVER_ID,
+      pairingToken: 'pairing-secret',
+      deviceName: 'Phone',
+      platform: 'mobile',
+    });
+    now = 60_000;
+
+    // INVALID_GRANT says the CREDENTIAL is unusable, not that the device was
+    // revoked — a server that could not durably persist the rotated secret
+    // answers exactly this. The runtime retries once, then surfaces an error
+    // the user can act on; it does NOT destroy the pairing, which is what
+    // turned a full disk into a trip back to the host machine.
+    await expect(runtime.fetch('/api/projects')).rejects.toBeInstanceOf(CredentialRejectedError);
+    expect(await sessionStore.load()).not.toBeNull();
+    expect(runtime.currentState.status).toBe('error');
+  });
+
+  it('clears persisted credentials when the server says the device is revoked', async () => {
+    let now = 0;
+    const sessionStore = new MemorySessionStore();
+    const runtime = new AuthenticatedClientRuntime({
+      endpoint: 'http://127.0.0.1:3100',
+      keyStore: new MemoryDeviceKeyStore(),
+      sessionStore,
+      clock: () => now,
+      fetchImpl: vi.fn(async (input) => {
+        const url = String(input);
+        if (url.endsWith('/api/auth/server-info')) return Response.json({ serverId: SERVER_ID });
+        if (url.endsWith('/api/auth/pair/complete')) {
+          return Response.json(
+            {
+              deviceId: 'device-1',
+              deviceName: 'Phone',
+              scopes: ['chat:read'],
+              accessToken: 'short-access-token',
+              accessTokenExpiresAt: 30_000,
+              resumeSecret: 'resume-secret',
+              resumeExpiresAt: 60_000,
+              credentialVersion: 1,
+            },
+            { status: 201 },
+          );
+        }
+        if (url.endsWith('/api/auth/token/refresh')) {
+          return Response.json(
+            { error: { code: 'REVOKED', message: 'Device has been revoked' } },
+            { status: 401 },
           );
         }
         return Response.json({ ok: true });

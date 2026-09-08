@@ -1,19 +1,19 @@
 // ────────────────────────────────────────────────────────────────
-// QuickActions — three big targets at the end of Home.
+// QuickActions — the two things Home can start that the FAB does not.
 //
-//   New chat      → the Chats tab with `?new=1`, which opens the SAME
-//                   NewChatSheet the Chats FAB opens. No second creation
-//                   flow to drift.
 //   New workflow  → the Work tab on its Workflows segment with `?new=1`,
 //                   which opens that segment's "New" sheet (an honest
 //                   placeholder until authoring lands).
 //   Pair a device → Settings › Security.
+//
+// "New chat" is deliberately NOT here: Home's own FAB is that action, and
+// the two sat on the same screen a thumb's width apart.
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
 import { Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { MessageSquarePlus, Smartphone, Workflow } from 'lucide-react-native';
+import { Smartphone, Workflow } from 'lucide-react-native';
 
 import { Card } from '../ui/primitives';
 import { Touchable } from '../ui/Touchable';
@@ -23,12 +23,6 @@ import { useTheme } from '../../theme/ThemeProvider';
 export function QuickActions(): React.ReactElement {
   const { colors } = useTheme();
   const actions = [
-    {
-      key: 'chat',
-      label: 'New chat',
-      icon: <MessageSquarePlus size={18} color={colors.primary} />,
-      onPress: () => router.push('/chats?new=1'),
-    },
     {
       key: 'workflow',
       label: 'New workflow',

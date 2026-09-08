@@ -106,7 +106,26 @@ export function ProviderBrandIcon({
   if (provider === 'gemini' || provider === 'google') {
     return <GeminiMark size={size} {...(color ? { color } : {})} />;
   }
-  return <GitHubCopilotMark size={size} {...(color ? { color } : {})} />;
+  if (provider === 'copilot' || provider === 'github') {
+    return <GitHubCopilotMark size={size} {...(color ? { color } : {})} />;
+  }
+  // Codex is OpenAI's; everything else gets a neutral mark. Falling through
+  // to the Copilot octocat put GitHub's logo on Codex, OpenCode and the ACP
+  // agent alike, which is both wrong and unreadable as branding.
+  if (provider === 'codex') return <OpenAIMark size={size} {...(color ? { color } : {})} />;
+  return <GenericHarnessMark size={size} {...(color ? { color } : {})} />;
+}
+
+/** Neutral mark for a harness with no brand of its own. */
+export function GenericHarnessMark({ size = 20, color }: VendorIconProps): React.ReactElement {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        fill={color ?? '#8B949E'}
+        d="M4 3h16a1 1 0 011 1v16a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1zm1 2v14h14V5H5zm2.7 3.3l1.4-1.4 3.6 3.6a1 1 0 010 1.4l-3.6 3.6-1.4-1.4L10.6 12 7.7 8.3zM13 15h5v2h-5v-2z"
+      />
+    </Svg>
+  );
 }
 
 /**

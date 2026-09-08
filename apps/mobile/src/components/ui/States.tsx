@@ -51,16 +51,47 @@ function Frame({
   message,
   action,
   live = 'polite',
+  compact = false,
 }: {
   icon: React.ReactNode;
   title: string;
   message?: string;
   action?: { label: string; onPress: () => void };
   live?: 'none' | 'polite' | 'assertive';
+  /**
+   * The pane variant: a title, one line of help and the action, at a third
+   * of the height. Panes are switched between constantly during a turn, and
+   * a 120pt illustrated paragraph every time you glance at Changes is noise.
+   * The full treatment stays for tab-level empties, which are read once.
+   */
+  compact?: boolean;
 }): React.ReactElement {
+  if (compact) {
+    return (
+      <View accessibilityLiveRegion={live} className="items-center gap-2 px-8 py-7">
+        <View className="flex-row items-center gap-2">
+          {icon}
+          <Text accessibilityRole="header" className="text-md font-semibold text-foreground">
+            {title}
+          </Text>
+        </View>
+        {message ? (
+          <Text numberOfLines={2} className="text-center text-xs leading-relaxed text-muted-foreground">
+            {message}
+          </Text>
+        ) : null}
+        {action ? (
+          <View className="self-center pt-0.5">
+            <Button label={action.label} onPress={action.onPress} variant="secondary" size="sm" />
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
   return (
     <View accessibilityLiveRegion={live} className="items-center gap-3 px-8 py-12">
-      <View className="h-14 w-14 items-center justify-center rounded-3xl bg-subtle">{icon}</View>
+      <View className="h-14 w-14 items-center justify-center rounded-3xl bg-emphasis">{icon}</View>
       <Text accessibilityRole="header" className="text-center text-lg font-semibold text-foreground">
         {title}
       </Text>
@@ -68,7 +99,12 @@ function Frame({
         <Text className="text-center text-sm leading-relaxed text-muted-foreground">{message}</Text>
       ) : null}
       {action ? (
-        <Button label={action.label} onPress={action.onPress} variant="secondary" size="sm" />
+        // `Button` defaults to `self-start`, which overrode the frame's
+        // `items-center` and left the action hanging off the left edge under
+        // a centred title (seen on the Terminal pane's "New terminal").
+        <View className="self-center">
+          <Button label={action.label} onPress={action.onPress} variant="secondary" size="md" />
+        </View>
       ) : null}
     </View>
   );
@@ -79,17 +115,21 @@ export function EmptyState({
   message,
   icon,
   action,
+  compact = false,
 }: {
   title?: string;
   message?: string;
   icon?: React.ReactNode;
   action?: { label: string; onPress: () => void };
+  /** The dense variant for a session pane. See `Frame`. */
+  compact?: boolean;
 }): React.ReactElement {
   const { colors } = useTheme();
   return (
     <Frame
-      icon={icon ?? <Inbox size={24} color={colors['muted-foreground']} />}
+      icon={icon ?? <Inbox size={compact ? 16 : 24} color={colors['muted-foreground']} />}
       title={title}
+      compact={compact}
       {...(message ? { message } : {})}
       {...(action ? { action } : {})}
     />

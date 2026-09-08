@@ -21,6 +21,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, Globe, Play, RotateCw, Square } from 'lucide-react-native';
+import { describeErrorBody } from '@generatorai/client-core';
 
 import { IconButton } from '../../ui/Button';
 import { EmptyState, LoadingState, Spinner } from '../../ui/States';
@@ -113,7 +114,23 @@ function BrowserPanel({ workspaceId }: { workspaceId: string }): React.ReactElem
         ...(body ? { headers: { 'content-type': 'application/json' } } : {}),
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) {
+        // The raw body is a JSON envelope whose `message` can be several
+        // hundred characters of stack-adjacent detail. Toasting it verbatim
+        // put `{"error":{...,"requestId":"..."}}` in front of the user; this
+        // is the same rendering every other call in the app gets.
+        const raw = await response.text();
+        let described: string | null = null;
+        try {
+          described = describeErrorBody(JSON.parse(raw));
+        } catch {
+          described = raw;
+        }
+        const message = (described ?? `${response.status} ${response.statusText}`)
+          .split(/\r?\n/)[0]!
+          .trim();
+        throw new Error(message.length > 160 ? `${message.slice(0, 157)}…` : message);
+      }
       return response;
     },
     [authFetch, workspaceId],
@@ -216,27 +233,33 @@ function BrowserPanel({ workspaceId }: { workspaceId: string }): React.ReactElem
         {/* Named for the page, not the app: the screen header already has a
             "Back", and two controls with the same accessible name on one
             screen is ambiguous to anyone navigating by voice or reader. */}
-        <IconButton
-          compact
-          accessibilityLabel="Browser back"
-          icon={<ArrowLeft size={16} color={colors['muted-foreground']} />}
-          disabled={!live}
-          onPress={() => act.mutate({ kind: 'back' })}
-        />
-        <IconButton
-          compact
-          accessibilityLabel="Browser forward"
-          icon={<ArrowRight size={16} color={colors['muted-foreground']} />}
-          disabled={!live}
-          onPress={() => act.mutate({ kind: 'forward' })}
-        />
-        <IconButton
-          compact
-          accessibilityLabel="Reload page"
-          icon={<RotateCw size={16} color={colors['muted-foreground']} />}
-          disabled={!live}
-          onPress={() => act.mutate({ kind: 'reload' })}
-        />
+        {/* Navigation only exists once there is a page to navigate. Three
+            permanently dead arrows in front of the address bar made the
+            toolbar look broken before the browser had even been started. */}
+        {live ? (
+          <>
+            <IconButton
+              compact
+              accessibilityLabel="Browser back"
+              icon={<ArrowLeft size={16} color={colors['muted-foreground']} />}
+              disabled={descriptor.data?.canGoBack === false}
+              onPress={() => act.mutate({ kind: 'back' })}
+            />
+            <IconButton
+              compact
+              accessibilityLabel="Browser forward"
+              icon={<ArrowRight size={16} color={colors['muted-foreground']} />}
+              disabled={descriptor.data?.canGoForward === false}
+              onPress={() => act.mutate({ kind: 'forward' })}
+            />
+            <IconButton
+              compact
+              accessibilityLabel="Reload page"
+              icon={<RotateCw size={16} color={colors['muted-foreground']} />}
+              onPress={() => act.mutate({ kind: 'reload' })}
+            />
+          </>
+        ) : null}
         <View className="mx-1 flex-1">
           <Field
             placeholder="Search or enter address"
@@ -292,10 +315,15 @@ function BrowserPanel({ workspaceId }: { workspaceId: string }): React.ReactElem
         // still said "not running" the whole time, so Start looked ignored.
         <LoadingState label="Starting the browser…" />
       ) : (
+        // The action is IN the empty state. The copy used to name a control
+        // ("press Start") that was an unlabelled ▶ at the far end of the
+        // toolbar, past three arrows that do nothing yet.
         <EmptyState
+          compact
           title="Browser is not running"
-          message="Type a URL and press Start, or leave it — the agent starts it when it needs a page."
-          icon={<Globe size={22} color={colors['muted-foreground']} />}
+          message="Start it here, or leave it — the agent starts it when it needs a page."
+          icon={<Globe size={16} color={colors['muted-foreground']} />}
+          action={{ label: 'Start browser', onPress: () => startStop.mutate('start') }}
         />
       )}
 

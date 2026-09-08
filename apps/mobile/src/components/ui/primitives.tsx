@@ -81,7 +81,9 @@ export function SectionHeader({
   className?: string;
 }): React.ReactElement {
   return (
-    <View className={`flex-row items-center justify-between px-1 pb-2 pt-4 ${className}`}>
+    // No horizontal padding: the label lines up with the leading edge of the
+    // card it introduces, instead of sitting 4pt inside it.
+    <View className={`flex-row items-center justify-between pb-2 pt-4 ${className}`}>
       {/* The header role is what lets a screen-reader user jump between
           sections instead of swiping through every row of the one above. */}
       <Text accessibilityRole="header" className="text-sm font-semibold text-muted-foreground">

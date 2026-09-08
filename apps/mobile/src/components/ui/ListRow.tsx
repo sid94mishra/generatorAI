@@ -16,7 +16,6 @@ import { Switch as RNSwitch, Text, View } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 
 import { Touchable } from './Touchable';
-import { haptics } from './haptics';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function ListRow({
@@ -59,8 +58,12 @@ export function ListRow({
   const body = (
     <View className="min-h-14 flex-row items-center gap-3 px-4 py-2.5">
       {icon ? (
+        // `emphasis`, not `subtle`. In the light palette background, card and
+        // subtle sit within ~3% of each other, so a subtle tile on a card was
+        // effectively invisible and every settings glyph floated unanchored.
+        // In the dark palette the step is still gentle.
         <View
-          className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle"
+          className="h-9 w-9 items-center justify-center rounded-2xl bg-emphasis"
           style={iconTint ? { backgroundColor: iconTint } : undefined}
         >
           {icon}
@@ -82,21 +85,32 @@ export function ListRow({
       </View>
 
       {toggle ? (
-        <RNSwitch
-          // Not focusable on its own: the row owns the switch role below, so
-          // leaving this reachable would announce the same control twice.
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          value={toggle.value}
-          disabled={disabled}
-          onValueChange={(next) => {
-            haptics.select();
-            toggle.onValueChange(next);
-          }}
-          trackColor={{ false: colors.emphasis ?? '', true: colors.primary ?? '' }}
-          thumbColor={colors.background}
-          ios_backgroundColor={colors.emphasis}
-        />
+        // The switch is DECORATION. The row owns the press, the role and the
+        // state; the control only draws the current value.
+        //
+        // It used to handle its own `onValueChange` while sitting inside the
+        // row's pressable, so a tap on the switch fired BOTH handlers and the
+        // two cancelled out — the affordance people actually aim at was the
+        // one that did nothing, and only tapping the label worked.
+        // `pointerEvents: none` also removes the nested-pressable that made
+        // web emit a hydration warning and gave screen readers two controls.
+        <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <RNSwitch
+            // iOS and Android honour the wrapper's `accessibilityElementsHidden`
+            // and this, so the row is the only element a screen reader sees.
+            // react-native-web forwards neither, and forwards no `aria-hidden`
+            // either — the browser preview therefore still exposes an inert
+            // duplicate. It cannot be reached by touch (`pointerEvents:none`)
+            // and web is not a shipping target, so it is left as is rather
+            // than reimplementing the platform control.
+            accessible={false}
+            value={toggle.value}
+            disabled={disabled}
+            trackColor={{ false: colors.emphasis ?? '', true: colors.primary ?? '' }}
+            thumbColor={colors.background}
+            ios_backgroundColor={colors.emphasis}
+          />
+        </View>
       ) : (
         trailing
       )}
@@ -114,8 +128,12 @@ export function ListRow({
       accessibilityLabel={accessibilityLabel ?? title}
       accessibilityHint={accessibilityHint ?? (subtitle && !toggle ? subtitle : undefined)}
       accessibilityState={toggle ? { checked: toggle.value } : { selected }}
+      // RN's `accessibilityState.checked` does not reach `aria-checked` on
+      // web for a Pressable, so the row announced as a switch with NO state.
+      // The ARIA prop is core RN and is a no-op on native.
+      {...(toggle ? { 'aria-checked': toggle.value } : {})}
       disabled={disabled}
-      haptic={toggle ? 'none' : 'tap'}
+      haptic={toggle ? 'select' : 'tap'}
       scale="large"
       onPress={toggle ? () => toggle.onValueChange(!toggle.value) : onPress}
       {...(onLongPress ? { onLongPress } : {})}

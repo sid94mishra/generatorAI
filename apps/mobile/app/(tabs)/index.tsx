@@ -24,7 +24,7 @@ import { View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { router } from 'expo-router';
-import { Activity as ActivityIcon, BellRing, MessagesSquare, Plus, ServerCog, Workflow } from 'lucide-react-native';
+import { Activity as ActivityIcon, BellRing, Plus } from 'lucide-react-native';
 
 import {
   useActivity,
@@ -79,10 +79,7 @@ export default function HomeScreen(): React.ReactElement {
   const approvals = useMemo(() => groupApprovals(activity.operations), [activity.operations]);
   const blocked = useMemo(() => [...approvals.chats, ...approvals.runs], [approvals]);
 
-  const visible = useMemo(
-    () => filterOperations(activity.operations, filter),
-    [activity.operations, filter],
-  );
+  const visible = useMemo(() => filterOperations(activity.operations, filter), [activity.operations, filter]);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -124,13 +121,16 @@ export default function HomeScreen(): React.ReactElement {
     activity.refetch();
   }, [activity]);
 
+  // Two tiles, not five. "Chats" and "Runs" restated the tab bar directly
+  // below them and "Health" restated the server card below that; the strip
+  // scrolled but never had anything off-screen.
   const stats = useMemo<StatItem[]>(
     () => [
       {
         id: 'attention',
         label: 'Needs you',
         value: approvals.total,
-        icon: <BellRing size={16} color={colors.warning} />,
+        icon: <BellRing size={15} color={approvals.total > 0 ? colors.warning : colors['muted-foreground']} />,
         tone: approvals.total > 0 ? 'warning' : 'neutral',
         onPress: () => setFilter('attention'),
       },
@@ -138,67 +138,64 @@ export default function HomeScreen(): React.ReactElement {
         id: 'running',
         label: 'Running',
         value: activity.counts.running,
-        icon: <ActivityIcon size={16} color={colors.info} />,
+        icon: (
+          <ActivityIcon size={15} color={activity.counts.running > 0 ? colors.info : colors['muted-foreground']} />
+        ),
         tone: activity.counts.running > 0 ? 'info' : 'neutral',
         onPress: () => setFilter('running'),
       },
-      {
-        id: 'chats',
-        label: 'Chats',
-        value: activity.counts.chats,
-        icon: <MessagesSquare size={16} color={colors['muted-foreground']} />,
-        onPress: () => router.push('/chats'),
-      },
-      {
-        id: 'runs',
-        label: 'Runs',
-        value: activity.counts.runs,
-        icon: <Workflow size={16} color={colors['muted-foreground']} />,
-        onPress: () => router.push('/runs?segment=runs' as never),
-      },
-      {
-        id: 'health',
-        label: activity.health?.status === 'ok' ? 'Healthy' : 'Degraded',
-        value: activity.health?.harness.type ?? '—',
-        icon: (
-          <ServerCog
-            size={16}
-            color={activity.health?.status === 'ok' ? colors.success : colors.warning}
-          />
-        ),
-        tone: activity.health?.status === 'ok' ? 'success' : 'warning',
-      },
     ],
-    [approvals.total, activity.counts, activity.health, colors],
+    [approvals.total, activity.counts.running, colors],
   );
 
   const header = (
-    <View className="gap-3 pb-3">
+    // `paddingHorizontal` in a LegendList's contentContainerStyle does not
+    // reach the rows: every container is absolutely positioned with
+    // `left: 0 / right: 0`, which resolves against the padding box and so
+    // ignores it. The gutter therefore lives on the rows themselves — the
+    // same 16pt `Screen` uses, so the tab screens line up with the settings
+    // stack instead of running edge to edge.
+    <View className="gap-3 px-4 pb-3">
       {/* (a) Approvals queue — first whenever non-empty. */}
       <ApprovalsQueue blocked={blocked} />
 
-      {/* (b) Stat rail. */}
-      <StatRail items={stats} loading={activity.isLoading} />
+      {/* (b) Stat rail — bleeds through the gutter so the last tile can be
+          scrolled up to the edge instead of stopping short of it. */}
+      <View className="-mx-4">
+        <StatRail items={stats} loading={activity.isLoading} />
+      </View>
 
       {/* (c) Feed filter. */}
       <SegmentedControl segments={segments} value={filter} onChange={setFilter} />
     </View>
   );
 
-  const footer = (
-    <View className="gap-3 pt-2">
-      {/* (d) Health. */}
-      <SectionHeader title="Server" />
-      <HealthCard health={activity.health} />
+  const unhealthy = Boolean(activity.health) && activity.health?.status !== 'ok';
 
-      {/* (e) Quick actions. */}
+  const footer = (
+    // `pb-24` clears the FAB. A short Home does not scroll, so the list's own
+    // `paddingBottom` never comes into play.
+    //
+    // The server card is no longer permanent furniture: a healthy server is
+    // not news, and Home's job is to say what needs a person. It appears
+    // here only when it is degraded, and lives in Diagnostics otherwise.
+    <View className="gap-3 px-4 pb-24 pt-2">
       <SectionHeader title="Quick actions" />
       <QuickActions />
+
+      {unhealthy ? (
+        <>
+          <SectionHeader title="Server" />
+          <HealthCard health={activity.health} />
+        </>
+      ) : null}
     </View>
   );
 
   const empty = activity.isLoading ? (
-    <SkeletonList rows={5} />
+    <View className="px-4">
+      <SkeletonList rows={5} />
+    </View>
   ) : activity.isError ? (
     <ErrorState message="Could not reach the server." onRetry={activity.refetch} />
   ) : (
@@ -236,14 +233,16 @@ export default function HomeScreen(): React.ReactElement {
               keyExtractor={(op: Operation) => op.id}
               estimatedItemSize={66}
               recycleItems
-              contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 160, gap: 10 }}
+              contentContainerStyle={{ paddingBottom: 24, gap: 10 }}
               ListHeaderComponent={header}
               ListEmptyComponent={empty}
               ListFooterComponent={footer}
               refreshing={activity.isFetching && !activity.isLoading}
               onRefresh={refresh}
               renderItem={({ item, index }: { item: Operation; index: number }) => (
-                <OperationCard operation={item} index={index} />
+                <View className="px-4">
+                  <OperationCard operation={item} index={index} />
+                </View>
               )}
             />
           </View>

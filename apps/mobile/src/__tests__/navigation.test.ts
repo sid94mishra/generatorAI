@@ -100,12 +100,19 @@ describe('resolveWorkSegment', () => {
 
   it('ignores anything unrecognised rather than throwing', () => {
     expect(resolveWorkSegment('nope', 'nah')).toBe(DEFAULT_WORK_SEGMENT);
-    expect(resolveWorkSegment(['scripts', 'runs'], undefined)).toBe('scripts');
+    expect(resolveWorkSegment(['automations', 'runs'], undefined)).toBe('automations');
   });
 
-  it('exposes four segments and a stable pref key', () => {
-    expect(WORK_SEGMENTS).toEqual(['workflows', 'runs', 'automations', 'scripts']);
+  it('exposes the three built segments and a stable pref key', () => {
+    expect(WORK_SEGMENTS).toEqual(['workflows', 'runs', 'automations']);
     expect(WORK_SEGMENT_PREF_KEY).toBe('work.segment');
+  });
+
+  it('lands a phone left on the retired scripts segment back on the default', () => {
+    // `scripts` was a placeholder-only segment that the tab could OPEN on,
+    // because the last-used one is remembered.
+    expect(resolveWorkSegment(undefined, 'scripts')).toBe(DEFAULT_WORK_SEGMENT);
+    expect(resolveWorkSegment('scripts', 'runs')).toBe('runs');
   });
 });
 

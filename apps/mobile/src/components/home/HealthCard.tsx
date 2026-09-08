@@ -27,8 +27,11 @@ export function HealthCard({ health }: { health: HealthSnapshot | undefined }): 
   const harnessOk = health.harness.healthy;
   const tone = ok && harnessOk ? 'success' : 'warning';
   const headline = ok ? (harnessOk ? 'Server healthy' : 'Harness degraded') : 'Server degraded';
+  // The harness name is already the trailing badge; repeating it here made
+  // the detail line 196pt wide in a 157pt column, so the uptime — the one
+  // part that changes — was the half that got truncated away.
   const detail = [
-    `${health.harness.type}${harnessOk ? '' : ' (unhealthy)'}`,
+    ...(harnessOk ? [] : [`${health.harness.type} unhealthy`]),
     health.db ? 'database ok' : 'database down',
     `up ${formatDuration(Math.max(0, health.uptime) * 1000)}`,
   ].join(' · ');

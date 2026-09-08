@@ -2,7 +2,7 @@
 // DrizzleChatMessageRepository — IChatMessageRepository impl
 // ────────────────────────────────────────────────────────────────
 
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import type { IChatMessageRepository } from '@generatorai/core';
 import type { ChatMessage } from '@generatorai/shared';
 import { chatMessages } from '../schema.js';
@@ -105,6 +105,31 @@ export class DrizzleChatMessageRepository implements IChatMessageRepository {
       .from(chatMessages)
       .where(eq(chatMessages.chatId, chatId));
     return Number(rows[0]?.count ?? 0);
+  }
+
+  /**
+   * Newest message per session, in one statement.
+   *
+   * `rowid` breaks ties: two messages of the same turn routinely share a
+   * second-resolution `timestamp`, and ordering by time alone returned the
+   * user's prompt as the "latest" instead of the answer to it.
+   */
+  async latestBySessionIds(sessionIds: readonly string[]): Promise<Map<string, ChatMessage>> {
+    const out = new Map<string, ChatMessage>();
+    if (sessionIds.length === 0) return out;
+    // SQLite caps a statement at 999 bound parameters.
+    for (let i = 0; i < sessionIds.length; i += 500) {
+      const slice = sessionIds.slice(i, i + 500);
+      const rows = await this.db
+        .select()
+        .from(chatMessages)
+        .where(inArray(chatMessages.sessionId, [...slice]))
+        .orderBy(desc(chatMessages.timestamp), desc(sql`rowid`));
+      for (const row of rows) {
+        if (!out.has(row.sessionId)) out.set(row.sessionId, this.mapRow(row));
+      }
+    }
+    return out;
   }
 
   private mapRow(row: typeof chatMessages.$inferSelect): ChatMessage {

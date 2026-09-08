@@ -78,7 +78,9 @@ export default function ApprovalsScreen(): React.ReactElement {
             message="Tool permissions, questions, plan reviews and blocked runs appear here the moment an agent needs you."
             icon={<CheckCircle2 size={24} color={colors.success} />}
           />
-          <ApprovalsQueueEmptyHint />
+          <View className="-mt-8">
+            <ApprovalsQueueEmptyHint />
+          </View>
         </>
       ) : (
         <View className="gap-2.5">

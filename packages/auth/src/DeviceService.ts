@@ -47,20 +47,22 @@ import type {
 } from './ports.js';
 import { isAdminCapable, type Principal } from './principals.js';
 
+export type PairingErrorCode =
+  | 'INVALID_GRANT'
+  | 'EXPIRED'
+  | 'CONSUMED'
+  | 'REVOKED'
+  | 'TOO_MANY_ATTEMPTS'
+  | 'THROTTLED'
+  | 'INVALID_KEY'
+  | 'DUPLICATE_KEY'
+  | 'SCOPE_ESCALATION'
+  | 'CREDENTIAL_SUPERSEDED';
+
 export class PairingError extends Error {
   constructor(
     message: string,
-    readonly code:
-      | 'INVALID_GRANT'
-      | 'EXPIRED'
-      | 'CONSUMED'
-      | 'REVOKED'
-      | 'TOO_MANY_ATTEMPTS'
-      | 'THROTTLED'
-      | 'INVALID_KEY'
-      | 'DUPLICATE_KEY'
-      | 'SCOPE_ESCALATION'
-      | 'CREDENTIAL_SUPERSEDED',
+    readonly code: PairingErrorCode,
   ) {
     super(message);
     this.name = 'PairingError';
@@ -528,22 +530,38 @@ export class DeviceService {
     transport?: string;
   }): Promise<DeviceSessionResult> {
     const now = Date.now();
+    // A rejected refresh is how a phone loses its pairing, and until now it
+    // left no trace at all: the client showed "Access revoked" and the server
+    // log was silent, so there was nothing to tell a genuine revocation from
+    // a credential the server failed to persist.
+    const reject = (message: string, code: PairingErrorCode, deviceId: string | null): never => {
+      this.deps.audit.record({
+        action: AuditAction.tokenRefreshed,
+        result: 'failure',
+        resourceType: 'device',
+        ...(deviceId ? { resourceId: deviceId } : {}),
+        transport: params.transport ?? null,
+        metadata: { code },
+      });
+      throw new PairingError(message, code);
+    };
+
     const credential = await this.deps.devices.findCredentialByHash(
       sha256Base64Url(params.resumeSecret),
     );
     if (!credential || credential.revokedAt != null) {
-      throw new PairingError('Resume credential is not valid', 'INVALID_GRANT');
+      return reject('Resume credential is not valid', 'INVALID_GRANT', null);
     }
     if (credential.expiresAt != null && credential.expiresAt <= now) {
-      throw new PairingError('Resume credential has expired', 'EXPIRED');
+      return reject('Resume credential has expired', 'EXPIRED', credential.deviceId);
     }
     const device = await this.deps.devices.findById(credential.deviceId);
     if (!device || device.revokedAt != null) {
-      throw new PairingError('Device has been revoked', 'REVOKED');
+      return reject('Device has been revoked', 'REVOKED', credential.deviceId);
     }
     // Sender-constraint: the refresh must be proven with the device's key.
     if (device.jwkThumbprint !== params.keyThumbprint) {
-      throw new PairingError('Refresh proof key does not match the device', 'INVALID_KEY');
+      return reject('Refresh proof key does not match the device', 'INVALID_KEY', device.deviceId);
     }
 
     const isCurrentCredential = credential.version === device.credentialVersion;
@@ -552,7 +570,7 @@ export class DeviceService {
       device.previousCredentialGraceUntil != null &&
       device.previousCredentialGraceUntil > now;
     if (!isCurrentCredential && !isPreviousCredential) {
-      throw new PairingError('Resume credential has been superseded', 'CREDENTIAL_SUPERSEDED');
+      return reject('Resume credential has been superseded', 'CREDENTIAL_SUPERSEDED', device.deviceId);
     }
 
     await this.deps.devices.markCredentialUsed(credential.credentialId, now);

@@ -277,10 +277,21 @@ export class SqliteDeviceRepository implements IDeviceRepository {
   }
 
   async markCredentialUsed(credentialId: string, at: number): Promise<void> {
-    // Consuming a resume credential retires it: refresh always rotates.
+    // Records consumption; it does NOT revoke.
+    //
+    // This used to set `revoked_at` as well, which quietly disabled the whole
+    // grace window: `refreshSession` rejects a revoked credential before it
+    // ever reaches the "is this the previous generation, still in grace?"
+    // branch. A client that received a rotated secret but was killed before
+    // persisting it — a crash, a backgrounded app, a server that could not
+    // write — presented the old one on its next launch and was told
+    // INVALID_GRANT, permanently, with re-pairing from the host the only way
+    // back. `revoked_at` now means "deliberately revoked" (device revoke,
+    // unpair, sign-out) and validity is decided by generation + grace, which
+    // is what the rotation was documented to do all along.
     this.sqlite
-      .prepare(`UPDATE auth_device_credentials SET last_used_at = ?, revoked_at = ? WHERE credential_id = ?`)
-      .run(at, at, credentialId);
+      .prepare(`UPDATE auth_device_credentials SET last_used_at = ? WHERE credential_id = ?`)
+      .run(at, credentialId);
   }
 }
 

@@ -19,7 +19,7 @@
 
 import React from 'react';
 import { Text, View } from 'react-native';
-import { FolderGit2, Gauge, ShieldCheck, Sparkles, Wand2 } from 'lucide-react-native';
+import { ChevronRight, Cpu, FolderGit2, Gauge, ShieldCheck, Sparkles, Wand2 } from 'lucide-react-native';
 import type { AgentMode, ModelInfo } from '@generatorai/client-core';
 
 import { Sheet, SheetRow, SheetSection } from '../ui/Sheet';
@@ -52,6 +52,7 @@ export function TurnOptionsSheet({
   onPermissionModeChange,
   contextTokens,
   codebaseCount,
+  onOpenModel,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -66,6 +67,8 @@ export function TurnOptionsSheet({
   onPermissionModeChange: (mode: string) => void;
   contextTokens: number | null;
   codebaseCount: number;
+  /** Hands off to the model picker; the composer owns that sheet. */
+  onOpenModel?: () => void;
 }): React.ReactElement {
   const { colors } = useTheme();
 
@@ -78,6 +81,22 @@ export function TurnOptionsSheet({
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Turn options" detents={[0.75, 0.92]}>
+      {/* The model leads: it is the choice that changes the answer most, and
+          since the composer now carries ONE chip for this whole decision the
+          picker has to be reachable from inside it. */}
+      {onOpenModel ? (
+        <>
+          <SheetSection title="Model" />
+          <SheetRow
+            title={model?.name ?? 'Server default'}
+            subtitle={model?.description ?? 'The provider default for this chat.'}
+            onPress={onOpenModel}
+            left={<Cpu size={18} color={colors['muted-foreground']} />}
+            right={<ChevronRight size={18} color={colors['muted-foreground']} />}
+          />
+        </>
+      ) : null}
+
       <SheetSection title="How it answers" />
       {MODE_OPTIONS.map((option) => (
         <SheetRow

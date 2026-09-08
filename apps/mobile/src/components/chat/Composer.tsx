@@ -40,7 +40,6 @@ import {
   ArrowUp,
   Camera,
   ClipboardPaste,
-  Cpu,
   FolderOpen,
   Globe,
   History,
@@ -84,7 +83,7 @@ import {
   type GateBannerProps,
   type WorkspacePrepProps,
 } from './composer/ComposerBanners';
-import { MODE_OPTIONS, modeLabel, optionsChipLabel } from './composer/turnOptions';
+import { MODE_OPTIONS, turnChipLabel } from './composer/turnOptions';
 import type {
   AttachmentSource,
   PromptHistoryEntry,
@@ -351,6 +350,13 @@ export function Composer(props: ComposerProps): React.ReactElement {
   const fieldEditable = !disabled || hasGate;
   const hasContent = draft.trim().length > 0 || attachments.length > 0 || Boolean(props.activeCommand);
   const canSend = hasContent && !disabled && !props.sending;
+  const turnLabel = turnChipLabel({
+    model,
+    mode: props.mode,
+    effort: props.effort,
+    permissionMode: props.permissionMode,
+    contextTier: props.contextTier,
+  });
 
   // ── Swipe up on the field → history ───────────────────────────
   const touchStart = useRef<{ x: number; y: number; t: number } | null>(null);
@@ -602,35 +608,20 @@ export function Composer(props: ComposerProps): React.ReactElement {
             // the context ring and the send button.
             style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0 }}
           >
+            {/* ONE chip for the whole "how should this turn run" decision.
+                Model, mode, effort, context and permissions used to be three
+                separate chips that could not fit the strip; they are all in
+                the sheet this opens, and the label says what is currently
+                set so nothing is hidden. */}
             <Chip
-              accessibilityLabel="Choose model"
-              label={model?.name ?? 'Model'}
-              icon={<Cpu size={13} color={colors['muted-foreground']} />}
-              onPress={() => setSheet('model')}
-              showChevron
-              // Long names ("Claude Opus 4.8", "GPT-5.6 Sol") otherwise push
-              // the options chip out of the strip on a 393pt screen.
-              maxWidth={120}
-            />
-            <Chip
-              accessibilityLabel={`Agent mode: ${modeLabel(props.mode)}`}
-              label={modeLabel(props.mode)}
-              icon={<Wand2 size={13} color={props.mode === 'plan' ? colors.primary : colors['muted-foreground']} />}
-              active={props.mode === 'plan'}
-              onPress={() => setSheet('mode')}
-              showChevron
-            />
-            <Chip
-              accessibilityLabel="Turn options"
-              label={optionsChipLabel({
-                effort: props.effort,
-                model,
-                permissionMode: props.permissionMode,
-                contextTier: props.contextTier,
-              })}
+              accessibilityLabel={`Turn setup: ${turnLabel}`}
+              accessibilityHint="Model, mode, effort and permissions for this turn"
+              label={turnLabel}
               icon={<SlidersHorizontal size={13} color={colors['muted-foreground']} />}
+              active={props.mode === 'plan' || props.permissionMode !== 'default'}
               onPress={() => setSheet('options')}
-              maxWidth={150}
+              showChevron
+              maxWidth={210}
             />
           </ScrollView>
 
@@ -670,6 +661,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
       <TurnOptionsSheet
         visible={sheet === 'options'}
         onClose={() => setSheet('none')}
+        onOpenModel={() => setSheet('model')}
         model={model}
         mode={props.mode}
         onModeChange={props.onModeChange}

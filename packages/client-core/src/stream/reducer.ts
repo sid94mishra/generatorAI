@@ -570,13 +570,18 @@ export function completeStream(
   }
   // A forced settle is the user's own Stop: latch it, so the transcript can
   // say the turn was stopped even when nothing had streamed yet.
+  //
+  // `pendingUserMessage` survives, for the reason given on `appendToken`: a
+  // consumer that dedupes the history copy against the LIVE TURN ID (both
+  // apps do) still hides it, so clearing it here made the user's own prompt
+  // disappear from the transcript the moment they pressed Stop, and stay
+  // gone until the screen was reloaded.
   if (opts.force) {
     return put(streams, sessionId, {
       ...existing,
       status: 'complete',
       typing: false,
       cancelRequested: true,
-      pendingUserMessage: null,
     });
   }
   // A settled turn has no held text left (the router force-flushes before the
@@ -594,21 +599,23 @@ export function completeStream(
  */
 export function requestCancel(streams: StreamsRecord, sessionId: string): StreamsRecord {
   const existing = existingOrDefault(streams, sessionId);
+  // `pendingUserMessage` is kept — see `completeStream`. Stopping a turn must
+  // not take the prompt that started it off the screen.
   return put(streams, sessionId, {
     ...existing,
     cancelRequested: true,
     status: 'complete',
-    pendingUserMessage: null,
     typing: false,
   });
 }
 
 export function errorStream(streams: StreamsRecord, sessionId: string): StreamsRecord {
   const existing = existingOrDefault(streams, sessionId);
+  // Same as the two above: a failed turn still has to show what was asked,
+  // otherwise the error row sits alone with no question attached to it.
   return put(streams, sessionId, {
     ...existing,
     status: 'error',
-    pendingUserMessage: null,
     typing: false,
   });
 }

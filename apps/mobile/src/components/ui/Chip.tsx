@@ -107,17 +107,27 @@ export function Chip({
         : colors[tone]
     : colors['muted-foreground'];
 
+  // An empty label is a deliberate icon-only chip: the caller keeps the
+  // accessible name and drops the visible one when the value is the default
+  // and the strip needs the room. Rendering an empty <Text> instead would
+  // leave its gap behind and the chip would look lopsided.
+  const iconOnly = label.length === 0;
+
   const body = (
     <>
       {icon}
-      <Text
-        numberOfLines={1}
-        maxFontSizeMultiplier={MAX_SCALE.chrome}
-        className={`font-medium ${SIZE_TEXT[size]} ${text}`}
-      >
-        {label}
-      </Text>
-      {showChevron ? <ChevronDown size={size === 'sm' ? 11 : 12} color={iconColor} /> : null}
+      {iconOnly ? null : (
+        <Text
+          numberOfLines={1}
+          maxFontSizeMultiplier={MAX_SCALE.chrome}
+          className={`font-medium ${SIZE_TEXT[size]} ${text}`}
+        >
+          {label}
+        </Text>
+      )}
+      {showChevron && !iconOnly ? (
+        <ChevronDown size={size === 'sm' ? 11 : 12} color={iconColor} />
+      ) : null}
     </>
   );
 
@@ -168,7 +178,7 @@ export function Chip({
       disabled={disabled}
       haptic="select"
       onPress={onPress}
-      className={`flex-row items-center rounded-full border ${SIZE_CONTAINER[size]} ${container}`}
+      className={`flex-row items-center rounded-full border ${SIZE_CONTAINER[size]} ${iconOnly ? 'justify-center px-2' : ''} ${container}`}
       style={maxWidth ? { maxWidth } : undefined}
     >
       {body}

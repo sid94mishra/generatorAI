@@ -19,7 +19,7 @@ import { queryKeys } from '@generatorai/client-core';
 
 import { useTheme } from '../../theme/ThemeProvider';
 import { Sheet } from '../ui/Sheet';
-import { Button } from '../ui/Button';
+import { Button, IconButton } from '../ui/Button';
 import { Field, Switch } from '../ui/Form';
 import { useToast } from '../ui/Toast';
 import { haptics } from '../ui/haptics';
@@ -97,32 +97,36 @@ export function CommitBar({
     );
   }
 
+  // Nothing to commit and no open PR to reach: the bar is furniture. It used
+  // to persist with a dead outlined button parked in its left corner, which
+  // read as unfinished rather than as "there is nothing to do here".
+  if (fileCount === 0 && !openPr) return null;
+
   return (
     <>
-      <View className="flex-row items-center gap-2 border-t border-border bg-card px-3 py-2">
-        <Button
-          label="Commit"
-          size="sm"
-          variant="secondary"
-          icon={<GitCommitHorizontal size={14} color={colors.foreground} />}
-          disabled={fileCount === 0}
-          onPress={() => setSheet('commit')}
-        />
-        {scmEnabled ? (
+      <View className="flex-row items-center gap-2 border-t border-border bg-card px-3 py-2.5">
+        {fileCount > 0 ? (
           <Button
-            label="Create PR"
-            size="sm"
+            grow
+            label={`Commit ${fileCount} ${fileCount === 1 ? 'file' : 'files'}`}
+            icon={<GitCommitHorizontal size={16} color={colors['primary-foreground']} />}
+            onPress={() => setSheet('commit')}
+          />
+        ) : null}
+        {scmEnabled && fileCount > 0 ? (
+          <IconButton
+            accessibilityLabel="Create a pull request"
             variant="secondary"
-            icon={<GitPullRequest size={14} color={colors.foreground} />}
+            icon={<GitPullRequest size={18} color={colors.foreground} />}
             onPress={() => setSheet('pr')}
           />
         ) : null}
-        <View className="flex-1" />
         {openPr ? (
           <Button
-            label={`#${openPr.number}`}
-            size="sm"
-            variant="ghost"
+            {...(fileCount === 0 ? { grow: true } : {})}
+            label={`PR #${openPr.number}`}
+            size={fileCount === 0 ? 'md' : 'sm'}
+            variant="secondary"
             icon={<ExternalLink size={14} color={colors.primary} />}
             accessibilityLabel={`Open pull request ${openPr.number}: ${openPr.title}`}
             onPress={() => void Linking.openURL(openPr.url)}

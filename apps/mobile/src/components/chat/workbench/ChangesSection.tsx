@@ -30,6 +30,7 @@ import {
   Send,
   WrapText,
 } from 'lucide-react-native';
+import { checkpointTime } from '../../review/checkpointGroups';
 import { Touchable } from '../../ui/Touchable';
 import { Button, IconButton } from '../../ui/Button';
 import { EmptyState, ErrorState } from '../../ui/States';
@@ -166,7 +167,9 @@ export function ChangesSection({
     const found = checkpoints.data?.checkpoints.find(
       (c) => `checkpoint:${c.id}` === base || (c.turnId && `turn:${c.turnId}` === base),
     );
-    return found ? `${checkpointLabel(found)} · ${new Date(found.createdAt).toLocaleTimeString()}` : 'a checkpoint';
+    return found
+      ? `${checkpointLabel(found)} · ${new Date(checkpointTime(found.createdAt)).toLocaleTimeString()}`
+      : 'a checkpoint';
   }, [base, changes.summary, checkpoints.data]);
 
   // Discard is a single-path checkpoint restore, not a reverse patch — the
@@ -362,7 +365,11 @@ export function ChangesSection({
         </View>
       ) : !changes.hasGit ? (
         <View className="flex-1">
-          <EmptyState title="Not a git repository" message="This workspace has no git history, so there is nothing to diff." />
+          <EmptyState
+            compact
+            title="Not a git repository"
+            message="This workspace has no git history, so there is nothing to diff."
+          />
         </View>
       ) : changes.files.length === 0 ? (
         <View className="flex-1">

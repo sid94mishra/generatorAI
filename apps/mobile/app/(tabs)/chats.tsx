@@ -20,8 +20,10 @@ import { LegendList } from '@legendapp/list/react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Activity,
   Archive,
   ArchiveRestore,
+  BellRing,
   MessagesSquare,
   Pencil,
   Plus,
@@ -97,9 +99,13 @@ export default function ChatsScreen(): React.ReactElement {
   // "is a turn in flight" flag, and a live dot is the single most useful
   // thing this list can show.
   const activity = useActivity();
-  const running = useMemo(
-    () => new Set(activity.health?.runningChatIds ?? []),
-    [activity.health],
+  const running = useMemo(() => new Set(activity.health?.runningChatIds ?? []), [activity.health]);
+  // Which chats are BLOCKED on a person. A catalogue that cannot say
+  // "this one is waiting on you" makes you open each chat to find out, which
+  // is the one question this app exists to answer quickly.
+  const waiting = useMemo(
+    () => new Set(activity.operations.filter((op) => op.kind === 'chat' && op.blocked).map((op) => op.id)),
+    [activity.operations],
   );
 
   const invalidate = useCallback(
@@ -117,8 +123,7 @@ export default function ChatsScreen(): React.ReactElement {
   });
 
   const setStatus = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      api.chats.update(id, { status }),
+    mutationFn: ({ id, status }: { id: string; status: string }) => api.chats.update(id, { status }),
     onSuccess: invalidate,
     onError: () => toast({ message: 'Could not update that chat.', tone: 'error' }),
   });
@@ -171,12 +176,14 @@ export default function ChatsScreen(): React.ReactElement {
   const visible = useMemo(() => {
     const list = chats.data ?? [];
     const q = query.trim().toLowerCase();
-    return list
-      .filter((chat) => (scope === 'archived' ? isArchived(chat) : !isArchived(chat)))
-      .filter((chat) => !q || chat.name.toLowerCase().includes(q))
-      // `updatedAt` arrives as an ISO string; subtracting them directly is NaN
-      // and leaves the list in whatever order the server returned.
-      .sort((a, b) => epochOr(b.updatedAt) - epochOr(a.updatedAt));
+    return (
+      list
+        .filter((chat) => (scope === 'archived' ? isArchived(chat) : !isArchived(chat)))
+        .filter((chat) => !q || chat.name.toLowerCase().includes(q))
+        // `updatedAt` arrives as an ISO string; subtracting them directly is NaN
+        // and leaves the list in whatever order the server returned.
+        .sort((a, b) => epochOr(b.updatedAt) - epochOr(a.updatedAt))
+    );
   }, [chats.data, query, scope]);
 
   const activeCount = (chats.data ?? []).filter((c) => !isArchived(c)).length;
@@ -228,19 +235,25 @@ export default function ChatsScreen(): React.ReactElement {
             keyExtractor={(chat: ChatSummary) => chat.id}
             estimatedItemSize={66}
             recycleItems
-            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 140, gap: 10 }}
+            // The gutter is on the row, not here: LegendList positions every
+            // container absolutely, so contentContainerStyle padding never
+            // reaches the rows.
+            contentContainerStyle={{ paddingBottom: 140, gap: 10 }}
             refreshing={chats.isFetching}
             onRefresh={() => void chats.refetch()}
             renderItem={({ item }: { item: ChatSummary }) => (
-              <ChatRow
-                chat={item}
-                live={running.has(item.id)}
-                archived={scope === 'archived'}
-                onArchive={() => archiveChat(item)}
-                onUnarchive={() => unarchiveChat(item)}
-                onDelete={() => setDeleting(item)}
-                onMenu={() => setMenuFor(item)}
-              />
+              <View className="px-4">
+                <ChatRow
+                  chat={item}
+                  live={running.has(item.id)}
+                  waiting={waiting.has(item.id)}
+                  archived={scope === 'archived'}
+                  onArchive={() => archiveChat(item)}
+                  onUnarchive={() => unarchiveChat(item)}
+                  onDelete={() => setDeleting(item)}
+                  onMenu={() => setMenuFor(item)}
+                />
+              </View>
             )}
           />
         )}
@@ -324,9 +337,18 @@ export default function ChatsScreen(): React.ReactElement {
   );
 }
 
+/**
+ * One catalogue row.
+ *
+ * Three facts, in the order they are wanted: what state the chat is in, what
+ * it is called, and what was last said in it. The state is carried by a
+ * leading marker AND by the row's left edge, so "waiting on you" is legible
+ * in a glance down the list rather than after reading four labels.
+ */
 function ChatRow({
   chat,
   live,
+  waiting,
   archived,
   onArchive,
   onUnarchive,
@@ -335,6 +357,7 @@ function ChatRow({
 }: {
   chat: ChatSummary;
   live: boolean;
+  waiting: boolean;
   archived: boolean;
   onArchive: () => void;
   onUnarchive: () => void;
@@ -377,39 +400,83 @@ function ChatRow({
     [archived, colors, onArchive, onUnarchive, onDelete],
   );
 
-  const status = live ? 'Running' : `Updated ${relativeTime(chat.updatedAt)}`;
+  const state = waiting ? 'waiting' : live ? 'running' : 'idle';
+  const stateLabel = waiting ? 'Waiting on you' : live ? 'Running' : relativeTime(chat.updatedAt);
+  const markerColor =
+    state === 'waiting' ? colors.warning : state === 'running' ? colors.info : colors['muted-foreground'];
+
+  // "You: …" for your own last line reads as a conversation; an unlabelled
+  // excerpt of your own prompt reads as the agent repeating you back.
+  const preview = chat.preview
+    ? chat.previewRole === 'user'
+      ? `You: ${chat.preview}`
+      : chat.preview
+    : null;
 
   return (
     <View className="overflow-hidden rounded-3xl">
       <SwipeableRow actions={actions}>
         <Touchable
-          accessibilityLabel={`${chat.name}, ${status}`}
+          accessibilityLabel={`${chat.name}. ${stateLabel}.${preview ? ` ${preview}` : ''}`}
           accessibilityHint="Double tap and hold for more actions"
           haptic="tap"
           scale="large"
           onPress={() => router.push(`/chats/${chat.id}`)}
           onLongPress={onMenu}
         >
-          <Card className="flex-row items-center gap-3 p-3.5">
-            <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
-              <MessagesSquare
-                size={16}
-                color={live ? colors.primary : colors['muted-foreground']}
-              />
+          <Card
+            className="flex-row gap-3 p-3.5"
+            // Inline rather than a utility: NativeWind has no reliable
+            // directional border-colour class, and the whole point of the
+            // marker is that it is unambiguous.
+            style={state === 'waiting' ? { borderLeftWidth: 3, borderLeftColor: colors.warning } : undefined}
+          >
+            <View
+              className={`h-9 w-9 items-center justify-center rounded-2xl ${
+                state === 'waiting' ? 'bg-warning-muted' : 'bg-subtle'
+              }`}
+            >
+              {state === 'waiting' ? (
+                <BellRing size={16} color={colors.warning} />
+              ) : state === 'running' ? (
+                <Activity size={16} color={colors.info} />
+              ) : (
+                <MessagesSquare size={16} color={colors['muted-foreground']} />
+              )}
             </View>
 
             <View className="flex-1 gap-0.5">
-              <Text numberOfLines={2} className="text-md font-medium text-foreground">
-                {chat.name}
-              </Text>
-              <View className="flex-row items-center gap-1.5">
-                {live ? <StatusDot tone="info" label={null} /> : null}
-                <Text numberOfLines={1} className="flex-1 text-xs text-muted-foreground">
-                  {live ? 'Running · ' : ''}
-                  {relativeTime(chat.updatedAt)}
-                  {chat.model ? ` · ${chat.model}` : ''}
+              <View className="flex-row items-baseline gap-2">
+                <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
+                  {chat.name}
                 </Text>
+                <Text className="text-xs text-muted-foreground">{relativeTime(chat.updatedAt)}</Text>
               </View>
+
+              {preview ? (
+                <Text numberOfLines={1} className="text-sm text-muted-foreground">
+                  {preview}
+                </Text>
+              ) : null}
+
+              {state !== 'idle' || chat.model ? (
+                <View className="flex-row items-center gap-1.5 pt-0.5">
+                  {state !== 'idle' ? (
+                    <>
+                      <StatusDot tone={state === 'waiting' ? 'warning' : 'info'} label={null} />
+                      <Text numberOfLines={1} className="text-xs font-medium" style={{ color: markerColor }}>
+                        {stateLabel}
+                      </Text>
+                    </>
+                  ) : null}
+                  {chat.model ? (
+                    <Text numberOfLines={1} className="flex-1 text-xs text-muted-foreground">
+                      {state !== 'idle' ? '· ' : ''}
+                      {chat.model}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
           </Card>
         </Touchable>

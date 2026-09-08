@@ -47,7 +47,12 @@ export type AuthState =
   | { status: 'pairing' }
   | { status: 'authenticated'; deviceId: string; scopes: string[]; expiresAt: number }
   | { status: 'revoked'; reason: string }
-  | { status: 'error'; message: string };
+  /**
+   * `kind` separates "cannot reach the host" from "the host rejected this
+   * device's saved session". Both are recoverable and neither is a
+   * revocation, but they need different words in front of the user.
+   */
+  | { status: 'error'; message: string; kind?: 'unreachable' | 'credential' };
 
 export interface ClientRuntimeOptions {
   /** Base URL of the GeneratorAI API, e.g. `http://127.0.0.1:3100`. */
@@ -81,6 +86,30 @@ export class DeviceRevokedError extends Error {
   constructor(message = 'This device has been revoked') {
     super(message);
     this.name = 'DeviceRevokedError';
+  }
+}
+
+/**
+ * The stored resume credential was rejected, but the DEVICE was not revoked.
+ *
+ * These are two different facts and they were being conflated. A server that
+ * cannot durably write the rotated credential — a full disk, a failed
+ * transaction, a process killed between issuing and committing — answers the
+ * next refresh with `INVALID_GRANT`, and treating that as a revocation wiped
+ * the pairing and told the user "this device is no longer authorized", which
+ * was neither true nor recoverable without going back to the host.
+ *
+ * The credential is genuinely unusable, so the session cannot continue; but
+ * the key stays, the pairing stays, and the user is offered a retry with an
+ * honest reason before anything is destroyed.
+ */
+export class CredentialRejectedError extends Error {
+  constructor(
+    message = 'The server did not accept this device’s saved session',
+    readonly code: string = 'INVALID_GRANT',
+  ) {
+    super(message);
+    this.name = 'CredentialRejectedError';
   }
 }
 
@@ -588,6 +617,31 @@ export class AuthenticatedClientRuntime {
     if (this.refreshInFlight) return this.refreshInFlight;
     this.refreshInFlight = this.doRefresh()
       .catch(async (error) => {
+        // ONE retry on a rejected credential before giving up. The server
+        // keeps the previous generation in a grace window precisely so an
+        // interrupted rotation can recover, and a rejection here is often a
+        // race with the write that rotated it.
+        if (error instanceof CredentialRejectedError) {
+          try {
+            await this.doRefresh();
+            return;
+          } catch (retryError) {
+            if (retryError instanceof DeviceRevokedError) {
+              await this.forget();
+              this.setState({ status: 'revoked', reason: retryError.message });
+            } else {
+              // NOT `forget()`: the pairing and the key are still valid as far
+              // as anyone knows, and destroying them turns a retryable
+              // failure into a trip back to the host machine.
+              this.setState({
+                status: 'error',
+                message: (retryError as Error).message,
+                kind: 'credential',
+              });
+            }
+            throw retryError;
+          }
+        }
         if (error instanceof DeviceRevokedError) {
           await this.forget();
           this.setState({ status: 'revoked', reason: error.message });
@@ -628,8 +682,19 @@ export class AuthenticatedClientRuntime {
         error?: { code?: string };
       } | null;
       const code = body?.error?.code;
-      if (code === 'REVOKED' || code === 'INVALID_GRANT' || code === 'INVALID_KEY') {
+      // A REVOKED device or a key that does not match are decisions the
+      // server made about this DEVICE: unrecoverable, and re-pairing is the
+      // only route. Everything else is a statement about the CREDENTIAL.
+      if (code === 'REVOKED' || code === 'INVALID_KEY') {
         throw new DeviceRevokedError('The server no longer recognises this device.');
+      }
+      if (code === 'INVALID_GRANT' || code === 'EXPIRED' || code === 'CREDENTIAL_SUPERSEDED') {
+        throw new CredentialRejectedError(
+          code === 'EXPIRED'
+            ? 'This device’s saved session has expired.'
+            : 'The server did not accept this device’s saved session.',
+          code,
+        );
       }
     }
     if (!response.ok) {

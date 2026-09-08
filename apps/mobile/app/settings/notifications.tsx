@@ -17,10 +17,9 @@ import { BellOff, BellRing, CircleHelp, MessageSquare, Workflow } from 'lucide-r
 
 import { prefs } from '../../src/storage/prefs';
 import { describePushStatus, usePushStatusStore } from '../../src/notifications/pushStatus';
-import { Badge, Card, SectionHeader } from '../../src/components/ui/primitives';
+import { Card, SectionHeader } from '../../src/components/ui/primitives';
 import { Button } from '../../src/components/ui/Button';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
-import { Switch } from '../../src/components/ui/Form';
 import { Screen } from '../../src/components/ui/Screen';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
@@ -111,9 +110,6 @@ export default function NotificationsScreen(): React.ReactElement {
             )
           }
           chevron={false}
-          trailing={
-            <Badge label={granted ? 'Granted' : 'Not granted'} tone={granted ? 'success' : 'warning'} />
-          }
         />
         {!granted ? (
           <Button
@@ -152,20 +148,20 @@ export default function NotificationsScreen(): React.ReactElement {
             icon={<Icon size={18} color={colors['muted-foreground']} />}
             chevron={false}
             disabled={!granted}
-            trailing={
-              <Switch
-                accessibilityLabel={title}
-                value={values[key] ?? false}
-                disabled={!granted}
-                onValueChange={(next) => {
-                  prefs.setString(key, next ? '1' : '0');
-                  setValues((prev) => ({ ...prev, [key]: next }));
-                  // Re-syncs the server-side mute (see notificationFilter.ts);
-                  // the foreground filter reads prefs directly on each push.
-                  bumpPreferences();
-                }}
-              />
-            }
+            // `toggle`, not a <Switch> in `trailing`: the row then IS the
+            // switch — one accessibility element that announces its label,
+            // its help text and its on/off state. As a trailing sibling the
+            // row announced as a button and the state was not exposed at all.
+            toggle={{
+              value: values[key] ?? false,
+              onValueChange: (next) => {
+                prefs.setString(key, next ? '1' : '0');
+                setValues((prev) => ({ ...prev, [key]: next }));
+                // Re-syncs the server-side mute (see notificationFilter.ts);
+                // the foreground filter reads prefs directly on each push.
+                bumpPreferences();
+              },
+            }}
           />
         ))}
       </ListGroup>

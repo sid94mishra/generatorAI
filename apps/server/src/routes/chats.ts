@@ -21,7 +21,7 @@ import {
   SetChatPermissionModeSchema,
   coerceAgentMode,
 } from '@generatorai/shared';
-import type { PlanDocument } from '@generatorai/shared';
+import type { ChatMessage, PlanDocument } from '@generatorai/shared';
 
 /**
  * Body of `POST /chats/:id/cancel`. The budget is clamped, not rejected: the
@@ -70,6 +70,23 @@ function canBypassPermissions(req: { principal?: { scopes?: readonly string[] } 
  * Send on it and shows the preparation error, so it travels with the chat
  * rather than requiring a second request.
  */
+/**
+ * A message rendered as one line of catalogue text.
+ *
+ * Fenced code, images and long tool output all collapse: the row has ~40
+ * characters of usable width on a phone, and a preview that starts with
+ * ```ts tells the reader nothing about the conversation.
+ */
+function previewText(content: string): string {
+  const flat = content
+    .replace(/```[\s\S]*?```/g, ' [code] ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' [image] ')
+    .replace(/[*_`#>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return flat.length > 160 ? `${flat.slice(0, 159)}…` : flat;
+}
+
 async function withWorkspacePrep<T extends { workspaceId?: string }>(container: Container, chat: T): Promise<T> {
   if (!chat.workspaceId) return chat;
   try {
@@ -205,7 +222,35 @@ export function createChatApiRoutes(container: Container): Router {
         projectId,
       );
       const page = limit === undefined ? chats : chats.slice(0, limit);
-      res.json(await Promise.all(page.map((c) => withWorkspacePrep(container, c))));
+      // One-line preview per row, in ONE extra query for the whole page. The
+      // catalogue is the phone's main navigation surface and a title plus a
+      // relative time is not enough to tell two chats apart.
+      //
+      // Best-effort: a preview is a nicety, and a catalogue that fails
+      // outright because the preview query did is worse than one without.
+      let previews = new Map<string, ChatMessage>();
+      try {
+        previews = await container.chatMessageRepo.latestBySessionIds(
+          page.map((c) => c.sessionId).filter((id): id is string => Boolean(id)),
+        );
+      } catch (previewErr) {
+        logger.warn(
+          `[ChatRoutes] Could not load list previews: ${
+            previewErr instanceof Error ? previewErr.message : String(previewErr)
+          }`,
+        );
+      }
+      const withPreview = page.map((c) => {
+        const last = c.sessionId ? previews.get(c.sessionId) : undefined;
+        if (!last) return c;
+        return {
+          ...c,
+          preview: previewText(last.content),
+          previewRole: last.role,
+          previewAt: last.timestamp,
+        };
+      });
+      res.json(await Promise.all(withPreview.map((c) => withWorkspacePrep(container, c))));
     } catch (err) {
       next(err);
     }

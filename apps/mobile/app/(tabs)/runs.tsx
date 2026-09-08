@@ -26,7 +26,7 @@ import { LegendList } from '@legendapp/list/react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { Bot, FileCode2, Play, Plus, Workflow as WorkflowIcon } from 'lucide-react-native';
+import { Bot, Play, Plus, Workflow as WorkflowIcon } from 'lucide-react-native';
 import {
   epochOr,
   queryKeys,
@@ -75,7 +75,6 @@ const NEW_SHEET_COPY: Record<WorkSegment, { title: string; message: string } | n
       'The automation stepper (trigger, workflows, input mode, retry) lands in the next phase. Until then, create automations on the desktop or web app — their runs and history show up here.',
   },
   runs: null,
-  scripts: null,
 };
 
 export default function WorkScreen(): React.ReactElement {
@@ -196,23 +195,23 @@ export default function WorkScreen(): React.ReactElement {
   }, [runs, workflows, automations]);
 
   const header = (
-    <View className="gap-3 pb-3">
+    // The gutter is on the header/rows, not on contentContainerStyle:
+    // LegendList's containers are absolutely positioned and never see it.
+    <View className="gap-3 px-4 pb-3">
       <SegmentedControl segments={segments} value={segment} onChange={setSegment} accessibilityLabel="Work catalogue" />
-      {segment !== 'scripts' ? (
-        <SearchField value={query} onChangeText={setQuery} placeholder={`Search ${WORK_SEGMENT_LABEL[segment].toLowerCase()}`} />
-      ) : null}
+      <SearchField
+        value={query}
+        onChangeText={setQuery}
+        placeholder={`Search ${WORK_SEGMENT_LABEL[segment].toLowerCase()}`}
+      />
     </View>
   );
 
   const empty =
-    segment === 'scripts' ? (
-      <EmptyState
-        title="Scripts are coming"
-        message="Script listing, run-with-profile and materialise land with the Work phase. The server exposes scripts today; this app does not list them yet."
-        icon={<FileCode2 size={22} color={colors['muted-foreground']} />}
-      />
-    ) : active?.isLoading ? (
-      <SkeletonList rows={5} />
+    active?.isLoading ? (
+      <View className="px-4">
+        <SkeletonList rows={5} />
+      </View>
     ) : active?.isError ? (
       <ErrorState message="Could not load this list." onRetry={() => void active.refetch()} />
     ) : query ? (
@@ -261,35 +260,38 @@ export default function WorkScreen(): React.ReactElement {
               keyExtractor={(row: Row) => `${row.kind}:${row.item.id}`}
               estimatedItemSize={108}
               recycleItems
-              contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 160, gap: 10 }}
+              contentContainerStyle={{ paddingBottom: 160, gap: 10 }}
               ListHeaderComponent={header}
               ListEmptyComponent={empty}
               refreshing={runs.isFetching || workflows.isFetching || automations.isFetching}
               onRefresh={refreshAll}
-              renderItem={({ item: row }: { item: Row }) =>
-                row.kind === 'run' ? (
-                  <RunCard run={row.item} />
-                ) : row.kind === 'workflow' ? (
-                  <WorkflowCard workflow={row.item} runs={runs.data ?? []} />
-                ) : (
-                  <AutomationCard automation={row.item} />
-                )
-              }
+              renderItem={({ item: row }: { item: Row }) => (
+                <View className="px-4">
+                  {row.kind === 'run' ? (
+                    <RunCard run={row.item} />
+                  ) : row.kind === 'workflow' ? (
+                    <WorkflowCard workflow={row.item} runs={runs.data ?? []} />
+                  ) : (
+                    <AutomationCard automation={row.item} />
+                  )}
+                </View>
+              )}
             />
           </View>
         </GestureDetector>
       </Screen>
 
-      {/* No FAB on Scripts: there is nothing it could honestly do yet. */}
-      {segment !== 'scripts' ? (
-        <Fab
-          accessibilityLabel={segment === 'runs' ? 'New run — pick a workflow' : `New ${WORK_SEGMENT_LABEL[segment].slice(0, -1).toLowerCase()}`}
-          icon={<Plus size={22} color={colors['primary-foreground']} />}
-          label="New"
-          onPress={onNew}
-          offset={64}
-        />
-      ) : null}
+      <Fab
+        accessibilityLabel={
+          segment === 'runs'
+            ? 'New run — pick a workflow'
+            : `New ${WORK_SEGMENT_LABEL[segment].slice(0, -1).toLowerCase()}`
+        }
+        icon={<Plus size={22} color={colors['primary-foreground']} />}
+        label="New"
+        onPress={onNew}
+        offset={64}
+      />
 
       {newCopy ? (
         <ComingSoonSheet

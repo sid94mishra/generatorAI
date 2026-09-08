@@ -37,7 +37,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useShallow } from 'zustand/react/shallow';
-import { Archive, ArrowDown, Pencil, Share2, Square, Volume2 } from 'lucide-react-native';
+import { Archive, ArchiveRestore, ArrowDown, Pencil, Share2, Square, Volume2 } from 'lucide-react-native';
 import {
   ApiError,
   isArchived,
@@ -212,6 +212,12 @@ export default function ChatScreen(): React.ReactElement {
     enabled: Boolean(projectId),
     staleTime: 60_000,
   });
+  // Mount aliases ("main", "docs") name what is checked out for this chat.
+  const repoAliases = useMemo(
+    () => (changes.data?.repos ?? []).map((repo) => repo.alias).filter((a) => a && a !== '.'),
+    [changes.data?.repos],
+  );
+
   const codebaseCount =
     (chat.data as { codebaseIds?: string[] } | undefined)?.codebaseIds?.length ??
     project.data?.codebases.length ??
@@ -272,17 +278,32 @@ export default function ChatScreen(): React.ReactElement {
   const streamConnection = useStreamHealth((s) => s.connection);
   const transport = describeSessionTransport(auth.transport, streamConnection);
   const title = chat.data?.name ?? 'Chat';
+  // What this chat will touch, under its name. The project it is bound to is
+  // otherwise only discoverable by opening the New-chat sheet's Project page
+  // on a chat that already exists — which is to say, not at all.
+  const headerSubtitle = useMemo(() => {
+    const parts: string[] = [];
+    if (project.data?.name) parts.push(project.data.name);
+    else if (repoAliases.length > 0) parts.push(repoAliases.join(', '));
+    if (mode === 'plan') parts.push('Plan first');
+    return parts.length > 0 ? parts.join(' · ') : null;
+  }, [project.data?.name, repoAliases, mode]);
 
   React.useLayoutEffect(() => {
     navigation.setOptions({
       title,
       headerTitle: () => (
-        <ChatHeaderTitle title={title} transport={transport} onPress={() => setRenameOpen(true)} />
+        <ChatHeaderTitle
+          title={title}
+          subtitle={headerSubtitle}
+          transport={transport}
+          onPress={() => setRenameOpen(true)}
+        />
       ),
       headerRight: () => <ChatHeaderMenuButton onPress={() => setMenuOpen(true)} />,
     });
     // `transport` is rebuilt every render; its label/tone are what matter.
-  }, [navigation, title, transport.label, transport.tone]);
+  }, [navigation, title, headerSubtitle, transport.label, transport.tone]);
 
   // ── Mutations ────────────────────────────────────────────────
   /**
@@ -376,16 +397,19 @@ export default function ChatScreen(): React.ReactElement {
     [patchChat, harnessConfig],
   );
 
+  // Archiving is reversible, so this menu item toggles rather than turning
+  // into a permanently disabled "Archived" row — which is what the chat list
+  // has always done ("Move to active") and what the detail screen did not.
   const archive = useMutation({
-    mutationFn: () => api.chats.archive(chatId!),
-    onSuccess: () => {
+    mutationFn: (next: 'archived' | 'active') => api.chats.update(chatId!, { status: next }),
+    onSuccess: (_result, next) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId!) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.chats() });
-      toast({ message: 'Chat archived.', tone: 'success' });
+      toast({ message: next === 'archived' ? 'Chat archived.' : 'Chat restored.', tone: 'success' });
     },
     onError: () => {
       haptics.error();
-      toast({ message: 'Could not archive this chat.', tone: 'error' });
+      toast({ message: 'Could not change this chat.', tone: 'error' });
     },
   });
 
@@ -1012,12 +1036,16 @@ export default function ChatScreen(): React.ReactElement {
               },
             },
             {
-              label: archived ? 'Archived' : 'Archive',
-              icon: <Archive size={18} color={colors.danger} />,
-              destructive: true,
-              disabled: archived || archive.isPending,
-              detail: archived ? 'Unarchive from the chat list.' : undefined,
-              onPress: () => archive.mutate(),
+              // Not destructive: red is for Delete. Archiving is a filing
+              // action and it is undone from this very menu.
+              label: archived ? 'Move to active' : 'Archive',
+              icon: archived ? (
+                <ArchiveRestore size={18} color={colors.foreground} />
+              ) : (
+                <Archive size={18} color={colors.foreground} />
+              ),
+              disabled: archive.isPending,
+              onPress: () => archive.mutate(archived ? 'active' : 'archived'),
             },
           ]}
         />

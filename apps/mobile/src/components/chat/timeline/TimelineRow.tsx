@@ -605,7 +605,9 @@ function StoppedRow(): React.ReactElement {
       accessibilityLiveRegion="polite"
       className="flex-row items-center justify-center gap-2 py-1"
     >
-      <Square size={11} color={colors['muted-foreground']} />
+      {/* Filled, not an outline: a hollow 11pt square beside grey text reads
+          as an empty checkbox, which is not what a stop marker should say. */}
+      <Square size={10} color={colors['muted-foreground']} fill={colors['muted-foreground']} />
       <Text className="text-xs text-muted-foreground">Stopped by you before the response finished</Text>
     </Animated.View>
   );

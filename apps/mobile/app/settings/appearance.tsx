@@ -103,8 +103,10 @@ export default function AppearanceScreen(): React.ReactElement {
                 <View className="flex-row items-center gap-2">
                   {/* `system` resolves to a variant the user cannot otherwise
                       see — so say which one it landed on. */}
-                  {option.id === 'system' ? <Badge label={appearance} tone="neutral" /> : null}
-                  {selected ? <Check size={18} color={colors.primary} /> : null}
+                  {option.id === 'system' ? (
+                    <Badge label={appearance === 'dark' ? 'Dark' : 'Light'} tone="neutral" />
+                  ) : null}
+                  <SelectionCheck selected={selected} color={colors.primary} />
                 </View>
               }
             />
@@ -128,7 +130,7 @@ export default function AppearanceScreen(): React.ReactElement {
                   trailing={
                     <View className="flex-row items-center gap-2">
                       <ThemePreview theme={option} appearance={appearance} accentId={accent} />
-                      {selected ? <Check size={18} color={colors.primary} /> : null}
+                      <SelectionCheck selected={selected} color={colors.primary} />
                     </View>
                   }
                 />
@@ -192,5 +194,20 @@ export default function AppearanceScreen(): React.ReactElement {
         </View>
       </Card>
     </Screen>
+  );
+}
+
+/**
+ * The selection tick, with its slot always reserved.
+ *
+ * Rendering `null` for the unselected rows made every preview in the list
+ * jump 26pt sideways when the selection moved, so the four theme thumbnails
+ * never lined up with each other.
+ */
+function SelectionCheck({ selected, color }: { selected: boolean; color: string | undefined }): React.ReactElement {
+  return (
+    <View className="w-[18px] items-center">
+      {selected ? <Check size={18} color={color} /> : null}
+    </View>
   );
 }

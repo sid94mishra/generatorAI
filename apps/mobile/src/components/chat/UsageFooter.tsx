@@ -12,7 +12,7 @@
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import { Coins, TriangleAlert, Zap } from 'lucide-react-native';
+import { ChevronDown, Coins, TriangleAlert, Zap } from 'lucide-react-native';
 import type { StreamUsage } from '@generatorai/client-core';
 
 import { Touchable } from '../ui/Touchable';
@@ -38,26 +38,36 @@ export function UsageFooter({
 
   return (
     <Touchable
-      accessibilityLabel={`Turn usage: ${usage.model}, ${compact(usage.inputTokens)} in, ${compact(usage.outputTokens)} out${cost ? `, ${cost}` : ''}${hint ? `. ${hint}` : ''}`}
+      accessibilityLabel={`Turn usage: ${usage.model}${duration ? `, ${duration}` : ''}${cost ? `, ${cost}` : ''}${hint ? `. ${hint}` : ''}`}
+      accessibilityHint="Shows the token breakdown"
+      accessibilityState={{ expanded }}
       haptic="tap"
       scale="large"
       onPress={() => setExpanded((v) => !v)}
       className={`self-start rounded-2xl px-3 py-2 ${hint ? 'border border-warning bg-warning-muted' : 'bg-subtle'}`}
     >
+      {/* Collapsed, this says the three things that are read: which model,
+          how long, what it cost. The arrows-and-lightning token line needed a
+          legend nobody has — it now lives one tap down with its labels. */}
       <View className="flex-row items-center gap-2">
         {hint ? <TriangleAlert size={12} color={colors.warning} /> : <Coins size={12} color={colors['muted-foreground']} />}
         <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-          {usage.model} · ↑{compact(usage.inputTokens)}
-          {cached > 0 ? ` · ⚡${compact(cached)}` : ''} · ↓{compact(usage.outputTokens)}
+          {usage.model}
           {duration ? ` · ${duration}` : ''}
           {cost ? ` · ${cost}` : ''}
         </Text>
+        <ChevronDown
+          size={12}
+          color={colors['muted-foreground']}
+          style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}
+        />
       </View>
 
       {expanded ? (
         <Animated.View entering={FadeIn.duration(120)} className="mt-2 gap-0.5">
-          <Detail label="Input" value={compact(usage.inputTokens)} />
-          <Detail label="Output" value={compact(usage.outputTokens)} />
+          <Detail label="Sent" value={compact(usage.inputTokens)} />
+          <Detail label="Received" value={compact(usage.outputTokens)} />
+          {duration ? <Detail label="Took" value={duration} /> : null}
           {cached > 0 ? <Detail label="Cache read" value={compact(cached)} icon={<Zap size={11} color={colors.success} />} /> : null}
           {usage.cacheWriteTokens ? <Detail label="Cache write" value={compact(usage.cacheWriteTokens)} /> : null}
           {usage.provider ? <Detail label="Provider" value={usage.provider} /> : null}

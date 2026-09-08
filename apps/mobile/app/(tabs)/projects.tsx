@@ -107,9 +107,11 @@ export default function ProjectsScreen(): React.ReactElement {
           keyExtractor={(row: Row) => `${row.kind}:${row.item.id}`}
           estimatedItemSize={66}
           recycleItems
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 160, gap: 10 }}
+          // The gutter is on the header/rows: LegendList positions its
+          // containers absolutely, so contentContainerStyle padding is lost.
+          contentContainerStyle={{ paddingBottom: 160, gap: 10 }}
           ListHeaderComponent={
-            <View className="gap-3 pb-3">
+            <View className="gap-3 px-4 pb-3">
               <SegmentedControl
                 segments={[
                   { value: 'projects', label: 'Projects', count: projects.data?.length ?? 0 },
@@ -132,33 +134,35 @@ export default function ProjectsScreen(): React.ReactElement {
             haptics.tap();
             void active.refetch();
           }}
-          renderItem={({ item: row }: { item: Row }) =>
-            row.kind === 'agent' ? (
-              <AgentCard agent={row.item} onPress={() => setAgent(row.item)} />
-            ) : (
-              <Touchable
-                accessibilityLabel={row.item.name}
-                accessibilityHint={row.item.description ?? undefined}
-                haptic="tap"
-                scale="large"
-                onPress={() => router.push(`/projects/${row.item.id}`)}
-              >
-                <Card className="flex-row items-center gap-3 p-3.5">
-                  <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
-                    <FolderGit2 size={16} color={colors['muted-foreground']} />
-                  </View>
-                  <View className="flex-1 gap-0.5">
-                    <Text numberOfLines={2} className="text-md font-medium text-foreground">
-                      {row.item.name}
-                    </Text>
-                    <Text numberOfLines={2} className="text-xs text-muted-foreground">
-                      {row.item.description ?? `Created ${relativeTime(row.item.createdAt)}`}
-                    </Text>
-                  </View>
-                </Card>
-              </Touchable>
-            )
-          }
+          renderItem={({ item: row }: { item: Row }) => (
+            <View className="px-4">
+              {row.kind === 'agent' ? (
+                <AgentCard agent={row.item} onPress={() => setAgent(row.item)} />
+              ) : (
+                <Touchable
+                  accessibilityLabel={row.item.name}
+                  accessibilityHint={row.item.description ?? undefined}
+                  haptic="tap"
+                  scale="large"
+                  onPress={() => router.push(`/projects/${row.item.id}`)}
+                >
+                  <Card className="flex-row items-center gap-3 p-3.5">
+                    <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
+                      <FolderGit2 size={16} color={colors['muted-foreground']} />
+                    </View>
+                    <View className="flex-1 gap-0.5">
+                      <Text numberOfLines={2} className="text-md font-medium text-foreground">
+                        {row.item.name}
+                      </Text>
+                      <Text numberOfLines={2} className="text-xs text-muted-foreground">
+                        {row.item.description ?? `Created ${relativeTime(row.item.createdAt)}`}
+                      </Text>
+                    </View>
+                  </Card>
+                </Touchable>
+              )}
+            </View>
+          )}
         />
       </Screen>
 

@@ -32,6 +32,8 @@ export interface Segment<T extends string> {
   icon?: React.ReactNode;
   /** Small count shown after the label — e.g. "Runs 12". */
   count?: number;
+  /** A live dot after the label, for state that has no useful number. */
+  live?: boolean;
 }
 
 /**
@@ -112,7 +114,10 @@ export function SegmentedControl<T extends string>({
 
   return (
     <View
-      className={`min-h-10 rounded-full bg-subtle p-1 ${className}`}
+      // 44pt tall, not 40: this is a primary control on the chat screen and
+      // it shares the row with nothing else, so the platform minimum is the
+      // right floor rather than the desktop segmented-control's 32.
+      className={`min-h-11 rounded-full bg-subtle p-1 ${className}`}
       accessibilityRole="tablist"
       {...(accessibilityLabel ? { accessibilityLabel } : {})}
     >
@@ -136,12 +141,18 @@ export function SegmentedControl<T extends string>({
               key={segment.value}
               a11yRole="tab"
               accessibilityState={{ selected }}
-              accessibilityLabel={count !== undefined && count > 0 ? `${segment.label}, ${count}` : segment.label}
+              accessibilityLabel={
+                count !== undefined && count > 0
+                  ? `${segment.label}, ${count}`
+                  : segment.live
+                    ? `${segment.label}, running`
+                    : segment.label
+              }
               haptic={haptic ? 'select' : 'none'}
               ripple={false}
               scale="none"
               onPress={() => onChange(segment.value)}
-              className={`min-h-8 flex-1 flex-row items-center justify-center ${dense ? "gap-1 px-0.5" : "gap-1.5"} rounded-full py-1`}
+              className={`min-h-9 flex-1 flex-row items-center justify-center ${dense ? 'gap-1 px-0.5' : 'gap-1.5'} rounded-full py-1`}
             >
               {segment.icon}
               <Text
@@ -151,6 +162,9 @@ export function SegmentedControl<T extends string>({
               >
                 {segment.label}
               </Text>
+              {segment.live ? (
+                <View accessible={false} className="h-1.5 w-1.5 rounded-full bg-success" />
+              ) : null}
               {dense && count !== undefined && count > 0 ? (
                 <View accessible={false} className="h-1.5 w-1.5 rounded-full bg-primary" />
               ) : null}

@@ -24,6 +24,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
+import { useQuery } from '@tanstack/react-query';
 import { Ellipsis, Monitor } from 'lucide-react-native';
 
 import { IconButton } from '../../ui/Button';
@@ -31,6 +32,7 @@ import { Pager, type PagerHandle } from '../../ui/Pager';
 import { SegmentedControl, type Segment } from '../../ui/SegmentedControl';
 import { EmptyState } from '../../ui/States';
 import { checkFeature } from '../../../auth/featureGate';
+import { useAuth } from '../../../auth/AuthProvider';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { ChangesSection } from '../workbench/ChangesSection';
 import { TerminalSection } from '../workbench/TerminalSection';
@@ -76,12 +78,42 @@ export function SessionPanes({
   renderChat,
 }: SessionPanesProps): React.ReactElement {
   const { colors } = useTheme();
+  const { fetch: authFetch } = useAuth();
   const progress = useSharedValue(0);
   const pagerRef = useRef<PagerHandle | null>(null);
 
-  const panes = useMemo(() => availablePanes({ workspaceId, scopes, changesCount }), [workspaceId, scopes, changesCount]);
+  // Same query key as BrowserSection's, so this is a cache read rather than
+  // a second poll — it exists so the STRIP can say the browser is up without
+  // the user having to open the pane to find out.
+  const browserDescriptor = useQuery<{ ready?: boolean }>({
+    queryKey: ['workspaces', workspaceId, 'browser', 'descriptor'] as const,
+    queryFn: async () => {
+      const response = await authFetch(`/api/workspaces/${workspaceId}/browser/descriptor`);
+      if (!response.ok) throw new Error(String(response.status));
+      return (await response.json()) as { ready?: boolean };
+    },
+    enabled: Boolean(workspaceId) && checkFeature('browser', scopes).available,
+    refetchInterval: 5_000,
+  });
+
+  const panes = useMemo(
+    () =>
+      availablePanes({
+        workspaceId,
+        scopes,
+        changesCount,
+        browserLive: browserDescriptor.data?.ready === true,
+      }),
+    [workspaceId, scopes, changesCount, browserDescriptor.data?.ready],
+  );
   const segments = useMemo<Segment<PaneId>[]>(
-    () => panes.map((p) => ({ value: p.id, label: p.label, ...(p.count !== undefined ? { count: p.count } : {}) })),
+    () =>
+      panes.map((p) => ({
+        value: p.id,
+        label: p.label,
+        ...(p.count !== undefined ? { count: p.count } : {}),
+        ...(p.live ? { live: true } : {}),
+      })),
     [panes],
   );
 
@@ -200,7 +232,10 @@ function ChangesPage({
 function ComputerPage(): React.ReactElement {
   const { colors } = useTheme();
   return (
-    <View className="flex-1 justify-center">
+    // Top-aligned like every other pane's empty state — this one was the
+    // only one centred in the page, so switching panes moved the message
+    // half a screen.
+    <View className="flex-1">
       <EmptyState
         icon={<Monitor size={22} color={colors['muted-foreground']} />}
         title="Computer use"

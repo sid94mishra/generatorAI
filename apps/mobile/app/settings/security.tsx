@@ -15,7 +15,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clock, KeyRound, ShieldAlert, ShieldCheck, Smartphone } from 'lucide-react-native';
+import { ChevronDown, Clock, Eye, KeyRound, ShieldAlert, ShieldCheck, Smartphone } from 'lucide-react-native';
 
 import {
   lastResolvedRequestOf,
@@ -38,6 +38,7 @@ import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { Card, Divider, SectionHeader } from '../../src/components/ui/primitives';
 import { Screen } from '../../src/components/ui/Screen';
 import { Spinner } from '../../src/components/ui/States';
+import { Touchable } from '../../src/components/ui/Touchable';
 import { useToast } from '../../src/components/ui/Toast';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
@@ -100,6 +101,11 @@ export default function SecurityScreen(): React.ReactElement {
   const [unpairing, setUnpairing] = useState(false);
 
   const scopes = state.status === 'authenticated' ? state.scopes : [];
+  // Split by consequence, not alphabetically: "can change this machine" is
+  // the only division that answers the question this screen is opened with.
+  const sensitiveScopes = useMemo(() => scopes.filter(isSensitiveScope), [scopes]);
+  const readOnlyScopes = useMemo(() => scopes.filter((scope) => !isSensitiveScope(scope)), [scopes]);
+  const [readOpen, setReadOpen] = useState(false);
 
   // Naming what is MISSING, not just what is held. "Terminal is not enabled"
   // in the workbench was previously the only hint, and it appeared in a
@@ -324,17 +330,70 @@ export default function SecurityScreen(): React.ReactElement {
       {/* ── Permissions ── */}
       <SectionHeader title="What this device can do" />
       <Card className="gap-3 p-4">
+        {/* Two groups, not twenty-four undifferentiated bullets. This is the
+            screen someone opens when they are worried about what a phone can
+            do to their machine, and "can change this machine" is the only
+            division that answers that question. The read-only half is
+            collapsed because it is long and reassuring, not alarming. */}
         {scopes.length === 0 ? (
           <Text className="text-sm text-muted-foreground">Not paired.</Text>
         ) : (
-          scopes.map((scope) => (
-            <View key={scope} className="flex-row gap-2">
-              <Text className={isSensitiveScope(scope) ? 'text-warning' : 'text-muted-foreground'}>
-                •
-              </Text>
-              <Text className="flex-1 text-sm text-muted-foreground">{describeScope(scope)}</Text>
-            </View>
-          ))
+          <>
+            {sensitiveScopes.length > 0 ? (
+              <View className="gap-2">
+                <View className="flex-row items-center gap-2">
+                  <ShieldAlert size={15} color={colors.warning} />
+                  <Text className="flex-1 text-sm font-semibold text-foreground">
+                    Can change this machine ({sensitiveScopes.length})
+                  </Text>
+                </View>
+                {sensitiveScopes.map((scope) => (
+                  <View key={scope} className="flex-row gap-2 pl-1">
+                    <Text className="text-warning">•</Text>
+                    <View className="flex-1">
+                      <Text className="text-sm text-foreground">{describeScope(scope)}</Text>
+                      <Text className="font-mono text-xs text-muted-foreground">{scope}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {readOnlyScopes.length > 0 ? (
+              <View className="gap-2">
+                <Touchable
+                  accessibilityLabel={`Can read, ${readOnlyScopes.length} permissions`}
+                  accessibilityState={{ expanded: readOpen }}
+                  accessibilityHint={readOpen ? 'Collapses the list' : 'Expands the list'}
+                  haptic="tap"
+                  scale="none"
+                  onPress={() => setReadOpen((v) => !v)}
+                  className="min-h-11 flex-row items-center gap-2"
+                >
+                  <Eye size={15} color={colors['muted-foreground']} />
+                  <Text className="flex-1 text-sm font-semibold text-foreground">
+                    Can read ({readOnlyScopes.length})
+                  </Text>
+                  <ChevronDown
+                    size={16}
+                    color={colors['muted-foreground']}
+                    style={{ transform: [{ rotate: readOpen ? '180deg' : '0deg' }] }}
+                  />
+                </Touchable>
+                {readOpen
+                  ? readOnlyScopes.map((scope) => (
+                      <View key={scope} className="flex-row gap-2 pl-1">
+                        <Text className="text-muted-foreground">•</Text>
+                        <View className="flex-1">
+                          <Text className="text-sm text-muted-foreground">{describeScope(scope)}</Text>
+                          <Text className="font-mono text-xs text-muted-foreground">{scope}</Text>
+                        </View>
+                      </View>
+                    ))
+                  : null}
+              </View>
+            ) : null}
+          </>
         )}
 
         {missingCapabilities.length > 0 ? (

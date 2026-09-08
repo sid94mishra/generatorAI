@@ -120,7 +120,7 @@ export async function request<T>(fetchImpl: ApiFetch, path: string, init?: Reque
  * of those directly yields "[object Object]", which tells the user nothing
  * about what they typed wrong.
  */
-function describeErrorBody(body: unknown): string | null {
+export function describeErrorBody(body: unknown): string | null {
   if (typeof body === 'string') return body;
   if (!body || typeof body !== 'object') return null;
 
@@ -254,6 +254,13 @@ export interface ChatSummary {
   defaultAgentMode?: AgentMode | null;
   permissionMode?: string | null;
   orchestratorMode?: boolean;
+  /**
+   * One line of the newest message, for a catalogue row. Present on the LIST
+   * response only — a single chat is fetched with its messages anyway.
+   */
+  preview?: string;
+  previewRole?: 'user' | 'assistant' | 'system' | 'tool';
+  previewAt?: Timestamp;
 }
 
 /** True when a chat has been archived. */

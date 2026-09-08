@@ -121,6 +121,20 @@ interface Projection {
   warnings?: Array<{ message?: string; code?: string } | string>;
 }
 
+/**
+ * The stand-in title for a chat created without one.
+ *
+ * Deliberately a real, sortable name rather than "Untitled": the catalogue
+ * shows a preview of the conversation underneath, so the title only has to
+ * disambiguate two chats started on the same day.
+ */
+function defaultChatName(): string {
+  const now = new Date();
+  return `Chat ${now.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${now
+    .toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    .replace(/\s/g, '')}`;
+}
+
 export function NewChatSheet({
   visible,
   onClose,
@@ -270,12 +284,15 @@ export function NewChatSheet({
   };
 
   const sourceError = validateDrafts(drafts);
-  const canCreate = name.trim().length > 0 && sourceError === null;
+  // The name is OPTIONAL. Naming a conversation before having it is a
+  // desktop habit; on a phone the flow has to be open, type, send. An unnamed
+  // chat gets a date-stamped placeholder that the first prompt replaces.
+  const canCreate = sourceError === null;
 
   const submit = (): void => {
     onCreate(
       buildCreateChatBody({
-        name,
+        name: name.trim() || defaultChatName(),
         description,
         ...(model ? { model } : {}),
         ...(projectId ? { projectId } : {}),
@@ -303,7 +320,11 @@ export function NewChatSheet({
       visible={visible}
       onClose={close}
       title={PAGE_TITLES[page]}
-      detents={[0.75, 0.92]}
+      // Sized to its content, capped at 0.92. The fixed detent left roughly
+      // 300pt of empty sheet under "Create chat" on the first page, and the
+      // sheet grows on its own when "More options" or a sub-page opens.
+      detents={[0.92]}
+      fitContent
       leading={
         page === 'main' ? undefined : (
           <IconButton
@@ -563,12 +584,12 @@ export function NewChatSheet({
       ) : (
         <View className="gap-4 px-4 py-4">
           <Field
-            label="Name"
-            placeholder="What is this chat about?"
+            label="Name (optional)"
+            placeholder={defaultChatName()}
             value={name}
             onChangeText={setName}
             autoFocus
-            accessibilityLabel="Chat name"
+            accessibilityLabel="Chat name, optional"
           />
 
           <View className="overflow-hidden rounded-3xl border border-border bg-card">

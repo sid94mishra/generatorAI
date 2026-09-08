@@ -17,8 +17,9 @@ import { queryKeys, type ProviderStatus } from '@generatorai/client-core';
 import { useApi } from '../../src/api/useApi';
 import { requireStepUp } from '../../src/auth/stepUp';
 import { ProviderBrandIcon } from '../../src/components/brand/VendorIcons';
-import { Badge, Card, type Tone } from '../../src/components/ui/primitives';
-import { Button, IconButton } from '../../src/components/ui/Button';
+import { Badge, SectionHeader, type Tone } from '../../src/components/ui/primitives';
+import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
+import { IconButton } from '../../src/components/ui/Button';
 import { ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { Screen } from '../../src/components/ui/Screen';
@@ -56,6 +57,12 @@ export default function ProvidersScreen(): React.ReactElement {
     },
   });
 
+  const all = providers.data?.providers ?? [];
+  // Ready first: the list exists to pick a default, and only a ready
+  // provider can be one.
+  const ready = all.filter((p) => p.ready);
+  const blocked = all.filter((p) => !p.ready);
+
   return (
     <Screen
       title="Providers"
@@ -77,73 +84,99 @@ export default function ProvidersScreen(): React.ReactElement {
         <ErrorState message="Could not reach the provider registry." onRetry={() => void providers.refetch()} />
       ) : (
         <>
-          {(providers.data?.providers ?? []).map((provider) => {
-            const state = readiness(provider);
-            const isDefault = provider.type === providers.data?.primary;
-
-            return (
-              <Card key={provider.type} className="gap-3 p-4">
-                <View className="flex-row items-center gap-3">
-                  <View className="h-10 w-10 items-center justify-center rounded-2xl border border-border bg-subtle">
-                    <ProviderBrandIcon
-                      provider={provider.type}
-                      size={20}
-                      {...(provider.type === 'copilot' ? { color: colors.foreground } : {})}
-                    />
-                  </View>
-                  <View className="flex-1 gap-0.5">
-                    <Text className="text-md font-semibold text-foreground">{provider.label}</Text>
-                    <Text className="text-xs text-muted-foreground">
-                      {provider.modelCount} model{provider.modelCount === 1 ? '' : 's'}
-                    </Text>
-                  </View>
-                  <Badge label={state.label} tone={state.tone} />
-                </View>
-
-                {provider.error ? (
-                  <Text className="text-xs leading-relaxed text-danger">{provider.error}</Text>
-                ) : null}
-
-                {!provider.authenticated && provider.installed ? (
-                  <Text className="text-xs leading-relaxed text-muted-foreground">
-                    Sign in by running this provider's CLI login on the machine hosting GeneratorAI.
-                    A phone cannot complete that flow.
-                  </Text>
-                ) : null}
-
-                {isDefault ? (
-                  <View className="flex-row items-center gap-1.5">
-                    <Check size={14} color={colors.primary} />
-                    <Text className="text-sm text-primary">Default for new chats</Text>
-                  </View>
-                ) : (
-                  <Button
-                    label="Make default"
-                    variant="secondary"
-                    size="sm"
-                    disabled={!provider.ready}
-                    loading={setDefault.isPending && setDefault.variables === provider.type}
-                    // `admin:harnesses` — a server setting, so the first
-                    // change per session takes the local step-up like every
-                    // other admin write. A cancelled prompt is not an error.
-                    onPress={() => {
-                      void requireStepUp('Confirm changing the default AI provider').then((ok) => {
-                        if (ok) setDefault.mutate(provider.type);
-                      });
-                    }}
+          {/* Choosing a default is a RADIO decision, so it is drawn as one:
+              a grouped list with a tick, ready providers first. It used to be
+              five tall cards each with its own "Make default" button, three of
+              which were permanently dead — five independent-looking commands
+              for what is really one choice. */}
+          <SectionHeader title="Available" />
+          <ListGroup>
+            {ready.map((provider) => (
+              <ListRow
+                key={provider.type}
+                title={provider.label}
+                subtitle={`${provider.modelCount} model${provider.modelCount === 1 ? '' : 's'}${
+                  provider.type === providers.data?.primary ? ' · default for new chats' : ''
+                }`}
+                icon={
+                  <ProviderBrandIcon
+                    provider={provider.type}
+                    size={20}
+                    {...(provider.type === 'copilot' ? { color: colors.foreground } : {})}
                   />
-                )}
-              </Card>
-            );
-          })}
+                }
+                chevron={false}
+                selected={provider.type === providers.data?.primary}
+                accessibilityLabel={`${provider.label}, ${provider.modelCount} models`}
+                accessibilityHint={
+                  provider.type === providers.data?.primary
+                    ? 'Already the default for new chats'
+                    : 'Makes this the default for new chats'
+                }
+                // NOT disabled when it is already the default: dimming the
+                // current selection makes the one active provider look like
+                // the inactive one. The tick says it is chosen; pressing it
+                // again simply does nothing.
+                disabled={setDefault.isPending}
+                trailing={
+                  provider.type === providers.data?.primary ? (
+                    <Check size={18} color={colors.primary} />
+                  ) : (
+                    <View className="h-[18px] w-[18px]" />
+                  )
+                }
+                // `admin:harnesses` — a server setting, so the first change
+                // per session takes the local step-up like every other admin
+                // write. A cancelled prompt is not an error.
+                onPress={() => {
+                  if (provider.type === providers.data?.primary) return;
+                  void requireStepUp('Confirm changing the default AI provider').then((ok) => {
+                    if (ok) setDefault.mutate(provider.type);
+                  });
+                }}
+              />
+            ))}
+          </ListGroup>
+
+          {blocked.length > 0 ? (
+            <>
+              <SectionHeader title="Not available on this machine" />
+              <ListGroup>
+                {blocked.map((provider) => {
+                  const state = readiness(provider);
+                  return (
+                    <ListRow
+                      key={provider.type}
+                      title={provider.label}
+                      subtitle={
+                        provider.error ??
+                        (provider.installed
+                          ? "Sign in by running this provider's CLI login on the machine hosting GeneratorAI — a phone cannot complete that flow."
+                          : 'Install this provider on the machine hosting GeneratorAI to use it.')
+                      }
+                      icon={
+                        <ProviderBrandIcon
+                          provider={provider.type}
+                          size={20}
+                          {...(provider.type === 'copilot' ? { color: colors.foreground } : {})}
+                        />
+                      }
+                      chevron={false}
+                      trailing={<Badge label={state.label} tone={state.tone} />}
+                    />
+                  );
+                })}
+              </ListGroup>
+            </>
+          ) : null}
 
           {setDefault.isError ? (
-            <Text className="px-1 text-sm text-danger">
+            <Text className="text-sm text-danger">
               Could not change the default provider. It may no longer be ready.
             </Text>
           ) : null}
 
-          <Text className="px-1 pt-2 text-xs leading-relaxed text-muted-foreground">
+          <Text className="pt-2 text-xs leading-relaxed text-muted-foreground">
             Changing the default only affects chats created afterwards. Existing conversations keep
             the provider they started on.
           </Text>

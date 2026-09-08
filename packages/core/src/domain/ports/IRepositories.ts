@@ -70,6 +70,13 @@ export interface IChatMessageRepository {
   getByChatId(chatId: string, limit?: number, offset?: number): Promise<ChatMessage[]>;
   /** v2: Total message count for a Chat entity — used for paginated history. */
   countByChatId(chatId: string): Promise<number>;
+  /**
+   * The newest message of each of several sessions, in ONE query.
+   *
+   * The chat catalogue needs a one-line preview per row; asking per chat is
+   * N round trips on a list a phone loads on every foreground.
+   */
+  latestBySessionIds(sessionIds: readonly string[]): Promise<Map<string, ChatMessage>>;
   deleteBySession(sessionId: string): Promise<void>;
 }
 

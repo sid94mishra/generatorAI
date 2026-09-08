@@ -33,7 +33,11 @@ export default function RevokedScreen(): React.ReactElement {
         title="Access revoked"
         reason={`${reason} To use this app again, pair it from the server's screen.`}
       />
+      {/* `Button` defaults to `self-start`, which beat the column's
+          `items-center` and left this hanging off the left edge under a
+          centred message. */}
       <Button
+        full
         label="Pair again"
         size="lg"
         loading={busy}

@@ -21,27 +21,43 @@ import type { TransportBadge } from './sessionTransport';
 
 export function ChatHeaderTitle({
   title,
+  subtitle,
   transport,
   onPress,
 }: {
   title: string;
+  /**
+   * Model and branch. These two facts change what a prompt will do, and they
+   * were previously only discoverable by opening two different sheets —
+   * after sending, which is too late.
+   */
+  subtitle?: string | null;
   transport: TransportBadge;
   onPress: () => void;
 }): React.ReactElement {
   return (
     <View className="flex-row items-center gap-2">
       <Touchable
-        accessibilityLabel={`${title}. Rename`}
+        accessibilityLabel={`${title}${subtitle ? `. ${subtitle}` : ''}. Rename`}
         accessibilityHint="Opens the rename sheet"
         haptic="tap"
         ripple={false}
         scale="none"
         onPress={onPress}
-        className="max-w-[60%] shrink"
+        className="min-w-0 shrink"
       >
         <Text numberOfLines={1} maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-md font-semibold text-foreground">
           {title}
         </Text>
+        {subtitle ? (
+          <Text
+            numberOfLines={1}
+            maxFontSizeMultiplier={MAX_SCALE.chrome}
+            className="text-xs text-muted-foreground"
+          >
+            {subtitle}
+          </Text>
+        ) : null}
       </Touchable>
       <TransportChip transport={transport} />
     </View>
@@ -50,6 +66,7 @@ export function ChatHeaderTitle({
 
 function TransportChip({ transport }: { transport: TransportBadge }): React.ReactElement {
   const tone = transport.tone === 'neutral' ? 'neutral' : transport.tone;
+  const healthy = transport.label === 'LAN';
   const text =
     transport.tone === 'success'
       ? 'text-success'
@@ -66,12 +83,18 @@ function TransportChip({ transport }: { transport: TransportBadge }): React.Reac
       ripple={false}
       scale="none"
       onPress={() => router.push('/settings/diagnostics')}
-      className="flex-row items-center gap-1 rounded-full bg-subtle px-2 py-0.5"
+      className={`shrink-0 flex-row items-center gap-1 rounded-full bg-subtle py-0.5 ${healthy ? 'px-1.5' : 'px-2'}`}
     >
       <StatusDot tone={tone} label={null} />
-      <Text maxFontSizeMultiplier={MAX_SCALE.chrome} className={`text-xs font-medium ${text}`}>
-        {transport.label}
-      </Text>
+      {/* On a healthy direct connection the word "LAN" is chrome that costs
+          the chat's own name ~50pt of a 393pt header — the title was being
+          truncated with room to spare. The dot carries it; the label comes
+          back the moment the connection is anything but normal. */}
+      {healthy ? null : (
+        <Text maxFontSizeMultiplier={MAX_SCALE.chrome} className={`text-xs font-medium ${text}`}>
+          {transport.label}
+        </Text>
+      )}
     </Touchable>
   );
 }

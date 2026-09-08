@@ -13,9 +13,20 @@ export interface PaneDescriptor {
   label: string;
   /** Shown after the label — "Changes 3". */
   count?: number;
+  /** A live dot after the label, for state with no useful number. */
+  live?: boolean;
 }
 
 export const COMPUTER_SCOPE = 'exec:computer';
+
+/**
+ * The Computer pane has no implementation yet — the page it renders only
+ * explains that it is coming. A top-level destination that can never have
+ * content teaches people to skip that part of the navigation, so it is
+ * withheld until there is something behind it. Flip this when the pane
+ * lands; the scope check below still applies on top of it.
+ */
+export const COMPUTER_PANE_IMPLEMENTED = false;
 
 /**
  * Terminal and Browser are listed even without their scope — the pane
@@ -27,13 +38,17 @@ export function availablePanes(input: {
   workspaceId: string | null;
   scopes: readonly string[];
   changesCount: number;
+  /** Chromium is up for this workspace — the Browser tab gets a live dot. */
+  browserLive?: boolean;
 }): PaneDescriptor[] {
   const out: PaneDescriptor[] = [{ id: 'chat', label: 'Chat' }];
   if (!input.workspaceId) return out;
   out.push({ id: 'changes', label: 'Changes', ...(input.changesCount > 0 ? { count: input.changesCount } : {}) });
   out.push({ id: 'terminal', label: 'Terminal' });
-  out.push({ id: 'browser', label: 'Browser' });
-  if (input.scopes.includes(COMPUTER_SCOPE)) out.push({ id: 'computer', label: 'Computer' });
+  out.push({ id: 'browser', label: 'Browser', ...(input.browserLive ? { live: true } : {}) });
+  if (COMPUTER_PANE_IMPLEMENTED && input.scopes.includes(COMPUTER_SCOPE)) {
+    out.push({ id: 'computer', label: 'Computer' });
+  }
   return out;
 }
 

@@ -148,7 +148,7 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
   // A connection failure must not masquerade as an empty account. Public
   // routes still render so the user can re-pair against a different host.
   if (state.status === 'error' && !isPublic) {
-    return <ConnectionError message={state.message} />;
+    return <ConnectionError message={state.message} kind={state.kind ?? 'unreachable'} />;
   }
 
   return <>{children}</>;
@@ -161,13 +161,26 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
  * pairing, and no explanation of which host was unreachable — a dead end
  * reached by simply walking out of Wi-Fi range.
  */
-function ConnectionError({ message }: { message: string }): React.ReactElement {
+function ConnectionError({
+  message,
+  kind,
+}: {
+  message: string;
+  kind: 'unreachable' | 'credential';
+}): React.ReactElement {
   const { reconnect } = useAuth();
   return (
     <View className="flex-1 items-center justify-center gap-4 px-8">
       <ErrorState
-        title="Can’t reach your server"
-        message={message}
+        // A rejected saved session is not an unreachable host, and calling it
+        // one sends people to check their Wi-Fi. It is also not a revocation:
+        // the pairing is intact and a retry is the right first move.
+        title={kind === 'credential' ? 'Sign-in needs refreshing' : 'Can’t reach your server'}
+        message={
+          kind === 'credential'
+            ? `${message} Try again — if it keeps failing, pair this phone from the host again.`
+            : message
+        }
         onRetry={() => {
           void reconnect();
         }}

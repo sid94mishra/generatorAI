@@ -510,6 +510,12 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     stageExecutionService,
     sessionAllocator,
     chatEntityRepo,
+    // The chat LIST route enriches each row with a one-line preview of its
+    // newest message, in one batched query. Without this double the route
+    // answers 502 and the failure reads like a route bug.
+    chatMessageRepo: {
+      latestBySessionIds: vi.fn().mockResolvedValue(new Map()),
+    },
     workflowRunRepo,
     stageRunRepo,
     // The stage "Wake now" route calls this. Without it the route throws on

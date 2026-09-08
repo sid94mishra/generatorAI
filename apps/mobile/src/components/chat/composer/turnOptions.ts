@@ -74,6 +74,46 @@ export function permissionLabel(mode: string): string {
   return PERMISSION_MODES.find((m) => m.value === mode)?.title ?? mode;
 }
 
+/**
+ * The single composer chip: what this turn will do, in one line.
+ *
+ * Three separate pickers (model, mode, options) for one decision needed
+ * 280pt of a 253pt strip, so the third was permanently cut in half. The
+ * model's short name leads because it is what changes the answer most; the
+ * mode follows only when it is NOT the default, and any other override is
+ * summarised after it.
+ */
+export function turnChipLabel(input: {
+  model: ModelInfo | undefined;
+  mode: AgentMode;
+  effort: string | null;
+  permissionMode: string;
+  contextTier: ContextTier;
+}): string {
+  const parts: string[] = [shortModelName(input.model)];
+  if (input.mode !== 'auto') parts.push(modeLabel(input.mode));
+  const options = optionsChipLabel({
+    effort: input.effort,
+    model: input.model,
+    permissionMode: input.permissionMode,
+    contextTier: input.contextTier,
+  });
+  if (options !== 'Options') parts.push(options);
+  return parts.join(' · ');
+}
+
+/**
+ * "Claude Sonnet 5" → "Sonnet 5". The vendor prefix is the same on every
+ * model in the list, so it is the half that carries no information in a
+ * 150pt chip.
+ */
+export function shortModelName(model: ModelInfo | undefined): string {
+  // No explicit model means the chat follows the provider's default, which is
+  // a real, nameable state — "Model" read like a control that had not loaded.
+  if (!model) return 'Default model';
+  return model.name.replace(/^(claude|gpt|gemini|openai|anthropic|google)[\s-]*/i, '').trim() || model.name;
+}
+
 /** Short summary for the options chip: "High · Ask me". */
 export function optionsChipLabel(input: {
   effort: string | null;

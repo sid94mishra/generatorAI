@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { availablePanes, routeSection } from '../components/chat/panes/paneModel';
+import { availablePanes, COMPUTER_PANE_IMPLEMENTED, routeSection } from '../components/chat/panes/paneModel';
 import { describeSessionTransport } from '../components/chat/sessionTransport';
 import { planCardActions } from '../components/chat/gateActions';
 
@@ -11,13 +11,17 @@ describe('availablePanes', () => {
     ]);
   });
 
-  it('lists Terminal and Browser without their scope (locked pages), Computer only with it', () => {
+  it('lists Terminal and Browser without their scope (they render locked pages)', () => {
     const without = availablePanes({ workspaceId: 'ws', scopes: [], changesCount: 0 });
     expect(without.map((p) => p.id)).toEqual(['chat', 'changes', 'terminal', 'browser']);
-    const withComputer = availablePanes({ workspaceId: 'ws', scopes: ['exec:computer'], changesCount: 2 });
-    expect(withComputer.map((p) => p.id)).toEqual(['chat', 'changes', 'terminal', 'browser', 'computer']);
-    expect(withComputer[1]).toEqual({ id: 'changes', label: 'Changes', count: 2 });
     expect(without[1]).toEqual({ id: 'changes', label: 'Changes' });
+  });
+
+  it('withholds Computer while the pane has no implementation, scope or not', () => {
+    expect(COMPUTER_PANE_IMPLEMENTED).toBe(false);
+    const withScope = availablePanes({ workspaceId: 'ws', scopes: ['exec:computer'], changesCount: 2 });
+    expect(withScope.map((p) => p.id)).not.toContain('computer');
+    expect(withScope[1]).toEqual({ id: 'changes', label: 'Changes', count: 2 });
   });
 
   it('routes composer sections to a pane or the More sheet', () => {

@@ -68,10 +68,19 @@ export function Touchable({
   const target = scale === 'large' ? PRESS_SCALE_LARGE : PRESS_SCALE;
   const scaleEnabled = scale !== 'none' && !reduceMotion;
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scaleEnabled ? 1 - pressed.value * (1 - target) : 1 }],
-    opacity: 1 - pressed.value * 0.12,
-  }));
+  // The dimming for `disabled` belongs HERE, not in the static style array.
+  // Reanimated writes its animated props straight onto the node, so an
+  // `opacity` in the style array is overwritten by this worklet's own value
+  // on the very first frame — every disabled control in the app was drawn at
+  // full strength and only announced its state to a screen reader.
+  const dim = disabled ? 0.4 : 1;
+  const animatedStyle = useAnimatedStyle(
+    () => ({
+      transform: [{ scale: scaleEnabled ? 1 - pressed.value * (1 - target) : 1 }],
+      opacity: dim - pressed.value * 0.12,
+    }),
+    [scaleEnabled, target, dim],
+  );
 
   const handlePress = useCallback<NonNullable<PressableProps['onPress']>>(
     (event) => {
@@ -105,7 +114,7 @@ export function Touchable({
         pressed.value = reduceMotion ? withTiming(0, TIMING_FAST) : withSpring(0, SPRING_PRESS);
       }}
       onPress={handlePress}
-      style={[animatedStyle, style, disabled ? { opacity: 0.45 } : null]}
+      style={[animatedStyle, style]}
       {...rest}
     >
       {children}

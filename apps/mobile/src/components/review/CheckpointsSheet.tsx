@@ -15,20 +15,27 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Camera, GitCompare, History, RotateCcw } from 'lucide-react-native';
+import { Camera, Ellipsis, GitCompare, History, RotateCcw } from 'lucide-react-native';
 import { queryKeys, type RestoreResult } from '@generatorai/client-core';
 
 import { useApi } from '../../api/useApi';
 import { useTheme } from '../../theme/ThemeProvider';
 import { Sheet } from '../ui/Sheet';
 import { Button, IconButton } from '../ui/Button';
-import { ConfirmSheet } from '../ui/ActionSheet';
+import { Touchable } from '../ui/Touchable';
+import { ActionSheet, ConfirmSheet } from '../ui/ActionSheet';
 import { Badge } from '../ui/primitives';
 import { EmptyState, ErrorState, LoadingState } from '../ui/States';
 import { useToast } from '../ui/Toast';
 import { haptics } from '../ui/haptics';
 import { useWorkspaceExtras, type CheckpointRow } from '../changes/api';
-import { describePrompt, formatAliasList, groupCheckpoints, type CheckpointGroup } from './checkpointGroups';
+import {
+  checkpointTime,
+  describePrompt,
+  formatAliasList,
+  groupCheckpoints,
+  type CheckpointGroup,
+} from './checkpointGroups';
 import { useCapability } from './useScopes';
 
 export interface CheckpointsSheetProps {
@@ -70,6 +77,7 @@ export function CheckpointsSheet({
   const { colors } = useTheme();
   const restoreCap = useCapability('restoreCheckpoints');
   const [confirm, setConfirm] = useState<CheckpointGroup | null>(null);
+  const [menuFor, setMenuFor] = useState<CheckpointGroup | null>(null);
   const [report, setReport] = useState<RewindReport | null>(null);
 
   const checkpoints = useWorkspaceCheckpoints(workspaceId, visible);
@@ -123,8 +131,11 @@ export function CheckpointsSheet({
       visible={visible}
       onClose={onClose}
       title="Checkpoints"
+      // Opens at the SMALL detent and is dragged up. A session usually has
+      // two or three checkpoints, and opening full-screen for two rows left
+      // most of the sheet empty.
       detents={[0.6, 0.92]}
-      initialDetent={1}
+      initialDetent={0}
       scrollable={false}
       keyboardAware={false}
       action={
@@ -170,63 +181,109 @@ export function CheckpointsSheet({
             const active = currentBase === group.compareValue;
             const time = new Date(group.createdAt);
             return (
-              <View key={group.key} className="gap-1.5 border-b border-border-muted px-4 py-3">
-                <View className="flex-row items-center gap-2">
-                  <History size={14} color={active ? colors.primary : colors['muted-foreground']} />
-                  <Text className="flex-1 text-sm font-medium text-foreground" numberOfLines={1}>
-                    {group.label}
-                  </Text>
-                  {active ? <Badge label="Comparing" tone="primary" /> : null}
-                  <Text className="text-xs text-muted-foreground">
-                    {time.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
-                </View>
-                {group.promptExcerpt ? (
-                  <Text numberOfLines={2} className="text-xs text-muted-foreground">
-                    {describePrompt(group.promptExcerpt)}
-                  </Text>
-                ) : null}
-                <View className="flex-row flex-wrap items-center gap-2">
-                  {group.aliases.length > 1 || group.aliases[0] !== '.' ? (
-                    <Text className="text-xs text-muted-foreground">{formatAliasList(group.aliases)}</Text>
-                  ) : null}
-                  {group.fileCount > 0 ? (
-                    <Text className="font-mono text-xs text-muted-foreground">
-                      {group.fileCount} {group.fileCount === 1 ? 'file' : 'files'}{' '}
-                      <Text className="text-success">+{group.additions}</Text>{' '}
-                      <Text className="text-danger">−{group.deletions}</Text>
-                    </Text>
-                  ) : null}
-                </View>
-                <View className="flex-row gap-2 pt-1">
-                  {onCompare ? (
-                    <Button
-                      label="Compare"
-                      size="sm"
-                      variant="secondary"
-                      icon={<GitCompare size={14} color={colors.foreground} />}
-                      onPress={() => {
-                        onCompare(group.compareValue);
-                        onClose();
-                      }}
-                    />
-                  ) : null}
-                  {restoreCap.available && group.restoreTargets.length > 0 ? (
-                    <Button
-                      label={group.undoesTurn ? 'Rewind to before' : 'Rewind here'}
-                      size="sm"
-                      variant="ghost"
-                      icon={<RotateCcw size={14} color={colors.danger} />}
+              // The ROW is the compare action; rewind lives behind the
+              // trailing menu. Two peer buttons of different weights — a
+              // bordered "Compare" beside a bare "Rewind" link — implied the
+              // heavier-looking one was the more consequential, which was
+              // exactly backwards.
+              //
+              // The menu button is a SIBLING of the row's pressable, never a
+              // child: a nested pressable is invalid DOM on web and leaves
+              // the inner control unreachable to a screen reader on both
+              // platforms.
+              <View key={group.key} className="flex-row items-start border-b border-border-muted">
+                <Touchable
+                  accessibilityLabel={`${group.label}${
+                    group.promptExcerpt ? `. ${describePrompt(group.promptExcerpt)}` : ''
+                  }`}
+                  accessibilityHint={onCompare ? 'Compares the working tree against this point' : undefined}
+                  accessibilityState={{ selected: active }}
+                  haptic="tap"
+                  scale="none"
+                  disabled={!onCompare}
+                  className="flex-1"
+                  onPress={() => {
+                    if (!onCompare) return;
+                    onCompare(group.compareValue);
+                    onClose();
+                  }}
+                >
+                  <View className="gap-1.5 py-3 pl-4 pr-2">
+                    <View className="flex-row items-center gap-2">
+                      <History size={14} color={active ? colors.primary : colors['muted-foreground']} />
+                      <Text className="flex-1 text-sm font-medium text-foreground" numberOfLines={1}>
+                        {group.label}
+                      </Text>
+                      {active ? <Badge label="Comparing" tone="primary" /> : null}
+                      <Text className="text-xs text-muted-foreground">
+                        {time.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                    </View>
+                    {group.promptExcerpt ? (
+                      <Text numberOfLines={2} className="text-xs text-muted-foreground">
+                        {describePrompt(group.promptExcerpt)}
+                      </Text>
+                    ) : null}
+                    <View className="flex-row flex-wrap items-center gap-2">
+                      {group.aliases.length > 1 || group.aliases[0] !== '.' ? (
+                        <Text className="text-xs text-muted-foreground">{formatAliasList(group.aliases)}</Text>
+                      ) : null}
+                      {group.fileCount > 0 ? (
+                        <Text className="font-mono text-xs text-muted-foreground">
+                          {group.fileCount} {group.fileCount === 1 ? 'file' : 'files'}{' '}
+                          <Text className="text-success">+{group.additions}</Text>{' '}
+                          <Text className="text-danger">−{group.deletions}</Text>
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                </Touchable>
+
+                {restoreCap.available && group.restoreTargets.length > 0 ? (
+                  <View className="pr-2 pt-3">
+                    <IconButton
+                      compact
+                      accessibilityLabel={`Actions for ${group.label}`}
+                      icon={<Ellipsis size={16} color={colors['muted-foreground']} />}
                       disabled={rewind.isPending}
-                      onPress={() => setConfirm(group)}
+                      onPress={() => setMenuFor(group)}
                     />
-                  ) : null}
-                </View>
+                  </View>
+                ) : null}
               </View>
             );
           })}
         </ScrollView>
       )}
+
+      <ActionSheet
+        visible={menuFor !== null}
+        onClose={() => setMenuFor(null)}
+        title={menuFor?.label ?? ''}
+        actions={
+          menuFor
+            ? [
+                ...(onCompare
+                  ? [
+                      {
+                        label: 'Compare against this',
+                        icon: <GitCompare size={18} color={colors.foreground} />,
+                        onPress: () => {
+                          onCompare(menuFor.compareValue);
+                          onClose();
+                        },
+                      },
+                    ]
+                  : []),
+                {
+                  label: menuFor.undoesTurn ? 'Rewind to before this turn' : 'Rewind to this point',
+                  icon: <RotateCcw size={18} color={colors.foreground} />,
+                  onPress: () => setConfirm(menuFor),
+                },
+              ]
+            : []
+        }
+      />
 
       <ConfirmSheet
         visible={confirm !== null}
@@ -268,7 +325,7 @@ function latestRedoPoint(rows: readonly CheckpointRow[], report: RewindReport): 
   for (const alias of restored) {
     const redo = rows
       .filter((c) => c.kind === 'pre_restore' && c.repoAlias === alias)
-      .sort((a, b) => b.createdAt - a.createdAt)[0];
+      .sort((a, b) => checkpointTime(b.createdAt) - checkpointTime(a.createdAt))[0];
     if (redo) targets.push(redo);
   }
   if (targets.length === 0) return null;
@@ -276,7 +333,7 @@ function latestRedoPoint(rows: readonly CheckpointRow[], report: RewindReport): 
     key: 'undo',
     kind: 'pre_restore',
     label: 'Redo point',
-    createdAt: targets[0]!.createdAt,
+    createdAt: checkpointTime(targets[0]!.createdAt),
     aliases: targets.map((t) => t.repoAlias),
     restoreTargets: targets,
     undoesTurn: false,

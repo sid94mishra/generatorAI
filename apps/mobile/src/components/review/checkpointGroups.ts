@@ -38,6 +38,34 @@ export interface CheckpointGroup {
   compareValue: string;
 }
 
+/**
+ * Checkpoint times as epoch milliseconds.
+ *
+ * The server holds `createdAt` as a `Date`, so it arrives over the wire as an
+ * ISO string even though the client type says `number`. `Math.min` and `a - b`
+ * on that string produce NaN, which is how every row in the Checkpoints sheet
+ * came to read "Invalid Date" and why the list was not actually sorted.
+ * A value that looks like epoch SECONDS (the shape of the `created_at`
+ * column) is widened to milliseconds; anything smaller is passed through so
+ * relative fixtures keep their own scale.
+ */
+const SECONDS_FLOOR = 1e9;
+const MILLIS_FLOOR = 1e12;
+
+function widen(n: number): number {
+  return n >= SECONDS_FLOOR && n < MILLIS_FLOOR ? n * 1000 : n;
+}
+
+export function checkpointTime(value: string | number | Date | null | undefined): number {
+  if (value == null) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return widen(value);
+  const numeric = Number(value);
+  if (value.trim() !== '' && Number.isFinite(numeric)) return widen(numeric);
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 export function groupCheckpoints(records: readonly CheckpointRow[]): CheckpointGroup[] {
   const groups = new Map<string, CheckpointRow[]>();
   const order: string[] = [];
@@ -68,7 +96,10 @@ export function groupCheckpoints(records: readonly CheckpointRow[]): CheckpointG
     }
 
     const counted = afters.length > 0 ? afters : members;
-    const createdAt = members.reduce((min, m) => Math.min(min, m.createdAt), first.createdAt);
+    const createdAt = members.reduce(
+      (min, m) => Math.min(min, checkpointTime(m.createdAt)),
+      checkpointTime(first.createdAt),
+    );
 
     return {
       key,
