@@ -13,7 +13,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { Check, CircleHelp } from 'lucide-react-native';
 import type { StreamBlock } from '@generatorai/client-core';
 
@@ -21,6 +21,7 @@ import { Button } from '../ui/Button';
 import { Badge } from '../ui/primitives';
 import { Touchable } from '../ui/Touchable';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useCardEntering } from '../common/enterMotion';
 
 type QuestionBlock = Extract<StreamBlock, { type: 'question' }>;
 
@@ -32,6 +33,7 @@ export function QuestionCard({
   onSubmit: (answers: Record<string, string[]>, freeform: string | undefined) => Promise<void> | void;
 }): React.ReactElement {
   const { colors } = useTheme();
+  const entering = useCardEntering();
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [freeform, setFreeform] = useState('');
   const [busy, setBusy] = useState(false);
@@ -66,7 +68,7 @@ export function QuestionCard({
 
   return (
     <Animated.View
-      entering={FadeInDown.springify().damping(18)}
+      entering={entering}
       className="mx-3 mb-2 gap-3 rounded-3xl border border-info bg-card p-3.5"
     >
       <View className="flex-row items-center gap-2.5">

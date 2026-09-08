@@ -57,6 +57,7 @@ export function Button({
   loading = false,
   disabled = false,
   full = false,
+  grow = false,
   haptic = 'commit',
   accessibilityLabel,
   accessibilityHint,
@@ -68,7 +69,14 @@ export function Button({
   icon?: React.ReactNode;
   loading?: boolean;
   disabled?: boolean;
+  /** Fill the parent's width (column layouts). */
   full?: boolean;
+  /**
+   * Share a `flex-row` with sibling buttons. `full` alone makes each button
+   * 100 % wide inside a row, so the second one is pushed off-screen — seen
+   * on the permission card and the Home decision card in the Sept 7 run.
+   */
+  grow?: boolean;
   haptic?: HapticIntent;
   accessibilityLabel?: string;
   accessibilityHint?: string;
@@ -91,7 +99,7 @@ export function Button({
       disabled={disabled || loading}
       haptic={haptic}
       onPress={onPress}
-      className={`flex-row items-center justify-center gap-2 ${SIZE_CONTAINER[size]} ${VARIANT_CONTAINER[variant]} ${full ? 'w-full' : 'self-start'}`}
+      className={`flex-row items-center justify-center gap-2 ${SIZE_CONTAINER[size]} ${VARIANT_CONTAINER[variant]} ${grow ? 'flex-1' : full ? 'w-full' : 'self-start'}`}
     >
       {loading ? <ActivityIndicator size="small" color={spinnerColor} /> : icon}
       <Text
@@ -182,11 +190,7 @@ export function Fab({
   const fontScale = useFontScale();
 
   return (
-    <View
-      className="absolute right-4"
-      style={{ bottom: insets.bottom + offset }}
-      pointerEvents="box-none"
-    >
+    <View className="absolute right-4" style={{ bottom: insets.bottom + offset }} pointerEvents="box-none">
       <Touchable
         accessibilityLabel={accessibilityLabel}
         haptic="commit"
@@ -196,7 +200,10 @@ export function Fab({
         style={{
           minHeight: 56,
           ...(label ? {} : { width: 56 }),
-          shadowColor: 'rgba(0,0,0,0.9)',
+          // D32: an alpha in `shadowColor` multiplies with `shadowOpacity`,
+          // so the previous `rgba(0,0,0,0.9)` shipped a 25% shadow while
+          // reading as 28%. Opaque colour, one opacity.
+          shadowColor: 'rgb(0,0,0)',
           shadowOpacity: 0.28,
           shadowRadius: 16,
           shadowOffset: { width: 0, height: 6 },
@@ -207,10 +214,7 @@ export function Fab({
         {/* The label is dropped rather than truncated at large reading sizes:
             a FAB that grows to half the screen width is worse than an icon. */}
         {label && fontScale <= 1.35 ? (
-          <Text
-            maxFontSizeMultiplier={MAX_SCALE.chrome}
-            className="text-md font-semibold text-primary-foreground"
-          >
+          <Text maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-md font-semibold text-primary-foreground">
             {label}
           </Text>
         ) : null}

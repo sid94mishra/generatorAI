@@ -20,6 +20,10 @@ const ALLOWED_ROOTS = new Set([
   'projects',
   'changes',
   'settings',
+  // Both are real roots under `app/` (`workflows/[id]`, `terminal/[workspaceId]`)
+  // and both are legitimate push targets; pushes to them were being dropped.
+  'workflows',
+  'terminal',
 ]);
 
 export function isSafeNotificationRoute(route: unknown): route is string {

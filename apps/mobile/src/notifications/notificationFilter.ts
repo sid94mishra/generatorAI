@@ -18,8 +18,10 @@
 //      "Approvals" only affects foreground presentation.
 //
 // The server's payload puts `{ route, category, threadId }` in `data`
-// (PushDispatcher.ts). `category` is one of 'approval' | 'completed' |
-// 'failed'; `route` starts with `/runs/…` or `/chats/…`.
+// (PushDispatcher.ts), plus `{ chatId, interactionId, kind, actions? }` for
+// chat gates (see notificationCategories.ts). `category` is one of
+// 'approval' | 'completed' | 'failed'; `route` starts with `/runs/…` or
+// `/chats/…` (`/chats/<id>/gate/<interactionId>` for a gate).
 // ────────────────────────────────────────────────────────────────
 
 export const NOTIFY_PREF_KEYS = {

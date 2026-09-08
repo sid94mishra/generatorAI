@@ -5,6 +5,7 @@
 
 import { Router } from 'express';
 import multer from 'multer';
+import { z } from 'zod';
 import type { Container } from '../composition-root.js';
 import { validate } from '../middleware/validate.js';
 import {
@@ -21,6 +22,22 @@ import {
   coerceAgentMode,
 } from '@generatorai/shared';
 import type { PlanDocument } from '@generatorai/shared';
+
+/**
+ * Body of `POST /chats/:id/cancel`. The budget is clamped, not rejected: the
+ * client's `StopController` already clamps to the same [0.5, 60] window, so a
+ * value outside it is a client bug to tolerate, not a request to refuse.
+ */
+const CancelTurnBodySchema = z
+  .object({
+    force: z.boolean().optional(),
+    budgetSeconds: z
+      .number()
+      .finite()
+      .transform((s) => Math.min(60, Math.max(0.5, s)))
+      .optional(),
+  })
+  .strip();
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -353,12 +370,38 @@ export function createChatApiRoutes(container: Container): Router {
   });
 
   // POST /chats/:id/cancel — Stop the in-flight turn (abort SDK, emit idle)
+  //
+  // Body (optional): `{ force?: boolean, budgetSeconds?: number }` — what the
+  // two-phase Stop control (`StopController` in client-core) computes for the
+  // press. Both web and mobile were computing these and then sending `{}`;
+  // the route ignored the body anyway. See `cancelTurn` for what each does.
   router.post('/:id/cancel', async (req, res, next) => {
     try {
       const chatId = String(req.params['id']);
-      await chatManagementService.cancelTurn(chatId);
-      logger.info(`[ChatRoutes] Cancelled turn for chat ${chatId}`, { requestId: req.requestId });
-      res.json({ status: 'cancelled' });
+      // `req.body` is undefined when no JSON body was sent (a bare POST), so
+      // parse the fallback rather than failing a body-less stop.
+      const parsed = CancelTurnBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Cancel body validation failed',
+            fields: parsed.error.flatten().fieldErrors,
+          },
+        });
+        return;
+      }
+      const { force, budgetSeconds } = parsed.data;
+      await chatManagementService.cancelTurn(chatId, {
+        ...(force !== undefined ? { force } : {}),
+        ...(budgetSeconds !== undefined ? { budgetSeconds } : {}),
+      });
+      logger.info(`[ChatRoutes] Cancelled turn for chat ${chatId}`, {
+        requestId: req.requestId,
+        force: force ?? false,
+        budgetSeconds: budgetSeconds ?? null,
+      });
+      res.json({ status: 'cancelled', force: force ?? false });
     } catch (err) {
       next(err);
     }

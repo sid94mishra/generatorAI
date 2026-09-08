@@ -121,6 +121,56 @@ interface ScopeEntry {
 /** A scope the server keeps refusing is not retried forever — matches the browser client's constant. */
 const MAX_REJECTIONS_PER_SCOPE = 3;
 
+/** One scope the server has refused, as reported by `rejectedScopes()`. */
+export interface RejectedScope {
+  scope: string;
+  id: string;
+  /** The `onDisconnected` reason the scope's handlers were given. */
+  reason: string;
+}
+
+/**
+ * The scope(s) a `403 INSUFFICIENT_SCOPE` body names, or `null` when it names
+ * none this client can identify.
+ *
+ * The server answers `POST /api/stream/connections` and `/subs` with a 403
+ * for the FIRST subscription the principal may not read, and refuses the
+ * whole request — so a client that treats every non-OK status as a
+ * connection failure retries the same payload into the same answer until it
+ * gives up, and every OTHER scope on the connection (the ones it was allowed)
+ * never connects either. This is how a paired phone without `admin:settings`
+ * got no live events at all: its `global` sub sank the connection carrying
+ * its chat feeds.
+ *
+ * Prefers the body's `sub: {scope, id}` (which the server now sends) and
+ * falls back to the scope name quoted in the message, so an older server is
+ * still handled.
+ */
+export function parseInsufficientScope(
+  body: unknown,
+): { scope: string; id?: string; requiredScope: string } | null {
+  if (!body || typeof body !== 'object') return null;
+  const error = (body as { error?: unknown }).error;
+  if (!error || typeof error !== 'object') return null;
+  const rec = error as Record<string, unknown>;
+  if (rec['code'] !== 'INSUFFICIENT_SCOPE') return null;
+  const required = Array.isArray(rec['requiredScopes'])
+    ? (rec['requiredScopes'] as unknown[]).map(String).filter((s) => s.length > 0)
+    : [];
+  const requiredScope = required[0] ?? 'unknown';
+
+  const sub = rec['sub'];
+  if (sub && typeof sub === 'object') {
+    const scope = String((sub as Record<string, unknown>)['scope'] ?? '');
+    const rawId = (sub as Record<string, unknown>)['id'];
+    if (scope) return { scope, ...(typeof rawId === 'string' && rawId ? { id: rawId } : {}), requiredScope };
+  }
+  const message = typeof rec['message'] === 'string' ? rec['message'] : '';
+  const quoted = /"([^"]+)"\s+stream/.exec(message);
+  if (quoted?.[1]) return { scope: quoted[1], requiredScope };
+  return null;
+}
+
 /** Cross-scope dedup window. Items are rare, so this is generous relative to real traffic. */
 const SEEN_HIGH_WATER = 4000;
 const SEEN_RETAIN = 2000;
@@ -155,6 +205,8 @@ export class MuxStreamClient {
   private readonly sentFilters = new Map<string, string[] | undefined>();
   private readonly seenEventIds = new Set<number>();
   private readonly rejections = new Map<string, number>();
+  /** scopeKey → why it was given up on; populated the moment `rejections` hits the ceiling. */
+  private readonly rejectionReasons = new Map<string, string>();
   private maxSeenEventId = 0;
 
   private connectionId: string | null = null;
@@ -241,6 +293,7 @@ export class MuxStreamClient {
       this.scopes.delete(key);
       this.cursors.delete(key);
       this.rejections.delete(key);
+      this.rejectionReasons.delete(key);
       this.sentFilters.delete(key);
       if (this.scopes.size === 0) this.teardown();
       else void this.reconcile();
@@ -256,7 +309,80 @@ export class MuxStreamClient {
     this.cursors.clear();
     this.sentFilters.clear();
     this.rejections.clear();
+    this.rejectionReasons.clear();
     this.teardown();
+  }
+
+  /**
+   * Scopes this client has stopped asking for, and why.
+   *
+   * A scope lands here either because the server refused it in a `hello` /
+   * `subs` frame `MAX_REJECTIONS_PER_SCOPE` times, or because a 403 named it
+   * as the subscription the principal may not read (reason
+   * `rejected:insufficient_scope:<requiredScope>`). Still-subscribed only:
+   * a scope whose last local subscriber left is forgotten entirely.
+   */
+  rejectedScopes(): RejectedScope[] {
+    const out: RejectedScope[] = [];
+    for (const [key, entry] of this.scopes) {
+      if ((this.rejections.get(key) ?? 0) < MAX_REJECTIONS_PER_SCOPE) continue;
+      out.push({ scope: entry.scope, id: entry.id, reason: this.rejectionReasons.get(key) ?? 'rejected' });
+    }
+    return out;
+  }
+
+  /**
+   * Forget every rejection and ask for those scopes again.
+   *
+   * For after the device's grants change — a user who has just been granted
+   * `read:activity` should not have to restart the app to get the global
+   * feed its handlers are still waiting on. Reconciles onto the live
+   * connection when there is one, else opens one.
+   */
+  resetRejections(): void {
+    if (this.closed) return;
+    const had = this.rejections.size > 0;
+    this.rejections.clear();
+    this.rejectionReasons.clear();
+    if (!had) return;
+    if (this.connectionId) void this.reconcile();
+    else this.scheduleOpen();
+  }
+
+  /**
+   * Mark the scope(s) a `403 INSUFFICIENT_SCOPE` body named as rejected, so
+   * `wanted()` leaves them out of the very next request, and tell their
+   * handlers ONCE. Returns how many scope entries were newly marked; zero
+   * means the body named nothing this client is subscribed to, in which case
+   * the caller falls back to treating the response as an ordinary failure.
+   *
+   * `global` is matched on scope alone: the server addresses it by the fixed
+   * id `all` whatever the client sent.
+   */
+  private applyInsufficientScope(body: unknown): number {
+    const refused = parseInsufficientScope(body);
+    if (!refused) return 0;
+    let marked = 0;
+    for (const [key, entry] of this.scopes) {
+      if (entry.scope !== refused.scope) continue;
+      if (refused.id !== undefined && refused.scope !== 'global' && entry.id !== refused.id) continue;
+      if ((this.rejections.get(key) ?? 0) >= MAX_REJECTIONS_PER_SCOPE) continue; // already told
+      this.rejections.set(key, MAX_REJECTIONS_PER_SCOPE);
+      const reason = `rejected:insufficient_scope:${refused.requiredScope}`;
+      this.rejectionReasons.set(key, reason);
+      this.forEachHandler(key, (o) => o.onDisconnected?.(reason));
+      marked += 1;
+    }
+    return marked;
+  }
+
+  /** Read a JSON error body without letting a non-JSON one throw. */
+  private static async errorBody(res: Response): Promise<unknown> {
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
   }
 
   // ── Internals — ported from apps/web/src/platform/muxStream.ts ──────────
@@ -298,6 +424,7 @@ export class MuxStreamClient {
     for (const key of this.activeScopes) {
       if (!previous.has(key)) {
         this.rejections.delete(key);
+        this.rejectionReasons.delete(key);
         this.forEachHandler(key, (o) => o.onConnected?.());
       }
       if (Object.prototype.hasOwnProperty.call(resumed, key) && resumed[key] !== true) {
@@ -318,8 +445,9 @@ export class MuxStreamClient {
       const next = (this.rejections.get(key) ?? 0) + 1;
       this.rejections.set(key, next);
       if (next >= MAX_REJECTIONS_PER_SCOPE) {
-        const reason = String((item as Record<string, unknown>)['reason'] ?? 'rejected');
-        this.forEachHandler(key, (o) => o.onDisconnected?.(`rejected:${reason}`));
+        const reason = `rejected:${String((item as Record<string, unknown>)['reason'] ?? 'rejected')}`;
+        this.rejectionReasons.set(key, reason);
+        this.forEachHandler(key, (o) => o.onDisconnected?.(reason));
       }
     }
   }
@@ -358,6 +486,16 @@ export class MuxStreamClient {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ add, remove }),
       });
+      if (res.status === 403) {
+        // The server refuses the WHOLE mutation when one added sub is out of
+        // scope, so nothing in `add` landed. Drop the refused scope and run
+        // again for the rest — the connection itself is fine, and tearing it
+        // down would cost every other scope its position for nothing.
+        if (this.applyInsufficientScope(await MuxStreamClient.errorBody(res)) > 0) {
+          this.reconcilePending = true;
+          return;
+        }
+      }
       if (!res.ok) {
         // The connection is gone server-side (restart, reap, cap). Reopening
         // is the only way back, and it carries the cursor map so nothing is
@@ -436,6 +574,10 @@ export class MuxStreamClient {
       .map((e) => this.subPayload(e));
     if (subs.length === 0) return;
 
+    // Set when a 403 named one scope: the rest deserve an immediate retry,
+    // not a backoff step — the server was up and answered, the payload was
+    // simply wrong. Acted on in `finally`, after `connecting` clears.
+    let retryWithoutRejected = false;
     this.connecting = true;
     try {
       const cursorMap: Record<string, number> = {};
@@ -448,6 +590,15 @@ export class MuxStreamClient {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ subs, cursors: cursorMap }),
       });
+      if (res.status === 403) {
+        // One out-of-scope sub sinks the whole POST. Identify it, stop asking
+        // for it, and go again with what is left — silently retrying the same
+        // payload is how a phone missing one scope lost ALL its live events.
+        if (this.applyInsufficientScope(await MuxStreamClient.errorBody(res)) > 0) {
+          retryWithoutRejected = true;
+          return;
+        }
+      }
       if (!res.ok) {
         for (const key of this.scopes.keys()) this.forEachHandler(key, (o) => o.onDisconnected?.(`http:${res.status}`));
         this.scheduleRetry();
@@ -499,6 +650,9 @@ export class MuxStreamClient {
       this.scheduleRetry();
     } finally {
       this.connecting = false;
+      // `connect()` itself returns early when nothing is wanted any more, so
+      // "everything was rejected" stops here without a further request.
+      if (retryWithoutRejected) this.scheduleOpen();
     }
   }
 

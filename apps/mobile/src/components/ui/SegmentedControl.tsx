@@ -10,18 +10,19 @@
 // because the Workbench header and the Activity filter have different widths
 // and neither knows the screen size at build time.
 //
-// `swipeable` attaches a horizontal pan so the *content* below can be swiped
-// between peers, which is what a fluent user tries first on both platforms.
-// The gesture is exposed rather than owned because only the screen knows
-// which view is underneath.
+// `useSegmentSwipe` binds a horizontal pan on the *content* below so it can
+// be swiped between peers, which is what a fluent user tries first on both
+// platforms. The gesture is exposed rather than owned because only the screen
+// knows which view is underneath; a screen that uses `Pager` can instead
+// hand it `progress` and let the indicator track the pages 1:1.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Text, View, type LayoutChangeEvent } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, type SharedValue } from 'react-native-reanimated';
 
 import { Touchable } from './Touchable';
-import { SPRING_SHEET } from './motion';
+import { useReducedMotionPreset } from './motion';
 import { MAX_SCALE, useFontScale } from './accessibility';
 import { haptics } from './haptics';
 
@@ -55,15 +56,28 @@ export function SegmentedControl<T extends string>({
   value,
   onChange,
   className = '',
+  haptic = true,
+  progress,
+  accessibilityLabel,
 }: {
   segments: ReadonlyArray<Segment<T>>;
   value: T;
   onChange: (value: T) => void;
   className?: string;
+  /** Selection haptic on tap. Off when the parent already fires one. */
+  haptic?: boolean;
+  /**
+   * A continuous 0..n-1 position (from `Pager`) that the indicator follows
+   * on the UI thread. When supplied, the indicator tracks the finger during a
+   * page drag instead of jumping once the page settles.
+   */
+  progress?: SharedValue<number>;
+  accessibilityLabel?: string;
 }): React.ReactElement {
   const [width, setWidth] = useState(0);
   const offset = useSharedValue(0);
   const fontScale = useFontScale();
+  const presets = useReducedMotionPreset();
 
   const index = Math.max(
     0,
@@ -72,27 +86,35 @@ export function SegmentedControl<T extends string>({
   const slot = width > 0 ? width / segments.length : 0;
 
   useEffect(() => {
-    if (slot === 0) return;
-    offset.value = withSpring(index * slot, SPRING_SHEET);
-  }, [index, slot, offset]);
+    if (slot === 0 || progress) return;
+    offset.value = withSpring(index * slot, presets.springSheet);
+  }, [index, slot, offset, presets, progress]);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     setWidth(e.nativeEvent.layout.width);
   }, []);
 
-  const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: offset.value }],
-    width: slot,
-  }));
+  const indicatorStyle = useAnimatedStyle(
+    () => ({
+      transform: [{ translateX: progress ? progress.value * slot : offset.value }],
+      width: slot,
+    }),
+    [slot, progress],
+  );
 
   // Past ~1.3× the labels stop fitting three-across. Dropping to icons is
-  // worse than dropping the counts, so the counts go first.
-  const showCounts = fontScale <= 1.3;
+  // worse than dropping the counts, so the counts go first. Five segments
+  // (the chat's pane strip) are dense at any scale: the count collapses to a
+  // dot and the type steps down one size, so "Changes" is never truncated
+  // to "Chan…" beside its badge (seen in the Sept 7 phone-viewport run).
+  const dense = segments.length >= 5;
+  const showCounts = fontScale <= 1.3 && !dense;
 
   return (
     <View
       className={`min-h-10 rounded-full bg-subtle p-1 ${className}`}
       accessibilityRole="tablist"
+      {...(accessibilityLabel ? { accessibilityLabel } : {})}
     >
       {/* The measured box must be the CONTENT box, not the padded one: sizing
           the indicator from the outer width made the last slot overhang the
@@ -106,44 +128,45 @@ export function SegmentedControl<T extends string>({
           />
         ) : null}
 
-      {segments.map((segment) => {
-        const selected = segment.value === value;
-        const count = segment.count;
-        return (
-          <Touchable
-            key={segment.value}
-            a11yRole="tab"
-            accessibilityState={{ selected }}
-            accessibilityLabel={
-              count !== undefined && count > 0 ? `${segment.label}, ${count}` : segment.label
-            }
-            haptic="select"
-            ripple={false}
-            scale="none"
-            onPress={() => onChange(segment.value)}
-            className="min-h-8 flex-1 flex-row items-center justify-center gap-1.5 rounded-full py-1"
-          >
-            {segment.icon}
-            <Text
-              numberOfLines={1}
-              maxFontSizeMultiplier={MAX_SCALE.chrome}
-              className={`text-sm font-semibold ${selected ? 'text-foreground' : 'text-muted-foreground'}`}
+        {segments.map((segment) => {
+          const selected = segment.value === value;
+          const count = segment.count;
+          return (
+            <Touchable
+              key={segment.value}
+              a11yRole="tab"
+              accessibilityState={{ selected }}
+              accessibilityLabel={count !== undefined && count > 0 ? `${segment.label}, ${count}` : segment.label}
+              haptic={haptic ? 'select' : 'none'}
+              ripple={false}
+              scale="none"
+              onPress={() => onChange(segment.value)}
+              className={`min-h-8 flex-1 flex-row items-center justify-center ${dense ? "gap-1 px-0.5" : "gap-1.5"} rounded-full py-1`}
             >
-              {segment.label}
-            </Text>
-            {showCounts && count !== undefined && count > 0 ? (
-              <View className="min-w-5 items-center rounded-full bg-emphasis px-1">
-                <Text
-                  maxFontSizeMultiplier={MAX_SCALE.chrome}
-                  className="text-xs font-semibold text-muted-foreground"
-                >
-                  {count}
-                </Text>
-              </View>
-            ) : null}
-          </Touchable>
-        );
-      })}
+              {segment.icon}
+              <Text
+                numberOfLines={1}
+                maxFontSizeMultiplier={MAX_SCALE.chrome}
+                className={`${dense ? 'text-xs' : 'text-sm'} font-semibold ${selected ? 'text-foreground' : 'text-muted-foreground'}`}
+              >
+                {segment.label}
+              </Text>
+              {dense && count !== undefined && count > 0 ? (
+                <View accessible={false} className="h-1.5 w-1.5 rounded-full bg-primary" />
+              ) : null}
+              {showCounts && count !== undefined && count > 0 ? (
+                <View className="min-w-5 items-center rounded-full bg-emphasis px-1">
+                  <Text
+                    maxFontSizeMultiplier={MAX_SCALE.chrome}
+                    className="text-xs font-semibold text-muted-foreground"
+                  >
+                    {count}
+                  </Text>
+                </View>
+              ) : null}
+            </Touchable>
+          );
+        })}
       </View>
     </View>
   );

@@ -1,0 +1,15 @@
+import { launch, shot, APP_URL, sleep } from './lib.mjs';
+const { ctx, page, consoleLog } = await launch();
+const net = [];
+page.on('response', async (r) => { const u = r.url(); if (u.includes('/api/stream')) { let b = ''; try { if (r.status() >= 400 || r.request().method() === 'POST') b = (await r.text()).slice(0, 220); } catch {} net.push(`${r.status()} ${r.request().method()} ${u.replace('http://127.0.0.1:3111', '').replace(/ticket=[^&]+/, 'ticket=…').slice(0, 70)} ${b}`); } });
+await page.goto(APP_URL + '/', { waitUntil: 'domcontentloaded' });
+await sleep(12000);
+await shot(page, 'legacy-home');
+console.log('net:', net.join('\n     '));
+console.log('text:', (await page.locator('body').innerText()).replace(/\s+/g, ' ').slice(0, 260));
+await page.goto(APP_URL + process.argv[2], { waitUntil: 'domcontentloaded' });
+await sleep(6000);
+await shot(page, 'legacy-chat');
+console.log('chat net:', net.slice(-4).join('\n     '));
+console.log('errors:', consoleLog.filter((l) => /^\[(error|pageerror)\]/.test(l)).slice(0, 5).join(' | ') || '(none)');
+await ctx.close();

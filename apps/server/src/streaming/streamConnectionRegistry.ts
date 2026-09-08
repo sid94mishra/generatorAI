@@ -57,6 +57,13 @@ export interface MuxSub {
    * the client sends their union and narrows again locally.
    */
   readonly filter?: readonly string[];
+  /**
+   * Set by `routes/stream.ts` when the sub was authorised under `read:activity`
+   * rather than `admin:settings`: the `global` feed is then narrowed to
+   * `LIFECYCLE_EVENT_KINDS` server-side, whatever `filter` says. Never
+   * client-supplied — `parseSub` does not read it.
+   */
+  readonly lifecycleOnly?: boolean;
 }
 
 export function scopeKeyOf(scope: MuxScope, id: string): string {

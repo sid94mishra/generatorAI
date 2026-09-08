@@ -11,6 +11,8 @@ describe('notification route guard — accepts real routes', () => {
     '/changes/w1',
     '/changes/w1/file?path=src%2Fa.ts',
     '/settings/security',
+    '/workflows/wf-1',
+    '/terminal/ws-1',
   ])('allows %s', (route) => {
     expect(isSafeNotificationRoute(route)).toBe(true);
     expect(safeRoute(route)).toBe(route);
@@ -65,6 +67,9 @@ describe('notification route guard — rejects navigation escapes', () => {
     expect(isSafeNotificationRoute('/admin')).toBe(false);
     expect(isSafeNotificationRoute('/pair')).toBe(false);
     expect(isSafeNotificationRoute('/_sitemap')).toBe(false);
+    // Near-misses of the newly allowed roots must not ride in on a prefix.
+    expect(isSafeNotificationRoute('/workflow/wf-1')).toBe(false);
+    expect(isSafeNotificationRoute('/terminals/ws-1')).toBe(false);
   });
 
   it('rejects non-strings and empties', () => {

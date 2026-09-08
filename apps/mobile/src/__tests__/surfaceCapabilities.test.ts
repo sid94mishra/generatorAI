@@ -36,23 +36,33 @@ describe('W29 — mobile fileAttachment', () => {
 
   it('the composer only has an attach path when a handler is supplied', () => {
     // The control itself is real, which is what made the ledger's claim
-    // plausible: there IS an "Add attachment" button. It is `onAttach` that
-    // decides whether pressing it can do anything.
+    // plausible: there IS an "Add attachment" button. Composer v2 (D2) takes
+    // `onAttachFrom` (the picker menu) with `onAttach` kept for v1 callers;
+    // whichever the screen supplies decides whether pressing it can attach.
     expect(composer).toContain('accessibilityLabel="Add attachment"');
     expect(
-      /onAttach\?:/.test(composer),
-      'Composer no longer takes an optional onAttach — re-derive this probe',
+      /onAttach\?:/.test(composer) && /onAttachFrom\?:/.test(composer),
+      'Composer no longer takes optional onAttach / onAttachFrom — re-derive this probe',
     ).toBe(true);
-    // The fallback is what turns a missing handler into a dead control rather
-    // than a crash, so its presence is the mechanism this test is about.
-    expect(composer).toContain('props.onAttach ?? (() => {})');
+    // The mechanism that keeps a withheld scope from becoming a DEAD control:
+    // the press explains itself and offers "Request access" instead of
+    // silently doing nothing (plan D2).
+    expect(composer).toContain("'Attachments are off for this device'");
+    expect(composer).toContain("text: 'Request access'");
+    // With the scope held, the press opens the picker menu rather than a noop.
+    expect(composer).toContain("setSheet('attach')");
   });
 
   it('declares fileAttachment exactly when the chat screen wires an attach handler', () => {
     // The lock, in both directions. Wiring an attachment picker without
     // updating the ledger fails here; flipping the ledger without wiring one
-    // fails here. Today neither is true and the expected value is `false`.
-    const wired = /\bonAttach=/.test(chatScreen);
+    // fails here. The screen wires it either by passing a handler directly or
+    // by spreading `useComposerController().props`, which supplies
+    // `onAttachFrom` + the multipart send path.
+    const wired =
+      /\bonAttach=/.test(chatScreen) ||
+      /\bonAttachFrom=/.test(chatScreen) ||
+      /useComposerController\(/.test(chatScreen);
 
     expect(
       MOBILE_CAPABILITIES.fileAttachment.supported,

@@ -7,7 +7,7 @@
 //   ThemeProvider           injects the CSS variables the tree resolves
 //   QueryClientProvider     server cache
 //   AuthProvider            credentials + transport
-//   BottomSheetModalProvider must be INSIDE gesture + safe-area
+//   MuxStreamProvider       one shared stream socket for every screen
 // ────────────────────────────────────────────────────────────────
 
 import '../src/theme/global.css';
@@ -16,13 +16,12 @@ import '../src/theme/global.css';
 // native installs the JSI/OpenSSL implementation, web asserts the built-in one.
 import { installCrypto } from '../src/crypto/installCrypto';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import { Redirect, Stack, SplashScreen, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChevronLeft } from 'lucide-react-native';
 
@@ -31,11 +30,15 @@ import { goBack } from '../src/components/ui/Screen';
 
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
 import { PreferencesProvider } from '../src/prefs/preferences';
+import { consumeLastRoute, useLastRoute } from '../src/prefs/lastRoute';
 import { AuthProvider, useAuth } from '../src/auth/AuthProvider';
-import { Spinner, ToastProvider, Button, ErrorState } from '../src/components/ui';
+import { AppLockGate } from '../src/auth/AppLock';
+import { Spinner, ToastProvider, ContextMenuProvider, Button, ErrorState } from '../src/components/ui';
 import { usePushNotifications } from '../src/notifications/usePushNotifications';
 import { MuxStreamProvider } from '../src/stream/MuxStreamProvider';
 import { useGlobalStream } from '../src/stream/useGlobalStream';
+import { ConnectionStripHost } from '../src/components/common/ConnectionStrip';
+import { ErrorBoundary } from '../src/navigation/ErrorBoundary';
 
 installCrypto();
 
@@ -102,6 +105,25 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
   // per list tab. Without it the Chats / Runs / Automations lists have no live
   // lifecycle events at all and go stale until TanStack refetches them.
   useGlobalStream();
+
+  // Records every restorable route as it changes (MMKV, synchronous), so a
+  // cold start within 30 minutes can put the user back mid-transcript.
+  useLastRoute();
+
+  // Cold-start restore — exactly once, after the session resolves, and ONLY
+  // when the app opened at its entry route: a deep link or a notification tap
+  // into `/runs/<id>` is where the user asked to go and must win. The record
+  // is consumed either way so a stale route can never replay later.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (initializing || restoredRef.current) return;
+    restoredRef.current = true;
+    const target = consumeLastRoute();
+    if (!target) return;
+    if (state.status !== 'authenticated') return;
+    if (pathname !== '/' && pathname !== '/(tabs)') return;
+    router.replace(target as Parameters<typeof router.replace>[0]);
+  }, [initializing, state.status, pathname]);
 
   const isPublic = PUBLIC_ROUTES.has(pathname);
 
@@ -260,9 +282,50 @@ function RootStack(): React.ReactElement {
       <Stack.Screen name="settings/diagnostics" options={{ headerShown: false }} />
       <Stack.Screen name="settings/about" options={{ headerShown: false }} />
       <Stack.Screen name="settings/security" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/accessibility" options={{ headerShown: false }} />
+
+      {/* ── Route-addressable sheets (plan §6.2) ──────────────────────
+          These are exactly the routes push notifications carry:
+            /approvals                                the whole queue
+            /chats/[id]/gate/[interactionId]          one pending gate
+            /chats/[id]/plan/[planId]                 a plan + its decision
+            /scope-request                            ask for a permission
+          Presented as a form sheet on iOS (detents where the OS supports
+          them) and a modal on Android. Each draws its own title row and
+          Close through `RouteSheet`, which also copes with arriving cold
+          (no history to pop) by falling back to the tab shell. */}
+      <Stack.Screen name="approvals" options={sheetOptions} />
+      <Stack.Screen name="chats/[id]/gate/[interactionId]" options={sheetOptions} />
+      <Stack.Screen name="chats/[id]/plan/[planId]" options={sheetOptions} />
+      <Stack.Screen name="scope-request" options={sheetOptions} />
     </Stack>
   );
 }
+
+/**
+ * How a route sheet is presented.
+ *
+ * iOS: `formSheet` is the native `UISheetPresentationController`, with
+ * medium/large detents and a grabber; a swipe down dismisses. Android has
+ * no system sheet for a navigator route, so it is a modal that slides up.
+ * Web preview: a modal too.
+ */
+const sheetOptions: React.ComponentProps<typeof Stack.Screen>['options'] =
+  Platform.OS === 'ios'
+    ? {
+        headerShown: false,
+        presentation: 'formSheet',
+        sheetAllowedDetents: [0.6, 1],
+        sheetGrabberVisible: true,
+        sheetCornerRadius: 24,
+        gestureEnabled: true,
+      }
+    : {
+        headerShown: false,
+        presentation: 'modal',
+        animation: 'slide_from_bottom',
+        gestureEnabled: true,
+      };
 
 export default function RootLayout(): React.ReactElement {
   return (
@@ -278,11 +341,30 @@ export default function RootLayout(): React.ReactElement {
                       every screen's subscription rides the same socket. */}
                   <MuxStreamProvider>
                     <ToastProvider>
-                      <BottomSheetModalProvider>
-                        <AuthGate>
-                          <RootStack />
-                        </AuthGate>
-                      </BottomSheetModalProvider>
+                      {/* Hosts the single shared long-press menu sheet;
+                          `ContextMenu`/`useContextMenu` no-op without it. */}
+                      <ContextMenuProvider>
+                        {/* app-lock-gate: the biometric <AppLockGate> wraps
+                            <AuthGate> here — outside the auth gate so a locked
+                            app never renders a screen, inside the providers so
+                            the gate can read preferences and theme. */}
+                        <AppLockGate>
+                          <AuthGate>
+                          {/* D0/S7 — the one line that says the socket is
+                              down, retrying, or refused a scope this phone
+                              does not hold. In flow above the navigator so
+                              it never covers a back button. */}
+                          <ConnectionStripHost>
+                            {/* A render error on any screen lands here
+                                instead of blanking the app. */}
+                            <ErrorBoundary scope="root">
+                              <RootStack />
+                            </ErrorBoundary>
+                          </ConnectionStripHost>
+                          </AuthGate>
+                        </AppLockGate>
+                        {/* /app-lock-gate */}
+                      </ContextMenuProvider>
                     </ToastProvider>
                   </MuxStreamProvider>
                 </AuthProvider>

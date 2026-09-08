@@ -99,6 +99,22 @@ const AgentResolverEmpty = (): ResolvedAgentProjection => AgentResolver.empty();
  */
 const CONVERSATION_BIND_TIMEOUT_MS = 90_000;
 
+/**
+ * How long `cancelTurn` waits for the provider to acknowledge an abort when
+ * the caller names no budget. Matches `STOP_BUDGET_DEFAULT_SECONDS` in
+ * client-core's `StopController`, so a client that sends nothing gets the
+ * same window as one that sends the default.
+ */
+const DEFAULT_CANCEL_BUDGET_SECONDS = 10;
+
+/** Options for `ChatManagementService.cancelTurn`. See its doc comment. */
+export interface CancelTurnOptions {
+  /** Also destroy the provider conversation after the abort (hard stop). */
+  force?: boolean;
+  /** Seconds to wait for the provider to acknowledge the abort; clamped to [0.5, 60]. */
+  budgetSeconds?: number;
+}
+
 async function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -2909,10 +2925,39 @@ export class ChatManagementService {
    * subscription and emits `harness.idle` so the UI transitions out of the
    * "generating" state. The chat stays active and can accept new prompts
    * (unlike archive, which closes the session).
+   *
+   * `options` is what the two-phase Stop control sends (`StopController` in
+   * client-core: first press graceful, second press after the budget forced):
+   *
+   * - `budgetSeconds` bounds how long this waits for the provider to
+   *   acknowledge the abort. The wait used to be unbounded, so a wedged
+   *   provider transport (the agent-host supervisor not answering
+   *   `abort_session`, say) held the cancel request — and the UI's "stopping"
+   *   state — open indefinitely. Past the budget we proceed to finalise and
+   *   emit idle regardless; the provider's own semantic-cancel grace
+   *   (`hardening/semanticCancel.ts`) synthesises its terminal event.
+   *
+   * - `force` additionally DESTROYS the provider conversation after the abort
+   *   (`harness.destroyConversation`): for claude-agent that closes the
+   *   persistent CLI process the conversation owns, for the agent host it
+   *   deletes the session. This is the honest "hard stop" available — there is
+   *   deliberately no process-kill hook on a runtime that may be shared (see
+   *   `semanticCancel.ts`'s header), but a conversation is per-chat and can be
+   *   torn down without touching anyone else. The binding is dropped too, so
+   *   the next prompt goes through the resume-with-config path and rebuilds a
+   *   fresh runtime with the persisted history rather than queueing behind a
+   *   turn the old one never settled.
    */
-  async cancelTurn(chatId: string): Promise<void> {
+  async cancelTurn(chatId: string, options: CancelTurnOptions = {}): Promise<void> {
     const chat = await this.chatRepo.getById(chatId);
     const session = await this.sessionRepo.getById(chat.sessionId);
+    const force = options.force === true;
+    const budgetMs =
+      Math.min(60, Math.max(0.5, options.budgetSeconds ?? DEFAULT_CANCEL_BUDGET_SECONDS)) * 1000;
+    console.info(
+      `[ChatManagement] cancelTurn ${chatId}: force=${force} budgetMs=${budgetMs}` +
+        (session.conversationId ? ` conversation=${session.conversationId}` : ' (no conversation)'),
+    );
 
     // Tells `sendPrompt`'s catch that the imminent abort rejection is expected.
     this.cancelledTurns.add(chatId);
@@ -2924,23 +2969,64 @@ export class ChatManagementService {
     // turn. Resolving the waiters lets each provider callback return, which
     // in turn decrements its `permissionPending` watchdog counter.
     if (this.extensions.agentInteractionService) {
+      // Kinds are read BEFORE cancelling: the repo settles the rows, and the
+      // client keys its cards by kind. A tool-permission card only clears on
+      // `chat.permission.expired`; sending `chat.question.expired` for it left
+      // the Allow/Deny card pinned on the phone after Stop (Sept 7 live run).
+      const pending = await this.extensions.agentInteractionService.listPendingByChat(chatId);
+      const kindOf = new Map(pending.map((p) => [p.id, p.kind] as const));
       const cancelled = await this.extensions.agentInteractionService.cancelForChat(
         chatId,
         'user_cancelled',
       );
       for (const interactionId of cancelled) {
+        const kind = kindOf.get(interactionId) === 'tool_permission'
+          ? 'chat.permission.expired'
+          : 'chat.question.expired';
         await this.eventBus.emit(chat.sessionId, {
-          kind: 'chat.question.expired',
+          kind,
           data: { chatId, interactionId, reason: 'user_cancelled' },
         } as AgentEvent);
       }
     }
 
     if (session.conversationId) {
+      const conversationId = session.conversationId;
       try {
-        await this.harness.abortConversation(session.conversationId);
-      } catch {
-        // Conversation may not be actively streaming — non-fatal.
+        await withDeadline(
+          this.harness.abortConversation(conversationId),
+          budgetMs,
+          'abort the conversation',
+        );
+      } catch (err) {
+        // Conversation may not be actively streaming — non-fatal. A deadline
+        // here means the provider did not acknowledge within the budget; we
+        // carry on and settle the turn ourselves below.
+        console.warn(
+          `[ChatManagement] abort for chat ${chatId} did not settle cleanly:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+      if (force) {
+        // Hard stop: tear the provider conversation down so nothing of the
+        // unsettled turn survives into the next prompt. See the doc comment.
+        try {
+          await withDeadline(
+            this.harness.destroyConversation(conversationId),
+            budgetMs,
+            'destroy the conversation',
+          );
+          console.info(`[ChatManagement] force-cancel destroyed conversation ${conversationId} for chat ${chatId}`);
+        } catch (err) {
+          console.warn(
+            `[ChatManagement] force-cancel could not destroy conversation ${conversationId}:`,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+        // Whether or not destroy succeeded, forget the binding: the next
+        // `sendPrompt` then rebinds (resume-with-config, falling back to a
+        // recreate) instead of assuming a live runtime it may not have.
+        this.conversationBindings.delete(conversationId);
       }
     }
 

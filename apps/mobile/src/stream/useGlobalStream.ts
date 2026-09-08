@@ -33,6 +33,11 @@ import {
   invalidateListKeys,
   listKeysForEvent,
 } from './muxTransport';
+import {
+  connectionFromDisconnect,
+  requiredScopeFromReason,
+  useStreamHealth,
+} from './streamHealth';
 
 /**
  * One invalidation batch per frame.
@@ -47,9 +52,22 @@ export function useGlobalStream(): void {
   const queryClient = useQueryClient();
   const stream = useMuxStream();
   const pendingRef = useRef(new Set<string>());
+  // D0/S7 — a phone paired before `read:activity` existed does not hold it,
+  // and the server now rejects THIS scope alone rather than the whole
+  // connection. The client drops the scope after the rejection, so the only
+  // way it is ever asked for again is this effect re-running: `Retry` on the
+  // strip refreshes the token and bumps the generation.
+  const retryGeneration = useStreamHealth((s) => s.retryGeneration);
+
+  useEffect(() => {
+    // No client means no session (unpaired, backgrounded): the strip must
+    // not report an outage for a socket that was never meant to be open.
+    if (!stream) useStreamHealth.getState().setConnection('idle');
+  }, [stream]);
 
   useEffect(() => {
     if (!stream) return;
+    const health = useStreamHealth.getState();
 
     const flush = (): void => {
       const keys = pendingRef.current;
@@ -68,7 +86,22 @@ export function useGlobalStream(): void {
           pendingRef.current.add(JSON.stringify(key));
         }
       },
-      { filter: [...GLOBAL_SCOPE_FILTER] },
+      {
+        filter: [...GLOBAL_SCOPE_FILTER],
+        onConnected: () => health.setConnection('connected'),
+        onReconnecting: (attempt) => health.setConnection('reconnecting', attempt),
+        onDisconnected: (reason) => {
+          const requiredScope = requiredScopeFromReason(reason);
+          if (requiredScope) {
+            // The socket is fine; only this scope was refused. Say so by name
+            // rather than letting the lists go silently stale.
+            health.noteRejected({ scope: 'global', id: GLOBAL_SCOPE_ID, requiredScope });
+            return;
+          }
+          const next = connectionFromDisconnect(reason);
+          if (next) health.setConnection(next);
+        },
+      },
     );
 
     return () => {
@@ -78,5 +111,6 @@ export function useGlobalStream(): void {
       // land, or the list the user is about to look at is stale for no reason.
       flush();
     };
-  }, [stream, queryClient]);
+    // `retryGeneration` is a deliberate dependency: it is the re-subscribe signal.
+  }, [stream, queryClient, retryGeneration]);
 }

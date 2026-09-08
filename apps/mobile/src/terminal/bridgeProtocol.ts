@@ -25,8 +25,16 @@ export type ToWebView =
   | { type: 'clear' }
   | { type: 'theme'; theme: Record<string, string> }
   | { type: 'fit' }
+  /** Incremental search — highlights and jumps to the first match. */
   | { type: 'search'; query: string }
-  | { type: 'scrollToBottom' };
+  | { type: 'searchNext'; query: string }
+  | { type: 'searchPrev'; query: string }
+  | { type: 'clearSearch' }
+  | { type: 'scrollToBottom' }
+  /** Pinch-to-zoom result. The renderer refits after applying it. */
+  | { type: 'fontSize'; size: number }
+  | { type: 'focus' }
+  | { type: 'blur' };
 
 /** WebView → RN. */
 export type FromWebView =
@@ -34,7 +42,22 @@ export type FromWebView =
   | { type: 'input'; b64: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'selection'; text: string }
-  | { type: 'bell' };
+  | { type: 'bell' }
+  /** OSC 0/2 window title from the shell (`user@host: ~/project`). */
+  | { type: 'title'; title: string }
+  /** The user tapped a URL the web-links addon detected. RN decides whether to open it. */
+  | { type: 'link'; url: string }
+  /**
+   * A key a soft keyboard cannot produce (Escape, Tab, arrows, a Ctrl chord)
+   * arrived at the renderer — evidence of a hardware keyboard.
+   */
+  | { type: 'hwkey' }
+  | { type: 'searchResult'; found: boolean };
+
+/** Largest title the bridge will carry — a shell can set anything. */
+const MAX_TITLE_CHARS = 256;
+/** Largest URL the bridge will carry. */
+const MAX_URL_CHARS = 2048;
 
 /**
  * Coalesces PTY output into at most one bridge message per frame.
@@ -112,7 +135,8 @@ export function parseFromWebView(raw: string): FromWebView | null {
   switch (message['type']) {
     case 'ready':
     case 'bell':
-      return { type: message['type'] as 'ready' | 'bell' };
+    case 'hwkey':
+      return { type: message['type'] as 'ready' | 'bell' | 'hwkey' };
     case 'input':
       return typeof message['b64'] === 'string' ? { type: 'input', b64: message['b64'] } : null;
     case 'resize': {
@@ -127,9 +151,35 @@ export function parseFromWebView(raw: string): FromWebView | null {
       return typeof message['text'] === 'string'
         ? { type: 'selection', text: message['text'].slice(0, 100_000) }
         : null;
+    case 'title':
+      return typeof message['title'] === 'string'
+        ? { type: 'title', title: message['title'].slice(0, MAX_TITLE_CHARS) }
+        : null;
+    case 'link': {
+      const url = message['url'];
+      // The scheme is checked again by the caller before `Linking.openURL`;
+      // this only guards the shape and size.
+      if (typeof url !== 'string' || url.length === 0 || url.length > MAX_URL_CHARS) return null;
+      return { type: 'link', url };
+    }
+    case 'searchResult':
+      return typeof message['found'] === 'boolean'
+        ? { type: 'searchResult', found: message['found'] }
+        : null;
     default:
       return null;
   }
+}
+
+/**
+ * Only `http:` and `https:` links leave the renderer.
+ *
+ * Terminal output is untrusted: a `file:`, `javascript:`, `tel:` or custom
+ * app scheme printed by a program must never reach `Linking.openURL`, where
+ * it would be dereferenced with the app's own identity.
+ */
+export function isOpenableLink(url: string): boolean {
+  return /^https?:\/\/[^\s/]+/i.test(url);
 }
 
 function isSaneDimension(value: unknown): boolean {

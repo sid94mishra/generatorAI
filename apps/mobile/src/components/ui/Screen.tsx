@@ -11,7 +11,13 @@
 // a phone frame. It is driven by a scroll handler on the UI thread, so it
 // stays smooth while a chat stream is running on the JS thread.
 //
-// Two defects this version fixes:
+// v2: the search field lives INSIDE the collapsing block, so it folds away
+// with the large title exactly as a `UISearchController` does — and stays
+// pinned while it has focus, because a field that scrolls away under the
+// keyboard it summoned is the one thing worse than no search. `headerRight`
+// is the v2 name for `trailing`; both work.
+//
+// Two defects the previous version fixed and this one keeps fixed:
 //   • The title was rendered twice and both copies were readable, so every
 //     screen announced its name twice to a screen reader.
 //   • `router.back()` was called unconditionally. Arriving from a push
@@ -19,7 +25,7 @@
 //     back button did nothing and the user was stranded on a detail screen.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, Text, View } from 'react-native';
 import Animated, {
   interpolate,
@@ -36,6 +42,7 @@ import { IconButton } from './Button';
 import { SearchField } from './Form';
 import { MAX_SCALE } from './accessibility';
 import { useTheme } from '../../theme/ThemeProvider';
+import { usePreferences } from '../../prefs/preferences';
 
 /** Scroll distance over which the large title shrinks into the nav bar. */
 const COLLAPSE_RANGE = 48;
@@ -51,12 +58,25 @@ export function goBack(fallback: Parameters<typeof router.replace>[0] = '/(tabs)
   else router.replace(fallback);
 }
 
+export interface ScreenSearch {
+  value: string;
+  /** v2 name. */
+  onChange?: (next: string) => void;
+  /** v1 name; either works. */
+  onChangeText?: (next: string) => void;
+  placeholder?: string;
+  autoFocus?: boolean;
+  onSubmit?: () => void;
+}
+
 export function ScreenHeader({
   title,
   subtitle,
   scrollY,
   leading,
   trailing,
+  below,
+  belowPinned = false,
 }: {
   title: string;
   subtitle?: string;
@@ -64,9 +84,17 @@ export function ScreenHeader({
   scrollY?: SharedValue<number>;
   leading?: React.ReactNode;
   trailing?: React.ReactNode;
+  /** Rendered inside the collapsing block, under the title — the search field. */
+  below?: React.ReactNode;
+  /** Keep `below` visible regardless of scroll — while search has focus. */
+  belowPinned?: boolean;
 }): React.ReactElement {
   const fallback = useSharedValue(0);
-  const y = scrollY ?? fallback;
+  // Settings → Accessibility → "Large titles collapse". Off, the header
+  // reads the constant 0 instead of the scroll offset, so every interpolation
+  // below holds at its resting value and the large title simply stays.
+  const { largeTitleCollapse } = usePreferences();
+  const y = largeTitleCollapse && scrollY ? scrollY : fallback;
 
   const largeStyle = useAnimatedStyle(() => ({
     opacity: interpolate(y.value, [0, COLLAPSE_RANGE], [1, 0], 'clamp'),
@@ -76,6 +104,20 @@ export function ScreenHeader({
   const compactStyle = useAnimatedStyle(() => ({
     opacity: interpolate(y.value, [COLLAPSE_RANGE * 0.6, COLLAPSE_RANGE], [0, 1], 'clamp'),
   }));
+
+  // The search row folds a beat after the title so the two read as one
+  // block collapsing rather than two things disappearing at once.
+  const belowStyle = useAnimatedStyle(
+    () => ({
+      opacity: belowPinned ? 1 : interpolate(y.value, [COLLAPSE_RANGE * 0.5, COLLAPSE_RANGE * 1.5], [1, 0], 'clamp'),
+      transform: [
+        {
+          translateY: belowPinned ? 0 : interpolate(y.value, [0, COLLAPSE_RANGE * 1.5], [0, -6], 'clamp'),
+        },
+      ],
+    }),
+    [belowPinned],
+  );
 
   return (
     <View className="bg-background px-4 pb-2 pt-1">
@@ -89,11 +131,7 @@ export function ScreenHeader({
             It is also hidden from assistive tech. Both copies are always
             mounted so the crossfade can run, and leaving both readable made
             every screen announce its own name twice. */}
-        <View
-          className="flex-1"
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-        >
+        <View className="flex-1" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           <Animated.Text
             numberOfLines={1}
             style={compactStyle}
@@ -123,6 +161,12 @@ export function ScreenHeader({
           </Text>
         ) : null}
       </Animated.View>
+
+      {below ? (
+        <Animated.View style={belowStyle} className="pt-2">
+          {below}
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
@@ -131,9 +175,11 @@ export function Screen({
   title,
   subtitle,
   trailing,
+  headerRight,
   leading,
   back = false,
   backFallback,
+  onBack,
   onRefresh,
   refreshing = false,
   search,
@@ -143,10 +189,13 @@ export function Screen({
   contentClassName = '',
   /** Extra bottom clearance. Tab screens pass the FAB's height. */
   bottomInset = 0,
+  scrollY: externalScrollY,
 }: {
   title?: string;
   subtitle?: string;
+  /** Trailing header slot. `headerRight` is the v2 name for the same slot. */
   trailing?: React.ReactNode;
+  headerRight?: React.ReactNode;
   leading?: React.ReactNode;
   /**
    * Draw a back button.
@@ -157,35 +206,69 @@ export function Screen({
    */
   back?: boolean;
   backFallback?: Parameters<typeof router.replace>[0];
+  /** Replace the default pop; for a sheet-like screen that confirms first. */
+  onBack?: () => void;
   onRefresh?: () => void;
   refreshing?: boolean;
-  /** Renders a search field under the title. */
-  search?: { value: string; onChangeText: (next: string) => void; placeholder?: string };
+  /** Renders a search field under the title that collapses with it. */
+  search?: ScreenSearch;
   children: React.ReactNode;
   scroll?: boolean;
   contentClassName?: string;
   bottomInset?: number;
+  /**
+   * When the screen owns its scroller (`scroll={false}`), pass the shared
+   * value its `useAnimatedScrollHandler` writes so the title still collapses.
+   */
+  scrollY?: SharedValue<number>;
 }): React.ReactElement {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const scrollY = useSharedValue(0);
+  const internalScrollY = useSharedValue(0);
+  const scrollY = externalScrollY ?? internalScrollY;
   const scroller = useRef<Animated.ScrollView>(null);
+  const [searchFocused, setSearchFocused] = useState(false);
 
   const onScroll = useAnimatedScrollHandler((event) => {
     scrollY.value = event.contentOffset.y;
   });
 
-  const onBack = useCallback(() => goBack(backFallback), [backFallback]);
+  const handleBack = useCallback(() => {
+    if (onBack) onBack();
+    else goBack(backFallback);
+  }, [onBack, backFallback]);
 
+  const trailingSlot = headerRight ?? trailing;
+
+  // `IconButton` is a full platform-minimum box (44pt / 48dp) with the
+  // `tap` haptic — the back button must never be the one control on the
+  // screen that is smaller than the finger.
   const leadingSlot =
     leading ??
     (back ? (
       <IconButton
         accessibilityLabel="Back"
+        accessibilityHint="Returns to the previous screen"
         icon={<ChevronLeft size={24} color={colors.foreground} />}
-        onPress={onBack}
+        onPress={handleBack}
+        haptic="tap"
       />
     ) : undefined);
+
+  const onSearchChange = search?.onChange ?? search?.onChangeText;
+  const searchNode =
+    search && onSearchChange ? (
+      <SearchField
+        value={search.value}
+        onChangeText={onSearchChange}
+        placeholder={search.placeholder ?? 'Search'}
+        autoFocus={search.autoFocus ?? false}
+        {...(search.onSubmit ? { onSubmit: search.onSubmit } : {})}
+        onFocus={() => setSearchFocused(true)}
+        onBlur={() => setSearchFocused(false)}
+        onCancel={() => setSearchFocused(false)}
+      />
+    ) : null;
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -195,18 +278,13 @@ export function Screen({
           {...(subtitle ? { subtitle } : {})}
           scrollY={scrollY}
           leading={leadingSlot}
-          trailing={trailing}
+          trailing={trailingSlot}
+          below={searchNode}
+          belowPinned={searchFocused}
         />
-      ) : null}
-
-      {search ? (
-        <View className="px-4 pb-2">
-          <SearchField
-            value={search.value}
-            onChangeText={search.onChangeText}
-            placeholder={search.placeholder ?? 'Search'}
-          />
-        </View>
+      ) : searchNode ? (
+        // No title to collapse under: the field simply sits at the top.
+        <View className="px-4 pb-2 pt-1">{searchNode}</View>
       ) : null}
 
       {scroll ? (
@@ -262,11 +340,7 @@ export function PlainScroll({
       contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 12 }}
       refreshControl={
         onRefresh ? (
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors['muted-foreground']}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors['muted-foreground']} />
         ) : undefined
       }
     >

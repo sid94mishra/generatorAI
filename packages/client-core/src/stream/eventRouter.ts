@@ -925,6 +925,11 @@ export class StreamEventRouter {
       case 'chat.question_expired':
         this.flushKey(key, out);
         out.push({ op: 'expireQuestion', key, interactionId: str(data['interactionId']) });
+        // Servers before Sept 2026 sent this kind for EVERY cancelled
+        // interaction, tool permissions included. Expiring a permission card
+        // by the same id is a no-op when none matches, and keeps the
+        // Allow/Deny card from staying pinned after a Stop against such a server.
+        out.push({ op: 'expirePermission', key, interactionId: str(data['interactionId']), reason: 'user_cancelled' });
         out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
         break;
 

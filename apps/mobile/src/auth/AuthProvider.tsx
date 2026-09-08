@@ -37,6 +37,8 @@ import {
 } from '@generatorai/client-transport';
 
 import { MobileDeviceKeyStore, MobileSessionStore, type KeyBacking } from './stores';
+import { registerAuthenticatedFetch } from './backgroundFetch';
+import { resetStepUp } from './stepUp';
 import { buildEndpointCandidates } from '../transport/endpointPlan';
 import { PREF_KEYS, prefs } from '../storage/prefs';
 
@@ -249,6 +251,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     // Clear the key too: leaving it behind would let a later pairing reuse a
     // keypair the server has already revoked.
     await keyStore.clear();
+    // A biometric step-up granted to the old pairing must not carry over to
+    // the next one.
+    resetStepUp();
     supervisorRef.current = null;
     runtimeRef.current = null;
     setState({ status: 'unpaired' });
@@ -305,6 +310,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       refreshPermissions,
     ],
   );
+
+  // ── Non-React access to the signed fetch (notifications/backgroundFetch) ──
+  // Lock-screen Allow/Deny actions POST a decision while no screen is
+  // mounted; they reach the runtime through this module-level accessor.
+  useEffect(() => {
+    registerAuthenticatedFetch(value.fetch);
+    return () => registerAuthenticatedFetch(null);
+  }, [value.fetch]);
+  // ── end non-React access ──────────────────────────────────────────────
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

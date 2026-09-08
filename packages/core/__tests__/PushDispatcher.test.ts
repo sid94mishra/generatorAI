@@ -71,7 +71,7 @@ describe('PushDispatcher — scope enforcement', () => {
     ]);
 
     const messages = dispatcher.handleEvent({
-      kind: 'chat.question_asked',
+      kind: 'chat.question.asked',
       data: { chatId: 'c1' },
     });
     expect(messages.map((m) => m.target.deviceId)).toEqual(['chats']);
@@ -210,6 +210,57 @@ describe('PushDispatcher — delivery outcomes', () => {
     expect(() => dispatcher.handleEvent(gate)).not.toThrow();
     await Promise.resolve();
     await Promise.resolve();
+  });
+
+  it('carries the gate identity, actions and category for a permission prompt', () => {
+    // Everything the phone needs to answer from the lock screen without
+    // opening the UI: which chat, which gate, and which decisions exist.
+    const { dispatcher } = makeDispatcher([target()]);
+    const [message] = dispatcher.handleEvent({
+      kind: 'chat.permission.requested',
+      data: {
+        chatId: 'c1',
+        interactionId: 'i1',
+        toolName: 'Bash',
+        inputSummary: 'pnpm test',
+        description: 'Run a shell command',
+      },
+    });
+    expect(message!.title).toBe('Allow Bash: pnpm test?');
+    expect(message!.categoryId).toBe('approval');
+    expect(message!.data).toEqual({
+      route: '/chats/c1/gate/i1',
+      category: 'approval',
+      threadId: 'chat:c1',
+      chatId: 'c1',
+      interactionId: 'i1',
+      kind: 'permission',
+      actions: ['approve', 'deny'],
+    });
+  });
+
+  it('names the approval category for every approval, but never for other categories', () => {
+    const { dispatcher } = makeDispatcher([target()]);
+    const [approval] = dispatcher.handleEvent(gate);
+    expect(approval!.categoryId).toBe('approval');
+    // A workflow gate has no chat interaction, so no per-gate fields leak in.
+    expect(approval!.data).toEqual({ route: '/runs/r1', category: 'approval', threadId: 'run:r1' });
+
+    const [done] = dispatcher.handleEvent({
+      kind: 'workflow_run.completed',
+      data: { workflowRunId: 'r2' },
+    });
+    expect(done!.categoryId).toBeUndefined();
+  });
+
+  it('dedupes a permission prompt per chat, so a replayed gate does not buzz twice', () => {
+    const { dispatcher } = makeDispatcher([target()]);
+    const prompt = {
+      kind: 'chat.permission.requested',
+      data: { chatId: 'c1', interactionId: 'i1', toolName: 'Bash' },
+    };
+    expect(dispatcher.handleEvent(prompt)).toHaveLength(1);
+    expect(dispatcher.handleEvent(prompt)).toHaveLength(0);
   });
 
   it('carries the deep-link route in the payload', () => {

@@ -1002,12 +1002,24 @@ export function useArchiveChat() {
   });
 }
 
+/** Input to `useCancelChat`: a bare chat id (graceful stop) or the two-phase Stop control's press. */
+export type CancelChatInput =
+  | string
+  | { chatId: string; force?: boolean; budgetSeconds?: number };
+
 /** Stop the in-flight turn for a chat */
 export function useCancelChat() {
   const platform = usePlatform();
 
   return useMutation({
-    mutationFn: (chatId: string) => (platform as HttpPlatformClient).cancelChat(chatId),
+    mutationFn: (input: CancelChatInput) => {
+      if (typeof input === 'string') return (platform as HttpPlatformClient).cancelChat(input);
+      const { chatId, force, budgetSeconds } = input;
+      return (platform as HttpPlatformClient).cancelChat(chatId, {
+        ...(force !== undefined ? { force } : {}),
+        ...(budgetSeconds !== undefined ? { budgetSeconds } : {}),
+      });
+    },
   });
 }
 

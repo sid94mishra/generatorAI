@@ -230,6 +230,16 @@ export function epochOr(value: Timestamp | null | undefined, fallback = 0): numb
  *
  * There is likewise no `archived` boolean: archival is `status === 'archived'`.
  */
+/**
+ * Body of `POST /api/chats/:id/cancel` — what `StopController` computes for a
+ * press. `force` (the second press) also destroys the provider conversation;
+ * `budgetSeconds` bounds the server's wait for the provider to acknowledge.
+ */
+export interface CancelTurnOptions {
+  force?: boolean;
+  budgetSeconds?: number;
+}
+
 export interface ChatSummary {
   id: string;
   name: string;
@@ -730,6 +740,27 @@ export interface SourceControlStatus {
 }
 
 
+/**
+ * A device's request for more scopes (`/api/auth/**\/scope-requests`).
+ * `scopes` are the ones asked for; `grantedScopes` the subset an admin
+ * approved (null until then). `deviceName`/`platform` are joined in by the
+ * server so a list needs no second fetch.
+ */
+export interface DeviceScopeRequest {
+  requestId: string;
+  deviceId: string;
+  deviceName: string | null;
+  platform: string | null;
+  scopes: string[];
+  reason: string | null;
+  status: 'pending' | 'approved' | 'denied' | 'cancelled';
+  createdAt: number;
+  resolvedAt: number | null;
+  resolvedBy: string | null;
+  resolutionNote: string | null;
+  grantedScopes: string[] | null;
+}
+
 /** Query keys, shared so web and mobile invalidate the same entries. */
 export const queryKeys = {
   chats: () => ['chats'] as const,
@@ -742,6 +773,10 @@ export const queryKeys = {
   providers: () => ['harness', 'providers'] as const,
   health: () => ['health'] as const,
   devices: () => ['auth', 'devices'] as const,
+  /** This device's own scope requests. */
+  myScopeRequests: () => ['auth', 'scope-requests', 'me'] as const,
+  /** The admin queue of pending scope requests. */
+  pendingScopeRequests: () => ['auth', 'scope-requests', 'pending'] as const,
   posture: () => ['security', 'posture'] as const,
   workflows: () => ['workflows'] as const,
   runs: (workflowId?: string) => (workflowId ? (['runs', workflowId] as const) : (['runs'] as const)),
@@ -910,7 +945,14 @@ export function createApiClient(fetchImpl: ApiFetch) {
         });
       },
 
-      cancel: (id: string) => request<void>(fetchImpl, `/api/chats/${id}/cancel`, json({})),
+      /**
+       * Stop the in-flight turn. `options` is what `StopController` computes
+       * for the press — the first, graceful press and the forced second press
+       * differ only here — and was previously dropped on the floor by every
+       * caller, which sent `{}`.
+       */
+      cancel: (id: string, options?: CancelTurnOptions) =>
+        request<void>(fetchImpl, `/api/chats/${id}/cancel`, json(options ?? {})),
 
       /**
        * Update chat metadata.
@@ -1365,6 +1407,34 @@ export function createApiClient(fetchImpl: ApiFetch) {
         request<{ content: string }>(fetchImpl, `/api/system/artifacts/${id}`),
 
       mcpServers: () => request<McpServerEntry[]>(fetchImpl, '/api/system/mcp-servers'),
+    },
+
+    /**
+     * What a device can do about its OWN grant. Needs only `read:status`;
+     * the server takes the device id from the credential, never from the
+     * body. Reviewing other devices' requests is the admin half — see
+     * `createAdminApi().devices.scopeRequests`.
+     */
+    auth: {
+      scopeRequests: {
+        /**
+         * Ask for scopes this device does not hold. 403 `SCOPE_NOT_REQUESTABLE`
+         * for `admin:*` from a non-admin device; 409 `REQUEST_PENDING` (with
+         * the open request under `existing`) when one is already waiting.
+         */
+        create: (body: { scopes: string[]; reason?: string }) =>
+          request<DeviceScopeRequest>(fetchImpl, '/api/auth/devices/me/scope-requests', json(body)),
+        /** Newest first. Lets the UI show "Pending since …" or the last answer. */
+        mine: async () =>
+          (await request<{ requests: DeviceScopeRequest[] }>(
+            fetchImpl,
+            '/api/auth/devices/me/scope-requests',
+          )).requests ?? [],
+        cancel: (requestId: string) =>
+          request<void>(fetchImpl, `/api/auth/devices/me/scope-requests/${encodeURIComponent(requestId)}`, {
+            method: 'DELETE',
+          }),
+      },
     },
 
     sourceControl: {

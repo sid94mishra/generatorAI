@@ -1,135 +1,173 @@
 // ────────────────────────────────────────────────────────────────
 // Workbench › Changes — the mobile form of web's ChangesSurface.
 //
-// Web renders every file as a collapsed header in one long virtualised
-// column and expands them in place. That works because the column is ~400pt
-// wide and permanently on screen. On a phone the same layout puts a two-line
-// header above two visible lines of diff, so the list and the diff are
-// separate views: tap a file, read it full width, come back.
+// A thin pane over the shared Changes components (D20): the file list,
+// the virtualised diff, the review sheet, the checkpoints sheet and the
+// commit bar all live in `src/components/changes` and `src/components/
+// review`; this file only decides how they are arranged on a phone.
 //
-// Everything else from the web toolbar is kept, because each control answers
-// a question nothing else can:
-//   base picker   "what changed since the agent's last checkpoint?"
-//   wrap          a 200-column line is unreadable at 393pt without it
-//   discard       the only destructive action here, so it is two-step
-//   checkpoints   the undo history, and the way back from a bad discard
+// Tap a file → its diff opens inline (capped); the maximise button or the
+// cap notice opens it full width inside the pane. Long-press a line →
+// comment. The base picker is behind the history icon: a permanent strip
+// of checkpoint chips cost a whole band of vertical space to duplicate
+// what that sheet already says.
+//
+// `active: false` pauses every query subscription here without dropping
+// the cache, so a pane the user swiped away from is free while hidden.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { LegendList } from '@legendapp/list/react-native';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Text, View } from 'react-native';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  ChevronDown,
-  ChevronRight,
+  ChevronLeft,
   ChevronsDownUp,
   ChevronsUpDown,
-  FileDiff,
+  FileDiff as FileDiffIcon,
   History,
-  Maximize2,
+  MessageSquare,
   RefreshCw,
-  Undo2,
+  Send,
   WrapText,
 } from 'lucide-react-native';
-import {
-  parseUnifiedDiff,
-  queryKeys,
-  toDiffList,
-  type ChangeFileEntry,
-  type DiffListItem,
-} from '@generatorai/client-core';
-
 import { Touchable } from '../../ui/Touchable';
 import { Button, IconButton } from '../../ui/Button';
-import { EmptyState, ErrorState, LoadingState } from '../../ui/States';
+import { EmptyState, ErrorState } from '../../ui/States';
 import { SkeletonList } from '../../ui/Skeleton';
 import { useToast } from '../../ui/Toast';
 import { haptics } from '../../ui/haptics';
 import { useApi } from '../../../api/useApi';
 import { useTheme } from '../../../theme/ThemeProvider';
+import {
+  ChangesList,
+  CommitBar,
+  FileDiffPane,
+  Toolbar,
+  checkpointLabel,
+  restorePath,
+  setDiffWrap,
+  useChangesSummary,
+  useDiffPrefs,
+  type ChangeRow,
+  type CommentRequest,
+  type DiffSide,
+} from '../../changes';
+import {
+  CheckpointsSheet,
+  ReviewCommentsSheet,
+  batchSummary,
+  countThreads,
+  useCapability,
+  useReviewThreads,
+  useWorkspaceCheckpoints,
+  type ReviewDraft,
+  type ReviewFocus,
+} from '../../review';
 
-/** Web's STATUS_STYLE, letter for letter. */
-const STATUS_TONE: Record<ChangeFileEntry['status'], string> = {
-  added: 'text-success',
-  modified: 'text-warning',
-  deleted: 'text-danger',
-  renamed: 'text-info',
-};
+export { Toolbar } from '../../changes/Toolbar';
 
-const STATUS_BG: Record<ChangeFileEntry['status'], string> = {
-  added: 'bg-success-muted',
-  modified: 'bg-warning-muted',
-  deleted: 'bg-danger-muted',
-  renamed: 'bg-info-muted',
-};
+export interface ChangesSectionProps {
+  workspaceId: string;
+  /** The chat the review threads belong to and are sent back to. */
+  chatId?: string | null;
+  /** False while the pane is off screen: queries pause, nothing heavy renders. */
+  active?: boolean;
+  /** Open this file's diff on mount (deep link from a tool row or the tray). */
+  focusPath?: string | null;
+  /** Hand a file to the Files pane. Omitted → the menu item is not shown. */
+  onOpenInFiles?: (path: string, alias?: string) => void;
+  /**
+   * Controlled detail (legacy Workbench contract). When supplied the pane
+   * shows that file and `onOpenFile` is asked to change it; otherwise the
+   * pane keeps its own detail state.
+   */
+  detail?: { path: string; alias?: string } | null;
+  onOpenFile?: (path: string, alias?: string) => void;
+}
 
-const STATUS_LETTER: Record<ChangeFileEntry['status'], string> = {
-  added: 'A',
-  modified: 'M',
-  deleted: 'D',
-  renamed: 'R',
-};
-
-const STATUS_TITLE: Record<ChangeFileEntry['status'], string> = {
-  added: 'Added',
-  modified: 'Modified',
-  deleted: 'Deleted',
-  renamed: 'Renamed',
-};
-
-/** Web's checkpoint-kind wording, so both apps name the same snapshot alike. */
-const CHECKPOINT_LABEL: Record<string, string> = {
-  baseline: 'Session start',
-  turn: 'Chat turn',
-  stage: 'Stage',
-  autorun: 'Automation',
-  manual: 'Manual snapshot',
-  pre_restore: 'Before rewind',
-};
-
-type Row = ChangeFileEntry & { alias: string };
-
-/** The section toolbar band. Mirrors web's `px-2 py-1.5` + bottom border. */
-export function Toolbar({ children }: { children: React.ReactNode }): React.ReactElement {
-  return (
-    <View className="min-h-11 flex-row items-center gap-2 border-b border-border-muted px-3 py-1.5">
-      {children}
-    </View>
-  );
+interface Detail {
+  path: string;
+  alias: string;
 }
 
 export function ChangesSection({
   workspaceId,
-  detail,
+  chatId = null,
+  active = true,
+  focusPath = null,
+  onOpenInFiles,
+  detail: controlledDetail,
   onOpenFile,
-}: {
-  workspaceId: string;
-  detail: { path: string; alias?: string } | null;
-  onOpenFile: (path: string, alias?: string) => void;
-}): React.ReactElement {
+}: ChangesSectionProps): React.ReactElement {
   const api = useApi();
   const queryClient = useQueryClient();
   const { colors } = useTheme();
   const toast = useToast();
+  const { wrap } = useDiffPrefs();
+  const restoreCap = useCapability('restoreCheckpoints');
 
   const [base, setBase] = useState('baseline');
-  const [wrap, setWrap] = useState(false);
-  const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null);
-  const [showCheckpoints, setShowCheckpoints] = useState(false);
-  /** Files whose diff is open inline, keyed `alias:path` (web parity). */
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [ownDetail, setOwnDetail] = useState<Detail | null>(null);
+  const [showCheckpoints, setShowCheckpoints] = useState(false);
+  const [reviewSheet, setReviewSheet] = useState<{ draft?: ReviewDraft; focus?: ReviewFocus } | null>(null);
 
-  const changes = useQuery({
-    queryKey: [...queryKeys.changes(workspaceId), base],
-    queryFn: () => api.workspaces.changes(workspaceId, { base, head: 'working' }),
-    staleTime: 10_000,
+  const changes = useChangesSummary(workspaceId, { base, active });
+  const checkpoints = useWorkspaceCheckpoints(workspaceId, active);
+  const review = useReviewThreads(workspaceId, chatId ? { scope: 'chat', scopeId: chatId } : null, {
+    active,
+    target: chatId ? { kind: 'chat', chatId } : null,
   });
 
-  const checkpoints = useQuery({
-    queryKey: queryKeys.checkpoints(workspaceId),
-    queryFn: () => api.workspaces.checkpoints(workspaceId),
-    staleTime: 30_000,
-  });
+  const detail: Detail | null = controlledDetail
+    ? { path: controlledDetail.path, alias: controlledDetail.alias ?? '.' }
+    : ownDetail;
+
+  const openDetail = useCallback(
+    (path: string, alias: string) => {
+      if (onOpenFile) onOpenFile(path, alias);
+      else setOwnDetail({ path, alias });
+    },
+    [onOpenFile],
+  );
+
+  // Deep link: open the named file once its row exists.
+  useEffect(() => {
+    if (!focusPath) return;
+    const row = changes.files.find((f) => f.path === focusPath);
+    if (row) openDetail(row.path, row.alias);
+  }, [focusPath, changes.files, openDetail]);
+
+  const multiMount = useMemo(
+    () => new Set(changes.files.map((f) => f.alias)).size > 1,
+    [changes.files],
+  );
+
+  /** The checkpoint a discard restores from: the compared base, else the baseline. */
+  const baseCheckpointId = useMemo(() => {
+    const summaryBase = changes.summary?.base;
+    if (summaryBase?.id && (summaryBase.kind === 'checkpoint' || summaryBase.kind === 'baseline')) return summaryBase.id;
+    if (base.startsWith('checkpoint:')) return base.slice('checkpoint:'.length);
+    return checkpoints.data?.checkpoints.find((c) => c.kind === 'baseline')?.id ?? null;
+  }, [changes.summary, base, checkpoints.data]);
+
+  const reviewCheckpoints = useMemo(
+    () => ({
+      base: changes.summary?.base?.id ?? baseCheckpointId ?? '',
+      head: changes.summary?.head?.id ?? '',
+    }),
+    [changes.summary, baseCheckpointId],
+  );
+
+  const baseLabel = useMemo(() => {
+    if (base === 'baseline') return 'session start';
+    const summaryBase = changes.summary?.base;
+    if (summaryBase?.label) return summaryBase.label;
+    const found = checkpoints.data?.checkpoints.find(
+      (c) => `checkpoint:${c.id}` === base || (c.turnId && `turn:${c.turnId}` === base),
+    );
+    return found ? `${checkpointLabel(found)} · ${new Date(found.createdAt).toLocaleTimeString()}` : 'a checkpoint';
+  }, [base, changes.summary, checkpoints.data]);
 
   // Discard is a single-path checkpoint restore, not a reverse patch — the
   // same call web makes, and undoable because the server snapshots first.
@@ -137,87 +175,124 @@ export function ChangesSection({
     mutationFn: (vars: { checkpointId: string; paths: string[] }) =>
       api.workspaces.restoreCheckpoint(workspaceId, vars.checkpointId, { paths: vars.paths }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.changes(workspaceId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceTree(workspaceId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.checkpoints(workspaceId) });
+      void queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId] });
       toast({ message: 'Discarded — a snapshot was saved first', tone: 'success' });
     },
-    onError: (err) =>
-      toast({
-        message: err instanceof Error ? err.message : 'Could not discard',
-        tone: 'error',
-      }),
+    onError: (err) => toast({ message: err instanceof Error ? err.message : 'Could not discard', tone: 'error' }),
   });
 
-  const rows = useMemo<Row[]>(
-    () =>
-      (changes.data?.repos ?? []).flatMap((repo) =>
-        repo.files.map((file) => ({ ...file, alias: repo.alias })),
-      ),
-    [changes.data],
-  );
-
-  const baseCheckpointId = useMemo(() => {
-    if (base.startsWith('checkpoint:')) return base.slice('checkpoint:'.length);
-    return checkpoints.data?.checkpoints.find((c) => c.kind === 'baseline')?.id ?? null;
-  }, [base, checkpoints.data]);
-
-  const baseLabel = useMemo(() => {
-    if (base === 'baseline') return 'session start';
-    const found = checkpoints.data?.checkpoints.find((c) => `checkpoint:${c.id}` === base);
-    if (!found) return 'a checkpoint';
-    return `${CHECKPOINT_LABEL[found.kind] ?? found.label ?? found.kind} · ${new Date(
-      found.createdAt,
-    ).toLocaleTimeString()}`;
-  }, [base, checkpoints.data]);
-
   const discard = useCallback(
-    (row: Row) => {
-      if (!baseCheckpointId) return;
-      const target = row.alias === '.' ? row.path : `${row.alias}/${row.path}`;
+    (row: ChangeRow) => {
+      if (!baseCheckpointId) {
+        toast({ message: 'No checkpoint to restore from yet', tone: 'error' });
+        return;
+      }
       haptics.warn();
-      restore.mutate({ checkpointId: baseCheckpointId, paths: [target] });
-      setConfirmDiscard(null);
+      restore.mutate({ checkpointId: baseCheckpointId, paths: [restorePath(row.alias, row.path)] });
     },
-    [baseCheckpointId, restore],
+    [baseCheckpointId, restore, toast],
   );
 
-  if (detail) {
-    const entry = rows.find((r) => r.path === detail.path);
-    return (
-      <DiffView
-        workspaceId={workspaceId}
-        path={detail.path}
-        base={base}
-        wrap={wrap}
-        onToggleWrap={() => setWrap((w) => !w)}
-        {...(detail.alias ? { alias: detail.alias } : {})}
-        {...(entry?.oldBlob ? { oldBlob: entry.oldBlob } : {})}
-        {...(entry?.newBlob ? { newBlob: entry.newBlob } : {})}
+  const commentOn = useCallback(
+    (row: { path: string; alias: string }, request: CommentRequest) =>
+      setReviewSheet({ draft: { path: row.path, alias: row.alias, ...request } }),
+    [],
+  );
+  const openThreadsAt = useCallback(
+    (row: { path: string; alias: string }, side: DiffSide, line: number) =>
+      setReviewSheet({ focus: { path: row.path, alias: row.alias, side, line } }),
+    [],
+  );
+  const toggle = useCallback((id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+
+  const counts = useMemo(() => countThreads(review.threads), [review.threads]);
+  const commentDisabledReason = review.canWrite ? null : review.writeReason;
+
+  const sheets = (
+    <>
+      <ReviewCommentsSheet
+        visible={reviewSheet !== null}
+        onClose={() => setReviewSheet(null)}
+        review={review}
+        draft={reviewSheet?.draft ?? null}
+        focus={reviewSheet?.focus ?? null}
+        checkpoints={reviewCheckpoints}
       />
+      <CheckpointsSheet
+        visible={showCheckpoints}
+        onClose={() => setShowCheckpoints(false)}
+        workspaceId={workspaceId}
+        currentBase={base}
+        onCompare={setBase}
+      />
+    </>
+  );
+
+  // ── Detail: one file, full width ───────────────────────────────
+  if (detail) {
+    const entry = changes.files.find((r) => r.path === detail.path && r.alias === detail.alias);
+    const threads = review.byFile.get(`${detail.alias}:${detail.path}`);
+    return (
+      <View className="flex-1">
+        {!controlledDetail ? (
+          <Touchable
+            accessibilityLabel="Back to the file list"
+            haptic="tap"
+            onPress={() => setOwnDetail(null)}
+            className="h-9 flex-row items-center gap-1 px-2"
+          >
+            <ChevronLeft size={18} color={colors.primary} />
+            <Text className="text-sm text-primary">All changes</Text>
+          </Touchable>
+        ) : null}
+        <FileDiffPane
+          workspaceId={workspaceId}
+          path={detail.path}
+          alias={detail.alias}
+          base={base}
+          {...(entry?.oldBlob ? { oldBlob: entry.oldBlob } : {})}
+          {...(entry?.newBlob ? { newBlob: entry.newBlob } : {})}
+          {...(entry?.lang ? { lang: entry.lang } : {})}
+          {...(entry ? { additions: entry.additions, deletions: entry.deletions } : {})}
+          {...(threads ? { threads } : {})}
+          openThreadCount={(threads ?? []).filter((t) => t.status !== 'resolved' && t.status !== 'outdated').length}
+          onShowComments={() => setReviewSheet({ focus: { path: detail.path, alias: detail.alias } })}
+          {...(review.canWrite ? { onComment: (request: CommentRequest) => commentOn(detail, request) } : {})}
+          onOpenThreads={(side, line) => openThreadsAt(detail, side, line)}
+          commentDisabledReason={commentDisabledReason}
+        />
+        {sheets}
+      </View>
     );
   }
 
-  const stats = changes.data?.stats;
-  const allExpanded = rows.length > 0 && expanded.size >= rows.length;
+  // ── List ───────────────────────────────────────────────────────
+  const allExpanded = changes.files.length > 0 && expanded.size >= changes.files.length;
+  const openThreads = counts.pending + counts.submitted + counts.addressed;
 
   return (
     <View className="flex-1">
       <Toolbar>
-        <FileDiff size={14} color={colors['muted-foreground']} />
+        <FileDiffIcon size={14} color={colors['muted-foreground']} />
         <Text className="text-sm font-medium text-foreground">
-          {stats?.files ?? 0} {stats?.files === 1 ? 'change' : 'changes'}
+          {changes.files.length} {changes.files.length === 1 ? 'change' : 'changes'}
         </Text>
-        {stats && (stats.additions > 0 || stats.deletions > 0) ? (
+        {changes.additions > 0 || changes.deletions > 0 ? (
           <Text className="font-mono text-xs">
-            <Text className="text-success">+{stats.additions}</Text>{' '}
-            <Text className="text-danger">−{stats.deletions}</Text>
+            <Text className="text-success">+{changes.additions}</Text> <Text className="text-danger">−{changes.deletions}</Text>
           </Text>
         ) : null}
         <View className="flex-1" />
-        {!showCheckpoints && rows.length > 0 ? (
+        {changes.files.length > 0 ? (
           <IconButton
             accessibilityLabel={allExpanded ? 'Collapse all files' : 'Expand all files'}
+            compact
             icon={
               allExpanded ? (
                 <ChevronsDownUp size={16} color={colors['muted-foreground']} />
@@ -225,50 +300,42 @@ export function ChangesSection({
                 <ChevronsUpDown size={16} color={colors['muted-foreground']} />
               )
             }
-            onPress={() =>
-              setExpanded(
-                allExpanded ? new Set() : new Set(rows.map((r) => `${r.alias}:${r.path}`)),
-              )
-            }
-          />
-        ) : null}
-        {!showCheckpoints ? (
-          <IconButton
-            accessibilityLabel={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
-            selected={wrap}
-            icon={<WrapText size={16} color={wrap ? colors.primary : colors['muted-foreground']} />}
-            onPress={() => setWrap((w) => !w)}
+            onPress={() => setExpanded(allExpanded ? new Set() : new Set(changes.files.map((r) => r.id)))}
           />
         ) : null}
         <IconButton
-          accessibilityLabel={showCheckpoints ? 'Hide checkpoints' : 'Checkpoints and rewind'}
-          selected={showCheckpoints}
-          icon={
-            <History
-              size={16}
-              color={showCheckpoints ? colors.primary : colors['muted-foreground']}
-            />
-          }
-          onPress={() => setShowCheckpoints((v) => !v)}
+          accessibilityLabel={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
+          compact
+          selected={wrap}
+          icon={<WrapText size={16} color={wrap ? colors.primary : colors['muted-foreground']} />}
+          onPress={() => setDiffWrap(!wrap)}
+        />
+        {review.canRead ? (
+          <IconButton
+            accessibilityLabel={openThreads ? `${openThreads} review comments` : 'Review comments'}
+            compact
+            badge={counts.pending > 0}
+            icon={<MessageSquare size={16} color={openThreads ? colors.primary : colors['muted-foreground']} />}
+            onPress={() => setReviewSheet({})}
+          />
+        ) : null}
+        <IconButton
+          accessibilityLabel="Checkpoints, compare and rewind"
+          compact
+          selected={base !== 'baseline'}
+          icon={<History size={16} color={base !== 'baseline' ? colors.primary : colors['muted-foreground']} />}
+          onPress={() => setShowCheckpoints(true)}
         />
         <IconButton
           accessibilityLabel="Refresh changes"
-          icon={
-            <RefreshCw
-              size={16}
-              color={changes.isFetching ? colors.primary : colors['muted-foreground']}
-            />
-          }
-          onPress={() => void changes.refetch()}
+          compact
+          icon={<RefreshCw size={16} color={changes.isFetching ? colors.primary : colors['muted-foreground']} />}
+          onPress={changes.refetch}
           disabled={changes.isFetching}
         />
       </Toolbar>
 
-      {/* The base a diff is taken against is chosen from the checkpoint list
-          behind the history icon. A permanent strip of checkpoint chips cost
-          a whole band of vertical space to duplicate what that list already
-          says, on the surface with the least room to spare. */}
-      {base !== 'baseline' && !showCheckpoints ? (
+      {base !== 'baseline' ? (
         <View className="flex-row items-center gap-2 border-b border-border-muted bg-subtle px-3 py-1.5">
           <History size={12} color={colors['muted-foreground']} />
           <Text numberOfLines={1} className="flex-1 text-xs text-muted-foreground">
@@ -285,522 +352,73 @@ export function ChangesSection({
         </View>
       ) : null}
 
-      {showCheckpoints ? (
-        <CheckpointList
-          workspaceId={workspaceId}
-          onCompare={(id) => {
-            setBase(`checkpoint:${id}`);
-            setShowCheckpoints(false);
-          }}
-        />
-      ) : changes.isLoading ? (
-        <View className="p-4">
+      {changes.isLoading ? (
+        <View className="flex-1 p-4">
           <SkeletonList rows={4} />
         </View>
       ) : changes.isError ? (
-        <ErrorState message="Could not load changes." onRetry={() => void changes.refetch()} />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          title="No changes yet"
-          message="Files the agent creates or edits show up here as it works."
-          icon={<FileDiff size={22} color={colors['muted-foreground']} />}
-        />
-      ) : (
-        <LegendList
-          data={rows}
-          keyExtractor={(row) => `${row.alias}:${row.path}`}
-          estimatedItemSize={62}
-          // Rows close over `expanded`, `wrap` and the discard state, none of
-          // which are in `data`. Without this the list keeps the rows it
-          // already built and expanding a file does nothing on screen.
-          extraData={`${expanded.size}:${[...expanded].join()}|${wrap}|${confirmDiscard ?? ''}`}
-          contentContainerStyle={{ paddingBottom: 32 }}
-          renderItem={({ item }) => {
-            const id = `${item.alias}:${item.path}`;
-            return (
-              <FileRow
-                row={item}
-                workspaceId={workspaceId}
-                base={base}
-                wrap={wrap}
-                expanded={expanded.has(id)}
-                onToggle={() =>
-                  setExpanded((prev) => {
-                    const next = new Set(prev);
-                    if (!next.delete(id)) next.add(id);
-                    return next;
-                  })
-                }
-                canDiscard={Boolean(baseCheckpointId)}
-                confirming={confirmDiscard === id}
-                discarding={restore.isPending}
-                onOpen={() => onOpenFile(item.path, item.alias)}
-                onAskDiscard={() => setConfirmDiscard(id)}
-                onCancelDiscard={() => setConfirmDiscard(null)}
-                onConfirmDiscard={() => discard(item)}
-              />
-            );
-          }}
-        />
-      )}
-    </View>
-  );
-}
-
-function FileRow({
-  row,
-  workspaceId,
-  base,
-  wrap,
-  expanded,
-  onToggle,
-  canDiscard,
-  confirming,
-  discarding,
-  onOpen,
-  onAskDiscard,
-  onCancelDiscard,
-  onConfirmDiscard,
-}: {
-  row: Row;
-  workspaceId: string;
-  base: string;
-  wrap: boolean;
-  expanded: boolean;
-  onToggle: () => void;
-  canDiscard: boolean;
-  confirming: boolean;
-  discarding: boolean;
-  onOpen: () => void;
-  onAskDiscard: () => void;
-  onCancelDiscard: () => void;
-  onConfirmDiscard: () => void;
-}): React.ReactElement {
-  const { colors } = useTheme();
-  const name = row.path.slice(row.path.lastIndexOf('/') + 1);
-  const dir = row.path.slice(0, row.path.lastIndexOf('/'));
-  const readable = !row.isBinary && !row.isTooLarge;
-
-  return (
-    <View className="border-b border-border-muted">
-      <View className="flex-row items-center">
-        <Touchable
-          accessibilityLabel={`${STATUS_TITLE[row.status]} ${row.path}`}
-          accessibilityHint={readable ? 'Shows the diff below' : undefined}
-          accessibilityState={{ expanded }}
-          haptic="tap"
-          scale="none"
-          onPress={readable ? onToggle : onOpen}
-          className="min-h-14 flex-1 flex-row items-center gap-2.5 py-2 pl-3"
-        >
-          {readable ? (
-            expanded ? (
-              <ChevronDown size={14} color={colors['muted-foreground']} />
-            ) : (
-              <ChevronRight size={14} color={colors['muted-foreground']} />
-            )
-          ) : (
-            <View className="w-3.5" />
-          )}
-          <View className={`h-5 w-5 items-center justify-center rounded ${STATUS_BG[row.status]}`}>
-            <Text className={`font-mono text-xs font-bold ${STATUS_TONE[row.status]}`}>
-              {STATUS_LETTER[row.status]}
-            </Text>
-          </View>
-          <View className="flex-1">
-            <Text numberOfLines={1} className="text-sm font-medium text-foreground">
-              {row.oldPath ? (
-                <Text className="text-muted-foreground line-through">
-                  {row.oldPath.slice(row.oldPath.lastIndexOf('/') + 1)}{' → '}
-                </Text>
-              ) : null}
-              {name}
-            </Text>
-            <Text numberOfLines={1} className="text-xs text-muted-foreground">
-              {row.alias !== '.' ? `${row.alias}/` : ''}
-              {dir || '·'}
-            </Text>
-          </View>
-          {row.isBinary ? (
-            <Text className="text-xs text-muted-foreground">binary</Text>
-          ) : row.isTooLarge ? (
-            <Text className="text-xs text-muted-foreground">too large</Text>
-          ) : (
-            <View className="flex-row gap-1.5">
-              <Text className="font-mono text-xs text-success">+{row.additions}</Text>
-              <Text className="font-mono text-xs text-danger">−{row.deletions}</Text>
-            </View>
-          )}
-        </Touchable>
-        {readable ? (
-          <IconButton
-            accessibilityLabel={`Open ${row.path} full screen`}
-            icon={<Maximize2 size={14} color={colors['muted-foreground']} />}
-            onPress={onOpen}
-          />
-        ) : null}
-        {canDiscard && !confirming ? (
-          <IconButton
-            accessibilityLabel={`Discard changes to ${row.path}`}
-            icon={<Undo2 size={15} color={colors['muted-foreground']} />}
-            onPress={onAskDiscard}
-          />
-        ) : null}
-      </View>
-
-      {expanded && readable ? (
-        <InlineDiff
-          workspaceId={workspaceId}
-          path={row.path}
-          base={base}
-          wrap={wrap}
-          {...(row.alias ? { alias: row.alias } : {})}
-          {...(row.oldBlob ? { oldBlob: row.oldBlob } : {})}
-          {...(row.newBlob ? { newBlob: row.newBlob } : {})}
-        />
-      ) : null}
-
-      {confirming ? (
-        <View className="flex-row items-center gap-2 bg-warning-muted px-3 py-2">
-          <Text className="flex-1 text-xs text-foreground">Discard this file&apos;s changes?</Text>
-          <Button label="Cancel" variant="ghost" size="sm" onPress={onCancelDiscard} />
-          <Button
-            label="Discard"
-            variant="danger"
-            size="sm"
-            loading={discarding}
-            onPress={onConfirmDiscard}
+        <View className="flex-1">
+          <ErrorState message="Could not load changes." onRetry={changes.refetch} />
+        </View>
+      ) : !changes.hasGit ? (
+        <View className="flex-1">
+          <EmptyState title="Not a git repository" message="This workspace has no git history, so there is nothing to diff." />
+        </View>
+      ) : changes.files.length === 0 ? (
+        <View className="flex-1">
+          <EmptyState
+            title="No changes yet"
+            message="Files the agent creates or edits show up here as it works."
+            icon={<FileDiffIcon size={22} color={colors['muted-foreground']} />}
           />
         </View>
-      ) : null}
-    </View>
-  );
-}
-
-/** How many diff lines an inline expansion renders before deferring. */
-const INLINE_DIFF_LIMIT = 400;
-
-/**
- * A file's diff, opened in place under its row.
- *
- * Capped rather than virtualised: a nested virtual list inside an outer one
- * cannot measure itself, and a change set is mostly small files. Anything
- * past the cap says so and points at the full-screen view.
- */
-function InlineDiff({
-  workspaceId,
-  path,
-  alias,
-  base,
-  wrap,
-  oldBlob,
-  newBlob,
-}: {
-  workspaceId: string;
-  path: string;
-  alias?: string;
-  base: string;
-  wrap: boolean;
-  oldBlob?: string;
-  newBlob?: string;
-}): React.ReactElement {
-  const api = useApi();
-
-  const patch = useQuery({
-    queryKey: [...queryKeys.changeFile(workspaceId, path, oldBlob, newBlob), base, 'inline'],
-    queryFn: () =>
-      api.workspaces.filePatch(workspaceId, {
-        path,
-        base,
-        head: 'working',
-        ...(alias ? { alias } : {}),
-        ...(oldBlob ? { oldBlob } : {}),
-        ...(newBlob ? { newBlob } : {}),
-      }),
-  });
-
-  const lines = useMemo<DiffListItem[]>(
-    () => (patch.data?.patch ? toDiffList(parseUnifiedDiff(patch.data.patch)) : []),
-    [patch.data],
-  );
-
-  if (patch.isLoading) {
-    return (
-      <View className="px-3 py-2">
-        <SkeletonList rows={3} />
-      </View>
-    );
-  }
-  if (patch.isError) {
-    return (
-      <View className="px-3 py-2">
-        <ErrorState message="Could not load this diff." onRetry={() => void patch.refetch()} />
-      </View>
-    );
-  }
-  if (lines.length === 0) {
-    return (
-      <Text className="px-3 py-2 text-xs text-muted-foreground">No textual diff for this file.</Text>
-    );
-  }
-
-  const shown = lines.slice(0, INLINE_DIFF_LIMIT);
-  return (
-    <View className="border-t border-border-muted bg-canvas-bg">
-      <DiffLines lines={shown} wrap={wrap} truncated={patch.data?.truncated ?? false} scroll={false} />
-      {lines.length > shown.length ? (
-        <Text className="px-3 py-1.5 text-xs text-muted-foreground">
-          {lines.length - shown.length} more lines — open full screen to read the rest.
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
-function CheckpointList({
-  workspaceId,
-  onCompare,
-}: {
-  workspaceId: string;
-  onCompare: (id: string) => void;
-}): React.ReactElement {
-  const api = useApi();
-  const { colors } = useTheme();
-  const checkpoints = useQuery({
-    queryKey: queryKeys.checkpoints(workspaceId),
-    queryFn: () => api.workspaces.checkpoints(workspaceId),
-  });
-
-  if (checkpoints.isLoading) return <LoadingState label="Loading checkpoints…" />;
-  const list = (checkpoints.data?.checkpoints ?? []).filter((c) => c.kind !== 'live');
-  if (list.length === 0) {
-    return (
-      <EmptyState
-        title="No checkpoints yet"
-        message="A snapshot is written before each turn, so you can always compare or rewind."
-        icon={<History size={22} color={colors['muted-foreground']} />}
-      />
-    );
-  }
-
-  return (
-    <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
-      {list.map((c) => (
-        <Touchable
-          key={c.id}
-          accessibilityLabel={`Compare against ${CHECKPOINT_LABEL[c.kind] ?? c.kind}`}
-          haptic="tap"
-          onPress={() => onCompare(c.id)}
-          className="min-h-14 flex-row items-center gap-3 border-b border-border-muted px-3 py-2.5"
-        >
-          <History size={15} color={colors['muted-foreground']} />
-          <View className="flex-1">
-            <Text className="text-sm font-medium text-foreground">
-              {CHECKPOINT_LABEL[c.kind] ?? c.label ?? c.kind}
-            </Text>
-            <Text className="text-xs text-muted-foreground">
-              {new Date(c.createdAt).toLocaleString()}
-            </Text>
-          </View>
-          <ChevronRight size={16} color={colors['muted-foreground']} />
-        </Touchable>
-      ))}
-    </ScrollView>
-  );
-}
-
-/**
- * One file's unified diff.
- *
- * The query key carries the blob pair, not just the path: with a path-only
- * key and any staleTime, editing a file leaves the previous diff on screen
- * because the key never changed.
- */
-function DiffView({
-  workspaceId,
-  path,
-  alias,
-  base,
-  wrap,
-  onToggleWrap,
-  oldBlob,
-  newBlob,
-}: {
-  workspaceId: string;
-  path: string;
-  alias?: string;
-  base: string;
-  wrap: boolean;
-  onToggleWrap: () => void;
-  oldBlob?: string;
-  newBlob?: string;
-}): React.ReactElement {
-  const api = useApi();
-  const { colors } = useTheme();
-
-  const patch = useQuery({
-    queryKey: [...queryKeys.changeFile(workspaceId, path, oldBlob, newBlob), base],
-    queryFn: () =>
-      api.workspaces.filePatch(workspaceId, {
-        path,
-        base,
-        head: 'working',
-        ...(alias ? { alias } : {}),
-        ...(oldBlob ? { oldBlob } : {}),
-        ...(newBlob ? { newBlob } : {}),
-      }),
-  });
-
-  const lines = useMemo<DiffListItem[]>(
-    () => (patch.data?.patch ? toDiffList(parseUnifiedDiff(patch.data.patch)) : []),
-    [patch.data],
-  );
-
-  const body = ((): React.ReactElement => {
-    if (patch.isLoading) return <LoadingState label="Loading diff…" />;
-    if (patch.isError) {
-      return <ErrorState message="Could not load this diff." onRetry={() => void patch.refetch()} />;
-    }
-    if (lines.length === 0) {
-      return <EmptyState title="Nothing to show" message="This file has no textual diff." />;
-    }
-    return <DiffLines lines={lines} wrap={wrap} truncated={patch.data?.truncated ?? false} />;
-  })();
-
-  return (
-    <View className="flex-1">
-      <Toolbar>
-        <Text numberOfLines={1} className="flex-1 font-mono text-xs text-muted-foreground">
-          {path}
-        </Text>
-        <IconButton
-          accessibilityLabel={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
-          selected={wrap}
-          icon={<WrapText size={16} color={wrap ? colors.primary : colors['muted-foreground']} />}
-          onPress={onToggleWrap}
-        />
-      </Toolbar>
-      {body}
-    </View>
-  );
-}
-
-/**
- * The diff body.
- *
- * Unwrapped, the whole list scrolls horizontally as ONE surface rather than
- * per row, so the gutter cannot drift out of alignment with its code.
- */
-function DiffLines({
-  lines,
-  wrap,
-  truncated,
-  scroll = true,
-}: {
-  lines: DiffListItem[];
-  wrap: boolean;
-  truncated: boolean;
-  /**
-   * False when the diff is expanded inline under a file row. A virtualised
-   * list nested inside another one cannot measure itself, so inline diffs
-   * render their (already capped) rows directly.
-   */
-  scroll?: boolean;
-}): React.ReactElement {
-  const renderLine = (item: DiffListItem): React.ReactElement =>
-    item.type === 'hunk' ? (
-      <View className="bg-subtle px-3 py-0.5">
-        <Text className="font-mono text-xs leading-code text-info">
-          {`@@ -${item.hunk.oldStart},${item.hunk.oldLines} +${item.hunk.newStart},${item.hunk.newLines} @@`}
-          {item.hunk.section ? ` ${item.hunk.section}` : ''}
-        </Text>
-      </View>
-    ) : (
-      <View
-        className={`flex-row ${
-          item.row.kind === 'add'
-            ? 'bg-success-muted'
-            : item.row.kind === 'del'
-              ? 'bg-danger-muted'
-              : ''
-        }`}
-      >
-        {/* Line numbers are what makes a diff quotable in a follow-up
-            prompt, which is most of why anyone reads one on a phone. */}
-        <Text className="w-10 px-1 text-right font-mono text-xs leading-code text-muted-foreground">
-          {item.row.newNumber ?? item.row.oldNumber ?? ''}
-        </Text>
-        <Text
-          className={`w-3 font-mono text-xs leading-code ${
-            item.row.kind === 'add'
-              ? 'text-success'
-              : item.row.kind === 'del'
-                ? 'text-danger'
-                : 'text-muted-foreground'
-          }`}
-        >
-          {item.row.kind === 'add' ? '+' : item.row.kind === 'del' ? '−' : ' '}
-        </Text>
-        <Text
-          {...(wrap ? {} : { numberOfLines: 1 })}
-          className="flex-1 pr-3 font-mono text-xs leading-code text-foreground"
-        >
-          {item.row.content}
-        </Text>
-      </View>
-    );
-
-  const list = scroll ? (
-    <LegendList
-      data={lines}
-      keyExtractor={(line) => line.key}
-      estimatedItemSize={18}
-      contentContainerStyle={{ paddingVertical: 8, paddingBottom: 32 }}
-      renderItem={({ item }) => renderLine(item)}
-    />
-  ) : (
-    <View className="py-1">
-      {lines.map((item) => (
-        <React.Fragment key={item.key}>{renderLine(item)}</React.Fragment>
-      ))}
-    </View>
-  );
-
-  const banner = truncated ? (
-    <View className="bg-warning-muted px-3 py-1.5">
-      <Text className="text-xs text-foreground">
-        The server truncated this diff because the file is very large.
-      </Text>
-    </View>
-  ) : null;
-
-  if (!scroll) {
-    return (
-      <View>
-        {banner}
-        {wrap ? (
-          list
-        ) : (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ width: 760 }}>{list}</View>
-          </ScrollView>
-        )}
-      </View>
-    );
-  }
-
-  return (
-    <View className="flex-1">
-      {banner}
-      {wrap ? (
-        list
       ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={{ width: 760 }} className="flex-1">
-            {list}
-          </View>
-        </ScrollView>
+        <View className="flex-1">
+          <ChangesList
+            workspaceId={workspaceId}
+            files={changes.files}
+            base={base}
+            expanded={expanded}
+            onToggle={toggle}
+            threadsByFile={review.byFile}
+            multiMount={multiMount}
+            onOpenFile={(row) => openDetail(row.path, row.alias)}
+            {...(onOpenInFiles ? { onOpenInFiles: (row: ChangeRow) => onOpenInFiles(row.path, row.alias) } : {})}
+            {...(restoreCap.available ? { onDiscard: discard } : {})}
+            discarding={restore.isPending}
+            {...(review.canWrite ? { onComment: commentOn } : {})}
+            onOpenThreads={openThreadsAt}
+            commentDisabledReason={commentDisabledReason}
+            onRefresh={changes.refetch}
+            refreshing={changes.isFetching && !changes.isLoading}
+          />
+        </View>
       )}
+
+      {counts.pending > 0 ? (
+        <View className="flex-row items-center gap-2 border-t border-border-muted bg-accent px-3 py-2">
+          <MessageSquare size={14} color={colors.primary} />
+          <Text className="flex-1 text-xs font-medium text-foreground" numberOfLines={1}>
+            {batchSummary(counts)}
+          </Text>
+          <Button label="Review" size="sm" variant="ghost" onPress={() => setReviewSheet({})} />
+          {review.canSend ? (
+            <Button
+              label="Send to agent"
+              size="sm"
+              icon={<Send size={14} color={colors['primary-foreground']} />}
+              loading={review.submit.isPending}
+              onPress={() => {
+                haptics.success();
+                review.submit.mutate({});
+              }}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
+      <CommitBar workspaceId={workspaceId} fileCount={changes.files.length} active={active} />
+      {sheets}
     </View>
   );
 }

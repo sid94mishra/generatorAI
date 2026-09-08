@@ -12,19 +12,33 @@
 // The fingerprint on this screen is the SAME value the server displays next
 // to its QR. Comparing them is what defeats a swapped code, and it is the
 // only step a user can perform that a machine cannot do for them.
+//
+// D22 — rebuilt on the design system: safe areas, `Screen`, `Card`,
+// `ListGroup`/`ListRow`, `Button`, `Field`. The consent screen groups the
+// offered scopes into Read / Act / Sensitive (sensitive highlighted) and
+// names the preset the offer matches, so "Mobile companion" and "Full
+// workstation" read as different decisions rather than two long lists.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as Device from 'expo-application';
 import { router } from 'expo-router';
+import { Camera, KeyRound, Link2, QrCode, Server, ShieldAlert, ShieldCheck } from 'lucide-react-native';
 import { PairingCodeError, parsePairingCode, type PairingConsent } from '@generatorai/client-runtime';
 import { isPairingCode } from '@generatorai/shared';
 
 import { useAuth } from '../src/auth/AuthProvider';
-import { describeScope } from '../src/auth/scopeLabels';
-import { Spinner } from '../src/components/common/States';
+import { describeScope, isSensitiveScope } from '../src/auth/scopeLabels';
+import { groupScopes, matchScopePreset } from '../src/auth/scopePresets';
+import { Button } from '../src/components/ui/Button';
+import { Field } from '../src/components/ui/Form';
+import { ListGroup, ListRow } from '../src/components/ui/ListRow';
+import { Badge, Card, SectionHeader } from '../src/components/ui/primitives';
+import { Screen } from '../src/components/ui/Screen';
+import { EmptyState, Spinner } from '../src/components/ui/States';
+import { haptics } from '../src/components/ui/haptics';
 import { useTheme } from '../src/theme/ThemeProvider';
 
 type Phase = 'scan' | 'manual' | 'consent' | 'enrolling';
@@ -32,10 +46,11 @@ type Phase = 'scan' | 'manual' | 'consent' | 'enrolling';
 export default function PairScreen(): React.ReactElement {
   const { completePairing } = useAuth();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>('scan');
   const [consent, setConsent] = useState<PairingConsent | null>(null);
-  const [deviceName, setDeviceName] = useState(Device.nativeApplicationVersion ? 'My phone' : 'My phone');
+  const [deviceName, setDeviceName] = useState('My phone');
   const [error, setError] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState('');
   // Guards against the camera firing the same code dozens of times per second.
@@ -51,6 +66,7 @@ export default function PairScreen(): React.ReactElement {
       setConsent(parsePairingCode(data));
       setError(null);
       setPhase('consent');
+      haptics.success();
       return true;
     } catch (err) {
       // The short code (`4H7K-2M9P-XQ3T`) carries no server address, so this
@@ -65,18 +81,22 @@ export default function PairScreen(): React.ReactElement {
             ? err.message
             : 'That is not a GeneratorAI pairing code.',
       );
+      haptics.error();
       return false;
     }
   }, []);
 
-  const onScanned = useCallback((data: string) => {
-    if (scanned) return;
-    setScanned(true);
-    if (!acceptCode(data)) {
-      // Re-arm so the user can simply point at a different code.
-      setTimeout(() => setScanned(false), 1200);
-    }
-  }, [scanned, acceptCode]);
+  const onScanned = useCallback(
+    (data: string) => {
+      if (scanned) return;
+      setScanned(true);
+      if (!acceptCode(data)) {
+        // Re-arm so the user can simply point at a different code.
+        setTimeout(() => setScanned(false), 1200);
+      }
+    },
+    [scanned, acceptCode],
+  );
 
   const onSubmitManual = useCallback(() => {
     const raw = manualCode.trim();
@@ -90,12 +110,31 @@ export default function PairScreen(): React.ReactElement {
     setError(null);
     try {
       await completePairing(consent, deviceName.trim() || 'Mobile device');
+      haptics.success();
       router.replace('/(tabs)');
     } catch (err) {
+      haptics.error();
       setError(err instanceof Error ? err.message : String(err));
       setPhase('consent');
     }
   }, [consent, deviceName, completePairing]);
+
+  const reset = useCallback(() => {
+    setPhase('scan');
+    setConsent(null);
+    setScanned(false);
+    setManualCode('');
+    setError(null);
+  }, []);
+
+  const preset = useMemo(
+    () => (consent ? matchScopePreset(consent.requestedScopes) : null),
+    [consent],
+  );
+  const groups = useMemo(
+    () => (consent ? groupScopes(consent.requestedScopes, isSensitiveScope) : []),
+    [consent],
+  );
 
   // Manual entry is checked BEFORE the camera gate on purpose: it is the
   // fallback for precisely the situations where the camera is unusable —
@@ -104,68 +143,64 @@ export default function PairScreen(): React.ReactElement {
   // preview. Without this the screen is a dead end with no way forward.
   if (phase === 'manual') {
     return (
-      <ScrollView contentContainerClassName="gap-5 px-6 py-8">
-        <View className="gap-1">
-          <Text className="text-xl font-semibold text-foreground">Enter pairing code</Text>
+      <Screen
+        title="Enter pairing code"
+        subtitle="Paste a pairing link from your GeneratorAI server."
+        back
+        onBack={() => {
+          setError(null);
+          setPhase('scan');
+        }}
+      >
+        <Card className="gap-3 p-4">
           {/* Deliberately NOT "the code shown under the QR image": that is the
               short code, which carries no server address and only works in a
-              browser already opened at the host. Naming it here sent users
-              down a path this screen cannot complete. */}
-          <Text className="text-sm text-muted-foreground">
-            Paste a pairing link from your GeneratorAI server. The short code shown next to the QR
-            image will not work here — scan the QR instead.
+              browser already opened at the host. */}
+          <Text className="text-sm leading-relaxed text-muted-foreground">
+            The short code shown next to the QR image will not work here — it has no server
+            address. Scan the QR instead, or paste the full link.
           </Text>
-        </View>
-
-        <View className="gap-2">
-          <TextInput
+          <Field
+            label="Pairing link"
             value={manualCode}
             onChangeText={setManualCode}
             placeholder="generatorai://pair?code=…"
-            className="rounded-lg border border-input bg-background px-3 py-3 text-foreground"
             autoCapitalize="none"
             autoCorrect={false}
             multiline
             onSubmitEditing={onSubmitManual}
+            error={error}
           />
-          {error ? <Text className="text-sm text-danger">{error}</Text> : null}
-        </View>
+        </Card>
 
-        <View className="gap-3">
-          <Pressable
-            accessibilityRole="button"
-            disabled={manualCode.trim().length === 0}
-            onPress={onSubmitManual}
-            className="items-center rounded-lg bg-primary-emphasis px-5 py-4 disabled:opacity-60"
-          >
-            <Text className="font-semibold text-primary-foreground">Continue</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => {
-              setError(null);
-              setPhase('scan');
-            }}
-            className="items-center px-5 py-3"
-          >
-            <Text className="text-sm text-muted-foreground">Scan a QR code instead</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
+        <Button
+          label="Continue"
+          size="lg"
+          full
+          disabled={manualCode.trim().length === 0}
+          onPress={onSubmitManual}
+        />
+        <Button
+          label="Scan a QR code instead"
+          variant="ghost"
+          icon={<QrCode size={16} color={colors.primary} />}
+          haptic="tap"
+          onPress={() => {
+            setError(null);
+            setPhase('scan');
+          }}
+        />
+      </Screen>
     );
   }
 
-  // Camera permission gates the SCAN phase only.
-  //
-  // These used to run before every phase check, which was harmless when the
-  // camera was the sole entry point. Now that a code can arrive by hand, a
-  // blanket gate would bounce the user straight back to "Camera access
-  // needed" the moment they submitted a valid code — hiding the consent
-  // screen behind a permission the manual path never needs.
+  // Camera permission gates the SCAN phase only: a blanket gate would bounce
+  // the user straight back to "Camera access needed" the moment they
+  // submitted a valid code by hand.
   if (phase === 'scan') {
     if (!permission) {
       return (
-        <View className="flex-1 items-center justify-center">
+        <View className="flex-1 items-center justify-center bg-background">
           <Spinner />
         </View>
       );
@@ -173,159 +208,182 @@ export default function PairScreen(): React.ReactElement {
 
     if (!permission.granted) {
       return (
-        <View className="flex-1 items-center justify-center gap-4 px-8">
-          <Text className="text-center text-lg font-semibold text-foreground">
-            Camera access needed
-          </Text>
-          <Text className="text-center text-sm text-muted-foreground">
-            Pairing uses the camera to read the QR code shown by your GeneratorAI server. The
-            camera is used for nothing else.
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => void requestPermission()}
-            className="rounded-lg bg-primary-emphasis px-5 py-3"
-          >
-            <Text className="font-semibold text-primary-foreground">Allow camera</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
+        <Screen title="Pair this phone" subtitle="Scan the code your GeneratorAI server shows.">
+          <EmptyState
+            title="Camera access needed"
+            message="Pairing uses the camera to read the QR code shown by your GeneratorAI server. The camera is used for nothing else."
+            icon={<Camera size={22} color={colors['muted-foreground']} />}
+          />
+          <Button label="Allow camera" size="lg" full onPress={() => void requestPermission()} />
+          <Button
+            label="Enter the code manually instead"
+            variant="ghost"
+            icon={<Link2 size={16} color={colors.primary} />}
+            haptic="tap"
             onPress={() => setPhase('manual')}
-            className="px-5 py-2"
-          >
-            <Text className="text-sm text-muted-foreground">Enter the code manually instead</Text>
-          </Pressable>
-        </View>
+          />
+        </Screen>
       );
     }
 
     return (
-      <View className="flex-1">
+      <View className="flex-1 bg-background">
         <CameraView
           style={{ flex: 1 }}
           barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
           onBarcodeScanned={({ data }) => onScanned(data)}
         />
-        <View className="absolute inset-x-0 bottom-0 gap-2 bg-overlay/90 px-6 pb-10 pt-5">
-          <Text className="text-center text-base font-semibold text-foreground">
-            Scan the pairing code
-          </Text>
-          <Text className="text-center text-sm text-muted-foreground">
-            Open Settings → Security → Pair a device on your GeneratorAI server.
-          </Text>
-          {error ? <Text className="text-center text-sm text-danger">{error}</Text> : null}
-          <Pressable
-            accessibilityRole="button"
+        <View
+          className="absolute inset-x-0 bottom-0 gap-3 rounded-t-4xl border-t border-border bg-card px-6 pt-5"
+          style={{ paddingBottom: insets.bottom + 16 }}
+        >
+          <View className="flex-row items-center gap-2.5">
+            <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
+              <QrCode size={18} color={colors.primary} />
+            </View>
+            <View className="flex-1">
+              <Text accessibilityRole="header" className="text-md font-semibold text-foreground">
+                Scan the pairing code
+              </Text>
+              <Text className="text-sm text-muted-foreground">
+                Settings › Security › Pair a device, on your GeneratorAI server.
+              </Text>
+            </View>
+          </View>
+          {error ? (
+            <Text accessibilityLiveRegion="assertive" className="text-sm text-danger">
+              {error}
+            </Text>
+          ) : null}
+          <Button
+            label="Enter the code manually"
+            variant="secondary"
+            full
+            haptic="tap"
             onPress={() => {
               setError(null);
               setPhase('manual');
             }}
-            className="items-center pt-1"
-          >
-            <Text className="text-sm text-muted-foreground underline">Enter the code manually</Text>
-          </Pressable>
+          />
         </View>
       </View>
     );
   }
 
-  return (
-    <ScrollView contentContainerClassName="gap-5 px-6 py-8">
-      <View className="gap-1">
-        <Text className="text-xl font-semibold text-foreground">Pair with this server?</Text>
-        <Text className="text-sm text-muted-foreground">
-          Only continue if the fingerprint below matches the one on your server screen.
-        </Text>
-      </View>
+  // ── Consent ──────────────────────────────────────────────────────
+  const enrolling = phase === 'enrolling';
+  const sensitiveCount = groups.find((g) => g.id === 'sensitive')?.scopes.length ?? 0;
 
-      <View className="gap-3 rounded-lg border border-border bg-card p-4">
-        <Row label="Server" value={consent?.serverName ?? ''} />
-        <Row label="Address" value={consent?.endpoint ?? ''} mono />
-        <View className="gap-1">
-          <Text className="text-xs uppercase tracking-wide text-muted-foreground">Fingerprint</Text>
+  return (
+    <Screen
+      title="Pair with this server?"
+      subtitle="Only continue if the fingerprint matches the one on your server screen."
+      back
+      onBack={reset}
+    >
+      <ListGroup>
+        <ListRow
+          title={consent?.serverName ?? 'Server'}
+          subtitle={consent?.endpoint ?? ''}
+          icon={<Server size={18} color={colors['muted-foreground']} />}
+        />
+        <View className="gap-1 px-4 py-3">
+          <Text className="text-sm font-medium text-foreground">Fingerprint</Text>
           {/* Large and monospaced: this is the one thing the user must
               actually compare, character by character. */}
-          <Text className="font-mono text-lg tracking-widest text-foreground">
+          <Text
+            selectable
+            accessibilityLabel={`Fingerprint ${consent?.fingerprint ?? ''}`}
+            className="font-mono text-lg tracking-widest text-foreground"
+          >
             {consent?.fingerprint}
           </Text>
         </View>
-      </View>
+      </ListGroup>
 
-      <View className="gap-2 rounded-lg border border-border bg-card p-4">
-        <Text className="text-sm font-semibold text-foreground">This device will be able to</Text>
-        {consent?.requestedScopes.map((scope) => (
-          <View key={scope} className="flex-row gap-2">
-            <Text className="text-muted-foreground">•</Text>
-            <Text className="flex-1 text-sm text-muted-foreground">{describeScope(scope)}</Text>
-          </View>
-        ))}
-        <Text className="mt-1 text-xs text-muted-foreground">
-          Terminal and browser control are not included. You can grant them later, per device.
+      <SectionHeader
+        title="This device will be able to"
+        action={
+          <Badge
+            label={preset ? preset.label : 'Custom grant'}
+            tone={preset ? (preset.id === 'companion' || preset.id === 'readonly' ? 'success' : 'warning') : 'neutral'}
+            icon={
+              preset && (preset.id === 'companion' || preset.id === 'readonly') ? (
+                <ShieldCheck size={12} color={colors.success} />
+              ) : (
+                <ShieldAlert size={12} color={preset ? colors.warning : colors['muted-foreground']} />
+              )
+            }
+          />
+        }
+      />
+      {preset ? (
+        <Text className="px-1 text-xs leading-relaxed text-muted-foreground">{preset.hint}</Text>
+      ) : (
+        <Text className="px-1 text-xs leading-relaxed text-muted-foreground">
+          This offer does not match a standard preset. Read the list before you continue.
         </Text>
-      </View>
+      )}
 
-      <View className="gap-2">
-        <Text className="text-xs uppercase tracking-wide text-muted-foreground">Device name</Text>
-        <TextInput
-          value={deviceName}
-          onChangeText={setDeviceName}
-          placeholder="My phone"
-          className="rounded-lg border border-input bg-background px-3 py-3 text-foreground"
-          autoCapitalize="words"
-        />
-        <Text className="text-xs text-muted-foreground">
-          Shown in your server&apos;s device list so you can revoke it later.
+      {groups.map((group) => (
+        <View key={group.id} className="gap-2">
+          <Text
+            accessibilityRole="header"
+            className={`px-1 text-sm font-semibold ${group.id === 'sensitive' ? 'text-warning' : 'text-muted-foreground'}`}
+          >
+            {group.title}
+            {group.id === 'sensitive' ? ' — granted only when you say so' : ''}
+          </Text>
+          <Card className={`gap-2 p-3.5 ${group.id === 'sensitive' ? 'border-warning' : ''}`}>
+            {group.scopes.map((scope) => (
+              <View key={scope} className="flex-row items-start gap-2">
+                {group.id === 'sensitive' ? (
+                  <ShieldAlert size={14} color={colors.warning} style={{ marginTop: 2 }} />
+                ) : (
+                  <Text className="text-muted-foreground">•</Text>
+                )}
+                <Text
+                  className={`flex-1 text-sm ${group.id === 'sensitive' ? 'text-foreground' : 'text-muted-foreground'}`}
+                >
+                  {describeScope(scope)}
+                </Text>
+              </View>
+            ))}
+          </Card>
+        </View>
+      ))}
+
+      <Text className="px-1 text-xs leading-relaxed text-muted-foreground">
+        {sensitiveCount === 0
+          ? 'Terminal and browser control are not included. You can grant them later, per device.'
+          : `${sensitiveCount} sensitive permission${sensitiveCount === 1 ? '' : 's'} let this phone act on the machine running GeneratorAI. You can revoke any of them later, per device.`}
+      </Text>
+
+      <SectionHeader title="Device name" />
+      <Field
+        label="Name"
+        hint="Shown in your server’s device list so you can revoke it later."
+        value={deviceName}
+        onChangeText={setDeviceName}
+        placeholder="My phone"
+        autoCapitalize="words"
+      />
+
+      {error ? (
+        <Text accessibilityLiveRegion="assertive" className="text-sm text-danger">
+          {error}
         </Text>
-      </View>
+      ) : null}
 
-      {error ? <Text className="text-sm text-danger">{error}</Text> : null}
-
-      <View className="gap-3">
-        <Pressable
-          accessibilityRole="button"
-          disabled={phase === 'enrolling'}
-          onPress={() => void onConfirm()}
-          className="items-center rounded-lg bg-primary-emphasis px-5 py-4 disabled:opacity-60"
-        >
-          {phase === 'enrolling' ? (
-            // Sits on `bg-primary-emphasis`, so it must use the paired
-            // foreground token rather than a hardcoded white — the accent
-            // palettes differ between light and dark.
-            <ActivityIndicator color={colors['primary-foreground']} />
-          ) : (
-            <Text className="font-semibold text-primary-foreground">Pair this device</Text>
-          )}
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => {
-            setPhase('scan');
-            setConsent(null);
-            setScanned(false);
-            setManualCode('');
-          }}
-          className="items-center px-5 py-3"
-        >
-          <Text className="text-sm text-muted-foreground">Cancel</Text>
-        </Pressable>
-      </View>
-    </ScrollView>
-  );
-}
-
-function Row({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}): React.ReactElement {
-  return (
-    <View className="gap-1">
-      <Text className="text-xs uppercase tracking-wide text-muted-foreground">{label}</Text>
-      <Text className={`text-sm text-foreground ${mono ? 'font-mono' : ''}`}>{value}</Text>
-    </View>
+      <Button
+        label="Pair this device"
+        size="lg"
+        full
+        loading={enrolling}
+        icon={<KeyRound size={18} color={colors['primary-foreground']} />}
+        onPress={() => void onConfirm()}
+      />
+      <Button label="Cancel" variant="ghost" haptic="tap" disabled={enrolling} onPress={reset} />
+    </Screen>
   );
 }

@@ -131,6 +131,10 @@ export type AgentEvent =
   | { kind: 'harness.client_restarting'; data: { message?: string; provider?: string } }
   // ── Chat Events ──
   | { kind: 'chat.created'; data: { chatId: string; name: string } }
+  // A paired device asked for more scopes / an admin answered (S2 scope-request flow).
+  // Lifecycle kinds: they fan out to the global scope so admin devices' lists refresh.
+  | { kind: 'device.scope_requested'; data: { requestId: string; deviceId: string; deviceName: string | null; platform: string | null; scopes: string[] } }
+  | { kind: 'device.scope_request_resolved'; data: { requestId: string; deviceId: string; deviceName: string | null; status: 'approved' | 'denied' | 'cancelled'; scopes: string[] } }
   | { kind: 'chat.prompt_sent'; data: { chatId: string; prompt: string } }
   | { kind: 'chat.prompt_failed'; data: { chatId: string; error: string } }
   | { kind: 'chat.archived'; data: { chatId: string } }

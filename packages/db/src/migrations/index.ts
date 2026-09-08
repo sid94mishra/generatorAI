@@ -2400,6 +2400,43 @@ export const MIGRATIONS: readonly Migration[] = [
         `DROP TABLE IF EXISTS workspace_worktrees;`,
       ],
     },
+
+    // ── v52 — device scope requests (mobile standalone plan S2) ──
+    //
+    // A paired device asking for more authority than it holds. The row is a
+    // request, not a grant: approval goes through DeviceService.
+    // updateDeviceScopes like any manual scope change. The partial unique
+    // index makes "one pending request per device" an engine rule, so two
+    // concurrent POSTs from the same phone cannot both open a request.
+    // ON DELETE CASCADE mirrors device_push_tokens: a device that is ever
+    // hard-deleted takes its requests with it.
+    {
+      version: 52,
+      name: 'device_scope_requests',
+      sql: [
+        `CREATE TABLE IF NOT EXISTS device_scope_requests (
+          id               TEXT PRIMARY KEY,
+          device_id        TEXT NOT NULL
+                           REFERENCES auth_devices(device_id) ON DELETE CASCADE,
+          requested_scopes TEXT NOT NULL DEFAULT '[]',
+          reason           TEXT,
+          status           TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending','approved','denied','cancelled')),
+          created_at       INTEGER NOT NULL,
+          resolved_at      INTEGER,
+          resolved_by      TEXT,
+          resolution_note  TEXT,
+          -- Subset actually granted on approval; NULL for every other status.
+          granted_scopes   TEXT
+        );`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_device_scope_requests_pending
+           ON device_scope_requests(device_id) WHERE status = 'pending';`,
+        `CREATE INDEX IF NOT EXISTS idx_device_scope_requests_status
+           ON device_scope_requests(status, created_at);`,
+        `CREATE INDEX IF NOT EXISTS idx_device_scope_requests_device
+           ON device_scope_requests(device_id, created_at);`,
+      ],
+    },
   ];
 
 

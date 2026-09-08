@@ -75,6 +75,7 @@ export {
   SqliteServiceAccountRepository,
   SqliteSecurityAuditRepository,
   SqliteRelayRevokeOutboxRepository,
+  SqliteDeviceScopeRequestRepository,
   sqliteHandle,
 } from './repositories/AuthRepositories.js';
 export { SqliteHarnessInstanceRepository } from './repositories/HarnessInstanceRepository.js';

@@ -43,8 +43,14 @@ const config: ExpoConfig = {
         'Scan the pairing QR code shown by your GeneratorAI server to connect this device.',
       NSMicrophoneUsageDescription:
         'Dictate prompts to your agent. Audio is transcribed on your own server, never in the cloud.',
+      // Both uses are real (D8): `AppLockGate` (src/auth/AppLock.tsx) locks the
+      // app on cold start and after the configured grace, and `requireStepUp`
+      // (src/auth/stepUp.ts) confirms terminal/browser/computer and admin
+      // actions and device revocation. Keep this string in step with the
+      // `faceIDPermission` plugin value below — Apple reviews the one that
+      // ends up in Info.plist, and the plugin writes the same key.
       NSFaceIDUsageDescription:
-        'Unlock GeneratorAI and confirm sensitive actions such as granting terminal access.',
+        'Unlock GeneratorAI when you return to it, and confirm sensitive actions such as opening a terminal or revoking a device.',
       // Loopback/LAN endpoints are plain HTTP by design. There is NO
       // message-level encryption above the transport (relay-protocol's
       // e2ee.ts is unwired); requests are DPoP-signed, which authenticates
@@ -93,11 +99,33 @@ const config: ExpoConfig = {
         // Keystore-encrypted entries cannot be decrypted after a backup
         // restore, so they must be excluded from Android Auto Backup.
         configureAndroidBackup: true,
-        faceIDPermission: 'Unlock GeneratorAI with Face ID.',
+        faceIDPermission:
+          'Unlock GeneratorAI when you return to it, and confirm sensitive actions such as opening a terminal or revoking a device.',
       },
     ],
     ['expo-camera', { cameraPermission: 'Scan the pairing QR code from your GeneratorAI server.' }],
-    'expo-local-authentication',
+    [
+      // Composer attachments (D2): photo library + camera. Files use
+      // expo-file-system's own `File.pickFileAsync`, so no document-picker
+      // module is added. `microphonePermission: false` because the picker
+      // never records video here and expo-audio already declares the mic.
+      'expo-image-picker',
+      {
+        photosPermission: 'Attach photos and screenshots to your prompt.',
+        cameraPermission: 'Take a photo to attach to your prompt.',
+        microphonePermission: false,
+      },
+    ],
+    [
+      // App lock + step-up. The plugin writes NSFaceIDUsageDescription; the
+      // value must match `ios.infoPlist` above so the last writer does not
+      // silently replace the reviewed string.
+      'expo-local-authentication',
+      {
+        faceIDPermission:
+          'Unlock GeneratorAI when you return to it, and confirm sensitive actions such as opening a terminal or revoking a device.',
+      },
+    ],
     'expo-notifications',
     'expo-web-browser',
     [

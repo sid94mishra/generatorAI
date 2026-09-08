@@ -10,17 +10,12 @@
 // equivalent of an unlabelled `<input>`.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useId } from 'react';
-import {
-  Switch as RNSwitch,
-  Text,
-  TextInput,
-  View,
-  type TextInputProps,
-} from 'react-native';
+import React, { useId, useRef, useState } from 'react';
+import { Switch as RNSwitch, Text, TextInput, View, type TextInputProps } from 'react-native';
 import { Search, X } from 'lucide-react-native';
 
 import { Touchable } from './Touchable';
+import { MAX_SCALE } from './accessibility';
 import { haptics } from './haptics';
 import { useTheme } from '../../theme/ThemeProvider';
 
@@ -107,41 +102,89 @@ export function SearchField({
   placeholder = 'Search',
   autoFocus = false,
   onSubmit,
+  onFocus,
+  onBlur,
+  onCancel,
+  accessibilityLabel,
 }: {
   value: string;
   onChangeText: (next: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
   onSubmit?: () => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  /**
+   * Renders a Cancel affordance while focused (the iOS search-bar
+   * convention): clears the query, blurs the field, then calls this.
+   */
+  onCancel?: () => void;
+  accessibilityLabel?: string;
 }): React.ReactElement {
   const { colors } = useTheme();
+  const input = useRef<TextInput>(null);
+  const [focused, setFocused] = useState(false);
 
   return (
-    <View className="min-h-11 flex-row items-center gap-2 rounded-2xl border border-border bg-raised px-3">
-      <Search size={16} color={colors['muted-foreground']} />
-      <TextInput
-        accessibilityLabel={placeholder}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors['muted-foreground']}
-        autoCapitalize="none"
-        autoCorrect={false}
-        autoFocus={autoFocus}
-        returnKeyType="search"
-        clearButtonMode="never"
-        onSubmitEditing={onSubmit}
-        className="flex-1 py-2.5 text-md text-foreground"
-      />
-      {value.length > 0 ? (
+    <View className="flex-row items-center gap-2">
+      <View
+        className={`min-h-11 flex-1 flex-row items-center gap-2 rounded-2xl border bg-raised px-3 ${
+          focused ? 'border-primary' : 'border-border'
+        }`}
+      >
+        <Search size={16} color={colors['muted-foreground']} />
+        <TextInput
+          ref={input}
+          accessibilityLabel={accessibilityLabel ?? placeholder}
+          accessibilityRole="search"
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={colors['muted-foreground']}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoFocus={autoFocus}
+          returnKeyType="search"
+          clearButtonMode="never"
+          onSubmitEditing={onSubmit}
+          onFocus={() => {
+            setFocused(true);
+            onFocus?.();
+          }}
+          onBlur={() => {
+            setFocused(false);
+            onBlur?.();
+          }}
+          className="flex-1 py-2.5 text-md text-foreground"
+        />
+        {value.length > 0 ? (
+          <Touchable
+            accessibilityLabel="Clear search"
+            haptic="select"
+            scale="none"
+            ripple={false}
+            onPress={() => onChangeText('')}
+          >
+            <X size={16} color={colors['muted-foreground']} />
+          </Touchable>
+        ) : null}
+      </View>
+      {onCancel && focused ? (
         <Touchable
-          accessibilityLabel="Clear search"
+          accessibilityLabel="Cancel search"
           haptic="select"
-          scale="none"
           ripple={false}
-          onPress={() => onChangeText('')}
+          scale="none"
+          onPress={() => {
+            onChangeText('');
+            input.current?.blur();
+            onCancel();
+          }}
+          className="min-h-11 justify-center px-1"
         >
-          <X size={16} color={colors['muted-foreground']} />
+          <Text maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-md text-primary">
+            Cancel
+          </Text>
         </Touchable>
       ) : null}
     </View>

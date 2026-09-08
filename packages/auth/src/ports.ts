@@ -98,6 +98,56 @@ export interface IPairingGrantRepository {
   deleteExpired(before: number): Promise<number>;
 }
 
+// ── Device scope requests ────────────────────────────────────────
+//
+// A paired device asking for MORE authority than it holds (plan S2). The
+// request itself grants nothing: an `admin:devices` principal resolves it,
+// and the grant travels through `DeviceService.updateDeviceScopes` like any
+// other scope change, so the same escalation rules and audit apply.
+
+export type DeviceScopeRequestStatus = 'pending' | 'approved' | 'denied' | 'cancelled';
+
+export interface DeviceScopeRequestRecord {
+  requestId: string;
+  deviceId: string;
+  /** Scopes asked for, already filtered to ones the device did not hold. */
+  requestedScopes: Scope[];
+  /** Free text from the requester. Shown to the approver; never interpreted. */
+  reason: string | null;
+  status: DeviceScopeRequestStatus;
+  createdAt: number;
+  resolvedAt: number | null;
+  /** `type:id` of the resolving principal (or the device itself on cancel). */
+  resolvedBy: string | null;
+  resolutionNote: string | null;
+  /** Subset actually granted on approval; null until then / when denied. */
+  grantedScopes: Scope[] | null;
+}
+
+export interface IDeviceScopeRequestRepository {
+  /** Rejects (throws) when the device already has a pending request. */
+  create(record: DeviceScopeRequestRecord): Promise<void>;
+  get(requestId: string): Promise<DeviceScopeRequestRecord | null>;
+  findPendingByDevice(deviceId: string): Promise<DeviceScopeRequestRecord | null>;
+  listPending(): Promise<DeviceScopeRequestRecord[]>;
+  listByDevice(deviceId: string, limit?: number): Promise<DeviceScopeRequestRecord[]>;
+  /**
+   * Atomically moves a PENDING request to a terminal status. Returns false
+   * when the request was not pending (already resolved, or unknown) so two
+   * admins answering at once cannot both "win".
+   */
+  resolve(
+    requestId: string,
+    patch: {
+      status: Exclude<DeviceScopeRequestStatus, 'pending'>;
+      resolvedAt: number;
+      resolvedBy: string;
+      resolutionNote: string | null;
+      grantedScopes: Scope[] | null;
+    },
+  ): Promise<boolean>;
+}
+
 // ── Replay / nonce / ticket stores ───────────────────────────────
 
 export interface IReplayStore {

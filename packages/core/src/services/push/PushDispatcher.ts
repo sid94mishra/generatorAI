@@ -22,7 +22,12 @@
 
 import type { ILogger } from '@generatorai/shared';
 
-import { isMutable, planNotification, type NotificationPlan } from './notificationPolicy.js';
+import {
+  isMutable,
+  planNotification,
+  type InteractionKind,
+  type NotificationPlan,
+} from './notificationPolicy.js';
 
 /** What the dispatcher needs to know about a device. Structural, so the
  *  service does not depend on the auth package's concrete record type. */
@@ -35,14 +40,38 @@ export interface PushTarget {
   mutedUntil: number | null;
 }
 
+/**
+ * What the app receives in the notification's `data` field.
+ *
+ * `route`/`category`/`threadId` are always present. The interaction fields
+ * are set for chat gates so a lock-screen action can resolve the gate
+ * without opening the UI; `actions` is present ONLY for tool-permission
+ * prompts (the one gate with a closed allow/deny answer).
+ */
+export interface PushData {
+  route: string;
+  category: string;
+  threadId: string;
+  chatId?: string;
+  interactionId?: string;
+  kind?: InteractionKind;
+  actions?: readonly string[];
+}
+
 export interface PushMessage {
   target: PushTarget;
   title: string;
   body: string;
-  /** Consumed by the app to deep-link on tap. */
-  data: { route: string; category: string; threadId: string };
+  /** Consumed by the app to deep-link on tap and to act from the lock screen. */
+  data: PushData;
   threadId: string;
   interruption: 'active' | 'timeSensitive';
+  /**
+   * Expo/UNNotification category identifier. The app registers an
+   * `approval` category with Allow/Deny buttons at startup, so every
+   * approval notification names it — the OS then renders the buttons.
+   */
+  categoryId?: string;
 }
 
 /** Pluggable delivery, so Expo Push / APNs / FCM can be swapped or faked. */
@@ -102,9 +131,10 @@ export class PushDispatcher {
         target,
         title: plan.title,
         body: plan.body,
-        data: { route: plan.route, category: plan.category, threadId: plan.threadId },
+        data: buildData(plan),
         threadId: plan.threadId,
         interruption: plan.interruption,
+        ...(plan.category === 'approval' ? { categoryId: APPROVAL_CATEGORY_ID } : {}),
       });
       this.recentlySent.set(dedupeKey(target.deviceId, plan), now);
     }
@@ -161,6 +191,21 @@ export class PushDispatcher {
       if (at < cutoff) this.recentlySent.delete(key);
     }
   }
+}
+
+/** Must match the category the mobile app registers with Allow/Deny actions. */
+export const APPROVAL_CATEGORY_ID = 'approval';
+
+function buildData(plan: NotificationPlan): PushData {
+  const data: PushData = { route: plan.route, category: plan.category, threadId: plan.threadId };
+  const gate = plan.interaction;
+  if (gate) {
+    data.chatId = gate.chatId;
+    data.interactionId = gate.interactionId;
+    data.kind = gate.kind;
+    if (gate.actions && gate.actions.length > 0) data.actions = [...gate.actions];
+  }
+  return data;
 }
 
 function dedupeKey(deviceId: string, plan: NotificationPlan): string {

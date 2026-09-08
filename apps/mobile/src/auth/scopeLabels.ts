@@ -19,6 +19,7 @@ const LABELS: Record<string, string> = {
   'read:workflows': 'See workflow definitions and run history',
   'read:files': 'Read files in workspaces and codebases',
   'read:reviews': 'See code changes and review threads',
+  'read:activity': 'See when chats, runs and automations start, finish or fail',
 
   'write:projects': 'Create and change projects',
   'write:workspaces': 'Create and change workspaces',

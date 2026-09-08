@@ -12,6 +12,9 @@
 //
 // Nothing is dropped relative to web; it is re-homed. Each group carries the
 // same explanatory copy the web tooltips do, because there is no hover.
+//
+// The option models live in `composer/turnOptions.ts` so the chips, this
+// sheet and the new-chat sheet agree on wording, and so they are testable.
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
@@ -22,39 +25,18 @@ import type { AgentMode, ModelInfo } from '@generatorai/client-core';
 import { Sheet, SheetRow, SheetSection } from '../ui/Sheet';
 import { ProgressBar, usageTone } from '../ui/ProgressRing';
 import { Badge } from '../ui/primitives';
-import { promptLimit, reasoningEfforts } from '../../api/useModels';
+import { promptLimit } from '../../api/useModels';
 import { formatTokens } from './ModelSheet';
+import {
+  MODE_OPTIONS,
+  PERMISSION_MODES,
+  TIER_OPTIONS,
+  effectiveEffort,
+  effortOptionsFor,
+} from './composer/turnOptions';
 import { useTheme } from '../../theme/ThemeProvider';
 
-const MODE_COPY: Record<AgentMode, { title: string; help: string }> = {
-  auto: {
-    title: 'Auto',
-    help: 'The agent works straight through and only stops if it needs you.',
-  },
-  plan: {
-    title: 'Plan first',
-    help: 'The agent writes a plan and waits for your approval before making any change.',
-  },
-};
-
-const EFFORT_COPY: Record<string, string> = {
-  low: 'Fastest. Best for small, well-specified edits.',
-  medium: 'Balanced.',
-  high: 'Thinks longer before acting. Better on ambiguous work.',
-  xhigh: 'Substantially longer reasoning.',
-  max: 'Maximum reasoning. Slowest and most expensive.',
-};
-
-/** Server values for `PATCH /api/chats/:id { permissionMode }`. */
-export const PERMISSION_MODES = [
-  { value: 'default', title: 'Ask me', help: 'Pause for approval before sensitive actions.' },
-  { value: 'acceptEdits', title: 'Auto-accept edits', help: 'File edits apply without asking.' },
-  {
-    value: 'bypassPermissions',
-    title: 'Full autonomy',
-    help: 'Nothing is gated. Use only in a sandbox you can throw away.',
-  },
-] as const;
+export { PERMISSION_MODES };
 
 export function TurnOptionsSheet({
   visible,
@@ -87,7 +69,7 @@ export function TurnOptionsSheet({
 }): React.ReactElement {
   const { colors } = useTheme();
 
-  const efforts = reasoningEfforts(model);
+  const efforts = effortOptionsFor(model);
   const limit =
     contextTier === 'long_context'
       ? (model?.longContext?.promptTokenLimit ?? promptLimit(model))
@@ -97,13 +79,13 @@ export function TurnOptionsSheet({
   return (
     <Sheet visible={visible} onClose={onClose} title="Turn options" detents={[0.75, 0.92]}>
       <SheetSection title="How it answers" />
-      {(['auto', 'plan'] as const).map((value) => (
+      {MODE_OPTIONS.map((option) => (
         <SheetRow
-          key={value}
-          title={MODE_COPY[value].title}
-          subtitle={MODE_COPY[value].help}
-          selected={mode === value}
-          onPress={() => onModeChange(value)}
+          key={option.value}
+          title={option.title}
+          subtitle={option.help}
+          selected={mode === option.value}
+          onPress={() => onModeChange(option.value)}
           left={<Wand2 size={18} color={colors['muted-foreground']} />}
         />
       ))}
@@ -111,13 +93,13 @@ export function TurnOptionsSheet({
       {efforts.length > 0 ? (
         <>
           <SheetSection title="Reasoning effort" />
-          {efforts.map((value) => (
+          {efforts.map((option) => (
             <SheetRow
-              key={value}
-              title={value.charAt(0).toUpperCase() + value.slice(1)}
-              subtitle={EFFORT_COPY[value] ?? null}
-              selected={(effort ?? model?.defaultReasoningEffort) === value}
-              onPress={() => onEffortChange(value)}
+              key={option.value}
+              title={option.title}
+              subtitle={option.help || null}
+              selected={effectiveEffort(effort, model) === option.value}
+              onPress={() => onEffortChange(option.value)}
               left={<Sparkles size={18} color={colors['muted-foreground']} />}
             />
           ))}
@@ -127,18 +109,19 @@ export function TurnOptionsSheet({
       {model?.supportsLongContext ? (
         <>
           <SheetSection title="Context window" />
-          <SheetRow
-            title="Standard"
-            subtitle={formatTokens(model.standardContextWindow ?? promptLimit(model)) ?? undefined}
-            selected={contextTier === 'default'}
-            onPress={() => onContextTierChange('default')}
-          />
-          <SheetRow
-            title="Long context"
-            subtitle={formatTokens(model.longContext?.promptTokenLimit) ?? undefined}
-            selected={contextTier === 'long_context'}
-            onPress={() => onContextTierChange('long_context')}
-          />
+          {TIER_OPTIONS.map((option) => (
+            <SheetRow
+              key={option.value}
+              title={option.title}
+              subtitle={
+                (option.value === 'default'
+                  ? formatTokens(model.standardContextWindow ?? promptLimit(model))
+                  : formatTokens(model.longContext?.promptTokenLimit)) ?? option.help
+              }
+              selected={contextTier === option.value}
+              onPress={() => onContextTierChange(option.value)}
+            />
+          ))}
         </>
       ) : null}
 

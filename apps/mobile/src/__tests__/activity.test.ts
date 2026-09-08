@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ChatSummary, InteractionSummary } from '@generatorai/client-core';
+
 import {
+  GATE_PROBE_LIMIT,
   filterOperations,
+  hasPendingGate,
   rankOperations,
+  selectGateCandidates,
   type Operation,
 } from '../api/activityRanking';
 import { crumbsFor, levelEntries } from '../components/chat/workbench/fileTree';
@@ -74,14 +79,14 @@ describe('levelEntries', () => {
 
   it('lists directories before files at the root', () => {
     expect(levelEntries(paths, '')).toEqual([
-      { name: 'src', path: 'src/', isDir: true },
+      { name: 'src', path: 'src/', isDir: true, count: 3 },
       { name: 'README.md', path: 'README.md', isDir: false },
     ]);
   });
 
   it('descends into a prefix without repeating it', () => {
     expect(levelEntries(paths, 'src/')).toEqual([
-      { name: 'components', path: 'src/components/', isDir: true },
+      { name: 'components', path: 'src/components/', isDir: true, count: 2 },
       { name: 'index.ts', path: 'src/index.ts', isDir: false },
     ]);
   });
@@ -113,5 +118,59 @@ describe('crumbsFor', () => {
 
   it('drops the trailing slash', () => {
     expect(crumbsFor('src/components/')).toEqual(['src', 'components']);
+  });
+});
+
+function chat(id: string, updatedAt: string, status = 'active'): ChatSummary {
+  return { id, name: id, sessionId: null, status, createdAt: updatedAt, updatedAt };
+}
+
+describe('selectGateCandidates', () => {
+  // D10 — the pending-gate source is per chat, so the feed probes a bounded,
+  // ordered set rather than every chat on every refresh.
+  it('probes running chats first, then the most recently updated', () => {
+    const picked = selectGateCandidates(
+      [
+        chat('stale', '2026-09-01T00:00:00Z'),
+        chat('fresh', '2026-09-06T00:00:00Z'),
+        chat('running-old', '2026-08-01T00:00:00Z'),
+      ],
+      ['running-old'],
+    );
+    expect(picked).toEqual(['running-old', 'fresh', 'stale']);
+  });
+
+  it('skips archived chats', () => {
+    const picked = selectGateCandidates(
+      [chat('archived', '2026-09-06T00:00:00Z', 'archived'), chat('live', '2026-09-01T00:00:00Z')],
+      [],
+    );
+    expect(picked).toEqual(['live']);
+  });
+
+  it('caps the probe set', () => {
+    const many = Array.from({ length: GATE_PROBE_LIMIT + 5 }, (_, i) =>
+      chat(`c${i}`, new Date(1_700_000_000_000 + i * 1000).toISOString()),
+    );
+    expect(selectGateCandidates(many, [])).toHaveLength(GATE_PROBE_LIMIT);
+    expect(selectGateCandidates(many, [], 3)).toHaveLength(3);
+    // A running chat outside the recency window still makes the cut.
+    expect(selectGateCandidates(many, ['c0'], 3)[0]).toBe('c0');
+  });
+});
+
+describe('hasPendingGate', () => {
+  const pending: InteractionSummary = { interactionId: 'i1', kind: 'tool_permission', status: 'pending' };
+  const answered: InteractionSummary = { interactionId: 'i2', kind: 'question', status: 'answered' };
+
+  it('is true only for a pending interaction of any kind', () => {
+    expect(hasPendingGate([pending])).toBe(true);
+    expect(hasPendingGate([{ ...pending, kind: 'plan_review' }])).toBe(true);
+    expect(hasPendingGate([answered])).toBe(false);
+  });
+
+  it('is false while the probe has not answered', () => {
+    expect(hasPendingGate(undefined)).toBe(false);
+    expect(hasPendingGate([])).toBe(false);
   });
 });

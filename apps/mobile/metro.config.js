@@ -44,9 +44,23 @@ config.resolver.unstable_enablePackageExports = true;
 // build), retry a failed `.js` resolution with the extension stripped so
 // Metro's normal `sourceExts` scan finds the `.ts`/`.tsx` file.
 const originalResolveRequest = config.resolver.resolveRequest;
+// ── Client-only entry for @generatorai/shared ────────────────────────
+// The package's main barrel is the SERVER's view of shared (app config
+// schema, child-process env allow-lists, host IPC protocols, OpenTelemetry,
+// the pino logger factory). The phone imports four values from it. Resolving
+// the bare specifier to `src/client.ts` keeps all of that out of the bundle
+// — and out of the device's memory — while `tsc` still checks against the
+// full barrel. `scripts/check-bundle.mjs` fails the export if any server
+// module leaks back in, and `sharedClientEntry.test.ts` fails if a client
+// package imports a value the entry does not export.
+const SHARED_CLIENT_ENTRY = path.resolve(workspaceRoot, 'packages/shared/src/client.ts');
+
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === 'crypto') {
     return context.resolveRequest(context, 'react-native-quick-crypto', platform);
+  }
+  if (moduleName === '@generatorai/shared') {
+    return { type: 'sourceFile', filePath: SHARED_CLIENT_ENTRY };
   }
 
   const resolve = originalResolveRequest ?? context.resolveRequest;

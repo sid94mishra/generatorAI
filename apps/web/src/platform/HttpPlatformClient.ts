@@ -712,9 +712,22 @@ export class HttpPlatformClient implements IPlatformClient {
     await apiFetch(`${this.baseUrl}/api/chats/${chatId}`, { method: 'DELETE' });
   }
 
-  /** Stop the in-flight turn for a chat (aborts the SDK conversation). */
-  async cancelChat(chatId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/chats/${chatId}/cancel`, { method: 'POST' });
+  /**
+   * Stop the in-flight turn for a chat (aborts the SDK conversation).
+   *
+   * `options` is what the two-phase Stop control computes: `force` on the
+   * second press tears the provider conversation down as well; `budgetSeconds`
+   * bounds how long the server waits for the provider to acknowledge.
+   */
+  async cancelChat(
+    chatId: string,
+    options?: { force?: boolean; budgetSeconds?: number },
+  ): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/chats/${chatId}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options ?? {}),
+    });
   }
 
   async sendChatPrompt(

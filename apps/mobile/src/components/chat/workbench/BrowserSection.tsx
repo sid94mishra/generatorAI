@@ -27,6 +27,8 @@ import { EmptyState, LoadingState, Spinner } from '../../ui/States';
 import { Field } from '../../ui/Form';
 import { useToast } from '../../ui/Toast';
 import { useAuth } from '../../../auth/AuthProvider';
+import { StepUpGate } from '../../../auth/StepUpGate';
+import { bytesToBase64 } from '../../../lib/base64';
 import { useTheme } from '../../../theme/ThemeProvider';
 
 /** Mirrors the server's `ActionBodySchema` union so a bad shape cannot compile. */
@@ -49,7 +51,28 @@ interface Descriptor {
 /** How often a frame is refreshed while the section is on screen. */
 const FRAME_INTERVAL_MS = 2_000;
 
-export function BrowserSection({ workspaceId }: { workspaceId: string }): React.ReactElement {
+/**
+ * The pane, behind the session's biometric step-up (plan §5.1): driving the
+ * browser is an `exec:browser` action. The pager pre-mounts this beside the
+ * Terminal pane, so the prompt waits for `active` — the moment it is swiped
+ * into view — rather than firing for a page the user cannot see.
+ */
+export function BrowserSection({
+  workspaceId,
+  active = true,
+}: {
+  workspaceId: string;
+  /** Whether the pane is the visible page; gates the step-up prompt. */
+  active?: boolean;
+}): React.ReactElement {
+  return (
+    <StepUpGate reason="Confirm opening the browser" active={active}>
+      <BrowserPanel workspaceId={workspaceId} />
+    </StepUpGate>
+  );
+}
+
+function BrowserPanel({ workspaceId }: { workspaceId: string }): React.ReactElement {
   const { fetch: authFetch } = useAuth();
   const { colors } = useTheme();
   const queryClient = useQueryClient();
@@ -285,21 +308,4 @@ export function BrowserSection({ workspaceId }: { workspaceId: string }): React.
       ) : null}
     </View>
   );
-}
-
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-/** Hermes has no `btoa`, and `Buffer` is not guaranteed on React Native. */
-function bytesToBase64(bytes: Uint8Array): string {
-  let out = '';
-  for (let i = 0; i < bytes.length; i += 3) {
-    const a = bytes[i]!;
-    const b = i + 1 < bytes.length ? bytes[i + 1]! : 0;
-    const c = i + 2 < bytes.length ? bytes[i + 2]! : 0;
-    out += B64[a >> 2];
-    out += B64[((a & 3) << 4) | (b >> 4)];
-    out += i + 1 < bytes.length ? B64[((b & 15) << 2) | (c >> 6)] : '=';
-    out += i + 2 < bytes.length ? B64[c & 63] : '=';
-  }
-  return out;
 }

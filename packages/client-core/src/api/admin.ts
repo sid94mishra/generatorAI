@@ -43,7 +43,16 @@ import type {
   WorktreeDetail,
   WorktreeInfo,
 } from '@generatorai/shared';
-import { json, jsonWith, qs, request, requestAllowing, requestText, type ApiFetch } from './client.js';
+import {
+  json,
+  jsonWith,
+  qs,
+  request,
+  requestAllowing,
+  requestText,
+  type ApiFetch,
+  type DeviceScopeRequest,
+} from './client.js';
 
 /**
  * One finding from `definitions.validate`, carrying the graph element it is
@@ -961,6 +970,26 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       revokeInvite: (grantId: string) =>
         req<void>(`/api/auth/pair/${grantId}`, { method: 'DELETE' }),
       serverInfo: () => req<Record<string, unknown>>('/api/auth/server-info'),
+
+      // Scope requests raised by devices (routes/scopeRequests.ts). All
+      // three need `admin:devices`; the device-side half (create / mine /
+      // cancel) is `createApiClient().auth.scopeRequests`.
+      scopeRequests: {
+        listPending: async () =>
+          (await req<{ requests: DeviceScopeRequest[] }>('/api/auth/scope-requests?status=pending'))
+            .requests ?? [],
+        /** `scopes` narrows the grant to a subset of what was asked for. */
+        approve: (requestId: string, body?: { scopes?: string[]; note?: string }) =>
+          req<{ request: DeviceScopeRequest; deviceScopes: string[] }>(
+            `/api/auth/scope-requests/${encodeURIComponent(requestId)}/approve`,
+            json(body ?? {}),
+          ),
+        deny: (requestId: string, body?: { note?: string }) =>
+          req<{ request: DeviceScopeRequest }>(
+            `/api/auth/scope-requests/${encodeURIComponent(requestId)}/deny`,
+            json(body ?? {}),
+          ),
+      },
     },
 
     // ── system.ts / copilot.ts ──────────────────────────────────

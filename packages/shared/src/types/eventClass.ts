@@ -78,6 +78,8 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
 
   // chat
   'chat.created': 'item',
+  'device.scope_requested': 'item',
+  'device.scope_request_resolved': 'item',
   'chat.prompt_sent': 'item',
   'chat.prompt_failed': 'item',
   'chat.archived': 'item',

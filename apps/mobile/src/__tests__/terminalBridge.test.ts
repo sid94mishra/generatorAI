@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   OutputBatcher,
+  isOpenableLink,
   parseFromWebView,
   splitBatch,
 } from '../terminal/bridgeProtocol';
@@ -145,5 +146,65 @@ describe('parseFromWebView — rejects untrusted input', () => {
     const parsed = parseFromWebView(huge);
     expect(parsed).not.toBeNull();
     expect((parsed as { text: string }).text.length).toBe(100_000);
+  });
+});
+
+describe('parseFromWebView — renderer additions', () => {
+  it('parses title, link, hwkey and searchResult', () => {
+    expect(parseFromWebView('{"type":"title","title":"user@host: ~"}')).toEqual({
+      type: 'title',
+      title: 'user@host: ~',
+    });
+    expect(parseFromWebView('{"type":"link","url":"https://example.com/a"}')).toEqual({
+      type: 'link',
+      url: 'https://example.com/a',
+    });
+    expect(parseFromWebView('{"type":"hwkey"}')).toEqual({ type: 'hwkey' });
+    expect(parseFromWebView('{"type":"searchResult","found":false}')).toEqual({
+      type: 'searchResult',
+      found: false,
+    });
+  });
+
+  it('bounds a title — a shell can set anything', () => {
+    const parsed = parseFromWebView(JSON.stringify({ type: 'title', title: 't'.repeat(10_000) }));
+    expect((parsed as { title: string }).title.length).toBe(256);
+  });
+
+  it('drops malformed title / link / searchResult payloads', () => {
+    expect(parseFromWebView('{"type":"title","title":5}')).toBeNull();
+    expect(parseFromWebView('{"type":"link"}')).toBeNull();
+    expect(parseFromWebView('{"type":"link","url":""}')).toBeNull();
+    expect(parseFromWebView(JSON.stringify({ type: 'link', url: `https://x/${'a'.repeat(5000)}` }))).toBeNull();
+    expect(parseFromWebView('{"type":"searchResult","found":"yes"}')).toBeNull();
+  });
+});
+
+describe('isOpenableLink', () => {
+  it('allows http and https only', () => {
+    expect(isOpenableLink('https://example.com')).toBe(true);
+    expect(isOpenableLink('http://localhost:3000/x?y=1')).toBe(true);
+    expect(isOpenableLink('HTTPS://EXAMPLE.COM')).toBe(true);
+  });
+
+  it('refuses every other scheme terminal output could print', () => {
+    // These would be dereferenced with the app's own identity by
+    // `Linking.openURL`.
+    for (const url of [
+      'file:///etc/passwd',
+      'javascript:alert(1)',
+      'tel:+15555555555',
+      'sms:+1',
+      'mailto:a@b',
+      'intent://x#Intent;end',
+      'generatorai://pair?token=x',
+      'ftp://x',
+      'https:',
+      'https://',
+      '//example.com',
+      'example.com',
+    ]) {
+      expect(isOpenableLink(url), url).toBe(false);
+    }
   });
 });

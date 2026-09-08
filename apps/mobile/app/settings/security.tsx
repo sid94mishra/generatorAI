@@ -4,19 +4,41 @@
 // The screen that justifies having this app on a phone: what this device is
 // allowed to do, how its key is protected, which other devices exist, and
 // how to revoke any of them from wherever you happen to be standing.
+//
+// D1 — built on `Screen` like every other settings page. The root layout
+// turns the navigator header off for `settings/*` on the assumption that each
+// draws its own collapsing title and back button through `<Screen>`; this one
+// used a bare `ScrollView`, so it had no title, no way back, and content
+// under the status bar.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import * as LocalAuthentication from 'expo-local-authentication';
-import { ShieldAlert, ShieldCheck, Smartphone } from 'lucide-react-native';
+import { Clock, KeyRound, ShieldAlert, ShieldCheck, Smartphone } from 'lucide-react-native';
 
+import {
+  lastResolvedRequestOf,
+  pendingRequestOf,
+  useApproveScopeRequest,
+  useCancelScopeRequest,
+  useDenyScopeRequest,
+  useMyScopeRequests,
+  usePendingScopeRequests,
+  type DeviceScopeRequest,
+} from '../../src/api/scopeRequests';
 import { useAuth } from '../../src/auth/AuthProvider';
 import { revokeDeviceRequest } from '../../src/auth/deviceRequests';
+import { requireStepUp } from '../../src/auth/stepUp';
 import { describeScope, isSensitiveScope } from '../../src/auth/scopeLabels';
 import { checkFeature, grantableFeatures, type MobileFeature } from '../../src/auth/featureGate';
 import { ConfirmSheet } from '../../src/components/ui/ActionSheet';
+import { Button } from '../../src/components/ui/Button';
+import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
+import { Card, Divider, SectionHeader } from '../../src/components/ui/primitives';
+import { Screen } from '../../src/components/ui/Screen';
+import { Spinner } from '../../src/components/ui/States';
+import { useToast } from '../../src/components/ui/Toast';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 /** Short names for the capabilities a user can be granted after pairing. */
@@ -33,6 +55,8 @@ const FEATURE_LABELS: Record<MobileFeature, string> = {
 
 interface DeviceRecord {
   deviceId: string;
+  /** Wire field is `name` (`toPublicDevice` in routes/auth.ts); `deviceName` is derived below. */
+  name?: string;
   deviceName: string;
   platform: string;
   createdAt: number;
@@ -67,9 +91,12 @@ export default function SecurityScreen(): React.ReactElement {
   const { state, transport, keyBacking, fetch: authFetch, unpair, refreshPermissions } = useAuth();
   const { colors } = useTheme();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   /** Device awaiting the "revoke?" confirmation, or null. */
   const [revoking, setRevoking] = useState<DeviceRecord | null>(null);
+  /** Another device's access request awaiting the "approve?" confirmation. */
+  const [approving, setApproving] = useState<DeviceScopeRequest | null>(null);
   const [unpairing, setUnpairing] = useState(false);
 
   const scopes = state.status === 'authenticated' ? state.scopes : [];
@@ -97,10 +124,27 @@ export default function SecurityScreen(): React.ReactElement {
     queryFn: async (): Promise<DeviceRecord[]> => {
       const res = await authFetch('/api/auth/devices');
       if (!res.ok) throw new Error(`Devices request failed (${res.status})`);
-      return ((await res.json()) as { devices: DeviceRecord[] }).devices;
+      const list = ((await res.json()) as { devices: Array<DeviceRecord & { name?: string }> }).devices;
+      // The server publishes `name`; the screen was reading `deviceName` and
+      // rendered "Revoke undefined" (Sept 7 live run).
+      return list.map((d) => ({ ...d, deviceName: d.deviceName ?? d.name ?? 'Unnamed device' }));
     },
     enabled: deviceAdmin.available,
   });
+
+  // This device's own access requests (plan S2): the row that says "you
+  // asked for X on Tuesday and nobody has answered yet", and the Cancel.
+  const paired = state.status === 'authenticated';
+  const myRequests = useMyScopeRequests(paired);
+  const myPending = pendingRequestOf(myRequests.data);
+  const myLastAnswer = myPending ? null : lastResolvedRequestOf(myRequests.data);
+  const cancelRequest = useCancelScopeRequest();
+
+  // Requests FROM other devices, answerable here because this phone holds
+  // admin:devices. Same gate as the device list below.
+  const accessRequests = usePendingScopeRequests(deviceAdmin.available);
+  const approveRequest = useApproveScopeRequest();
+  const denyRequest = useDenyScopeRequest();
 
   const posture = useQuery({
     queryKey: ['security', 'posture'],
@@ -121,14 +165,10 @@ export default function SecurityScreen(): React.ReactElement {
    */
   const revokeDevice = useCallback(
     async (device: DeviceRecord) => {
-      const hasBiometrics =
-        (await LocalAuthentication.hasHardwareAsync()) && (await LocalAuthentication.isEnrolledAsync());
-      if (hasBiometrics) {
-        const result = await LocalAuthentication.authenticateAsync({
-          promptMessage: `Confirm revoking ${device.deviceName}`,
-        });
-        if (!result.success) return;
-      }
+      // `requireStepUp` handles the no-biometrics case (device passcode, or
+      // an honest allow on a phone with neither) the same way every other
+      // sensitive action does, instead of this screen deciding on its own.
+      if (!(await requireStepUp(`Confirm revoking ${device.deviceName}`))) return;
 
       setBusy(device.deviceId);
       try {
@@ -136,13 +176,78 @@ export default function SecurityScreen(): React.ReactElement {
         const res = await authFetch(path, init);
         if (!res.ok) throw new Error(`Revoke failed (${res.status})`);
         await queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] });
+        toast({ message: `Revoked ${device.deviceName}.`, tone: 'success' });
       } catch (err) {
-        Alert.alert('Could not revoke', err instanceof Error ? err.message : String(err));
+        toast({
+          message: `Could not revoke: ${err instanceof Error ? err.message : String(err)}`,
+          tone: 'error',
+        });
       } finally {
         setBusy(null);
       }
     },
-    [authFetch, queryClient],
+    [authFetch, queryClient, toast],
+  );
+
+  /**
+   * Approving another device's request hands it authority — terminal access
+   * is remote code execution — so it takes the same two steps as revoking:
+   * a sheet naming the device and what it gets, then a biometric check where
+   * the phone has one.
+   */
+  const approveAccessRequest = useCallback(
+    async (request: DeviceScopeRequest) => {
+      if (!(await requireStepUp(`Confirm granting access to ${request.deviceName ?? 'this device'}`))) return;
+      setBusy(request.requestId);
+      try {
+        await approveRequest.mutateAsync({ requestId: request.requestId });
+        toast({ message: `Approved ${request.deviceName ?? 'the request'}.`, tone: 'success' });
+      } catch (err) {
+        toast({
+          message: `Could not approve: ${err instanceof Error ? err.message : String(err)}`,
+          tone: 'error',
+        });
+      } finally {
+        setBusy(null);
+      }
+    },
+    [approveRequest, toast],
+  );
+
+  const denyAccessRequest = useCallback(
+    async (request: DeviceScopeRequest) => {
+      setBusy(request.requestId);
+      try {
+        await denyRequest.mutateAsync({ requestId: request.requestId });
+        toast({ message: `Denied ${request.deviceName ?? 'the request'}.`, tone: 'success' });
+      } catch (err) {
+        toast({
+          message: `Could not deny: ${err instanceof Error ? err.message : String(err)}`,
+          tone: 'error',
+        });
+      } finally {
+        setBusy(null);
+      }
+    },
+    [denyRequest, toast],
+  );
+
+  const cancelMyRequest = useCallback(
+    async (request: DeviceScopeRequest) => {
+      setBusy(request.requestId);
+      try {
+        await cancelRequest.mutateAsync(request.requestId);
+        toast({ message: 'Request withdrawn.', tone: 'success' });
+      } catch (err) {
+        toast({
+          message: `Could not cancel: ${err instanceof Error ? err.message : String(err)}`,
+          tone: 'error',
+        });
+      } finally {
+        setBusy(null);
+      }
+    },
+    [cancelRequest, toast],
   );
 
   /**
@@ -154,12 +259,16 @@ export default function SecurityScreen(): React.ReactElement {
     try {
       await refreshPermissions();
       await queryClient.invalidateQueries({ queryKey: ['security', 'posture'] });
+      toast({ message: 'Permissions are up to date.', tone: 'success' });
     } catch (err) {
-      Alert.alert('Could not refresh', err instanceof Error ? err.message : String(err));
+      toast({
+        message: `Could not refresh: ${err instanceof Error ? err.message : String(err)}`,
+        tone: 'error',
+      });
     } finally {
       setBusy(null);
     }
-  }, [refreshPermissions, queryClient]);
+  }, [refreshPermissions, queryClient, toast]);
 
   // Both destructive device actions on this screen confirm through the same
   // sheet as chat deletion, so one pattern covers every irreversible action.
@@ -167,53 +276,54 @@ export default function SecurityScreen(): React.ReactElement {
 
   const hardwareBacked = keyBacking !== 'software' && keyBacking !== 'web-preview';
 
+  const connectionLabel =
+    transport.state === 'connected'
+      ? `${transport.kind} — ${transport.endpoint}`
+      : transport.state === 'host-mismatch'
+        ? 'Blocked: server identity changed'
+        : transport.state;
+
   return (
-    <ScrollView
-      contentContainerClassName="gap-6 px-4 py-6"
-      refreshControl={
-        <RefreshControl
-          refreshing={devices.isFetching || posture.isFetching}
-          onRefresh={() => {
-            void devices.refetch();
-            void posture.refetch();
-          }}
-          tintColor={colors['muted-foreground']}
-        />
-      }
+    <Screen
+      title="Security"
+      back
+      backFallback="/settings"
+      onRefresh={() => {
+        void devices.refetch();
+        void posture.refetch();
+        void myRequests.refetch();
+        if (deviceAdmin.available) void accessRequests.refetch();
+      }}
+      refreshing={devices.isFetching || posture.isFetching || myRequests.isFetching}
     >
       {/* ── This device ── */}
-      <Section title="This device">
-        <View className="flex-row items-center gap-3">
-          {hardwareBacked ? (
-            <ShieldCheck size={20} color={colors.success} />
-          ) : (
-            <ShieldAlert size={20} color={colors.warning} />
-          )}
-          <View className="flex-1">
-            <Text className="text-sm font-medium text-foreground">
-              Key protection: {KEY_BACKING_LABEL[keyBacking] ?? keyBacking}
-            </Text>
-            <Text className="text-xs text-muted-foreground">
-              {hardwareBacked
-                ? 'The signing key cannot leave this device, even if the app is compromised.'
-                : 'No secure element available, so the key is stored encrypted but is extractable. Treat this device as lower trust.'}
-            </Text>
-          </View>
-        </View>
-
-        <Divider />
-
-        <Field label="Connection">
-          {transport.state === 'connected'
-            ? `${transport.kind} — ${transport.endpoint}`
-            : transport.state === 'host-mismatch'
-              ? 'Blocked: server identity changed'
-              : transport.state}
-        </Field>
-      </Section>
+      <SectionHeader title="This device" />
+      <ListGroup>
+        <ListRow
+          title={`Key protection: ${KEY_BACKING_LABEL[keyBacking] ?? keyBacking}`}
+          subtitle={
+            hardwareBacked
+              ? 'The signing key cannot leave this device, even if the app is compromised.'
+              : 'No secure element available, so the key is stored encrypted but is extractable. Treat this device as lower trust.'
+          }
+          icon={
+            hardwareBacked ? (
+              <ShieldCheck size={18} color={colors.success} />
+            ) : (
+              <ShieldAlert size={18} color={colors.warning} />
+            )
+          }
+        />
+        <ListRow
+          title="Connection"
+          subtitle={connectionLabel}
+          icon={<KeyRound size={18} color={colors['muted-foreground']} />}
+        />
+      </ListGroup>
 
       {/* ── Permissions ── */}
-      <Section title="What this device can do">
+      <SectionHeader title="What this device can do" />
+      <Card className="gap-3 p-4">
         {scopes.length === 0 ? (
           <Text className="text-sm text-muted-foreground">Not paired.</Text>
         ) : (
@@ -230,9 +340,7 @@ export default function SecurityScreen(): React.ReactElement {
         {missingCapabilities.length > 0 ? (
           <>
             <Divider />
-            <Text className="text-xs uppercase tracking-wide text-muted-foreground">
-              Not granted
-            </Text>
+            <Text className="text-sm font-semibold text-muted-foreground">Not granted</Text>
             {missingCapabilities.map((capability) => (
               <View key={capability.scope} className="flex-row gap-2">
                 <Text className="text-muted-foreground">•</Text>
@@ -242,7 +350,7 @@ export default function SecurityScreen(): React.ReactElement {
           </>
         ) : null}
 
-        <Text className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        <Text className="text-xs leading-relaxed text-muted-foreground">
           Terminal and browser control are withheld from a phone by default. Turn them on where
           GeneratorAI is running — Settings › Security › Paired devices › this device › Capabilities
           — then tap below.
@@ -251,22 +359,68 @@ export default function SecurityScreen(): React.ReactElement {
         {/* Scopes travel inside the access token, so a grant made elsewhere
             is invisible here until the token is re-minted. Without this the
             capability appears to have been ignored. */}
-        <Pressable
-          accessibilityRole="button"
-          disabled={busy === 'permissions'}
+        <Button
+          label="Check for new permissions"
+          variant="secondary"
+          full
+          loading={busy === 'permissions'}
           onPress={() => void reloadPermissions()}
-          className="mt-1 items-center rounded-lg border border-border px-4 py-3"
-        >
-          <Text className="text-sm font-medium text-foreground">
-            {busy === 'permissions' ? 'Checking…' : 'Check for new permissions'}
-          </Text>
-        </Pressable>
-      </Section>
+        />
+      </Card>
+
+      {/* ── This device's access request ── */}
+      {myPending ? (
+        <ListGroup>
+          <ListRow
+            title="Pending access request"
+            subtitle={`Asked ${new Date(myPending.createdAt).toLocaleString()} for: ${myPending.scopes
+              .map(describeScope)
+              .join('; ')}. Approve it from a device that manages devices.`}
+            icon={<Clock size={18} color={colors.warning} />}
+            trailing={
+              <Button
+                label="Cancel"
+                variant="secondary"
+                size="sm"
+                haptic="tap"
+                loading={busy === myPending.requestId}
+                accessibilityLabel="Cancel the pending access request"
+                onPress={() => void cancelMyRequest(myPending)}
+              />
+            }
+          />
+        </ListGroup>
+      ) : myLastAnswer ? (
+        <ListGroup>
+          <ListRow
+            title={
+              myLastAnswer.status === 'approved'
+                ? 'Last access request approved'
+                : 'Last access request denied'
+            }
+            subtitle={
+              myLastAnswer.status === 'approved'
+                ? `Granted ${(myLastAnswer.grantedScopes ?? myLastAnswer.scopes)
+                    .map(describeScope)
+                    .join('; ')}. Tap "Check for new permissions" above if it is not active yet.`
+                : `${myLastAnswer.resolutionNote ? `"${myLastAnswer.resolutionNote}" — ` : ''}You can ask again with a different reason.`
+            }
+            icon={
+              myLastAnswer.status === 'approved' ? (
+                <ShieldCheck size={18} color={colors.success} />
+              ) : (
+                <ShieldAlert size={18} color={colors['muted-foreground']} />
+              )
+            }
+          />
+        </ListGroup>
+      ) : null}
 
       {/* ── Server posture ── */}
-      <Section title="Server">
+      <SectionHeader title="Server" />
+      <Card className="gap-3 p-4">
         {posture.isLoading ? (
-          <ActivityIndicator color={colors['muted-foreground']} />
+          <Spinner />
         ) : posture.data ? (
           <>
             <Field label="Identity" mono>
@@ -282,11 +436,11 @@ export default function SecurityScreen(): React.ReactElement {
             </Field>
 
             {posture.data.warnings.length > 0 ? (
-              <View className="mt-2 gap-2">
+              <View className="gap-2">
                 {posture.data.warnings.map((w) => (
                   <View
                     key={w.code}
-                    className={`rounded-lg border p-3 ${
+                    className={`rounded-2xl border p-3 ${
                       w.severity === 'critical'
                         ? 'border-danger bg-danger-muted'
                         : 'border-warning bg-warning-muted'
@@ -301,54 +455,102 @@ export default function SecurityScreen(): React.ReactElement {
         ) : (
           <Text className="text-sm text-danger">{String(posture.error)}</Text>
         )}
-      </Section>
+      </Card>
+
+      {/* ── Access requests from other devices (admin:devices) ── */}
+      {deviceAdmin.available && (accessRequests.data?.length ?? 0) > 0 ? (
+        <>
+          <SectionHeader title="Access requests" />
+          <ListGroup>
+            {(accessRequests.data ?? []).map((request) => (
+              <ListRow
+                key={request.requestId}
+                title={request.deviceName ?? 'Unnamed device'}
+                subtitle={[
+                  request.platform,
+                  `wants: ${request.scopes.map(describeScope).join('; ')}`,
+                  request.reason ? `“${request.reason}”` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' — ')}
+                icon={<Smartphone size={18} color={colors.warning} />}
+                trailing={
+                  <View className="flex-row gap-2">
+                    <Button
+                      label="Deny"
+                      variant="secondary"
+                      size="sm"
+                      haptic="tap"
+                      disabled={busy === request.requestId}
+                      accessibilityLabel={`Deny access request from ${request.deviceName ?? 'device'}`}
+                      onPress={() => void denyAccessRequest(request)}
+                    />
+                    <Button
+                      label="Approve"
+                      size="sm"
+                      loading={busy === request.requestId}
+                      accessibilityLabel={`Approve access request from ${request.deviceName ?? 'device'}`}
+                      onPress={() => setApproving(request)}
+                    />
+                  </View>
+                }
+              />
+            ))}
+          </ListGroup>
+        </>
+      ) : null}
 
       {/* ── Devices ── */}
-      <Section title="Paired devices">
-        {!deviceAdmin.available ? (
+      <SectionHeader title="Paired devices" />
+      {!deviceAdmin.available ? (
+        <Card className="p-4">
           <Text className="text-sm text-muted-foreground">{deviceAdmin.reason}</Text>
-        ) : devices.isLoading ? (
-          <ActivityIndicator color={colors['muted-foreground']} />
-        ) : devices.data ? (
-          devices.data.map((device) => (
-            <View key={device.deviceId} className="flex-row items-center gap-3 py-2">
-              <Smartphone size={18} color={colors['muted-foreground']} />
-              <View className="flex-1">
-                <Text className="text-sm font-medium text-foreground">{device.deviceName}</Text>
-                <Text className="text-xs text-muted-foreground">
-                  {device.platform}
-                  {device.revokedAt ? ' — revoked' : ''}
-                  {device.lastUsedAt
-                    ? ` — last used ${new Date(device.lastUsedAt).toLocaleDateString()}`
-                    : ''}
-                </Text>
-              </View>
-              {!device.revokedAt ? (
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={busy === device.deviceId}
-                  onPress={() => setRevoking(device)}
-                  className="rounded-md border border-danger px-3 py-1.5"
-                >
-                  <Text className="text-xs font-medium text-danger">
-                    {busy === device.deviceId ? '…' : 'Revoke'}
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ))
-        ) : (
+        </Card>
+      ) : devices.isLoading ? (
+        <Card className="items-center p-4">
+          <Spinner />
+        </Card>
+      ) : devices.data ? (
+        <ListGroup>
+          {devices.data.map((device) => (
+            <ListRow
+              key={device.deviceId}
+              title={device.deviceName}
+              subtitle={[
+                device.platform,
+                device.revokedAt ? 'revoked' : null,
+                device.lastUsedAt
+                  ? `last used ${new Date(device.lastUsedAt).toLocaleDateString()}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' — ')}
+              icon={<Smartphone size={18} color={colors['muted-foreground']} />}
+              trailing={
+                !device.revokedAt ? (
+                  <Button
+                    label="Revoke"
+                    variant="danger"
+                    size="sm"
+                    haptic="tap"
+                    loading={busy === device.deviceId}
+                    accessibilityLabel={`Revoke ${device.deviceName}`}
+                    onPress={() => setRevoking(device)}
+                  />
+                ) : undefined
+              }
+            />
+          ))}
+        </ListGroup>
+      ) : (
+        <Card className="p-4">
           <Text className="text-sm text-danger">{String(devices.error)}</Text>
-        )}
-      </Section>
+        </Card>
+      )}
 
-      <Pressable
-        accessibilityRole="button"
-        onPress={confirmUnpair}
-        className="items-center rounded-lg border border-danger px-5 py-4"
-      >
-        <Text className="font-semibold text-danger">Unpair this device</Text>
-      </Pressable>
+      <View className="pt-2">
+        <Button label="Unpair this device" variant="danger" full onPress={confirmUnpair} />
+      </View>
 
       <ConfirmSheet
         visible={revoking !== null}
@@ -364,6 +566,22 @@ export default function SecurityScreen(): React.ReactElement {
       />
 
       <ConfirmSheet
+        visible={approving !== null}
+        onClose={() => setApproving(null)}
+        title={`Grant access to “${approving?.deviceName ?? ''}”?`}
+        message={`It will be able to: ${(approving?.scopes ?? [])
+          .map(describeScope)
+          .join('; ')}. Anything marked sensitive here is a deliberate grant.`}
+        confirmLabel="Approve"
+        destructive={false}
+        onConfirm={() => {
+          const request = approving;
+          setApproving(null);
+          if (request) void approveAccessRequest(request);
+        }}
+      />
+
+      <ConfirmSheet
         visible={unpairing}
         onClose={() => setUnpairing(false)}
         title="Unpair this device?"
@@ -374,22 +592,7 @@ export default function SecurityScreen(): React.ReactElement {
           void unpair();
         }}
       />
-    </ScrollView>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <View className="gap-3">
-      <Text className="text-xs uppercase tracking-wide text-muted-foreground">{title}</Text>
-      <View className="gap-3 rounded-lg border border-border bg-card p-4">{children}</View>
-    </View>
+    </Screen>
   );
 }
 
@@ -404,14 +607,10 @@ function Field({
 }): React.ReactElement {
   return (
     <View className="gap-1">
-      <Text className="text-xs uppercase tracking-wide text-muted-foreground">{label}</Text>
+      <Text className="text-xs font-semibold text-muted-foreground">{label}</Text>
       <Text className={`text-sm text-foreground ${mono ? 'font-mono' : ''}`}>{children}</Text>
     </View>
   );
-}
-
-function Divider(): React.ReactElement {
-  return <View className="h-px bg-border" />;
 }
 
 /** Same grouping the pairing screen and the server use, so they can be compared. */

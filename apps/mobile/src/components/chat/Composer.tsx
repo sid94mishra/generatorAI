@@ -1,44 +1,67 @@
 // ────────────────────────────────────────────────────────────────
-// Composer — the chat input.
+// Composer — the chat input (v2, §6.4).
 //
-// Every control the web composer exposes is reachable here. What differs is
-// the layout: a phone gets ONE row of inline affordances (the two the user
-// touches most, plus send), and everything else lives one tap away in a
-// sheet. Cramming thirteen desktop pills onto 393pt is what made the previous
-// version unusable.
+//   row 1   attachment chips            — image thumb / file / capture, remove
+//   row 2   slash / mention strip       — while a `/` or `@` trigger is open
+//   row 3   the field + mic             — OR the voice pill while dictating
+//   row 4   [+] [model ▾] [mode] [options] … [gauge] [send/stop]
 //
-//   row 1   attachments (chips)          — only when non-empty
-//   row 2   slash / mention strip        — only while a trigger is open
-//   row 3   the text field + mic
-//   row 4   [+] [model ▾] [mode] [options] … [gauge] [send]
+// Above the card, when the screen supplies them: the bound-agent chip, the
+// workspace prep bar, and the gate banner ("Cancel and send").
+//
+// Two ways to drive it:
+//   • `useComposerController()` returns `props` — spread them, add the turn
+//     props (model, mode, effort, stop) the screen owns.
+//   • The v1 prop set still works unchanged: a screen that passes
+//     `mentionPaths` / `onOpenSection` / `onVoice` gets the v1 behaviour for
+//     those parts, so nothing breaks while the screen adopts the hook.
 //
 // The send control is a single morphing target rather than two swapped
 // buttons: swapping moves the tap area under the user's thumb at exactly the
 // moment they are reaching for it, which is how you get accidental cancels.
+// Long-press on Send = send with plan mode.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+  type GestureResponderEvent,
+  type NativeSyntheticEvent,
+  type TextInputKeyPressEventData,
+} from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
+import type { SharedValue } from 'react-native-reanimated';
+import { useRouter } from 'expo-router';
 import {
   ArrowUp,
+  Camera,
+  ClipboardPaste,
   Cpu,
+  FolderOpen,
+  Globe,
+  History,
+  Image as ImageIcon,
   Mic,
-  Paperclip,
   Plus,
   SlidersHorizontal,
   Square,
+  Terminal,
   Wand2,
-  X,
 } from 'lucide-react-native';
-import type { AgentMode, ModelInfo } from '@generatorai/client-core';
+import type { AgentMode, ContextUsageSnapshot, ModelInfo } from '@generatorai/client-core';
 
 import { Chip } from '../ui/Chip';
 import { IconButton } from '../ui/Button';
 import { ProgressRing } from '../ui/ProgressRing';
 import { Spinner } from '../ui/States';
 import { Touchable } from '../ui/Touchable';
+import { ActionSheet, type MenuAction } from '../ui/ActionSheet';
 import { haptics } from '../ui/haptics';
+import { MAX_SCALE, useFontScale } from '../ui/accessibility';
 import { ModelSheet } from './ModelSheet';
 import { TurnOptionsSheet } from './TurnOptionsSheet';
 import {
@@ -47,25 +70,127 @@ import {
   detectMenu,
   filterCommands,
   filterPaths,
-  type MenuState,
 } from './composerMenu';
+import { AttachmentChips, type ChipAttachment } from './composer/AttachmentChips';
+import { SuggestionStrip } from './composer/SuggestionStrip';
+import { VoicePill } from './composer/VoicePill';
+import { HistorySheet } from './composer/HistorySheet';
+import { GaugeSheet } from './composer/GaugeSheet';
+import {
+  BoundAgentChip,
+  GateBanner,
+  WorkspacePrepBar,
+  type BoundAgentProps,
+  type GateBannerProps,
+  type WorkspacePrepProps,
+} from './composer/ComposerBanners';
+import { MODE_OPTIONS, modeLabel, optionsChipLabel } from './composer/turnOptions';
+import type {
+  AttachmentSource,
+  PromptHistoryEntry,
+  SlashItem,
+  StopState,
+  VoiceUiState,
+} from './composer/types';
+import { SCOPE_REQUEST_ROUTE } from '../../navigation/routes';
 import { findModel, promptLimit } from '../../api/useModels';
 import { useTheme } from '../../theme/ThemeProvider';
 
-export interface ComposerProps {
+export type { StopState } from './composer/types';
+
+/** A pane the composer can ask the screen to reveal. */
+export type ComposerPane = 'browser' | 'terminal' | 'changes' | 'files' | 'plan' | 'tasks';
+
+/**
+ * Props the controller hook supplies. The screen spreads
+ * `useComposerController().props` and adds `ComposerTurnProps` beside them.
+ */
+export interface ComposerControlledProps {
   draft: string;
   onDraftChange: (text: string) => void;
   onSend: () => void;
+  /** Long-press on Send. */
+  onSendWithPlan?: (() => void) | undefined;
+  /** A send is in flight (attachments reading / request pending). */
+  sending?: boolean | undefined;
+  disabled?: boolean | undefined;
+
+  /**
+   * Caret position, lifted so dictated segments insert at it. Uncontrolled
+   * if omitted.
+   */
+  caret?: number | undefined;
+  onCaretChange?: ((caret: number) => void) | undefined;
+  /**
+   * One-shot selection to apply after a programmatic insertion, then clear.
+   * Held only for a single render: leaving `selection` permanently
+   * controlled fights the user's own typing on Android.
+   */
+  pendingSelection?: number | null | undefined;
+  onPendingSelectionApplied?: (() => void) | undefined;
+  /**
+   * Fired on any manual interaction with the field while dictation is live
+   * — the act of editing IS the pause signal (Part C.3).
+   */
+  onComposerInteraction?: (() => void) | undefined;
+
+  /** Ranked `/` or `@` matches from the controller. Absent → v1 menu. */
+  suggestions?: readonly SlashItem[] | undefined;
+  onSelectSuggestion?: ((item: SlashItem) => void) | undefined;
+  suggestionsLoading?: boolean | undefined;
+  /** The `/command` chip pinned inside the card once picked. */
+  activeCommand?: { label: string; argHint?: string | undefined; onRemove: () => void } | null | undefined;
+  /** `/browser`, `/terminal` and the pane openers resolve through this. */
+  onOpenPane?: ((pane: ComposerPane) => void) | undefined;
+  /** Hardware ↑ / ↓ history. Return true when handled. */
+  onHistoryStep?: ((dir: -1 | 1) => boolean) | undefined;
+
+  voiceAvailable: boolean;
+  /** v2 voice. When present the mic drives the pill; `onVoice` is ignored. */
+  voiceState?: VoiceUiState | undefined;
+  voiceInterim?: string | undefined;
+  voiceAmplitude?: SharedValue<number> | undefined;
+  voiceWaveform?: SharedValue<number[]> | undefined;
+  voiceStartedAt?: number | null | undefined;
+  voiceError?: string | null | undefined;
+  /** Hold the mic to dictate, release to accept. */
+  pushToTalk?: boolean | undefined;
+  onVoiceStart?: (() => void) | undefined;
+  onVoicePause?: (() => void) | undefined;
+  onVoiceResume?: (() => void) | undefined;
+  onVoiceCancel?: (() => void) | undefined;
+  onVoiceAccept?: (() => void) | undefined;
+
+  attachments: readonly ChipAttachment[];
+  onRemoveAttachment: (id: string) => void;
+  attachAvailable: boolean;
+  /** Shown when the attach button is unavailable, instead of a dead control. */
+  attachDisabledReason?: string | undefined;
+  /** Whether "Request access" is worth offering. */
+  attachGrantable?: boolean | undefined;
+  /** v2: the `+` menu's pickers. */
+  onAttachFrom?: ((source: AttachmentSource) => void) | undefined;
+  attachPending?: boolean | undefined;
+  /** Which capture sources this device may use (browser / terminal panes). */
+  captureScopes?: { browser: boolean; terminal: boolean } | undefined;
+
+  historyEntries?: readonly PromptHistoryEntry[] | undefined;
+  historyVisible?: boolean | undefined;
+  onOpenHistory?: (() => void) | undefined;
+  onCloseHistory?: (() => void) | undefined;
+  onPickHistory?: ((entry: PromptHistoryEntry) => void) | undefined;
+}
+
+/** Props the screen owns: the chat's turn settings, stop, and banners. */
+export interface ComposerTurnProps {
   onStop: () => void;
   isStreaming: boolean;
   /**
    * W30-b — what the Stop control should say and whether it accepts a press.
-   *
    * Owned by the screen, which is the only thing that can see whether the
    * BACKEND still considers the turn live. Absent means "behave as before".
    */
-  stopState?: { label: string; enabled: boolean; forceAvailable: boolean };
-  disabled?: boolean;
+  stopState?: StopState | undefined;
   disabledReason?: string | undefined;
 
   models: ModelInfo[] | undefined;
@@ -84,61 +209,47 @@ export interface ComposerProps {
   onPermissionModeChange: (mode: string) => void;
 
   contextTokens: number | null;
+  /** The full snapshot, for the gauge breakdown sheet. */
+  contextUsage?: ContextUsageSnapshot | null | undefined;
   codebaseCount: number;
 
-  /** Paths offered for @-mentions. Empty when there is no workspace yet. */
-  mentionPaths: readonly string[];
-  /** Opens a Workbench section — how slash commands resolve on mobile. */
-  onOpenSection: (section: string) => void;
+  /** Which agent drives this chat, when one is bound. */
+  boundAgent?: BoundAgentProps | null | undefined;
+  /** Mount readiness from the chat DTO. Hidden when ready. */
+  workspacePrep?: WorkspacePrepProps | null | undefined;
+  /** A pending interaction blocks sends; offers "Cancel and send". */
+  gate?: Omit<GateBannerProps, 'hasDraft'> | null | undefined;
+  /** Where "Request access" goes. Defaults to the scope-request route. */
+  onRequestScope?: (() => void) | undefined;
 
-  voiceAvailable: boolean;
+  // ── v1 compatibility ──────────────────────────────────────────
+  /** v1: paths for @-mentions when no `suggestions` are supplied. */
+  mentionPaths?: readonly string[] | undefined;
+  /** v1: opens a Workbench section for a slash command. */
+  onOpenSection?: ((section: string) => void) | undefined;
+  /** v1: single mic toggle. Ignored when `voiceState` is supplied. */
   onVoice?: (() => void) | undefined;
-  /** Listening right now — the button becomes a stop control. */
   voiceActive?: boolean | undefined;
-  /** Transcribing — disabled with a spinner. */
   voiceBusy?: boolean | undefined;
-  /**
-   * Live, not-yet-committed dictation text (Part C.2). Rendered as a
-   * separate dimmed line, deliberately NOT merged into `draft`: nothing
-   * uncommitted is ever put in the editable buffer, which is what removes
-   * the whole class of "manual edit collides with in-flight speech" bugs.
-   */
-  voiceInterim?: string | undefined;
-  /**
-   * Fired on any manual interaction with the field while dictation is live
-   * — typing or moving the caret (Part C.3). The act of editing IS the
-   * pause signal; the user never has to press anything to say "wait".
-   */
-  onComposerInteraction?: (() => void) | undefined;
-  /**
-   * Caret position, lifted so the screen can insert dictated segments at it
-   * (Part C.2, insert-at-caret). Uncontrolled if omitted.
-   */
-  caret?: number | undefined;
-  onCaretChange?: ((caret: number) => void) | undefined;
-  /**
-   * One-shot selection to apply after a programmatic insertion, then clear.
-   * Held only for a single render: leaving `selection` permanently
-   * controlled fights the user's own typing on Android.
-   */
-  pendingSelection?: number | null | undefined;
-  onPendingSelectionApplied?: (() => void) | undefined;
-  attachAvailable: boolean;
+  /** v1: single attach handler. Ignored when `onAttachFrom` is supplied. */
   onAttach?: (() => void) | undefined;
-  /** Shown when the attach button is unavailable, instead of a dead control. */
-  attachDisabledReason?: string | undefined;
-
-  attachments: Array<{ id: string; name: string }>;
-  onRemoveAttachment: (id: string) => void;
 }
+
+export type ComposerProps = ComposerControlledProps & ComposerTurnProps;
+
+/** Line height of the field (text-md, leading-relaxed) at font scale 1. */
+const LINE_HEIGHT = 24;
+const MAX_LINES = 6;
 
 export function Composer(props: ComposerProps): React.ReactElement {
   const { colors } = useTheme();
-  const [sheet, setSheet] = useState<'none' | 'model' | 'options'>('none');
+  const router = useRouter();
+  const fontScale = useFontScale();
+  const [sheet, setSheet] = useState<'none' | 'model' | 'options' | 'gauge' | 'mode' | 'attach'>('none');
   const [internalCaret, setInternalCaret] = useState(0);
   const [focused, setFocused] = useState(false);
-  // Controlled when the screen supplies one (it needs the caret to insert
-  // dictated text there); self-managed otherwise.
+  const inputRef = useRef<TextInput | null>(null);
+
   const caret = props.caret ?? internalCaret;
   const { onCaretChange } = props;
   const setCaret = useCallback(
@@ -160,59 +271,68 @@ export function Composer(props: ComposerProps): React.ReactElement {
     disabledReason,
     models,
     selectedModelId,
-    mentionPaths,
-    onOpenSection,
     attachments,
     onRemoveAttachment,
   } = props;
 
   const model = findModel(models, selectedModelId);
   const limit = promptLimit(model);
-  const ratio = limit && props.contextTokens ? props.contextTokens / limit : 0;
+  const currentTokens = props.contextUsage?.currentTokens ?? props.contextTokens;
+  const ratio = limit && currentTokens ? currentTokens / limit : 0;
 
-  const menu = useMemo<MenuState | null>(() => detectMenu(draft, caret), [draft, caret]);
-
-  const suggestions = useMemo(() => {
-    if (!menu) return [];
-    if (menu.kind === 'slash') {
-      return filterCommands(menu.query).map((c) => ({
-        key: c.id,
+  // ── Suggestions: controller-supplied, else the v1 menu ─────────
+  const v1Menu = useMemo(
+    () => (props.suggestions === undefined ? detectMenu(draft, caret) : null),
+    [props.suggestions, draft, caret],
+  );
+  const v1Items = useMemo<SlashItem[]>(() => {
+    if (!v1Menu) return [];
+    if (v1Menu.kind === 'slash') {
+      return filterCommands(v1Menu.query).map((c) => ({
+        id: c.id,
+        name: c.id,
         label: c.label,
-        hint: c.description,
+        description: c.description,
+        kind: 'navigate' as const,
+        source: 'builtin' as const,
+        pane: c.section as ComposerPane | undefined,
       }));
     }
-    return filterPaths(mentionPaths, menu.query).map((p) => ({
-      key: p,
+    return filterPaths(props.mentionPaths ?? [], v1Menu.query).map((p) => ({
+      id: p,
+      name: p.slice(p.lastIndexOf('/') + 1),
       label: p.slice(p.lastIndexOf('/') + 1),
-      hint: p,
+      description: p,
+      kind: 'file' as const,
+      source: 'workspace' as const,
+      path: p,
     }));
-  }, [menu, mentionPaths]);
+  }, [v1Menu, props.mentionPaths]);
 
-  const applySuggestion = useCallback(
-    (key: string) => {
-      if (!menu) return;
+  const selectV1 = useCallback(
+    (item: SlashItem) => {
+      if (!v1Menu) return;
       haptics.select();
-
-      if (menu.kind === 'slash') {
-        // A slash command is an app action, not text: it opens a Workbench
-        // section and removes itself from the draft rather than being sent to
-        // the model, which would only see a word it does not understand.
-        const command = SLASH_COMMANDS.find((c) => c.id === key);
-        onDraftChange(draft.slice(menu.end).trimStart());
+      if (v1Menu.kind === 'slash') {
+        const command = SLASH_COMMANDS.find((c) => c.id === item.id);
+        onDraftChange(draft.slice(v1Menu.end).trimStart());
         setCaret(0);
-        if (command?.section) onOpenSection(command.section);
+        if (command?.section) {
+          if (props.onOpenPane) props.onOpenPane(command.section as ComposerPane);
+          else props.onOpenSection?.(command.section);
+        }
         return;
       }
-
-      // A mention inserts the repo-relative path as plain text. Mobile cannot
-      // upload file CONTENT (that needs multipart plus `write:files`), but the
-      // agent can read any path it is handed, so the path is the useful part.
-      const next = applyMenuSelection(draft, menu, `${key} `);
+      const next = applyMenuSelection(draft, v1Menu, `${item.path ?? item.label} `);
       onDraftChange(next.text);
       setCaret(next.caret);
     },
-    [menu, draft, onDraftChange, onOpenSection],
+    [v1Menu, draft, onDraftChange, setCaret, props],
   );
+
+  const suggestions = props.suggestions ?? v1Items;
+  const onSelectSuggestion = props.onSelectSuggestion ?? selectV1;
+  const menuOpen = props.suggestions !== undefined ? suggestions.length > 0 || Boolean(props.suggestionsLoading) : v1Menu !== null;
 
   // Release the one-shot selection on the render after it was applied, so
   // the field goes back to being uncontrolled for selection.
@@ -221,7 +341,124 @@ export function Composer(props: ComposerProps): React.ReactElement {
     if (pendingSelection != null) onPendingSelectionApplied?.();
   }, [pendingSelection, onPendingSelectionApplied]);
 
-  const canSend = draft.trim().length > 0 && !disabled;
+  // ── Voice ──────────────────────────────────────────────────────
+  const voiceV2 = props.voiceState !== undefined;
+  const voiceLive =
+    voiceV2 && props.voiceState !== 'idle' && props.voiceWaveform !== undefined;
+
+  // ── Gate: the field stays editable so "Cancel and send" has something to send.
+  const hasGate = Boolean(props.gate);
+  const fieldEditable = !disabled || hasGate;
+  const hasContent = draft.trim().length > 0 || attachments.length > 0 || Boolean(props.activeCommand);
+  const canSend = hasContent && !disabled && !props.sending;
+
+  // ── Swipe up on the field → history ───────────────────────────
+  const touchStart = useRef<{ x: number; y: number; t: number } | null>(null);
+  const onFieldTouchStart = useCallback((e: GestureResponderEvent) => {
+    touchStart.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY, t: Date.now() };
+  }, []);
+  const onFieldTouchEnd = useCallback(
+    (e: GestureResponderEvent) => {
+      const start = touchStart.current;
+      touchStart.current = null;
+      if (!start || !props.onOpenHistory) return;
+      const dx = Math.abs(e.nativeEvent.pageX - start.x);
+      const dy = start.y - e.nativeEvent.pageY;
+      if (dy >= 48 && dx < 32 && Date.now() - start.t < 600) {
+        haptics.tap();
+        props.onOpenHistory();
+      }
+    },
+    [props],
+  );
+
+  const onKeyPress = useCallback(
+    (e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
+      const key = e.nativeEvent.key;
+      if (key === 'ArrowUp') props.onHistoryStep?.(-1);
+      else if (key === 'ArrowDown') props.onHistoryStep?.(1);
+    },
+    [props],
+  );
+
+  // ── Attach menu ────────────────────────────────────────────────
+  const requestScope = useCallback(() => {
+    if (props.onRequestScope) props.onRequestScope();
+    else router.push(SCOPE_REQUEST_ROUTE);
+  }, [props, router]);
+
+  const onAttachPress = useCallback(() => {
+    if (!props.attachAvailable) {
+      const reason =
+        props.attachDisabledReason ?? 'This device was not granted permission to upload files.';
+      Alert.alert(
+        'Attachments are off for this device',
+        reason,
+        props.attachGrantable === false
+          ? [{ text: 'OK' }]
+          : [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Request access', onPress: requestScope },
+            ],
+      );
+      return;
+    }
+    if (!props.onAttachFrom && props.onAttach) {
+      props.onAttach();
+      return;
+    }
+    setSheet('attach');
+  }, [props, requestScope]);
+
+  const attachActions = useMemo<MenuAction[]>(() => {
+    const pick = (source: AttachmentSource) => () => {
+      setSheet('none');
+      props.onAttachFrom?.(source);
+    };
+    const muted = colors['muted-foreground'];
+    const scopes = props.captureScopes ?? { browser: false, terminal: false };
+    const items: MenuAction[] = [
+      { label: 'Photo library', icon: <ImageIcon size={18} color={colors.foreground} />, onPress: pick('photo') },
+      { label: 'Camera', icon: <Camera size={18} color={colors.foreground} />, onPress: pick('camera') },
+      { label: 'Files', icon: <FolderOpen size={18} color={colors.foreground} />, onPress: pick('file') },
+      { label: 'Paste image', icon: <ClipboardPaste size={18} color={colors.foreground} />, onPress: pick('clipboard') },
+      {
+        label: 'Browser capture',
+        icon: <Globe size={18} color={muted} />,
+        disabled: true,
+        detail: scopes.browser
+          ? 'Capture from the Browser pane; it lands here as a chip.'
+          : 'Needs browser access, which this device was not granted.',
+        onPress: () => {},
+      },
+      {
+        label: 'Terminal capture',
+        icon: <Terminal size={18} color={muted} />,
+        disabled: true,
+        detail: scopes.terminal
+          ? 'Select output in the Terminal pane and attach it.'
+          : 'Needs terminal access, which this device was not granted.',
+        onPress: () => {},
+      },
+    ];
+    if (props.onOpenHistory) {
+      items.push({
+        label: 'Recent prompts',
+        icon: <History size={18} color={colors.foreground} />,
+        onPress: () => {
+          setSheet('none');
+          props.onOpenHistory?.();
+        },
+      });
+    }
+    return items;
+  }, [props, colors]);
+
+  const maxFieldHeight = Math.round(LINE_HEIGHT * MAX_LINES * Math.min(fontScale, MAX_SCALE.chrome) + 8);
+
+  const placeholder = disabled && !hasGate
+    ? 'Waiting…'
+    : props.activeCommand?.argHint ?? 'Ask anything · / actions · @ files';
 
   return (
     <View className="border-t border-border bg-background">
@@ -231,61 +468,38 @@ export function Composer(props: ComposerProps): React.ReactElement {
         </Animated.View>
       ) : null}
 
-      {attachments.length > 0 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingTop: 10 }}
-        >
-          {attachments.map((file) => (
-            <View
-              key={file.id}
-              className="h-8 flex-row items-center gap-1.5 rounded-full bg-subtle pl-2.5 pr-1"
-            >
-              <Paperclip size={12} color={colors['muted-foreground']} />
-              <Text numberOfLines={1} className="max-w-40 text-xs text-muted-foreground">
-                {file.name}
-              </Text>
-              <Touchable
-                accessibilityLabel={`Remove ${file.name}`}
-                haptic="select"
-                onPress={() => onRemoveAttachment(file.id)}
-                className="h-6 w-6 items-center justify-center rounded-full"
-              >
-                <X size={12} color={colors['muted-foreground']} />
-              </Touchable>
-            </View>
-          ))}
-        </ScrollView>
-      ) : null}
+      {props.boundAgent ? <BoundAgentChip agent={props.boundAgent} /> : null}
+      {props.workspacePrep ? <WorkspacePrepBar prep={props.workspacePrep} /> : null}
+      {props.gate ? <GateBanner gate={{ ...props.gate, hasDraft: hasContent }} /> : null}
 
-      {menu && suggestions.length > 0 ? (
-        <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(120)}>
-          <ScrollView
-            horizontal
-            keyboardShouldPersistTaps="always"
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingTop: 10 }}
-          >
-            {suggestions.map((s) => (
-              <Touchable
-                key={s.key}
-                accessibilityLabel={s.hint}
-                haptic="none"
-                onPress={() => applySuggestion(s.key)}
-                className="h-9 justify-center rounded-2xl border border-border bg-raised px-3"
-              >
-                <Text className="text-sm font-medium text-foreground">{s.label}</Text>
-              </Touchable>
-            ))}
-          </ScrollView>
-        </Animated.View>
+      <AttachmentChips items={attachments} onRemove={onRemoveAttachment} />
+
+      {menuOpen ? (
+        <SuggestionStrip
+          items={suggestions}
+          loading={Boolean(props.suggestionsLoading)}
+          onSelect={onSelectSuggestion}
+        />
       ) : null}
 
       <Animated.View
         layout={LinearTransition.duration(160)}
-        className={`m-3 rounded-3xl border bg-card ${focused ? 'border-primary' : 'border-border'}`}
+        className={`m-3 rounded-3xl border bg-card ${focused || voiceLive ? 'border-primary' : 'border-border'}`}
       >
+        {props.activeCommand ? (
+          <View className="flex-row px-3 pt-2.5">
+            <Chip
+              accessibilityLabel={`Command ${props.activeCommand.label}`}
+              label={props.activeCommand.label}
+              icon={<Wand2 size={13} color={colors.primary} />}
+              tone="accent"
+              size="sm"
+              onRemove={props.activeCommand.onRemove}
+              removeLabel={`Remove ${props.activeCommand.label} command`}
+            />
+          </View>
+        ) : null}
+
         {props.voiceInterim ? (
           <View className="px-3 pt-2.5">
             <Text
@@ -297,58 +511,66 @@ export function Composer(props: ComposerProps): React.ReactElement {
           </View>
         ) : null}
 
-        <View className="flex-row items-end gap-1 px-3 pt-2.5">
-          <TextInput
-            accessibilityLabel="Message"
-            multiline
-            editable={!disabled}
-            value={draft}
-            onChangeText={(text) => {
-              props.onComposerInteraction?.();
-              onDraftChange(text);
-            }}
-            onSelectionChange={(e) => {
-              const next = e.nativeEvent.selection.start;
-              // A programmatic insertion moves the caret too and would
-              // otherwise look like the user reaching in and editing.
-              if (props.pendingSelection == null) props.onComposerInteraction?.();
-              setCaret(next);
-            }}
-            {...(props.pendingSelection != null
-              ? { selection: { start: props.pendingSelection, end: props.pendingSelection } }
-              : {})}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            placeholder={disabled ? 'Waiting…' : 'Ask anything · / actions · @ files'}
-            placeholderTextColor={colors['muted-foreground']}
-            // Capped so a long paste cannot push the controls off screen; the
-            // field scrolls internally past this height.
-            className="max-h-40 min-h-9 flex-1 py-1 text-md leading-relaxed text-foreground"
+        {voiceLive ? (
+          <VoicePill
+            state={props.voiceState!}
+            waveform={props.voiceWaveform!}
+            startedAt={props.voiceStartedAt ?? null}
+            error={props.voiceError}
+            onPause={props.onVoicePause ?? (() => {})}
+            onResume={props.onVoiceResume ?? (() => {})}
+            onCancel={props.onVoiceCancel ?? (() => {})}
+            onAccept={props.onVoiceAccept ?? (() => {})}
           />
-          {props.voiceAvailable && props.onVoice && (draft.length === 0 || props.voiceActive) ? (
-            <IconButton
-              accessibilityLabel={props.voiceActive ? 'Stop recording' : 'Dictate a message'}
-              accessibilityHint={
-                props.voiceActive
-                  ? 'Transcribes what you said and adds it to the message'
-                  : 'Records audio and transcribes it on your own server'
-              }
-              selected={Boolean(props.voiceActive)}
-              disabled={Boolean(props.voiceBusy)}
-              variant={props.voiceActive ? 'danger' : 'ghost'}
-              icon={
-                props.voiceBusy ? (
-                  <Spinner />
-                ) : props.voiceActive ? (
-                  <Square size={16} color={colors['destructive-foreground']} />
-                ) : (
-                  <Mic size={18} color={colors['muted-foreground']} />
-                )
-              }
-              onPress={props.onVoice}
+        ) : (
+          <View
+            className="flex-row items-end gap-1 px-3 pt-2.5"
+            onTouchStart={onFieldTouchStart}
+            onTouchEnd={onFieldTouchEnd}
+          >
+            <TextInput
+              ref={inputRef}
+              accessibilityLabel="Message"
+              accessibilityHint={props.onOpenHistory ? 'Swipe up for recent prompts' : undefined}
+              multiline
+              editable={fieldEditable}
+              value={draft}
+              onChangeText={(text) => {
+                props.onComposerInteraction?.();
+                onDraftChange(text);
+              }}
+              onSelectionChange={(e) => {
+                const next = e.nativeEvent.selection.start;
+                // A programmatic insertion moves the caret too and would
+                // otherwise look like the user reaching in and editing.
+                if (props.pendingSelection == null) props.onComposerInteraction?.();
+                setCaret(next);
+              }}
+              onKeyPress={onKeyPress}
+              {...(props.pendingSelection != null
+                ? { selection: { start: props.pendingSelection, end: props.pendingSelection } }
+                : {})}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder={placeholder}
+              placeholderTextColor={colors['muted-foreground']}
+              // Six lines, then the field scrolls internally: a long paste
+              // must not push the controls off screen.
+              style={{ maxHeight: maxFieldHeight }}
+              className="min-h-9 flex-1 py-1 text-md leading-relaxed text-foreground"
             />
-          ) : null}
-        </View>
+            <MicButton
+              // v2 dictation inserts at the caret, so the mic stays offered
+              // with text in the field; v1 keeps its "empty field only" rule.
+              visible={props.voiceAvailable && (voiceV2 || draft.length === 0) && !props.activeCommand}
+              v2={voiceV2}
+              state={props.voiceState ?? (props.voiceActive ? 'listening' : props.voiceBusy ? 'transcribing' : 'idle')}
+              pushToTalk={Boolean(props.pushToTalk)}
+              onStart={voiceV2 ? props.onVoiceStart : props.onVoice}
+              onAccept={props.onVoiceAccept}
+            />
+          </View>
+        )}
 
         <View className="flex-row items-center gap-1.5 px-2 pb-2 pt-1">
           <IconButton
@@ -357,17 +579,15 @@ export function Composer(props: ComposerProps): React.ReactElement {
             // a broken one. When the scope is withheld the button explains
             // itself rather than ignoring the tap.
             accessibilityHint={props.attachDisabledReason}
-            icon={<Plus size={18} color={colors['muted-foreground']} />}
-            onPress={
-              props.attachAvailable
-                ? (props.onAttach ?? (() => {}))
-                : () =>
-                    Alert.alert(
-                      'Attachments are off for this device',
-                      props.attachDisabledReason ??
-                        'This device was not granted permission to upload files.',
-                    )
+            icon={
+              props.attachPending ? (
+                <Spinner />
+              ) : (
+                <Plus size={18} color={props.attachAvailable ? colors['muted-foreground'] : colors['muted-foreground']} />
+              )
             }
+            disabled={Boolean(props.attachPending)}
+            onPress={onAttachPress}
           />
 
           <ScrollView
@@ -392,33 +612,35 @@ export function Composer(props: ComposerProps): React.ReactElement {
               // the options chip out of the strip on a 393pt screen.
               maxWidth={120}
             />
-            {/* Agent mode also lives in the options sheet, so the chip earns
-                its space only while the mode differs from the default —
-                otherwise it pushes "Options" off-screen to say "Auto", and a
-                control nobody can see is a control nobody uses. */}
-            {props.mode === 'plan' ? (
-              <Chip
-                accessibilityLabel="Agent mode"
-                label="Plan first"
-                icon={<Wand2 size={13} color={colors.primary} />}
-                active
-                onPress={() => props.onModeChange('auto')}
-              />
-            ) : null}
+            <Chip
+              accessibilityLabel={`Agent mode: ${modeLabel(props.mode)}`}
+              label={modeLabel(props.mode)}
+              icon={<Wand2 size={13} color={props.mode === 'plan' ? colors.primary : colors['muted-foreground']} />}
+              active={props.mode === 'plan'}
+              onPress={() => setSheet('mode')}
+              showChevron
+            />
             <Chip
               accessibilityLabel="Turn options"
-              label="Options"
+              label={optionsChipLabel({
+                effort: props.effort,
+                model,
+                permissionMode: props.permissionMode,
+                contextTier: props.contextTier,
+              })}
               icon={<SlidersHorizontal size={13} color={colors['muted-foreground']} />}
               onPress={() => setSheet('options')}
+              maxWidth={150}
             />
           </ScrollView>
 
           <View className="shrink-0 flex-row items-center gap-1.5">
-            {limit ? (
+            {limit || props.contextUsage ? (
               <Touchable
                 accessibilityLabel={`Context usage ${Math.round(ratio * 100)} percent`}
+                accessibilityHint="Shows where the context is going"
                 haptic="tap"
-                onPress={() => setSheet('options')}
+                onPress={() => setSheet('gauge')}
                 className="px-1"
               >
                 <ProgressRing ratio={ratio} />
@@ -428,7 +650,9 @@ export function Composer(props: ComposerProps): React.ReactElement {
             <SendButton
               streaming={isStreaming}
               enabled={canSend}
+              sending={Boolean(props.sending)}
               onSend={onSend}
+              onSendWithPlan={props.onSendWithPlan}
               onStop={onStop}
               {...(stopState ? { stopState } : {})}
             />
@@ -458,22 +682,116 @@ export function Composer(props: ComposerProps): React.ReactElement {
         contextTokens={props.contextTokens}
         codebaseCount={props.codebaseCount}
       />
+
+      <GaugeSheet
+        visible={sheet === 'gauge'}
+        onClose={() => setSheet('none')}
+        usage={props.contextUsage}
+        contextTokens={props.contextTokens}
+        limit={limit}
+        modelName={model?.name}
+      />
+
+      <ActionSheet
+        visible={sheet === 'mode'}
+        onClose={() => setSheet('none')}
+        title="Agent mode"
+        message="Applies to this chat's next turns. Long-press Send to plan just once."
+        actions={MODE_OPTIONS.map((option) => ({
+          label: option.value === props.mode ? `${option.title} ✓` : option.title,
+          icon: <Wand2 size={18} color={option.value === props.mode ? colors.primary : colors.foreground} />,
+          detail: option.help,
+          onPress: () => {
+            setSheet('none');
+            if (option.value !== props.mode) props.onModeChange(option.value);
+          },
+        }))}
+      />
+
+      <ActionSheet
+        visible={sheet === 'attach'}
+        onClose={() => setSheet('none')}
+        title="Attach"
+        actions={attachActions}
+      />
+
+      {props.historyEntries ? (
+        <HistorySheet
+          visible={Boolean(props.historyVisible)}
+          onClose={props.onCloseHistory ?? (() => {})}
+          entries={props.historyEntries}
+          onPick={props.onPickHistory ?? (() => {})}
+        />
+      ) : null}
     </View>
+  );
+}
+
+function MicButton({
+  visible,
+  v2,
+  state,
+  pushToTalk,
+  onStart,
+  onAccept,
+}: {
+  visible: boolean;
+  v2: boolean;
+  state: VoiceUiState;
+  pushToTalk: boolean;
+  onStart: (() => void) | undefined;
+  onAccept: (() => void) | undefined;
+}): React.ReactElement | null {
+  const { colors } = useTheme();
+  if (!visible || !onStart) return null;
+  const busy = state === 'transcribing';
+
+  if (v2 && pushToTalk) {
+    // Hold to talk: press-in starts, release accepts. A release before the
+    // server has answered `ready` (a tap shorter than the handshake) tears
+    // the session down with nothing to commit — the same as a cancel.
+    return (
+      <Touchable
+        accessibilityLabel="Hold to dictate"
+        accessibilityHint="Hold to record; release to add what you said"
+        haptic="tap"
+        disabled={busy}
+        onPressIn={onStart}
+        onPressOut={onAccept}
+        className="h-10 w-10 items-center justify-center rounded-full"
+      >
+        {busy ? <Spinner /> : <Mic size={18} color={colors['muted-foreground']} />}
+      </Touchable>
+    );
+  }
+
+  return (
+    <IconButton
+      accessibilityLabel={state === 'paused' ? 'Resume dictation' : 'Dictate a message'}
+      accessibilityHint="Records audio and transcribes it on your own server"
+      disabled={busy}
+      icon={busy ? <Spinner /> : <Mic size={18} color={colors['muted-foreground']} />}
+      onPress={onStart}
+    />
   );
 }
 
 function SendButton({
   streaming,
   enabled,
+  sending,
   onSend,
+  onSendWithPlan,
   onStop,
   stopState,
 }: {
   streaming: boolean;
   enabled: boolean;
+  sending: boolean;
   onSend: () => void;
+  onSendWithPlan?: (() => void) | undefined;
   onStop: () => void;
-  stopState?: { label: string; enabled: boolean; forceAvailable: boolean };
+  stopState?: StopState;
 }): React.ReactElement {
   const { colors } = useTheme();
   // W30-b — during the 400 ms arming window the control is genuinely
@@ -485,21 +803,33 @@ function SendButton({
 
   return (
     <Touchable
-      accessibilityLabel={streaming ? (stopState?.label ?? 'Stop') : 'Send'}
+      accessibilityLabel={streaming ? (stopState?.label ?? 'Stop') : sending ? 'Sending' : 'Send'}
+      accessibilityHint={!streaming && onSendWithPlan ? 'Long-press to send in plan mode' : undefined}
       disabled={!active}
       haptic="commit"
       onPress={streaming ? onStop : onSend}
+      onLongPress={
+        !streaming && onSendWithPlan
+          ? () => {
+              haptics.success();
+              onSendWithPlan();
+            }
+          : undefined
+      }
+      delayLongPress={350}
       className={`h-10 w-10 items-center justify-center rounded-full ${
         streaming ? 'bg-danger' : active ? 'bg-primary' : 'bg-emphasis'
       }`}
     >
-      <Animated.View key={streaming ? 'stop' : 'send'} entering={FadeIn.duration(120)}>
+      <Animated.View key={streaming ? 'stop' : sending ? 'sending' : 'send'} entering={FadeIn.duration(120)}>
         {streaming ? (
           <Square
             size={13}
             fill={colors['destructive-foreground']}
             color={colors['destructive-foreground']}
           />
+        ) : sending ? (
+          <Spinner />
         ) : (
           <ArrowUp
             size={18}

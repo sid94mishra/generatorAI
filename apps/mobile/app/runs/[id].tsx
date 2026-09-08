@@ -16,7 +16,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { FileDiff, Info, TerminalSquare } from 'lucide-react-native';
 import { queryKeys, type StageRunSummary } from '@generatorai/client-core';
 
@@ -38,6 +38,7 @@ import { EmptyState, ErrorState, Spinner } from '../../src/components/ui/States'
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { haptics } from '../../src/components/ui/haptics';
 import { useTheme } from '../../src/theme/ThemeProvider';
+import { useCardEntering } from '../../src/components/common/enterMotion';
 
 type Outcome = 'approved' | 'changes_requested' | 'rejected';
 
@@ -73,10 +74,14 @@ export default function RunDetailScreen(): React.ReactElement {
     },
   });
 
+  // D19 — the run's own status decides. A finished run has no interrupts to
+  // wait for, and this used to keep polling every 5 s for as long as the
+  // screen stayed mounted.
+  const runStatus = run.data?.status;
   const interrupts = useQuery({
     queryKey: queryKeys.runInterrupts(runId),
     queryFn: () => api.runs.pendingInterrupts(runId),
-    refetchInterval: 5_000,
+    refetchInterval: runStatus && isTerminal(runStatus) ? false : 5_000,
   });
 
   React.useLayoutEffect(() => {
@@ -284,9 +289,10 @@ function StageGate({
   busy: boolean;
   onDecide: (outcome: Outcome) => void;
 }): React.ReactElement {
+  const entering = useCardEntering();
   return (
     <Animated.View
-      entering={FadeInDown.springify().damping(18)}
+      entering={entering}
       className="gap-3 rounded-3xl border border-warning bg-warning-muted p-4"
     >
       <Text className="text-md font-semibold text-foreground">

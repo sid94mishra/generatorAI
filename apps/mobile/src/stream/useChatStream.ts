@@ -25,6 +25,12 @@
 // drains it on a ~16ms tick, so the store sees at most ~60 updates/second
 // regardless of token rate.
 //
+// The tick is DEMAND-DRIVEN (plan §7.2, D14 companion): it starts when an
+// event leaves something to flush and stops the first time a tick finds the
+// router and the effect queue empty. An idle chat screen — which is most of
+// the time a chat is open — used to wake the JS thread 60 times a second to
+// drain nothing.
+//
 // Ordered events (tool calls, turn boundaries, errors) bypass the buffer:
 // the router flushes pending text before them, so coalescing never reorders
 // the transcript.
@@ -42,6 +48,7 @@ import { MOBILE_CAPABILITIES } from '@generatorai/shared';
 
 import { useStreamStore } from './streamStore';
 import { useMuxStream } from './MuxStreamProvider';
+import { connectionFromDisconnect, useStreamHealth } from './streamHealth';
 
 const FLUSH_INTERVAL_MS = 16;
 
@@ -60,6 +67,21 @@ export type SseStatus =
 
 export interface UseChatStreamOptions {
   chatId: string;
+  /**
+   * The chat's session id — the key the stream store is indexed by (web keys
+   * `streams[chat.sessionId]`, and the screen reads the same key). Until the
+   * chat query has loaded it, `chatId` stands in; the effect re-subscribes
+   * once with the real key.
+   *
+   * This is deliberately NOT derived from the event payload: mux frames carry
+   * no session id of their own, and only a handful of payloads (`session.*`,
+   * hooks, stage events) include one. Keying by `data.sessionId ?? chatId`
+   * put every `harness.token` and `chat.permission.requested` under `chatId`
+   * while the screen read `chat.sessionId` — so no live text or gate card
+   * ever rendered on the phone and content only appeared on history refetch
+   * (found in the Sept 7 2026 live run).
+   */
+  sessionId?: string | null | undefined;
   /** Skip connecting (e.g. the screen is not focused). */
   enabled?: boolean;
   onStatusChange?(status: SseStatus): void;
@@ -67,9 +89,11 @@ export interface UseChatStreamOptions {
 
 export function useChatStream({
   chatId,
+  sessionId,
   enabled = true,
   onStatusChange,
 }: UseChatStreamOptions): void {
+  const streamKey = sessionId ?? chatId;
   const queryClient = useQueryClient();
   const stream = useMuxStream();
   const applyEffects = useStreamStore((s) => s.applyEffects);
@@ -92,6 +116,10 @@ export function useChatStream({
 
     const router = routerRef.current;
     router.reset();
+    // The per-screen `SseStatus` stays for the chat header's chip; the same
+    // transitions are mirrored into the app-wide store so `ConnectionStrip`
+    // agrees with it. Both hooks ride one socket, so they cannot diverge.
+    const health = useStreamHealth.getState();
 
     /**
      * Apply buffered effects.
@@ -99,7 +127,7 @@ export function useChatStream({
      * Query invalidations are de-duplicated per tick: a burst of ten
      * `message_complete` events must produce ONE refetch, not ten.
      */
-    const flush = (final = false): void => {
+    const flush = (final = false): boolean => {
       // W30-d — the frame tick releases only completed blocks; teardown must
       // release everything, or the sentence the user was reading is lost when
       // they navigate away mid-block.
@@ -110,6 +138,7 @@ export function useChatStream({
       if (effects.length > 0) applyEffects(effects);
 
       const resources = invalidateRef.current;
+      let didWork = effects.length > 0 || resources.size > 0;
       if (resources.size > 0) {
         for (const [resource, id] of resources) {
           switch (resource) {
@@ -142,37 +171,58 @@ export function useChatStream({
         }
         resources.clear();
       }
+      // Text the router is still holding back to a block boundary (W30-d)
+      // counts as pending: a later tick may be the one that releases it.
+      if (router.hasPending) didWork = true;
+      return didWork;
     };
 
-    const timer = setInterval(flush, FLUSH_INTERVAL_MS);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const stopTimer = (): void => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    const tick = (): void => {
+      if (!flush()) stopTimer();
+    };
+    /** Called per event; a no-op while the timer is already running. */
+    const ensureTimer = (): void => {
+      if (timer === null) timer = setInterval(tick, FLUSH_INTERVAL_MS);
+    };
 
     const unsubscribe = stream.subscribe(
       'chat',
       chatId,
       (event: MuxStreamEvent) => {
-        // The frame carries no sessionId of its own; the payload does when
-        // the event belongs to a session, and the chat id is the fallback the
-        // router keys transcripts by.
-        const sessionId =
-          typeof event.data['sessionId'] === 'string' ? event.data['sessionId'] : chatId;
-        for (const effect of router.handle(sessionId, { kind: event.kind, data: event.data })) {
+        // One key for every event on this subscription — see `sessionId` above.
+        for (const effect of router.handle(streamKey, { kind: event.kind, data: event.data })) {
           if (effect.op === 'invalidate') {
             invalidateRef.current.set(effect.resource, effect.id);
           } else {
             pendingRef.current.push(effect);
           }
         }
+        ensureTimer();
       },
       {
-        onConnected: () => onStatusChange?.({ state: 'open' }),
-        onReconnecting: (attempt) =>
-          onStatusChange?.({ state: 'reconnecting', attempt, delayMs: 0 }),
+        onConnected: () => {
+          health.setConnection('connected');
+          onStatusChange?.({ state: 'open' });
+        },
+        onReconnecting: (attempt) => {
+          health.setConnection('reconnecting', attempt);
+          onStatusChange?.({ state: 'reconnecting', attempt, delayMs: 0 });
+        },
         onDisconnected: (reason) => {
           // A `gap:` reason means this scope's cursor could not be honoured,
           // so the transcript needs a fresh snapshot rather than a resume.
           if (reason?.startsWith('gap:')) {
             void queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
           }
+          const next = connectionFromDisconnect(reason);
+          if (next) health.setConnection(next);
           onStatusChange?.({ state: 'closed', reason: reason ?? 'disconnected' });
         },
       },
@@ -182,11 +232,11 @@ export function useChatStream({
 
     return () => {
       unsubscribe();
-      clearInterval(timer);
+      stopTimer();
       // Final flush so text buffered in the last partial tick is not lost
       // when the user navigates away mid-sentence.
       flush(true);
       router.reset();
     };
-  }, [chatId, enabled, stream, queryClient, applyEffects, onStatusChange]);
+  }, [chatId, streamKey, enabled, stream, queryClient, applyEffects, onStatusChange]);
 }

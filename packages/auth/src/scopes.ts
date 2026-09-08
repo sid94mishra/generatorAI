@@ -14,6 +14,14 @@ export const SCOPES = [
   'read:workflows',
   'read:files',
   'read:reviews',
+  // Subscribe to the global lifecycle feed (entity created/state changed/
+  // deleted) without seeing transcripts. Never carries `harness.*` or content
+  // events for non-admin holders — `routes/stream.ts` restricts a `global`
+  // subscription held under this scope to `LIFECYCLE_EVENT_KINDS` server-side,
+  // regardless of the client's own filter. Exists so a paired phone or browser
+  // can keep its chat/run/automation LISTS live without `admin:settings`, which
+  // is what `global` used to demand and which no default grant carries.
+  'read:activity',
   'write:projects',
   'write:workspaces',
   'write:chats',
@@ -65,6 +73,7 @@ export const DEFAULT_DEVICE_SCOPES: readonly Scope[] = [
   'read:workflows',
   'read:files',
   'read:reviews',
+  'read:activity',
   'write:chats',
   'write:workflows',
   'write:reviews',
@@ -85,10 +94,28 @@ export const DEFAULT_MOBILE_SCOPES: readonly Scope[] = [
   'read:workflows',
   'read:files',
   'read:reviews',
+  'read:activity',
   'write:chats',
   'write:reviews',
   'stream:events',
   'exec:agent',
+];
+
+/**
+ * Standalone preset for a phone the user physically holds and uses as a FULL
+ * client (plan MOBILE_STANDALONE_CLIENT_PLAN §5.1): the companion grant plus
+ * workspace/file/workflow/project authoring and terminal + browser control.
+ * `exec:computer` and every `admin:*` scope stay per-device opt-in — they
+ * are granted from a trusted device, never selected at pairing time.
+ */
+export const STANDALONE_MOBILE_SCOPES: readonly Scope[] = [
+  ...DEFAULT_MOBILE_SCOPES,
+  'write:workspaces',
+  'write:files',
+  'write:workflows',
+  'write:projects',
+  'exec:terminal',
+  'exec:browser',
 ];
 
 /** Default grant for a CLI device — adds terminal/workspace authority. */

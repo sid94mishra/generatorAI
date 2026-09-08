@@ -140,6 +140,18 @@ interface SecurityPosture {
   warnings: { code: string; severity: 'warn' | 'critical'; message: string }[];
 }
 
+/** `GET /api/auth/scope-requests?status=pending` row (routes/scopeRequests.ts). */
+interface ScopeRequestSummary {
+  requestId: string;
+  deviceId: string;
+  deviceName: string | null;
+  platform: string | null;
+  scopes: string[];
+  reason: string | null;
+  status: 'pending' | 'approved' | 'denied' | 'cancelled';
+  createdAt: number;
+}
+
 const PLATFORM_ICON: Record<string, React.ElementType> = {
   web: Globe,
   desktop: Monitor,
@@ -160,7 +172,7 @@ const SCOPE_PRESETS: Record<string, { label: string; hint: string; scopes: strin
     hint: 'Can view projects, chats, workflows and diffs. Cannot run anything.',
     scopes: [
       'read:status', 'read:projects', 'read:workspaces', 'read:chats',
-      'read:workflows', 'read:files', 'read:reviews', 'stream:events',
+      'read:workflows', 'read:files', 'read:reviews', 'read:activity', 'stream:events',
     ],
   },
   companion: {
@@ -168,8 +180,19 @@ const SCOPE_PRESETS: Record<string, { label: string; hint: string; scopes: strin
     hint: 'Read, chat, approve and review. No terminal, browser or admin access.',
     scopes: [
       'read:status', 'read:projects', 'read:workspaces', 'read:chats',
-      'read:workflows', 'read:files', 'read:reviews', 'write:chats',
+      'read:workflows', 'read:files', 'read:reviews', 'read:activity', 'write:chats',
       'write:reviews', 'stream:events', 'exec:agent',
+    ],
+  },
+  // Mirrors STANDALONE_MOBILE_SCOPES in packages/auth/src/scopes.ts.
+  standalone: {
+    label: 'Mobile standalone',
+    hint: 'Full client on a phone you hold: workspaces, files, workflows, terminal and browser control; no admin.',
+    scopes: [
+      'read:status', 'read:projects', 'read:workspaces', 'read:chats',
+      'read:workflows', 'read:files', 'read:reviews', 'read:activity', 'write:chats',
+      'write:reviews', 'stream:events', 'exec:agent', 'write:workspaces', 'write:files',
+      'write:workflows', 'write:projects', 'exec:terminal', 'exec:browser',
     ],
   },
   workstation: {
@@ -177,7 +200,7 @@ const SCOPE_PRESETS: Record<string, { label: string; hint: string; scopes: strin
     hint: 'Everything except administration — including terminal and browser control.',
     scopes: [
       'read:status', 'read:projects', 'read:workspaces', 'read:chats',
-      'read:workflows', 'read:files', 'read:reviews', 'write:projects',
+      'read:workflows', 'read:files', 'read:reviews', 'read:activity', 'write:projects',
       'write:workspaces', 'write:chats', 'write:workflows', 'write:files',
       'write:reviews', 'stream:events', 'exec:agent', 'exec:terminal', 'exec:browser',
     ],
@@ -225,6 +248,14 @@ const GRANTABLE_CAPABILITIES: Array<{ scope: string; label: string; hint: string
     hint: 'Pair and revoke other devices from this one.',
   },
 ];
+
+/** Short label for a scope in the access-request card; raw id otherwise. */
+function scopeLabel(scope: string): string {
+  return GRANTABLE_CAPABILITIES.find((cap) => cap.scope === scope)?.label ?? scope;
+}
+
+/** Scopes whose grant is confirmed explicitly, matching `toggleCapability`. */
+const CONFIRMED_GRANTS = new Set(['exec:terminal', 'admin:devices']);
 
 function relativeTime(ts: number | null): string {
   if (!ts) return 'never';
@@ -305,6 +336,10 @@ export function SecuritySection() {
   const [posture, setPosture] = useState<SecurityPosture | null>(null);
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [pending, setPending] = useState<PendingPairing[]>([]);
+  const [scopeRequests, setScopeRequests] = useState<ScopeRequestSummary[]>([]);
+  /** Per request: the subset of scopes ticked for approval (prefilled: all). */
+  const [approveSelection, setApproveSelection] = useState<Record<string, string[]>>({});
+  const [requestBusy, setRequestBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [pairing, setPairing] = useState<PairingResponse | null>(null);
@@ -324,16 +359,25 @@ export function SecuritySection() {
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      const [p, d, q, n] = await Promise.all([
+      const [p, d, q, n, r] = await Promise.all([
         apiFetch<SecurityPosture>('/api/security/posture'),
         apiFetch<{ devices: DeviceSummary[] }>('/api/auth/devices?includeRevoked=true'),
         apiFetch<{ pending: PendingPairing[] }>('/api/auth/pair/pending'),
         apiFetch<NetworkAccess>('/api/security/network-access'),
+        apiFetch<{ requests: ScopeRequestSummary[] }>('/api/auth/scope-requests?status=pending'),
       ]);
       setPosture(p);
       setDevices(d.devices);
       setPending(q.pending);
       setNetwork(n);
+      setScopeRequests(r.requests);
+      // Prefill every request with all of its scopes ticked; keep an
+      // existing selection so a refetch does not undo the operator's edits.
+      setApproveSelection((prev) => {
+        const next: Record<string, string[]> = {};
+        for (const req of r.requests) next[req.requestId] = prev[req.requestId] ?? [...req.scopes];
+        return next;
+      });
     } catch (err) {
       // A device without `admin:devices` legitimately cannot list devices —
       // say so plainly instead of rendering an empty table that looks broken.
@@ -384,6 +428,90 @@ export function SecuritySection() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Access requests arrive from other devices, so this page cannot know
+  // about them without asking. It subscribes to nothing today; poll every
+  // 30 s while the tab is visible and once more when it becomes visible.
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    const t = setInterval(tick, 30_000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, [refresh]);
+
+  const toggleRequestScope = useCallback((requestId: string, scope: string) => {
+    setApproveSelection((prev) => {
+      const current = prev[requestId] ?? [];
+      const next = current.includes(scope)
+        ? current.filter((s) => s !== scope)
+        : [...current, scope];
+      return { ...prev, [requestId]: next };
+    });
+  }, []);
+
+  /**
+   * Approve the ticked subset. The server clamps the grant to this
+   * principal's own scopes and audits high-risk grants as critical, the same
+   * path as toggling a capability; a terminal or device-admin grant is
+   * confirmed here for the same reason it is there.
+   */
+  const approveRequest = useCallback(
+    async (req: ScopeRequestSummary) => {
+      const scopes = (approveSelection[req.requestId] ?? req.scopes).filter((s) => req.scopes.includes(s));
+      if (scopes.length === 0) return;
+      const sensitive = scopes.filter((s) => CONFIRMED_GRANTS.has(s));
+      if (sensitive.length > 0) {
+        const what = sensitive
+          .map((s) => (s === 'exec:terminal' ? 'run shell commands on this machine' : 'pair and revoke other devices'))
+          .join(' and ');
+        if (!(await confirmAction({
+          title: `Allow "${req.deviceName ?? 'this device'}" to ${what}?`,
+          description: 'This takes effect the next time that device refreshes its session.',
+          confirmLabel: 'Allow',
+        }))) {
+          return;
+        }
+      }
+      setRequestBusy(req.requestId);
+      setError(null);
+      try {
+        await apiFetch(`/api/auth/scope-requests/${encodeURIComponent(req.requestId)}/approve`, {
+          method: 'POST',
+          body: JSON.stringify(scopes.length === req.scopes.length ? {} : { scopes }),
+        });
+        void refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setRequestBusy(null);
+      }
+    },
+    [approveSelection, confirmAction, refresh],
+  );
+
+  const denyRequest = useCallback(
+    async (req: ScopeRequestSummary) => {
+      setRequestBusy(req.requestId);
+      setError(null);
+      try {
+        await apiFetch(`/api/auth/scope-requests/${encodeURIComponent(req.requestId)}/deny`, {
+          method: 'POST',
+          body: JSON.stringify({}),
+        });
+        void refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setRequestBusy(null);
+      }
+    },
+    [refresh],
+  );
 
   // A pairing code is short-lived; tick so the countdown stays honest and the
   // code disappears from the screen the moment it stops working.
@@ -1009,6 +1137,96 @@ export function SecuritySection() {
           </div>
         )}
       </SettingsCard>
+
+      {/* ── Access requests ───────────────────────────────────── */}
+      {scopeRequests.length > 0 && (
+        <SettingsCard
+          title={`Access requests (${scopeRequests.length})`}
+          description="A paired device asked for more than it holds. Untick anything you do not want to grant; the rest is refused."
+        >
+          <div className="space-y-2">
+            {scopeRequests.map((req) => {
+              const Icon = PLATFORM_ICON[req.platform ?? 'other'] ?? KeyRound;
+              const selected = approveSelection[req.requestId] ?? req.scopes;
+              const busy = requestBusy === req.requestId;
+              return (
+                <div
+                  key={req.requestId}
+                  className="flex items-start justify-between gap-3 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5"
+                >
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-subtle text-muted-foreground">
+                      <Icon className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium text-foreground">
+                          {req.deviceName ?? 'Unnamed device'}
+                        </span>
+                        {req.platform && <StatusPill tone="neutral" label={req.platform} />}
+                        <span className="text-xs text-muted-foreground">asked {relativeTime(req.createdAt)}</span>
+                      </div>
+                      {req.reason && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">“{req.reason}”</p>
+                      )}
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {req.scopes.map((scope) => {
+                          const on = selected.includes(scope);
+                          return (
+                            <label
+                              key={scope}
+                              className={cn(
+                                'flex cursor-pointer items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]',
+                                on
+                                  ? 'border-primary/40 bg-primary/10 text-primary'
+                                  : 'border-border text-muted-foreground line-through',
+                              )}
+                              title={scope}
+                            >
+                              <input
+                                type="checkbox"
+                                className="h-3 w-3 accent-primary"
+                                checked={on}
+                                disabled={busy}
+                                onChange={() => toggleRequestScope(req.requestId, scope)}
+                              />
+                              {scopeLabel(scope)}
+                              {(scope.startsWith('exec:') || scope.startsWith('admin:')) && (
+                                <AlertTriangle className="h-2.5 w-2.5 text-warning" />
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => void denyRequest(req)}
+                      className="hover:border-destructive/50 hover:bg-destructive/5 hover:text-destructive"
+                    >
+                      Deny
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={busy || selected.length === 0}
+                      onClick={() => void approveRequest(req)}
+                      leftIcon={busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    >
+                      Approve{selected.length < req.scopes.length ? ` ${selected.length}/${req.scopes.length}` : ''}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </SettingsCard>
+      )}
 
       {/* ── Devices ───────────────────────────────────────────── */}
       <SettingsCard

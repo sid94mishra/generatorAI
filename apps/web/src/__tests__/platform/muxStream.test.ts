@@ -10,7 +10,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { __setAllowUnauthenticatedForTests } from '@/platform/authRuntime.js';
-import { openMultiplexedStream, resetMuxStreamForTests } from '@/platform/muxStream.js';
+import {
+  openMultiplexedStream,
+  rejectedMuxScopes,
+  resetMuxRejections,
+  resetMuxStreamForTests,
+} from '@/platform/muxStream.js';
 
 __setAllowUnauthenticatedForTests(true);
 
@@ -336,5 +341,121 @@ describe('muxStream', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(live).toHaveLength(0);
+  });
+
+  /**
+   * The server refuses the WHOLE `POST /connections` for the first sub the
+   * principal may not read. Treating that as an outage retried the same
+   * payload into the same 403, so a browser whose grant lacked ONE scope
+   * (`global` needed `admin:settings`) got no live events for any scope.
+   */
+  describe('a 403 for one scope', () => {
+    /** A server that refuses `global` until `grant()` and accepts the rest. */
+    function scopedFetch(opts: { withSub?: boolean } = {}) {
+      let granted = false;
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        posts.push({ url, body });
+        const subs = (body['subs'] ?? body['add'] ?? []) as Array<{ scope: string }>;
+        if (!granted && subs.some((s) => s.scope === 'global')) {
+          return {
+            ok: false,
+            status: 403,
+            json: async () => ({
+              error: {
+                code: 'INSUFFICIENT_SCOPE',
+                message: 'Subscribing to a "global" stream requires the read:activity scope.',
+                requiredScopes: ['read:activity'],
+                ...(opts.withSub === false ? {} : { sub: { scope: 'global', id: 'all' } }),
+              },
+            }),
+          } as unknown as Response;
+        }
+        if (url.endsWith('/api/stream/connections')) {
+          return { ok: true, status: 201, json: async () => ({ connectionId: 'conn-1', ticket: 't' }) } as unknown as Response;
+        }
+        return { ok: true, status: 202, json: async () => ({ accepted: true }) } as unknown as Response;
+      }) as typeof globalThis.fetch;
+      return { grant: () => { granted = true; } };
+    }
+
+    it('drops the refused scope and connects the accepted one on the immediate second POST', async () => {
+      scopedFetch();
+      const chatErrors: unknown[] = [];
+      const globalErrors: unknown[] = [];
+      const rejected: string[] = [];
+      openMultiplexedStream('chat', 'A', { onError: (s) => chatErrors.push(s) });
+      openMultiplexedStream('global', 'all', {
+        onError: (s) => globalErrors.push(s),
+        onRejected: (r) => rejected.push(r),
+      });
+      await settle();
+
+      // Two POSTs back to back — no backoff timer in between (the retry
+      // delay starts at 2s; `settle` waits far less than that).
+      expect(connectionPosts()).toHaveLength(2);
+      expect(connectionPosts()[0]!.body['subs']).toEqual([
+        { scope: 'chat', id: 'A' },
+        { scope: 'global', id: 'all' },
+      ]);
+      expect(connectionPosts()[1]!.body['subs']).toEqual([{ scope: 'chat', id: 'A' }]);
+      expect(live).toHaveLength(1);
+
+      // Only the refused scope was told, and told why.
+      expect(chatErrors).toEqual([]);
+      expect(globalErrors).toEqual([null]);
+      expect(rejected).toEqual(['insufficient_scope:read:activity']);
+      expect(rejectedMuxScopes()).toEqual([
+        { scope: 'global', id: 'all', reason: 'insufficient_scope:read:activity' },
+      ]);
+    });
+
+    it('still identifies the scope from the message when the server sends no `sub`', async () => {
+      scopedFetch({ withSub: false });
+      openMultiplexedStream('chat', 'A', {});
+      openMultiplexedStream('global', 'all', {});
+      await settle();
+
+      expect(connectionPosts()).toHaveLength(2);
+      expect(connectionPosts()[1]!.body['subs']).toEqual([{ scope: 'chat', id: 'A' }]);
+    });
+
+    it('resetMuxRejections asks again once the grant has changed', async () => {
+      const { grant } = scopedFetch();
+      const opened: string[] = [];
+      openMultiplexedStream('chat', 'A', {});
+      openMultiplexedStream('global', 'all', { onOpen: () => opened.push('global') });
+      await settle();
+      live[0]!.control('hello', { connectionId: 'conn-1', active: ['chat:A'], resumed: {} });
+      expect(rejectedMuxScopes().map((r) => r.scope)).toEqual(['global']);
+
+      grant();
+      resetMuxRejections();
+      await vi.waitFor(() => expect(subPosts()).toHaveLength(1));
+
+      // Live connection, so it is a /subs mutation and the socket survives.
+      expect(subPosts()[0]!.body['add']).toEqual([{ scope: 'global', id: 'all' }]);
+      expect(live).toHaveLength(1);
+      expect(rejectedMuxScopes()).toEqual([]);
+
+      live[0]!.control('subs', { active: ['chat:A', 'global:all'], resumed: {}, rejected: [] });
+      expect(opened).toEqual(['global']);
+    });
+
+    it('handles a 403 on /subs without dropping the socket its siblings share', async () => {
+      scopedFetch();
+      openMultiplexedStream('chat', 'A', {});
+      await settle();
+      live[0]!.control('hello', { connectionId: 'conn-1', active: ['chat:A'], resumed: {} });
+
+      const rejected: string[] = [];
+      openMultiplexedStream('global', 'all', { onRejected: (r) => rejected.push(r) });
+      await vi.waitFor(() => expect(rejected).toEqual(['insufficient_scope:read:activity']));
+
+      expect(live).toHaveLength(1);
+      expect(live[0]!.closed).toBe(false);
+      expect(connectionPosts()).toHaveLength(1);
+    });
   });
 });

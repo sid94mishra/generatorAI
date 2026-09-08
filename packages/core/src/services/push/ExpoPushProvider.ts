@@ -27,6 +27,15 @@ const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 /** Expo rejects batches larger than this. */
 const MAX_BATCH = 100;
 
+/**
+ * Android channel per category. Approvals get their own high-importance
+ * channel (`approvals`, registered by the app with sound + vibration); the
+ * other categories keep a channel named after the category.
+ */
+function androidChannel(message: PushMessage): string {
+  return message.data.category === 'approval' ? 'approvals' : message.data.category;
+}
+
 interface ExpoTicket {
   status: 'ok' | 'error';
   id?: string;
@@ -61,10 +70,15 @@ export class ExpoPushProvider implements PushProviderClient {
       body: message.body,
       data: message.data,
       sound: 'default',
+      // Approvals are the notifications with buttons. `categoryId` names the
+      // UNNotificationCategory / action set the app registered at startup;
+      // `priority: high` is FCM's "wake the device now" — a gate that lands
+      // in the next batching window on a dozing phone has already lost.
+      ...(message.categoryId ? { categoryId: message.categoryId, priority: 'high' as const } : {}),
       // Groups related notifications into one stack on both platforms.
       ...(message.target.platform === 'ios'
         ? { threadId: message.threadId, interruptionLevel: message.interruption }
-        : { channelId: message.data.category }),
+        : { channelId: androidChannel(message) }),
       // Approvals expire: an hour-old gate has usually been handled at a
       // desk, and delivering it then is pure noise.
       ttl: message.interruption === 'timeSensitive' ? 3600 : 900,

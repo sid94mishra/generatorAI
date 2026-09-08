@@ -21,13 +21,30 @@ import {
 } from '@generatorai/client-core';
 
 import { useApi } from './useApi';
-import { rankOperations, type Operation } from './activityRanking';
+import {
+  hasPendingGate,
+  primaryGate,
+  rankOperations,
+  selectGateCandidates,
+  type GateInfo,
+  type Operation,
+} from './activityRanking';
 import { isActive, needsAttention } from '../components/runs/statusStyle';
 
 export {
   filterOperations,
   rankOperations,
+  selectGateCandidates,
+  hasPendingGate,
+  gateFromInteraction,
+  primaryGate,
+  groupApprovals,
+  needsYouCount,
+  GATE_PROBE_LIMIT,
   type ActivityFilter,
+  type ApprovalGroups,
+  type GateInfo,
+  type GateKind,
   type Operation,
   type OperationKind,
 } from './activityRanking';
@@ -61,27 +78,83 @@ export function useActivity() {
 
   const [health, chats, runs, automations] = results;
 
+  const runningChatIds = (health.data as HealthSnapshot | undefined)?.runningChatIds;
+  const chatRows = chats.data as ChatSummary[] | undefined;
+
+  /**
+   * D10 — chats parked on a gate (tool permission, question, plan review).
+   *
+   * Nothing list-level says so: `ChatSummary.status` is active/archived and
+   * the health snapshot only knows what is streaming. The pending-gate source
+   * is per chat (`api.chats.interactions`, which the server answers from
+   * `listPendingByChat`), so a bounded, ordered set of chats is probed. The
+   * query key is the one the chat screen invalidates on interaction events,
+   * so answering a gate anywhere clears the badge here without a poll.
+   */
+  const gateCandidates = useMemo(
+    () => selectGateCandidates(chatRows ?? [], runningChatIds ?? []),
+    [chatRows, runningChatIds],
+  );
+  const gates = useQueries({
+    queries: gateCandidates.map((chatId) => ({
+      queryKey: queryKeys.chatInteractions(chatId),
+      queryFn: () => api.chats.interactions(chatId),
+      refetchInterval: 15_000,
+      staleTime: 10_000,
+    })),
+  });
+  // A string rather than the `gates` array: `useQueries` hands back a new
+  // array every render, which would defeat the memo below.
+  const gatedKey = gateCandidates
+    .filter((_, index) => hasPendingGate(gates[index]?.data))
+    .join(',');
+
+  // The gate itself (kind, tool name, plan id) for the Home queue and the
+  // approvals sheet. Serialised for the same reason as `gatedKey`: a card's
+  // label must change exactly when its gate does, not on every poll.
+  const gateInfoKey = gateCandidates
+    .map((chatId, index) => {
+      const gate = primaryGate(gates[index]?.data);
+      return gate ? `${chatId}\t${JSON.stringify(gate)}` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+
   const operations = useMemo<Operation[]>(() => {
     const out: Operation[] = [];
-    const runningChats = new Set(
-      (health.data as HealthSnapshot | undefined)?.runningChatIds ?? [],
-    );
+    const runningChats = new Set(runningChatIds ?? []);
+    const gatedChats = new Set(gatedKey.split(',').filter(Boolean));
+    const gateByChat = new Map<string, GateInfo>();
+    for (const line of gateInfoKey.split('\n')) {
+      const tab = line.indexOf('\t');
+      if (tab <= 0) continue;
+      try {
+        gateByChat.set(line.slice(0, tab), JSON.parse(line.slice(tab + 1)) as GateInfo);
+      } catch {
+        // A malformed line only loses the card's label, never the card.
+      }
+    }
 
-    for (const chat of (chats.data as ChatSummary[] | undefined) ?? []) {
+    for (const chat of chatRows ?? []) {
       if (isArchived(chat)) continue;
+      const running = runningChats.has(chat.id);
+      const gated = gatedChats.has(chat.id);
       out.push({
         id: `chat:${chat.id}`,
         kind: 'chat',
         name: chat.name,
         // The chat entity has no live turn status; the health snapshot is the
-        // authoritative "is it streaming right now" signal.
-        status: runningChats.has(chat.id) ? 'running' : chat.status,
+        // authoritative "is it streaming right now" signal, and an open gate
+        // outranks it — `awaiting_input` is what the run surfaces already
+        // label "Needs you".
+        status: gated ? 'awaiting_input' : running ? 'running' : chat.status,
         // Normalised at the boundary: the wire value is an ISO string, and
         // every downstream comparison here is arithmetic.
         updatedAt: toEpochMs(chat.updatedAt) ?? 0,
         href: `/chats/${chat.id}`,
-        blocked: false,
-        running: runningChats.has(chat.id),
+        blocked: gated,
+        running,
+        ...(gated && gateByChat.has(chat.id) ? { gate: gateByChat.get(chat.id)! } : {}),
       });
     }
 
@@ -112,7 +185,7 @@ export function useActivity() {
     }
 
     return rankOperations(out);
-  }, [health.data, chats.data, runs.data, automations.data]);
+  }, [runningChatIds, chatRows, gatedKey, gateInfoKey, runs.data, automations.data]);
 
   return {
     operations,
@@ -129,6 +202,7 @@ export function useActivity() {
     isFetching: results.some((r) => r.isFetching),
     refetch: () => {
       for (const result of results) void result.refetch();
+      for (const gate of gates) void gate.refetch();
     },
   };
 }

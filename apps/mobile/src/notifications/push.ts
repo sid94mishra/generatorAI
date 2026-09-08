@@ -16,6 +16,7 @@ import { Platform } from 'react-native';
 
 import { prefs } from '../storage/prefs';
 import { readNotifyPrefs, shouldPresent } from './notificationFilter';
+import { APPROVAL_ACTIONS, APPROVAL_CATEGORY_ID, APPROVAL_CHANNEL_ID } from './notificationCategories';
 
 /**
  * Foreground presentation.
@@ -58,8 +59,25 @@ export interface PushRegistration {
 export async function ensureAndroidChannels(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
-  await Notifications.setNotificationChannelAsync('approval', {
+  // The channel the server targets for approvals (`channelId: 'approvals'`).
+  // Heads-up + sound + vibration: a tool-permission prompt is the one push
+  // that must be seen the moment it lands, because the agent is idle until
+  // it is answered.
+  await Notifications.setNotificationChannelAsync(APPROVAL_CHANNEL_ID, {
     name: 'Approvals',
+    description: 'Tool permissions, questions and plan reviews your agent is waiting on.',
+    importance: Notifications.AndroidImportance.MAX,
+    sound: 'default',
+    enableVibrate: true,
+    vibrationPattern: [0, 250, 250, 250],
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    bypassDnd: false,
+  });
+  // Legacy channel id (`approval`, singular) for servers that predate the
+  // `approvals` channel. Android keeps a channel forever once created, so
+  // this costs nothing and keeps old-server pushes audible.
+  await Notifications.setNotificationChannelAsync('approval', {
+    name: 'Approvals (legacy)',
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
@@ -77,6 +95,25 @@ export async function ensureAndroidChannels(): Promise<void> {
 }
 
 /**
+ * Register the `approval` category so the OS renders Allow / Deny buttons on
+ * every push the server tags with `categoryId: 'approval'`.
+ *
+ * Idempotent: re-registering replaces the category with identical actions.
+ * Both buttons keep the app in the background (`opensAppToForeground:
+ * false`); `usePushNotifications` posts the decision from the response
+ * listener. Web has no notification categories, so this is a no-op there.
+ */
+export async function ensureNotificationCategories(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  try {
+    await Notifications.setNotificationCategoryAsync(APPROVAL_CATEGORY_ID, [...APPROVAL_ACTIONS]);
+  } catch {
+    // Without the category the notification still arrives — it just has no
+    // buttons, and a tap opens the gate. Never let this block registration.
+  }
+}
+
+/**
  * Request permission and obtain a push token.
  *
  * Returns null when the user declines or the device cannot receive push —
@@ -85,6 +122,7 @@ export async function ensureAndroidChannels(): Promise<void> {
  */
 export async function requestPushToken(projectId: string): Promise<PushRegistration | null> {
   await ensureAndroidChannels();
+  await ensureNotificationCategories();
 
   const existing = await Notifications.getPermissionsAsync();
   let granted = existing.granted || existing.ios?.status === 2; /* PROVISIONAL */

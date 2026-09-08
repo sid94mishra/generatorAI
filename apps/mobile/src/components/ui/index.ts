@@ -20,24 +20,47 @@ export {
 } from './accessibility';
 export { Touchable, type TouchableProps, type HapticIntent } from './Touchable';
 export { Button, IconButton, Fab, type ButtonVariant, type ButtonSize } from './Button';
-export { Chip, StaticChip } from './Chip';
-export {
-  SegmentedControl,
-  stepSegment,
-  useSegmentSwipe,
-  type Segment,
-} from './SegmentedControl';
+export { Chip, StaticChip, type ChipProps, type ChipTone, type ChipSize } from './Chip';
+export { SegmentedControl, stepSegment, useSegmentSwipe, type Segment } from './SegmentedControl';
 export { ListRow, ListGroup } from './ListRow';
 export { Card, Surface, SectionHeader, Divider, Badge, StatusDot, type Tone } from './primitives';
 export { Skeleton, SkeletonRow, SkeletonList, SkeletonCard } from './Skeleton';
 export { ProgressRing, ProgressBar, usageTone } from './ProgressRing';
 export { Sheet, SheetRow, SheetSection, type Detent, type SheetProps } from './Sheet';
+export {
+  DISMISS_FRACTION,
+  DISMISS_VELOCITY,
+  detentOffsets,
+  snapDetent,
+  type SnapInput,
+  type SnapResult,
+} from './sheetMath';
 export { ActionSheet, ConfirmSheet, type MenuAction } from './ActionSheet';
+export {
+  ContextMenu,
+  ContextMenuProvider,
+  useContextMenu,
+  type ContextMenuItem,
+  type ContextMenuProps,
+  type ContextMenuOptions,
+  type ContextMenuAnchor,
+} from './ContextMenu';
+export { Pager, PagerIndicator, type PagerProps, type PagerHandle } from './Pager';
+export { EDGE_GUTTER, clampIndex, pageOffset, pageProgress, settlePage, type SettleInput } from './pagerMath';
 export { SwipeableRow, closeSwipedRow, type SwipeAction } from './SwipeableRow';
-export { ToastProvider, useToast, type ToastTone } from './Toast';
-export { Screen, ScreenHeader, PlainScroll, goBack } from './Screen';
+export {
+  ToastProvider,
+  useToast,
+  useDismissToast,
+  type ToastTone,
+  type ToastVariant,
+  type ToastRequest,
+} from './Toast';
+export { Screen, ScreenHeader, PlainScroll, goBack, type ScreenSearch } from './Screen';
 export { Spinner, LoadingState, EmptyState, ErrorState, LockedState } from './States';
 export { Switch, Field, SearchField } from './Form';
+export { KeyboardSticky, type KeyboardStickyProps } from './KeyboardSticky';
+export { useKeyboardHeight, useKeyboardShown, type KeyboardOptions } from './keyboard';
 export {
   DURATION,
   TIMING,
@@ -48,5 +71,11 @@ export {
   SPRING_ENTER,
   SPRING_SWIPE,
   PRESS_SCALE,
+  PRESS_SCALE_LARGE,
   stagger,
+  presetsFor,
+  reduceMotionFor,
+  useReducedMotionPreset,
+  type MotionPresets,
 } from './motion';
+export { UiGallery, UI_GALLERY_SECTIONS, type GallerySection } from './gallery';

@@ -26,6 +26,7 @@ import {
   keyPairFromEd25519Seed,
   randomToken,
   type IDeviceRepository,
+  type IDeviceScopeRequestRepository,
   type INonceStore,
   type IPairingGrantRepository,
   type IRelayRevokeOutboxRepository,
@@ -45,6 +46,7 @@ import {
 } from '@generatorai/secrets';
 import {
   SqliteDeviceRepository,
+  SqliteDeviceScopeRequestRepository,
   SqliteNonceStore,
   SqlitePairingGrantRepository,
   SqliteRelayRevokeOutboxRepository,
@@ -102,6 +104,7 @@ export interface SecurityContext {
   serviceAccountRepo: IServiceAccountRepository;
   auditRepo: ISecurityAuditRepository;
   relayOutboxRepo: IRelayRevokeOutboxRepository;
+  scopeRequestRepo: IDeviceScopeRequestRepository;
 
   /** Effective posture, surfaced by `GET /api/security/posture`. */
   posture: SecurityPosture;
@@ -210,6 +213,7 @@ export async function createSecurityContext(
   const serviceAccountRepo = new SqliteServiceAccountRepository(db);
   const auditRepo = new SqliteSecurityAuditRepository(db);
   const relayOutboxRepo = new SqliteRelayRevokeOutboxRepository(db);
+  const scopeRequestRepo = new SqliteDeviceScopeRequestRepository(db);
 
   // ── Services ────────────────────────────────────────────────────
   const audit = new SecurityAuditService(auditRepo, {
@@ -244,6 +248,7 @@ export async function createSecurityContext(
     tokens,
     audit,
     relayOutbox: relayOutboxRepo,
+    scopeRequests: scopeRequestRepo,
     resumeCredentialTtlMs: security.sessionTtlHours * 60 * 60_000,
     logger: {
       warn: (m, meta) => logger.warn(m, meta as Record<string, unknown>),
@@ -419,6 +424,7 @@ export async function createSecurityContext(
     serviceAccountRepo,
     auditRepo,
     relayOutboxRepo,
+    scopeRequestRepo,
     posture,
     async shutdown() {
       clearInterval(sweeper);

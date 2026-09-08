@@ -29,6 +29,7 @@ import {
   DEFAULT_DEVICE_SCOPES,
   DEFAULT_MOBILE_SCOPES,
   HIGH_RISK_SCOPES,
+  isScope,
   isScopeSubset,
   normalizeScopes,
   type Scope,
@@ -37,12 +38,14 @@ import type {
   DeviceConnectionMode,
   DevicePlatform,
   DeviceRecord,
+  DeviceScopeRequestRecord,
   IDeviceRepository,
+  IDeviceScopeRequestRepository,
   IPairingGrantRepository,
   IRelayRevokeOutboxRepository,
   PairingGrantRecord,
 } from './ports.js';
-import type { Principal } from './principals.js';
+import { isAdminCapable, type Principal } from './principals.js';
 
 export class PairingError extends Error {
   constructor(
@@ -61,6 +64,31 @@ export class PairingError extends Error {
   ) {
     super(message);
     this.name = 'PairingError';
+  }
+}
+
+/**
+ * Failure of the scope-request flow. `existing` is populated for
+ * `REQUEST_PENDING` so the caller can show the request that is already open
+ * instead of a bare conflict.
+ */
+export class ScopeRequestError extends Error {
+  constructor(
+    message: string,
+    readonly code:
+      | 'UNKNOWN_SCOPE'
+      | 'SCOPES_ALREADY_HELD'
+      | 'SCOPE_NOT_REQUESTABLE'
+      | 'REQUEST_PENDING'
+      | 'NOT_FOUND'
+      | 'NOT_PENDING'
+      | 'NOT_IN_REQUEST'
+      | 'DEVICE_REVOKED'
+      | 'UNAVAILABLE',
+    readonly existing?: DeviceScopeRequestRecord,
+  ) {
+    super(message);
+    this.name = 'ScopeRequestError';
   }
 }
 
@@ -141,6 +169,8 @@ export interface DeviceServiceOptions {
   tokens: TokenService;
   audit: SecurityAuditService;
   relayOutbox?: IRelayRevokeOutboxRepository | undefined;
+  /** Optional: without it the scope-request flow answers `UNAVAILABLE`. */
+  scopeRequests?: IDeviceScopeRequestRepository | undefined;
   /** Default owner until multi-user identity lands (Phase 7). */
   defaultOwnerId?: string;
   /**
@@ -714,6 +744,274 @@ export class DeviceService {
       reasonCode: reason,
       severity: 'critical',
     });
+  }
+
+  // ── Scope requests (plan S2) ───────────────────────────────────
+
+  private scopeRequestRepo(): IDeviceScopeRequestRepository {
+    if (!this.deps.scopeRequests) {
+      throw new ScopeRequestError('Scope requests are not enabled on this server', 'UNAVAILABLE');
+    }
+    return this.deps.scopeRequests;
+  }
+
+  /**
+   * A device asks for scopes it does not hold.
+   *
+   * Rules: every scope must exist; scopes already held are dropped (a phone
+   * with a stale token may not know what it has); `admin:*` cannot be
+   * requested unless the caller already holds an admin scope — admin
+   * authority is granted from a trusted device, never pulled from an
+   * untrusted one; and one pending request per device, enforced by the store
+   * (partial unique index) as well as here.
+   */
+  async requestScopes(params: {
+    principal: Principal;
+    scopes: readonly string[];
+    reason?: string | null;
+    requestId?: string | null;
+  }): Promise<DeviceScopeRequestRecord> {
+    const repo = this.scopeRequestRepo();
+    const { principal } = params;
+    const deviceId = principal.deviceId ?? principal.id;
+
+    const unknown = params.scopes.filter((s) => !isScope(s));
+    if (unknown.length > 0) {
+      throw new ScopeRequestError(`Unknown scope(s): ${unknown.join(', ')}`, 'UNKNOWN_SCOPE');
+    }
+    const device = await this.deps.devices.findById(deviceId);
+    if (!device || device.revokedAt != null) {
+      throw new ScopeRequestError('Device has been revoked', 'DEVICE_REVOKED');
+    }
+
+    const held = new Set<string>(device.scopes);
+    const wanted = normalizeScopes(params.scopes).filter((s) => !held.has(s));
+    if (wanted.length === 0) {
+      throw new ScopeRequestError('This device already holds every requested scope', 'SCOPES_ALREADY_HELD');
+    }
+    const admin = wanted.filter((s) => s.startsWith('admin:'));
+    if (admin.length > 0 && !isAdminCapable(principal)) {
+      this.deps.audit.record({
+        action: AuditAction.deviceScopeRequested,
+        result: 'denied',
+        principal,
+        resourceType: 'device',
+        resourceId: deviceId,
+        reasonCode: 'admin_scope_not_requestable',
+        requestId: params.requestId ?? null,
+        metadata: { scopes: wanted },
+        severity: 'warn',
+      });
+      throw new ScopeRequestError(
+        `${admin.join(', ')} cannot be requested from a device; grant it from a trusted device`,
+        'SCOPE_NOT_REQUESTABLE',
+      );
+    }
+
+    const existing = await repo.findPendingByDevice(deviceId);
+    if (existing) {
+      throw new ScopeRequestError('This device already has a pending request', 'REQUEST_PENDING', existing);
+    }
+
+    const record: DeviceScopeRequestRecord = {
+      requestId: crypto.randomUUID(),
+      deviceId,
+      requestedScopes: wanted,
+      reason: params.reason ? params.reason.slice(0, 500) : null,
+      status: 'pending',
+      createdAt: Date.now(),
+      resolvedAt: null,
+      resolvedBy: null,
+      resolutionNote: null,
+      grantedScopes: null,
+    };
+    try {
+      await repo.create(record);
+    } catch (err) {
+      // Lost a race with a concurrent request from the same device: the
+      // store's uniqueness rule is authoritative, so report the winner.
+      const raced = await repo.findPendingByDevice(deviceId);
+      if (raced) {
+        throw new ScopeRequestError('This device already has a pending request', 'REQUEST_PENDING', raced);
+      }
+      throw err;
+    }
+
+    this.deps.audit.record({
+      action: AuditAction.deviceScopeRequested,
+      result: 'success',
+      principal,
+      resourceType: 'device_scope_request',
+      resourceId: record.requestId,
+      requestId: params.requestId ?? null,
+      // The reason is user text; it stays out of the audit log.
+      metadata: { deviceId, scopes: wanted },
+      severity: 'warn',
+    });
+    return record;
+  }
+
+  async listScopeRequestsForDevice(deviceId: string, limit = 20): Promise<DeviceScopeRequestRecord[]> {
+    return this.scopeRequestRepo().listByDevice(deviceId, limit);
+  }
+
+  async listPendingScopeRequests(): Promise<DeviceScopeRequestRecord[]> {
+    return this.scopeRequestRepo().listPending();
+  }
+
+  async getScopeRequest(requestId: string): Promise<DeviceScopeRequestRecord | null> {
+    return this.scopeRequestRepo().get(requestId);
+  }
+
+  /** The requesting device withdraws its own pending request. */
+  async cancelScopeRequest(requestId: string, principal: Principal): Promise<DeviceScopeRequestRecord> {
+    const repo = this.scopeRequestRepo();
+    const deviceId = principal.deviceId ?? principal.id;
+    const request = await repo.get(requestId);
+    // A foreign request id is reported as NOT_FOUND, not as "someone else's":
+    // the route must not confirm which ids exist.
+    if (!request || request.deviceId !== deviceId) {
+      throw new ScopeRequestError('Scope request not found', 'NOT_FOUND');
+    }
+    const now = Date.now();
+    const done = await repo.resolve(requestId, {
+      status: 'cancelled',
+      resolvedAt: now,
+      resolvedBy: `${principal.type}:${principal.id}`,
+      resolutionNote: null,
+      grantedScopes: null,
+    });
+    if (!done) {
+      throw new ScopeRequestError('Scope request is no longer pending', 'NOT_PENDING');
+    }
+    this.deps.audit.record({
+      action: AuditAction.deviceScopeRequestResolved,
+      result: 'success',
+      principal,
+      resourceType: 'device_scope_request',
+      resourceId: requestId,
+      reasonCode: 'cancelled',
+      metadata: { deviceId },
+    });
+    return (await repo.get(requestId)) ?? { ...request, status: 'cancelled', resolvedAt: now };
+  }
+
+  /**
+   * Grants a request (or a subset of it). The grant goes through
+   * `updateDeviceScopes`, so it is clamped to the approver's own authority
+   * and audited like a manual scope change; a high-risk grant is additionally
+   * recorded at critical severity, exactly as `PUT /devices/:id/scopes` does.
+   *
+   * The request is resolved FIRST (compare-and-set on pending) so two admins
+   * approving at once produce one grant, not two.
+   */
+  async approveScopeRequest(params: {
+    requestId: string;
+    principal: Principal;
+    /** Subset of the requested scopes to grant. Defaults to all of them. */
+    scopes?: readonly string[] | undefined;
+    note?: string | null;
+  }): Promise<{ request: DeviceScopeRequestRecord; deviceScopes: Scope[] }> {
+    const repo = this.scopeRequestRepo();
+    const request = await repo.get(params.requestId);
+    if (!request) throw new ScopeRequestError('Scope request not found', 'NOT_FOUND');
+    if (request.status !== 'pending') {
+      throw new ScopeRequestError('Scope request is no longer pending', 'NOT_PENDING');
+    }
+
+    const granted = params.scopes ? normalizeScopes(params.scopes) : [...request.requestedScopes];
+    const outside = granted.filter((s) => !request.requestedScopes.includes(s));
+    if (outside.length > 0 || granted.length === 0) {
+      throw new ScopeRequestError(
+        outside.length > 0
+          ? `Not part of this request: ${outside.join(', ')}`
+          : 'Approve at least one requested scope, or deny the request',
+        'NOT_IN_REQUEST',
+      );
+    }
+
+    const device = await this.deps.devices.findById(request.deviceId);
+    if (!device || device.revokedAt != null) {
+      throw new ScopeRequestError('The requesting device has been revoked', 'DEVICE_REVOKED');
+    }
+    const next = normalizeScopes([...device.scopes, ...granted]);
+    // Authority check BEFORE the compare-and-set, so an approver who cannot
+    // grant the scopes does not consume the request.
+    if (!isScopeSubset(next, params.principal.scopes)) {
+      throw new PairingError('Cannot grant scopes beyond your own', 'SCOPE_ESCALATION');
+    }
+
+    const now = Date.now();
+    const won = await repo.resolve(params.requestId, {
+      status: 'approved',
+      resolvedAt: now,
+      resolvedBy: `${params.principal.type}:${params.principal.id}`,
+      resolutionNote: params.note ? params.note.slice(0, 500) : null,
+      grantedScopes: granted,
+    });
+    if (!won) throw new ScopeRequestError('Scope request is no longer pending', 'NOT_PENDING');
+
+    const deviceScopes = await this.updateDeviceScopes(request.deviceId, next, params.principal);
+
+    const highRisk = granted.filter((s) => HIGH_RISK_SCOPES.includes(s));
+    if (highRisk.length > 0) {
+      this.deps.audit.record({
+        action: AuditAction.deviceScopesChanged,
+        result: 'success',
+        principal: params.principal,
+        resourceType: 'device',
+        resourceId: request.deviceId,
+        metadata: { highRiskGranted: highRisk, scopeRequestId: request.requestId },
+        severity: 'critical',
+      });
+    }
+    this.deps.audit.record({
+      action: AuditAction.deviceScopeRequestResolved,
+      result: 'success',
+      principal: params.principal,
+      resourceType: 'device_scope_request',
+      resourceId: request.requestId,
+      reasonCode: 'approved',
+      metadata: { deviceId: request.deviceId, granted, requested: request.requestedScopes },
+      severity: highRisk.length > 0 ? 'critical' : 'warn',
+    });
+
+    const resolved = (await repo.get(params.requestId)) ?? {
+      ...request,
+      status: 'approved' as const,
+      resolvedAt: now,
+      grantedScopes: granted,
+    };
+    return { request: resolved, deviceScopes };
+  }
+
+  async denyScopeRequest(params: {
+    requestId: string;
+    principal: Principal;
+    note?: string | null;
+  }): Promise<DeviceScopeRequestRecord> {
+    const repo = this.scopeRequestRepo();
+    const request = await repo.get(params.requestId);
+    if (!request) throw new ScopeRequestError('Scope request not found', 'NOT_FOUND');
+    const now = Date.now();
+    const won = await repo.resolve(params.requestId, {
+      status: 'denied',
+      resolvedAt: now,
+      resolvedBy: `${params.principal.type}:${params.principal.id}`,
+      resolutionNote: params.note ? params.note.slice(0, 500) : null,
+      grantedScopes: null,
+    });
+    if (!won) throw new ScopeRequestError('Scope request is no longer pending', 'NOT_PENDING');
+    this.deps.audit.record({
+      action: AuditAction.deviceScopeRequestResolved,
+      result: 'success',
+      principal: params.principal,
+      resourceType: 'device_scope_request',
+      resourceId: request.requestId,
+      reasonCode: 'denied',
+      metadata: { deviceId: request.deviceId, requested: request.requestedScopes },
+    });
+    return (await repo.get(params.requestId)) ?? { ...request, status: 'denied', resolvedAt: now };
   }
 
   private auditPairingFailure(

@@ -1,0 +1,9 @@
+{
+  "name": "generatorai-device-key",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Expo module: non-extractable P-256 device key in the Secure Enclave / Android Keystore (StrongBox when present). Autolinked from apps/mobile/modules by expo prebuild.",
+  "license": "UNLICENSED",
+  "author": "GeneratorAI",
+  "homepage": "https://github.com/generatorai"
+}

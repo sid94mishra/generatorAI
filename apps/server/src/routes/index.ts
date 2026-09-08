@@ -8,6 +8,7 @@ import { createTemplateRoutes } from './templates.js';
 import { createWebhookRoutes } from './webhooks.js';
 import { createHealthRoutes } from './health.js';
 import { createAuthRoutes } from './auth.js';
+import { createScopeRequestRoutes } from './scopeRequests.js';
 import { createSecurityRoutes } from './security.js';
 import { createCopilotRoutes } from './copilot.js';
 import { createHooksRoutes } from './hooks.js';
@@ -109,6 +110,9 @@ export function createApiRouter(container: Container): Router {
 
   // Device pairing, sessions, device administration, security audit.
   router.use('/auth', createAuthRoutes(container));
+  // Device scope requests (plan S2) — same mount so the policy prefixes
+  // `/auth/devices/me/scope-requests` and `/auth/scope-requests` apply.
+  router.use('/auth', createScopeRequestRoutes(container));
 
   // Security posture + secret-backend diagnostics.
   router.use('/security', createSecurityRoutes(container));

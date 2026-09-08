@@ -690,6 +690,41 @@ Total: **≈ 20–26 engineer-weeks** for one engineer; ≈ 12–14 calendar wee
 
 ---
 
+## 12. Implementation status (Sept 7 2026)
+
+Decisions 1–9 were taken as recommended. Everything below is on `arch-redesign`, uncommitted, verified by `typecheck`/`test`/`lint` per package and by a live phone-viewport pass (Expo web preview at 393×852 against an isolated server, three paired devices: admin, companion-scope, legacy-scope). Device builds were NOT produced: this machine has no Android SDK, emulator or Xcode, so anything that needs the native shell (WebView terminal, biometrics, push actions, haptics, native gestures, the Secure Enclave/StrongBox key module) is written and typechecked but unverified on hardware.
+
+### Landed
+
+| Area | What shipped |
+|---|---|
+| Phone ≠ desktop (bundle) | `@generatorai/shared/client` entry + Metro alias (server config/IPC/OTel/pino out of the phone), per-icon lucide Babel plugin, dead deps removed (gorhom, Skia, background-task, task-manager, sharing, network, qrcode-svg, semver), `scripts/check-bundle.mjs` gate (`pnpm bundle:check`). 6.77 → 5.12 MB before features; 6.50 MB after everything incl. the inlined xterm renderer. No server module in the bundle (guard test `sharedClientEntry.test.ts`). |
+| Server S1/S2/S3/S4/S7 | `read:activity` scope (global feed restricted to lifecycle kinds server-side), scope-request flow (migration 52, routes under `/api/auth`, web + phone admin UI, Standalone preset), push for tool permissions/questions/plans with lock-screen Allow/Deny (`approval` category, `approvals` channel), cancel body `{force,budgetSeconds}` (force destroys the provider conversation), per-scope 403 handling in both mux clients. |
+| Phase 0 | D0 (strip + retry), D1, D7, D9, D10, D17, D19, D23, D24 fixed; **new** P0 found live: chat stream state was keyed by `data.sessionId ?? chatId` while the screen read `chat.sessionId`, so no live token or gate ever rendered on mobile (content appeared only on history refetch). Fixed in `useChatStream`. |
+| Phase 1 | Home/Chats/Work/Projects tabs (JS tabs, Native Tabs behind `USE_NATIVE_TABS`), needs-you strip, Home approvals queue + decision cards, Work segments, Projects › Agents, route sheets `/approvals`, `/chats/[id]/gate/[iid]`, `/chats/[id]/plan/[pid]`, `/scope-request`, pair/revoked rebuilt, design-system v2 (Screen search, drag-anywhere Sheet, ContextMenu, Pager, KeyboardSticky, Chip tones, Toast actions, motion presets), app lock + privacy overlay, biometric step-up (`requireStepUp`, `StepUpGate` on terminal/browser/admin), Accessibility settings (motion, haptics, text size, title collapse, app lock, push-to-talk), stream store LRU (6 chats / 2,000 blocks), base64 dedupe, last-route restore, local Expo module `modules/generatorai-device-key` (Swift + Kotlin, uncompiled). |
+| Phase 2 | Timeline model ported from web (grouped rows, subagent nesting, file-op rows with inline diff, shell rows → Agent Console sheet, warning/error/waiting/stopped rows, usage chip with cache hint, attachments on user rows), per-block live selector, demand-driven flush timer, Markdown v2 (GFM, tables, images + lightbox, link allow-list) + dependency-free highlighter, Composer v2 (`useComposerController`: attachment chips via expo-image-picker / file picker / clipboard, slash + @ strips, model/mode/options chips, gauge sheet, prompt history, voice waveform on shared values, gate banner with Cancel-and-send), New chat sheet v2, session panes Chat · Changes · Terminal · Browser · Computer with More sheet (Files, Plan, Tasks, Widgets placeholder, Inspector), header transport badge and menu (rename, share, archive), changes tray. |
+| Phase 3 | One Changes surface (route screens + pane), virtualised diff with wrap/pinch/split ≥700pt, review comments sheet + batch send, checkpoints sheet, commit/PR bar, plan sheet (revisions, edit, comments, decisions), tasks pane, files pane. |
+| Phase 4 (partial) | Terminal: inlined xterm.js WebView, ≤4 tabs, hotkey bar, pinch, restart/kill, Agent Console (native). Browser pane: watch + start/stop/navigate (take-control, capture chips and the computer-use view are **not** built). |
+| Phase 5 (partial) | Work tab shell with Runs/Workflows/Automations lists and Agents list/detail; run detail polling fix. Workflow/automation authoring, scripts, project/codebase CRUD are **not** built. |
+| Phase 6 (partial) | Accessibility settings, scope requests and device names in Security, notification categories with actions. Live Activities, widgets, multi-server, iPad two-pane are **not** built. |
+| E2E harness | `apps/mobile/e2e/` (Playwright, phone viewport, isolated server) — see its README. |
+
+### Found and fixed by the live pass (none were caught by unit tests)
+
+1. Live rendering keyed under the wrong stream key (above).
+2. Stop left the Allow/Deny card pinned: the server emitted `chat.question.expired` for tool permissions; it now emits `chat.permission.expired` (the client also tolerates the old kind).
+3. Fit-to-content sheets (menus, confirmations, PR sheet) rendered empty on web (`flex: 0` → `0 1 0%`) and overflowed by the header height on every platform.
+4. Two full-width buttons in a row pushed the second off-screen (permission card, Home decision card, plan sheet): `Button grow`.
+5. Security screen showed "Revoke undefined" (wire field is `name`); the request sheet broke navigation when opened by URL; the five-segment pane strip truncated "Changes".
+
+### Not done / needs hardware or a later phase
+
+- Device builds, Maestro flows, store readiness, performance budgets measured on a phone (§7.2 numbers are unverified).
+- Browser take-control/inspect/capture, computer-use consent pane, browser/terminal capture chips (menu items are honest stubs).
+- Workflow outline editor + tablet canvas, automation create, scripts, project/codebase CRUD, run controls beyond approve/open.
+- Live Activities / Android live updates, home-screen widgets, multi-server switcher, iPad SplitView, localisation scaffold, Sentry.
+- Server: tunnel public endpoint (S6), widget-asset origin (S5), badge counts on push, per-platform session TTL.
+
 ## Appendix A — Web feature catalogue (summary)
 
 Areas and control counts from the audit: navigation/shell/shortcuts 32 · dashboard 8 · chat list + create 18 · chat page + panels 26 · composer 24 · streaming timeline 26 · changes/files/review 30 · plan/orchestrator 12 · terminal 12 · browser 14 · computer use 10 · workflow builder + list 32 · workflow runs 14 · automations 18 · projects/codebases 20 · agents 14 · skills/MCP 8 · extensions/widgets 8 · templates/scripts 8 · hooks 5 · settings (14 sections) ≈ 100 · auth/devices/pairing 12 · desktop-only 18. Doc drift noted: `usage-web.md` still describes a `/templates` route, a 4-tab settings page, "no auth", and `POST /chats/:id/archive|stop` routes that do not exist.

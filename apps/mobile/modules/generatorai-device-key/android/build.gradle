@@ -1,0 +1,15 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'dev.generatorai'
+version = '0.1.0'
+
+android {
+  namespace "dev.generatorai.devicekey"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}

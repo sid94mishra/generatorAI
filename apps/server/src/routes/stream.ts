@@ -27,6 +27,7 @@ import type { Container } from '../composition-root.js';
 import type { StreamEventRow, StreamScope } from '@generatorai/core';
 import { canMintDerivedCredentials, type Principal, type Scope } from '@generatorai/auth';
 import { acquireSseSlot } from '../composition/sseConnectionCap.js';
+import { LIFECYCLE_EVENT_KINDS } from '../composition/streamScopes.js';
 import { SseConnection, parseCursor } from '../streaming/sseConnection.js';
 import { MuxSseConnection } from '../streaming/muxConnection.js';
 import {
@@ -119,15 +120,98 @@ const STREAM_SCOPE_READ_REQUIREMENTS: Record<string, Scope | undefined> = {
   computer: 'exec:computer',
   terminal: 'exec:terminal',
   browser: 'exec:browser',
-  // `global` is the firehose: everything above, for every id.
+  // `global` is every `emitGlobal` event verbatim (workflow-run, stage,
+  // automation, HITL, hook and checkpoint events — see `composition-root.ts`'s
+  // `primaryScopeFor`) plus the lifecycle kinds bridged in from every session.
+  // `admin:settings` reads all of it. `read:activity` (below) reads only the
+  // lifecycle kinds, and is what the default device/mobile grants carry.
   global: 'admin:settings',
 };
+
+/**
+ * The lesser scope that also opens `global` — restricted server-side to
+ * `LIFECYCLE_EVENT_KINDS` (see `restrictsGlobalToLifecycle`). Without this
+ * every paired phone and browser, none of whose default grants carry
+ * `admin:settings`, had the WHOLE multiplexed connection refused the moment
+ * it asked for the list-lifecycle feed, and so received no live events at all.
+ */
+const GLOBAL_ACTIVITY_SCOPE: Scope = 'read:activity';
 
 /** `undefined` when the principal may read this scope, else the missing scope. */
 function missingStreamScope(principal: Principal, scope: string): Scope | undefined {
   const required = STREAM_SCOPE_READ_REQUIREMENTS[scope];
   if (!required) return undefined;
-  return principal.scopes.includes(required) ? undefined : required;
+  if (principal.scopes.includes(required)) return undefined;
+  if (scope === 'global' && principal.scopes.includes(GLOBAL_ACTIVITY_SCOPE)) return undefined;
+  // Report the LESSER scope that would have sufficed: a device pairing screen
+  // acting on `requiredScopes` should ask for `read:activity`, not for admin.
+  return scope === 'global' ? GLOBAL_ACTIVITY_SCOPE : required;
+}
+
+/**
+ * True when this principal's `global` subscription must be narrowed to
+ * lifecycle kinds: it holds `read:activity` but not `admin:settings`.
+ *
+ * Decided from the PRINCIPAL, never from the client-supplied filter — the
+ * filter is a courtesy the client extends to itself, and a client that omits
+ * it must still not see a `stage_run.*` or `hitl.*` payload.
+ */
+function restrictsGlobalToLifecycle(principal: Principal, scope: string): boolean {
+  return scope === 'global' && !principal.scopes.includes('admin:settings');
+}
+
+/**
+ * The kind-prefix families `LIFECYCLE_EVENT_KINDS` fall into, derived rather
+ * than listed so a kind added there is covered here without a second edit.
+ *
+ * Passed to the broker as `kindPrefixes` so replay and live delivery skip
+ * everything outside those families cheaply; the EXACT membership check in
+ * `lifecycleOnly` below is what actually enforces the boundary. The two are
+ * separate because the broker caps prefixes at 10 and there are more than 10
+ * lifecycle kinds — a set that size handed to the broker would be truncated.
+ */
+const LIFECYCLE_KIND_FAMILIES: readonly string[] = [
+  ...new Set([...LIFECYCLE_EVENT_KINDS].map((kind) => `${kind.split('.')[0]}.`)),
+];
+
+/**
+ * Wrap a delivery handler so only lifecycle kinds pass. Exact-match, not
+ * prefix: `chat.` would also admit `chat.question.asked`, whose payload is
+ * the agent's question text.
+ */
+function lifecycleOnly<R>(deliver: (row: StreamEventRow) => R): (row: StreamEventRow) => R | undefined {
+  return (row) => (LIFECYCLE_EVENT_KINDS.has(row.kind) ? deliver(row) : undefined);
+}
+
+/**
+ * The broker filter for a lifecycle-restricted `global` subscription.
+ *
+ * A client filter, when present, is kept as-is — it can only narrow, and
+ * `lifecycleOnly` gates whatever it lets through. Without one, the lifecycle
+ * families stand in so a non-admin subscriber does not make the broker walk
+ * every `stage_run.*` row on replay only to drop it here.
+ */
+function lifecycleKindPrefixes(clientFilter: readonly string[] | undefined): readonly string[] {
+  return clientFilter && clientFilter.length > 0 ? clientFilter : LIFECYCLE_KIND_FAMILIES;
+}
+
+/** The 403 body for a subscription the principal may not read. */
+function insufficientScopeBody(
+  verb: 'Subscribing to' | 'Reading',
+  sub: { scope: string; id: string },
+  missing: Scope,
+): { error: Record<string, unknown> } {
+  return {
+    error: {
+      code: 'INSUFFICIENT_SCOPE',
+      message: `${verb} a "${sub.scope}" stream requires the ${missing} scope.`,
+      requiredScopes: [missing],
+      // Which subscription was refused, so a multiplexing client can drop
+      // just that one and reconnect with the rest instead of retrying the
+      // whole connection into the same answer (`MuxStreamClient`).
+      sub: { scope: sub.scope, id: sub.id },
+    },
+  };
 }
 
 /** Ticket scopes redeemable by a WebSocket upgrade rather than SSE. */
@@ -316,16 +400,14 @@ export function createUnifiedStreamRoutes(container: Container): Router {
         // widening the header above promises cannot happen.
         const missing = missingStreamScope(principal, parsed.scope);
         if (missing) {
-          res.status(403).json({
-            error: {
-              code: 'INSUFFICIENT_SCOPE',
-              message: `Subscribing to a "${parsed.scope}" stream requires the ${missing} scope.`,
-              requiredScopes: [missing],
-            },
-          });
+          res.status(403).json(insufficientScopeBody('Subscribing to', parsed, missing));
           return;
         }
-        subs.push(parsed);
+        subs.push(
+          restrictsGlobalToLifecycle(principal, parsed.scope)
+            ? { ...parsed, lifecycleOnly: true }
+            : parsed,
+        );
       }
 
       const cursors = new Map<string, number>();
@@ -414,16 +496,14 @@ export function createUnifiedStreamRoutes(container: Container): Router {
       // individually. This is the line that makes that true.
       const missing = missingStreamScope(principal, parsed.scope);
       if (missing) {
-        res.status(403).json({
-          error: {
-            code: 'INSUFFICIENT_SCOPE',
-            message: `Subscribing to a "${parsed.scope}" stream requires the ${missing} scope.`,
-            requiredScopes: [missing],
-          },
-        });
+        res.status(403).json(insufficientScopeBody('Subscribing to', parsed, missing));
         return;
       }
-      add.push(parsed);
+      add.push(
+        restrictsGlobalToLifecycle(principal, parsed.scope)
+          ? { ...parsed, lifecycleOnly: true }
+          : parsed,
+      );
     }
     const remove: string[] = (Array.isArray(req.body?.remove) ? req.body.remove : [])
       .map((k: unknown) => String(k))
@@ -482,15 +562,16 @@ export function createUnifiedStreamRoutes(container: Container): Router {
 
     const missingScope = req.principal ? missingStreamScope(req.principal, scope) : undefined;
     if (missingScope) {
-      res.status(403).json({
-        error: {
-          code: 'INSUFFICIENT_SCOPE',
-          message: `Reading a "${scope}" stream requires the ${missingScope} scope.`,
-          requiredScopes: [missingScope],
-        },
-      });
+      res.status(403).json(insufficientScopeBody('Reading', { scope, id: scopeId }, missingScope));
       return;
     }
+    // Same rule as the multiplexed path: a `global` reader without
+    // `admin:settings` gets lifecycle kinds only. (No principal at all means
+    // the server runs unauthenticated, which is the local-desktop case and
+    // carries every scope.)
+    const lifecycleRestricted = req.principal
+      ? restrictsGlobalToLifecycle(req.principal, scope)
+      : false;
 
     let kindPrefixes: readonly string[] | undefined;
     try {
@@ -502,6 +583,7 @@ export function createUnifiedStreamRoutes(container: Container): Router {
       }
       throw err;
     }
+    if (lifecycleRestricted) kindPrefixes = lifecycleKindPrefixes(kindPrefixes);
 
     // STR-08 / W08 — resume semantics. Accepts the `Last-Event-ID` header
     // (set automatically by the browser's EventSource on reconnect) or an
@@ -616,7 +698,8 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     // when an item had to be queued; the broker awaits it, which is how a
     // congested connection actually slows its session's producer rather than
     // only bounding memory.
-    const deliver = (row: StreamEventRow): void | Promise<void> => conn.deliver(row);
+    const deliverRaw = (row: StreamEventRow): void | Promise<void> => conn.deliver(row);
+    const deliver = lifecycleRestricted ? lifecycleOnly(deliverRaw) : deliverRaw;
 
     try {
       const handle = await streamBroker.subscribe(scope, scopeId, deliver, {
@@ -856,14 +939,24 @@ export function createUnifiedStreamRoutes(container: Container): Router {
         return;
       }
       const cursor = record.cursors.get(scopeKey);
+      // Belt and braces: the sub was flagged when it was authorised (POST
+      // `/connections` or `/subs`), but the principal attaching the stream is
+      // re-checked here so a flag lost anywhere between the two requests
+      // fails CLOSED. Either says restrict → restricted.
+      const restricted = sub.lifecycleOnly === true || restrictsGlobalToLifecycle(principal, sub.scope);
+      const deliverRaw = deliverTo(scopeKey);
+      const deliver = restricted
+        ? lifecycleOnly((row: StreamEventRow) => deliverRaw(row))
+        : deliverRaw;
+      const kindPrefixes = restricted ? lifecycleKindPrefixes(sub.filter) : sub.filter;
       try {
         const unsubscribe = await streamBroker.subscribe(
           sub.scope,
           sub.id,
-          deliverTo(scopeKey),
+          deliver,
           {
             ...(cursor === undefined ? {} : { afterSeq: cursor }),
-            ...(sub.filter ? { kindPrefixes: sub.filter } : {}),
+            ...(kindPrefixes ? { kindPrefixes } : {}),
             syncReplayLimit: 200,
             onResume: (status) => {
               resumed[scopeKey] = status.resumed;

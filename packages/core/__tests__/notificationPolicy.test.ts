@@ -29,7 +29,7 @@ describe('planNotification — what earns an interruption', () => {
   });
 
   it('notifies on an agent question and a plan review', () => {
-    expect(planNotification(event('chat.question_asked', { chatId: 'c1' }))).toMatchObject({
+    expect(planNotification(event('chat.question.asked', { chatId: 'c1' }))).toMatchObject({
       category: 'approval',
       route: '/chats/c1',
       requiredScope: 'read:chats',
@@ -37,6 +37,109 @@ describe('planNotification — what earns an interruption', () => {
     expect(
       planNotification(event('chat.plan.review_requested', { chatId: 'c1', summary: 'Refactor' })),
     ).toMatchObject({ category: 'approval', route: '/chats/c1' });
+  });
+
+  it('notifies on a tool-permission prompt with a human title and lock-screen actions', () => {
+    // The most time-critical gate: the agent is idle until someone answers,
+    // and the answer is one tap — so the payload carries approve/deny.
+    const plan = planNotification(
+      event('chat.permission.requested', {
+        chatId: 'c1',
+        interactionId: 'i1',
+        turnId: 't1',
+        toolName: 'Bash',
+        type: 'tool',
+        description: 'Run a shell command',
+        inputSummary: 'pnpm test',
+        permissionMode: 'default',
+      }),
+    );
+    expect(plan).toMatchObject({
+      category: 'approval',
+      title: 'Allow Bash: pnpm test?',
+      body: 'Run a shell command',
+      route: '/chats/c1/gate/i1',
+      requiredScope: 'read:chats',
+      threadId: 'chat:c1',
+      interruption: 'timeSensitive',
+      interaction: { chatId: 'c1', interactionId: 'i1', kind: 'permission', actions: ['approve', 'deny'] },
+    });
+  });
+
+  it('moves a long tool input into the body instead of truncating the title', () => {
+    const inputSummary = `cat ${'src/very/deep/path/component.tsx '.repeat(4)}| grep TODO`;
+    const plan = planNotification(
+      event('chat.permission.requested', {
+        chatId: 'c1',
+        interactionId: 'i1',
+        toolName: 'Bash',
+        inputSummary,
+        description: 'Run a shell command',
+      }),
+    );
+    expect(plan!.title).toBe('Allow Bash?');
+    expect(plan!.body.startsWith('cat src/very/deep')).toBe(true);
+  });
+
+  it('collapses a multi-line tool input onto one line', () => {
+    const plan = planNotification(
+      event('chat.permission.requested', {
+        chatId: 'c1',
+        interactionId: 'i1',
+        toolName: 'Write',
+        inputSummary: 'src/a.ts\n\n  (12 lines)',
+      }),
+    );
+    expect(plan!.title).toBe('Allow Write: src/a.ts (12 lines)?');
+    expect(plan!.body).toBe('Your agent is waiting for permission to continue.');
+  });
+
+  it('refuses a permission prompt it cannot resolve', () => {
+    // Without an interactionId there is nothing for Approve/Deny to act on,
+    // and a button that fails silently is worse than no notification.
+    expect(
+      planNotification(event('chat.permission.requested', { chatId: 'c1', toolName: 'Bash' })),
+    ).toBeNull();
+  });
+
+  it('deep-links a question and a plan review to their gate, without action buttons', () => {
+    // A question needs reading before answering, so the notification opens
+    // the gate rather than offering a blind approve/deny.
+    const question = planNotification(
+      event('chat.question.asked', {
+        chatId: 'c1',
+        interactionId: 'q1',
+        questions: [{ id: 'a', header: 'Scope', question: 'Include the docs folder?', options: [] }],
+      }),
+    );
+    expect(question).toMatchObject({
+      category: 'approval',
+      body: 'Include the docs folder?',
+      route: '/chats/c1/gate/q1',
+      interaction: { chatId: 'c1', interactionId: 'q1', kind: 'question' },
+    });
+    expect(question!.interaction!.actions).toBeUndefined();
+
+    const plan = planNotification(
+      event('chat.plan.review_requested', {
+        chatId: 'c1',
+        interactionId: 'p1',
+        title: 'Refactor the auth layer',
+        summary: 'Long multi-paragraph summary…',
+      }),
+    );
+    expect(plan).toMatchObject({
+      body: 'Refactor the auth layer',
+      route: '/chats/c1/gate/p1',
+      interaction: { chatId: 'c1', interactionId: 'p1', kind: 'plan' },
+    });
+  });
+
+  it('uses the real event kind for questions (chat.question.asked, not chat.question_asked)', () => {
+    // The policy once listened for `chat.question_asked`, which the server
+    // never emits — so no phone was ever told about a question.
+    expect(planNotification(event('chat.question_asked', { chatId: 'c1' }))).toBeNull();
+    expect(planNotification(event('chat.question.asked', { chatId: 'c1' }))).not.toBeNull();
   });
 
   it('notifies on failure and completion', () => {
@@ -93,7 +196,7 @@ describe('planNotification — robustness', () => {
     // user is interrupted and then has to go hunting.
     expect(planNotification(event('stage_run.awaiting_input', { name: 'Deploy' }))).toBeNull();
     expect(planNotification(event('workflow_run.failed', { error: 'boom' }))).toBeNull();
-    expect(planNotification(event('chat.question_asked', {}))).toBeNull();
+    expect(planNotification(event('chat.question.asked', {}))).toBeNull();
   });
 
   it('tolerates missing or wrongly-typed data', () => {
@@ -139,16 +242,25 @@ describe('planNotification — security', () => {
       event('workflow_run.failed', { workflowRunId: 'r1' }),
       event('workflow_run.completed', { workflowRunId: 'r1' }),
       event('automation_execution.failed', { automationId: 'a1' }),
-      event('chat.question_asked', { chatId: 'c1' }),
+      event('chat.question.asked', { chatId: 'c1' }),
+      event('chat.permission.requested', { chatId: 'c1', interactionId: 'i1', toolName: 'Bash' }),
+      event('chat.plan.review_requested', { chatId: 'c1', interactionId: 'p1' }),
     ]) {
       const plan = planNotification(e);
       expect(plan!.requiredScope, e.kind).toMatch(/^read:/);
     }
   });
 
+  it('URL-encodes ids in the gate route so a hostile id cannot escape the path', () => {
+    const plan = planNotification(
+      event('chat.permission.requested', { chatId: 'c/../x', interactionId: 'i?1', toolName: 'Bash' }),
+    );
+    expect(plan!.route).toBe('/chats/c%2F..%2Fx/gate/i%3F1');
+  });
+
   it('routes chat notifications behind read:chats, not read:workflows', () => {
     // Getting this backwards leaks chat titles to a workflow-only device.
-    expect(planNotification(event('chat.question_asked', { chatId: 'c1' }))!.requiredScope).toBe(
+    expect(planNotification(event('chat.question.asked', { chatId: 'c1' }))!.requiredScope).toBe(
       'read:chats',
     );
   });
@@ -174,7 +286,7 @@ describe('notification threading', () => {
 
   it('does not group unrelated subjects', () => {
     const run = planNotification(event('workflow_run.failed', { workflowRunId: 'r1' }));
-    const chat = planNotification(event('chat.question_asked', { chatId: 'r1' }));
+    const chat = planNotification(event('chat.question.asked', { chatId: 'r1' }));
     expect(run!.threadId).not.toBe(chat!.threadId);
   });
 });

@@ -17,6 +17,7 @@ import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import {
+  Accessibility,
   Activity,
   Bell,
   Blocks,
@@ -71,6 +72,12 @@ export default function SettingsScreen(): React.ReactElement {
           subtitle="What this device alerts you about"
           icon={<Bell size={18} color={colors.info} />}
           onPress={() => router.push('/settings/notifications')}
+        />
+        <ListRow
+          title="Accessibility"
+          subtitle="Motion, haptics, text size and app lock"
+          icon={<Accessibility size={18} color={colors.success} />}
+          onPress={() => router.push('/settings/accessibility')}
         />
       </ListGroup>
 

@@ -838,10 +838,12 @@ export function ChatPage() {
    */
   const stop = useTwoPhaseStop({
     isLive: isCopilotWorking,
-    onCancel: ({ force }) => {
+    onCancel: ({ force, budgetSeconds }) => {
       if (!chatId) return;
       applyStopEffects(useStreamStore.getState(), sessionId, force);
-      cancelMutation.mutate(chatId);
+      // The controller's verdict reaches the server: a forced second press
+      // tears the provider conversation down, not just the abort again.
+      cancelMutation.mutate({ chatId, force, budgetSeconds });
     },
   });
 

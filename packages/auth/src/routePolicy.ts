@@ -49,7 +49,21 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: '/auth/token/refresh', read: [], write: [], public: true },
   { prefix: '/auth/nonce', read: [], write: [], public: true },
   { prefix: '/auth/server-info', read: [], write: [], public: true },
+  // A device asking for MORE scopes for ITSELF (plan S2). `read:status`
+  // rather than `admin:devices` for the same reason as `/auth/push-token`
+  // below: the device id comes from the authenticated principal, never from
+  // the path or body, and the request grants nothing by itself — only an
+  // `admin:devices` holder can approve it (`/auth/scope-requests`). Longest-
+  // prefix matching keeps this ahead of the admin-scoped `/auth/devices`.
+  {
+    prefix: '/auth/devices/me/scope-requests',
+    read: ['read:status'],
+    write: ['read:status'],
+  },
   { prefix: '/auth/devices', read: ['admin:devices'], write: ['admin:devices'], riskLevel: 'high' },
+  // Reviewing and resolving scope requests grants authority, so it is the
+  // same bar as editing a device's scopes directly.
+  { prefix: '/auth/scope-requests', read: ['admin:devices'], write: ['admin:devices'], riskLevel: 'high' },
   { prefix: '/auth/pair', read: ['admin:devices'], write: ['admin:devices'], riskLevel: 'high' },
   { prefix: '/auth/service-accounts', read: ['admin:credentials'], write: ['admin:credentials'], riskLevel: 'high' },
   { prefix: '/auth/audit', read: ['admin:settings'], write: ['admin:settings'] },

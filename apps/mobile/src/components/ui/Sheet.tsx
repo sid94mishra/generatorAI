@@ -20,11 +20,19 @@
 // transparent, in both light and dark. Re-applying `useTheme().style` on the
 // modal's root view is therefore load-bearing, not decoration.
 //
-// What we implement ourselves, because the library was meant to provide it:
-// detents, drag-by-header as well as by the grabber, velocity-aware
-// dismissal, a scrim whose opacity tracks position, keyboard avoidance, and
-// modal accessibility semantics. All of it runs on the UI thread, which
-// matters because most sheets are opened mid-token-stream.
+// v2 — what changed and why:
+//   • Drag ANYWHERE. The header drags as before; the body drags too, the way
+//     every native sheet does: downward when its content is scrolled to the
+//     top, upward whenever the sheet is below its tallest detent. Content
+//     scrolling is only enabled AT the tallest detent, which is what stops
+//     a list and the sheet from moving together. A body that manages its own
+//     scrolling (`scrollable={false}`) drags from its left/right 20pt edges.
+//   • Snapping is velocity-aware (`sheetMath.snapDetent`): a flick reaches
+//     the next detent in its direction even when "nearest" is behind it.
+//   • Keyboard lift uses RN `Keyboard` events. RN's Android `Modal` already
+//     resizes its window for the IME, so the lift is iOS-only by design.
+//   • Reduce Motion (OS switch OR app preference) jumps between positions
+//     instead of springing.
 // ──────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -32,7 +40,6 @@ import {
   BackHandler,
   Modal,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -44,7 +51,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   interpolate,
   runOnJS,
-  useAnimatedKeyboard,
+  useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -55,18 +62,32 @@ import { Check, X } from 'lucide-react-native';
 
 import { IconButton } from './Button';
 import { Touchable } from './Touchable';
-import { SPRING_SHEET, TIMING_FAST } from './motion';
+import { useReducedMotionPreset } from './motion';
 import { MAX_SCALE } from './accessibility';
 import { haptics } from './haptics';
+import { useKeyboardHeight } from './keyboard';
+import { detentOffsets, rubberBand, snapDetent } from './sheetMath';
 import { useTheme } from '../../theme/ThemeProvider';
 
-/** Rest heights as a fraction of the screen. */
-export type Detent = 0.28 | 0.4 | 0.5 | 0.6 | 0.75 | 0.92;
+/**
+ * Rest height as a fraction of the screen. The plan's three canonical stops
+ * are 0.28 / 0.6 / 0.92; any fraction in (0, 1] is accepted.
+ */
+export type Detent = number;
 
-/** Past this much of a drag downward from the lowest detent, dismiss. */
-const DISMISS_FRACTION = 0.35;
-/** Or past this downward velocity, regardless of distance. */
-const DISMISS_VELOCITY = 900;
+/** Width of the strip on each side of a self-scrolling body that drags the sheet. */
+const BODY_EDGE = 20;
+
+/**
+ * Body sizing. `flex: 0` is NOT the same on every renderer: react-native-web
+ * resolves it to `flex: 0 1 0%`, so a fit-to-content ScrollView collapsed to
+ * zero height and every action sheet / confirmation rendered as an empty
+ * card in the web preview (Sept 7 2026 live run). Spelling out grow/shrink/
+ * basis gives the same "size to content, shrink if the sheet is capped"
+ * behaviour on native and web.
+ */
+const FIT_BODY = { flexGrow: 0, flexShrink: 1, flexBasis: 'auto' } as const;
+const FILL_BODY = { flex: 1 } as const;
 
 export interface SheetProps {
   visible: boolean;
@@ -94,6 +115,14 @@ export interface SheetProps {
    * is a wall of empty card rather than a considered proportion.
    */
   fitContent?: boolean;
+  /**
+   * Lift the sheet with the keyboard (iOS; Android's modal window resizes on
+   * its own). On by default — off for a sheet that hosts no text input and
+   * must not move when one elsewhere opens.
+   */
+  keyboardAware?: boolean;
+  /** Fires after the sheet settles on a detent the user dragged it to. */
+  onDetentChange?: (index: number) => void;
   children: React.ReactNode;
 }
 
@@ -108,69 +137,95 @@ export function Sheet({
   scrollable = true,
   persistent = false,
   fitContent = false,
+  keyboardAware = true,
+  onDetentChange,
   children,
 }: SheetProps): React.ReactElement | null {
   const { colors, style: themeVars } = useTheme();
   const { height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const keyboard = useAnimatedKeyboard();
+  const presets = useReducedMotionPreset();
+  const keyboard = useKeyboardHeight();
   const [contentHeight, setContentHeight] = useState(0);
+  // The grabber + title block sits OUTSIDE the measured body. Sizing a
+  // fit-to-content sheet from the body alone made it overflow by exactly the
+  // header height, pushing its primary button below the screen edge (the
+  // Rename sheet's Save in the Sept 7 run).
+  const [headerHeight, setHeaderHeight] = useState(0);
 
+  // Callers pass `detents={[0.28, 0.6, 0.92]}` inline, so the prop is a NEW
+  // array on every render. Keying on its CONTENTS is what stops the settle
+  // effect re-running on every parent re-render and yanking the sheet back
+  // to `initialDetent` — which is why resizing it and then tapping anything
+  // used to collapse it again.
+  const stopsKey = [...detents].sort((a, b) => a - b).join(',');
   // Sorted ascending so index 0 is always the shortest rest height.
-  const stops = useMemo(() => [...detents].sort((a, b) => a - b), [detents]);
+  const stops = useMemo(() => stopsKey.split(',').map(Number), [stopsKey]);
   const tallest = stops[stops.length - 1] ?? 0.92;
-  // Callers pass `detents={[0.28, 0.6, 0.92]}` inline, so `stops` is a NEW
-  // array on every render. Depending on its identity re-ran the settle effect
-  // on every parent re-render and yanked the sheet back to `initialDetent` —
-  // which is why resizing it and then tapping anything collapsed it again.
-  const stopsKey = stops.join(',');
 
   const maxHeight = screenHeight * tallest;
   const sheetHeight = fitContent
-    ? Math.min(maxHeight, contentHeight + insets.bottom + 24 || maxHeight)
+    ? Math.min(maxHeight, contentHeight > 0 ? contentHeight + headerHeight + insets.bottom + 24 : maxHeight)
     : maxHeight;
 
-  /** Offset from fully-open for a given detent. */
-  const offsetFor = useCallback(
-    (fraction: number) => Math.max(0, sheetHeight - screenHeight * fraction),
-    [sheetHeight, screenHeight],
+  /** translateY of each detent, index-aligned with `stops`. */
+  const offsets = useMemo(
+    () => (fitContent ? [0] : detentOffsets(stops, screenHeight, sheetHeight)),
+    [stops, screenHeight, sheetHeight, fitContent],
   );
 
   const closedOffset = sheetHeight;
   const openIndex = initialDetent ?? stops.length - 1;
+  const lastIndex = offsets.length - 1;
 
   const translateY = useSharedValue(closedOffset);
   const dragStart = useSharedValue(0);
-  const stopIndex = useRef(openIndex);
+  const dragOrigin = useSharedValue(0);
+  const dragging = useSharedValue(0);
+  const bodyScrollY = useSharedValue(0);
+  const bodyWidth = useSharedValue(0);
+  const stopIndex = useRef(Math.min(openIndex, lastIndex));
   const wasVisible = useRef(false);
+
+  // Content scrolls only at the tallest detent. Below it, a drag on the
+  // body moves the sheet, which is what the finger meant.
+  const [atTallest, setAtTallest] = useState(stopIndex.current >= lastIndex);
+
+  const rememberStop = useCallback(
+    (index: number) => {
+      const changed = stopIndex.current !== index;
+      stopIndex.current = index;
+      setAtTallest(index >= lastIndex);
+      if (changed) {
+        haptics.threshold();
+        onDetentChange?.(index);
+      }
+    },
+    [lastIndex, onDetentChange],
+  );
 
   // Geometry changes (rotation, keyboard) must re-settle the sheet, but only
   // an OPEN transition may choose the detent. While it is already open the
   // user's own choice wins, so re-settling keeps `stopIndex.current`.
   useEffect(() => {
     if (visible) {
-      if (!wasVisible.current) stopIndex.current = Math.min(openIndex, stops.length - 1);
+      if (!wasVisible.current) {
+        stopIndex.current = Math.min(openIndex, lastIndex);
+        setAtTallest(stopIndex.current >= lastIndex);
+      }
       wasVisible.current = true;
-      translateY.value = withSpring(
-        fitContent ? 0 : offsetFor(stops[stopIndex.current] ?? tallest),
-        SPRING_SHEET,
-      );
+      translateY.value = withSpring(offsets[stopIndex.current] ?? 0, presets.springSheet);
     } else {
       wasVisible.current = false;
-      translateY.value = withTiming(closedOffset, TIMING_FAST);
+      translateY.value = withTiming(closedOffset, presets.timingFast);
     }
-    // `stopsKey` stands in for `stops`, whose identity changes every render.
-  }, [visible, openIndex, stopsKey, tallest, offsetFor, closedOffset, translateY, fitContent]);
+  }, [visible, openIndex, lastIndex, offsets, closedOffset, translateY, presets]);
 
   const close = useCallback(() => {
     if (persistent) return;
     haptics.tap();
     onClose();
   }, [persistent, onClose]);
-
-  const rememberStop = useCallback((index: number) => {
-    stopIndex.current = index;
-  }, []);
 
   // Android hardware / predictive back closes the sheet rather than the
   // screen behind it. `Modal`'s `onRequestClose` covers the classic button;
@@ -185,62 +240,27 @@ export function Sheet({
     return () => sub.remove();
   }, [visible, persistent, close]);
 
-  /**
-   * Snap to the nearest detent, or dismiss.
-   *
-   * Velocity is consulted before distance so a quick flick closes even when
-   * the finger barely moved — that is what makes a sheet feel like a sheet
-   * rather than a panel that has to be dragged all the way down.
-   */
+  /** Snap to a detent, or dismiss. See `sheetMath.snapDetent` for the rules. */
   const settle = useCallback(
     (offset: number, velocity: number) => {
       'worklet';
-      const lowest = fitContent ? 0 : offsetFor(stops[0] ?? tallest);
-
-      if (!persistent && (velocity > DISMISS_VELOCITY || offset > lowest + sheetHeight * DISMISS_FRACTION)) {
-        translateY.value = withTiming(closedOffset, TIMING_FAST, () => {
+      const result = snapDetent({ offset, velocity, offsets, sheetHeight, persistent });
+      if (result.kind === 'dismiss') {
+        translateY.value = withTiming(closedOffset, presets.timingFast, () => {
           runOnJS(onClose)();
         });
         return;
       }
-
-      if (fitContent) {
-        translateY.value = withSpring(0, SPRING_SHEET);
-        return;
-      }
-
-      let best = 0;
-      let bestDistance = Number.POSITIVE_INFINITY;
-      for (let i = 0; i < stops.length; i += 1) {
-        // Project the throw a little so a fast drag lands on the next detent
-        // rather than snapping back to where it started.
-        const target = offsetFor(stops[i]!);
-        const distance = Math.abs(offset + velocity * 0.08 - target);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = i;
-        }
-      }
       // Record it, or a later re-settle would spring back to the detent the
       // sheet was opened at rather than the one the user dragged it to.
-      runOnJS(rememberStop)(best);
-      translateY.value = withSpring(offsetFor(stops[best]!), SPRING_SHEET);
+      runOnJS(rememberStop)(result.index);
+      translateY.value = withSpring(offsets[result.index] ?? 0, presets.springSheet);
     },
-    [
-      offsetFor,
-      stops,
-      tallest,
-      persistent,
-      sheetHeight,
-      closedOffset,
-      translateY,
-      onClose,
-      fitContent,
-      rememberStop,
-    ],
+    [offsets, sheetHeight, persistent, translateY, closedOffset, presets, onClose, rememberStop],
   );
 
-  const pan = useMemo(
+  /** The header (grabber + title row) drags unconditionally. */
+  const headerPan = useMemo(
     () =>
       Gesture.Pan()
         .onBegin(() => {
@@ -249,8 +269,7 @@ export function Sheet({
         .onUpdate((event) => {
           // Rubber-band upward past the tallest detent instead of allowing the
           // sheet to detach from the top of the screen.
-          const next = dragStart.value + event.translationY;
-          translateY.value = next < 0 ? next * 0.25 : next;
+          translateY.value = rubberBand(dragStart.value + event.translationY);
         })
         .onEnd((event) => {
           settle(translateY.value, event.velocityY);
@@ -258,12 +277,64 @@ export function Sheet({
     [dragStart, translateY, settle],
   );
 
+  // The body's own scroll, declared as a gesture so the body pan can be
+  // told to run alongside it instead of fighting it for the touch.
+  const scrollGesture = useMemo(() => Gesture.Native(), []);
+
+  /**
+   * The body drags the sheet when the finger's intent is unambiguous:
+   * downward with the content at its top, or upward while the sheet is not
+   * yet at its tallest. Otherwise the touch belongs to the content.
+   */
+  const bodyPan = useMemo(() => {
+    const gesture = Gesture.Pan()
+      .activeOffsetY([-10, 10])
+      .failOffsetX([-16, 16])
+      .onTouchesDown((event, state) => {
+        // A self-scrolling body (a nested list) keeps its interior: only the
+        // edge strips drag the sheet, so the list never loses a scroll.
+        if (scrollable) return;
+        const x = event.allTouches[0]?.x ?? 0;
+        if (x > BODY_EDGE && x < bodyWidth.value - BODY_EDGE) state.fail();
+      })
+      .onBegin(() => {
+        dragging.value = 0;
+      })
+      .onUpdate((event) => {
+        if (!dragging.value) {
+          const down = event.translationY > 0;
+          const canDown = bodyScrollY.value <= 0;
+          const canUp = translateY.value > 0.5;
+          if (!((down && canDown) || (!down && canUp))) return;
+          dragging.value = 1;
+          dragStart.value = translateY.value;
+          dragOrigin.value = event.translationY;
+        }
+        translateY.value = rubberBand(dragStart.value + event.translationY - dragOrigin.value);
+      })
+      .onEnd((event) => {
+        if (!dragging.value) return;
+        dragging.value = 0;
+        settle(translateY.value, event.velocityY);
+      })
+      .onFinalize(() => {
+        dragging.value = 0;
+      });
+    if (scrollable) gesture.simultaneousWithExternalGesture(scrollGesture);
+    return gesture;
+  }, [scrollable, bodyWidth, dragging, bodyScrollY, translateY, dragStart, dragOrigin, settle, scrollGesture]);
+
+  const onBodyScroll = useAnimatedScrollHandler((event) => {
+    bodyScrollY.value = event.contentOffset.y;
+  });
+
   /** Tapping the grabber cycles detents — HIG, and the only non-drag route. */
   const cycleDetent = useCallback(() => {
     if (stops.length < 2 || fitContent) return;
-    stopIndex.current = (stopIndex.current + 1) % stops.length;
-    translateY.value = withSpring(offsetFor(stops[stopIndex.current]!), SPRING_SHEET);
-  }, [stops, offsetFor, translateY, fitContent]);
+    const next = (stopIndex.current + 1) % stops.length;
+    rememberStop(next);
+    translateY.value = withSpring(offsets[next] ?? 0, presets.springSheet);
+  }, [stops.length, offsets, translateY, fitContent, presets, rememberStop]);
 
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
@@ -276,9 +347,7 @@ export function Sheet({
   // Lifting the whole sheet is correct here rather than padding its content:
   // the sheet is anchored to the bottom edge, so the keyboard would otherwise
   // cover its primary action no matter how the body scrolls.
-  const liftStyle = useAnimatedStyle(() => ({
-    paddingBottom: keyboard.height.value,
-  }));
+  const liftStyle = useAnimatedStyle(() => ({ paddingBottom: keyboardAware ? keyboard.value : 0 }), [keyboardAware]);
 
   const onContentLayout = useCallback(
     (event: LayoutChangeEvent) => {
@@ -289,7 +358,7 @@ export function Sheet({
 
   if (!visible) return null;
 
-  const Body = scrollable ? ScrollView : View;
+  const scrollEnabled = scrollable && (fitContent || atTallest);
 
   return (
     <Modal visible transparent animationType="none" onRequestClose={close} statusBarTranslucent>
@@ -298,12 +367,7 @@ export function Sheet({
           and the whole sheet paints transparent. `zIndex` is explicit because
           react-native-web lands the modal host at z-index 0. */}
       <Animated.View
-        style={[
-          StyleSheet.absoluteFill,
-          themeVars,
-          liftStyle,
-          { justifyContent: 'flex-end', zIndex: 50 },
-        ]}
+        style={[StyleSheet.absoluteFill, themeVars, liftStyle, { justifyContent: 'flex-end', zIndex: 50 }]}
       >
         <Touchable
           a11yRole="none"
@@ -315,9 +379,7 @@ export function Sheet({
           onPress={close}
           style={StyleSheet.absoluteFill as ViewStyle}
         >
-          <Animated.View
-            style={[StyleSheet.absoluteFill, scrimStyle, { backgroundColor: 'rgb(0,0,0)' }]}
-          />
+          <Animated.View style={[StyleSheet.absoluteFill, scrimStyle, { backgroundColor: 'rgb(0,0,0)' }]} />
         </Touchable>
 
         <Animated.View
@@ -343,15 +405,13 @@ export function Sheet({
           {/* The whole header block drags, not just the grabber. Every native
               sheet does; dragging by a 9pt bar was the one interaction users
               had to be taught. */}
-          <GestureDetector gesture={pan}>
-            <View>
+          <GestureDetector gesture={headerPan}>
+            <View onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)}>
               <View className="items-center pb-1 pt-2.5">
                 <Touchable
                   a11yRole="adjustable"
                   accessibilityLabel={stops.length > 1 ? 'Sheet size' : 'Grabber'}
-                  accessibilityHint={
-                    stops.length > 1 ? 'Double tap to change the sheet height' : undefined
-                  }
+                  accessibilityHint={stops.length > 1 ? 'Double tap to change the sheet height' : undefined}
                   disabled={stops.length < 2 || fitContent}
                   haptic="select"
                   ripple={false}
@@ -386,19 +446,39 @@ export function Sheet({
             </View>
           </GestureDetector>
 
-          <Body
-            style={{ flex: fitContent ? 0 : 1 }}
-            onLayout={onContentLayout}
-            {...(scrollable
-              ? {
-                  contentContainerStyle: { paddingBottom: 24 },
-                  keyboardShouldPersistTaps: 'handled' as const,
-                  keyboardDismissMode: 'interactive' as const,
-                }
-              : {})}
-          >
-            {children}
-          </Body>
+          <GestureDetector gesture={bodyPan}>
+            <View
+              style={fitContent ? FIT_BODY : FILL_BODY}
+              onLayout={(event) => {
+                bodyWidth.value = event.nativeEvent.layout.width;
+              }}
+            >
+              {scrollable ? (
+                <GestureDetector gesture={scrollGesture}>
+                  <Animated.ScrollView
+                    style={fitContent ? FIT_BODY : FILL_BODY}
+                    onScroll={onBodyScroll}
+                    scrollEventThrottle={16}
+                    scrollEnabled={scrollEnabled}
+                    // No overscroll: when the content is at its top a downward
+                    // drag moves the SHEET, and a bounce underneath it would
+                    // read as two things moving.
+                    bounces={false}
+                    overScrollMode="never"
+                    contentContainerStyle={{ paddingBottom: 24 }}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="interactive"
+                  >
+                    <View onLayout={onContentLayout}>{children}</View>
+                  </Animated.ScrollView>
+                </GestureDetector>
+              ) : (
+                <View style={fitContent ? FIT_BODY : FILL_BODY} onLayout={onContentLayout}>
+                  {children}
+                </View>
+              )}
+            </View>
+          </GestureDetector>
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -411,6 +491,7 @@ export function SheetRow({
   subtitle,
   selected = false,
   onPress,
+  onLongPress,
   left,
   right,
   disabled = false,
@@ -419,6 +500,8 @@ export function SheetRow({
   subtitle?: string | null;
   selected?: boolean;
   onPress: () => void;
+  /** Open a context menu for this row (see `useContextMenu`). */
+  onLongPress?: () => void;
   left?: React.ReactNode;
   right?: React.ReactNode;
   disabled?: boolean;
@@ -434,6 +517,7 @@ export function SheetRow({
       haptic="select"
       scale="large"
       onPress={onPress}
+      {...(onLongPress ? { onLongPress } : {})}
       className={`min-h-14 flex-row items-center gap-3 px-4 py-2.5 ${selected ? 'bg-accent' : ''}`}
     >
       {left}
@@ -459,13 +543,7 @@ export function SheetRow({
  * Sentence case, matching `SectionHeader`. The previous all-caps treatment
  * was a third competing header style in a system that already had two.
  */
-export function SheetSection({
-  title,
-  right,
-}: {
-  title: string;
-  right?: React.ReactNode;
-}): React.ReactElement {
+export function SheetSection({ title, right }: { title: string; right?: React.ReactNode }): React.ReactElement {
   return (
     <View className="flex-row items-center justify-between bg-background px-4 py-2">
       <Text

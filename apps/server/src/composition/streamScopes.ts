@@ -59,6 +59,11 @@ export const LIFECYCLE_EVENT_KINDS: ReadonlySet<string> = new Set([
   'automation_execution.failed',
   'automation_execution.cancelled',
   'automation_execution.recovered',
+  // Device scope requests (plan S2). An admin phone's "Access requests" list
+  // is wrong until it hears a request was opened; the requesting phone's
+  // "Pending since …" row is wrong until it hears the answer.
+  'device.scope_requested',
+  'device.scope_request_resolved',
 ]);
 
 function readString(obj: unknown, key: string): string | undefined {

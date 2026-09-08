@@ -66,6 +66,31 @@ Settings › Notifications stores three per-device switches (`notify.gates`, `no
   for the two non-approval categories; it is engaged when *both* “Run outcomes” and “Chat
   replies” are off. Approvals are never mutable server-side by design.
 
+## Phone ≠ desktop: bundle hygiene
+
+Metro bundles whatever the import graph reaches, and the phone must not carry server code.
+Two mechanisms keep it out, both enforced:
+
+- `@generatorai/shared` resolves to `packages/shared/src/client.ts` on the phone (see
+  `metro.config.js`): the server's app-config schema, child-process env, host IPC, OpenTelemetry
+  and the pino logger never enter the bundle. `src/__tests__/sharedClientEntry.test.ts` fails if a
+  client package imports a value the entry does not export.
+- `plugins/babel-plugin-lucide-icons.js` rewrites icon imports to per-icon modules (the barrel is
+  1.29 MB of source for ~60 icons).
+
+```powershell
+pnpm --filter @generatorai/mobile bundle:analyze   # expo export + size table + forbidden-module gate
+pnpm --filter @generatorai/mobile bundle:check     # gate only (needs a previous export)
+pnpm --filter @generatorai/mobile terminal:bundle  # regenerate src/terminal/xtermBundle.generated.ts
+```
+
+## End-to-end harness
+
+`e2e/` drives the Expo web preview at a phone viewport against an isolated server with Playwright
+(pair, chat, live gate, Changes, Stop, scope request, admin approve). See `e2e/README.md`.
+It complements, not replaces, a device build: WebView, biometrics, push actions and native gestures
+still need `eas build`.
+
 ## Tests
 
 `vitest run` covers platform-agnostic logic only (`src/**/*.test.ts`). Screens need a device.

@@ -30,6 +30,8 @@ export const AuditAction = {
   deviceCreated: 'device.created',
   deviceRenamed: 'device.renamed',
   deviceScopesChanged: 'device.scopes_changed',
+  deviceScopeRequested: 'device.scope_requested',
+  deviceScopeRequestResolved: 'device.scope_request_resolved',
   deviceCredentialRotated: 'device.credential_rotated',
   deviceRevoked: 'device.revoked',
   tokenRefreshed: 'token.refreshed',

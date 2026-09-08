@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// Interaction preferences — motion and haptics.
+// Interaction preferences — motion, haptics, app lock, large titles.
 //
 // Separate from ThemeProvider on purpose: the theme decides what the app
 // looks like, this decides how it *behaves*. Both read MMKV synchronously so
@@ -11,6 +11,14 @@
 // user instead is a layout that survives their existing choice — see
 // `useFontScale` and the min-height sizing across the design system — plus a
 // direct route into the system setting from Appearance.
+//
+// Every value here has a UI (Settings → Accessibility) and a consumer:
+//
+//   motion              ui/motion.ts `useReducedMotionPreset`, ui/accessibility.ts `useReduceMotion`
+//   haptics             ui/haptics.ts `setHapticsEnabled` (pushed from here)
+//   biometricLock       src/auth/AppLock.tsx `AppLockGate`
+//   lockGraceSeconds    src/auth/AppLock.tsx `AppLockGate`
+//   largeTitleCollapse  ui/Screen.tsx (see the note on `largeTitleCollapse` below)
 // ────────────────────────────────────────────────────────────────
 
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
@@ -23,11 +31,43 @@ export type MotionPreference = 'system' | 'reduced' | 'full';
 
 const MOTION_VALUES: readonly MotionPreference[] = ['system', 'reduced', 'full'];
 
-interface PreferencesValue {
+/**
+ * How long the app may sit in the background before the lock re-arms.
+ *
+ * `0` is "immediately": the lock arms the moment the app leaves the
+ * foreground. The other steps match the OS's own auto-lock options so the
+ * picker reads as familiar rather than invented.
+ */
+export const LOCK_GRACE_OPTIONS = [
+  { seconds: 0, label: 'Immediately' },
+  { seconds: 60, label: '1 minute' },
+  { seconds: 300, label: '5 minutes' },
+  { seconds: 900, label: '15 minutes' },
+] as const;
+
+export type LockGraceSeconds = (typeof LOCK_GRACE_OPTIONS)[number]['seconds'];
+
+export const DEFAULT_LOCK_GRACE_SECONDS: LockGraceSeconds = 60;
+
+export interface PreferencesValue {
   motion: MotionPreference;
   setMotion(next: MotionPreference): void;
   haptics: boolean;
   setHaptics(next: boolean): void;
+  /** Require biometrics / device passcode on cold start and after the grace. */
+  biometricLock: boolean;
+  setBiometricLock(next: boolean): void;
+  lockGraceSeconds: LockGraceSeconds;
+  setLockGraceSeconds(next: LockGraceSeconds): void;
+  /**
+   * Whether `<Screen>`'s large title collapses into the compact bar on scroll.
+   *
+   * Persisted and exposed here; the design-system `ScreenHeader` is the
+   * consumer and is expected to read this and skip the collapse interpolation
+   * when it is false.
+   */
+  largeTitleCollapse: boolean;
+  setLargeTitleCollapse(next: boolean): void;
 }
 
 const PreferencesContext = createContext<PreferencesValue | null>(null);
@@ -37,6 +77,31 @@ function readMotion(): MotionPreference {
   return MOTION_VALUES.includes(stored as MotionPreference)
     ? (stored as MotionPreference)
     : 'system';
+}
+
+/** Coerce whatever is stored onto one of the picker's steps. */
+export function coerceLockGrace(value: number): LockGraceSeconds {
+  const match = LOCK_GRACE_OPTIONS.find((option) => option.seconds === value);
+  return match ? match.seconds : DEFAULT_LOCK_GRACE_SECONDS;
+}
+
+/**
+ * Synchronous reads for code that runs before or outside React.
+ *
+ * `AppLockGate` decides whether to show the lock on the very first frame,
+ * before the provider has rendered anything the user could see — so it
+ * cannot wait for context.
+ */
+export function readLockPreferences(): {
+  biometricLock: boolean;
+  lockGraceSeconds: LockGraceSeconds;
+} {
+  return {
+    biometricLock: prefs.getBoolean(PREF_KEYS.biometricLock, false),
+    lockGraceSeconds: coerceLockGrace(
+      prefs.getNumber(PREF_KEYS.lockGraceSeconds, DEFAULT_LOCK_GRACE_SECONDS),
+    ),
+  };
 }
 
 export function PreferencesProvider({
@@ -52,6 +117,15 @@ export function PreferencesProvider({
     setHapticsEnabled(enabled);
     return enabled;
   });
+  const [biometricLock, setBiometricLockState] = useState<boolean>(
+    () => readLockPreferences().biometricLock,
+  );
+  const [lockGraceSeconds, setLockGraceState] = useState<LockGraceSeconds>(
+    () => readLockPreferences().lockGraceSeconds,
+  );
+  const [largeTitleCollapse, setLargeTitleCollapseState] = useState<boolean>(() =>
+    prefs.getBoolean(PREF_KEYS.largeTitleCollapse, true),
+  );
 
   const setMotion = useCallback((next: MotionPreference) => {
     setMotionState(next);
@@ -64,13 +138,64 @@ export function PreferencesProvider({
     prefs.setBoolean(PREF_KEYS.haptics, next);
   }, []);
 
+  const setBiometricLock = useCallback((next: boolean) => {
+    setBiometricLockState(next);
+    prefs.setBoolean(PREF_KEYS.biometricLock, next);
+  }, []);
+
+  const setLockGraceSeconds = useCallback((next: LockGraceSeconds) => {
+    const coerced = coerceLockGrace(next);
+    setLockGraceState(coerced);
+    prefs.setNumber(PREF_KEYS.lockGraceSeconds, coerced);
+  }, []);
+
+  const setLargeTitleCollapse = useCallback((next: boolean) => {
+    setLargeTitleCollapseState(next);
+    prefs.setBoolean(PREF_KEYS.largeTitleCollapse, next);
+  }, []);
+
   const value = useMemo<PreferencesValue>(
-    () => ({ motion, setMotion, haptics, setHaptics }),
-    [motion, setMotion, haptics, setHaptics],
+    () => ({
+      motion,
+      setMotion,
+      haptics,
+      setHaptics,
+      biometricLock,
+      setBiometricLock,
+      lockGraceSeconds,
+      setLockGraceSeconds,
+      largeTitleCollapse,
+      setLargeTitleCollapse,
+    }),
+    [
+      motion,
+      setMotion,
+      haptics,
+      setHaptics,
+      biometricLock,
+      setBiometricLock,
+      lockGraceSeconds,
+      setLockGraceSeconds,
+      largeTitleCollapse,
+      setLargeTitleCollapse,
+    ],
   );
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;
 }
+
+const OUTSIDE_PROVIDER: PreferencesValue = {
+  motion: 'system',
+  setMotion: () => {},
+  haptics: true,
+  setHaptics: () => {},
+  biometricLock: false,
+  setBiometricLock: () => {},
+  lockGraceSeconds: DEFAULT_LOCK_GRACE_SECONDS,
+  setLockGraceSeconds: () => {},
+  largeTitleCollapse: true,
+  setLargeTitleCollapse: () => {},
+};
 
 /**
  * Safe outside the provider.
@@ -79,12 +204,5 @@ export function PreferencesProvider({
  * in isolation; throwing there would turn a preference lookup into a crash.
  */
 export function usePreferences(): PreferencesValue {
-  return (
-    useContext(PreferencesContext) ?? {
-      motion: 'system',
-      setMotion: () => {},
-      haptics: true,
-      setHaptics: () => {},
-    }
-  );
+  return useContext(PreferencesContext) ?? OUTSIDE_PROVIDER;
 }

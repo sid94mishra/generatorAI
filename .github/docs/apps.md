@@ -318,7 +318,7 @@ The relay is a byte pipe: it reads no application payloads. Identity and authori
 
 A companion client for chats and run monitoring, reaching the server directly on the LAN or through `apps/relay`. It shares `packages/client-core`'s stream reducer and types, but has its own transport (`src/stream/SseClient.ts`) and event router (`src/stream/useChatStream.ts`).
 
-> Mobile still uses the **per-scope** stream endpoint (`GET /api/stream?scope=chat&id=…`) rather than the multiplexed connection web and CLI moved to, and subscribes only to `chat` scope — so list screens have no live lifecycle events and fall back to polling. Tracked in [docs/V2_REMAINING_WORK_AUDIT.md](../../docs/V2_REMAINING_WORK_AUDIT.md) §4.
+> Mobile uses the multiplexed stream connection (one socket, `chat` + `global` scopes). The `global` lifecycle feed needs the `read:activity` scope (in every default preset since Sept 2026); a device paired without it sees an explanatory strip with Retry while its chat streams keep working. Standalone-client overhaul status: [docs/MOBILE_STANDALONE_CLIENT_PLAN_2026-09.md](../../docs/MOBILE_STANDALONE_CLIENT_PLAN_2026-09.md) §12.
 
 ---
 

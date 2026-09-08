@@ -15,6 +15,7 @@ import { Check, RefreshCw } from 'lucide-react-native';
 import { queryKeys, type ProviderStatus } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
+import { requireStepUp } from '../../src/auth/stepUp';
 import { ProviderBrandIcon } from '../../src/components/brand/VendorIcons';
 import { Badge, Card, type Tone } from '../../src/components/ui/primitives';
 import { Button, IconButton } from '../../src/components/ui/Button';
@@ -122,7 +123,14 @@ export default function ProvidersScreen(): React.ReactElement {
                     size="sm"
                     disabled={!provider.ready}
                     loading={setDefault.isPending && setDefault.variables === provider.type}
-                    onPress={() => setDefault.mutate(provider.type)}
+                    // `admin:harnesses` — a server setting, so the first
+                    // change per session takes the local step-up like every
+                    // other admin write. A cancelled prompt is not an error.
+                    onPress={() => {
+                      void requireStepUp('Confirm changing the default AI provider').then((ok) => {
+                        if (ok) setDefault.mutate(provider.type);
+                      });
+                    }}
                   />
                 )}
               </Card>

@@ -9,17 +9,22 @@
 // tap-target conventions) with the danger styling `ApprovalGate` uses for
 // its reject action: Allow and Deny must never look alike, because a
 // mis-tap here lets an agent loose on a tool it was not cleared to use.
+//
+// Deny is two-step: the first tap reveals an optional reason (the agent
+// reads it — "use the test database instead" changes what it does next),
+// and a second tap sends. Allow stays one tap.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
-import { Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Text, TextInput, View } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { ShieldAlert } from 'lucide-react-native';
 import type { StreamBlock } from '@generatorai/client-core';
 
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/primitives';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useCardEntering } from '../common/enterMotion';
 
 type PermissionBlock = Extract<StreamBlock, { type: 'permission' }>;
 
@@ -28,18 +33,22 @@ export function PermissionCard({
   onDecide,
 }: {
   block: PermissionBlock;
-  onDecide: (behavior: 'allow' | 'deny') => Promise<void> | void;
+  onDecide: (behavior: 'allow' | 'deny', message?: string) => Promise<void> | void;
 }): React.ReactElement {
   const { colors } = useTheme();
+  const entering = useCardEntering();
   // A single in-flight flag rather than per-button, so a tap on Allow while
   // Deny is still resolving (or vice versa) cannot double-submit either one.
   const [pending, setPending] = useState<'allow' | 'deny' | null>(null);
+  const [denying, setDenying] = useState(false);
+  const [reason, setReason] = useState('');
 
   const decide = async (behavior: 'allow' | 'deny'): Promise<void> => {
     if (pending) return;
     setPending(behavior);
     try {
-      await onDecide(behavior);
+      const message = behavior === 'deny' ? reason.trim() : '';
+      await onDecide(behavior, message ? message : undefined);
     } finally {
       setPending(null);
     }
@@ -47,7 +56,7 @@ export function PermissionCard({
 
   return (
     <Animated.View
-      entering={FadeInDown.springify().damping(18)}
+      entering={entering}
       className="mx-3 mb-2 gap-3 rounded-3xl border border-danger bg-card p-3.5"
     >
       <View className="flex-row items-center gap-2.5">
@@ -75,26 +84,58 @@ export function PermissionCard({
         </View>
       </View>
 
-      <View className="flex-row gap-2">
-        <Button
-          label="Deny"
-          variant="danger"
-          size="lg"
-          full
-          loading={pending === 'deny'}
-          disabled={pending !== null}
-          onPress={() => void decide('deny')}
-        />
-        <Button
-          label="Allow"
-          variant="primary"
-          size="lg"
-          full
-          loading={pending === 'allow'}
-          disabled={pending !== null}
-          onPress={() => void decide('allow')}
-        />
-      </View>
+      {denying ? (
+        <Animated.View entering={FadeIn.duration(120)} className="gap-2">
+          <TextInput
+            accessibilityLabel="Reason for denying (optional)"
+            multiline
+            autoFocus
+            value={reason}
+            onChangeText={setReason}
+            placeholder="Tell the agent why, or what to do instead (optional)"
+            placeholderTextColor={colors['muted-foreground']}
+            className="max-h-28 min-h-11 rounded-2xl border border-border bg-raised px-3 py-2.5 text-sm text-foreground"
+          />
+          <View className="flex-row gap-2">
+            <Button
+              label="Back"
+              variant="secondary"
+              size="lg"
+              disabled={pending !== null}
+              onPress={() => setDenying(false)}
+            />
+            <Button
+              label={reason.trim() ? 'Deny with reason' : 'Deny'}
+              variant="danger"
+              size="lg"
+              grow
+              loading={pending === 'deny'}
+              disabled={pending !== null}
+              onPress={() => void decide('deny')}
+            />
+          </View>
+        </Animated.View>
+      ) : (
+        <View className="flex-row gap-2">
+          <Button
+            label="Deny"
+            variant="danger"
+            size="lg"
+            grow
+            disabled={pending !== null}
+            onPress={() => setDenying(true)}
+          />
+          <Button
+            label="Allow"
+            variant="primary"
+            size="lg"
+            grow
+            loading={pending === 'allow'}
+            disabled={pending !== null}
+            onPress={() => void decide('allow')}
+          />
+        </View>
+      )}
     </Animated.View>
   );
 }

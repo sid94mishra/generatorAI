@@ -13,6 +13,10 @@
     "./node": {
       "import": "./src/node.ts",
       "types": "./src/node.ts"
+    },
+    "./client": {
+      "import": "./src/client.ts",
+      "types": "./src/client.ts"
     }
   },
   "files": [

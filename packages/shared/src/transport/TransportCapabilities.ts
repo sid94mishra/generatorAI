@@ -284,7 +284,8 @@ export const CLI_CAPABILITIES: TransportCapabilitySet = {
  *     `<Image>` with back/forward/reload/address-bar controls, mounted at
  *     `Workbench.tsx:154`. Only pointer input is not forwarded.
  *   - `fileAttachment` was `enforced(true)` while mobile could not attach a
- *     file by any route — see the comment on the field below.
+ *     file by any route, then `enforced(false)` until Composer v2 wired the
+ *     pickers and the multipart send — see the comment on the field below.
  */
 export const MOBILE_CAPABILITIES: TransportCapabilitySet = {
   sse: e(true),
@@ -297,24 +298,18 @@ export const MOBILE_CAPABILITIES: TransportCapabilitySet = {
   computerPanelRendering: a(false),
   terminalRendering: a(true),  // src/terminal/TerminalView.tsx (xterm in a WebView)
   /**
-   * Mobile cannot attach a file, and this is the field that said it could.
+   * Mobile attaches files through Composer v2: `app/chats/[id].tsx` spreads
+   * `useComposerController().props`, which supplies `onAttachFrom` (photo /
+   * camera / file / clipboard pickers via `expo-image-picker`,
+   * `expo-file-system`'s `File.pickFileAsync` and `expo-clipboard`), and its `onSend` posts
+   * through `chats.sendWithAttachments` (multipart) with the chips' bytes.
    *
-   * `Composer` renders an "Add attachment" button and takes an OPTIONAL
-   * `onAttach`; `app/chats/[id].tsx` passes `attachAvailable`,
-   * `attachDisabledReason` and a hardcoded `attachments={[]}` — and no
-   * handler. So the button fell through to `props.onAttach ?? (() => {})`
-   * and did nothing when tapped, on a surface whose ledger row read
-   * `enforced(true)`.
-   *
-   * Corrected rather than wired: `apps/mobile` has no picker dependency at
-   * all (no `expo-document-picker`, no `expo-image-picker`), and the send
-   * path carries no files, so "wiring it up" means a new native module and a
-   * new upload path — a feature, not a fix. Declaring the truth is the fix.
-   * `enforced` because there is now a mobile-side probe that fails if either
-   * half of this changes without the other:
+   * This row was `e(false)` while the screen passed a hardcoded
+   * `attachments={[]}` and no handler. `enforced` because a mobile-side probe
+   * fails if either half changes without the other:
    * `apps/mobile/src/__tests__/surfaceCapabilities.test.ts`.
    */
-  fileAttachment: e(false),
+  fileAttachment: e(true),
   keyboardShortcuts: a(false),
   hitlGates: a(true),          // QuestionCard/PlanCard in app/chats/[id].tsx
   highLatencyBlockDelivery: e(true),

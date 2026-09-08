@@ -16,7 +16,10 @@ import type {
   DeviceCredentialRecord,
   DevicePlatform,
   DeviceRecord,
+  DeviceScopeRequestRecord,
+  DeviceScopeRequestStatus,
   IDeviceRepository,
+  IDeviceScopeRequestRepository,
   INonceStore,
   IPairingGrantRepository,
   IRelayRevokeOutboxRepository,
@@ -803,5 +806,121 @@ export class SqliteRelayRevokeOutboxRepository implements IRelayRevokeOutboxRepo
   /** Only called after the relay ACKs — otherwise the revocation is retried. */
   async remove(id: string): Promise<void> {
     this.sqlite.prepare(`DELETE FROM relay_revoke_outbox WHERE id = ?`).run(id);
+  }
+}
+
+// ── Device scope requests (migration v52) ────────────────────────
+
+interface ScopeRequestRow {
+  id: string;
+  device_id: string;
+  requested_scopes: string;
+  reason: string | null;
+  status: string;
+  created_at: number;
+  resolved_at: number | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+  granted_scopes: string | null;
+}
+
+function toScopeRequest(row: ScopeRequestRow): DeviceScopeRequestRecord {
+  return {
+    requestId: row.id,
+    deviceId: row.device_id,
+    requestedScopes: parseScopes(row.requested_scopes),
+    reason: row.reason,
+    status: row.status as DeviceScopeRequestStatus,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at,
+    resolvedBy: row.resolved_by,
+    resolutionNote: row.resolution_note,
+    grantedScopes: row.granted_scopes == null ? null : parseScopes(row.granted_scopes),
+  };
+}
+
+export class SqliteDeviceScopeRequestRepository implements IDeviceScopeRequestRepository {
+  private readonly sqlite: BetterSqlite3.Database;
+
+  constructor(db: AppDatabase) {
+    this.sqlite = sqliteHandle(db);
+  }
+
+  /**
+   * Throws on a second pending request for the same device — the partial
+   * unique index is the authority, not a read-then-write in the service.
+   */
+  async create(record: DeviceScopeRequestRecord): Promise<void> {
+    this.sqlite
+      .prepare(
+        `INSERT INTO device_scope_requests (
+           id, device_id, requested_scopes, reason, status, created_at,
+           resolved_at, resolved_by, resolution_note, granted_scopes
+         ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        record.requestId,
+        record.deviceId,
+        JSON.stringify(record.requestedScopes),
+        record.reason,
+        record.status,
+        record.createdAt,
+        record.resolvedAt,
+        record.resolvedBy,
+        record.resolutionNote,
+        record.grantedScopes == null ? null : JSON.stringify(record.grantedScopes),
+      );
+  }
+
+  async get(requestId: string): Promise<DeviceScopeRequestRecord | null> {
+    const row = this.sqlite
+      .prepare('SELECT * FROM device_scope_requests WHERE id = ?')
+      .get(requestId) as ScopeRequestRow | undefined;
+    return row ? toScopeRequest(row) : null;
+  }
+
+  async findPendingByDevice(deviceId: string): Promise<DeviceScopeRequestRecord | null> {
+    const row = this.sqlite
+      .prepare(`SELECT * FROM device_scope_requests WHERE device_id = ? AND status = 'pending'`)
+      .get(deviceId) as ScopeRequestRow | undefined;
+    return row ? toScopeRequest(row) : null;
+  }
+
+  async listPending(): Promise<DeviceScopeRequestRecord[]> {
+    const rows = this.sqlite
+      .prepare(`SELECT * FROM device_scope_requests WHERE status = 'pending' ORDER BY created_at ASC`)
+      .all() as ScopeRequestRow[];
+    return rows.map(toScopeRequest);
+  }
+
+  async listByDevice(deviceId: string, limit = 20): Promise<DeviceScopeRequestRecord[]> {
+    const rows = this.sqlite
+      .prepare(
+        'SELECT * FROM device_scope_requests WHERE device_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+      )
+      .all(deviceId, Math.max(1, Math.min(limit, 200))) as ScopeRequestRow[];
+    return rows.map(toScopeRequest);
+  }
+
+  /** Compare-and-set on `status = 'pending'` — see the port for why. */
+  async resolve(
+    requestId: string,
+    patch: Parameters<IDeviceScopeRequestRepository['resolve']>[1],
+  ): Promise<boolean> {
+    const result = this.sqlite
+      .prepare(
+        `UPDATE device_scope_requests
+            SET status = ?, resolved_at = ?, resolved_by = ?, resolution_note = ?, granted_scopes = ?
+          WHERE id = ? AND status = 'pending'`,
+      )
+      .run(
+        patch.status,
+        patch.resolvedAt,
+        patch.resolvedBy,
+        patch.resolutionNote,
+        patch.grantedScopes == null ? null : JSON.stringify(patch.grantedScopes),
+        requestId,
+      );
+    return result.changes > 0;
   }
 }

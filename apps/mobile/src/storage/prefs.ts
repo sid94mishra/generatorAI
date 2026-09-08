@@ -26,17 +26,32 @@ export const prefs = {
   setBoolean(key: string, value: boolean): void {
     storage.set(key, value);
   },
+  getNumber(key: string, fallback: number): number {
+    const value = storage.getNumber(key);
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  },
+  setNumber(key: string, value: number): void {
+    storage.set(key, value);
+  },
   delete(key: string): void {
     storage.remove(key);
   },
 };
 
 export const PREF_KEYS = {
+  /** App lock: require biometrics / passcode on cold start and after `lockGraceSeconds`. */
   biometricLock: 'generatorai.biometric-lock',
+  /** Seconds in the background before the app lock re-arms. `0` = immediately. */
+  lockGraceSeconds: 'generatorai.lock-grace-seconds',
   localOnly: 'generatorai.local-only',
+  /** Last visited route, restored on a cold start within `LAST_ROUTE_TTL_MS`. */
   lastRoute: 'generatorai.last-route',
+  /** Epoch ms of the `lastRoute` write — the TTL is measured from here. */
+  lastRouteAt: 'generatorai.last-route-at',
   motion: 'generatorai.motion',
   haptics: 'generatorai.haptics',
+  /** Whether `<Screen>`'s large title collapses on scroll. */
+  largeTitleCollapse: 'generatorai.large-title-collapse',
   /** Locally disabled skills — mirrors the web's `catalogPrefsStore`. */
   disabledSkills: 'generatorai.disabled-skills',
 } as const;

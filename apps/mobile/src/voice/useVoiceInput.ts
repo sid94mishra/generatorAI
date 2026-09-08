@@ -27,6 +27,14 @@
 // unconverted does not error — it transcribes to nothing — so every buffer
 // goes through `toMono16k` (see pcm.ts) before it is sent.
 //
+// AMPLITUDE (D16)
+// ---------------
+// Loudness used to be React state, set once per audio buffer (~10×/s), which
+// re-rendered the whole chat screen for a number nothing displayed. It is
+// now a Reanimated shared value — written from `onBuffer`, read on the UI
+// thread by the waveform pill — plus an 18-slot ring of recent amplitudes
+// for the scrolling waveform. Neither touches React.
+//
 // Everything still runs on the user's own server: audio goes to the loopback
 // / paired host, Parakeet or Whisper transcribes on-device, no cloud.
 // ────────────────────────────────────────────────────────────────
@@ -34,9 +42,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { AudioModule, setAudioModeAsync, useAudioStream } from 'expo-audio';
+import { useSharedValue, type SharedValue } from 'react-native-reanimated';
 
 import { useAuth } from '../auth/AuthProvider';
 import { TARGET_SAMPLE_RATE, rms, toMono16k } from './pcm';
+import { WAVEFORM_BARS } from './dictationCommit';
 
 /**
  * Mirrors the web hook's states (useSpeechToText.ts) so the two composers
@@ -60,8 +70,12 @@ export interface VoiceInput {
   error: string | null;
   /** True when the platform can capture audio at all. */
   supported: boolean;
-  /** 0..1 loudness, for the recording indicator. */
-  amplitude: number;
+  /** 0..1 loudness, updated per buffer on the UI thread — never React state. */
+  amplitude: SharedValue<number>;
+  /** The last `WAVEFORM_BARS` amplitudes, oldest first, for the waveform pill. */
+  waveform: SharedValue<number[]>;
+  /** Epoch ms the current session started listening, or null. */
+  startedAt: number | null;
   start: () => Promise<void>;
   /** Suspend audio without tearing the stream or socket down (Part C.3). */
   pause: () => void;
@@ -71,11 +85,15 @@ export interface VoiceInput {
   cancel: () => void;
 }
 
+const EMPTY_WAVEFORM: number[] = Array.from({ length: WAVEFORM_BARS }, () => 0);
+
 export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
   const { socketUrl } = useAuth();
   const [status, setStatus] = useState<VoiceStatus>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [amplitude, setAmplitude] = useState(0);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const amplitude = useSharedValue(0);
+  const waveform = useSharedValue<number[]>(EMPTY_WAVEFORM);
 
   // Callbacks are read through a ref so a caller that passes inline closures
   // (every caller) doesn't re-create the audio stream on every render.
@@ -89,6 +107,11 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
   const cancelledRef = useRef(false);
 
   const supported = Platform.OS === 'ios' || Platform.OS === 'android';
+
+  const resetLevels = useCallback(() => {
+    amplitude.value = 0;
+    waveform.value = EMPTY_WAVEFORM;
+  }, [amplitude, waveform]);
 
   /**
    * Native capture. Declared at hook level (not inside start()) because
@@ -105,7 +128,13 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
       if (!socket || socket.readyState !== 1) return;
       const pcm = toMono16k(buffer.data, buffer.sampleRate, buffer.channels);
       if (pcm.length === 0) return;
-      setAmplitude(rms(pcm));
+      // Loudness lands on the shared values only. RMS of speech sits around
+      // 0.05–0.3, so it is lifted onto a 0..1 display range here once,
+      // rather than in every worklet that reads it.
+      const level = Math.min(1, rms(pcm) * 4);
+      amplitude.value = level;
+      const prev = waveform.value;
+      waveform.value = [...prev.slice(1), level];
       try {
         socket.send(pcm.buffer as ArrayBuffer);
       } catch {
@@ -130,8 +159,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
         /* already closing */
       }
     }
-    setAmplitude(0);
-  }, [stream]);
+    resetLevels();
+    setStartedAt(null);
+  }, [stream, resetLevels]);
 
   const fail = useCallback(
     (message: string) => {
@@ -186,6 +216,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
             // listening — same rule as the web hook.
             sendingRef.current = true;
             setStatus('listening');
+            setStartedAt(Date.now());
             void stream.start().catch((err: unknown) => fail((err as Error).message));
             break;
           case 'interim':
@@ -235,10 +266,10 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
     // Stop sending immediately rather than waiting for the ack: the point of
     // pausing is that words spoken while the user is editing must not land.
     sendingRef.current = false;
-    setAmplitude(0);
+    amplitude.value = 0;
     const socket = socketRef.current;
     if (socket?.readyState === 1) socket.send(JSON.stringify({ t: 'pause' }));
-  }, [status]);
+  }, [status, amplitude]);
 
   const resume = useCallback(() => {
     if (status !== 'paused') return;
@@ -257,7 +288,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
     } catch {
       /* not streaming */
     }
-    setAmplitude(0);
+    resetLevels();
     setStatus('transcribing');
     const socket = socketRef.current;
     if (socket?.readyState === 1) socket.send(JSON.stringify({ t: 'stop' }));
@@ -265,7 +296,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
       teardown();
       setStatus('idle');
     }
-  }, [status, stream, teardown]);
+  }, [status, stream, teardown, resetLevels]);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
@@ -278,5 +309,17 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
   // A screen that unmounts mid-dictation must not leave the microphone hot.
   useEffect(() => () => teardown(), [teardown]);
 
-  return { status, error, supported, amplitude, start, pause, resume, stop, cancel };
+  return {
+    status,
+    error,
+    supported,
+    amplitude,
+    waveform,
+    startedAt,
+    start,
+    pause,
+    resume,
+    stop,
+    cancel,
+  };
 }
