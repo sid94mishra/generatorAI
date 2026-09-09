@@ -144,6 +144,19 @@ macOS is built per-architecture for the same reason, rather than `universal`: a
 universal app has to carry both slices of every native module, and the server
 runtime is staged for one at a time.
 
+> [!IMPORTANT]
+> **Releases ship Apple Silicon only.** Intel would mean a second build leg on a
+> runner GitHub retires in August 2027 — the last x86-64 macOS image it offers —
+> and anyone on a Mac old enough to be Intel is an unlikely host for local AI
+> agents. The release therefore pins its Mac runner to a fixed macOS version
+> (not `macos-latest`, which moved to a new release in June 2026 and will move
+> again) and passes `--arm64` explicitly. The architecture is named on the
+> download page and in the installer filename, so an Intel user does not
+> download something that installs cleanly and then fails on first launch.
+>
+> Building `--x64` locally still works, exactly as described above. Nothing
+> stops you shipping Intel later; it is one matrix entry.
+
 ---
 
 ## 6. Update channel
@@ -274,26 +287,52 @@ and rebuild to see an update offered, and check `app-update.yml` inside
 
 ## 11. Publishing a release
 
-Releases are tag-driven; see [release.yml](../workflows/release.yml).
+A release ships more than the desktop app: the server container, the
+command-line tool and the Android app all come out of the same run. See
+[release.yml](../workflows/release.yml).
+
+### Two ways to start one
+
+**Push a tag.** The tag carries both the version and the channel.
 
 ```bash
-git tag v0.0.1-alpha.2
-git push origin v0.0.1-alpha.2
+git tag v0.1.0-alpha.1
+git push origin v0.1.0-alpha.1
 ```
 
-The workflow then:
+**Or press the button.** Actions › Release › type the version, pick a channel,
+Run. The tag is created by the workflow *afterwards*, once everything has
+passed, so a tag can never point at a build that failed.
 
-1. **prepare** — resolves channel, tag and prerelease flag once, and rejects a
-   malformed tag before three platform builds are spent on it.
-2. **preflight** — build, lint, typecheck, test and the security invariants. A
-   tag cannot publish an untested build.
-3. **build** (3-OS matrix) — packages with `--publish never`, then verifies the
-   manifest, then uploads artifacts.
-4. **release** — downloads every platform's artifacts and creates one GitHub
-   release.
+Both routes meet at the same `prepare` job and produce identical output.
+
+### What runs
+
+1. **prepare** — works out the version (from the tag, or from what you typed)
+   and the channel, and rejects a malformed version before any build is spent
+   on it. It also refuses to publish a pre-release version on the `latest`
+   channel.
+2. **preflight** — build, `pnpm lint`, typecheck and test. Note `pnpm lint`,
+   not `turbo lint`: the root script runs five further gates (security,
+   durability, doc drift, sync-IO budget, design tokens) that the task runner
+   alone skips.
+3. **desktop** (Windows, Linux, macOS) — packages with `--publish never`, then
+   verifies the update manifest, then uploads artifacts. macOS is **Apple
+   Silicon only**; see §5.
+4. **android** — `expo prebuild` then Gradle, on Linux. No Apple hardware and
+   no paid build service. Allowed to fail without holding back the rest.
+5. **container** — builds `docker/server.Dockerfile` and pushes it to the
+   GitHub container registry under the version, the channel and the commit.
+6. **cli** — bundles, packs, installs the tarball into an empty directory and
+   runs it, and only then publishes to npm under the matching channel tag.
+   Publishing is skipped with a notice if no npm credentials are configured.
+7. **publish** — collects every artifact and creates one GitHub release.
 
 Builds never publish directly. Three matrix legs racing to create the same
 release is a documented way to end up with duplicates or a half-populated
 release, so artifacts are collected and published once.
 
-`workflow_dispatch` is also available if you need to pick the channel manually.
+> [!NOTE]
+> While the macOS build is unsigned it produces **no update manifest**, and that
+> is correct — see §8. `verify:release` recognises that one case and passes;
+> every other "no manifest" is still a failure.

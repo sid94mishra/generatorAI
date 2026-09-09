@@ -513,3 +513,39 @@ jobs:
       - name: Stop it
         if: always()
         run: docker rm -f gai-ci 2>/dev/null || true
+
+  # ── Performance benchmarks ───────────────────────────────────────────────
+  # These assert microseconds per event, so what they actually measure is how
+  # busy the machine is. Inside `turbo test` — every package's suite running in
+  # parallel — they measured 2,806 us against a 2,000 us budget and the batched
+  # case timed out, on a machine where each passes comfortably alone. A shared
+  # runner is busier still.
+  #
+  # So they are skipped by default and run here, alone, and `continue-on-error`
+  # like the load test above: a number that moved is worth seeing, and is not
+  # worth failing someone's pull request over. Read the summary, don't gate on
+  # it.
+  benchmarks:
+    name: Benchmarks (reporting only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo build --filter=@generatorai/db...
+
+      - name: Per-token persistence cost
+        env:
+          GENERATORAI_RUN_BENCHMARKS: '1'
+        run: pnpm --filter @generatorai/db exec vitest run __benchmarks__
