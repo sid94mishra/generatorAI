@@ -14,7 +14,7 @@ import { loadSettings } from './config';
 import { getServerManager } from './server-manager';
 import { resolveTarget } from './serverConnections';
 import { getWindowManager } from './window-manager';
-import { getNativeBrowserHost, nativeBrowserEnabled } from './browser-host';
+import { nativeBrowserEnabled } from './browser-host';
 import { disposeComputerHost, initComputerHost } from './computer-host-registry';
 import { setIpcToken } from './cdp/ipc-token';
 import { registerIpc } from './ipc';
@@ -55,6 +55,31 @@ if (!app.requestSingleInstanceLock()) {
     setIpcToken(ipcToken);
   }
   main();
+}
+
+/**
+ * Resolve `work`, or give up after `ms` and carry on.
+ *
+ * Deliberately resolves rather than rejects on the deadline: the caller's job
+ * is to finish quitting either way, and a rejection there would only travel to
+ * a `catch` that logs and continues. The timer is unref'd so it can never be
+ * the reason the process stays alive — which would be a fine irony in a
+ * shutdown path.
+ */
+async function withDeadline(work: Promise<void>, ms: number, message: string): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      log.warn(message);
+      resolve();
+    }, ms);
+    timer.unref?.();
+  });
+  try {
+    await Promise.race([work, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function main(): void {
@@ -105,15 +130,43 @@ function main(): void {
     getWindowManager().setQuitting(true);
     log.info('Quitting — shutting down embedded server');
     try {
-      // Before the server: the driver holds OS-level input grants, and
-      // leaving it running past the app that is responsible for it is exactly
-      // the orphaned-automation case the TCC model is meant to prevent.
-      await disposeComputerHost();
-      if (mode === 'standalone') await getServerManager().stop();
+      // Bounded, because `app.exit(0)` below is the only thing that actually
+      // ends the process once `preventDefault()` has been called. Anything that
+      // can hang in here — a server that will not drain, a driver that will not
+      // release — takes the whole quit with it, and the user is left with a
+      // window that closed and an application that did not, still holding the
+      // database and the port. That happened: the packaged app hung here
+      // indefinitely and had to be killed from the task manager.
+      //
+      // Graceful shutdown gets a generous window and then loses. `stop()` runs
+      // its own 15 s drain-then-force sequence inside this, so reaching the
+      // deadline means something below it is genuinely stuck, and the honest
+      // response is to say so and go.
+      await withDeadline(
+        (async () => {
+          // Before the server: the driver holds OS-level input grants, and
+          // leaving it running past the app that is responsible for it is
+          // exactly the orphaned-automation case the TCC model is meant to
+          // prevent.
+          await disposeComputerHost();
+          if (mode === 'standalone') await getServerManager().stop();
+        })(),
+        20_000,
+        'shutdown did not finish in 20s — exiting anyway',
+      );
     } catch (e) {
       log.warn('Error stopping server during quit', e);
     } finally {
-      destroyTray();
+      // Logged, not silent. This is the last stretch of a path that has already
+      // hung once in a shipped build, and when it hangs the only evidence is
+      // which of these lines was the last one written.
+      log.info('Shutdown complete — destroying tray');
+      try {
+        destroyTray();
+      } catch (e) {
+        log.warn('Error destroying tray during quit', e);
+      }
+      log.info('Exiting');
       app.exit(0);
     }
   });
@@ -194,6 +247,15 @@ async function onReady(): Promise<void> {
       await sm.start();
       appUrl = sm.url;
     } catch (err) {
+      // Quitting during startup is not a failure. Closing the app while the
+      // server is still coming up stops the child, which makes this `start()`
+      // reject — reporting that to the user would be blaming them for their own
+      // decision, and the window it opens is what used to stop the app exiting
+      // at all (see `showError`, which now refuses regardless).
+      if (isQuitting) {
+        log.info('Server start abandoned because the app is quitting');
+        return;
+      }
       log.error('Embedded server failed to start', err);
       wm.showError(
         `The GeneratorAI server failed to start.\n\n${err instanceof Error ? err.message : String(err)}`,
@@ -315,4 +377,4 @@ function showAbout(): void {
 }
 
 // Referenced to keep the linter aware these are intentionally part of lifecycle.
-void isQuitting;
+// `isQuitting` is read by the startup-failure path in `onReady`.

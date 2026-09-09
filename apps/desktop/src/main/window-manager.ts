@@ -272,6 +272,22 @@ export class WindowManager {
   }
 
   showError(message: string): void {
+    // Never during shutdown. Creating and showing a window while the app is
+    // quitting prevents it from ever exiting: `app.exit(0)` is reached and
+    // logged, and the process stays alive anyway, holding the database and the
+    // listening port until it is killed from the task manager.
+    //
+    // It is easy to reach. Close the app while the embedded server is still
+    // starting — a perfectly ordinary thing to do, since startup takes several
+    // seconds — and stopping the server makes the in-flight `start()` reject,
+    // whose handler reports the failure by opening a window. The server did not
+    // really fail; we shut it down. Every caller of this is some flavour of
+    // "something went wrong", and once the app is on its way out, none of them
+    // has anything useful to say to a user who is already leaving.
+    if (this.quitting) {
+      log.info('Suppressed error window during shutdown', { message });
+      return;
+    }
     this.closeSplash();
     const target = this.mainWindow ?? this.createBareWindow();
     const url = `file://${path.join(RESOURCES, 'error.html')}?message=${encodeURIComponent(message)}`;

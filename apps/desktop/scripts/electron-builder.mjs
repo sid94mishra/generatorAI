@@ -18,7 +18,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -179,6 +179,57 @@ console.log(
   `[electron-builder] ${platform}/${stage.arch} on the '${channel}' channel` +
     `${signing.signed ? ' (signed)' : ' (unsigned)'}`,
 );
+
+// ── Start from an empty output directory ─────────────────────────
+//
+// Artifact names carry the version, so a rebuild at a different version adds
+// files rather than replacing them, and `release/` accumulates every build the
+// machine has ever done. That is not just untidy:
+//
+//   - `verify:release` re-hashes whatever manifests it finds against whatever
+//     artifacts it finds. With a stale `alpha.yml` from a previous version
+//     sitting beside its equally stale installer, it passes — having verified
+//     nothing at all about the build that just ran. Observed exactly that: a
+//     manifest five weeks old was "consistent with its artifacts" while the
+//     installers built moments earlier went unchecked.
+//   - The release workflow uploads `release/*.exe`, `*.dmg` and friends by
+//     glob. A dirty directory would attach two versions to one release.
+//
+// CI never sees it — a fresh checkout has nothing to accumulate — which is
+// exactly why it survives locally, where the confusion actually happens.
+// Only the DISTRIBUTABLES and the manifests. `win-unpacked` (and its siblings)
+// are staging directories electron-builder overwrites in place, and on Windows
+// they are exactly what still holds a lock after the app has been run from
+// them — removing the whole directory failed with EPERM for that reason. The
+// files that go stale are the ones whose names carry a version, so those are
+// the ones to remove.
+//
+// Best-effort on purpose. A clean that cannot finish must not fail a build:
+// the actual guarantee lives in `verify:release`, which asserts the manifest
+// describes THIS version, so a leftover cannot quietly pass as current even if
+// it survives. This step keeps the directory honest; the verifier is what makes
+// it safe.
+const releaseOutputDir = path.join(desktopRoot, 'release');
+const STALE = /\.(exe|dmg|zip|AppImage|deb|rpm|blockmap|yml)$/;
+if (existsSync(releaseOutputDir)) {
+  let removed = 0;
+  let kept = 0;
+  for (const entry of readdirSync(releaseOutputDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !STALE.test(entry.name)) continue;
+    try {
+      rmSync(path.join(releaseOutputDir, entry.name), { maxRetries: 5, retryDelay: 200 });
+      removed += 1;
+    } catch {
+      kept += 1;
+    }
+  }
+  if (removed || kept) {
+    console.log(
+      `[electron-builder] cleared ${removed} previous artifact(s) from release/` +
+        `${kept ? ` (${kept} locked, left in place — verify:release will reject any that are stale)` : ''}.`,
+    );
+  }
+}
 
 const { status } = spawnSync(
   process.execPath,

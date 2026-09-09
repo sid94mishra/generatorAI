@@ -64,8 +64,33 @@ function fail(message) {
   process.exit(1);
 }
 
-/** The version installed in the workspace, so the staged tree matches what the test run exercised. */
+/**
+ * The version installed in the workspace, so the staged tree matches what the
+ * test run exercised.
+ *
+ * `require.resolve(name + '/package.json')` is the obvious way to do this and
+ * it is a trap. Node enforces a package's `exports` map for every subpath, and
+ * a package whose map does not list `"./package.json"` makes that call throw
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED` — which is indistinguishable, from here, from
+ * the package not being installed at all.
+ *
+ * `@trycua/cua-driver` is exactly such a package, so this reported
+ * "not installed — run `pnpm install` first" about a dependency that was
+ * installed and sitting right there. It failed `prepack:dist`, which fails the
+ * desktop build, on every platform, which would have left a release with no
+ * installers at all. Nothing about it is environment-specific: it is a property
+ * of that package's manifest, so it fails identically on every CI runner.
+ *
+ * Reading the file off disk asks the question we actually mean — "is it
+ * there?" — and is unaffected by whatever the package chooses to export. The
+ * resolver is kept as a fallback for a hoisted layout where the package is not
+ * a direct child of this app's `node_modules`.
+ */
 function installedVersion(name) {
+  const direct = path.join(desktopRoot, 'node_modules', ...name.split('/'), 'package.json');
+  if (fs.existsSync(direct)) {
+    return JSON.parse(fs.readFileSync(direct, 'utf8')).version;
+  }
   try {
     return JSON.parse(fs.readFileSync(require.resolve(`${name}/package.json`), 'utf8')).version;
   } catch {
