@@ -1,0 +1,30 @@
+name: Feature or change request
+description: Suggest something new, or a change to how something works.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is alpha software under fast, breaking development. Please open this
+        **before** building anything substantial, so you do not build against
+        something that is about to be rewritten.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you have already tried or considered

@@ -1,13 +1,38 @@
 {
   "name": "@generatorai/cli",
   "version": "0.2.0",
-  "private": true,
+  "description": "Command-line client for GeneratorAI — run AI agents against your codebase from the terminal.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "generatorai": "./dist-bundle/generatorai.mjs"
   },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "developer-tools",
+    "generatorai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sid94mishra/GeneratorAI.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://github.com/sid94mishra/GeneratorAI#readme",
+  "bugs": {
+    "url": "https://github.com/sid94mishra/GeneratorAI/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "//files": "Compiled output only. Source maps are deliberately NOT published: they are 11 MB against 6 MB of code, which would nearly triple what every `npm i -g` downloads. They are still written to dist-bundle for local debugging, they just do not ship.",
   "files": [
-    "dist-bundle"
+    "dist-bundle/**/*.mjs",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

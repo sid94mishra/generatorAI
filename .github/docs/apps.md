@@ -272,7 +272,7 @@ Runtime data is isolated under the OS user‐data dir (`<userData>/data/{generat
 
 ## Host processes — `agent-host`, `pty-host`, `browser-host`, `cua-host`
 
-The V2 architecture ([ARCHITECTURE_V2_MASTER_PLAN_FINAL.md](../../docs/ARCHITECTURE_V2_MASTER_PLAN_FINAL.md) §3.2) moves anything owning a **native handle** out of the gateway process. The rule (L5) is that the gateway never holds a PTY file descriptor, a Chromium instance or a computer-use driver directly: a crash in any of them must not take the API down, and a gateway restart must not orphan them.
+The V2 architecture (V2 master plan §3.2, internal) moves anything owning a **native handle** out of the gateway process. The rule (L5) is that the gateway never holds a PTY file descriptor, a Chromium instance or a computer-use driver directly: a crash in any of them must not take the API down, and a gateway restart must not orphan them.
 
 All four share one shape:
 
@@ -288,7 +288,7 @@ All four share one shape:
 | [apps/browser-host](../../apps/browser-host/) | W15 | One Chromium instance, N contexts | *(none — deleted)* | Standalone only. `BrowserHostClient` had zero callers and covered 8 of `IBrowserBridge`'s ~30 operations; it was **deleted** rather than left exported as if it were usable |
 | [apps/cua-host](../../apps/cua-host/) | W17 | The `@trycua/cua-driver` session | *(none — deleted)* | Standalone only. **Must not be wired**: its protocol carries no app/window identity, so every action targets whatever is frontmost. `CuaHostClient` was **deleted**; see `packages/shared/src/ipc/CuaHostIpc.ts` |
 
-> Two of these are deliberately not the live path, and two are opt-in with known gaps. [docs/V2_REMAINING_WORK_AUDIT.md](../../docs/V2_REMAINING_WORK_AUDIT.md) records what is and is not finished for each — read it before turning any of them on.
+> Two of these are deliberately not the live path, and two are opt-in with known gaps. An internal remaining-work audit records what is and is not finished for each — read it before turning any of them on.
 
 Child environments are built from an **allowlist** (`packages/shared/src/config/childEnv.ts`), never by cloning `process.env`. A host that spawns a shell — `pty-host` — runs model-authored commands, so inheriting the gateway's environment would hand the agent the vault key, the desktop admin token and every provider credential.
 
@@ -308,7 +308,7 @@ A small, deliberately boring process you run somewhere a GeneratorAI server and 
 | `WS /relay/data?streamId=…` | Per-stream byte pipe |
 | `GET /healthz` | Liveness + capacity |
 
-The relay is a byte pipe: it reads no application payloads. Identity and authorisation are end-to-end between the client and the GeneratorAI server (see [SECURITY_AUTH_RELAY_IMPLEMENTATION.md](../../docs/SECURITY_AUTH_RELAY_IMPLEMENTATION.md)). Frame lanes mirror `AdmissionController`'s interactive/ordinary/bulk classes so a bulk artifact transfer cannot starve interactive input.
+The relay is a byte pipe: it reads no application payloads. Identity and authorisation are end-to-end between the client and the GeneratorAI server (see the auth/relay implementation notes, internal). Frame lanes mirror `AdmissionController`'s interactive/ordinary/bulk classes so a bulk artifact transfer cannot starve interactive input.
 
 ---
 
@@ -318,7 +318,7 @@ The relay is a byte pipe: it reads no application payloads. Identity and authori
 
 A companion client for chats and run monitoring, reaching the server directly on the LAN or through `apps/relay`. It shares `packages/client-core`'s stream reducer and types, but has its own transport (`src/stream/SseClient.ts`) and event router (`src/stream/useChatStream.ts`).
 
-> Mobile uses the multiplexed stream connection (one socket, `chat` + `global` scopes). The `global` lifecycle feed needs the `read:activity` scope (in every default preset since Sept 2026); a device paired without it sees an explanatory strip with Retry while its chat streams keep working. Standalone-client overhaul status: [docs/MOBILE_STANDALONE_CLIENT_PLAN_2026-09.md](../../docs/MOBILE_STANDALONE_CLIENT_PLAN_2026-09.md) §12.
+> Mobile uses the multiplexed stream connection (one socket, `chat` + `global` scopes). The `global` lifecycle feed needs the `read:activity` scope (in every default preset since Sept 2026); a device paired without it sees an explanatory strip with Retry while its chat streams keep working. Standalone-client overhaul status is tracked internally (mobile standalone plan §12).
 
 ---
 

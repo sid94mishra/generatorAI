@@ -1891,7 +1891,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // Settings -> Audio. The ENVIRONMENT still wins: an operator who pinned an
   // engine for a deployment must not be overridden from a UI, which is why
   // the env var is consulted first and the stored choice only fills the gap.
-  const audioPrefs = readAudioPreferences(path.dirname(resolve(config.dbPath)));
+  const audioPrefs = await readAudioPreferences(path.dirname(resolve(config.dbPath)));
   const sttEngineId = sttDisabled
     ? 'disabled'
     : resolveSttEngineId(process.env['GENERATORAI_STT_ENGINE'] ?? audioPrefs.sttEngine, logger);

@@ -1,27 +1,45 @@
 name: Release
 
-# Tag-driven. The tag decides both the version and the update channel:
+# ────────────────────────────────────────────────────────────────
+# Two ways in, one way out.
 #
-#   v0.0.1-alpha.3  → alpha.yml   (GitHub pre-release)
-#   v0.1.0-beta.1   → beta.yml    (GitHub pre-release)
-#   v1.0.0          → latest.yml  (full release)
+#   Route A (automatic) — push a version tag:
+#       git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1
 #
-# The channel split is what stops someone on the stable channel being offered
-# an alpha build: electron-updater only reads the manifest for its own channel.
-# `alpha` and `beta` are deliberate choices — electron-updater's GitHub
-# provider hardcodes those two names when deciding whether a pre-release is a
-# valid upgrade, so a custom channel ("nightly", say) would leave testers
-# stranded with no path back to stable.
+#   Route B (manual) — Actions › Release › type the version, pick a channel.
+#       The tag is created by this workflow AFTER everything passes, so a tag
+#       can never point at a build that failed.
 #
-# Builds never publish. Each platform emits artifacts and a single release job
-# assembles them: three matrix legs racing to create the same GitHub release is
-# a documented way to end up with duplicates or a half-populated release.
+# Route B used to be listed but could not run: the version was read from
+# `GITHUB_REF_NAME`, which on a manual start is the BRANCH name ("main"), so
+# the job died on "'main' is not a valid release tag". There was no input to
+# say otherwise. The `version` input below is that fix.
+#
+# The tag decides the channel, and the channel decides who is offered the
+# build:
+#
+#   v0.1.0-alpha.1  → alpha.yml   (GitHub pre-release, npm/image tag `alpha`)
+#   v0.2.0-beta.1   → beta.yml    (GitHub pre-release, npm/image tag `beta`)
+#   v1.0.0          → latest.yml  (full release, npm/image tag `latest`)
+#
+# `alpha` and `beta` are not free-form: electron-updater's GitHub provider
+# hardcodes those two names when deciding whether a pre-release is a valid
+# upgrade, so a custom channel would strand testers with no route to stable.
+#
+# Builds never publish. Each platform emits artifacts and a single job
+# assembles them — three matrix legs racing to create the same GitHub release
+# is a documented way to end up with duplicates or a half-populated release.
+# ────────────────────────────────────────────────────────────────
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
+      version:
+        description: 'Version to release, without the leading v (e.g. 0.1.0-alpha.1)'
+        required: true
+        type: string
       channel:
         description: 'Update channel to publish to'
         required: true
@@ -29,8 +47,13 @@ on:
         type: choice
         options: [alpha, beta, latest]
 
+# Read-only by default; the jobs that need more ask for it themselves.
 permissions:
   contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   # ── Resolve the release identity once ────────────────────────────────────
@@ -39,41 +62,59 @@ jobs:
   prepare:
     name: Prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       channel: ${{ steps.meta.outputs.channel }}
       tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       ref: ${{ github.sha }}
     steps:
       - id: meta
         shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
 
-          tag="${GITHUB_REF_NAME}"
+          # THE one place the two routes differ. A tag carries the version in
+          # its name; a manual run carries it in an input.
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            channel="${{ github.event.inputs.channel }}"
+            version="${INPUT_VERSION#v}"
+            channel="${INPUT_CHANNEL}"
           else
-            case "$tag" in
+            version="${GITHUB_REF_NAME#v}"
+            case "$version" in
               *-alpha*) channel=alpha  ;;
               *-beta*)  channel=beta   ;;
               *)        channel=latest ;;
             esac
           fi
+          tag="v${version}"
 
-          # Reject a malformed tag before three platform builds and a public
-          # release get spent on it.
-          version="${tag#v}"
+          # Reject a malformed version before four platform builds and a
+          # public release get spent on it.
           if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::'$tag' is not a valid release tag (expected vMAJOR.MINOR.PATCH[-prerelease])."
+            echo "::error::'$version' is not a valid version (expected MAJOR.MINOR.PATCH[-prerelease])."
             exit 1
           fi
+
+          # A pre-release channel must not be published as a stable version,
+          # and vice versa — otherwise electron-updater offers an alpha build
+          # to someone who never opted in.
+          case "$channel:$version" in
+            latest:*-*) echo "::error::channel 'latest' cannot publish the pre-release version '$version'."; exit 1 ;;
+            alpha:*-alpha*|beta:*-beta*|latest:*) ;;
+            *) echo "::warning::channel '$channel' does not match version '$version'; continuing as instructed." ;;
+          esac
 
           if [ "$channel" = latest ]; then prerelease=false; else prerelease=true; fi
 
           {
             echo "channel=$channel"
             echo "tag=$tag"
+            echo "version=$version"
             echo "prerelease=$prerelease"
           } >> "$GITHUB_OUTPUT"
 
@@ -88,17 +129,17 @@ jobs:
     name: Preflight
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: 'pnpm'
@@ -106,45 +147,89 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm turbo build
-      - run: pnpm turbo lint
-      - run: pnpm turbo typecheck
-      - run: pnpm turbo test
-      - run: pnpm run check:security
 
-  # ── Build installers ─────────────────────────────────────────────────────
-  build:
-    name: Build (${{ matrix.os }})
+      # `pnpm lint`, NOT `pnpm turbo lint`. The root script is
+      # `turbo lint && check:security && check:durability && check:docs &&
+      # check:syncio && check:tokens`. Calling the turbo task directly runs
+      # each package's own eslint and skips all five composite gates — which
+      # is exactly the mistake CI itself carries a comment about having fixed,
+      # while this workflow quietly kept making it on the one build that most
+      # needs them.
+      - run: pnpm lint
+
+      - run: pnpm turbo typecheck
+
+      - run: pnpm turbo test
+
+  # ── Desktop installers ───────────────────────────────────────────────────
+  desktop:
+    name: Desktop (${{ matrix.label }})
     needs: [prepare, preflight]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       # One platform failing should not discard the artifacts of the others —
       # the release job decides whether a partial set is worth shipping.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            label: linux
+            arch: x64
+          - os: windows-latest
+            label: windows
+            arch: x64
+          # Pinned, not `macos-latest`: that label moved to a new macOS
+          # release in June 2026 and will move again, which would silently
+          # change the minimum macOS version users need. `macos-26` is Apple
+          # Silicon — the only Mac architecture we ship (see `arch` below).
+          - os: macos-26
+            label: macos-arm64
+            arch: arm64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # Pinned to the commit preflight validated, so a push landing
           # mid-release cannot change what gets built.
           ref: ${{ needs.prepare.outputs.ref }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile
 
+      # deb/rpm need local packaging tools; electron-builder downloads `fpm`
+      # itself but not these. node-pty publishes no Linux prebuild, so the
+      # C++ toolchain is not optional either.
+      - name: Install Linux packaging tools
+        if: matrix.label == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3 make g++ rpm fakeroot dpkg-dev
+
+      - name: Stamp the release version
+        shell: bash
+        run: node scripts/stamp-version.mjs "${{ needs.prepare.outputs.version }}"
+
       # Builds the web SPA, bundles the server to a single file, and installs
       # the server's runtime dependencies beside it. Everything
       # electron-builder packages.
+      #
+      # GENERATORAI_STAGE_ARCH is passed explicitly rather than inferred: the
+      # staged server runtime carries real `.node` binaries compiled for ONE
+      # cpu, and the packaging step refuses outright if the installer
+      # architecture and the staged runtime disagree.
       - name: Build distributables
+        shell: bash
+        env:
+          GENERATORAI_STAGE_ARCH: ${{ matrix.arch }}
         run: pnpm --filter @generatorai/desktop prepack:dist
 
       # `--publish never`: electron-builder still writes the channel manifest
@@ -153,26 +238,36 @@ jobs:
       #
       # Signing credentials are passed whole. The build refuses to start if a
       # group is half-set, rather than quietly producing an unsigned artifact.
+      # None are configured yet — Windows and macOS ship unsigned for now,
+      # which is a deliberate, documented choice (see the download section of
+      # the README).
       - name: Package
         working-directory: apps/desktop
+        shell: bash
         env:
           GENERATORAI_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          GENERATORAI_STAGE_ARCH: ${{ matrix.arch }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: pnpm run electron-builder --publish never
+        run: pnpm run electron-builder --${{ matrix.arch }}
 
       # electron-updater trusts the manifest completely, and a target that
       # overwrites another's output invalidates it without failing the build.
+      #
+      # NOTE for the Mac leg: while the build is unsigned there is deliberately
+      # NO `<channel>-mac.yml`. Squirrel.Mac rejects a signature it cannot
+      # verify, so advertising an update path that always fails is worse than
+      # advertising none. An absent Mac manifest is correct, not a failure.
       - name: Verify update manifest
         working-directory: apps/desktop
         run: pnpm run verify:release
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: installers-${{ matrix.os }}
+          name: installers-${{ matrix.label }}
           path: |
             apps/desktop/release/*.exe
             apps/desktop/release/*.dmg
@@ -186,32 +281,277 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # ── Publish one release from all three platforms' output ─────────────────
-  release:
-    name: Publish release
-    needs: [prepare, build]
+  # ── Android app ──────────────────────────────────────────────────────────
+  # Built on Linux with the SDK that ships on the runner — no Apple hardware,
+  # no paid build service, no account. `expo prebuild` is local code
+  # generation; nothing here talks to Expo's servers.
+  #
+  # `continue-on-error` for now: this is the newest leg of the release and a
+  # Gradle hiccup should not hold back four working desktop installers. The
+  # publish job includes the APK only if it arrived.
+  android:
+    name: Android app
+    needs: [prepare, preflight]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      # React Native 0.86 / Expo SDK 57 build against JDK 17.
+      # TODO(pin): first-party action, still on a moving tag. Pin to a commit
+      # sha like the four above once you can resolve one — Dependabot will
+      # keep it current either way.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm turbo build --filter=@generatorai/mobile^...
+
+      # The phone must never carry server code. This gate exists because that
+      # regression has happened before; it exports a production bundle and
+      # reads the source map.
+      - name: Bundle hygiene gate
+        working-directory: apps/mobile
+        run: pnpm run bundle:check
+
+      - name: Generate the native project
+        working-directory: apps/mobile
+        env:
+          GENERATORAI_VERSION: ${{ needs.prepare.outputs.version }}
+          EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
+        run: pnpm exec expo prebuild --platform android --no-install
+
+      # Signed with Android's standard debug key, which is what the generated
+      # project defaults to. That is installable and fine for an alpha
+      # distributed by direct download; a real upload key is only required to
+      # publish on Google Play, which is deliberately out of scope for now.
+      - name: Build the APK
+        working-directory: apps/mobile/android
+        env:
+          GENERATORAI_VERSION: ${{ needs.prepare.outputs.version }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Name it after the release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android-out
+          src=$(find apps/mobile/android/app/build/outputs/apk/release -name '*.apk' | head -n1)
+          test -n "$src" || { echo "::error::no APK was produced"; exit 1; }
+          cp "$src" "android-out/GeneratorAI-${{ needs.prepare.outputs.version }}-android.apk"
+          ls -lh android-out
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-apk
+          path: android-out/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── Server container ─────────────────────────────────────────────────────
+  container:
+    name: Server container
+    needs: [prepare, preflight]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      # Deliberately the plain Docker CLI rather than the docker/* actions.
+      # This is the workflow that holds a registry credential; every
+      # third-party action added here is another thing that could take it.
+      # Docker is preinstalled on the runner and does everything needed.
+      - name: Build and push the image
+        shell: bash
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          SHA: ${{ needs.prepare.outputs.ref }}
+        run: |
+          set -euo pipefail
+          # Image names must be lower case; GitHub account names need not be.
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/${owner}/generatorai-server"
+
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+          docker build \
+            -f docker/server.Dockerfile \
+            -t "${image}:${VERSION}" \
+            -t "${image}:${CHANNEL}" \
+            -t "${image}:sha-${SHA}" \
+            .
+
+          docker push "${image}:${VERSION}"
+          docker push "${image}:${CHANNEL}"
+          docker push "${image}:sha-${SHA}"
+
+          echo "### Server image" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "docker run -p 3100:3100 -v generatorai_data:/data ${image}:${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  # ── Command-line tool ────────────────────────────────────────────────────
+  # Packed and installed into a clean directory BEFORE it is allowed near the
+  # registry — the same sequence CI runs, which has already caught two missing
+  # dependencies and a broken file list. Publishing is skipped (loudly, not
+  # silently) until npm credentials exist, so the first release does not fail
+  # on a registry that has never been set up.
+  cli:
+    name: Command-line tool
+    needs: [prepare, preflight]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Stamp the release version
+        run: node scripts/stamp-version.mjs "${{ needs.prepare.outputs.version }}"
+
+      - run: pnpm turbo build --filter=@generatorai/cli...
+      - run: pnpm --filter @generatorai/cli run bundle
+
+      - name: Pack and smoke-test exactly what npm would install
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @generatorai/cli pack --pack-destination "$RUNNER_TEMP"
+          tgz=$(ls "$RUNNER_TEMP"/generatorai-cli-*.tgz)
+          install_dir="$RUNNER_TEMP/cli-install-smoke"
+          rm -rf "$install_dir" && mkdir -p "$install_dir"
+          cd "$install_dir"
+          npm init -y >/dev/null
+          npm install --ignore-scripts "$tgz"
+          bin="node_modules/@generatorai/cli/dist-bundle/generatorai.mjs"
+          test -f "$bin" || { echo "::error::packed tarball is missing dist-bundle/generatorai.mjs"; exit 1; }
+          node "$bin" --version
+          echo "TARBALL=$tgz" >> "$GITHUB_ENV"
+
+      - name: Publish to npm
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::notice::NPM_TOKEN is not set — skipping publish. The tarball is attached to the release instead."
+            exit 0
+          fi
+          # `--tag` keeps a pre-release off `latest`, so a plain
+          # `npm i -g @generatorai/cli` cannot pick up an alpha by accident.
+          npm publish "$TARBALL" --access public --tag "$CHANNEL"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cli-tarball
+          path: ${{ env.TARBALL }}
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── Publish one release from every platform's output ─────────────────────
+  publish:
+    name: Publish release
+    needs: [prepare, desktop, android, cli]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      # TODO(pin): first-party action on a moving tag, same as setup-java.
       - uses: actions/download-artifact@v4
         with:
           pattern: installers-*
           merge-multiple: true
           path: release-assets
 
+      # The APK leg is allowed to fail without holding back the desktop
+      # installers, so this one is best-effort by design.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: android-apk
+          path: release-assets
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: cli-tarball
+          path: release-assets
+
       - name: List assets
         run: ls -lh release-assets
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          name: GeneratorAI ${{ needs.prepare.outputs.tag }}
-          generate_release_notes: true
-          prerelease: ${{ needs.prepare.outputs.prerelease }}
-          make_latest: ${{ needs.prepare.outputs.channel == 'latest' }}
-          files: release-assets/*
+      # `gh` rather than a third-party release action, for the same reason the
+      # container job uses plain Docker: this job holds `contents: write`, and
+      # the GitHub CLI is already on the runner.
+      #
+      # `gh release create` also creates the tag when it does not exist, which
+      # is what makes the manual route safe — the tag appears only here, at the
+      # very end, so it can never point at a build that failed. On the tag
+      # route the tag already exists and this simply attaches to it.
+      - name: Publish the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ needs.prepare.outputs.ref }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          set -euo pipefail
+
           # An empty release is worse than a failed one: electron-updater would
           # serve a manifest with nothing behind it.
-          fail_on_unmatched_files: true
+          if [ -z "$(ls -A release-assets 2>/dev/null)" ]; then
+            echo "::error::no artifacts were collected — refusing to publish an empty release."
+            exit 1
+          fi
 
+          args=( "$TAG" --title "GeneratorAI $TAG" --generate-notes --target "$SHA" )
+          [ "$PRERELEASE" = "true" ] && args+=( --prerelease )
+          [ "$CHANNEL" = "latest" ] && args+=( --latest )
+
+          gh release create "${args[@]}" release-assets/*

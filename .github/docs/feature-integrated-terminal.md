@@ -11,7 +11,7 @@ Prerequisites in your head: [feature-workspaces-files.md](./feature-workspaces-f
 A running PTY on the server, keyed by an opaque `sid`, owned by an [`ExecutionWorkspace`](./feature-workspaces-files.md#2-entities). The same session is:
 
 - **Rendered live** in the right pane of the Chat or Workflow Run page via xterm.js (WebGL renderer + Fit + WebLinks + Search addons).
-- **User-driven only** in MVP. The agent does not type into user terminals — it goes through the existing sandbox-exec tool path. Agent-typed commands with per-command confirm are a Phase 2 opt-in (see [docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md](../../docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md)).
+- **User-driven only** in MVP. The agent does not type into user terminals — it goes through the existing sandbox-exec tool path. Agent-typed commands with per-command confirm are a Phase 2 opt-in (see the internal terminal Phase 2 plan).
 - **Ephemeral** by design — sessions live in an in-memory `Map<sid, TerminalRecord>` on the server; server restart wipes them. Matches the Browser session model.
 - **Multi-tab** — up to 5 concurrent sessions per workspace, 20 server-wide (both env-tunable).
 
@@ -297,7 +297,7 @@ There is no `generatorai terminal …` CLI command. The terminal is a graphical 
 
 - **`node-pty` failed to load** — the composition-root wiring silently degrades to `FallbackChildProcessHost`. The SPA panel renders a yellow banner *"Fallback shell — full-screen apps (vim, htop) will not render correctly. Install `node-pty` for a proper PTY."* Real fix: ensure the `node-pty` prebuild for the current OS/arch is present under `packages/core/node_modules/node-pty/prebuilds/` (added as `optionalDependencies` on `@generatorai/core` so pnpm links it correctly).
 - **Two Terminal tabs on the same chat** — each has its own `tabId` (from `RightPane.render(ctx)`), its own localStorage sid key, its own PTY. Closing one does not affect the other.
-- **Workflow-run page terminal even when the run is sandboxed** — MVP always runs on the **host** in the workspace root, not inside the sandbox. Users see a distinct execution surface from the agent's sandboxed code. Phase 2 adds an opt-in *"Sandbox attached"* toggle — see [docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md](../../docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md).
+- **Workflow-run page terminal even when the run is sandboxed** — MVP always runs on the **host** in the workspace root, not inside the sandbox. Users see a distinct execution surface from the agent's sandboxed code. Phase 2 adds an opt-in *"Sandbox attached"* toggle.
 - **Windows PowerShell profile is slow** — off by default. If you need it, flip the Settings toggle.
 - **Sensitive env leakage** — the default env stripper hides `SSH_AUTH_SOCK` and AWS tokens even on trusted hosts. Enable per-workspace via Settings only when you actually need SSH-key forwarding.
 - **`yes | head -n 500000` stress test** — verified: watermark + `bufferedAmount` circuit-breaker keep xterm responsive (input echo < 50 ms during flood), memory bounded. See `agent-tests/terminal-ws-smoke.mjs` for the harness.
@@ -317,6 +317,6 @@ There is no `generatorai terminal …` CLI command. The terminal is a graphical 
 - **Right-pane wiring**: `terminal` tab kind in [apps/web/src/pages/ChatPage.tsx](../../apps/web/src/pages/ChatPage.tsx) + [apps/web/src/pages/WorkflowRunPageV2.tsx](../../apps/web/src/pages/WorkflowRunPageV2.tsx)
 - **Composition root wiring**: [apps/server/src/composition-root.ts](../../apps/server/src/composition-root.ts) (search for `terminalService`)
 - **Smoke tests**: `agent-tests/terminal-ws-smoke.mjs`, `agent-tests/terminal-desktop-smoke.mjs`
-- **Phase 2 plan**: [docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md](../../docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md)
+- **Phase 2 plan**: tracked internally; not part of the published docs.
 
 For the sibling surface see: [feature-integrated-browser.md](./feature-integrated-browser.md).

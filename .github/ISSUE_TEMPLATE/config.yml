@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/sid94mishra/GeneratorAI/security/advisories/new
+    about: Do NOT open a public issue. Report privately here — see SECURITY.md.
+  - name: Question or idea
+    url: https://github.com/sid94mishra/GeneratorAI/discussions
+    about: Ask a question or float an idea. Issues are for confirmed defects and agreed work.

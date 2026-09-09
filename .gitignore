@@ -76,3 +76,21 @@ apps/desktop/resources/cua-driver/
 chat-probe.txt
 tui-sweep-gallery.txt
 .cache
+
+# ── Superseded internal documentation ──────────────────────────────
+# ~50 planning, audit and tracker documents plus the old `docsOld/` tree,
+# consolidated here and deliberately NOT published. Several name unfixed
+# weaknesses in specific files, which reads as a target list on a public
+# repo. `docs/` keeps only CLI_SURFACE_SNAPSHOT.md, which is GENERATED from
+# the CLI registry and diffed by CI — moving it breaks that gate and a test.
+oldDocs/
+
+# ── Ad-hoc scratch, never source ───────────────────────────────────
+# Accessibility-tree dumps written by browser-driven testing (b1..b9,
+# wf-list), one-off computer-use probe scripts, and the agent scratch dir.
+# All were committed by accident and are regenerated on demand.
+.scratch/
+.impeccable/
+b[0-9].yaml
+wf-list.yaml
+scripts/tmp-cu-*

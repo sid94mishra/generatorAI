@@ -17,7 +17,7 @@
 // engine in a deployment must not be silently overridden from a UI.
 // ────────────────────────────────────────────────────────────────
 
-import * as fs from 'node:fs';
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 const STATE_FILE = 'audio.json';
@@ -96,10 +96,16 @@ function normalize(raw: Partial<AudioPreferences> | null): AudioPreferences {
   };
 }
 
-/** Read the persisted preferences; anything unreadable resolves to defaults. */
-export function readAudioPreferences(dataDir: string): AudioPreferences {
+/**
+ * Read the persisted preferences; anything unreadable resolves to defaults.
+ *
+ * Async, not sync: this is reached from `GET /api/system/audio`, so a
+ * synchronous read blocks the one thread that is also serving every live chat
+ * stream. (PART 11.1 — see scripts/check-sync-io-budget.mjs.)
+ */
+export async function readAudioPreferences(dataDir: string): Promise<AudioPreferences> {
   try {
-    const raw = fs.readFileSync(stateFilePath(dataDir), 'utf8');
+    const raw = await fs.readFile(stateFilePath(dataDir), 'utf8');
     return normalize(JSON.parse(raw) as Partial<AudioPreferences> | null);
   } catch {
     return { ...AUDIO_DEFAULTS };
@@ -107,13 +113,13 @@ export function readAudioPreferences(dataDir: string): AudioPreferences {
 }
 
 /** Persist the preferences, normalized. Returns what was actually written. */
-export function writeAudioPreferences(
+export async function writeAudioPreferences(
   dataDir: string,
   prefs: Partial<AudioPreferences>,
-): AudioPreferences {
-  const merged = normalize({ ...readAudioPreferences(dataDir), ...prefs });
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(
+): Promise<AudioPreferences> {
+  const merged = normalize({ ...(await readAudioPreferences(dataDir)), ...prefs });
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(
     stateFilePath(dataDir),
     `${JSON.stringify({ ...merged, updatedAt: Date.now() }, null, 2)}\n`,
     { mode: 0o600 },

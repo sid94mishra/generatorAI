@@ -80,7 +80,7 @@ export interface WorkspaceRetentionServiceOptions {
    * Read the CURRENT preferences. A function rather than a value so a change
    * made in Settings applies to the next tick without a restart.
    */
-  readPreferences: () => WorkspaceRetentionPrefs;
+  readPreferences: () => WorkspaceRetentionPrefs | Promise<WorkspaceRetentionPrefs>;
   logger: ILogger;
   /** How often to check whether tonight's sweep is due. Default hourly. */
   checkIntervalMs?: number;
@@ -135,7 +135,7 @@ export class WorkspaceRetentionService {
 
   private async tick(): Promise<void> {
     if (this.running) return;
-    const prefs = this.opts.readPreferences();
+    const prefs = await this.opts.readPreferences();
     if (!prefs.enabled) return;
     const now = this.now();
     if (now.getHours() < this.runAtHour) return;

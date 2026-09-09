@@ -83,12 +83,23 @@ const BANNER = [
 // react-reconciler 1.1 MB, react-devtools-core 0.7 MB, parse5, yoga-layout,
 // @xterm/headless, ink, react) evaluated before printing a version string.
 //
-// `splitting: true` needs `outdir` rather than `outfile`; `files: ["dist-bundle"]`
-// already ships the whole directory, so the extra chunks travel with it, and
-// `bin` still points at `generatorai.mjs`.
+// `splitting: true` needs `outdir` rather than `outfile`; the `files` entry in
+// package.json ships the compiled `.mjs` from that directory, so the extra
+// chunks travel with it, and `bin` still points at `generatorai.mjs`.
+const outdir = path.join(here, 'dist-bundle');
+
+// Wipe the directory first. Chunk names carry a content hash, so a rebuild
+// writes NEW files and leaves the previous build's chunks sitting there
+// forever — and `files` ships whatever it finds. A directory that had
+// accumulated across builds measured 128 MB against 18 MB for a clean one,
+// and packed a 27 MB tarball full of chunks nothing referenced any more. CI
+// never saw it because a fresh checkout has no stale output; a publish run
+// from a working machine would have shipped all of it.
+fs.rmSync(outdir, { recursive: true, force: true });
+
 const result = await build({
   entryPoints: [path.join(here, 'src', 'index.tsx')],
-  outdir: path.join(here, 'dist-bundle'),
+  outdir,
   entryNames: 'generatorai',
   chunkNames: 'chunks/[name]-[hash]',
   // `bin` points at `generatorai.mjs`, and Node needs the extension to treat

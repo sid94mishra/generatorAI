@@ -196,7 +196,7 @@ See [feature-integrated-terminal.md](./feature-integrated-terminal.md).
 
 ### Not implemented (planned)
 
-The Phase 2 plan (see [docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md](../../docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md)) describes flags for features that have not been built yet. None of the following are read anywhere in the codebase today — setting them has **no effect**. Do not configure them expecting a result:
+The internal terminal Phase 2 plan describes flags for features that have not been built yet. None of the following are read anywhere in the codebase today — setting them has **no effect**. Do not configure them expecting a result:
 
 - GENERATORAI_TERMINAL_SANDBOX — would-be sandbox-attached terminal toggle on workflow-run pages.
 - GENERATORAI_TERMINAL_PROPOSALS — would-be `terminal.propose` agent tool + inline confirmation card.
@@ -237,10 +237,26 @@ PORT=3100 \
 node apps/server/dist/index.js
 ```
 
-Behind a reverse proxy (nginx / Caddy) for TLS and (eventually) auth. Make sure:
-- `proxy_buffering off` (or `X-Accel-Buffering: no` honored) for SSE.
-- WebSocket upgrade is NOT needed (we use SSE, not WS).
-- Increase `proxy_read_timeout` to ≥ 600s for long-running runs.
+Behind a reverse proxy (nginx / Caddy) for TLS. Make sure:
+
+- **WebSocket upgrade IS required.** This line previously said the opposite —
+  "WebSocket upgrade is NOT needed (we use SSE, not WS)" — which was true once
+  and has not been for a long time. The integrated terminal, the integrated
+  browser, speech-to-text, and the phone app's entire live connection are all
+  WebSocket. A proxy that does not forward `Upgrade` and `Connection` gives you
+  an install where chat works and the terminal silently never connects, which
+  gets reported as a product bug.
+- `proxy_buffering off` (or an honoured `X-Accel-Buffering: no`) on the SSE
+  stream endpoint, or events arrive in batches instead of as they happen.
+- `proxy_read_timeout` ≥ 600s for long-running runs, and longer still on the
+  WebSocket routes — a terminal session can idle for as long as someone leaves
+  it open.
+
+A working configuration for all of the above ships in
+[docker/nginx/generatorai.conf](../../docker/nginx/generatorai.conf): it has a
+dedicated `location` for the SSE stream with buffering off, and one for the
+`*-ws` routes with the upgrade headers set. Start from that file rather than
+from these bullets.
 
 ### Multi-process (horizontal scaling)
 

@@ -23,7 +23,7 @@
 // sentence and decides, exactly like Computer Use.
 // ────────────────────────────────────────────────────────────────
 
-import * as fs from 'node:fs';
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 const STATE_FILE = 'workspace-retention.json';
@@ -71,9 +71,11 @@ export function clampRetentionDays(days: unknown): number {
  * A corrupt settings file must never be able to start deleting directories —
  * the failure direction for this setting is "do nothing", always.
  */
-export function readWorkspaceRetentionPreferences(dataDir: string): WorkspaceRetentionPreferences {
+export async function readWorkspaceRetentionPreferences(
+  dataDir: string,
+): Promise<WorkspaceRetentionPreferences> {
   try {
-    const raw = fs.readFileSync(stateFilePath(dataDir), 'utf8');
+    const raw = await fs.readFile(stateFilePath(dataDir), 'utf8');
     const parsed = JSON.parse(raw) as Partial<WorkspaceRetentionPreferences> | null;
     return {
       enabled: parsed?.enabled === true,
@@ -86,16 +88,16 @@ export function readWorkspaceRetentionPreferences(dataDir: string): WorkspaceRet
 }
 
 /** Persist the preferences. Applies to the next nightly sweep; no restart. */
-export function writeWorkspaceRetentionPreferences(
+export async function writeWorkspaceRetentionPreferences(
   dataDir: string,
   prefs: WorkspaceRetentionPreferences,
-): WorkspaceRetentionPreferences {
+): Promise<WorkspaceRetentionPreferences> {
   const normalized: WorkspaceRetentionPreferences = {
     enabled: prefs.enabled === true,
     retentionDays: clampRetentionDays(prefs.retentionDays),
   };
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(
     stateFilePath(dataDir),
     `${JSON.stringify({ ...normalized, updatedAt: Date.now() }, null, 2)}\n`,
     { mode: 0o600 },

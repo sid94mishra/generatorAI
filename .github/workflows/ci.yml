@@ -3,8 +3,28 @@ name: CI
 on:
   push:
     branches: [main, dev]
+    # Editing prose that no gate reads should not start a three-system build.
+    # Deliberately a short list rather than `**.md`: the doc-drift, CLI-docs
+    # and surface-snapshot gates all compare generated markdown against the
+    # code, so most .md files ARE checked and must not be skipped.
+    paths-ignore:
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'SECURITY.md'
+      - 'LICENSE'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
   pull_request:
     branches: [main, dev]
+    paths-ignore:
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'SECURITY.md'
+      - 'LICENSE'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
 
 # A new push to the same branch makes an in-flight run obsolete. Cancelling it
 # keeps the queue short without affecting correctness.
@@ -23,6 +43,7 @@ jobs:
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -41,10 +62,22 @@ jobs:
   build-and-test:
     name: Build & test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # A hung job otherwise runs until the six-hour default before failing,
+    # which hides the real problem and blocks anything queued behind it.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Linux only on a pull request, so you get an answer in about twenty
+        # minutes while the change is still in your head. The full sweep runs
+        # on merge to main/dev, which is once per change rather than once per
+        # push. Public repositories get unlimited free runner time, so this is
+        # about how long you wait, not what it costs.
+        #
+        # `macos-26` is pinned rather than `macos-latest`: that label moved to
+        # a new macOS release in June 2026 and will move again, which would
+        # silently change what the Mac leg is actually testing.
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","windows-latest","macos-26"]') }}
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -240,6 +273,7 @@ jobs:
   concurrent-load-test:
     name: Concurrent-load test (§1.Q)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     continue-on-error: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -393,3 +427,89 @@ jobs:
           path: ${{ env.E2E_STATE }}/logs/
           if-no-files-found: ignore
           retention-days: 14
+
+  # ── Phone bundle hygiene ─────────────────────────────────────────────────
+  # The phone app's unit tests and lint already run inside the turbo sweep
+  # above, but the two checks that matter for SHIPPING it did not run
+  # anywhere: a production bundle build, and the gate that fails when
+  # server-side code ends up on the phone.
+  #
+  # That is not a hypothetical risk here — a server package leaking into the
+  # phone bundle has happened before, and `scripts/check-bundle.mjs` was
+  # written in response. Until now nothing ran it.
+  mobile-bundle:
+    name: Phone bundle hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # Only what the phone actually depends on — building the server and
+      # desktop trees here would cost minutes for no signal.
+      - run: pnpm turbo build --filter=@generatorai/mobile^...
+
+      # Exports a real production bundle and reads its source map, so this
+      # also proves the app still bundles at all.
+      - name: Bundle hygiene gate
+        working-directory: apps/mobile
+        run: pnpm run bundle:check
+
+  # ── Server container ─────────────────────────────────────────────────────
+  # Builds the image the release publishes, and does NOT push it. The
+  # Dockerfile, `.dockerignore` and the runtime-staging script were all
+  # written against each other but nothing ever built them together, so a
+  # break in any of the three would first have been discovered during a
+  # release. Catching it on a pull request instead costs one Linux job.
+  container:
+    name: Server container builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Plain Docker rather than the docker/* actions: it is preinstalled, and
+      # nothing here needs a registry, a cache backend or multi-platform
+      # emulation.
+      - name: Build the image
+        run: docker build -f docker/server.Dockerfile -t generatorai/server:ci .
+
+      # An image that builds but cannot start is not much of a check. This
+      # boots it against a throwaway volume and waits for the health endpoint
+      # the image's own HEALTHCHECK uses.
+      - name: Boot it and wait for health
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name gai-ci -p 3100:3100 \
+            -e GENERATORAI_SECRET_KEY="$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')" \
+            generatorai/server:ci
+          deadline=$((SECONDS + 120))
+          until curl -fsS -o /dev/null http://127.0.0.1:3100/api/health; do
+            if ! docker ps --format '{{.Names}}' | grep -q '^gai-ci$'; then
+              echo "::error::the container exited before becoming healthy"
+              docker logs gai-ci || true
+              exit 1
+            fi
+            if (( SECONDS >= deadline )); then
+              echo "::error::container did not become healthy within 120s"
+              docker logs gai-ci || true
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "container is healthy"
+
+      - name: Stop it
+        if: always()
+        run: docker rm -f gai-ci 2>/dev/null || true

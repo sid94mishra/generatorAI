@@ -207,10 +207,10 @@ export function createSystemRoutes(container: Container): Router {
   }
   let modelDownload: ModelDownload | null = null;
 
-  router.get('/audio', (_req, res, next) => {
+  router.get('/audio', async (_req, res, next) => {
     try {
       res.json({
-        ...readAudioPreferences(dataDir),
+        ...(await readAudioPreferences(dataDir)),
         engines: STT_ENGINE_CHOICES,
         formatters: TEXT_FORMATTER_CHOICES,
         minEndpointMs: MIN_ENDPOINT_MS,
@@ -224,14 +224,14 @@ export function createSystemRoutes(container: Container): Router {
     }
   });
 
-  router.put('/audio', (req, res, next) => {
+  router.put('/audio', async (req, res, next) => {
     const parsed = audioSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
       return;
     }
     try {
-      res.json(writeAudioPreferences(dataDir, parsed.data));
+      res.json(await writeAudioPreferences(dataDir, parsed.data));
     } catch (err) {
       next(err);
     }
@@ -322,9 +322,9 @@ export function createSystemRoutes(container: Container): Router {
   });
 
   // GET /system/workspace-retention
-  router.get('/workspace-retention', (_req, res, next) => {
+  router.get('/workspace-retention', async (_req, res, next) => {
     try {
-      res.json({ ...readWorkspaceRetentionPreferences(dataDir), minDays: MIN_RETENTION_DAYS, maxDays: MAX_RETENTION_DAYS });
+      res.json({ ...(await readWorkspaceRetentionPreferences(dataDir)), minDays: MIN_RETENTION_DAYS, maxDays: MAX_RETENTION_DAYS });
     } catch (err) {
       next(err);
     }
@@ -333,15 +333,15 @@ export function createSystemRoutes(container: Container): Router {
   // PUT /system/workspace-retention — applies to the next nightly sweep; the
   // service re-reads preferences every tick, so no restart is needed and
   // switching it off part-way through a night takes effect immediately.
-  router.put('/workspace-retention', (req, res, next) => {
+  router.put('/workspace-retention', async (req, res, next) => {
     const parsed = workspaceRetentionSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
       return;
     }
     try {
-      const current = readWorkspaceRetentionPreferences(dataDir);
-      const saved = writeWorkspaceRetentionPreferences(dataDir, {
+      const current = await readWorkspaceRetentionPreferences(dataDir);
+      const saved = await writeWorkspaceRetentionPreferences(dataDir, {
         enabled: parsed.data.enabled,
         retentionDays: parsed.data.retentionDays ?? current.retentionDays,
       });
@@ -363,7 +363,7 @@ export function createSystemRoutes(container: Container): Router {
       }
       const days = typeof req.body?.retentionDays === 'number'
         ? req.body.retentionDays
-        : readWorkspaceRetentionPreferences(dataDir).retentionDays;
+        : (await readWorkspaceRetentionPreferences(dataDir)).retentionDays;
       res.json(await service.runOnce(days));
     } catch (err) {
       next(err);

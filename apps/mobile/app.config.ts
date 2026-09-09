@@ -21,10 +21,25 @@ if (!easProjectId) {
   );
 }
 
+// ── Release version ────────────────────────────────────────────────
+// One product, one version: the release workflow stamps the tag onto every
+// manifest that ships (scripts/stamp-version.mjs) and passes it here through
+// the environment, because this file is TypeScript rather than JSON and
+// rewriting it would mean editing source at build time.
+//
+// The fallback is what a local `expo start` or a plain `expo export` sees. It
+// is a placeholder, not a claim — the number that reaches a user always comes
+// from the tag.
+//
+// This is the version PEOPLE see. The store build number is a different thing
+// entirely, must only ever increase, and is handled by `autoIncrement` in
+// eas.json — do not try to derive one from the other.
+const version = process.env['GENERATORAI_VERSION']?.replace(/^v/, '').trim() || '0.1.0';
+
 const config: ExpoConfig = {
   name: 'GeneratorAI',
   slug: 'generatorai',
-  version: '0.1.0',
+  version,
   orientation: 'default',
   scheme: 'generatorai',
   userInterfaceStyle: 'automatic',
