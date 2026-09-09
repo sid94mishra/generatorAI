@@ -29,6 +29,27 @@ name: Release
 # Builds never publish. Each platform emits artifacts and a single job
 # assembles them — three matrix legs racing to create the same GitHub release
 # is a documented way to end up with duplicates or a half-populated release.
+#
+# ── Action pinning policy ───────────────────────────────────────
+# THIRD-PARTY actions are pinned to a commit sha, always. A version tag is
+# moved by whoever owns the action, so `@v4` means "whatever that tag points at
+# the moment this runs" — which is precisely how the tj-actions compromise of
+# March 2025 leaked secrets out of thousands of repositories. This workflow
+# holds `contents: write`, `packages: write` and the signing credentials, so it
+# is the last place to accept that.
+#
+# FIRST-PARTY `actions/*` are allowed to stay on a major version tag. They are
+# published by GitHub itself, from the same platform already running the job
+# and already holding the token — pinning them defends against an attacker who,
+# by that point, has everything anyway. This is a deliberate line, not an
+# oversight: `actions/setup-java@v4` and `actions/download-artifact@v4` below
+# are unpinned ON PURPOSE.
+#
+# Two rules follow from that, and they are the point of writing this down:
+#   1. Never copy the unpinned style onto a non-`actions/*` action.
+#   2. Prefer removing an action to pinning one. The container job uses plain
+#      Docker and the publish job uses the GitHub CLI for exactly this reason —
+#      both ship on the runner, and neither is code someone else can change.
 # ────────────────────────────────────────────────────────────────
 
 on:
@@ -252,7 +273,14 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: pnpm run electron-builder --${{ matrix.arch }}
+        # `--publish never` is not optional. electron-builder's default is
+        # `onTagOrDraft`, and the build config carries a GitHub publish target
+        # derived from GITHUB_REPOSITORY — which Actions always sets. Drop this
+        # flag and the only thing standing between a matrix leg and uploading
+        # its own half of a release is the absence of a token. Three legs
+        # racing to create the same release is exactly what the single publish
+        # job below exists to prevent.
+        run: pnpm run electron-builder --${{ matrix.arch }} --publish never
 
       # electron-updater trusts the manifest completely, and a target that
       # overwrites another's output invalidates it without failing the build.
@@ -310,9 +338,7 @@ jobs:
           cache: 'pnpm'
 
       # React Native 0.86 / Expo SDK 57 build against JDK 17.
-      # TODO(pin): first-party action, still on a moving tag. Pin to a commit
-      # sha like the four above once you can resolve one — Dependabot will
-      # keep it current either way.
+      # Unpinned by policy — first-party `actions/*`, see the header.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -500,7 +526,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
-      # TODO(pin): first-party action on a moving tag, same as setup-java.
+      # Unpinned by policy — first-party `actions/*`, see the header.
       - uses: actions/download-artifact@v4
         with:
           pattern: installers-*

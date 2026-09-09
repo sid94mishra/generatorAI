@@ -48,8 +48,10 @@ GeneratorAI/
 │   ├── system/extensions/           System-scope extensions (loaded read-only at boot)
 │   ├── scripts/*.workflow.mjs       Programmatic Workflow Scripts (PWS)
 │   └── data-source-scripts/         Automation data source helpers (py/sh/js)
-├── docs/                            User-facing design + implementation specs
-├── docsOld/                         Historical design docs (kept for context)
+├── docs/CLI_SURFACE_SNAPSHOT.md     Generated from the CLI registry; diffed by CI
+├── oldDocs/                         Superseded internal planning + audit notes.
+│                                    NOT tracked (see .gitignore) and not published —
+│                                    several name unfixed weaknesses in specific files.
 ├── agent-tests/                     Playwright E2E + helpers + feature catalog
 ├── docker/                          Sandbox + observability compose
 ├── scripts/db-backup.ts             Maintenance scripts
