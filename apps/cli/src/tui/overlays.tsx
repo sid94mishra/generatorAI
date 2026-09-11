@@ -105,7 +105,7 @@ export function OverlayHost({ registry, keymap, implemented, onRunCommand }: Ove
 
     case 'select':
       return (
-        <Overlay title={overlay.message} footer="↑↓ move · ⏎ select · Esc cancel">
+        <Overlay title={overlay.message} footer={`↑↓ move · ${prettyChord('return')} select · Esc cancel`}>
           <Select
             options={overlay.options}
             onSelect={(value) => {
@@ -244,7 +244,7 @@ function FormOverlay({
   return (
     <Overlay
       title={overlay.title}
-      footer="↑↓/tab field · ←→/space choose · ⏎ next/run · ctrl+s run · Esc cancel"
+      footer={`↑↓/Tab field · ←→/Space choose · ${prettyChord('return')} next/run · ${prettyChord('ctrl+s')} run · Esc cancel`}
       height={20}
     >
       {overlay.description ? (
@@ -359,7 +359,7 @@ function ValidationOverlay({
   return (
     <Overlay
       title={overlay.title}
-      footer="↑↓ move · ⏎ jump to stage · q / Esc close"
+      footer={`↑↓ move · ${prettyChord('return')} jump to stage · q / Esc close`}
       height={18}
     >
       <Box marginBottom={1}>
@@ -448,7 +448,7 @@ function CommandPalette({
   return (
     <Overlay
       title="Command palette"
-      footer={`↑↓ move · ⏎ run · Esc close   ${results.length} of ${entries.length}`}
+      footer={`↑↓ move · ${prettyChord('return')} run · Esc close   ${results.length} of ${entries.length}`}
     >
       <Box marginBottom={1}>
         <Text color={theme.c('primary')}>{'> '}</Text>
@@ -543,7 +543,7 @@ function TabNavigator({ onClose }: { onClose: () => void }): React.JSX.Element {
   });
 
   return (
-    <Overlay title="Jump to tab" footer="↑↓ move · ⏎ jump · 1-9 direct · Esc close">
+    <Overlay title="Jump to tab" footer={`↑↓ move · ${prettyChord('return')} jump · 1-9 direct · Esc close`}>
       <Box marginBottom={1}>
         <Text color={theme.c('primary')}>{'> '}</Text>
         <Text>{query || <Text color={theme.c('muted')}>Type to filter, or press a number…</Text>}</Text>
@@ -603,7 +603,7 @@ function NotificationQueue({ onClose }: { onClose: () => void }): React.JSX.Elem
   });
 
   return (
-    <Overlay title="Blocked work" footer="↑↓ move · ⏎ jump to pane · q / Esc close">
+    <Overlay title="Blocked work" footer={`↑↓ move · ${prettyChord('return')} jump to pane · q / Esc close`}>
       <VirtualList
         items={items}
         selectedIndex={selection.index}
@@ -829,7 +829,7 @@ function InputOverlay({
   });
 
   return (
-    <Overlay title={message} footer="⏎ confirm · Esc cancel" height={7}>
+    <Overlay title={message} footer={`${prettyChord('return')} confirm · Esc cancel`} height={7}>
       <TextInput value={value} onChange={setValue} onSubmit={onSubmit} />
     </Overlay>
   );

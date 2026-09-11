@@ -6,7 +6,7 @@
 // replace the whole body when open.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useStdin, useStdout } from 'ink';
 import * as nodePath from 'node:path';
 import {
@@ -57,6 +57,7 @@ import { findTranscriptMatch, Pane, terminalActivityLabel, type WorkspaceRow } f
 import { OverlayHost, Toasts } from './overlays.js';
 import { connectionTone } from './connectionStatus.js';
 import {
+  dashboardRows,
   dataKeysFor,
   getStore,
   loadData,
@@ -312,6 +313,14 @@ export function paneListRows(
       | undefined;
     const section = state?.section ?? 'pending';
     return state?.[section] ?? NO_ROWS;
+  }
+  // The home pane is not backed by one cache: its rows are the sections it
+  // links to, then the recent runs it lists. Falling through to the generic
+  // branch below sized its cursor against `dataKeysFor('dashboard')[0]` —
+  // the CHATS cache — so every arrow key on the first screen of the app
+  // moved an invisible cursor over a list that was not being drawn.
+  if (content?.kind === 'dashboard') {
+    return dashboardRows(data);
   }
   const key = content ? (dataKeysFor(content.kind)[0] as DataKey | undefined) : undefined;
   return key ? (data[key] ?? NO_ROWS) : NO_ROWS;
@@ -634,19 +643,68 @@ export function App({
     if (focusedPane) actions.setSelection(focusedPane.id, selection.index);
   }, [selection.index, focusedPane?.id]);
 
+  // The shell owns ONE cursor, but every pane has its own. Writing the
+  // cursor out to the store per pane (above) without ever reading it back
+  // meant the number simply carried over: switching tabs, focusing the other
+  // half of a split or replacing a pane's content all left the new list
+  // scrolled to whatever row the PREVIOUS one was on. Restoring on the way
+  // in closes that loop.
+  //
+  // Keyed on the pane's identity, not on `selection.index` — depending on
+  // the index too would fight every keypress for control of the cursor.
+  const restoredFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusedPane) return;
+    const identity = `${focusedPane.id}|${content?.kind ?? ''}|${content?.entityId ?? ''}`;
+    if (restoredFor.current === identity) return;
+    restoredFor.current = identity;
+    selection.setIndex(getStoreApi().getState().selection[focusedPane.id] ?? 0);
+  }, [focusedPane?.id, content?.kind, content?.entityId]);
+
   const open = useCallback(
     (
       paneContent: PaneContent,
       mode?: 'tab' | 'split-v' | 'split-h' | 'replace',
       targetPaneId?: string,
-    ): string => actions.openPane(paneContent, mode, targetPaneId),
-    [actions],
+    ): string => {
+      const paneId = actions.openPane(paneContent, mode, targetPaneId);
+      // A replaced pane keeps its id, so the restore effect below cannot see
+      // that anything changed when the new content has the same kind —
+      // `g d` from the dashboard is exactly that. Without this the cursor
+      // stayed wherever it was and Enter opened a row the user had not
+      // pointed at. `tab` and `split-*` mint a new id and need nothing here.
+      if (mode === 'replace') {
+        restoredFor.current = null;
+        selection.setIndex(0);
+      }
+      return paneId;
+    },
+    [actions, selection],
   );
 
   const openSelected = useCallback(() => {
     if (!content) return;
     const row = listRows[selection.index];
     if (!row) return;
+
+    // The dashboard mixes two kinds of row — a section to jump to and a run
+    // to open — so which opener applies is a property of the ROW, not of the
+    // pane. `OPENERS` is keyed by pane kind and so has no entry for
+    // `dashboard` at all, which is why Enter on the home screen used to
+    // return here silently.
+    if (content.kind === 'dashboard') {
+      if (row['dashboardRow'] === 'section') {
+        open(
+          { kind: row['kind'] as PaneContent['kind'], title: String(row['title']) },
+          'replace',
+        );
+        return;
+      }
+      const runOpener = openerFor('runs');
+      if (runOpener) void openEntity({ opener: runOpener, row, api, open, actions });
+      return;
+    }
+
     const opener = openerFor(content.kind);
     if (!opener) return;
 
@@ -3401,6 +3459,11 @@ export function App({
 
   const showComposer = content?.kind === 'chat';
 
+  // Whether Enter opens the selected row on the focused pane. `contexts`
+  // already encodes this: every pane that resolves `list` bindings has a
+  // cursor over rows, and the dashboard now does too.
+  const canOpenSelection = contexts.includes('list' as never) || content?.kind === 'dashboard';
+
   // The composer grows with the draft and with the completion menu. Assuming a
   // fixed height overflows the screen and paints the menu over the chrome.
   const [composerRows, setComposerRows] = useState(4);
@@ -3506,10 +3569,16 @@ export function App({
                     { keys: keymap.chordFor('app.quit'), label: 'quit' },
                   ]
                 : [
-                    { keys: keymap.chordFor('list.open'), label: 'open' },
+                    // Only where Enter actually opens the selected row. A run
+                    // or automation pane is a live view, not a list, and
+                    // "Enter open" there is the same empty promise the
+                    // dashboard used to make.
+                    ...(canOpenSelection
+                      ? [{ keys: keymap.chordFor('list.open'), label: 'open' }]
+                      : []),
                     { keys: keymap.chordFor('app.palette'), label: 'palette' },
                     { keys: `${prettyChord(keymap.chordFor('pane.leader'))} c`, label: 'new tab' },
-                    { keys: '?', label: 'help' },
+                    { keys: keymap.chordFor('app.help'), label: 'help' },
                   ]
             }
           />

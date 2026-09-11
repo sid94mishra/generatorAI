@@ -407,24 +407,91 @@ export function KeyHints({ hints }: KeyHintProps): React.JSX.Element {
   );
 }
 
-/** `ctrl+k` → `^K`; `shift+return` → `⇧⏎`. */
-export function prettyChord(chord: string): string {
+// ── Chord labels ──────────────────────────────────────────────────
+//
+// A chord is stored canonically (`ctrl+k`, `alt+l`, `shift+tab`) and has to
+// be PRINTED in whatever spelling the reader's platform uses. `^K` and `⌥L`
+// are Mac conventions; on Windows and Linux the same keys are written
+// `Ctrl+K` and `Alt+L`, and `⌥` in particular is not a key anyone there can
+// find on their keyboard — the label named a key that does not exist.
+
+export type ChordStyle = 'mac' | 'pc';
+
+let chordStyleOverride: ChordStyle | null = null;
+
+/** The style chords print in unless one is passed explicitly. */
+export function chordStyle(): ChordStyle {
+  if (chordStyleOverride) return chordStyleOverride;
+  const configured = process.env['GENERATORAI_KEY_STYLE'];
+  if (configured === 'mac' || configured === 'pc') return configured;
+  return process.platform === 'darwin' ? 'mac' : 'pc';
+}
+
+/** Forces a style — for tests, and for a user who prefers the other spelling. */
+export function setChordStyle(style: ChordStyle | null): void {
+  chordStyleOverride = style;
+}
+
+const MODIFIERS: Record<ChordStyle, { ctrl: string; alt: string; shift: string }> = {
+  mac: { ctrl: '^', alt: '⌥', shift: '⇧' },
+  pc: { ctrl: 'Ctrl+', alt: 'Alt+', shift: 'Shift+' },
+};
+
+/**
+ * Named keys, spelled the way both platforms label them.
+ *
+ * Only `return` genuinely differs: `⏎` is what a Mac keyboard prints, while a
+ * PC keyboard prints the word. Everything else reads better capitalised than
+ * as an obscure glyph on either platform, so both styles share it.
+ */
+const KEY_NAMES: Record<string, string> = {
+  escape: 'Esc',
+  tab: 'Tab',
+  space: 'Space',
+  backspace: 'Backspace',
+  delete: 'Del',
+  pageup: 'PgUp',
+  pagedown: 'PgDn',
+  home: 'Home',
+  end: 'End',
+  up: 'Up',
+  down: 'Down',
+  left: 'Left',
+  right: 'Right',
+};
+
+/**
+ * `ctrl+k` → `^K` on a Mac, `Ctrl+K` everywhere else.
+ *
+ * Sequences (`g d`) are formatted part by part, so the space that separates
+ * "press g, then d" survives.
+ */
+export function prettyChord(chord: string, style: ChordStyle = chordStyle()): string {
+  const mod = MODIFIERS[style];
   return chord
     .split(' ')
-    .map((part) =>
-      part
-        .replace(/^ctrl\+/, '^')
-        .replace(/^alt\+/, '⌥')
-        .replace(/^shift\+/, '⇧')
-        .replace(/\breturn\b/, '⏎')
-        .replace(/\bescape\b/, 'esc')
-        .replace(/\bpageup\b/, 'PgUp')
-        .replace(/\bpagedown\b/, 'PgDn')
-        // Only a modified letter is capitalised. Printing a bare `g d` as
-        // `G D` tells the reader to hold Shift, which does not work.
-        .replace(/^(\^|⌥|⇧)([a-z])$/, (_, mod: string, letter: string) =>
-          `${mod}${letter.toUpperCase()}`,
-        ),
-    )
+    .map((part) => {
+      let prefix = '';
+      let rest = part;
+      // Longest-first so `shift+` is not left behind by a `ctrl+` match.
+      for (const [name, symbol] of [
+        ['ctrl+', mod.ctrl],
+        ['alt+', mod.alt],
+        ['shift+', mod.shift],
+      ] as const) {
+        if (rest.startsWith(name)) {
+          prefix += symbol;
+          rest = rest.slice(name.length);
+        }
+      }
+
+      if (rest === 'return') rest = style === 'mac' ? '⏎' : 'Enter';
+      else if (KEY_NAMES[rest]) rest = KEY_NAMES[rest]!;
+      // Only a MODIFIED letter is capitalised. Printing a bare `g d` as
+      // `G D` tells the reader to hold Shift, which does not work.
+      else if (prefix && /^[a-z]$/.test(rest)) rest = rest.toUpperCase();
+
+      return `${prefix}${rest}`;
+    })
     .join(' ');
 }

@@ -42,6 +42,8 @@ import {
   leaves,
   visibleLeafIds,
   type Api,
+  epochOr,
+  statusTone,
   type CommandSpec,
   type FormField,
   type PaneContent,
@@ -502,7 +504,17 @@ export function createTuiStore(initial?: {
           }
           case 'replace': {
             landedId = targetPaneId ?? selectActiveTab(state.workbench).focusedPaneId;
-            return { workbench: updatePane(state.workbench, landedId, content) };
+            // The pane keeps its id but is now showing a DIFFERENT list, so
+            // its stored cursor and filter belong to content that is gone.
+            // Without this, `g w` then `g c` landed the cursor on whichever
+            // row index happened to be selected in Workflows — row 3 of
+            // Chats, for no reason the user could see — and the stale filter
+            // made the new list look half-empty.
+            return {
+              workbench: updatePane(state.workbench, landedId, content),
+              selection: { ...state.selection, [landedId]: 0 },
+              search: omitKeys(state.search, [landedId]),
+            };
           }
           default: {
             const workbench = addTab(state.workbench, content);
@@ -1089,6 +1101,91 @@ export const NO_ROWS: Record<string, unknown>[] = Object.freeze(
   [] as Record<string, unknown>[],
 ) as Record<string, unknown>[];
 
+// ── Dashboard rows ────────────────────────────────────────────────
+
+/** How many recent runs the dashboard offers as jump targets. */
+export const DASHBOARD_RECENT_RUNS = 12;
+
+/**
+ * The sections the dashboard can jump to, and the cache each one counts.
+ *
+ * Only caches `dataKeysFor('dashboard')` actually loads may appear here: a
+ * section whose count is structurally always zero is a lie, which is exactly
+ * what the old hard-coded `Projects` stat was.
+ */
+export const DASHBOARD_SECTIONS: ReadonlyArray<{
+  kind: PaneContent['kind'];
+  title: string;
+  key: DataKey;
+}> = [
+  { kind: 'chats', title: 'Chats', key: 'chats' },
+  { kind: 'workflows', title: 'Workflows', key: 'workflows' },
+  { kind: 'runs', title: 'Runs', key: 'runs' },
+  { kind: 'automations', title: 'Automations', key: 'automations' },
+  { kind: 'projects', title: 'Projects', key: 'projects' },
+];
+
+/** A dashboard row: either a section to jump to, or a run to open. */
+export interface DashboardRow extends Record<string, unknown> {
+  /** Which half of the pane the row belongs to. */
+  dashboardRow: 'section' | 'run';
+}
+
+/**
+ * Every selectable row on the dashboard, sections first, then recent runs.
+ *
+ * The home pane used to render its recent runs with `selectedIndex={-1}` and
+ * size its cursor against `paneListRows`' fallback — which, for the
+ * `dashboard` kind, resolved to `dataKeysFor('dashboard')[0]`, i.e. the CHATS
+ * cache. So the arrow keys moved a cursor over an invisible list of chats,
+ * nothing on screen ever changed, and Enter found no `OPENERS['dashboard']`
+ * and returned silently. The first screen of the app had no working
+ * navigation at all while its own status bar advertised "⏎ open".
+ *
+ * Both the cursor and the renderer read THIS function, so the two can no
+ * longer disagree about how many rows exist. It is deliberately independent
+ * of the pane's height: sizing the cursor against a height-derived slice is
+ * how the changes pane once made the bottom of a long diff unreachable.
+ */
+const dashboardRowCache = new WeakMap<DataCache, DashboardRow[]>();
+
+export function dashboardRows(data: DataCache): DashboardRow[] {
+  // Memoised on the cache OBJECT, for the same reason `NO_ROWS` is a frozen
+  // singleton: this feeds a `useSyncExternalStore` selector, and a selector
+  // that builds a fresh array per call reports a change on every render and
+  // spins until React throws "Maximum update depth exceeded". The store
+  // replaces `data` wholesale whenever a list is refetched, so identity is
+  // an exact staleness check, and a WeakMap keeps no entry alive after that.
+  const cached = dashboardRowCache.get(data);
+  if (cached) return cached;
+  const rows = buildDashboardRows(data);
+  dashboardRowCache.set(data, rows);
+  return rows;
+}
+
+function buildDashboardRows(data: DataCache): DashboardRow[] {
+  const sections = DASHBOARD_SECTIONS.map((section) => ({
+    dashboardRow: 'section' as const,
+    id: `section:${section.kind}`,
+    kind: section.kind,
+    title: section.title,
+    count: data[section.key].length,
+    active:
+      section.key === 'chats'
+        ? data.chats.filter((c) => String(c['status']) === 'active').length
+        : section.key === 'runs'
+          ? data.runs.filter((r) => statusTone(String(r['status'])) === 'running').length
+          : undefined,
+  }));
+
+  const runs = [...data.runs]
+    .sort((a, b) => epochOr(b['createdAt'] as string) - epochOr(a['createdAt'] as string))
+    .slice(0, DASHBOARD_RECENT_RUNS)
+    .map((run) => ({ ...run, dashboardRow: 'run' as const }));
+
+  return [...sections, ...runs];
+}
+
 // ── Data loading ──────────────────────────────────────────────────
 
 const LOADERS: Record<DataKey, (api: Api) => Promise<Array<Record<string, unknown>>>> = {
@@ -1107,7 +1204,11 @@ const LOADERS: Record<DataKey, (api: Api) => Promise<Array<Record<string, unknow
 export function dataKeysFor(kind: PaneContent['kind']): DataKey[] {
   switch (kind) {
     case 'dashboard':
-      return ['chats', 'runs', 'workflows', 'automations'];
+      // `projects` is here because the dashboard COUNTS it. It was omitted
+      // while the pane still rendered a `Projects` stat, so that number read
+      // 0 on an install with fifty projects — a counter that is always zero
+      // is worse than no counter at all.
+      return ['chats', 'runs', 'workflows', 'automations', 'projects'];
     case 'chats':
       return ['chats'];
     // A chat pane loads more than itself: `@` mentions address agents and

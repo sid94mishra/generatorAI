@@ -55,6 +55,9 @@ const LEADER_KEY = KEY.alt('l');
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Written out rather than inlined so a line split reads as one. */
+const NEWLINE = String.fromCharCode(10);
+
 class Screen {
   readonly term: InstanceType<typeof Terminal>;
   readonly stdout: NodeJS.WriteStream;
@@ -413,6 +416,77 @@ describe('TUI · navigation', () => {
     await screen.waitFor(new RegExp(`1\\s+${title}`));
   }, 40000);
 
+  it('moves a visible cursor down the dashboard and opens the section it lands on', async () => {
+    // The home screen used to render its recent runs with `selectedIndex={-1}`
+    // and size its cursor against the CHATS cache, so the arrow keys moved an
+    // invisible cursor over a list that was not drawn and Enter found no
+    // opener at all. The first screen of the app had no working navigation
+    // while its own status bar advertised "Enter open".
+    active = await mount();
+    const { screen } = active;
+    await screen.waitFor('Dashboard');
+    await screen.settle();
+
+    // Row 0 is the first section, and it must be visibly selected.
+    const home = screen.text();
+    expect(home).toMatch(/[>▸]\s+Chats/);
+
+    screen.press(KEY.down);
+    await screen.settle();
+    expect(screen.text()).toMatch(/[>▸]\s+Workflows/);
+    expect(screen.text()).not.toMatch(/[>▸]\s+Chats/);
+
+    screen.press(KEY.enter);
+    await screen.waitFor(/1\s+Workflows/);
+  }, 60000);
+
+  it('counts every section it lists, including projects', async (ctx) => {
+    // `dataKeysFor('dashboard')` omitted `projects` while the pane still drew
+    // a Projects stat, so that number read 0 on an install with fifty of them.
+    if (!liveServerReachable) return ctx.skip();
+    active = await mount();
+    const { screen } = active;
+    await screen.waitFor('Dashboard');
+    await screen.settle();
+
+    for (const section of ['Chats', 'Workflows', 'Runs', 'Automations', 'Projects']) {
+      const row = screen.text().split(NEWLINE).find((line) => line.includes(section));
+      expect(row, `${section} row`).toBeDefined();
+      // A count, not an empty column. `197/200` and `343` both qualify.
+      expect(row).toMatch(/\d/);
+    }
+  }, 60000);
+
+  it('resets the cursor when a pane is replaced with a different list', async () => {
+    // The shell owns one cursor and wrote it out per pane without ever
+    // reading it back, so `g w` then `g c` left the Chats cursor on whatever
+    // row Workflows had been on.
+    active = await mount();
+    const { screen } = active;
+    await screen.waitFor('GeneratorAI');
+
+    screen.press('g');
+    await delay(60);
+    screen.press('w');
+    await screen.waitFor(/1\s+Workflows/);
+    screen.press(KEY.down);
+    screen.press(KEY.down);
+    screen.press(KEY.down);
+    await screen.settle();
+
+    screen.press('g');
+    await delay(60);
+    screen.press('c');
+    await screen.waitFor(/1\s+Chats/);
+    await screen.settle();
+
+    // The cursor is on the FIRST row of the new list, not the fourth.
+    const lines = screen.text().split(NEWLINE);
+    const cursor = lines.findIndex((line) => /[>▸]\s+\S/.test(line));
+    const header = lines.findIndex((line) => / Name /.test(line));
+    expect(cursor).toBe(header + 1);
+  }, 60000);
+
   it('renders the dashboard summary counters', async () => {
     active = await mount();
     const { screen } = active;
@@ -486,6 +560,47 @@ describe('TUI · chat surface', () => {
 
     expect(screen.text()).toContain('good morning');
     expect(screen.text()).not.toMatch(/Workspaces\s+\d/);
+  }, 60000);
+
+  it('types a question mark into the composer instead of opening help', async (ctx) => {
+    // `app.help` is bound globally so that `?` works on a run, diff or
+    // workflow pane — every one of which shows a "? help" hint and, while the
+    // binding was scoped to `list`, did nothing when pressed. The composer is
+    // protected by `useKeymap`'s `textInputActive` guard, not by the
+    // binding's scope, and this is the test that says so.
+    if (!liveServerReachable) return ctx.skip();
+    active = await mount();
+    const { screen } = active;
+    await screen.waitFor('GeneratorAI');
+    screen.press('g');
+    await delay(60);
+    screen.press('c');
+    await screen.waitFor(/1\s+Chats/);
+    screen.press(KEY.enter);
+    await screen.waitFor('Send a message', 20000);
+
+    await screen.type('why?');
+    await screen.settle();
+
+    expect(screen.text()).toContain('why?');
+    expect(screen.text()).not.toContain('Keyboard shortcuts');
+  }, 60000);
+
+  it('opens help from a pane that is not a list', async (ctx) => {
+    if (!liveServerReachable) return ctx.skip();
+    active = await mount();
+    const { screen } = active;
+    await screen.waitFor('GeneratorAI');
+    screen.press('g');
+    await delay(60);
+    screen.press('r');
+    await screen.waitFor(/1\s+Runs/);
+    screen.press(KEY.enter);
+    await screen.settle(400, 15000);
+
+    // A run pane resolves `['run', 'global']` — no `list` anywhere in it.
+    screen.press('?');
+    await screen.waitFor('Keyboard shortcuts');
   }, 60000);
 
   it('shows chat-appropriate key hints, not list hints', async (ctx) => {

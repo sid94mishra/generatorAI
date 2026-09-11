@@ -19,6 +19,7 @@ import {
   Overlay,
   KeyHints,
   prettyChord,
+  setChordStyle,
   Markdown,
   CodeBlock,
   DiffView,
@@ -282,6 +283,45 @@ describe('prettyChord', () => {
     expect(prettyChord('ctrl+k')).toMatch(/k/i);
     expect(prettyChord('shift+r')).toMatch(/r/i);
     expect(prettyChord('escape').length).toBeGreaterThan(0);
+  });
+
+  it('spells modifiers the way the reading platform spells them', () => {
+    // `⌥` names no key a Windows or Linux user can find on their keyboard,
+    // and `^K` is a Mac convention those platforms write as `Ctrl+K`.
+    expect(prettyChord('ctrl+k', 'pc')).toBe('Ctrl+K');
+    expect(prettyChord('alt+l', 'pc')).toBe('Alt+L');
+    expect(prettyChord('shift+tab', 'pc')).toBe('Shift+Tab');
+    expect(prettyChord('return', 'pc')).toBe('Enter');
+
+    expect(prettyChord('ctrl+k', 'mac')).toBe('^K');
+    expect(prettyChord('alt+l', 'mac')).toBe('⌥L');
+    expect(prettyChord('shift+tab', 'mac')).toBe('⇧Tab');
+    expect(prettyChord('return', 'mac')).toBe('⏎');
+  });
+
+  it('keeps a two-key sequence readable as two keys', () => {
+    // `g d` means "press g, then d" — printing `G D` would tell the reader
+    // to hold Shift, which does not work.
+    expect(prettyChord('g d', 'pc')).toBe('g d');
+    expect(prettyChord('g d', 'mac')).toBe('g d');
+  });
+
+  it('names every key the keymap can hold', () => {
+    for (const style of ['pc', 'mac'] as const) {
+      for (const chord of ['escape', 'pageup', 'pagedown', 'home', 'end', 'space', 'up', 'down']) {
+        // No chord may print as the raw canonical token: those read as
+        // typos in a status bar ("pageup" rather than "PgUp").
+        expect(prettyChord(chord, style)).not.toBe(chord);
+      }
+    }
+  });
+
+  it('honours an explicit style override', () => {
+    setChordStyle('mac');
+    expect(prettyChord('ctrl+k')).toBe('^K');
+    setChordStyle('pc');
+    expect(prettyChord('ctrl+k')).toBe('Ctrl+K');
+    setChordStyle(null);
   });
 });
 

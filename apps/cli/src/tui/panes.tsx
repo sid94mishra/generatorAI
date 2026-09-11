@@ -11,7 +11,6 @@ import React, { useEffect, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import stringWidth from 'string-width';
 import {
-  epochOr,
   formatDuration,
   formatRelative,
   fit,
@@ -30,6 +29,7 @@ import {
   JsonView,
   Markdown,
   Panel,
+  prettyChord,
   Spinner,
   StatusPill,
   Table,
@@ -39,7 +39,7 @@ import {
   useTerminalSize,
   useTheme,
 } from '@generatorai/tui-kit';
-import { NO_ROWS, useActions, useTui, type DataKey } from './store.js';
+import { dashboardRows, NO_ROWS, useActions, useTui, type DataKey } from './store.js';
 import { TerminalScreen, useTerminalScreen, type TerminalLine } from './terminalRender.js';
 import { buildWorkspaceTree, type TreeRow } from './workspaceTree.js';
 
@@ -204,7 +204,14 @@ export function ListPane({ paneId, content, focused, height }: PaneProps): React
       flexGrow={1}
     >
       {error ? (
-        <EmptyState title="Could not load" hint={error} action="Press r to retry" />
+        <EmptyState
+          title="Could not load"
+          // `r` is not bound in the `list` context — this told the user to
+          // press a key that does nothing. `app.refresh` is the binding that
+          // actually re-fetches, and it is global, so it works here.
+          hint={error}
+          action={`Press ${prettyChord('ctrl+r')} to retry`}
+        />
       ) : loading && rows.length === 0 ? (
         <Spinner label="Loading…" />
       ) : (
@@ -222,41 +229,70 @@ export function ListPane({ paneId, content, focused, height }: PaneProps): React
 
 // ── Dashboard ─────────────────────────────────────────────────────
 
-function DashboardPane({ content, focused, height }: PaneProps): React.JSX.Element {
+function DashboardPane({ paneId, content, focused, height }: PaneProps): React.JSX.Element {
   const theme = useTheme();
   const data = useTui((s) => s.data);
   const connection = useTui((s) => s.connection);
+  const selected = useTui((s) => s.selection[paneId] ?? 0);
 
-  const activeRuns = data.runs.filter((r) => statusTone(String(r['status'])) === 'running');
-  const activeChats = data.chats.filter((c) => String(c['status']) === 'active');
-
-  const recent = useMemo(
-    () =>
-      [...data.runs]
-        .sort((a, b) => epochOr(b['createdAt'] as string) - epochOr(a['createdAt'] as string))
-        .slice(0, Math.max(3, height - 12)),
-    [data.runs, height],
-  );
+  // The SAME array the cursor is sized against (`paneListRows`), so a row
+  // the user can select is always a row that is drawn. Splitting it back
+  // into its two halves here is presentation only — the index space stays
+  // flat, which is what lets Down run from the last section straight into
+  // the first run without a special case.
+  const rows = useMemo(() => dashboardRows(data), [data]);
+  const sections = rows.filter((row) => row.dashboardRow === 'section');
+  const runs = rows.filter((row) => row.dashboardRow === 'run');
 
   return (
     <Panel title={content.title} focused={focused} flexGrow={1}>
-      <Box marginBottom={1}>
-        <Stat label="Chats" value={`${activeChats.length}/${data.chats.length}`} tone="running" />
-        <Stat label="Workflows" value={String(data.workflows.length)} />
-        <Stat label="Runs" value={`${activeRuns.length}/${data.runs.length}`} tone={activeRuns.length ? 'running' : 'idle'} />
-        <Stat label="Automations" value={String(data.automations.length)} />
-        <Stat label="Projects" value={String(data.projects.length)} />
-      </Box>
-
-      <Text bold color={theme.c('muted')}>
-        Recent runs
-      </Text>
       <VirtualList
-        items={recent}
-        selectedIndex={-1}
-        height={Math.max(1, height - 10)}
-        emptyMessage="No runs yet — press g w to pick a workflow."
-        renderItem={(run) => {
+        items={sections}
+        selectedIndex={selected < sections.length ? selected : -1}
+        height={sections.length}
+        emptyMessage=""
+        renderItem={(section, _index, isSelected) => {
+          const count = Number(section['count'] ?? 0);
+          const active = section['active'] as number | undefined;
+          return (
+            <Box width="100%">
+              {/* Same two-column cursor the tables draw, so the home screen
+                  looks like every list the user reaches from it. */}
+              <Text color={isSelected ? theme.c('primary') : undefined}>
+                {isSelected ? `${theme.glyphs.arrowRight} ` : '  '}
+              </Text>
+              <Box flexShrink={0} width={16}>
+                <Text bold color={isSelected ? theme.c('primary') : undefined}>
+                  {String(section['title'])}
+                </Text>
+              </Box>
+              <Box flexShrink={0} width={12}>
+                <Text color={theme.c(active ? 'running' : 'muted')}>
+                  {active === undefined ? String(count) : `${active}/${count}`}
+                </Text>
+              </Box>
+              <Box flexGrow={1} overflow="hidden">
+                <Text color={theme.c('muted')} wrap="truncate-end">
+                  {isSelected ? `${prettyChord('return')} to open` : ''}
+                </Text>
+              </Box>
+            </Box>
+          );
+        }}
+      />
+
+      <Box marginTop={1}>
+        <Text bold color={theme.c('muted')}>
+          Recent runs
+        </Text>
+      </Box>
+      <VirtualList
+        items={runs}
+        // The flat index space again: run 0 is row `sections.length`.
+        selectedIndex={selected - sections.length}
+        height={Math.max(1, height - sections.length - 7)}
+        emptyMessage="No runs yet — pick Workflows above and press Enter."
+        renderItem={(run, _index, isSelected) => {
           const status = String(run['status'] ?? '');
           const { color, glyph } = statusStyle(theme, statusTone(status));
           // Laid out as flex columns rather than padded strings: the name has
@@ -264,6 +300,9 @@ function DashboardPane({ content, focused, height }: PaneProps): React.JSX.Eleme
           // `fit(…, 28)` throws away on a wide terminal.
           return (
             <Box width="100%">
+              <Text color={isSelected ? theme.c('primary') : undefined}>
+                {isSelected ? `${theme.glyphs.arrowRight} ` : '  '}
+              </Text>
               <Box flexShrink={0} width={13}>
                 <Text color={color}>
                   {glyph} {fit(status, 10)}
@@ -290,27 +329,6 @@ function DashboardPane({ content, focused, height }: PaneProps): React.JSX.Eleme
         </Text>
       </Box>
     </Panel>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  label: string;
-  value: string;
-  tone?: 'running' | 'success' | 'failure' | 'warning' | 'idle' | 'neutral';
-}): React.JSX.Element {
-  const theme = useTheme();
-  const { color } = statusStyle(theme, tone);
-  return (
-    <Box marginRight={3} flexDirection="column">
-      <Text color={theme.c('muted')}>{label}</Text>
-      <Text bold color={color ?? theme.c('foreground')}>
-        {value}
-      </Text>
-    </Box>
   );
 }
 
@@ -404,7 +422,7 @@ function ChatPane({ paneId, content, focused, height }: PaneProps): React.JSX.El
               </Text>
             </>
           )}
-          <Text color={theme.c('muted')}>{`alt+g to answer ${theme.glyphs.neutral} waiting for you`}</Text>
+          <Text color={theme.c('muted')}>{`${prettyChord('alt+g')} to answer ${theme.glyphs.neutral} waiting for you`}</Text>
         </Box>
       ) : null}
 
@@ -815,7 +833,7 @@ function AutomationPane({ paneId, content, focused, height }: PaneProps): React.
       </Box>
 
       <Text color={theme.c('muted')}>
-        ctrl+n/p executions {theme.glyphs.neutral} ⏎ open run {theme.glyphs.neutral} c cancel
+        {`${prettyChord('ctrl+n')}/${prettyChord('ctrl+p')} executions ${theme.glyphs.neutral} ${prettyChord('return')} open run ${theme.glyphs.neutral} c cancel`}
       </Text>
     </Panel>
   );
@@ -893,7 +911,7 @@ function WorkflowPane({ content, focused, height }: PaneProps): React.JSX.Elemen
       )}
 
       <Text color={theme.c('muted')} wrap="truncate-end">
-        {`ctrl+n/p stage ${theme.glyphs.neutral} n new ${theme.glyphs.neutral} e edit ${theme.glyphs.neutral} E/D edge ${theme.glyphs.neutral} v vars ${theme.glyphs.neutral} h hooks ${theme.glyphs.neutral} V validate ${theme.glyphs.neutral} r run`}
+        {`${prettyChord('ctrl+n')}/${prettyChord('ctrl+p')} stage ${theme.glyphs.neutral} n new ${theme.glyphs.neutral} e edit ${theme.glyphs.neutral} E/D edge ${theme.glyphs.neutral} v vars ${theme.glyphs.neutral} h hooks ${theme.glyphs.neutral} V validate ${theme.glyphs.neutral} r run`}
       </Text>
     </Panel>
   );
@@ -1141,7 +1159,11 @@ function CommandPane({ paneId, content, focused, height }: PaneProps): React.JSX
       {state.loading ? (
         <Spinner label="Running…" />
       ) : state.error ? (
-        <EmptyState title="Could not load" hint={state.error} action="Press R to retry" />
+        <EmptyState
+          title="Could not load"
+          hint={state.error}
+          action={`Press R to re-run, or ${prettyChord('ctrl+r')} to refresh`}
+        />
       ) : state.shape === 'record' ? (
         <JsonView value={state.record ?? {}} height={height - 4} />
       ) : (
@@ -1154,7 +1176,7 @@ function CommandPane({ paneId, content, focused, height }: PaneProps): React.JSX
         />
       )}
       <Text color={theme.c('muted')} wrap="truncate-end">
-        {`⏎ inspect ${theme.glyphs.neutral} R rerun ${theme.glyphs.neutral} / filter${
+        {`${prettyChord('return')} inspect ${theme.glyphs.neutral} R rerun ${theme.glyphs.neutral} / filter${
           state.description ? `  ${theme.glyphs.neutral} ${state.description}` : ''
         }`}
       </Text>
@@ -1262,7 +1284,7 @@ function TerminalPane({ content, focused, height }: PaneProps): React.JSX.Elemen
         />
       )}
       <Text color={theme.c('muted')} wrap="truncate-end">
-        {`⏎ attach ${theme.glyphs.neutral} n new ${theme.glyphs.neutral} l switch ${theme.glyphs.neutral} d kill ${theme.glyphs.neutral} PgUp/PgDn scroll ${theme.glyphs.neutral} alt+s search ${theme.glyphs.neutral} y copy`}
+        {`${prettyChord('return')} attach ${theme.glyphs.neutral} n new ${theme.glyphs.neutral} l switch ${theme.glyphs.neutral} d kill ${theme.glyphs.neutral} PgUp/PgDn scroll ${theme.glyphs.neutral} ${prettyChord('alt+s')} search ${theme.glyphs.neutral} y copy`}
       </Text>
     </Panel>
   );

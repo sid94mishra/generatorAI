@@ -65,11 +65,33 @@ export interface CreateCliClientOptions {
 export async function selectEndpoint(
   options: CreateCliClientOptions,
 ): Promise<{ baseUrl: string; connection: ServerConnection | null; protocolWarning: string | null }> {
+  const manager = new ConnectionManager();
+
   if (options.serverUrl) {
-    return { baseUrl: options.serverUrl.replace(/\/$/, ''), connection: null, protocolWarning: null };
+    const baseUrl = options.serverUrl.replace(/\/$/, '');
+    // A URL typed at `--server` is still, very often, a server this device
+    // has already paired with — `ConnectionManager.find` takes a URL for
+    // exactly that reason. Returning `connection: null` unconditionally meant
+    // `--server http://127.0.0.1:3100` ran UNAUTHENTICATED against the same
+    // endpoint `connect list` reports as paired and active: every list in the
+    // TUI came back "This client is not paired with a GeneratorAI server",
+    // which is indistinguishable from the app being broken.
+    const paired = manager.find(baseUrl) ?? null;
+    if (!paired || options.offline) {
+      return { baseUrl, connection: paired, protocolWarning: null };
+    }
+
+    // Host pinning, same rule as the catalog path below: a credential is
+    // only reused while the endpoint still answers with the identity it was
+    // paired to. An explicit `--server` is not a reason to skip that check —
+    // it is a reason to make it, since the URL came from outside the catalog.
+    const probe = await probeEndpoint(baseUrl);
+    if (probe.ok && probe.serverId && probe.serverId !== paired.serverId) {
+      return { baseUrl, connection: null, protocolWarning: null };
+    }
+    return { baseUrl, connection: paired, protocolWarning: null };
   }
 
-  const manager = new ConnectionManager();
   const connection = options.connectionRef
     ? manager.require(options.connectionRef)
     : (options.config.activeConnection ? manager.find(options.config.activeConnection) : null) ??

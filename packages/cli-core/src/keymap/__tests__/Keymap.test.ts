@@ -46,14 +46,28 @@ describe('DEFAULT_KEYMAP', () => {
     expect(km.lookup('ctrl+c', ['global'])).toBe('app.quit');
   });
 
-  it('keeps printable chords out of the global context', () => {
-    // `?` and `/` must reach the chat composer as text; binding them globally
-    // means a question can never be typed.
+  it('keeps the search chord out of the global context', () => {
+    // `/` is printable AND only meaningful over a list — only a list pane
+    // reads `search[paneId]` — so it stays scoped. A global `/` would both
+    // compete with typed text and open a filter box that filters nothing.
     const km = new Keymap();
-    expect(km.lookup('?', ['global'])).toBeUndefined();
     expect(km.lookup('/', ['global'])).toBeUndefined();
-    expect(km.lookup('?', ['list', 'global'])).toBe('app.help');
     expect(km.lookup('/', ['list', 'global'])).toBe('app.search');
+  });
+
+  it('binds help globally, since every pane advertises it', () => {
+    // `?` is printable too, but the status bar offers "? help" on every pane
+    // and, scoped to `list`, it did nothing on a run, diff, workflow,
+    // automation or browser pane — none of which include `list` in their
+    // context chain. It is safe globally because the keymap never even sees
+    // a printable chord while a text field is focused (`useKeymap`'s
+    // `textInputActive` guard) or while an overlay is up (the resolver is
+    // handed `['overlay']` alone). `tui-e2e` covers the composer case.
+    const km = new Keymap();
+    expect(km.lookup('?', ['global'])).toBe('app.help');
+    expect(km.lookup('?', ['run', 'global'])).toBe('app.help');
+    expect(km.lookup('?', ['diff', 'global'])).toBe('app.help');
+    expect(km.lookup('?', ['list', 'global'])).toBe('app.help');
   });
 });
 

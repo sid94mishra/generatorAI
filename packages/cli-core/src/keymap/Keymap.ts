@@ -69,10 +69,18 @@ const LEADER_BINDING_ID = 'pane.leader';
 export const DEFAULT_KEYMAP: KeyBinding[] = [
   // ── Global ────────────────────────────────────────────────────
   { id: 'app.palette', context: 'global', keys: 'ctrl+k', alternates: ['ctrl+p'], description: 'Command palette', category: 'Global' },
-  // `?` and `/` are printable, so they cannot live in `global`: the chat
-  // composer would never receive them, and typing a question would open the
-  // help sheet instead. `list` is every context that has no text input.
-  { id: 'app.help', context: 'list', keys: '?', description: 'Toggle help', category: 'Global' },
+  // `?` and `/` are printable, so a keymap that saw them unconditionally
+  // would swallow a question typed into the chat composer. `useKeymap` now
+  // makes that impossible on its own: while a text field owns the keyboard
+  // it drops every printable chord before lookup, and while an overlay is up
+  // the resolver is handed `['overlay']` alone.
+  //
+  // So `app.help` is global — bound to `list` it was unreachable on a run,
+  // diff, workflow, automation or browser pane, every one of which shows a
+  // "? help" hint in the status bar and did nothing when you pressed it.
+  // `app.search` stays on `list`: only a list pane reads `search[paneId]`,
+  // so a global `/` would open a filter box that filters nothing.
+  { id: 'app.help', context: 'global', keys: '?', description: 'Toggle help', category: 'Global' },
   { id: 'app.quit', context: 'global', keys: 'ctrl+c', description: 'Quit', category: 'Global' },
   { id: 'app.refresh', context: 'global', keys: 'ctrl+r', description: 'Refresh current view', category: 'Global' },
   { id: 'app.search', context: 'list', keys: '/', description: 'Search in view', category: 'Global' },
