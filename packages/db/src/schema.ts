@@ -2,7 +2,7 @@
 // Database Schema — Tables (Drizzle ORM + SQLite)
 // ────────────────────────────────────────────────────────────────
 
-import { sqliteTable, text, integer, blob, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, blob, index, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
 import type {
   ChatMessageMetadata,
   WorkflowDefinitionSnapshot,
@@ -48,6 +48,8 @@ export const sessions = sqliteTable(
       event: string;
     } | null>(),
     conversationId: text('conversation_id'),
+    /** The provider's own session handle (Claude session id / Codex thread id). */
+    providerSessionId: text('provider_session_id'),
     ownerType: text('owner_type').$type<'chat' | 'stage_run' | 'workflow_run'>(),
     ownerId: text('owner_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
@@ -317,6 +319,14 @@ export const chats = sqliteTable(
     orchestratorWaveCount: integer('orchestrator_wave_count'),
     orchestratorStartedAt: integer('orchestrator_started_at'),
     parentChatId: text('parent_chat_id'),
+    /** Conversation-branch provenance (a fork is NOT a worker: it stays in the sidebar). */
+    forkedFromChatId: text('forked_from_chat_id'),
+    forkedAtTurnId: text('forked_at_turn_id'),
+    /**
+     * Transcript digest to prepend to the next prompt after a SYNTHETIC
+     * rewind/fork (provider without native branching). Cleared once consumed.
+     */
+    conversationSeed: text('conversation_seed'),
     backgroundTaskName: text('background_task_name'),
     backgroundTaskIndex: integer('background_task_index'),
     backgroundTaskStatus: text('background_task_status'),
@@ -1443,3 +1453,23 @@ export const agents = sqliteTable(
 /** Re-exported so repositories can reference the JSON column shapes. */
 export type AgentChatOverrides = AgentOverrides;
 export type AgentChatSnapshot = ResolvedAgentProjection;
+// ── Workspace change review (Changes tab "Keep" per file) ──
+//
+// A kept file is one the user reviewed and accepted at a given content blob.
+// The change summary marks a file `kept` while its working-tree blob still
+// equals `accepted_blob`; a later edit by the agent un-keeps it automatically.
+export const workspaceFileReviews = sqliteTable(
+  'workspace_file_reviews',
+  {
+    workspaceId: text('workspace_id').notNull(),
+    alias: text('alias').notNull(),
+    path: text('path').notNull(),
+    /** Working-tree blob sha the user accepted; '' for a deleted file. */
+    acceptedBlob: text('accepted_blob').notNull(),
+    acceptedAt: integer('accepted_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.alias, table.path] }),
+    workspaceIdx: index('idx_workspace_file_reviews_ws').on(table.workspaceId),
+  }),
+);

@@ -165,11 +165,14 @@ function SectionCard({
   icon: Icon,
   title,
   subtitle,
+  required,
   children,
 }: {
   icon: React.ElementType;
   title: string;
   subtitle?: string;
+  /** Marks the section as required, with the same marker form fields use. */
+  required?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -177,7 +180,10 @@ function SectionCard({
       <div className="mb-3 flex items-start gap-2">
         <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
         <div>
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <h3 className="text-sm font-semibold text-foreground">
+            {title}
+            {required && <span className="ml-0.5 text-danger">*</span>}
+          </h3>
           {subtitle && <p className="text-[11px] text-muted-foreground">{subtitle}</p>}
         </div>
       </div>
@@ -424,7 +430,7 @@ export function AgentEditorPage() {
         title={
           <span className="flex items-center gap-2">
             {isOrchestrator ? <Network className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
-            {isNew ? 'New agent' : form.name || 'Agent'}
+            {isNew ? 'New Agent' : form.name || 'Agent'}
             {readOnly && (
               <Badge tone="neutral" size="sm">
                 <Lock className="h-2.5 w-2.5" />
@@ -546,7 +552,7 @@ export function AgentEditorPage() {
               <Field
                 label="Description"
                 required
-                hint="Both SDKs use this to decide when to delegate to the agent. Be specific about when it should be chosen."
+                hint="Providers use this to decide when to delegate to the agent. Be specific about when it should be chosen."
                 htmlFor="agent-description"
               >
                 <Textarea
@@ -593,7 +599,13 @@ export function AgentEditorPage() {
               </div>
 
               <Field label="Tags">
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div
+                  className={
+                    readOnly
+                      ? 'flex flex-wrap items-center gap-1.5'
+                      : 'flex min-h-[38px] flex-wrap items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 transition-all duration-150 focus-within:border-[var(--primary)] focus-within:ring-2 focus-within:ring-primary/20'
+                  }
+                >
                   {form.tags.map((tag) => (
                     <Badge key={tag} tone="neutral" size="sm">
                       {tag}
@@ -613,6 +625,7 @@ export function AgentEditorPage() {
                   {!readOnly && (
                     <Input
                       aria-label="Add tag"
+                      data-inline-search=""
                       value={tagInput}
                       onChange={(e) => setTagInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -624,7 +637,7 @@ export function AgentEditorPage() {
                         }
                       }}
                       placeholder="Add tag…"
-                      className="h-auto w-24 rounded-none border-0 bg-transparent p-0 text-xs text-foreground placeholder:text-muted-foreground focus:border-0 focus:outline-none focus:ring-0"
+                      className="h-auto min-w-24 flex-1 rounded-none border-0 bg-transparent p-0 text-sm text-foreground placeholder:text-muted-foreground shadow-none hover:border-0 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
                     />
                   )}
                 </div>
@@ -644,7 +657,8 @@ export function AgentEditorPage() {
 
           <SectionCard
             icon={Sparkles}
-            title="Instructions*"
+            title="Instructions"
+            required
             subtitle="Who this agent is and how it should work. Added to the system prompt on every turn."
           >
             <div className="space-y-3">

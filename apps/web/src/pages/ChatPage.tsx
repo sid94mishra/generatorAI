@@ -10,6 +10,7 @@ import React, { useEffect, useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useChat, useChatMessages, useSendChatPrompt, useUpdateChat, useCancelChat, useBackgroundTasks, useHarnessConfig, useModels } from '@/hooks/queries.js';
 import { ChatChangesTray } from '@/components/chat/ChatChangesTray.js';
+import { LiveActivityStrip, useRunningBackgroundTaskCount } from '@/components/agent/LiveActivityStrip.js';
 import { PathRootsContext, toDisplayPath, type PathRoot } from '@/components/chat/changes/changePaths.js';
 import { useWorkspaceInfo, usePrepareChatWorkspace } from '@/hooks/sourceQueries.js';
 import { EditSourcesDialog } from '@/components/chat/sources/EditSourcesDialog.js';
@@ -21,6 +22,7 @@ import type { AgentMode, ChatMessage } from '@generatorai/shared';
 import { DEFAULT_AGENT_MODE } from '@generatorai/shared';
 import { protectStream, useStreamStore } from '@/stores/streamStore.js';
 import { useChatStore } from '@/stores/chatStore.js';
+import { useRewindStore } from '@/stores/rewindStore.js';
 import { useStickToBottom } from '@/hooks/useStickToBottom.js';
 import { useTwoPhaseStop } from '@/hooks/useTwoPhaseStop.js';
 import { applyStopEffects } from '@/pages/chatStopEffects.js';
@@ -47,7 +49,7 @@ import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { WidgetHost } from '@/components/widgets/WidgetHost.js';
 import { widgetTabId, parseWidgetTabId } from '@/components/widgets/widgetTabId.js';
 import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js';
-import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList, PauseCircle, MonitorCog } from 'lucide-react';
+import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList, PauseCircle, MonitorCog, GitFork } from 'lucide-react';
 import { openMultiplexedStream } from '@/platform/muxStream.js';
 import {
   addableRightPaneTabs as addableRightPaneTabsFor,
@@ -73,6 +75,32 @@ function PanelFallback() {
   return (
     <div className="flex h-full items-center justify-center">
       <Loader2 className="h-4 w-4 animate-spin text-[var(--color-muted-foreground)]" />
+    </div>
+  );
+}
+
+/**
+ * "Forked from <parent>" — where a branched conversation came from.
+ *
+ * The parent's name is fetched lazily (one small query, only on a fork) and
+ * falls back to a neutral label rather than an id: a chat the user can no
+ * longer read is still worth saying came from somewhere.
+ */
+function ForkProvenanceChip({ parentChatId }: { parentChatId: string }) {
+  const navigate = useNavigate();
+  const { data: parent } = useChat(parentChatId);
+  return (
+    <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5">
+      <button
+        type="button"
+        data-testid="fork-provenance"
+        onClick={() => navigate(`/chats/${parentChatId}`)}
+        className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
+        title="Open the chat this one branched from"
+      >
+        <GitFork className="h-3 w-3" />
+        {parent?.name ? `Forked from ${parent.name}` : 'Forked chat'}
+      </button>
     </div>
   );
 }
@@ -393,6 +421,8 @@ export function ChatPage() {
   );
   const { data: backgroundTasksData } = useBackgroundTasks(chatId, isOrchestrator);
   const backgroundTaskCount = backgroundTasksData?.tasks?.length ?? 0;
+  /** Workers running or waiting to start — the tab's live count badge. */
+  const runningTaskCount = useRunningBackgroundTaskCount(sessionId);
   const [bgTabAutoOpened, setBgTabAutoOpened] = useState(false);
   useEffect(() => {
     if (isOrchestrator && backgroundTaskCount > 0 && !bgTabAutoOpened) {
@@ -820,6 +850,28 @@ export function ChatPage() {
   const isChatActive = chat?.status === 'active';
 
   /**
+   * A rewind hands the prompt back so it can be edited and resent.
+   *
+   * The offer is parked in `rewindStore` by whichever path performed the
+   * rewind (this tab's own request, or a `chat.rewound` event from another
+   * surface) and consumed exactly once here, then forwarded to the composer.
+   * Nothing is auto-sent: re-running the turn would make the destructive
+   * option unreviewable.
+   */
+  const pendingRewindPrompt = useRewindStore((s) => s.pending);
+  const [restoredDraft, setRestoredDraft] = useState<{ text: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!pendingRewindPrompt || pendingRewindPrompt.chatId !== chatId) return;
+    setRestoredDraft({ text: pendingRewindPrompt.prompt, at: pendingRewindPrompt.at });
+    useRewindStore.getState().clear();
+  }, [pendingRewindPrompt, chatId]);
+
+  // A turn in flight is refused by the server (409 CHAT_BUSY), and an
+  // archived chat cannot be moved at all — so the control says so rather
+  // than letting the user find out by pressing it.
+  const canRewind = isChatActive && !isCopilotWorking;
+
+  /**
    * W30-b — two-phase Stop.
    *
    * `isLive` is the BACKEND's view: `stream.status` is driven entirely by the
@@ -986,7 +1038,15 @@ export function ChatPage() {
     // in the event stream (not in chat history), so clearing here would
     // drop the inline widget iframes the LLM rendered during the turn.
     const hasWidgetBlocks = current.blocks.some((b) => b.type === 'widget');
-    if (hasWidgetBlocks) return;
+    // Likewise for orchestrator workers still running: their rows exist only
+    // in the stream (rebuilt by replay after a reload) and they outlive the
+    // turn that spawned them, so the history catching up is not a reason to
+    // drop them — `clearStream` would keep the blocks but leave the stream
+    // `idle`, which is the one status the transcript does not render.
+    const hasLiveWorkers = current.blocks.some(
+      (b) => b.type === 'background_task' && (b.status === 'running' || b.status === 'spawned'),
+    );
+    if (hasWidgetBlocks || hasLiveWorkers) return;
 
     const turnMsg = current.turnUserMessage?.trim();
     if (!turnMsg) {
@@ -1186,6 +1246,10 @@ export function ChatPage() {
         description: 'Background agent tasks spawned by this orchestrator chat',
         icon: <Boxes className="h-3.5 w-3.5" />,
         allowMultiple: false,
+        // Live count of workers running or waiting to start, so the tab says
+        // there is something to look at without being opened.
+        getTabLabel: () =>
+          runningTaskCount > 0 ? `Background Tasks (${runningTaskCount})` : 'Background Tasks',
         disabled: !isOrchestrator,
         disabledReason: 'Enable Orchestrate mode on this chat to spawn background tasks',
         render: () => <BackgroundTasksPanel chatId={chatId} />,
@@ -1220,6 +1284,7 @@ export function ChatPage() {
     setAgentConsoleCallId,
     messages,
     isOrchestrator,
+    runningTaskCount,
     activePlanId,
     openWidgetTab,
     widgetTitlesKey,
@@ -1275,6 +1340,13 @@ export function ChatPage() {
         </div>
       )}
 
+      {/* Where this chat came from. A fork shares its parent's workspace and
+          its history up to the branch point, so the link back is the only way
+          to tell the two conversations apart once they diverge. */}
+      {chat.forkedFromChatId && (
+        <ForkProvenanceChip parentChatId={chat.forkedFromChatId} />
+      )}
+
       {/* Archived banner */}
       {chat.status === 'archived' && (
         <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-amber-500/5 px-4 py-2">
@@ -1310,6 +1382,7 @@ export function ChatPage() {
         {displayMessages.length > 0 && (
           <ChatMessageList
             messages={displayMessages}
+            canRewind={canRewind}
             onOpenPlan={openPlanTab}
             onOpenChanges={openChangesTab}
             onOpenShell={openAgentShell}
@@ -1422,6 +1495,7 @@ export function ChatPage() {
             isStreaming={isCopilotWorking}
             pendingCaptures={pendingCaptures}
             promptHistory={promptHistory}
+            {...(restoredDraft ? { restoredDraft } : {})}
             onRemovePendingCapture={(id) => setPendingCaptures((prev) => prev.filter((c) => c.id !== id))}
             onBuiltinCommand={async (commandId) => {
               const wsId = chat?.workspaceId;
@@ -1486,12 +1560,16 @@ export function ChatPage() {
             cancelMutation.mutate(chatId);
           }}
           aboveComposer={
-            <ChatChangesTray
-              workspaceId={chat?.workspaceId}
-              sessionId={sessionId}
-              streaming={isCopilotWorking}
-              onOpenChanges={openChangesTab}
-            />
+            <>
+              {/* Workers outlive the orchestrator's turn: keep the strip up while any run. */}
+              <LiveActivityStrip sessionId={sessionId} active={isCopilotWorking || runningTaskCount > 0} />
+              <ChatChangesTray
+                workspaceId={chat?.workspaceId}
+                sessionId={sessionId}
+                streaming={isCopilotWorking}
+                onOpenChanges={openChangesTab}
+              />
+            </>
           }
         />
         </>

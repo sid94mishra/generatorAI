@@ -219,108 +219,152 @@ export class CheckpointService {
     paths?: string[],
   ): Promise<RestoreCheckpointResult> {
     const key = `${checkpoint.workspaceId}::${checkpoint.repoAlias}`;
-    return this.withLock(key, async () => {
-      const skipped: RestoreCheckpointResult['skipped'] = [];
-
-      // Undoing an undo must not nest the label ("Before rewind to Before
-      // rewind to …"). A pre_restore target is identified by its timestamp
-      // instead, which is what distinguishes it anyway.
-      const targetName =
-        checkpoint.kind === 'pre_restore' || !checkpoint.label
-          ? new Date(checkpoint.createdAt).toLocaleTimeString()
-          : checkpoint.label;
-
-      const pre = await this.createUnlocked(
-        {
-          workspaceId: checkpoint.workspaceId,
-          repoDir,
-          repoAlias: checkpoint.repoAlias,
-          kind: 'pre_restore',
-          label: `Before rewind to ${targetName}`,
-          skipIfUnchanged: false,
-        },
+    // Undoing an undo must not nest the label ("Before rewind to Before
+    // rewind to …"). A pre_restore target is identified by its timestamp
+    // instead, which is what distinguishes it anyway.
+    const targetName =
+      checkpoint.kind === 'pre_restore' || !checkpoint.label
+        ? new Date(checkpoint.createdAt).toLocaleTimeString()
+        : checkpoint.label;
+    return this.withLock(key, () =>
+      this.restoreToTreeUnlocked(
+        checkpoint.workspaceId,
         checkpoint.repoAlias,
-      );
-
-      // Working tree → target. `A` means present in target but missing now.
-      const delta = await this.store.gitFor(repoDir).diffNameStatusZ(repoDir,
+        repoDir,
         checkpoint.treeSha,
-        // Diff tree-to-tree using the pre-restore snapshot as "current".
-        // `git diff <tree>` alone would compare against the index+worktree
-        // and silently omit untracked files, so agent-created files would
-        // never be deleted on rewind.
-        pre?.treeSha,
+        targetName,
         paths,
+      ),
+    );
+  }
+
+  /**
+   * Make the working tree match an arbitrary git revision — a commit, a tag,
+   * a tree — rather than a checkpoint row.
+   *
+   * Needed because a mount's BASE is frequently not a checkpoint at all: a
+   * linked worktree anchors on "Branch base" or "Worktree HEAD", and a plain
+   * git folder mounted in place anchors on its first commit. Discard on
+   * those mounts had nothing to restore from and was simply hidden in the UI.
+   * Everything else (the `pre_restore` snapshot that makes the operation
+   * undoable, the symlink refusal, tree-to-tree delta so adds/deletes/renames
+   * all behave) is shared with `restore`.
+   */
+  async restoreFromRevision(
+    workspaceId: string,
+    repoAlias: string,
+    repoDir: string,
+    treeish: string,
+    paths?: string[],
+    label = 'the base revision',
+  ): Promise<RestoreCheckpointResult> {
+    const key = `${workspaceId}::${repoAlias}`;
+    return this.withLock(key, () =>
+      this.restoreToTreeUnlocked(workspaceId, repoAlias, repoDir, treeish, label, paths),
+    );
+  }
+
+  /** Shared body of `restore` / `restoreFromRevision`. Caller holds the lock. */
+  private async restoreToTreeUnlocked(
+    workspaceId: string,
+    repoAlias: string,
+    repoDir: string,
+    treeish: string,
+    targetName: string,
+    paths?: string[],
+  ): Promise<RestoreCheckpointResult> {
+    const skipped: RestoreCheckpointResult['skipped'] = [];
+
+    const pre = await this.createUnlocked(
+      {
+        workspaceId,
+        repoDir,
+        repoAlias,
+        kind: 'pre_restore',
+        label: `Before rewind to ${targetName}`,
+        skipIfUnchanged: false,
+      },
+      repoAlias,
+    );
+
+    // Working tree → target. `A` means present in target but missing now.
+    const delta = await this.store.gitFor(repoDir).diffNameStatusZ(repoDir,
+      treeish,
+      // Diff tree-to-tree using the pre-restore snapshot as "current".
+      // `git diff <tree>` alone would compare against the index+worktree
+      // and silently omit untracked files, so agent-created files would
+      // never be deleted on rewind.
+      pre?.treeSha,
+      paths,
+    );
+
+    // Codes are relative to `checkpoint.treeSha` → `pre.treeSha`:
+    //   A = exists now but not in the checkpoint  → delete
+    //   D / M = exists in the checkpoint          → restore
+    //   R = renamed since the checkpoint          → delete new, restore old
+    const toDelete: string[] = [];
+    const toRestore: string[] = [];
+    for (const entry of delta) {
+      if (entry.code.startsWith('A')) {
+        toDelete.push(entry.path);
+      } else if (entry.code.startsWith('R') || entry.code.startsWith('C')) {
+        toDelete.push(entry.path);
+        if (entry.oldPath) toRestore.push(entry.oldPath);
+      } else {
+        toRestore.push(entry.path);
+      }
+    }
+
+    const safeDelete: string[] = [];
+    for (const rel of toDelete) {
+      const full = path.join(repoDir, rel);
+      const verdict = await classifyPath(full);
+      if (verdict) {
+        skipped.push({ path: rel, reason: verdict });
+        continue;
+      }
+      safeDelete.push(rel);
+    }
+
+    const safeRestore: string[] = [];
+    for (const rel of toRestore) {
+      const full = path.join(repoDir, rel);
+      const verdict = await classifyPath(full);
+      if (verdict) {
+        skipped.push({ path: rel, reason: verdict });
+        continue;
+      }
+      safeRestore.push(rel);
+    }
+
+    const indexFile = await this.store.restoreIndexPath(repoDir);
+    if (indexFile && safeRestore.length > 0) {
+      await this.store.gitFor(repoDir).restorePathsFromTree(repoDir,
+        treeish,
+        indexFile,
+        safeRestore,
       );
+    }
 
-      // Codes are relative to `checkpoint.treeSha` → `pre.treeSha`:
-      //   A = exists now but not in the checkpoint  → delete
-      //   D / M = exists in the checkpoint          → restore
-      //   R = renamed since the checkpoint          → delete new, restore old
-      const toDelete: string[] = [];
-      const toRestore: string[] = [];
-      for (const entry of delta) {
-        if (entry.code.startsWith('A')) {
-          toDelete.push(entry.path);
-        } else if (entry.code.startsWith('R') || entry.code.startsWith('C')) {
-          toDelete.push(entry.path);
-          if (entry.oldPath) toRestore.push(entry.oldPath);
-        } else {
-          toRestore.push(entry.path);
-        }
+    for (const rel of safeDelete) {
+      try {
+        await fs.rm(path.join(repoDir, rel), { force: true });
+      } catch (err) {
+        skipped.push({ path: rel, reason: `delete failed: ${String(err)}` });
       }
+    }
 
-      const safeDelete: string[] = [];
-      for (const rel of toDelete) {
-        const full = path.join(repoDir, rel);
-        const verdict = await classifyPath(full);
-        if (verdict) {
-          skipped.push({ path: rel, reason: verdict });
-          continue;
-        }
-        safeDelete.push(rel);
-      }
+    this.logger.info(
+      `[Checkpoints] Restored ${repoAlias}@${treeish.slice(0, 12)}: ${safeRestore.length} restored, ` +
+        `${safeDelete.length} deleted, ${skipped.length} skipped`,
+    );
 
-      const safeRestore: string[] = [];
-      for (const rel of toRestore) {
-        const full = path.join(repoDir, rel);
-        const verdict = await classifyPath(full);
-        if (verdict) {
-          skipped.push({ path: rel, reason: verdict });
-          continue;
-        }
-        safeRestore.push(rel);
-      }
-
-      const indexFile = await this.store.restoreIndexPath(repoDir);
-      if (indexFile && safeRestore.length > 0) {
-        await this.store.gitFor(repoDir).restorePathsFromTree(repoDir,
-          checkpoint.treeSha,
-          indexFile,
-          safeRestore,
-        );
-      }
-
-      for (const rel of safeDelete) {
-        try {
-          await fs.rm(path.join(repoDir, rel), { force: true });
-        } catch (err) {
-          skipped.push({ path: rel, reason: `delete failed: ${String(err)}` });
-        }
-      }
-
-      this.logger.info(
-        `[Checkpoints] Restored ${checkpoint.id}: ${safeRestore.length} restored, ` +
-          `${safeDelete.length} deleted, ${skipped.length} skipped`,
-      );
-
-      return {
-        preRestoreCheckpointId: pre?.id ?? null,
-        restoredPaths: safeRestore,
-        deletedPaths: safeDelete,
-        skipped,
-      };
-    });
+    return {
+      preRestoreCheckpointId: pre?.id ?? null,
+      restoredPaths: safeRestore,
+      deletedPaths: safeDelete,
+      skipped,
+    };
   }
 
   // ── Prune ───────────────────────────────────────────────────

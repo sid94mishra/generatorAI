@@ -72,11 +72,25 @@ export class ScopedCdpProxy {
   private nextClientSessionOrdinal = 0;
   private nextClientBrowserSessionOrdinal = 0;
 
+  /**
+   * The tab's real main-frame id, used as the advertised target id.
+   *
+   * Chromium guarantees a page target's id IS its main frame's id, and
+   * Playwright depends on it: it looks up the session that owns a frame by
+   * walking up to a frame whose id is a target id. With an invented
+   * `gai-proxy-target` that walk never matched, Playwright threw while
+   * attaching the main frame, and the page it handed back had no frame at all
+   * — an empty URL, and every evaluate (every agent browser tool) hung.
+   * Chromium keeps the main frame id across cross-process navigations.
+   */
+  private mainFrameId: string | null = null;
+
   constructor(private readonly webContents: WebContents) {}
 
   /** Start the proxy and return its `ws://127.0.0.1:<port>/<token>` URL. */
   async start(): Promise<string> {
     await this.attachDebugger();
+    await this.refreshMainFrameId();
     return new Promise<string>((resolve, reject) => {
       this.httpServer = createServer((_req, res) => {
         // No HTTP discovery surface at all — a caller must already have the
@@ -216,10 +230,34 @@ export class ScopedCdpProxy {
     this.send({ id: clientId, error: { code: -32000, message } }, client);
   }
 
+  private async enableRuntimeWithContexts(
+    client: WebSocket,
+    clientId: number,
+    params: Record<string, unknown>,
+    msgSessionId?: string,
+  ): Promise<void> {
+    await this.sendDebuggerCommand('Runtime.disable', {}, this.resolveDebuggerSessionId(msgSessionId)).catch(() => undefined);
+    if (!this.isActiveClient(client)) return;
+    this.forwardCommand(client, clientId, 'Runtime.enable', params, msgSessionId);
+  }
+
+  private async refreshMainFrameId(): Promise<void> {
+    if (this.webContents.isDestroyed()) return;
+    try {
+      const tree = await this.sendDebuggerCommand('Page.getFrameTree', {}) as
+        | { frameTree?: { frame?: { id?: unknown } } }
+        | undefined;
+      const id = tree?.frameTree?.frame?.id;
+      if (typeof id === 'string' && id.length > 0) this.mainFrameId = id;
+    } catch {
+      /* keep the last known id; the synthetic fallback still attaches */
+    }
+  }
+
   private buildTargetInfo(): Record<string, unknown> {
     const destroyed = this.webContents.isDestroyed();
     return {
-      targetId: 'gai-proxy-target',
+      targetId: this.mainFrameId ?? 'gai-proxy-target',
       type: 'page',
       title: destroyed ? '' : this.webContents.getTitle(),
       url: destroyed ? '' : this.webContents.getURL(),
@@ -362,6 +400,8 @@ export class ScopedCdpProxy {
     if (msg.method === 'Target.setAutoAttach') {
       this.sendResult(clientId, {}, client);
       if (!msg.sessionId) {
+        // Synchronous, like Chromium: Playwright expects the attach event in
+        // step with this reply. The main-frame id was read in `start()`.
         const sessionId = this.attachSyntheticPageSession();
         this.send({
           method: 'Target.attachedToTarget',
@@ -377,6 +417,17 @@ export class ScopedCdpProxy {
     // invalidate the replay in one place.
     if (msg.method !== 'DOM.focus' && msg.method !== 'Input.insertText') {
       this.pendingDomFocusBySession.delete(effectiveSessionId);
+    }
+
+    // Every client shares one Electron debugger session, so `Runtime` is
+    // already enabled once a previous client has connected. Chromium reports
+    // live execution contexts only on a disabled → enabled transition, so a
+    // reconnecting client never learned the page's main world and its
+    // evaluate calls hung until the next navigation. Cycling the domain makes
+    // Chromium report the contexts to whoever is connected now.
+    if (msg.method === 'Runtime.enable' && !this.webContents.isDestroyed()) {
+      void this.enableRuntimeWithContexts(client, clientId, msg.params ?? {}, msg.sessionId);
+      return;
     }
 
     if (msg.method === 'Page.bringToFront') {

@@ -401,9 +401,17 @@ async function startServer(): Promise<void> {
       ...(process.env['OTEL_SAMPLE_RATE'] ? { sampleRate: parseFloat(process.env['OTEL_SAMPLE_RATE']) } : {}),
       ...(process.env['OTEL_METRICS_EXPORT_INTERVAL_MS'] ? { metricsExportIntervalMs: parseInt(process.env['OTEL_METRICS_EXPORT_INTERVAL_MS'], 10) } : {}),
     },
-    // PRV-01 — harness provider selection. HARNESS_TYPE selects the LLM adapter.
-    ...(process.env['HARNESS_TYPE'] ? {
-      harness: {
+    // PRV-01 — harness provider selection. HARNESS_TYPE selects the default
+    // provider; every other available provider still runs alongside it.
+    harness: {
+      // Codex options apply whichever provider is the default. Its CLI path is
+      // not mapped here: `CODEX_CLI_PATH` is read by Codex discovery itself.
+      codex: {
+        ...(process.env['CODEX_MODEL'] ? { defaultModel: process.env['CODEX_MODEL'] } : {}),
+        ...(process.env['CODEX_APPROVAL_POLICY'] ? { approvalPolicy: process.env['CODEX_APPROVAL_POLICY'] } : {}),
+        ...(process.env['CODEX_SANDBOX_MODE'] ? { sandboxMode: process.env['CODEX_SANDBOX_MODE'] } : {}),
+      },
+      ...(process.env['HARNESS_TYPE'] ? {
         type: process.env['HARNESS_TYPE'],
         ...(process.env['HARNESS_TYPE'] === 'claude-agent' ? {
           claudeAgent: {
@@ -419,8 +427,8 @@ async function startServer(): Promise<void> {
             ...(process.env['ANTHROPIC_MODEL'] ? { defaultModel: process.env['ANTHROPIC_MODEL'] } : {}),
           },
         } : {}),
-      },
-    } : {}),
+      } : {}),
+    },
   };
 
   const config = AppConfigSchema.parse(rawConfig);
@@ -877,6 +885,13 @@ async function startServer(): Promise<void> {
       void shutdown('ipc');
     }
   });
+
+  // The same channel closes when the desktop process dies without asking —
+  // a crash, a force-quit, a SIGKILL. Nothing else tells us: we are reparented
+  // and would keep running, holding the database and every agent CLI (and
+  // their MCP servers) we spawned. Only a process started with an IPC channel
+  // ever sees this event, so a standalone server is unaffected.
+  process.on('disconnect', () => { void shutdown('parent-disconnect'); });
 
   // A fatal fault now unwinds through the same path as a signal, so it closes
   // the DB, flushes the event queues and reaps child processes instead of

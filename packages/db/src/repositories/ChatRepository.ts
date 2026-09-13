@@ -46,6 +46,9 @@ export class DrizzleChatRepository implements IChatRepository {
         projectId: chat.projectId ?? null,
         orchestratorMode: chat.orchestratorMode ?? false,
         parentChatId: chat.parentChatId ?? null,
+        forkedFromChatId: chat.forkedFromChatId ?? null,
+        forkedAtTurnId: chat.forkedAtTurnId ?? null,
+        conversationSeed: chat.conversationSeed ?? null,
         backgroundTaskName: chat.backgroundTask?.taskName ?? null,
         backgroundTaskIndex: chat.backgroundTask?.taskIndex ?? null,
         backgroundTaskStatus: chat.backgroundTask?.status ?? null,
@@ -150,6 +153,7 @@ export class DrizzleChatRepository implements IChatRepository {
     // The mount plan is editable on an idle chat (PUT /chats/:id/sources).
     if (updates.sources !== undefined) values['sources'] = updates.sources ?? null;
     if (updates.primarySource !== undefined) values['primarySource'] = updates.primarySource ?? null;
+    if (updates.conversationSeed !== undefined) values['conversationSeed'] = updates.conversationSeed ?? null;
     values['updatedAt'] = new Date();
 
     await this.db.update(chats).set(values).where(eq(chats.id, id));
@@ -260,6 +264,9 @@ export class DrizzleChatRepository implements IChatRepository {
       projectId: row.projectId ?? undefined,
       orchestratorMode: row.orchestratorMode ?? undefined,
       parentChatId: row.parentChatId ?? undefined,
+      forkedFromChatId: row.forkedFromChatId ?? undefined,
+      forkedAtTurnId: row.forkedAtTurnId ?? undefined,
+      conversationSeed: row.conversationSeed ?? undefined,
       backgroundTask,
       defaultAgentMode: coerceAgentMode(row.defaultAgentMode) ?? DEFAULT_AGENT_MODE,
       permissionMode: (row.permissionMode as Chat['permissionMode']) ?? 'bypassPermissions',

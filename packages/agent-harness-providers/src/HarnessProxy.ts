@@ -29,6 +29,9 @@ import type {
   HarnessAgentInfo,
   ProviderCapabilities,
   HarnessRuntimeDiagnostics,
+  ForkConversationOptions,
+  ForkConversationResult,
+  RewindConversationOptions,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
 import type { HarnessType } from './types.js';
@@ -115,6 +118,27 @@ export class HarnessProxy implements IAgentHarness {
   }
   hasLiveConversation(conversationId: string): boolean {
     return this._adapter.hasLiveConversation(conversationId);
+  }
+  getProviderSessionId(conversationId: string): string | undefined {
+    return this._adapter.getProviderSessionId?.(conversationId);
+  }
+  /**
+   * Optional on the port: forwarded only when the wrapped adapter implements
+   * it, so a caller that checks `capabilities().conversationFork` first never
+   * reaches a missing method.
+   */
+  forkConversation(conversationId: string, options: ForkConversationOptions): Promise<ForkConversationResult> {
+    const fn = this._adapter.forkConversation;
+    if (!fn) return Promise.reject(new Error('This provider cannot fork conversations'));
+    return fn.call(this._adapter, conversationId, options);
+  }
+  rewindConversation(conversationId: string, options: RewindConversationOptions): Promise<ForkConversationResult> {
+    const fn = this._adapter.rewindConversation;
+    if (!fn) return Promise.reject(new Error('This provider cannot rewind conversations'));
+    return fn.call(this._adapter, conversationId, options);
+  }
+  capabilitiesFor(conversationId: string): ProviderCapabilities {
+    return this._adapter.capabilitiesFor?.(conversationId) ?? this._adapter.capabilities();
   }
   runtimeDiagnostics(): HarnessRuntimeDiagnostics {
     return this._adapter.runtimeDiagnostics?.() ?? { liveConversations: 0, liveSessions: 0, warmSessions: 0 };

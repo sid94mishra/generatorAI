@@ -34,9 +34,12 @@
  *          `exports` map. That is a genuine, versioned, offline, pinned
  *          artifact, and every type emitted into `acp.generated.ts` — all 265
  *          of them — is derived from it.
- * codex  → NOT GENERATED. Requires `codex app-server generate-ts` run against
- *          a pinned `@openai/codex` binary. That package is not a dependency
- *          of this repo and no `codex` binary is on PATH.
+ * codex  → GENERATED from a COMMITTED artifact. `@openai/codex` is pinned as an
+ *          optional dependency of packages/agent-harness-providers, and
+ *          `schemas/codex/codex_app_server_protocol.schemas.json` is captured
+ *          from that exact binary (`codex app-server generate-json-schema`,
+ *          see schemas/versions.json → capturedBy). Re-capture it when the
+ *          pin moves; this script only turns the artifact into types.
  * opencode → NOT GENERATED. Requires the OpenAPI 3.1 document served at
  *          `GET /doc` by a running `opencode serve` from a pinned
  *          `opencode-ai`. Not a dependency here, and no `opencode` binary on

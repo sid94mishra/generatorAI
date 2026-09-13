@@ -29,6 +29,7 @@ export class DrizzleSessionRepository implements ISessionRepository {
         tags: session.tags,
         triggeredBy: null,
         conversationId: session.conversationId ?? null,
+        providerSessionId: session.providerSessionId ?? null,
         ownerType: session.ownerType ?? null,
         ownerId: session.ownerId ?? null,
         createdAt: session.createdAt,
@@ -94,6 +95,7 @@ export class DrizzleSessionRepository implements ISessionRepository {
     if (updates.model !== undefined) values['model'] = updates.model;
     if (updates.tags !== undefined) values['tags'] = updates.tags;
     if (updates.conversationId !== undefined) values['conversationId'] = updates.conversationId;
+    if (updates.providerSessionId !== undefined) values['providerSessionId'] = updates.providerSessionId ?? null;
     if (updates.ownerType !== undefined) values['ownerType'] = updates.ownerType;
     if (updates.ownerId !== undefined) values['ownerId'] = updates.ownerId;
     if (updates.startedAt !== undefined) values['startedAt'] = updates.startedAt;
@@ -128,6 +130,7 @@ export class DrizzleSessionRepository implements ISessionRepository {
       model: row.model ?? undefined,
       tags: safeJsonColumn(row.tags, stringArray, { fallback: [] }) ?? [],
       conversationId: row.conversationId ?? undefined,
+      providerSessionId: row.providerSessionId ?? undefined,
       ownerType: (row.ownerType as SessionOwnerType | null) ?? undefined,
       ownerId: row.ownerId ?? undefined,
       createdAt: row.createdAt,

@@ -230,7 +230,14 @@ export function TerminalPanel({
     const term = new Xterm({
       cursorBlink: true,
       scrollback: 5000,
-      fontFamily: 'JetBrainsMono, "Fira Code", Menlo, monospace',
+      // Nerd Font families trail the stack so prompt themes (Powerlevel10k,
+      // Starship, Oh My Posh) render their icon glyphs instead of empty boxes:
+      // those glyphs live in the Private Use Area, which the primary fonts lack,
+      // and Chromium only falls back per glyph to fonts named here. Consolas
+      // covers Windows before the generic fallback.
+      fontFamily:
+        'JetBrainsMono, "Fira Code", Menlo, Consolas, "MesloLGS NF", "Symbols Nerd Font Mono", ' +
+        '"JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Hack Nerd Font", "CaskaydiaCove Nerd Font", monospace',
       fontSize: 12,
       lineHeight: 1.2,
       allowProposedApi: true,

@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   NATIVE_CHROME,
   applyChromeToDocument,
+  applyFullscreenInsets,
   isDesktop,
   onDesktopCommand,
   onDesktopNavigate,
@@ -31,6 +32,7 @@ const ROUTE_LABELS: Array<[prefix: string, label: string]> = [
   ['/chats', 'Chats'],
   ['/workflows', 'Workflows'],
   ['/projects', 'Projects'],
+  ['/agents', 'Agents'],
   ['/scripts', 'Scripts'],
   ['/automations', 'Automations'],
   ['/settings', 'Settings'],
@@ -65,7 +67,7 @@ export function useDesktopIntegration(): DesktopWindowChrome {
       applyChromeToDocument(c);
       // The main process only knows the *expected* control width; Chromium
       // knows the real one and reports changes. Prefer it once it is live.
-      untrack = trackWindowControlsOverlay();
+      untrack = trackWindowControlsOverlay(c);
     });
     return () => {
       cancelled = true;
@@ -79,11 +81,12 @@ export function useDesktopIntegration(): DesktopWindowChrome {
     if (!isDesktop) return undefined;
     const root = document.documentElement;
     return onWindowStateChanged((s) => {
+      applyFullscreenInsets(chrome, s.fullScreen);
       root.classList.toggle('window-fullscreen', s.fullScreen);
       root.classList.toggle('window-maximized', s.maximized);
       root.classList.toggle('window-blurred', !s.focused);
     });
-  }, []);
+  }, [chrome]);
 
   // ── 2. Menu / accelerator commands ──
   useEffect(() => {

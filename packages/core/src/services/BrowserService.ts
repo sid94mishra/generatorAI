@@ -51,6 +51,10 @@ import type { IExecutionWorkspaceRepository } from '../domain/ports/IExecutionWo
 import type { IWorkspaceArtifactRepository } from '../domain/ports/IWorkspaceArtifactRepository.js';
 import { BrowserSessionStateMachine } from '../domain/state-machines/BrowserSessionStateMachine.js';
 import type { EventBus } from '../events/EventBus.js';
+import { withDeadline } from '../utils/withDeadline.js';
+
+/** How long a polled status read may wait on the browser bridge before giving up. */
+const BRIDGE_STATUS_DEADLINE_MS = 2_000;
 
 /** Per-workspace resolved state. */
 interface SessionRecord {
@@ -559,7 +563,12 @@ export class BrowserService {
         ready: false,
       };
     }
-    const remote = await record.bridge.describe(record.handle).catch(() => ({} as { url?: string; title?: string; viewport?: { width: number; height: number } }));
+    // Bounded: the SPA polls this, and a page that stops answering over CDP
+    // used to hang the request forever. Enough of those exhaust the browser's
+    // six-connections-per-origin limit, after which EVERY API call — a chat
+    // prompt included — queues client-side until its auth proof has expired.
+    const remote = await withDeadline(record.bridge.describe(record.handle), BRIDGE_STATUS_DEADLINE_MS, 'describe the browser page')
+      .catch(() => ({} as { url?: string; title?: string; viewport?: { width: number; height: number } }));
     return {
       workspaceId,
       status: record.fsm.status,
@@ -701,7 +710,8 @@ export class BrowserService {
    */
   async scrollState(workspaceId: string): Promise<{ scrollY: number; scrollHeight: number; clientHeight: number }> {
     const record = this.mustRecord(workspaceId);
-    return record.bridge.scrollState(record.handle);
+    // Bounded for the same reason as `describe`: this is polled.
+    return withDeadline(record.bridge.scrollState(record.handle), BRIDGE_STATUS_DEADLINE_MS, 'read the browser scroll state');
   }
 
   // ── Agent-facing (VSCode-parity built-in tool set) ──────────────

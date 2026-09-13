@@ -84,6 +84,16 @@ import {
 import { isExtensionAuthorToolName } from '../tools/extensionAuthorTools.js';
 import { mergeMcpServers } from '../mcp/mergeMcpServers.js';
 import type { McpServerConfig } from '@generatorai/shared';
+import { withDeadline } from '../utils/withDeadline.js';
+import {
+  groupTurns,
+  lastAnchor,
+  firstAnchor,
+  buildConversationSeed,
+  applyConversationSeed,
+} from './chatTranscript.js';
+import type { ConversationAnchor } from '../domain/ports/IAgentHarness.js';
+import type { RestoreTurnResult } from './WorkspaceCheckpointService.js';
 
 /** Local alias so the helper reads cleanly at its call sites. */
 const AgentResolverEmpty = (): ResolvedAgentProjection => AgentResolver.empty();
@@ -108,25 +118,35 @@ const CONVERSATION_BIND_TIMEOUT_MS = 90_000;
 const DEFAULT_CANCEL_BUDGET_SECONDS = 10;
 
 /** Options for `ChatManagementService.cancelTurn`. See its doc comment. */
+/** Server-internal `createChat` inputs (never accepted from the API). */
+export interface InternalCreateChatExtras {
+  forkedFromChatId?: string;
+  forkedAtTurnId?: string;
+  conversationSeed?: string;
+  /** Replaces `harness.createConversation` — a fork branches instead of starting cold. */
+  createConversation?: (config: CreateConversationParams) => Promise<void>;
+}
+
+export interface RewindChatResult {
+  chatId: string;
+  turnId: string;
+  scope: 'all' | 'code' | 'conversation';
+  prompt?: string;
+  conversation: 'native' | 'synthetic' | 'skipped';
+  files?: RestoreTurnResult;
+}
+
+export interface ForkChatResult {
+  chat: Chat;
+  turnId?: string;
+  conversation: 'native' | 'synthetic';
+}
+
 export interface CancelTurnOptions {
   /** Also destroy the provider conversation after the abort (hard stop). */
   force?: boolean;
   /** Seconds to wait for the provider to acknowledge the abort; clamped to [0.5, 60]. */
   budgetSeconds?: number;
-}
-
-async function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms trying to ${what}.`)), ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 /**
@@ -1482,7 +1502,7 @@ export class ChatManagementService {
   /**
    * Create a new Chat with its backing Session and Copilot conversation.
    */
-  async createChat(params: CreateChatParams): Promise<Chat> {
+  async createChat(params: CreateChatParams & InternalCreateChatExtras): Promise<Chat> {
     const chatId = generateId();
     const sessionId = generateId();
     const conversationId = `chat-${chatId}-${Date.now()}`;
@@ -1876,11 +1896,28 @@ export class ChatManagementService {
     // `conversationConfig` is assembled dynamically as a Record; every key set
     // above is a valid CreateConversationParams field, so assert the final shape
     // rather than leaking `any` into the harness boundary.
-    await this.harness.createConversation(conversationConfig as unknown as CreateConversationParams);
-    // Materialise the mounts (worktrees, branch checkouts, shadow stores) in
-    // the background. The first prompt awaits readiness — see `sendPrompt`.
-    if (planned && workspaceId && this.extensions.mountService) {
-      void this.extensions.mountService.prepare(workspaceId, { sessionId, chatId });
+    try {
+      if (params.createConversation) {
+        // A fork: the provider branches the source conversation into this id
+        // instead of starting cold. Same config, same tool handlers.
+        await params.createConversation(conversationConfig as unknown as CreateConversationParams);
+      } else {
+        await this.harness.createConversation(conversationConfig as unknown as CreateConversationParams);
+      }
+    } finally {
+      // Materialise the mounts (worktrees, branch checkouts, shadow stores) in
+      // the background. The first prompt awaits readiness — see `sendPrompt`.
+      //
+      // In a `finally` because `stage()` has already moved the workspace to
+      // `pending`, and the composer's prep bar offers Retry only for `error`,
+      // never for `pending`. So if `createConversation` throws here, a chat
+      // that skipped this kick is stranded with Send disabled and no way back
+      // — a state even a reload cannot clear, since nothing will ever start
+      // preparation. Kicking it regardless costs nothing on the failure path
+      // (the mounts are wanted either way) and removes the dead end.
+      if (planned && workspaceId && this.extensions.mountService) {
+        void this.extensions.mountService.prepare(workspaceId, { sessionId, chatId });
+      }
     }
     // Bring the first turn's fixed costs forward into the time the user spends
     // writing that first message. Fire-and-forget by design — see `prewarmChat`.
@@ -1920,7 +1957,12 @@ export class ChatManagementService {
       createWorktree: params.createWorktree,
       workspaceId,
       gitRepositories: params.gitRepositories,
-      ...(sharedWorkspace ? {} : { sources, ...(primarySource ? { primarySource } : {}) }),
+      // A fork shares its parent's workspace but keeps the parent's mount plan
+      // on the record, so the Sources block still describes what is linked.
+      ...(sharedWorkspace && !params.forkedFromChatId ? {} : { sources, ...(primarySource ? { primarySource } : {}) }),
+      ...(params.forkedFromChatId ? { forkedFromChatId: params.forkedFromChatId } : {}),
+      ...(params.forkedAtTurnId ? { forkedAtTurnId: params.forkedAtTurnId } : {}),
+      ...(params.conversationSeed ? { conversationSeed: params.conversationSeed } : {}),
       tags: params.tags ?? [],
       status: 'active',
       projectId: params.projectId,
@@ -1957,6 +1999,17 @@ export class ChatManagementService {
   async archiveChat(chatId: string): Promise<void> {
     const chat = await this.chatRepo.getById(chatId);
     const session = await this.sessionRepo.getById(chat.sessionId);
+
+    // Workers follow their orchestrator: a running one is stopped, and every
+    // one is archived with it (they are only reachable through its panel).
+    if (chat.orchestratorMode && !chat.parentChatId) {
+      await this.extensions.orchestratorService?.cancelWorkersForParent(chatId, 'orchestrator archived').catch(() => undefined);
+      const workers = await this.chatRepo.listBackgroundTasks(chatId).catch(() => []);
+      for (const worker of workers) {
+        if (worker.status === 'archived') continue;
+        await this.archiveChat(worker.id).catch(() => undefined);
+      }
+    }
 
     // Abort any in-flight work
     if (session.conversationId) {
@@ -2038,6 +2091,21 @@ export class ChatManagementService {
       harnessType: chat.harnessConfig?.harnessType,
       streaming: chat.harnessConfig?.streaming ?? true,
     };
+
+    // The provider's own handle for this conversation (Claude session id,
+    // Codex thread id), persisted after every turn. Without it a conversation
+    // re-created after a server restart started the model over with no memory
+    // of the chat — measured live: a Codex chat resumed onto a brand-new
+    // thread, so a later rewind could not find the turn it was asked to drop.
+    // A live adapter's own record still wins (see `resumeProviderSessionId`).
+    try {
+      const session = await this.sessionRepo.getById(chat.sessionId);
+      if (session.providerSessionId) {
+        conversationConfig['resumeProviderSessionId'] = session.providerSessionId;
+      }
+    } catch {
+      // No session row — a cold start is the only option.
+    }
 
     // Working directory + additional directories + env, from the persisted
     // mounts — the SAME exposure the create path used, so a restart, an
@@ -2231,6 +2299,13 @@ export class ChatManagementService {
         mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
         content: (existingSys?.content ?? '') + `\n\n${ORCHESTRATOR_SYSTEM_PROMPT}`,
       };
+
+      // Same as the create path: a resumed orchestrator must not regain the
+      // harness's native delegation, or it bypasses spawn_background_agent.
+      const existingExcluded = Array.isArray(conversationConfig['excludedBuiltinTools'])
+        ? (conversationConfig['excludedBuiltinTools'] as string[])
+        : [];
+      conversationConfig['excludedBuiltinTools'] = [...new Set([...existingExcluded, 'Agent', 'Task'])];
     }
 
     // PLN-01 — the resume path MUST reinstall the gates. The SDK cannot
@@ -2597,10 +2672,28 @@ export class ChatManagementService {
       const hasText = content.trim().length > 0;
       const hasActivity =
         !!turnMetadata.thinkingText?.trim() || (turnMetadata.toolCalls?.length ?? 0) > 0;
-      // A cancel before the model said anything at all leaves nothing worth a
-      // transcript row; a completed turn still requires text, as before.
-      if (partial ? !hasText && !hasActivity : !hasText) return;
+      // A completed turn still requires text. A cancelled one is always
+      // recorded — even one stopped before the model produced anything, as an
+      // empty `partial` row the transcript renders as just its "stopped" note.
+      // Skipping it made that note vanish on reload, leaving the question with
+      // no trace of what happened to it.
+      if (!partial && !hasText) return;
       assistantPersisted = true;
+
+      // A cancelled turn cannot have a call still in flight: whatever had not
+      // reported back was stopped. The provider's own "stopped" completion
+      // races this write — the listener awaits the event bus before it records
+      // the result, and cancel persists as soon as the abort returns — so
+      // without this the call is stored as `running` and history renders a
+      // stopped command as though it had succeeded.
+      if (partial) {
+        for (const tc of turnMetadata.toolCalls!) {
+          if (tc.status !== 'running') continue;
+          tc.status = 'complete';
+          tc.success = false;
+          tc.result ??= 'Stopped before it finished.';
+        }
+      }
 
       const metadata: ChatMessageMetadata = {};
       if (turnMetadata.thinkingText) metadata.thinkingText = turnMetadata.thinkingText;
@@ -2614,6 +2707,7 @@ export class ChatManagementService {
       metadata.turnId = turnId;
       metadata.agentMode = agentMode;
       if (partial) metadata.partial = true;
+      if (turnMetadata.providerAnchor) metadata.providerAnchor = turnMetadata.providerAnchor;
 
       // PLN-01 — persist plan/question cards into the transcript.
       // Event replay is SKIPPED for completed chats (replayEvents fast
@@ -2771,6 +2865,16 @@ export class ChatManagementService {
             break;
         }
 
+        // The provider's coordinate for this turn — the Claude message uuid
+        // or the Codex turn id — is what a later fork/rewind branches at.
+        // Last one wins: a turn ends on its final assistant message.
+        if (event.kind === 'harness.message_complete' && typeof data?.['providerMessageId'] === 'string') {
+          turnMetadata.providerAnchor = { kind: 'message', id: data['providerMessageId'] as string };
+        }
+        if (event.kind === 'harness.turn_end' && typeof data?.['providerTurnId'] === 'string') {
+          turnMetadata.providerAnchor = { kind: 'turn', id: data['providerTurnId'] as string };
+        }
+
         // Accumulate content — don't persist yet. In agentic loops,
         // message_complete fires before tool events complete.
         if (event.kind === 'harness.message_complete') {
@@ -2793,6 +2897,7 @@ export class ChatManagementService {
         // Persist on idle — all tool calls have completed by now
         if (event.kind === 'harness.idle') {
           await finalizeTurn();
+          void this.rememberProviderSession(session.id, session.conversationId!, session.providerSessionId);
 
           // Checkpoint the workspace AFTER the agent has finished. The
           // pre-turn snapshot alone is not enough: without an "after" the
@@ -2861,6 +2966,15 @@ export class ChatManagementService {
           `\n\n` +
           prompt;
       }
+      // A synthetic rewind/fork (provider without native branching) left the
+      // digest of the surviving conversation on the chat. It goes in front of
+      // this prompt exactly once — the provider session is fresh and has no
+      // memory of the chat otherwise.
+      if (chat.conversationSeed) {
+        promptForHarness = applyConversationSeed(chat.conversationSeed, promptForHarness);
+        await this.chatRepo.update(chatId, { conversationSeed: '' });
+      }
+
       // The `before` snapshot must be complete before the agent can touch the
       // working tree. This is the last moment that holds, and by now it has
       // been running concurrently with message persistence and event emission.
@@ -2948,6 +3062,406 @@ export class ChatManagementService {
    *   fresh runtime with the persisted history rather than queueing behind a
    *   turn the old one never settled.
    */
+  /**
+   * Record the provider's own session handle so a fork or rewind after a
+   * restart still has something to branch from. Best-effort and cheap: the
+   * value only changes on the first turn and after a rewind.
+   */
+  private async rememberProviderSession(
+    sessionId: string,
+    conversationId: string,
+    known: string | undefined,
+  ): Promise<void> {
+    try {
+      const current = this.harness.getProviderSessionId?.(conversationId);
+      if (current && current !== known) {
+        await this.sessionRepo.update(sessionId, { providerSessionId: current });
+      }
+    } catch {
+      // Never let bookkeeping break a turn.
+    }
+  }
+
+  /** Bring a conversation back into the harness's memory (best effort). */
+  private async ensureLiveConversation(conversationId: string, cfg: Record<string, unknown>): Promise<void> {
+    if (this.harness.hasLiveConversation(conversationId)) return;
+    try {
+      await withDeadline(
+        this.harness.resumeConversation(conversationId, cfg as unknown as CreateConversationParams),
+        CONVERSATION_BIND_TIMEOUT_MS,
+        'resume the conversation',
+      );
+    } catch (err) {
+      console.warn(
+        `[ChatManagement] could not resume conversation ${conversationId} before branching:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /** The capabilities of the provider that owns this conversation. */
+  private capabilitiesForConversation(conversationId: string): ReturnType<IAgentHarness['capabilities']> {
+    try {
+      return this.harness.capabilitiesFor?.(conversationId) ?? this.harness.capabilities();
+    } catch {
+      return this.harness.capabilities();
+    }
+  }
+
+  /** The chat record as persisted (including server-internal fields). */
+  async getChat(chatId: string): Promise<Chat> {
+    return this.chatRepo.getById(chatId);
+  }
+
+  /** Every message of a chat, oldest first — the whole transcript. */
+  async getTranscript(chatId: string): Promise<ChatMessage[]> {
+    await this.chatRepo.getById(chatId);
+    return this.messageRepo.getByChatId(chatId);
+  }
+
+  /**
+   * Rewind a chat to the START of `turnId` — i.e. the end of the turn before
+   * it. Files, conversation, or both, following the Claude Code rewind menu:
+   *
+   *   code:         every mount back to the turn's `before` snapshot
+   *   conversation: drop the turn and everything after it from the transcript
+   *                 AND from the provider's own history
+   *   all:          both
+   *
+   * The provider history is rewound natively when the provider can
+   * (`capabilities().conversationRewind` and the surviving turns carry
+   * anchors); otherwise synthetically — a fresh provider session that gets a
+   * digest of the surviving turns in front of the next prompt.
+   */
+  async rewindChat(
+    chatId: string,
+    turnId: string,
+    scope: 'all' | 'code' | 'conversation' = 'all',
+  ): Promise<RewindChatResult> {
+    const chat = await this.chatRepo.getById(chatId);
+    if (chat.status !== 'active') throw new ValidationError(`Chat ${chatId} is archived`);
+    if (this.isTurnActive(chatId)) {
+      const err = new Error(
+        'This chat is still generating a response. Stop it before rewinding.',
+      ) as Error & { code?: string };
+      err.code = 'CHAT_BUSY';
+      throw err;
+    }
+    const session = await this.sessionRepo.getById(chat.sessionId);
+    const messages = await this.messageRepo.getByChatId(chatId);
+    const turns = groupTurns(messages);
+    const index = turns.findIndex((t) => t.turnId === turnId);
+    if (index < 0) {
+      const err = new Error(`Turn ${turnId} not found in chat ${chatId}`) as Error & { code?: string };
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    const target = turns[index]!;
+    const prompt = target.userMessage?.content;
+
+    let files: RestoreTurnResult | undefined;
+    if (scope !== 'conversation' && chat.workspaceId && this.extensions.workspaceCheckpointService) {
+      files = await this.extensions.workspaceCheckpointService.restoreTurn(
+        chat.workspaceId,
+        turnId,
+        { chatId, sessionId: chat.sessionId },
+      );
+    }
+
+    let conversation: RewindChatResult['conversation'] = 'skipped';
+    if (scope !== 'code') {
+      const kept = messages.slice(0, target.startIndex);
+      const dropped = messages.slice(target.startIndex);
+      const keepThrough = lastAnchor(kept) ?? null;
+      const dropFrom = firstAnchor(dropped);
+      const droppedTurns = turns.slice(index).filter((t) => t.userMessage).length;
+
+      // Gates raised by the dropped turns are dead: settle them so nothing
+      // keeps waiting on an answer to a question that no longer exists.
+      if (this.extensions.agentInteractionService) {
+        try {
+          const pending = await this.extensions.agentInteractionService.listPendingByChat(chatId);
+          const kindOf = new Map(pending.map((p) => [p.id, p.kind] as const));
+          const cancelled = await this.extensions.agentInteractionService.cancelForChat(chatId, 'rewound');
+          for (const interactionId of cancelled) {
+            const kind = kindOf.get(interactionId) === 'tool_permission'
+              ? 'chat.permission.expired'
+              : 'chat.question.expired';
+            await this.eventBus.emit(chat.sessionId, {
+              kind,
+              data: { chatId, interactionId, reason: 'rewound' },
+            } as AgentEvent);
+          }
+        } catch {
+          // Non-fatal.
+        }
+      }
+
+      conversation = await this.rewindProviderConversation(chat, session.conversationId!, {
+        providerSessionId: session.providerSessionId,
+        keepThrough,
+        ...(dropFrom ? { dropFrom } : {}),
+        droppedTurns,
+        keptHasReplies: kept.some((m) => m.role === 'assistant'),
+        kept,
+      });
+
+      await this.messageRepo.deleteByIds(dropped.map((m) => m.id));
+      this.turnContexts.delete(chatId);
+
+      // Workers still running were spawned by a turn that no longer exists
+      // (a rewind requires an idle chat, so a running worker cannot belong to
+      // the surviving history). Stop them; their records stay in the panel.
+      if (chat.orchestratorMode && !chat.parentChatId && this.extensions.orchestratorService) {
+        try {
+          await this.extensions.orchestratorService.cancelWorkersForParent(chatId, 'orchestrator rewound');
+        } catch {
+          // Non-fatal.
+        }
+      }
+    }
+
+    const result: RewindChatResult = {
+      chatId,
+      turnId,
+      scope,
+      ...(prompt !== undefined ? { prompt } : {}),
+      conversation,
+      ...(files ? { files } : {}),
+    };
+    await this.eventBus.emit(chat.sessionId, {
+      kind: 'chat.rewound',
+      data: {
+        chatId,
+        turnId,
+        scope,
+        ...(prompt !== undefined ? { prompt } : {}),
+        conversation,
+        ...(files
+          ? { files: { restored: files.restored, deleted: files.deleted, skipped: files.skipped, mounts: files.mounts.length } }
+          : {}),
+      },
+    } as AgentEvent);
+    return result;
+  }
+
+  /**
+   * Move the provider's history back. Native when the provider supports it
+   * and every surviving turn is anchored; synthetic otherwise.
+   */
+  private async rewindProviderConversation(
+    chat: Chat,
+    conversationId: string,
+    opts: {
+      providerSessionId: string | undefined;
+      keepThrough: ConversationAnchor | null;
+      dropFrom?: ConversationAnchor;
+      droppedTurns: number;
+      keptHasReplies: boolean;
+      kept: ChatMessage[];
+    },
+  ): Promise<'native' | 'synthetic'> {
+    // The conversation must be live before its capabilities can be judged:
+    // after a restart the multi-provider harness has not instantiated the
+    // owning adapter yet, and a capability query then answers with the
+    // cross-provider intersection — "no native rewind" whenever any installed
+    // provider lacks it — so every post-restart rewind went synthetic.
+    const cfg = await this.buildConversationConfig(chat, conversationId);
+    await this.ensureLiveConversation(conversationId, cfg);
+    const caps = this.capabilitiesForConversation(conversationId);
+    // Without an anchor for the last surviving reply the provider cannot be
+    // told where to cut; only an empty survivor set needs none.
+    const anchored = !opts.keptHasReplies || opts.keepThrough !== null;
+    if (caps.conversationRewind && anchored && this.harness.rewindConversation) {
+      try {
+        const r = await withDeadline(
+          this.harness.rewindConversation(conversationId, {
+            ...(opts.providerSessionId ? { providerSessionId: opts.providerSessionId } : {}),
+            keepThrough: opts.keepThrough,
+            ...(opts.dropFrom ? { dropFrom: opts.dropFrom } : {}),
+            droppedTurns: opts.droppedTurns,
+            params: cfg as unknown as CreateConversationParams,
+          }),
+          CONVERSATION_BIND_TIMEOUT_MS,
+          'rewind the conversation',
+        );
+        if (r.providerSessionId) {
+          await this.sessionRepo.update(chat.sessionId, { providerSessionId: r.providerSessionId });
+        } else if (opts.keepThrough === null) {
+          await this.sessionRepo.update(chat.sessionId, { providerSessionId: '' });
+        }
+        if (r.anchorMap) await this.rekeyAnchors(opts.kept, r.anchorMap);
+        // The next prompt re-binds with full config (tool handlers) on
+        // whatever session the provider now points at.
+        this.conversationBindings.delete(conversationId);
+        return 'native';
+      } catch (err) {
+        console.warn(
+          `[ChatManagement] native rewind failed for chat ${chat.id}; falling back to a synthetic rewind:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+    // Synthetic: forget the provider session and seed the next prompt.
+    try {
+      await withDeadline(this.harness.destroyConversation(conversationId), CONVERSATION_BIND_TIMEOUT_MS, 'destroy the conversation');
+    } catch {
+      // Best effort — a dead runtime is what we want anyway.
+    }
+    this.conversationBindings.delete(conversationId);
+    await this.sessionRepo.update(chat.sessionId, { providerSessionId: '' });
+    await this.chatRepo.update(chat.id, { conversationSeed: buildConversationSeed(opts.kept) });
+    return 'synthetic';
+  }
+
+  /** Rewrite persisted anchors after a provider re-keyed the history. */
+  private async rekeyAnchors(rows: readonly ChatMessage[], map: Record<string, string>): Promise<void> {
+    for (const m of rows) {
+      const a = m.metadata?.providerAnchor;
+      const next = a && map[a.id];
+      if (!next) continue;
+      await this.messageRepo.updateMetadata(m.id, { ...m.metadata, providerAnchor: { kind: a.kind, id: next } });
+    }
+  }
+
+  /**
+   * Branch a chat after `turnId` (default: its last turn) into a new chat.
+   *
+   * The fork is a CONVERSATION branch, in the sense of Claude Code's
+   * `/branch`: it shares the parent's workspace, so the files are whatever
+   * they are now, and its transcript is the parent's through the chosen turn.
+   * Provider-side the history is copied natively when the provider can
+   * (`forkSession` / `thread/fork`), else the new session is seeded with a
+   * digest of the copied turns.
+   */
+  async forkChat(chatId: string, options: { turnId?: string; name?: string } = {}): Promise<ForkChatResult> {
+    const source = await this.chatRepo.getById(chatId);
+    if (this.isTurnActive(chatId)) {
+      const err = new Error(
+        'This chat is still generating a response. Wait for it to finish before forking.',
+      ) as Error & { code?: string };
+      err.code = 'CHAT_BUSY';
+      throw err;
+    }
+    const sourceSession = await this.sessionRepo.getById(source.sessionId);
+    const messages = await this.messageRepo.getByChatId(chatId);
+    const turns = groupTurns(messages);
+    let cut = turns.length - 1;
+    if (options.turnId) {
+      cut = turns.findIndex((t) => t.turnId === options.turnId);
+      if (cut < 0) {
+        const err = new Error(`Turn ${options.turnId} not found in chat ${chatId}`) as Error & { code?: string };
+        err.code = 'NOT_FOUND';
+        throw err;
+      }
+    }
+    const kept = cut >= 0 ? messages.slice(0, turns[cut]!.endIndex) : [];
+    const cutTurnId = cut >= 0 ? turns[cut]!.turnId : undefined;
+    const throughAnchor = lastAnchor(kept);
+    const keptHasReplies = kept.some((m) => m.role === 'assistant');
+
+    const conversationId = sourceSession.conversationId;
+    if (conversationId) {
+      // See `rewindProviderConversation`: the owning adapter must be up before
+      // its capabilities can be read.
+      await this.ensureLiveConversation(conversationId, await this.buildConversationConfig(source, conversationId));
+    }
+    const caps = conversationId ? this.capabilitiesForConversation(conversationId) : this.harness.capabilities();
+    const native =
+      !!conversationId &&
+      caps.conversationFork === true &&
+      typeof this.harness.forkConversation === 'function' &&
+      // The whole history can be copied without an anchor; a cut needs one.
+      (!keptHasReplies || (throughAnchor !== undefined && (cut === turns.length - 1 || true)));
+    let providerSessionId: string | undefined;
+    let anchorMap: Record<string, string> | undefined;
+    let mode: 'native' | 'synthetic' = native ? 'native' : 'synthetic';
+
+    const name = options.name?.trim() || `${source.name} (fork)`;
+    const base: CreateChatParams & InternalCreateChatExtras = {
+      name,
+      ...(source.description ? { description: source.description } : {}),
+      ...(source.model ? { model: source.model } : {}),
+      ...(source.harnessConfig ? { harnessConfig: source.harnessConfig } : {}),
+      ...(source.projectId ? { projectId: source.projectId } : {}),
+      ...(source.sources ? { sources: source.sources } : {}),
+      ...(source.primarySource ? { primary: source.primarySource } : {}),
+      tags: [...(source.tags ?? [])],
+      ...(source.browserConfig ? { browserConfig: source.browserConfig } : {}),
+      ...(source.defaultAgentMode ? { defaultAgentMode: source.defaultAgentMode } : {}),
+      ...(source.permissionMode ? { permissionMode: source.permissionMode } : {}),
+      ...(source.agentRef ? { agentRef: source.agentRef } : {}),
+      ...(source.agentOverrides ? { agentOverrides: source.agentOverrides } : {}),
+      ...(source.workspaceId ? { workspaceId: source.workspaceId } : {}),
+      forkedFromChatId: chatId,
+      ...(cutTurnId ? { forkedAtTurnId: cutTurnId } : {}),
+    };
+
+    let created: Chat;
+    if (native && keptHasReplies) {
+      try {
+        created = await this.createChat({
+          ...base,
+          createConversation: async (config) => {
+            const r = await withDeadline(
+              this.harness.forkConversation!(conversationId!, {
+                newConversationId: config.conversationId,
+                ...(throughAnchor ? { throughAnchor } : {}),
+                ...(sourceSession.providerSessionId
+                  ? { sourceProviderSessionId: sourceSession.providerSessionId }
+                  : {}),
+                params: config,
+              }),
+              CONVERSATION_BIND_TIMEOUT_MS,
+              'fork the conversation',
+            );
+            providerSessionId = r.providerSessionId;
+            anchorMap = r.anchorMap;
+          },
+        });
+      } catch (err) {
+        console.warn(
+          `[ChatManagement] native fork failed for chat ${chatId}; falling back to a synthetic fork:`,
+          err instanceof Error ? err.message : String(err),
+        );
+        mode = 'synthetic';
+        created = await this.createChat({ ...base, conversationSeed: buildConversationSeed(kept) });
+      }
+    } else {
+      // Nothing to copy provider-side (no replies yet) or no native support.
+      mode = keptHasReplies ? 'synthetic' : 'native';
+      created = await this.createChat({
+        ...base,
+        ...(keptHasReplies ? { conversationSeed: buildConversationSeed(kept) } : {}),
+      });
+    }
+
+    // Copy the transcript rows into the fork. Anchors are re-keyed when the
+    // provider minted fresh ids for the copied history.
+    for (const m of kept) {
+      const anchor = m.metadata?.providerAnchor;
+      const mapped = anchor && anchorMap?.[anchor.id];
+      await this.messageRepo.create({
+        ...m,
+        id: generateId(),
+        chatId: created.id,
+        sessionId: created.sessionId,
+        ...(mapped
+          ? { metadata: { ...m.metadata, providerAnchor: { kind: anchor.kind, id: mapped } } }
+          : {}),
+      });
+    }
+    if (providerSessionId) {
+      await this.sessionRepo.update(created.sessionId, { providerSessionId });
+    }
+
+    await this.eventBus.emit(source.sessionId, {
+      kind: 'chat.forked',
+      data: { chatId, forkChatId: created.id, ...(cutTurnId ? { turnId: cutTurnId } : {}), conversation: mode },
+    } as AgentEvent);
+    return { chat: created, conversation: mode, ...(cutTurnId ? { turnId: cutTurnId } : {}) };
+  }
+
   async cancelTurn(chatId: string, options: CancelTurnOptions = {}): Promise<void> {
     const chat = await this.chatRepo.getById(chatId);
     const session = await this.sessionRepo.getById(chat.sessionId);
@@ -3057,6 +3571,19 @@ export class ChatManagementService {
       chat.sessionId,
       this.enrichWithChatId({ kind: 'harness.idle', data: {} } as AgentEvent, chatId),
     );
+    // An orchestrator's workers exist to be read by the turn that spawned
+    // them. With that turn stopped, nobody will — so they stop too (Claude
+    // Code and Codex end their sub-agents on interrupt for the same reason).
+    if (chat.orchestratorMode && !chat.parentChatId && this.extensions.orchestratorService) {
+      try {
+        const stopped = await this.extensions.orchestratorService.cancelWorkersForParent(chatId, 'orchestrator stopped');
+        if (stopped.length > 0) {
+          console.info(`[ChatManagement] cancelTurn ${chatId}: stopped ${stopped.length} background worker(s)`);
+        }
+      } catch (err) {
+        console.warn(`[ChatManagement] cancelTurn ${chatId}: could not stop workers:`, err instanceof Error ? err.message : String(err));
+      }
+    }
   }
 
   /**
@@ -3125,6 +3652,19 @@ export class ChatManagementService {
    */
   async deleteChat(chatId: string): Promise<void> {
     const chat = await this.chatRepo.getById(chatId);
+
+    // An orchestrator's workers share its workspace and are hidden from the
+    // sidebar, so once the orchestrator is gone they are unreachable rows
+    // pointing at a deleted workspace. They go first.
+    if (chat.orchestratorMode && !chat.parentChatId) {
+      await this.extensions.orchestratorService?.cancelWorkersForParent(chatId, 'orchestrator deleted').catch(() => undefined);
+      const workers = await this.chatRepo.listBackgroundTasks(chatId).catch(() => []);
+      for (const worker of workers) {
+        await this.deleteChat(worker.id).catch((err) =>
+          console.warn(`[ChatManagement] deleteChat ${chatId}: could not delete worker ${worker.id}:`, err instanceof Error ? err.message : String(err)),
+        );
+      }
+    }
     const session = await this.sessionRepo.getById(chat.sessionId);
 
     // Cleanup SDK

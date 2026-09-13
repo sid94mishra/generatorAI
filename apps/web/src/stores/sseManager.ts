@@ -44,6 +44,7 @@
 import { useStreamStore } from './streamStore.js';
 import { useConnectionStore } from './connectionStore.js';
 import { useChatStore } from './chatStore.js';
+import { useRewindStore } from './rewindStore.js';
 import { useWorkflowRunStore } from './workflowRunStore.js';
 import { queryClient } from '../providers/QueryProvider.js';
 import { backgroundTasksKeys, queryKeys } from '../hooks/queries.js';
@@ -580,6 +581,28 @@ function applyHostEffect(
       return;
     }
 
+    case 'chatRewound': {
+      // The conversation lost its tail. Any live stream state for this chat
+      // belongs to a turn at or after the anchor — a rewind is refused while
+      // one is in flight, so what is left is the last completed turn, which
+      // the rewind dropped too. Leaving it would replay a response the server
+      // no longer has under a prompt that is no longer there.
+      if (effect.scope !== 'code') {
+        const key = useChatStore.getState().getSessionId(effect.chatId) ?? sessionId;
+        const timer = conn.cleanupTimers.get(key);
+        if (timer) {
+          clearTimeout(timer);
+          conn.cleanupTimers.delete(key);
+        }
+        const store = useStreamStore.getState();
+        if (store.streams[key]) store.clearStream(key);
+        // The prompt is offered back to the composer (never resent) — the
+        // page picks it up and hands it to the input box.
+        useRewindStore.getState().offerPrompt(effect.chatId, effect.prompt);
+      }
+      return;
+    }
+
     case 'widgetInvoke':
       // Forward to the iframe over the postMessage bridge; the widget replies
       // with a result the bridge POSTs back to resolve the server-side promise.
@@ -965,6 +988,41 @@ function openConnection(
       // groups that were deferred above. Runs even after a partial pagination
       // failure so parallel/active stages aren't left blank.
       replayAccumulated(true);
+
+      // Replayed rows rebuild the transcript, but `replayEventsIntoStore` is
+      // the store half only — the router's invalidation half never runs for
+      // them, because `processEvent` is reached exclusively by LIVE frames.
+      // Anything that changed an entity *before* this subscription existed
+      // therefore left its react-query cache stale until a manual reload.
+      //
+      // That window is not a narrow race. Creating a chat emits
+      // `workspace.prep` ('preparing' then 'ready') within ~300 ms, as
+      // chat-scope seq 2 and 3 — always before the client can be connected,
+      // since it must first receive the POST response, navigate, GET the chat
+      // to learn its sessionId, and only then open the stream. So the
+      // composer's "Preparing workspace…" gate, which reads
+      // `chat.workspacePrep`, stayed up permanently on every chat created
+      // with sources, on every platform, until the user reloaded by hand.
+      //
+      // Replay the accumulated rows through a THROWAWAY router and apply only
+      // the `invalidate` effects: a fresh instance so none of the live
+      // router's buffering or stage state is disturbed, and invalidate-only
+      // so replaying history cannot re-fire toasts or other user-visible
+      // notes. `scheduleInvalidation` de-duplicates within a frame, so a long
+      // replay costs one refetch per key rather than one per row.
+      if (allRows.length > 0) {
+        const catchUpRouter = new StreamEventRouter();
+        for (const row of allRows) {
+          const payload = (row.payload ?? {}) as Record<string, unknown>;
+          const rowSession = (payload['sessionId'] as string) || primarySessionId;
+          for (const effect of catchUpRouter.handle(rowSession, {
+            kind: row.kind,
+            data: payload,
+          })) {
+            if (effect.op === 'invalidate') invalidateResource(rowSession, effect);
+          }
+        }
+      }
     } catch {
       if (import.meta.env?.DEV) {
         console.debug('[sseManager] Replay failed for', key);

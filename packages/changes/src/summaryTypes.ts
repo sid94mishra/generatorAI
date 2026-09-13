@@ -62,6 +62,13 @@ export interface ChangeSummaryFile {
   newBlob?: string;
   /** Detected language hint for syntax highlighting. */
   lang?: string;
+  /**
+   * True when the user has reviewed and accepted this file AT ITS CURRENT
+   * head blob. Set by the API layer (the review rows live in the database,
+   * which this package deliberately knows nothing about). Any later edit
+   * changes the head blob and therefore silently un-keeps the file.
+   */
+  kept?: boolean;
 }
 
 export interface ChangeSummaryRepo {
@@ -69,8 +76,23 @@ export interface ChangeSummaryRepo {
   kind: ChangeRepoKind;
   /** True when a checkpoint baseline was available for this repo. */
   hasBaseline: boolean;
+  /**
+   * THIS repo's resolved base and head.
+   *
+   * The response-level `base`/`head` only describe the FIRST repo. Every
+   * mount resolves the same logical selector differently — one has a
+   * checkpoint baseline, the next falls back to its branch base, a third to
+   * its first commit — so a client that reads the top-level revision and
+   * applies it to every file gets the wrong answer for all but one mount.
+   * That is what hid the per-file discard action on every mount whose base
+   * was not a checkpoint row.
+   */
+  base: ChangeRevision;
+  head: ChangeRevision;
   stats: { files: number; additions: number; deletions: number };
   files: ChangeSummaryFile[];
+  /** How many of `files` are kept. Set by the API layer alongside `kept`. */
+  keptCount?: number;
   /**
    * Every path in the repo (tracked + untracked, gitignore-honouring), for
    * the full file-tree view. Omitted unless `includeTree` is requested.
@@ -81,11 +103,17 @@ export interface ChangeSummaryRepo {
 export interface ChangeSummary {
   workspaceId: string;
   hasGit: boolean;
+  /**
+   * The FIRST repo's resolution, kept for compatibility. Prefer
+   * `repos[].base` / `repos[].head`, which are correct per mount.
+   */
   base: ChangeRevision;
   head: ChangeRevision;
   repos: ChangeSummaryRepo[];
   /** Aggregate across every repo. */
   stats: { files: number; additions: number; deletions: number };
+  /** Kept files across every repo. Set by the API layer. */
+  keptCount?: number;
 }
 
 /** Selector accepted by the API for either side of the comparison. */

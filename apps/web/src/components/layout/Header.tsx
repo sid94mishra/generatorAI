@@ -48,6 +48,7 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
   const sectionTitle = (() => {
     const p = location.pathname;
     if (p.startsWith('/projects')) return 'Projects';
+    if (p.startsWith('/agents')) return 'Agents';
     if (p.startsWith('/scripts')) return 'Scripts';
     if (p.startsWith('/automations')) return 'Automations';
     if (p.startsWith('/settings')) return 'Settings';

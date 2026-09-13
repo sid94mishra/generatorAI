@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
+  CheckCheck,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
@@ -28,6 +29,7 @@ import {
   ListTree,
   MessageSquare,
   RefreshCw,
+  RotateCcw,
   Settings2,
   Undo2,
 } from 'lucide-react';
@@ -42,16 +44,20 @@ import {
   Spinner,
   Textarea,
   Select,
+  useConfirm,
 } from '@/components/ui/index.js';
+import { toast } from '@/components/Toast.js';
 import {
   useWorkspaceChangeSummary,
   useWorkspaceCheckpoints,
-  useRestoreWorkspaceCheckpoint,
   useCommitWorkspaceChanges,
+  useDiscardWorkspaceChanges,
+  useReviewWorkspaceChanges,
   useSourceControlStatus,
   useCreateWorkspacePullRequest,
   useWorkspacePullRequests,
 } from '@/hooks/queries.js';
+import type { ChangeSummary } from '@/types/changes.js';
 import type {
   ReviewIntent,
   ReviewScope,
@@ -167,6 +173,38 @@ const TREE_STATUS_COLORS = {
  */
 const FILE_HEADER_HEIGHT = 28;
 
+/**
+ * Split a summary into "still to review" and "kept".
+ *
+ * Kept files stay fully present — same ids, same diffs — they just move into
+ * their own collapsed group so what is left in the main list is exactly the
+ * work still needing a decision. Repos that end up empty on a side are
+ * dropped from that side so neither list shows a heading with nothing in it.
+ */
+export function splitKeptFiles(summary: ChangeSummary | undefined): {
+  pending: ChangeSummary | undefined;
+  kept: ChangeSummary | undefined;
+  keptCount: number;
+} {
+  if (!summary) return { pending: undefined, kept: undefined, keptCount: 0 };
+  const keptRepos: ChangeSummary['repos'] = [];
+  const pendingRepos: ChangeSummary['repos'] = [];
+  let keptCount = 0;
+  for (const repo of summary.repos) {
+    const kept = repo.files.filter((f) => f.kept === true);
+    const pending = repo.files.filter((f) => f.kept !== true);
+    keptCount += kept.length;
+    if (kept.length > 0) keptRepos.push({ ...repo, files: kept });
+    if (pending.length > 0) pendingRepos.push({ ...repo, files: pending });
+  }
+  if (keptCount === 0) return { pending: summary, kept: undefined, keptCount: 0 };
+  return {
+    pending: { ...summary, repos: pendingRepos },
+    kept: { ...summary, repos: keptRepos },
+    keptCount,
+  };
+}
+
 export function ChangesSurface({
   workspaceId,
   embedded = false,
@@ -201,6 +239,19 @@ export function ChangesSurface({
   /** File id awaiting discard confirmation, and the last discard failure. */
   const [confirmRevert, setConfirmRevert] = useState<string | null>(null);
   const [revertError, setRevertError] = useState<string | null>(null);
+  /**
+   * Which row is mid-flight, by diff source id.
+   *
+   * Per row, not per mutation: react-query's `isPending` is one flag shared
+   * by every call the hook makes, so undoing one file greyed out — and
+   * showed "Discarding…" on — the discard button of every other file at once.
+   */
+  const [busyRow, setBusyRow] = useState<string | null>(null);
+  /** True while a bulk Keep all / Undo all is running. */
+  const [bulkBusy, setBulkBusy] = useState<null | 'keep' | 'undo'>(null);
+  /** Whether the "Kept (N)" group at the bottom is open. */
+  const [showKept, setShowKept] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const summaryQuery = useWorkspaceChangeSummary(workspaceId, {
     base,
@@ -220,7 +271,8 @@ export function ChangesSurface({
     [workspaceInfo.data],
   );
   const checkpoints = useWorkspaceCheckpoints(workspaceId);
-  const restoreCheckpoint = useRestoreWorkspaceCheckpoint(workspaceId);
+  const reviewChanges = useReviewWorkspaceChanges(workspaceId);
+  const discardChanges = useDiscardWorkspaceChanges(workspaceId);
   const scmStatus = useSourceControlStatus();
   const commit = useCommitWorkspaceChanges(workspaceId);
   const createPr = useCreateWorkspacePullRequest(workspaceId);
@@ -302,13 +354,67 @@ export function ChangesSurface({
     return options;
   }, [mounts, checkpoints.data]);
 
+  /**
+   * Reviewed files are pulled out of the main list into their own group, so
+   * what remains above is exactly what still needs a decision.
+   */
+  const { pending: pendingSummary, kept: keptSummary, keptCount } = useMemo(
+    () => splitKeptFiles(summary),
+    [summary],
+  );
+
   const { entries, sources, loadingIds } = useDiffSources({
     workspaceId,
-    summary,
+    summary: pendingSummary,
     base,
     head: 'working',
     expandedIds,
   });
+  // A second source set for the kept group. Same ids and the same lazy
+  // fetching, so a kept file is still fully expandable and diffable.
+  const {
+    entries: keptEntries,
+    sources: keptSources,
+    loadingIds: keptLoadingIds,
+  } = useDiffSources({
+    workspaceId,
+    summary: keptSummary,
+    base,
+    head: 'working',
+    expandedIds,
+  });
+
+  /** Every row on the surface, kept or not — for lookups by id. */
+  const allEntries = useMemo(() => [...entries, ...keptEntries], [entries, keptEntries]);
+  const entryById = useMemo(
+    () => new Map(allEntries.map((e) => [e.id, e])),
+    [allEntries],
+  );
+  const keptIds = useMemo(() => new Set(keptEntries.map((e) => e.id)), [keptEntries]);
+
+  /**
+   * Each mount's OWN base revision.
+   *
+   * The response-level `summary.base` is the FIRST mount's, which is why
+   * discard used to be hidden whenever that one happened to have no
+   * checkpoint id — including on workspaces where every other mount could
+   * perfectly well be undone. A mount can be undone as soon as it resolved a
+   * base tree-ish at all; the server restores from a commit just as happily
+   * as from a checkpoint row.
+   */
+  const baseByAlias = useMemo(() => {
+    const map = new Map<string, { treeish?: string; label?: string }>();
+    for (const repo of summaryQuery.data?.repos ?? []) {
+      // Fall back to the response-level revision for a server that predates
+      // per-repo bases — wrong for the second mount, but no worse than before.
+      const revision = repo.base ?? summaryQuery.data?.base;
+      map.set(repo.alias, {
+        ...(revision?.treeish ? { treeish: revision.treeish } : {}),
+        ...(revision?.label ? { label: revision.label } : {}),
+      });
+    }
+    return map;
+  }, [summaryQuery.data]);
 
   // ── Review ───────────────────────────────────────────────────
 
@@ -577,7 +683,16 @@ export function ChangesSurface({
     });
   }, [sources, annotationsById]);
 
-  const allIds = useMemo(() => entries.map((e) => e.id), [entries]);
+  /** The same overlay for the kept group — a kept file still takes comments. */
+  const decoratedKeptSources = useMemo(() => {
+    if (annotationsById.size === 0) return keptSources;
+    return keptSources.map((s) => {
+      const annotations = annotationsById.get(s.id);
+      return annotations?.length ? { ...s, annotations } : s;
+    });
+  }, [keptSources, annotationsById]);
+
+  const allIds = useMemo(() => allEntries.map((e) => e.id), [allEntries]);
 
   /**
    * Files that can actually be opened. Binary and oversized files render a
@@ -586,8 +701,8 @@ export function ChangesSurface({
    */
   const expandableIds = useMemo(
     () =>
-      entries.filter((e) => !e.file.isBinary && !e.file.isTooLarge).map((e) => e.id),
-    [entries],
+      allEntries.filter((e) => !e.file.isBinary && !e.file.isTooLarge).map((e) => e.id),
+    [allEntries],
   );
   const allExpanded =
     expandableIds.length > 0 && expandableIds.every((id) => expandedIds.has(id));
@@ -637,19 +752,23 @@ export function ChangesSurface({
   const lastFocusToken = useRef<number | null>(null);
   useEffect(() => {
     if (!focusFile || lastFocusToken.current === focusFile.token) return;
-    const entry = entries.find((e) => display(e.alias, e.file.path) === focusFile.path);
+    const entry = allEntries.find((e) => display(e.alias, e.file.path) === focusFile.path);
     if (!entry) return;
     lastFocusToken.current = focusFile.token;
     setActivePath(focusFile.path);
+    // A kept file lives in the collapsed group at the bottom; jumping to one
+    // without opening that group would highlight a row nobody can see.
+    if (keptIds.has(entry.id)) setShowKept(true);
     if (!expandedIds.has(entry.id)) toggle(entry.id);
     pendingScrollRef.current = entry.id;
-  }, [focusFile, entries, expandedIds, toggle, display]);
+  }, [focusFile, allEntries, keptIds, expandedIds, toggle, display]);
 
   const handleTreeSelect = useCallback(
     (path: string) => {
-      const entry = entries.find((e) => display(e.alias, e.file.path) === path);
+      const entry = allEntries.find((e) => display(e.alias, e.file.path) === path);
       if (!entry) return;
       setActivePath(path);
+      if (keptIds.has(entry.id)) setShowKept(true);
       if (!expandedIds.has(entry.id)) toggle(entry.id);
       // Highlighting a file the user cannot see is not an answer. The list is
       // virtualized, so only the viewer knows where the row is; aligning to
@@ -657,53 +776,153 @@ export function ChangesSurface({
       // rather than below the fold.
       pendingScrollRef.current = entry.id;
     },
-    [entries, expandedIds, toggle, display],
+    [allEntries, keptIds, expandedIds, toggle, display],
   );
 
   /**
-   * Discard one file's changes, returning it to the base revision.
+   * Undo one file's changes, returning it to its mount's base revision.
    *
-   * This is deliberately a single-path checkpoint restore rather than a
-   * reverse-applied patch. Restoring is already the tested primitive: it is
-   * tree-to-tree (so adds, deletes and renames are all handled), it writes a
-   * `pre_restore` checkpoint so the discard is itself undoable, and it
-   * refuses to write through symlinks. Reverse-applying a patch would
-   * reimplement all of that, with a new failure mode whenever the patch no
-   * longer applies cleanly.
+   * Deliberately a server-side restore rather than a reverse-applied patch:
+   * restoring is tree-to-tree (adds, deletes and renames all behave), it
+   * writes a `pre_restore` checkpoint so the undo is itself undoable, and it
+   * refuses to write through symlinks. Reverse-applying would reimplement all
+   * of that plus a new failure mode whenever the patch no longer applies.
    *
-   * Requires a real checkpoint to restore from, which is why it is hidden
-   * when the base is the working tree or an arbitrary git ref.
+   * Per FILE, per MOUNT. The previous implementation posted every mount's
+   * files at the first mount's checkpoint id and was simply hidden whenever
+   * that mount's base was not a checkpoint row — which is the normal case for
+   * a linked worktree (its base is the branch commit) and for a plain git
+   * folder mounted in place (its first commit).
    */
-  const baseCheckpointId = summary?.base.id;
-  const canRevert = !!workspaceId && !!baseCheckpointId;
+  const canRevertFile = useCallback(
+    (alias: string) => !!workspaceId && !!baseByAlias.get(alias)?.treeish,
+    [workspaceId, baseByAlias],
+  );
+
+  /** Report paths the server refused rather than dropping them silently. */
+  const reportSkipped = useCallback(
+    (skipped: Array<{ alias: string; path: string; reason: string }>) => {
+      if (skipped.length === 0) return;
+      const reasons = [...new Set(skipped.map((s) => s.reason))].join(', ');
+      toast({
+        variant: 'warning',
+        title: `${skipped.length} ${skipped.length === 1 ? 'file was' : 'files were'} skipped`,
+        description: `${reasons}. ${skipped
+          .slice(0, 4)
+          .map((s) => display(s.alias, s.path))
+          .join(', ')}${skipped.length > 4 ? '…' : ''}`,
+      });
+    },
+    [display],
+  );
 
   const revertFile = useCallback(
-    async (alias: string, path: string) => {
-      if (!baseCheckpointId) return;
-      // REPO-RELATIVE, with no alias prefix.
-      //
-      // A checkpoint belongs to exactly one mount and its tree is that
-      // mount's tree, so `<alias>/<path>` names a file that does not exist in
-      // it — every discard silently restored nothing. (The server strips a
-      // leading alias defensively now, but sending the right path is what
-      // makes the behaviour correct rather than rescued.)
+    async (id: string, alias: string, filePath: string) => {
       setRevertError(null);
+      setBusyRow(id);
       try {
-        await restoreCheckpoint.mutateAsync({
-          checkpointId: baseCheckpointId,
-          paths: [toRestorePath(path, alias)],
-          // The summary's base id is the FIRST mount's checkpoint; the server
-          // maps it onto this mount's equivalent snapshot.
-          ...(alias && alias !== '.' ? { alias } : {}),
+        // REPO-RELATIVE, never alias-prefixed: a mount's base tree is that
+        // mount's tree, so `<alias>/<path>` names a file that is not in it.
+        const result = await discardChanges.mutateAsync({
+          files: [{ alias, path: toRestorePath(filePath, alias) }],
+        });
+        reportSkipped(result.skipped);
+        const failed = result.mounts.find((m) => !m.ok);
+        if (failed?.error) setRevertError(failed.error);
+      } catch (err) {
+        setRevertError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusyRow(null);
+        setConfirmRevert(null);
+      }
+    },
+    [discardChanges, reportSkipped],
+  );
+
+  /**
+   * Mark one file reviewed, at exactly the content on screen.
+   *
+   * The blob is what makes this durable AND self-correcting: the server
+   * stores it, and the file drops back out of "Kept" by itself the moment
+   * the agent edits it again.
+   */
+  const keepFile = useCallback(
+    async (id: string, alias: string, filePath: string, blob: string | undefined) => {
+      setRevertError(null);
+      setBusyRow(id);
+      try {
+        await reviewChanges.mutateAsync({
+          // A deleted file has no head blob; `''` is the sentinel for it.
+          keep: [{ alias, path: toRestorePath(filePath, alias), blob: blob ?? '' }],
         });
       } catch (err) {
         setRevertError(err instanceof Error ? err.message : String(err));
       } finally {
-        setConfirmRevert(null);
+        setBusyRow(null);
       }
     },
-    [baseCheckpointId, restoreCheckpoint],
+    [reviewChanges],
   );
+
+  const unkeepFile = useCallback(
+    async (id: string, alias: string, filePath: string) => {
+      setRevertError(null);
+      setBusyRow(id);
+      try {
+        await reviewChanges.mutateAsync({
+          unkeep: [{ alias, path: toRestorePath(filePath, alias) }],
+        });
+      } catch (err) {
+        setRevertError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusyRow(null);
+      }
+    },
+    [reviewChanges],
+  );
+
+  /** Accept everything currently changed. Resolved server-side, on live blobs. */
+  const keepAll = useCallback(async () => {
+    setRevertError(null);
+    setBulkBusy('keep');
+    try {
+      await reviewChanges.mutateAsync({ keepAll: true });
+    } catch (err) {
+      setRevertError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBulkBusy(null);
+    }
+  }, [reviewChanges]);
+
+  /**
+   * Throw away every change in the workspace. Confirmed first: this is the
+   * one action on this surface that can lose a whole turn's work — though
+   * the per-mount `pre_restore` checkpoints still make it recoverable from
+   * the rewind timeline.
+   */
+  const undoAll = useCallback(async () => {
+    const ok = await confirm({
+      title: 'Undo all changes?',
+      description:
+        `This restores every changed file in this workspace to its base revision. ` +
+        `A checkpoint is written first, so it can still be rewound.`,
+      confirmLabel: 'Undo all',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    setRevertError(null);
+    setBulkBusy('undo');
+    try {
+      const result = await discardChanges.mutateAsync({ all: true });
+      reportSkipped(result.skipped);
+      const failed = result.mounts.find((m) => !m.ok);
+      if (failed?.error) setRevertError(failed.error);
+    } catch (err) {
+      setRevertError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBulkBusy(null);
+    }
+  }, [confirm, discardChanges, reportSkipped]);
 
   /**
    * Renders each file's header. Replaces the built-in one so the +/- counts
@@ -717,12 +936,15 @@ export function ChangesSurface({
    */
   const renderHeader = useCallback(
     (item: { id: string; path: string; alias: string }) => {
-      const entry = entries.find((e) => e.id === item.id);
+      const entry = entryById.get(item.id);
       const file = entry?.file;
       const badge = STATUS_STYLE[file?.status ?? 'modified'] ?? STATUS_STYLE['modified']!;
       const confirming = confirmRevert === item.id;
       const expanded = expandedIds.has(item.id);
-      const loading = loadingIds.has(item.id);
+      const loading = loadingIds.has(item.id) || keptLoadingIds.has(item.id);
+      const isKept = file?.kept === true;
+      const rowBusy = busyRow === item.id;
+      const canUndo = canRevertFile(item.alias);
       const openable = !file?.isBinary && !file?.isTooLarge;
       const displayPath = display(item.alias, item.path);
       const isActive = activePath === displayPath;
@@ -851,60 +1073,114 @@ export function ChangesSurface({
           >
             {badge.label}
           </span>
-          {canRevert &&
-            (confirming ? (
-              <span className="flex shrink-0 items-center gap-1">
-                <Button
-                  type="button"
-                  variant="primary"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void revertFile(item.alias, item.path);
-                  }}
-                  disabled={restoreCheckpoint.isPending}
-                  className="h-auto rounded bg-amber-500 px-1.5 py-px text-[10px] font-medium text-white disabled:opacity-50"
-                >
-                  {restoreCheckpoint.isPending ? 'Discarding…' : 'Confirm discard'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmRevert(null);
-                  }}
-                  className="h-auto rounded px-1.5 py-px text-[10px] font-normal hover:bg-accent"
-                >
-                  Cancel
-                </Button>
-              </span>
-            ) : (
+          {/* Review actions. Always mounted for a kept row (the group it sits
+              in is small and deliberate); revealed on hover otherwise, so the
+              list stays quiet while it is being read. */}
+          {confirming ? (
+            <span className="flex shrink-0 items-center gap-1">
+              <Button
+                type="button"
+                variant="primary"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void revertFile(item.id, item.alias, item.path);
+                }}
+                disabled={rowBusy}
+                data-testid="confirm-undo-file"
+                className="h-auto rounded bg-amber-500 px-1.5 py-px text-[10px] font-medium text-white disabled:opacity-50"
+              >
+                {rowBusy ? 'Undoing…' : 'Confirm undo'}
+              </Button>
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-sm"
-                title="Discard this file's changes (undoable)"
-                aria-label={`Discard changes to ${item.path}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setConfirmRevert(item.id);
+                  setConfirmRevert(null);
                 }}
-                className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                className="h-auto rounded px-1.5 py-px text-[10px] font-normal hover:bg-accent"
               >
-                <Undo2 className="h-3 w-3" />
+                Cancel
               </Button>
-            ))}
+            </span>
+          ) : (
+            <span
+              className={cn(
+                'flex shrink-0 items-center gap-0.5 transition-opacity',
+                isKept
+                  ? 'opacity-100'
+                  : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100',
+              )}
+            >
+              {isKept ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Put this file back in the review list"
+                  aria-label={`Unkeep ${item.path}`}
+                  data-testid="unkeep-file"
+                  disabled={rowBusy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void unkeepFile(item.id, item.alias, item.path);
+                  }}
+                  className="h-auto w-auto shrink-0 rounded p-0.5 text-success hover:bg-accent"
+                >
+                  {rowBusy ? <Spinner size="xs" /> : <RotateCcw className="h-3 w-3" />}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Keep this file — mark it reviewed and move it out of the list"
+                  aria-label={`Keep ${item.path}`}
+                  data-testid="keep-file"
+                  disabled={rowBusy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void keepFile(item.id, item.alias, item.path, file?.newBlob);
+                  }}
+                  className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-success"
+                >
+                  {rowBusy ? <Spinner size="xs" /> : <Check className="h-3 w-3" />}
+                </Button>
+              )}
+              {canUndo && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Undo this file's changes (itself undoable)"
+                  aria-label={`Undo changes to ${item.path}`}
+                  data-testid="undo-file"
+                  disabled={rowBusy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmRevert(item.id);
+                  }}
+                  className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <Undo2 className="h-3 w-3" />
+                </Button>
+              )}
+            </span>
+          )}
         </div>
       );
     },
     [
-      entries,
-      canRevert,
+      entryById,
+      canRevertFile,
       confirmRevert,
       revertFile,
-      restoreCheckpoint.isPending,
+      keepFile,
+      unkeepFile,
+      busyRow,
       expandedIds,
       loadingIds,
+      keptLoadingIds,
       toggle,
       activePath,
       openThreadCountByFile,
@@ -939,9 +1215,14 @@ export function ChangesSurface({
       {/* ── Action bar ─────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-1.5 border-b px-2 py-1.5">
         <FileDiff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="text-xs font-medium">
+        <span className="text-xs font-medium" data-testid="changes-count">
           {stats.files} {stats.files === 1 ? 'change' : 'changes'}
         </span>
+        {keptCount > 0 && (
+          <span className="text-[10.5px] text-muted-foreground" data-testid="changes-kept-count">
+            {stats.files - keptCount} to review · {keptCount} kept
+          </span>
+        )}
         {(stats.additions > 0 || stats.deletions > 0) && (
           <span className="font-mono text-[10px]">
             <span className="text-emerald-500">+{stats.additions}</span>{' '}
@@ -981,6 +1262,43 @@ export function ChangesSurface({
               ? 'Hide workspace files'
               : `+${hiddenWorkspaceFiles} workspace ${hiddenWorkspaceFiles === 1 ? 'file' : 'files'}`}
           </button>
+        )}
+
+        {/* Bulk review. "Keep all" accepts every changed file at its current
+            content (resolved server-side, so it cannot accept something the
+            agent wrote a moment ago and nobody saw); "Undo all" throws the
+            whole change set away behind a confirmation. */}
+        {stats.files > 0 && (
+          <div className="ml-1 flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void keepAll()}
+              disabled={bulkBusy !== null || stats.files === keptCount}
+              loading={bulkBusy === 'keep'}
+              leftIcon={<CheckCheck className="h-3 w-3" />}
+              title="Mark every changed file as reviewed"
+              data-testid="keep-all"
+              className="h-6 rounded-md px-1.5 text-[10.5px] font-normal"
+            >
+              Keep all
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void undoAll()}
+              disabled={bulkBusy !== null}
+              loading={bulkBusy === 'undo'}
+              leftIcon={<Undo2 className="h-3 w-3" />}
+              title="Restore every changed file to its base revision"
+              data-testid="undo-all"
+              className="h-6 rounded-md px-1.5 text-[10.5px] font-normal text-danger hover:bg-danger-muted"
+            >
+              Undo all
+            </Button>
+          </div>
         )}
 
         <div className="ml-auto flex items-center gap-0.5">
@@ -1299,7 +1617,7 @@ export function ChangesSurface({
       {/* ── Body ───────────────────────────────────────────────── */}
       {revertError && (
         <div className="mx-2 mt-1 rounded bg-danger-muted px-2 py-1 text-[11px] text-danger">
-          Could not discard the file: {revertError}
+          Could not complete that action: {revertError}
           <Button
             type="button"
             variant="ghost"
@@ -1351,8 +1669,8 @@ export function ChangesSurface({
                 </div>
               )}
 
-              {/* Diff viewer */}
-              <div className="min-w-0 flex-1">
+              {/* Diff viewer, with the reviewed files parked underneath it. */}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 {/* W28 — DiffProviders wraps the diff surface at its point of
                     use, not the app root. See DiffProviders.tsx's header for
                     why this is safe (the underlying worker pool is a true
@@ -1362,23 +1680,73 @@ export function ChangesSurface({
                     eagerly-loaded highlighter/WASM code from every page load
                     that never opens a diff. */}
                 <DiffProviders>
-                  <DiffCodeView
-                    ref={viewerRef}
-                    sources={decoratedSources}
-                    viewMode={viewMode}
-                    wrapLines={wrapLines}
-                    enableSelection={reviewEnabled}
-                    style={{ height: '100%', overflow: 'auto' }}
-                    renderHeader={renderHeader}
-                    headerHeight={FILE_HEADER_HEIGHT}
-                    {...(reviewEnabled ? { onSelectRange: handleSelectRange } : {})}
-                    {...(reviewEnabled ? { renderAnnotation } : {})}
-                    emptyState={
-                      <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
-                        Select a file to view its diff.
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="min-h-0 flex-1">
+                      <DiffCodeView
+                        ref={viewerRef}
+                        sources={decoratedSources}
+                        viewMode={viewMode}
+                        wrapLines={wrapLines}
+                        enableSelection={reviewEnabled}
+                        style={{ height: '100%', overflow: 'auto' }}
+                        renderHeader={renderHeader}
+                        headerHeight={FILE_HEADER_HEIGHT}
+                        {...(reviewEnabled ? { onSelectRange: handleSelectRange } : {})}
+                        {...(reviewEnabled ? { renderAnnotation } : {})}
+                        emptyState={
+                          <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
+                            {keptCount > 0 && entries.length === 0
+                              ? 'Everything has been reviewed. Kept files are listed below.'
+                              : 'Select a file to view its diff.'}
+                          </div>
+                        }
+                      />
+                    </div>
+
+                    {/* ── Kept (N) ───────────────────────────────────
+                        Reviewed files are not hidden, only moved out of
+                        the way: the group opens to the same rows, with the
+                        same diffs and an "unkeep" next to each, so a second
+                        look never means undoing the review to get one. */}
+                    {keptCount > 0 && (
+                      <div
+                        className={cn('shrink-0 border-t', showKept && 'flex min-h-0 flex-1 flex-col')}
+                        data-testid="kept-group"
+                      >
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setShowKept((v) => !v)}
+                          aria-expanded={showKept}
+                          data-testid="kept-group-toggle"
+                          className="h-auto w-full shrink-0 justify-start gap-1.5 rounded-none px-2 py-1 text-left text-[11px] font-normal text-muted-foreground hover:bg-subtle hover:text-foreground"
+                        >
+                          <ChevronRight
+                            className={cn('h-3 w-3 transition-transform', showKept && 'rotate-90')}
+                          />
+                          <Check className="h-3 w-3 text-success" />
+                          <span className="font-medium text-foreground">Kept ({keptCount})</span>
+                          <span className="truncate">reviewed and set aside</span>
+                        </Button>
+                        {showKept && (
+                          <div className="min-h-0 flex-1">
+                            <DiffCodeView
+                              sources={decoratedKeptSources}
+                              viewMode={viewMode}
+                              wrapLines={wrapLines}
+                              enableSelection={reviewEnabled}
+                              style={{ height: '100%', overflow: 'auto' }}
+                              renderHeader={renderHeader}
+                              headerHeight={FILE_HEADER_HEIGHT}
+                              {...(reviewEnabled ? { onSelectRange: handleSelectRange } : {})}
+                              {...(reviewEnabled ? { renderAnnotation } : {})}
+                              emptyState={<></>}
+                            />
+                          </div>
+                        )}
                       </div>
-                    }
-                  />
+                    )}
+                  </div>
                 </DiffProviders>
               </div>
             </>
@@ -1397,6 +1765,7 @@ export function ChangesSurface({
           </div>
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 }

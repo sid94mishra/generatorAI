@@ -176,6 +176,11 @@ export class ChangeSummaryService {
           alias: repo.alias,
           kind: repo.kind,
           hasBaseline: resolvedBase.treeish !== undefined && resolvedBase.kind !== 'ref',
+          // THIS repo's own resolution. Mounts do not share one: the second
+          // mount of a workspace routinely falls back to its branch base
+          // while the first has a real checkpoint baseline.
+          base: resolvedBase,
+          head: resolvedHead,
           stats,
           files,
         };
@@ -191,6 +196,8 @@ export class ChangeSummaryService {
           alias: repo.alias,
           kind: repo.kind,
           hasBaseline: false,
+          base: { kind: base.kind },
+          head: { kind: head.kind },
           stats: { files: 0, additions: 0, deletions: 0 },
           files: [],
         });
@@ -233,21 +240,37 @@ export class ChangeSummaryService {
     params: GetChangeSummaryParams & {
       filePath: string;
       alias?: string;
+      /**
+       * The file's path on the BASE side, when it was renamed. Without it the
+       * base blob is looked up under the new name, finds nothing, and the
+       * rename renders as a pure addition.
+       */
+      oldPath?: string;
       /** Known blob SHAs from the summary. Absent side = file added/deleted. */
       blobs?: { old?: string | undefined; new?: string | undefined };
     },
   ): Promise<ChangeFileVersions> {
     const repo = await this.resolveRepo(params, params.alias ?? '.');
     const relPath = stripAliasPrefix(params.filePath, repo.alias);
+    /** Where the base side keeps this file — different only for a rename. */
+    const basePath = params.oldPath
+      ? stripAliasPrefix(params.oldPath, repo.alias)
+      : relPath;
 
     const fast = await this.tryReadKnownBlobs(repo, relPath, params.blobs);
     if (fast) return fast;
 
     const base = await this.resolveRevision(params.workspaceId, repo, params.base ?? { kind: 'baseline' });
-    const head = await this.resolveRevision(params.workspaceId, repo, params.head ?? { kind: 'working' });
+    // Same rule `getSummary` applies: a commit on the base side means the
+    // working tree must be staged through the repo's EOL config, or a CRLF
+    // checkout reads as rewritten end to end — and then the expanded body
+    // disagrees with the +/− counts the summary already showed.
+    const head = await this.resolveRevision(params.workspaceId, repo, params.head ?? { kind: 'working' }, {
+      honourEol: base.normalized === true,
+    });
 
     const oldBlob = base.treeish
-      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, base.treeish, relPath)
+      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, base.treeish, basePath)
       : null;
     const newBlob = head.treeish
       ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, head.treeish, relPath)
@@ -264,7 +287,7 @@ export class ChangeSummaryService {
 
     if (!isTooLarge) {
       if (oldBlob) {
-        oldContents = await this.readBlob(repo.repoDir, base.treeish!, relPath);
+        oldContents = await this.readBlob(repo.repoDir, base.treeish!, basePath);
         if (oldContents !== null && looksBinary(oldContents)) isBinary = true;
       }
       if (newBlob) {
@@ -437,18 +460,31 @@ export class ChangeSummaryService {
 
   /** Unified patch for one file. Used when the bodies are too large to ship. */
   async getFilePatch(
-    params: GetChangeSummaryParams & { filePath: string; alias?: string; contextLines?: number },
+    params: GetChangeSummaryParams & {
+      filePath: string;
+      alias?: string;
+      /** The file's path on the BASE side, when it was renamed. */
+      oldPath?: string;
+      contextLines?: number;
+    },
   ): Promise<ChangeFilePatch> {
     const repo = await this.resolveRepo(params, params.alias ?? '.');
     const base = await this.resolveRevision(params.workspaceId, repo, params.base ?? { kind: 'baseline' });
-    const head = await this.resolveRevision(params.workspaceId, repo, params.head ?? { kind: 'working' });
+    // See `getFileVersions`: the head side is materialised the same way the
+    // summary materialised it, so the patch cannot disagree with the counts.
+    const head = await this.resolveRevision(params.workspaceId, repo, params.head ?? { kind: 'working' }, {
+      honourEol: base.normalized === true,
+    });
     const relPath = stripAliasPrefix(params.filePath, repo.alias);
+    const basePath = params.oldPath
+      ? stripAliasPrefix(params.oldPath, repo.alias)
+      : relPath;
 
     let patch = await this.gitAt(repo.repoDir).diffPatch(
       repo.repoDir,
       base.treeish ?? EMPTY_TREE_SHA,
       head.treeish,
-      relPath,
+      basePath === relPath ? relPath : [basePath, relPath],
       params.contextLines ?? 3,
     );
 
@@ -459,7 +495,7 @@ export class ChangeSummaryService {
     }
 
     const oldBlob = base.treeish
-      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, base.treeish, relPath)
+      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, base.treeish, basePath)
       : null;
     const newBlob = head.treeish
       ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, head.treeish, relPath)
@@ -488,6 +524,12 @@ export class ChangeSummaryService {
      */
     nestedPrefixes: readonly string[] = [],
   ): Promise<ChangeSummaryFile[]> {
+    // The working tree could not be snapshotted yet (typically: the chat's
+    // shadow git store is still being created). Diffing against nothing made a
+    // brand-new chat report its scaffold files as deleted ("+0 −19"), so report
+    // no changes until a real snapshot exists.
+    if (head.kind === 'working' && head.treeish === undefined) return [];
+
     const from = base.treeish ?? EMPTY_TREE_SHA;
     const to = head.treeish;
 
@@ -661,7 +703,10 @@ export class ChangeSummaryService {
       this.workingIndexCache.set(cacheKey, indexFile);
     }
     const tree = (await this.gitAt(repoDir).writeTreeFromWorktree(repoDir, indexFile, { honourEol })) ?? undefined;
-    this.workingTreeCache.set(cacheKey, { tree, at: Date.now() });
+    // A failed snapshot is not memoised: the failure is usually transient (the
+    // shadow store is still being initialised) and caching it pinned the wrong
+    // answer for the whole TTL.
+    if (tree !== undefined) this.workingTreeCache.set(cacheKey, { tree, at: Date.now() });
     return tree;
   }
 
@@ -736,6 +781,11 @@ export class ChangeSummaryService {
       kind: 'baseline',
       ...(first ? { treeish: first } : { treeish: EMPTY_TREE_SHA }),
       label: first ? 'First commit' : 'Empty',
+      // A real commit's blobs went through git's EOL filters, exactly like
+      // "Branch base" and "Worktree HEAD". Without this the head side was
+      // materialised byte-exact and every CRLF file in a first-commit
+      // workspace read as entirely rewritten.
+      ...(first ? { normalized: true } : {}),
     };
   }
 

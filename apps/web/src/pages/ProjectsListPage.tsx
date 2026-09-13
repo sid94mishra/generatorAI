@@ -103,7 +103,8 @@ export function ProjectsListPage() {
   return (
     <PageContainer className="space-y-6">
       <PageHeader
-        title="Manage Projects"
+        title="Projects"
+        subtitle="Organize your codebases and the chats and workflows that run on them"
         actions={
           <Button
             variant="primary"
@@ -116,40 +117,46 @@ export function ProjectsListPage() {
       />
 
       {/* Search + view toggle */}
-      <Toolbar className="flex-wrap sm:flex-nowrap">
+      <Toolbar
+        className="flex-wrap sm:flex-nowrap"
+        end={
+          <div className="flex items-center overflow-hidden rounded-lg border border-border">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setViewMode('card')}
+              aria-label="Grid view"
+              aria-pressed={view === 'card'}
+              className={cn(
+                'h-auto w-auto rounded-l-lg rounded-r-none p-1.5 transition-colors',
+                view === 'card' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setViewMode('list')}
+              aria-label="List view"
+              aria-pressed={view === 'list'}
+              className={cn(
+                'h-auto w-auto rounded-r-lg rounded-l-none p-1.5 transition-colors',
+                view === 'list' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <ListIcon className="h-4 w-4" />
+            </Button>
+          </div>
+        }
+      >
         <SearchInput
           value={search}
           onChange={setSearch}
           placeholder="Search projects…"
           aria-label="Search projects"
-          className="min-w-0 max-w-md flex-1"
+          className="min-w-0 flex-1"
         />
-        <div className="flex items-center gap-0.5 rounded-md border border-border bg-subtle p-0.5">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => setViewMode('card')}
-            className={cn(
-              'h-auto w-auto gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors',
-              view === 'card' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-            )}
-            aria-pressed={view === 'card'}
-          >
-            <LayoutGrid className="h-3.5 w-3.5" /> Cards
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => setViewMode('list')}
-            className={cn(
-              'h-auto w-auto gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors',
-              view === 'list' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-            )}
-            aria-pressed={view === 'list'}
-          >
-            <ListIcon className="h-3.5 w-3.5" /> List
-          </Button>
-        </div>
       </Toolbar>
 
       {/* Empty states */}
@@ -187,11 +194,11 @@ export function ProjectsListPage() {
                 key={project.id}
                 onClick={() => navigate(`/projects/${project.id}`)}
                 className={cn(
-                  'group flex cursor-pointer flex-col rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-subtle/40',
+                  'group flex cursor-pointer flex-col rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-subtle/40',
                   !active && 'opacity-70',
                 )}
               >
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2.5">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-subtle text-primary">
                       <FolderKanban className="h-4.5 w-4.5" />
@@ -208,7 +215,9 @@ export function ProjectsListPage() {
                       variant="ghost"
                       size="icon-sm"
                       onClick={() => setDeleteTarget(project.id)}
-                      className="opacity-0 transition-opacity hover:bg-danger-muted hover:text-danger group-hover:opacity-100"
+                      // Collapsed rather than transparent, so the hidden button
+                      // doesn't push the switch away from the card's edge.
+                      className="hidden hover:bg-danger-muted hover:text-danger group-hover:inline-flex group-focus-within:inline-flex"
                       aria-label="Delete project"
                     >
                       <Trash2 className="h-3.5 w-3.5" />

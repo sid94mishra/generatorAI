@@ -32,6 +32,8 @@ export interface MenuAction {
   disabled?: boolean;
   /** Shown under the label — say why a disabled action is unavailable. */
   detail?: string;
+  /** For E2E: an action that a test has to tap by name rather than by label. */
+  testID?: string;
   onPress: () => void;
 }
 
@@ -74,6 +76,7 @@ export function ActionSheet({
             <Touchable
               accessibilityLabel={action.label}
               accessibilityHint={action.detail}
+              {...(action.testID ? { testID: action.testID } : {})}
               disabled={action.disabled}
               haptic="none"
               scale="none"

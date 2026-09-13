@@ -148,7 +148,15 @@ export interface ConversationWarning {
   code:
     | 'FIELD_UNSUPPORTED_BY_PROVIDER'
     | 'FIELD_COERCED'
-    | 'AGENT_NOT_REGISTERED';
+    | 'AGENT_NOT_REGISTERED'
+    /**
+     * An MCP server the conversation asked for did not come up. Distinct from
+     * `FIELD_UNSUPPORTED_BY_PROVIDER`: the field WAS accepted and translated,
+     * and the failure happened afterwards, at the provider's own startup — so
+     * the copy is "its tools are unavailable", not "this provider ignores it".
+     * `params.server` names it; `params.status` / `params.reason` say why.
+     */
+    | 'MCP_SERVER_FAILED';
   params: Record<string, string | number>;
 }
 
@@ -186,6 +194,19 @@ export interface PermissionRequest {
 export interface PermissionResponse {
   granted: boolean;
   reason?: string;
+  /**
+   * The user picked "don't ask again" rather than a one-off decision.
+   *
+   * Optional and additive: a host that never sets it keeps today's per-call
+   * behaviour. Providers that HAVE a durable decision in their own protocol
+   * honour it — Codex answers `acceptForSession` instead of `accept`, so the
+   * binary stops re-asking for the rest of the thread. A provider without one
+   * ignores the flag rather than approximating it.
+   *
+   * Only meaningful alongside `granted: true`; a remembered DENIAL is the
+   * host's own policy to enforce, not something to hand to the model.
+   */
+  remember?: boolean;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -524,11 +545,82 @@ export interface IHarnessClientLifecycle {
    * catching the error. All fields default closed (false/undefined).
    */
   capabilities(): ProviderCapabilities;
+  /**
+   * Start the provider's own sign-in flow. OPTIONAL — declare
+   * `capabilities().accountLogin` when implemented. A browser-based flow
+   * answers with `authUrl` for the host to open; the provider then notifies
+   * completion on its own channel and the registry re-probes readiness.
+   * Codex: `account/login/start { type: 'chatgpt' }` → `authUrl` +
+   * `account/login/completed`.
+   */
+  startLogin?(): Promise<{ authUrl?: string; loginId?: string; completed?: boolean }>;
+  /** Sign the provider's account out (Codex: `account/logout`). OPTIONAL. */
+  logout?(): Promise<void>;
+  /**
+   * Capabilities of the provider that OWNS `conversationId`. A multi-provider
+   * harness answers `capabilities()` with the intersection across providers,
+   * which hides per-conversation features (one provider forks natively, the
+   * other does not). Optional: single-provider adapters need not implement it.
+   */
+  capabilitiesFor?(conversationId: string): ProviderCapabilities;
 }
 
 /** Model discovery. */
 export interface IHarnessModelDiscovery {
   getModels(): Promise<HarnessModel[]>;
+}
+
+/**
+ * A point in a provider's own conversation history: the id of the last
+ * message (Claude) or turn (Codex) that a fork or rewind keeps. Persisted per
+ * turn as `ChatMessageMetadata.providerAnchor`.
+ */
+export interface ConversationAnchor {
+  kind: 'message' | 'turn';
+  id: string;
+}
+
+export interface ForkConversationOptions {
+  /** OUR id for the new conversation. */
+  newConversationId: string;
+  /**
+   * The source's provider handle as persisted by the caller
+   * (`sessions.provider_session_id`). Used when the adapter no longer holds
+   * the source conversation in memory (server restart, eviction).
+   */
+  sourceProviderSessionId?: string;
+  /**
+   * Keep history through this anchor (inclusive). Omitted = the whole
+   * conversation.
+   */
+  throughAnchor?: ConversationAnchor;
+  /** Full config for the new conversation (tools, cwd, model…), as for `createConversation`. */
+  params: CreateConversationParams;
+}
+
+export interface ForkConversationResult {
+  /** The provider's handle for the new conversation, when it has one. */
+  providerSessionId?: string;
+  /**
+   * Old anchor id → new anchor id for the copied history, when the provider
+   * re-keys messages on fork (Claude's `forkSession` mints fresh uuids). The
+   * caller rewrites the anchors it persisted for the copied turns so a later
+   * fork or rewind inside the branch still resolves.
+   */
+  anchorMap?: Record<string, string>;
+}
+
+export interface RewindConversationOptions {
+  /** The conversation's provider handle as persisted by the caller (see `ForkConversationOptions`). */
+  providerSessionId?: string;
+  /** Last anchor that SURVIVES. `null` = drop everything (back to an empty conversation). */
+  keepThrough: ConversationAnchor | null;
+  /** First anchor that is DROPPED, when known (Codex `thread/revert.beforeTurnId`). */
+  dropFrom?: ConversationAnchor;
+  /** How many of our turns are being dropped (Codex `thread/rollback.numTurns` fallback). */
+  droppedTurns: number;
+  /** Full config to re-bind the conversation with afterwards. */
+  params: CreateConversationParams;
 }
 
 /** Create / resume / list / delete conversations. */
@@ -593,6 +685,20 @@ export interface IHarnessConversationLifecycle {
    * callers must treat the move as a cold start rather than assume continuity.
    */
   getProviderSessionId?(conversationId: string): string | undefined;
+  /**
+   * Branch `conversationId` into a NEW conversation whose provider-side
+   * history is a copy of the source through `throughAnchor`. OPTIONAL —
+   * declare `capabilities().conversationFork` when implemented. The source is
+   * left untouched. Must not send a message or bill tokens.
+   */
+  forkConversation?(conversationId: string, options: ForkConversationOptions): Promise<ForkConversationResult>;
+  /**
+   * Truncate `conversationId`'s provider-side history so that `keepThrough`
+   * is the last thing the model remembers. OPTIONAL — declare
+   * `capabilities().conversationRewind` when implemented. Files are the
+   * caller's business (workspace checkpoints); this only moves the transcript.
+   */
+  rewindConversation?(conversationId: string, options: RewindConversationOptions): Promise<ForkConversationResult>;
   listConversations(): Promise<string[]>;
   getLastConversationId(): Promise<string | null>;
   deleteConversation(conversationId: string): Promise<void>;
@@ -666,6 +772,12 @@ export interface HarnessRuntimeDiagnostics {
   warmSessions: number;
   /** The configured cap on live sessions, when the provider has one. */
   maxLiveSessions?: number;
+  /** Turns currently holding an execution permit, when the provider caps concurrent turns. */
+  turnsInFlight?: number;
+  /** The concurrent-turn cap those permits come from. */
+  maxConcurrentTurns?: number;
+  /** Turns waiting for a permit. Non-zero while `turnsInFlight` is 0 means a permit leaked. */
+  turnsQueued?: number;
   /** Per-provider breakdown when the harness fronts several providers. */
   providers?: Record<string, Omit<HarnessRuntimeDiagnostics, 'providers'>>;
 }

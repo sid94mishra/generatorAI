@@ -52,7 +52,7 @@ import type { NextFunction, Request, Response } from 'express';
  * changes, this constant must be regenerated or the CSP will silently block
  * it, reintroducing the theme flash rather than breaking the page.
  */
-export const THEME_SCRIPT_CSP_HASH = 'sha256-BQvRuMaCC1KXd/oQ2/DaWqL9fxp/Evdu7lSis8R+8hQ=';
+export const THEME_SCRIPT_CSP_HASH = 'sha256-eMFruOxq9rBnZocnEAOZp+Z+m20i9sL8vOW+Ch9Xk9U=';
 
 export function createCspMiddleware() {
   const header = [

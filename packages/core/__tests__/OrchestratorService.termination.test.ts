@@ -299,6 +299,108 @@ describe('OrchestratorService — W24 termination guards (the arbiter)', () => {
     expect(afterRestart.error).toMatch(/Wave limit reached/);
   });
 
+  it('a NEW user request on the same chat starts a fresh budget: convergence, wave cap and clock reset once the orchestrator has answered', async () => {
+    const chatRepo = new MockChatRepository();
+    const h = await makeHarness({ maxWaves: 1, convergenceThreshold: 1 }, chatRepo);
+    await spawnAndFinish(h, 'task-1', { status: 'completed', converged: true }); // wave 1, converged
+    // Same request: both the wave cap and convergence refuse a second wave.
+    const sameRequest = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('task-2'));
+    expect(sameRequest.ok).toBe(false);
+
+    // The orchestrator finishes its turn → the request is over.
+    await h.eventBus.emit('parent-1-session', { kind: 'harness.idle', data: {} } as never);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await chatRepo.getOrchestratorWaveState(h.parentChatId)).toBeNull();
+
+    // The user's next request may spawn again, and it is wave 1 of a new budget.
+    const nextRequest = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('task-3'));
+    expect(nextRequest.ok).toBe(true);
+    expect((await chatRepo.getOrchestratorWaveState(h.parentChatId))?.waveCount).toBe(1);
+  });
+
+  it('the worker cap counts CONCURRENT workers, not every worker the chat ever had', async () => {
+    const chatRepo = new MockChatRepository();
+    const h = await makeHarness({ maxWorkers: 2, convergenceThreshold: 0, maxWaves: 10 }, chatRepo);
+    await spawnAndFinish(h, 'task-1', { status: 'completed' });
+    await spawnAndFinish(h, 'task-2', { status: 'completed' });
+    // Two finished workers are on the record; a third may still start.
+    const third = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('task-3'));
+    expect(third.ok).toBe(true);
+    // task-3 is running: with a cap of 2 a fourth running one is fine, a fifth is not.
+    const fourth = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('task-4'));
+    expect(fourth.ok).toBe(true);
+    const fifth = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('task-5'));
+    expect(fifth.ok).toBe(false);
+    expect(fifth.error).toMatch(/Worker limit reached/);
+  });
+
+  it('cancelWorkersForParent stops every running worker and does not re-prompt the orchestrator', async () => {
+    const h = await makeHarness({ convergenceThreshold: 0 });
+    const a = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('task-a'));
+    const b = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('task-b'));
+    expect(a.ok && b.ok).toBe(true);
+    const stopped = await h.orchestrator.cancelWorkersForParent(h.parentChatId, 'orchestrator stopped');
+    expect(stopped.sort()).toEqual([a.taskId, b.taskId].sort());
+    const list = await h.orchestrator.listBackgroundAgents(h.parentChatId);
+    expect(list.map((t) => t.status)).toEqual(['cancelled', 'cancelled']);
+    // The workers' own idle events arrive afterwards; the orchestrator must not be nudged.
+    const sent: string[] = [];
+    (h.orchestrator as unknown as { chatManagementService: { sendPrompt: (id: string, p: string) => Promise<void> } }).chatManagementService.sendPrompt =
+      async (_id: string, p: string) => { sent.push(p); };
+    await h.eventBus.emit(`${a.taskId}-session`, { kind: 'harness.cancelled', data: { reason: 'user_abort' } });
+    await h.eventBus.emit(`${a.taskId}-session`, { kind: 'harness.idle', data: {} });
+    await h.eventBus.emit(`${b.taskId}-session`, { kind: 'harness.cancelled', data: { reason: 'user_abort' } });
+    await h.eventBus.emit(`${b.taskId}-session`, { kind: 'harness.idle', data: {} });
+    // The nudge is deferred 2 s after the last worker settles; outwait it.
+    await new Promise((r) => setTimeout(r, 2_300));
+    expect(sent).toHaveLength(0);
+  }, 10_000);
+
+  it('a stopped worker that idles twice releases its wave slot once, so the wave waits for the others', async () => {
+    const h = await makeHarness({ convergenceThreshold: 0 });
+    const a = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('task-a'));
+    const b = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('task-b'));
+    expect(a.ok && b.ok).toBe(true);
+    const sent: string[] = [];
+    (h.orchestrator as unknown as { chatManagementService: { sendPrompt: (id: string, p: string) => Promise<void> } }).chatManagementService.sendPrompt =
+      async (_id: string, p: string) => { sent.push(p); };
+    // Cancel ONE worker from the panel: the provider's cancelled+idle, then
+    // the chat service's own idle for the same turn.
+    await h.orchestrator.cancelBackgroundAgent(a.taskId);
+    await h.eventBus.emit(`${a.taskId}-session`, { kind: 'harness.cancelled', data: { reason: 'user_abort' } });
+    await h.eventBus.emit(`${a.taskId}-session`, { kind: 'harness.idle', data: {} });
+    await h.eventBus.emit(`${a.taskId}-session`, { kind: 'harness.idle', data: {} });
+    await new Promise((r) => setTimeout(r, 2_300));
+    expect(sent).toHaveLength(0);
+    // The other worker finishing is what settles the wave.
+    await h.eventBus.emit(`${b.taskId}-session`, { kind: 'harness.message_complete', data: { content: '<TASK_RESULT>{"summary":"done"}</TASK_RESULT>' } });
+    await h.eventBus.emit(`${b.taskId}-session`, { kind: 'harness.idle', data: {} });
+    await new Promise((r) => setTimeout(r, 2_300));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatch(/Every background agent in the current wave has finished/);
+  }, 15_000);
+
+  it('a worker the DB still calls running after a restart is reported failed, not running forever', async () => {
+    const chatRepo = new MockChatRepository();
+    await chatRepo.create({
+      id: 'parent-x', name: 'Orchestrator', sessionId: 'parent-x-session', status: 'active', orchestratorMode: true,
+      createdAt: new Date(), updatedAt: new Date(),
+    } as unknown as Chat);
+    await chatRepo.create({
+      id: 'worker-stale', name: 'stale', sessionId: 'worker-stale-session', status: 'active', parentChatId: 'parent-x',
+      backgroundTask: { orchestratorChatId: 'parent-x', taskName: 'stale', status: 'running' },
+      createdAt: new Date(), updatedAt: new Date(),
+    } as unknown as Chat);
+    const fresh = new OrchestratorService(
+      chatRepo, fakeSessionRepo(), fakeMessageRepo(new Map()), fakeHarness(), new EventBus(),
+      { ...DEFAULT_ORCHESTRATOR_CONFIG, defaultWorkerModel: 'test-model', warmFirst: false },
+    );
+    fresh.setChatManagementService(fakeChatManagementService());
+    const list = await fresh.listBackgroundAgents('parent-x');
+    expect(list).toEqual([expect.objectContaining({ taskId: 'worker-stale', status: 'failed' })]);
+    expect((await chatRepo.getById('worker-stale')).backgroundTask?.status).toBe('failed');
+  });
+
   it('disposeForParent clears the persisted wave state (archive path)', async () => {
     const chatRepo = new MockChatRepository();
     const h = await makeHarness({ convergenceThreshold: 0 }, chatRepo);

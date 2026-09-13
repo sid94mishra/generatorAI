@@ -124,7 +124,7 @@ Every snapshot command for a mount runs through `IGitClient.withGitDir(<root>/.c
 
 **Baselines.** The baseline checkpoint is captured before readiness is announced. Until it lands (and as the "Branch base" option afterwards) a mount's `git.baseCommit` is the anchor (`ref:<sha>` base selector, EOL-normalised comparison). "Session start" = the baseline checkpoint.
 
-**Restore.** Per-file discard takes repo-relative paths (an `<alias>/` prefix is stripped server-side — it used to make the discard a silent no-op). `turn:<id>` as a base resolves to the turn's *before* checkpoint. `pre_restore` checkpoints are the redo points.
+**Restore.** Per-file discard takes repo-relative paths (an `<alias>/` prefix is stripped server-side — it used to make the discard a silent no-op). `turn:<id>` as a base resolves to the turn's *before* checkpoint. `pre_restore` checkpoints are the redo points. A chat **rewind** (`POST /api/chats/:id/rewind`, see [feature-chat.md §2.7](./feature-chat.md#27-rewind-fork-and-copy-transcript)) restores every mount to the turn's *before* snapshot in one server call through `WorkspaceCheckpointService.restoreTurn` — per-mount results, a mount without a snapshot for that turn falls back to its newest earlier one — rather than the per-mount client loop the Checkpoints panel used to run.
 
 Repositories that older versions polluted (`refs/generatorai/**`, `generatorai-*.index` in the user's `.git`, `generatorai/run-*` branches) can be cleaned with `POST /api/fs/scrub-legacy-refs { path, dryRun? }` (refs + index files; branches are the user's to delete).
 
@@ -156,6 +156,9 @@ GET  /api/workspaces/:id/changes[?base=…]        per mount (kind 'mount' | 'ne
 GET  /api/workspaces/:id/tree                    git ls-files per mount through the shadow store
 GET  /api/workspaces/:id/files                   @-mention index: mounts[], worktrees[] (one per mount, in-place included), workspaceFiles (scratch/plans)
 POST /api/workspaces/:id/checkpoints/:cid/restore { paths?: string[] }   repo-relative paths
+POST /api/workspaces/:id/changes/review   { keep?: [{alias,path,blob}], unkeep?: [{alias,path}], keepAll?: boolean }   Changes tab "Keep"
+POST /api/workspaces/:id/changes/discard  { files?: [{alias,path}], all?: boolean }   per-mount restore from that mount's own base
+POST /api/chats/:id/rewind                { turnId, scope }              every mount back to the turn's before-snapshot (+ conversation)
 
 GET  /api/fs/dirs?path=                          directory browser for the source picker (loopback / admin)
 GET  /api/fs/git-info?path=                      isRepo, currentBranch, branches, dirty, nestedRepos

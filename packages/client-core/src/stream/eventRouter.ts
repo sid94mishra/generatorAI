@@ -24,6 +24,7 @@
 import type { TransportCapabilitySet } from '@generatorai/shared';
 
 import type {
+  BackgroundTaskBlock,
   PermissionBlock,
   PlanBlock,
   QuestionBlock,
@@ -108,6 +109,16 @@ export type StreamEffect =
   | { op: 'addToolCall'; key: string; tool: string; args: unknown; callId?: string; parentCallId?: string }
   | { op: 'completeToolCall'; key: string; toolOrCallId: string; result: unknown; fileOp?: ToolFileOp; success?: boolean }
   | { op: 'addSystemMessage'; key: string; message: string; category: SystemCategory }
+  /**
+   * Insert or merge one orchestrator background worker, keyed by `taskId`.
+   * Fields the patch omits keep their previous value — the five
+   * `chat.background_task.*` events each carry only part of the picture.
+   */
+  | {
+      op: 'upsertBackgroundTask';
+      key: string;
+      task: Partial<Omit<BackgroundTaskBlock, 'type' | 'blockId'>> & { taskId: string };
+    }
   /** `hook.started` — see `StreamHookInvocation`; routed to the stage-aware
    *  `key` so `deriveRunView` can read a stage's hooks off its own stream. */
   | {
@@ -233,6 +244,21 @@ export type StreamEffect =
   | { op: 'widgetInvoke'; instanceId: string; invokeId: string; action: string; args: unknown }
   | { op: 'widgetTeardown'; instanceId: string; teardownId: string }
 
+  /**
+   * The transcript was rewound to the start of `turnId`: the host refetches
+   * messages, drops any local turn state for the dropped turns, and offers
+   * `prompt` back in the composer (Claude Code restores the prompt after a
+   * conversation rewind so the user can edit and resend it).
+   */
+  | {
+      op: 'chatRewound';
+      chatId: string;
+      turnId: string;
+      scope: 'all' | 'code' | 'conversation';
+      prompt?: string;
+      conversation: 'native' | 'synthetic' | 'skipped';
+    }
+
   /** Refetch a REST resource. The host decides how (TanStack, manual, …). */
   | {
       op: 'invalidate';
@@ -355,8 +381,40 @@ export interface StreamEventRouterOptions {
  * on a frame tick, so the store sees at most one update per frame regardless
  * of token rate.
  */
+/** How many spawn tool calls one stream key remembers for worker nesting. */
+const SPAWN_CALL_MEMORY = 64;
+
+/** The orchestrator tool whose call a background worker nests under. */
+const SPAWN_TOOL = 'spawn_background_agent';
+
+/** Minimum gap between two sub-agent progress notes on one stream key. */
+const SUBAGENT_PROGRESS_THROTTLE_MS = 1500;
+
+/** `taskName` as the spawn tool's arguments spell it, when they do. */
+function spawnTaskNameOf(args: unknown): string | undefined {
+  if (!args || typeof args !== 'object') return undefined;
+  const name = (args as Record<string, unknown>)['taskName'];
+  return typeof name === 'string' && name ? name : undefined;
+}
+
 export class StreamEventRouter {
   private readonly buffers = new Map<string, Buffers>();
+  /**
+   * Per stream key: `taskName` → the callId of the `spawn_background_agent`
+   * call that asked for it, and `taskId` → the same, learned from the spawn's
+   * RESULT.
+   *
+   * The server emits `chat.background_task.spawned` from inside the spawn
+   * tool's handler — after `harness.tool_start` (which carries the args and so
+   * the taskName) and before `harness.tool_complete` (which carries the
+   * taskId). Remembering the name at start is therefore what makes nesting
+   * work on the very first event of a worker's life; the id learned at
+   * completion is the fallback for the later progress/status events, whose
+   * taskName the emitter also sends but which a replay may clip.
+   */
+  private readonly spawnCalls = new Map<string, Map<string, string>>();
+  /** Per stream key: when a `subagent_progress` note was last admitted. */
+  private readonly lastSubagentProgress = new Map<string, number>();
   /** Stage attribution for events that do not carry their own stageRunId. */
   private currentStageRunId: string | null = null;
   /** W30-d — resolved once from the ledger entry; see the option's doc. */
@@ -373,6 +431,42 @@ export class StreamEventRouter {
       this.buffers.set(key, buf);
     }
     return buf;
+  }
+
+  /** Remember `alias → spawn callId`, bounded so a long run cannot grow it. */
+  private rememberSpawnCall(key: string, alias: string | undefined, callId: string): void {
+    if (!alias) return;
+    let map = this.spawnCalls.get(key);
+    if (!map) {
+      map = new Map<string, string>();
+      this.spawnCalls.set(key, map);
+    }
+    if (!map.has(alias) && map.size >= SPAWN_CALL_MEMORY) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    map.set(alias, callId);
+  }
+
+  /**
+   * Rate-limit `subagent_progress` notes to one per key per window.
+   *
+   * Uses the wall clock deliberately: the note exists to say "still working",
+   * so what matters is elapsed time, not event count.
+   */
+  private admitSubagentProgress(key: string): boolean {
+    const now = Date.now();
+    const last = this.lastSubagentProgress.get(key) ?? 0;
+    if (now - last < SUBAGENT_PROGRESS_THROTTLE_MS) return false;
+    this.lastSubagentProgress.set(key, now);
+    return true;
+  }
+
+  /** The spawn call a worker belongs to, by taskId first then taskName. */
+  private spawnCallFor(key: string, taskId?: string, taskName?: string): string | undefined {
+    const map = this.spawnCalls.get(key);
+    if (!map) return undefined;
+    return (taskId ? map.get(taskId) : undefined) ?? (taskName ? map.get(taskName) : undefined);
   }
 
   /**
@@ -656,12 +750,18 @@ export class StreamEventRouter {
       case 'harness.tool_start': {
         this.flushKey(key, out);
         if (internal) break;
+        const tool = str(data['tool'], 'tool');
+        const callId = optStr(data['callId']);
+        // The spawn call is the anchor a background worker's step nests under.
+        if (tool === SPAWN_TOOL && callId) {
+          this.rememberSpawnCall(key, spawnTaskNameOf(data['args']), callId);
+        }
         out.push({
           op: 'addToolCall',
           key,
-          tool: str(data['tool'], 'tool'),
+          tool,
           args: data['args'],
-          ...(optStr(data['callId']) ? { callId: str(data['callId']) } : {}),
+          ...(callId ? { callId } : {}),
           ...(optStr(data['parentToolCallId'])
             ? { parentCallId: str(data['parentToolCallId']) }
             : {}),
@@ -673,6 +773,14 @@ export class StreamEventRouter {
         this.flushKey(key, out);
         if (internal) break;
         const id = optStr(data['callId']) ?? optStr(data['tool']);
+        if (str(data['tool']) === SPAWN_TOOL && optStr(data['callId'])) {
+          // The result names the worker chat; index the call by that id too so
+          // later progress events nest even if their taskName drifted.
+          const result = data['result'];
+          const obj = result && typeof result === 'object' ? (result as Record<string, unknown>) : undefined;
+          this.rememberSpawnCall(key, optStr(obj?.['taskId']), str(data['callId']));
+          this.rememberSpawnCall(key, optStr(obj?.['taskName']), str(data['callId']));
+        }
         if (id) {
           const fileOp = data['fileOp'];
           out.push({
@@ -1087,6 +1195,8 @@ export class StreamEventRouter {
       // These replaced the Changes panel's polling loop. Keyed by workspace
       // id, which every workspace-scoped query shares as a prefix.
       case 'workspace.changed':
+      // Keep / Unkeep changes `file.kept` in the change summary, nothing else.
+      case 'workspace.review_changed':
       case 'checkpoint.created':
         out.push({
           op: 'invalidate',
@@ -1228,11 +1338,14 @@ export class StreamEventRouter {
         note(`Session error: ${str(data['message'], 'Unknown error')}`, 'error');
         break;
 
-      // ── Sub-agent / abort notices ────────────────────────────────
+      // ── Sub-agent / plan / provider notices ──────────────────────
       //
       // `harness.session_info` is raw SDK passthrough and made up 98% of one
-      // orchestrator turn's traffic. Only these four types are transcript;
-      // everything else (pending_messages, …) is silent on purpose.
+      // orchestrator turn's traffic, so this is an ALLOW-LIST: only the types
+      // below reach the transcript, and everything else (pending_messages,
+      // tool_progress, turn_diff, rate_limits, …) is silent on purpose. The
+      // types are provider-neutral — Claude and Codex both emit
+      // `compact_boundary` and `subagent_*`, so neither needs its own branch.
       case 'harness.session_info': {
         if (internal) break;
         const infoType = optStr(data['infoType']);
@@ -1240,10 +1353,33 @@ export class StreamEventRouter {
           subagent_started: { message: 'Sub-agent started', category: 'subagent' },
           subagent_completed: { message: 'Sub-agent completed', category: 'subagent' },
           subagent_failed: { message: 'Sub-agent failed', category: 'error' },
+          // A running sub-agent narrates continuously; these land as child
+          // notes on the sub-agent step rather than as their own rows.
+          subagent_progress: { message: 'Sub-agent working', category: 'subagent' },
           abort: { message: 'Turn aborted', category: 'error' },
+          // The agent's own checklist. Its own category because the timeline
+          // renders it as an expandable step, not a one-line notice.
+          plan_update: { message: 'Plan updated', category: 'plan' },
+          // Non-fatal provider notices. `warning` rather than `system` because
+          // a plain system note is dropped by the timeline, and these are
+          // exactly the things a user has to know about: a deprecated setting,
+          // a malformed config file, a model swapped out from under the turn,
+          // an upstream error being retried behind a spinner that would
+          // otherwise look like a hang.
+          provider_warning: { message: 'Provider warning', category: 'warning' },
+          provider_retry: { message: 'Retrying…', category: 'warning' },
+          model_rerouted: { message: 'Model rerouted', category: 'warning' },
+          // Emitted by every provider that compacts (Claude's compact boundary
+          // and Codex's `thread/compacted` land on this same type), so the
+          // transcript records WHY the context gauge just dropped.
+          compact_boundary: { message: 'Context compacted', category: 'system' },
         };
         const match = infoType ? notice[infoType] : undefined;
         if (!match) break;
+        // Progress is the only one of these that repeats, and a chatty
+        // sub-agent emits it many times a second. Started/completed/failed are
+        // state changes and are never dropped.
+        if (infoType === 'subagent_progress' && !this.admitSubagentProgress(key)) break;
         this.flushKey(key, out);
         out.push({
           op: 'addSystemMessage',
@@ -1278,6 +1414,36 @@ export class StreamEventRouter {
         out.push({ op: 'invalidate', resource: 'messages', ...chatId() });
         break;
 
+      case 'chat.rewound': {
+        const d = data as {
+          chatId?: string;
+          turnId?: string;
+          scope?: 'all' | 'code' | 'conversation';
+          prompt?: string;
+          conversation?: 'native' | 'synthetic' | 'skipped';
+        };
+        if (d.chatId && d.turnId) {
+          out.push({
+            op: 'chatRewound',
+            chatId: d.chatId,
+            turnId: d.turnId,
+            scope: d.scope ?? 'all',
+            ...(d.prompt !== undefined ? { prompt: d.prompt } : {}),
+            conversation: d.conversation ?? 'skipped',
+          });
+        }
+        out.push({ op: 'invalidate', resource: 'messages', ...chatId() });
+        out.push({ op: 'invalidate', resource: 'chat', ...chatId() });
+        // Files moved too (the restore announced itself per mount, but the
+        // tray also overlays live ops keyed by turn, which are now stale).
+        out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
+        break;
+      }
+
+      case 'chat.forked':
+        out.push({ op: 'invalidate', resource: 'chats' });
+        break;
+
       case 'chat.prompt_failed':
         out.push({ op: 'invalidate', resource: 'messages', ...chatId() });
         // The send never reached the provider, so nothing else will settle
@@ -1285,12 +1451,56 @@ export class StreamEventRouter {
         out.push({ op: 'errorStream', key: sessionKey });
         break;
 
+      // ── Orchestrator background workers ──────────────────────────
+      //
+      // A worker is a real chat with its own session, so nothing it streams
+      // reaches this connection. These five events, emitted on the PARENT
+      // chat scope, are the whole picture — folded into one
+      // `background_task` block per worker so the orchestrator's transcript
+      // shows what its workers are doing instead of only the panel.
       case 'chat.background_task.spawned':
       case 'chat.background_task.status':
+      case 'chat.background_task.progress':
       case 'chat.background_task.completed':
-      case 'chat.background_task.failed':
+      case 'chat.background_task.failed': {
         out.push({ op: 'invalidate', resource: 'tasks', ...chatId() });
+        const taskId = optStr(data['taskId']);
+        if (!taskId || internal) break;
+        const taskName = optStr(data['taskName']);
+        const parentCallId = this.spawnCallFor(key, taskId, taskName);
+        const terminal =
+          kind === 'chat.background_task.completed' || kind === 'chat.background_task.failed';
+        // `spawned` is kept distinct from `running`: a worker chat exists but
+        // has not produced anything yet, which is what the live counters call
+        // "pending". The first progress event flips it to `running`.
+        const status = kind === 'chat.background_task.spawned'
+          ? 'spawned'
+          : kind === 'chat.background_task.failed'
+            ? 'failed'
+            : optStr(data['status']);
+        // Ordering matters: the worker's row belongs where the spawn happened,
+        // so any buffered prose is committed before the block is appended.
+        this.flushKey(key, out);
+        out.push({
+          op: 'upsertBackgroundTask',
+          key,
+          task: {
+            taskId,
+            ...(taskName ? { taskName } : {}),
+            ...(optStr(data['model']) ? { model: str(data['model']) } : {}),
+            ...(status ? { status } : {}),
+            ...(optStr(data['currentStep']) ? { currentStep: str(data['currentStep']) } : {}),
+            ...(optStr(data['lastText']) ? { lastText: str(data['lastText']) } : {}),
+            ...(typeof data['toolCalls'] === 'number' ? { toolCalls: data['toolCalls'] } : {}),
+            ...(typeof data['startedAt'] === 'number' ? { startedAt: data['startedAt'] } : {}),
+            ...(terminal ? { endedAt: Date.now() } : {}),
+            ...(optStr(data['summary']) ? { summary: str(data['summary']) } : {}),
+            ...(optStr(data['error']) ? { summary: str(data['error']) } : {}),
+            ...(parentCallId ? { parentCallId } : {}),
+          },
+        });
         break;
+      }
 
       // ── Workflow run lifecycle ───────────────────────────────────
       case 'workflow_run.created':

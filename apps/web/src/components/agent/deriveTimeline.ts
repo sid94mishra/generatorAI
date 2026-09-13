@@ -8,6 +8,8 @@
 //  - system blocks with category 'subagent' consolidate to a single
 //    step with children (running/completed/failed status derived)
 //  - system blocks with category 'error' become failed steps
+//  - system blocks with category 'plan' become one collapsed step
+//    ("Plan: 2/5 done") whose children are the checklist
 //  - regular system blocks are dropped (they carry no user-visible value
 //    once we have thinking + tool_call detail)
 //  - text blocks are the "answer" and do NOT become steps
@@ -89,8 +91,39 @@ function inferKind(toolName: string): StepKind {
   if (n.includes('search') || n.includes('grep') || n.includes('find') || n.includes('glob')) return 'search';
   if (n.includes('shell') || n.includes('exec') || n.includes('run') || n.includes('bash') || n.includes('pwsh')) return 'run';
   if (n.includes('memory') || n.includes('remember')) return 'memory';
+  // The SDKs' own delegation tools are named exactly `Task` or `Agent`; the
+  // substring test below never matched either ("task" is not a substring of
+  // anything it looks for, and "agent" alone was only reached via longer
+  // names like `spawn_background_agent`), so a Claude/Codex sub-agent
+  // rendered as a generic wrench. Exact, case-insensitive.
+  if (n === 'task' || n === 'agent') return 'subagent';
   if (n.includes('subagent') || n.includes('agent') || n.includes('explore')) return 'subagent';
   return 'tool';
+}
+
+/** Human label for a worker's `currentStep` ('thinking' / 'writing' / a tool). */
+function workerStepLabel(step: string): string {
+  if (step === 'thinking') return 'Thinking…';
+  if (step === 'writing') return 'Writing…';
+  return `Running ${humanizeToolName(step)}`;
+}
+
+/**
+ * Status of one background worker's step.
+ *
+ * `spawned`/`running` spin only while the parent turn is live: a worker whose
+ * parent turn ended is not something the user is still waiting on, and a
+ * spinner there runs forever (the same rule `tool_call` follows).
+ */
+export function backgroundTaskStatus(status: string): StepStatus {
+  if (status === 'failed' || status === 'cancelled') return 'failed';
+  if (status === 'completed' || status === 'needs_review') return 'done';
+  // `spawned` / `running`. The block's status is the worker's own, kept
+  // current by its `chat.background_task.*` events — and a worker outlives
+  // the turn that spawned it, so the orchestrator's turn being settled says
+  // nothing about it. This used to read `active ? 'running' : 'done'`, which
+  // drew a green tick on every worker the moment the orchestrator went idle.
+  return 'running';
 }
 
 /** Shorten a filesystem path to its basename for compact tool-call
@@ -201,7 +234,9 @@ function summarizeArgs(toolName: string, args: unknown): { target: string; meta?
   // Common named args across the SDKs. Order matters: prefer specific over generic.
   let targetKey = '';
   let targetRaw = '';
-  for (const key of ['file_path', 'filePath', 'path', 'uri', 'url', 'pattern', 'query', 'command', 'description'] as const) {
+  // `taskName` is last: it only exists on the orchestrator's own tools, and a
+  // spawn call with no target read as a bare "spawn_background_agent" row.
+  for (const key of ['file_path', 'filePath', 'path', 'uri', 'url', 'pattern', 'query', 'command', 'description', 'taskName'] as const) {
     const v = a[key];
     if (typeof v === 'string' && v.trim()) {
       targetKey = key;
@@ -242,6 +277,59 @@ function subagentTarget(messages: string[]): string {
   if (list.length === 0) return 'Sub-agent';
   if (list.length === 1) return list[0]!;
   return list.join(', ');
+}
+
+// ── Orchestrator spawn calls in PERSISTED history ────────────────
+//
+// A live orchestrator turn gets `background_task` blocks from the
+// `chat.background_task.*` events. A REPLAYED one does not — those events are
+// not persisted — but the spawn tool call IS, and its result names the worker
+// (`taskId` / `taskName`). That is enough to rebuild a settled worker row from
+// history alone, which is why no extra persistence was needed for §3.
+
+/** The orchestrator tool that creates a worker. */
+const SPAWN_TOOL = 'spawn_background_agent';
+
+/** The orchestrator tools whose results carry worker digests. */
+const CHECK_TOOLS = new Set(['check_background_agents', 'check_background_agent']);
+
+/** `{ taskId, taskName }` a spawn tool call reported, from its result or args. */
+export function spawnWorkerRef(
+  b: Extract<StreamBlock, { type: 'tool_call' }>,
+): { taskId?: string; taskName?: string } {
+  const res = resultObject(b.result);
+  const args = b.args && typeof b.args === 'object' ? (b.args as Record<string, unknown>) : undefined;
+  const taskId = typeof res?.['taskId'] === 'string' ? (res['taskId'] as string) : undefined;
+  const taskName =
+    (typeof res?.['taskName'] === 'string' ? (res['taskName'] as string) : undefined) ??
+    (typeof args?.['taskName'] === 'string' ? (args['taskName'] as string) : undefined);
+  return { ...(taskId ? { taskId } : {}), ...(taskName ? { taskName } : {}) };
+}
+
+/**
+ * Digest summaries the orchestrator collected, keyed by BOTH taskId and
+ * taskName so a spawn step can find its own result whichever id it has.
+ */
+export function backgroundDigests(blocks: StreamBlock[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const take = (entry: unknown): void => {
+    if (!entry || typeof entry !== 'object') return;
+    const d = entry as Record<string, unknown>;
+    const summary = typeof d['summary'] === 'string' ? d['summary'].trim() : '';
+    if (!summary) return;
+    if (typeof d['taskId'] === 'string') out.set(d['taskId'], summary);
+    if (typeof d['taskName'] === 'string') out.set(d['taskName'], summary);
+  };
+  for (const b of blocks) {
+    if (b.type !== 'tool_call' || !CHECK_TOOLS.has(b.tool)) continue;
+    const res = resultObject(b.result);
+    if (!res) continue;
+    // `check_background_agents` answers `{ count, digests: [...] }`;
+    // `check_background_agent` answers one digest directly.
+    if (Array.isArray(res['digests'])) for (const d of res['digests']) take(d);
+    else take(res);
+  }
+  return out;
 }
 
 export interface DeriveTimelineOptions {
@@ -291,6 +379,10 @@ export function deriveTimeline(
       subagentBlocks.push(b);
     }
   }
+
+  // Digests the orchestrator collected this turn, so a settled spawn row can
+  // show what its worker actually reported (history has no progress events).
+  const digests = backgroundDigests(blocks);
 
   const steps: TimelineStep[] = [];
   const anchors: StepAnchors = new Map();
@@ -363,13 +455,32 @@ export function deriveTimeline(
           };
         const fileOp = b.fileOp;
         const image = b.status === 'complete' ? screenshotOf(b.result) : undefined;
+        // A spawn call IS a worker: name it one, link to its chat, and show
+        // the digest it eventually produced. This is what makes a replayed
+        // orchestrator turn render worker rows with no extra persistence.
+        const worker = b.tool === SPAWN_TOOL ? spawnWorkerRef(b) : undefined;
+        const workerSummary = worker
+          ? digests.get(worker.taskId ?? '') ?? digests.get(worker.taskName ?? '')
+          : undefined;
+        const workerChildren: TimelineStep[] | undefined = workerSummary
+          ? [{
+              id: `tool-${b.blockId}-digest`,
+              kind: 'note',
+              verb: '',
+              target: workerSummary,
+              mono: false,
+              status: 'done',
+            }]
+          : undefined;
         const step: TimelineStep = {
           id: `tool-${b.blockId}`,
           kind,
-          verb: humanizeToolName(b.tool),
-          target,
-          mono: true,
+          verb: worker ? 'Delegated' : humanizeToolName(b.tool),
+          target: worker ? worker.taskName ?? target : target,
+          mono: !worker,
           status,
+          ...(worker?.taskId ? { workerChatId: worker.taskId } : {}),
+          ...(workerChildren ? { children: workerChildren } : {}),
           // Per-op line stats trump the generic arg-derived meta: "+27 −3"
           // says more about a Write than "27 matches" ever could.
           meta: fileOp ? `+${fileOp.additions} −${fileOp.deletions}` : meta,
@@ -382,8 +493,9 @@ export function deriveTimeline(
           ...(image ? { image } : {}),
         };
         // `status` is the only derived field that can change while the block
-        // object stays the same (it folds in `opts.active` / the gate state).
-        anchors.set(step, { anchor: b, key: status });
+        // object stays the same (it folds in `opts.active` / the gate state) —
+        // except a spawn row's digest, which arrives from a LATER check call.
+        anchors.set(step, { anchor: b, key: workerSummary ? `${status}|d${workerSummary.length}` : status });
         stepByCallId.set(b.callId, step);
         const parent = b.parentCallId ? stepByCallId.get(b.parentCallId) : undefined;
         if (parent) {
@@ -431,6 +543,42 @@ export function deriveTimeline(
           }
           break;
         }
+        if (b.category === 'plan') {
+          // "Plan: 2/5 done" on the first line, one `[x] step` per line after.
+          // Compact by default — a ten-step plan restated after every tool
+          // call would bury the actual work — and the checklist is there on
+          // expand, as child rows that carry each step's own state.
+          const [headline = 'Plan updated', ...lines] = b.message.split('\n');
+          const children: TimelineStep[] = lines
+            .filter((l) => l.trim())
+            .map((line, i) => {
+              const mark = /^\[(.)\]\s*(.*)$/.exec(line.trim());
+              const state = mark?.[1];
+              return {
+                id: `plan-${b.blockId}-${i}`,
+                kind: 'note' as const,
+                verb: '',
+                target: mark ? (mark[2] ?? '') : line.trim(),
+                mono: false,
+                // An UNMARKED line is the plan's explanation, not a step —
+                // giving it the pending look would show a checklist item
+                // nobody ever intends to tick off.
+                status: !mark ? 'done' : state === 'x' ? 'done' : state === '~' ? 'running' : 'pending',
+              };
+            });
+          const planStep: TimelineStep = {
+            id: `plan-${b.blockId}`,
+            kind: 'note',
+            verb: 'Plan',
+            target: headline.replace(/^Plan:\s*/, ''),
+            mono: false,
+            status: 'done',
+            ...(children.length ? { children } : {}),
+          };
+          anchors.set(planStep, { anchor: b, key: b.message });
+          steps.push(planStep);
+          break;
+        }
         if (b.category === 'warning') {
           // Non-fatal, but the user has to see it: an MCP server that failed
           // to start, a credential that could not be resolved. Dropping it
@@ -462,6 +610,80 @@ export function deriveTimeline(
           break;
         }
         // 'system' category — drop (noise once we have thinking/tools).
+        break;
+      }
+
+      case 'background_task': {
+        // One orchestrator worker. Its own transcript lives in its own chat;
+        // what belongs here is "who is doing what right now", plus a link.
+        const status = backgroundTaskStatus(b.status);
+        const children: TimelineStep[] = [];
+        if (b.currentStep) {
+          children.push({
+            id: `bgt-${b.blockId}-step`,
+            kind: 'note',
+            verb: '',
+            target: workerStepLabel(b.currentStep),
+            mono: false,
+            status: status === 'running' ? 'running' : 'done',
+          });
+        }
+        if (b.lastText) {
+          children.push({
+            id: `bgt-${b.blockId}-text`,
+            kind: 'note',
+            verb: '',
+            target: b.lastText,
+            mono: false,
+            status: 'done',
+          });
+        }
+        if (b.summary) {
+          children.push({
+            id: `bgt-${b.blockId}-summary`,
+            kind: 'note',
+            verb: '',
+            target: b.summary,
+            mono: false,
+            status: status === 'failed' ? 'failed' : 'done',
+          });
+        }
+        if (b.model) {
+          children.push({
+            id: `bgt-${b.blockId}-model`,
+            kind: 'note',
+            verb: 'Model',
+            target: b.model,
+            mono: true,
+            status: 'done',
+          });
+        }
+        const step: TimelineStep = {
+          id: `bgt-${b.blockId}`,
+          kind: 'subagent',
+          verb: 'Worker',
+          target: b.taskName,
+          mono: false,
+          status,
+          ...(b.toolCalls > 0
+            ? { meta: `${b.toolCalls} tool call${b.toolCalls === 1 ? '' : 's'}` }
+            : {}),
+          ...(children.length > 0 ? { children } : {}),
+          // The row turns this into an "Open worker chat" link.
+          workerChatId: b.taskId,
+        };
+        // Every mutable field of the block folds into the key so the memoised
+        // row updates on a progress tick but not on an unrelated re-derive.
+        anchors.set(step, {
+          anchor: b,
+          key: `${status}|${b.currentStep ?? ''}|${b.toolCalls}|${b.lastText?.length ?? 0}|${b.summary ? 's' : ''}`,
+        });
+        const bgParent = b.parentCallId ? stepByCallId.get(b.parentCallId) : undefined;
+        if (bgParent) {
+          (bgParent.children ??= []).push(step);
+        } else {
+          steps.push(step);
+        }
         break;
       }
 

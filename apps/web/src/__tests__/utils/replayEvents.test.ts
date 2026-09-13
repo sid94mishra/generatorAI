@@ -374,4 +374,42 @@ describe('replayEventsIntoStore', () => {
     // Only last turn's blocks exist (turn 1 was discarded by startPending)
     expect(stream?.blocks.length).toBe(2); // thinking + text
   });
+
+  describe('orchestrator workers still running at page load', () => {
+    const workerEvents = (lastStatus: string) => [
+      makeEvent('harness.user_message', { content: 'spawn two workers' }, 1),
+      makeEvent('harness.token', { text: 'spawned' }, 2),
+      makeEvent('chat.background_task.spawned', { chatId: 'c1', taskId: 'w-live', taskName: 'readme', model: 'sonnet' }, 3),
+      makeEvent('chat.background_task.spawned', { chatId: 'c1', taskId: 'w-done', taskName: 'changelog' }, 4),
+      makeEvent('harness.message_complete', { content: 'spawned' }, 5),
+      makeEvent('harness.idle', {}, 6),
+      makeEvent('chat.background_task.progress', { chatId: 'c1', taskId: 'w-live', status: 'running', currentStep: 'Edit', toolCalls: 4, startedAt: 10 }, 7),
+      makeEvent('chat.background_task.progress', { chatId: 'c1', taskId: 'w-done', status: 'running', currentStep: 'Bash', toolCalls: 2, startedAt: 11 }, 8),
+      makeEvent('chat.background_task.' + (lastStatus === 'completed' ? 'completed' : 'status'), { chatId: 'c1', taskId: 'w-done', status: lastStatus, summary: 'done' }, 9),
+    ];
+
+    it('rebuilds one row per live worker after a completed turn (the fast path)', () => {
+      replayEventsIntoStore('s1', workerEvents('completed'));
+      const stream = useStreamStore.getState().streams['s1'];
+      const tasks = (stream?.blocks ?? []).filter((b) => b.type === 'background_task');
+      expect(tasks).toEqual([
+        expect.objectContaining({ taskId: 'w-live', taskName: 'readme', model: 'sonnet', status: 'running', currentStep: 'Edit', toolCalls: 4 }),
+      ]);
+      // Renders (not idle) without looking like a turn in progress.
+      expect(stream?.status).toBe('complete');
+    });
+
+    it('leaves a worker out once it has settled, whatever the terminal status', () => {
+      replayEventsIntoStore('s1', workerEvents('cancelled'));
+      const tasks = (useStreamStore.getState().streams['s1']?.blocks ?? []).filter((b) => b.type === 'background_task');
+      expect(tasks.map((b) => (b as { taskId: string }).taskId)).toEqual(['w-live']);
+    });
+
+    it('rebuilds live workers even when the orchestrator turn is still open', () => {
+      const events = workerEvents('completed').filter((e) => e.kind !== 'harness.idle' && e.kind !== 'harness.message_complete');
+      replayEventsIntoStore('s1', events);
+      const tasks = (useStreamStore.getState().streams['s1']?.blocks ?? []).filter((b) => b.type === 'background_task');
+      expect(tasks.map((b) => (b as { taskId: string }).taskId)).toEqual(['w-live']);
+    });
+  });
 });

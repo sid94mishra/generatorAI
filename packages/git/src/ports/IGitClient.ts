@@ -232,12 +232,18 @@ export interface IGitClient {
   ): Promise<GitRawDiffEntry[]>;
   /** Every blob in a tree with its SHA and size (`git ls-tree -r --long`). */
   lsTreeBlobs(repoDir: string, treeish: string): Promise<GitBlobEntry[]>;
-  /** Unified patch between two tree-ishes, optionally scoped to one path. */
+  /**
+   * Unified patch between two tree-ishes, optionally scoped to a path.
+   *
+   * Several paths may be given: a rename needs BOTH sides in the pathspec,
+   * because git applies the pathspec before it pairs the halves up, so
+   * asking for the new path alone reports the file as freshly added.
+   */
   diffPatch(
     repoDir: string,
     from: string,
     to?: string,
-    filePath?: string,
+    filePath?: string | readonly string[],
     contextLines?: number,
   ): Promise<string>;
   /** Byte size of a blob object (`git cat-file -s`), or null. */

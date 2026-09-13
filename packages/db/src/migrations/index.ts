@@ -2437,6 +2437,37 @@ export const MIGRATIONS: readonly Migration[] = [
            ON device_scope_requests(device_id, created_at);`,
       ],
     },
+    // v53 — conversation branching (rewind / fork) and change review.
+    //
+    // `sessions.provider_session_id`: the provider's own handle (Claude session
+    // id, Codex thread id) used to be adapter memory only, so a fork or rewind
+    // after a restart had nothing to branch from.
+    // `chats.forked_from_chat_id` / `forked_at_turn_id`: a fork is a
+    // conversation branch and must stay in the sidebar — `parent_chat_id`
+    // means "orchestrator worker" and hides the row, so it is not reused.
+    // `chats.conversation_seed`: the transcript digest a SYNTHETIC rewind/fork
+    // (provider without native branching) prepends to the next prompt.
+    // `workspace_file_reviews`: files the user marked "Keep" in the Changes tab.
+    {
+      version: 53,
+      name: 'conversation_branching_and_change_review',
+      sql: [
+        `ALTER TABLE sessions ADD COLUMN provider_session_id TEXT;`,
+        `ALTER TABLE chats ADD COLUMN forked_from_chat_id TEXT;`,
+        `ALTER TABLE chats ADD COLUMN forked_at_turn_id TEXT;`,
+        `ALTER TABLE chats ADD COLUMN conversation_seed TEXT;`,
+        `CREATE INDEX IF NOT EXISTS idx_chats_forked_from ON chats(forked_from_chat_id);`,
+        `CREATE TABLE IF NOT EXISTS workspace_file_reviews (
+          workspace_id  TEXT NOT NULL,
+          alias         TEXT NOT NULL,
+          path          TEXT NOT NULL,
+          accepted_blob TEXT NOT NULL,
+          accepted_at   INTEGER NOT NULL,
+          PRIMARY KEY (workspace_id, alias, path)
+        );`,
+        `CREATE INDEX IF NOT EXISTS idx_workspace_file_reviews_ws ON workspace_file_reviews(workspace_id);`,
+      ],
+    },
   ];
 
 

@@ -54,7 +54,21 @@ export const BUNDLE_EXTERNALS = [
  *                              designed to be absent. Excluding it is what
  *                              makes the guarded import worth having.
  */
-export const RUNTIME_PACKAGES = ['better-sqlite3', 'node-pty', 'playwright', '@trycua/cua-driver'];
+export const RUNTIME_PACKAGES = [
+  'better-sqlite3',
+  'node-pty',
+  'playwright',
+  '@trycua/cua-driver',
+  // The Codex CLI the packaged app ships. Its `bin/codex.js` launcher picks
+  // the per-platform binary package (`@openai/codex-<platform>-<arch>`) by
+  // `process.platform`/`process.arch`, and `resolveCodexCommand` finds the
+  // launcher with `createRequire(...).resolve('@openai/codex/bin/codex.js')`
+  // — a package-relative lookup that only works when the package sits next
+  // to the bundle, exactly like the cua driver above. Sign-in stays in the
+  // user's `CODEX_HOME`; the binary is just the protocol the build was typed
+  // against (see schemas/versions.json).
+  '@openai/codex',
+];
 
 /**
  * `@trycua/cua-driver` keeps its compiled library in a per-target optional

@@ -746,7 +746,7 @@ export class AuthenticatedClientRuntime {
       method: init.method ?? 'GET',
       url,
       accessToken: token,
-      nonce: this.nonce ?? undefined,
+      nonce: this.takeNonce(),
     });
     const response = await this.doFetch(url, {
       ...init,
@@ -761,6 +761,17 @@ export class AuthenticatedClientRuntime {
     return response;
   }
 
+  /**
+   * The server nonce for ONE proof. Server nonces are single-use: holding on to
+   * one and signing it into every later proof meant each request after the
+   * first carried a spent nonce and was rejected, which locked the client out.
+   */
+  private takeNonce(): string | undefined {
+    const nonce = this.nonce ?? undefined;
+    this.nonce = null;
+    return nonce;
+  }
+
   /** Proof without an access token — used by pairing and refresh. */
   private async fetchWithProof(url: string, init: RequestInit): Promise<Response> {
     const key = this.key;
@@ -770,7 +781,7 @@ export class AuthenticatedClientRuntime {
       key,
       method: init.method ?? 'GET',
       url,
-      nonce: this.nonce ?? undefined,
+      nonce: this.takeNonce(),
     });
     let response = await this.doFetch(url, {
       ...init,
@@ -779,7 +790,6 @@ export class AuthenticatedClientRuntime {
 
     const nonce = response.headers.get('dpop-nonce');
     if (nonce && response.status === 401) {
-      this.nonce = nonce;
       proof = await createDpopProof({
         key,
         method: init.method ?? 'GET',

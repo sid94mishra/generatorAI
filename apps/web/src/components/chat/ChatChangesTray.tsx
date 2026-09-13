@@ -14,8 +14,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, FileDiff } from 'lucide-react';
-import { useWorkspaceChangeSummary } from '@/hooks/queries.js';
+import { CheckCheck, ChevronRight, FileDiff, Undo2 } from 'lucide-react';
+import {
+  useDiscardWorkspaceChanges,
+  useReviewWorkspaceChanges,
+  useWorkspaceChangeSummary,
+} from '@/hooks/queries.js';
+import { useConfirm } from '@/components/ui/index.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { Button } from '@/components/ui/index.js';
 import { FileTypeIcon, FolderTypeIcon } from '@/components/shared/fileIcons.js';
@@ -142,6 +147,11 @@ export const ChatChangesTray = React.memo(function ChatChangesTray({
   const roots = usePathRoots();
   const queryClient = useQueryClient();
   const summaryQuery = useWorkspaceChangeSummary(workspaceId, { base: 'baseline', head: 'working' });
+  // Same two endpoints the Changes tab uses — the tray is a shortcut to them,
+  // not a second implementation.
+  const reviewChanges = useReviewWorkspaceChanges(workspaceId);
+  const discardChanges = useDiscardWorkspaceChanges(workspaceId);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   // Root-workspace scaffolding is hidden while a codebase is linked (same
   // rule as the Changes tab), so the count here is the count of code changes.
   const summary = useMemo(
@@ -272,6 +282,35 @@ export const ChatChangesTray = React.memo(function ChatChangesTray({
     return out;
   }, [files]);
 
+  /**
+   * How many of the summary's files the user has already accepted. Live
+   * overlay files are never kept (they were written moments ago), so this
+   * counts the summary only.
+   */
+  const keptCount = useMemo(
+    () => (summary?.repos ?? []).reduce((n, r) => n + r.files.filter((f) => f.kept).length, 0),
+    [summary],
+  );
+
+  const busy = reviewChanges.isPending || discardChanges.isPending;
+  const onKeepAll = useCallback(() => {
+    void reviewChanges.mutateAsync({ keepAll: true }).catch(() => undefined);
+  }, [reviewChanges]);
+  const onUndoAll = useCallback(() => {
+    void (async () => {
+      const ok = await confirm({
+        title: 'Undo all changes?',
+        description:
+          'This restores every changed file in this chat to its base revision. ' +
+          'A checkpoint is written first, so it can still be rewound.',
+        confirmLabel: 'Undo all',
+        variant: 'destructive',
+      });
+      if (!ok) return;
+      await discardChanges.mutateAsync({ all: true }).catch(() => undefined);
+    })();
+  }, [confirm, discardChanges]);
+
   const [open, setOpen] = useState<boolean>(() => readOpen());
   const toggle = useCallback(() => {
     setOpen((v) => {
@@ -322,8 +361,17 @@ export const ChatChangesTray = React.memo(function ChatChangesTray({
             )}
           </span>
           <span className="truncate text-[12px] font-medium text-foreground">
-            {files.length} {files.length === 1 ? 'file' : 'files'} changed
-            <span className="font-normal text-muted-foreground"> in this chat</span>
+            {keptCount > 0 ? (
+              <>
+                {files.length - keptCount} to review
+                <span className="font-normal text-muted-foreground"> · {keptCount} kept</span>
+              </>
+            ) : (
+              <>
+                {files.length} {files.length === 1 ? 'file' : 'files'} changed
+                <span className="font-normal text-muted-foreground"> in this chat</span>
+              </>
+            )}
           </span>
           <span className="ml-1 shrink-0 font-mono text-[10.5px] tabular-nums">
             <span className="text-success">+{totalAdd}</span>{' '}
@@ -345,7 +393,34 @@ export const ChatChangesTray = React.memo(function ChatChangesTray({
           <FileDiff className="h-3.5 w-3.5" />
           Review changes
         </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onKeepAll}
+          disabled={busy || files.length === keptCount}
+          className="h-7 shrink-0 gap-1 rounded-lg px-1.5 text-[11.5px] font-normal"
+          title="Mark every changed file as reviewed"
+          data-testid="chat-changes-tray-keep-all"
+        >
+          <CheckCheck className="h-3.5 w-3.5" />
+          Keep all
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onUndoAll}
+          disabled={busy}
+          className="h-7 shrink-0 gap-1 rounded-lg px-1.5 text-[11.5px] font-normal text-danger hover:bg-danger-muted"
+          title="Restore every changed file to its base revision"
+          data-testid="chat-changes-tray-undo-all"
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+          Undo all
+        </Button>
       </div>
+      {confirmDialog}
 
       {open && (
         <div

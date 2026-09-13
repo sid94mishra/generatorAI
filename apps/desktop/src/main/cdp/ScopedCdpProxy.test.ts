@@ -183,4 +183,32 @@ describe('ScopedCdpProxy', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(ws1.readyState).toBe(WebSocket.CLOSED);
   });
+
+  it("advertises the tab's real main-frame id as the target id", async () => {
+    // Playwright maps a frame to its session by walking up to a frame whose id
+    // is a target id — true in Chromium, where a page's target id IS its main
+    // frame id. An invented id broke that walk: Playwright threw while
+    // attaching the main frame and every agent evaluate hung.
+    proxy = new ScopedCdpProxy(createFakeWebContents());
+    const wsUrl = await proxy.start();
+    const ws = new WebSocket(wsUrl);
+    sockets.push(ws);
+    await waitOpen(ws);
+    const res = await sendAndAwait(ws, 3, 'Target.getTargetInfo');
+    expect((res.result as { targetInfo: { targetId: string } }).targetInfo.targetId).toBe('frame-1');
+  });
+
+  it("cycles Runtime on a client's Runtime.enable so a reconnecting client learns the page's contexts", async () => {
+    const wc = createFakeWebContents();
+    proxy = new ScopedCdpProxy(wc);
+    const wsUrl = await proxy.start();
+    const ws = new WebSocket(wsUrl);
+    sockets.push(ws);
+    await waitOpen(ws);
+    const send = wc.debugger.sendCommand as unknown as ReturnType<typeof vi.fn>;
+    send.mockClear();
+    const res = await sendAndAwait(ws, 7, 'Runtime.enable');
+    expect(res).toMatchObject({ id: 7, result: {} });
+    expect(send.mock.calls.map((c) => c[0])).toEqual(['Runtime.disable', 'Runtime.enable']);
+  });
 });

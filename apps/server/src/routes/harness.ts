@@ -78,8 +78,59 @@ export function createHarnessRoutes(container: Container): Router {
           checkedAt: s.checkedAt,
           modelCount: s.models.length,
           models: s.models,
+          // The provider can sign the user in from the app (see POST
+          // /providers/:type/login). Read off the live adapter when it is
+          // up; a provider that has not been brought up yet reports false
+          // and flips once the probe has run.
+          supportsLogin: typeof harnessRegistry.peek?.(s.type as HarnessType)?.startLogin === 'function',
         })),
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /harness/providers/:type/login — start the provider's own sign-in
+  // flow. Answers `{ authUrl }` for a browser flow; the client opens it and
+  // re-probes until the provider reports authenticated.
+  router.post('/providers/:type/login', async (req, res, next) => {
+    try {
+      const type = String(req.params['type']) as HarnessType;
+      if (!ALL_HARNESS_TYPES.includes(type)) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Unknown provider "${type}"` } });
+        return;
+      }
+      const adapter = await harnessRegistry.get(type);
+      if (typeof adapter.startLogin !== 'function') {
+        res.status(409).json({ error: { code: 'UNSUPPORTED', message: `${type} has no in-app sign-in; use its own CLI to sign in.` } });
+        return;
+      }
+      const result = await adapter.startLogin();
+      logger.info(`[HarnessRoutes] ${type} sign-in started`, { requestId: req.requestId, browser: !!result.authUrl });
+      if (result.completed) harnessRegistry.requestRefresh();
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /harness/providers/:type/logout — sign the provider's account out.
+  router.post('/providers/:type/logout', async (req, res, next) => {
+    try {
+      const type = String(req.params['type']) as HarnessType;
+      if (!ALL_HARNESS_TYPES.includes(type)) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Unknown provider "${type}"` } });
+        return;
+      }
+      const adapter = harnessRegistry.peek(type);
+      if (!adapter || typeof adapter.logout !== 'function') {
+        res.status(409).json({ error: { code: 'UNSUPPORTED', message: `${type} has no in-app sign-out.` } });
+        return;
+      }
+      await adapter.logout();
+      harnessRegistry.requestRefresh();
+      logger.info(`[HarnessRoutes] ${type} signed out`, { requestId: req.requestId });
+      res.json({ ok: true });
     } catch (err) {
       next(err);
     }

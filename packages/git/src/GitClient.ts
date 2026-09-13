@@ -1164,12 +1164,16 @@ export class GitClient implements IGitClient {
     repoDir: string,
     from: string,
     to?: string,
-    filePath?: string,
+    filePath?: string | readonly string[],
     contextLines = 3,
   ): Promise<string> {
     const args = ['diff', `--unified=${contextLines}`, '--find-renames=50%', '--no-color', from];
     if (to) args.push(to);
-    if (filePath) args.push('--', filePath);
+    // A rename must carry both halves of the pathspec — git filters paths
+    // before it detects renames, so the old path is invisible otherwise and
+    // the file reads as a pure addition.
+    const paths = (typeof filePath === 'string' ? [filePath] : (filePath ?? [])).filter(Boolean);
+    if (paths.length > 0) args.push('--', ...paths);
 
     const result = await this.runner.run('git', this.snapshotArgs(args), {
       cwd: repoDir,

@@ -98,6 +98,25 @@ export interface ProviderCapabilities {
    * simply does not claim it, and behaves exactly as it does today.
    */
   prewarm?: boolean;
+  /**
+   * Whether `forkConversation` is implemented natively — a new provider
+   * session whose history is a copy of the source up to a chosen anchor
+   * (Claude `forkSession`, Codex `thread/fork`). Without it the chat service
+   * forks synthetically: a fresh session seeded with a transcript digest.
+   */
+  conversationFork?: boolean;
+  /**
+   * Whether `rewindConversation` is implemented natively — the provider's
+   * own history is truncated back to a chosen anchor (Claude: fork-and-rebind,
+   * Codex `thread/revert`). Without it the chat service rewinds synthetically.
+   */
+  conversationRewind?: boolean;
+  /**
+   * Whether `startLogin` / `logout` are implemented — the provider can sign
+   * the user in from the app (Codex's ChatGPT browser flow) instead of
+   * requiring a terminal command.
+   */
+  accountLogin?: boolean;
 }
 
 /**

@@ -6,7 +6,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import type { CreateSessionParams, CreateChatParams } from '@generatorai/shared';
 import type { AgentMode, PlanAction } from '@generatorai/shared';
-import type { HttpPlatformClient, ChatModel } from '../platform/HttpPlatformClient.js';
+import type { HttpPlatformClient, ChatModel, RewindScope } from '../platform/HttpPlatformClient.js';
+import { formatTranscriptMarkdown } from '@generatorai/client-core';
 import { toast } from '../components/Toast.js';
 
 // ── Query Keys ──
@@ -167,6 +168,8 @@ export interface HarnessProviderInfo {
   checkedAt?: number;
   modelCount: number;
   models: ChatModel[];
+  /** The provider can sign the user in from the app (POST /harness/providers/:type/login). */
+  supportsLogin?: boolean;
 }
 
 /**
@@ -623,13 +626,64 @@ export function useRestoreWorkspaceCheckpoint(workspaceId: string | undefined) {
   return useMutation({
     mutationFn: (params: { checkpointId: string; paths?: string[]; alias?: string }) =>
       platform.restoreWorkspaceCheckpoint(workspaceId!, params.checkpointId, params.paths, params.alias),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['workspace-change-summary', workspaceId] });
-      void queryClient.invalidateQueries({ queryKey: ['workspace-change-file', workspaceId] });
-      void queryClient.invalidateQueries({ queryKey: ['workspace-change-patch', workspaceId] });
-      void queryClient.invalidateQueries({ queryKey: ['workspace-checkpoints', workspaceId] });
-      void queryClient.invalidateQueries({ queryKey: ['workspace-files', workspaceId] });
-    },
+    onSuccess: () => invalidateWorkspaceChanges(queryClient, workspaceId),
+  });
+}
+
+/**
+ * Query prefixes every write to the working tree (or to review state) has to
+ * invalidate. One list so restore, review and discard cannot drift apart.
+ */
+const WORKSPACE_CHANGE_QUERY_KEYS = [
+  'workspace-change-summary',
+  'workspace-change-file',
+  'workspace-change-patch',
+  'workspace-checkpoints',
+  'workspace-files',
+] as const;
+
+function invalidateWorkspaceChanges(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | undefined,
+): void {
+  for (const key of WORKSPACE_CHANGE_QUERY_KEYS) {
+    void queryClient.invalidateQueries({ queryKey: [key, workspaceId] });
+  }
+}
+
+/**
+ * Keep / Unkeep / Keep all — records which files the user has accepted.
+ *
+ * Invalidates the same prefixes a restore does: `kept` is carried ON the
+ * change summary, and the tray and the Changes tab both read it from there.
+ */
+export function useReviewWorkspaceChanges(workspaceId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      keep?: Array<{ alias: string; path: string; blob: string }>;
+      unkeep?: Array<{ alias: string; path: string }>;
+      keepAll?: boolean;
+    }) => platform.reviewWorkspaceChanges(workspaceId!, body),
+    onSuccess: () => invalidateWorkspaceChanges(queryClient, workspaceId),
+  });
+}
+
+/**
+ * Undo files — each mount restored from its own base, in one request.
+ *
+ * Replaces the old per-file checkpoint restore for discard: that one aimed
+ * every mount at the FIRST mount's checkpoint, and had nothing to aim at
+ * when a mount's base was a plain commit.
+ */
+export function useDiscardWorkspaceChanges(workspaceId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { files?: Array<{ alias: string; path: string }>; all?: boolean }) =>
+      platform.discardWorkspaceChanges(workspaceId!, body),
+    onSuccess: () => invalidateWorkspaceChanges(queryClient, workspaceId),
   });
 }
 
@@ -815,6 +869,94 @@ export function useSendChatPrompt(chatId: string) {
     meta: { errorTitle: 'Message not sent' },
     // Fire-and-forget: SSE events handle chatMessages invalidation
   });
+}
+
+// ── Rewind / fork / transcript ──
+
+/**
+ * Query prefixes that describe the WORKING TREE.
+ *
+ * A rewind with a file scope moves every one of them at once, exactly like
+ * restoring a checkpoint does (`useRestoreWorkspaceCheckpoint`) — the diff
+ * bodies as well as the summary, or the file list updates while the rendered
+ * diff keeps showing the previous revision.
+ */
+const WORKSPACE_QUERY_PREFIXES = [
+  'workspace-change-summary',
+  'workspace-change-file',
+  'workspace-change-patch',
+  'workspace-checkpoints',
+  'workspace-files',
+  'workspace-tree',
+  'workspace-tree-file',
+  'workspace-changes',
+] as const;
+
+function invalidateChatAndWorkspace(
+  queryClient: ReturnType<typeof useQueryClient>,
+  chatId: string,
+  workspaceId?: string,
+): void {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId) });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.chats });
+  for (const prefix of WORKSPACE_QUERY_PREFIXES) {
+    void queryClient.invalidateQueries({
+      queryKey: workspaceId ? [prefix, workspaceId] : [prefix],
+    });
+  }
+}
+
+/**
+ * Rewind a chat to the START of a turn.
+ *
+ * The server refuses with 409 `CHAT_BUSY` while a turn is in flight, which the
+ * caller surfaces the same way a refused send is surfaced.
+ */
+export function useRewindChat(chatId: string, workspaceId?: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { turnId: string; scope: RewindScope }) =>
+      platform.rewindChat(chatId, params),
+    onSuccess: () => {
+      invalidateChatAndWorkspace(queryClient, chatId, workspaceId);
+    },
+  });
+}
+
+/** Branch a chat into a new one at the end of a turn. */
+export function useForkChat(chatId: string, workspaceId?: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { turnId?: string; name?: string } = {}) =>
+      platform.forkChat(chatId, params),
+    onSuccess: () => {
+      // The fork SHARES the parent's workspace, so nothing in the tree moved —
+      // but the chat list gained a row and the parent gained a child.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chats });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
+    },
+  });
+}
+
+/**
+ * The whole transcript, for "Copy transcript".
+ *
+ * Deliberately not a hook: it is fetched on click (an export is never worth a
+ * standing subscription) and rendered through client-core's shared markdown
+ * formatter so web and mobile produce the same document.
+ */
+export async function fetchChatTranscript(
+  platform: HttpPlatformClient,
+  chatId: string,
+): Promise<{ name: string; markdown: string }> {
+  const transcript = await platform.getChatTranscript(chatId);
+  return {
+    name: transcript.name,
+    markdown: formatTranscriptMarkdown(transcript.name, transcript.messages),
+  };
 }
 
 // ── PLN-01: plan mode ──

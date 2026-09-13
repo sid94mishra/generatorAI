@@ -13,7 +13,7 @@
 
 import React, { useState } from 'react';
 import {
-  CheckCircle2, AlertTriangle, RefreshCw, Wifi, WifiOff, Cpu, Star,
+  CheckCircle2, AlertTriangle, RefreshCw, Wifi, WifiOff, Cpu, Star, LogIn, LogOut,
 } from 'lucide-react';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { useHarnessProviders, type HarnessProviderInfo } from '@/hooks/queries.js';
@@ -25,6 +25,20 @@ import { ProviderBrandIcon } from '../BrandIcons.js';
 const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   copilot: 'GitHub Copilot SDK — GPT, Claude, and Gemini models via your GitHub account.',
   'claude-agent': 'Claude Agent SDK — agentic execution with native tool use.',
+  codex: 'OpenAI Codex app-server — GPT models via your ChatGPT sign-in or API key.',
+  opencode: 'OpenCode server — models from any provider OpenCode is configured for.',
+  acp: 'Agent Client Protocol — any ACP-compatible agent.',
+};
+
+/** What a user runs to sign a provider in, where it is a CLI command. */
+const SIGN_IN_HINTS: Record<string, string> = {
+  codex: 'Sign in with your ChatGPT account using the button above (or run `codex login` in a terminal), then test the connection.',
+  'claude-agent': 'Run `claude` in a terminal and sign in, then test the connection.',
+};
+
+/** How to install a provider that isn't found. */
+const INSTALL_HINTS: Record<string, string> = {
+  codex: 'This build ships the Codex CLI, so this usually means its platform package could not be installed. Install Codex with `npm i -g @openai/codex` or the ChatGPT desktop app, or set CODEX_CLI_PATH to its location — then restart GeneratorAI.',
 };
 
 export function ProvidersSection() {
@@ -74,6 +88,64 @@ export function ProvidersSection() {
       const me = fresh.providers.find((x) => x.type === p.type);
       if (me?.ready) setSuccess(`${me.label} connected — ${me.modelCount} model${me.modelCount === 1 ? '' : 's'} available.`);
       else setError(`${p.label} is not connected${me?.error ? `: ${me.error}` : '.'}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
+   * Sign in through the provider's own flow. A browser flow answers with a
+   * URL to open; we then re-probe until the provider reports authenticated
+   * (the sign-in completes in the browser, out of our sight).
+   */
+  const signIn = async (p: HarnessProviderInfo): Promise<void> => {
+    setError(null);
+    setSuccess(null);
+    setBusy(p.type);
+    try {
+      const res = await fetch(`${platform.baseUrl}/api/harness/providers/${p.type}/login`, { method: 'POST' });
+      const body = (await res.json()) as { authUrl?: string; completed?: boolean; error?: { message?: string } };
+      if (!res.ok) { setError(body.error?.message ?? 'Could not start sign-in'); return; }
+      if (body.authUrl) {
+        window.open(body.authUrl, '_blank', 'noopener,noreferrer');
+        setSuccess(`Finish signing in to ${p.label} in the browser window that just opened. This page updates when it completes.`);
+      }
+      // Poll until the provider is authenticated (≤ 3 minutes).
+      const deadline = Date.now() + 180_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, body.authUrl ? 4_000 : 1_000));
+        const probe = await fetch(`${platform.baseUrl}/api/harness/providers?refresh=1`);
+        if (!probe.ok) continue;
+        const fresh = (await probe.json()) as { providers: HarnessProviderInfo[] };
+        const me = fresh.providers.find((x) => x.type === p.type);
+        if (me?.authenticated) {
+          await refetch();
+          setSuccess(`${p.label} signed in — ${me.modelCount} model${me.modelCount === 1 ? '' : 's'} available.`);
+          return;
+        }
+        if (!body.authUrl) break;
+      }
+      if (body.authUrl) setError(`${p.label} did not report a completed sign-in. Finish the browser flow and press Test connection.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const signOut = async (p: HarnessProviderInfo): Promise<void> => {
+    setError(null);
+    setSuccess(null);
+    setBusy(p.type);
+    try {
+      const res = await fetch(`${platform.baseUrl}/api/harness/providers/${p.type}/logout`, { method: 'POST' });
+      const body = (await res.json()) as { error?: { message?: string } };
+      if (!res.ok) { setError(body.error?.message ?? 'Could not sign out'); return; }
+      await fetch(`${platform.baseUrl}/api/harness/providers?refresh=1`);
+      await refetch();
+      setSuccess(`${p.label} signed out.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error');
     } finally {
@@ -146,7 +218,7 @@ export function ProvidersSection() {
                     <ConnectionPill provider={p} checking={busy === p.type || busy === '__all__'} />
                   </span>
                 }
-                subtitle={PROVIDER_DESCRIPTIONS[p.type] ?? `${p.label} agent provider.`}
+                subtitle={PROVIDER_DESCRIPTIONS[p.type] ?? `${p.label} provider.`}
                 expanded={expanded === p.type}
                 onToggleExpanded={() => setExpanded((cur) => (cur === p.type ? null : p.type))}
                 control={
@@ -159,6 +231,8 @@ export function ProvidersSection() {
                   busy={busy === p.type}
                   onTest={() => void testOne(p)}
                   onMakeDefault={() => void makeDefault(p)}
+                  onSignIn={() => void signIn(p)}
+                  onSignOut={() => void signOut(p)}
                 />
               </CatalogAccordionRow>
             ))}
@@ -201,13 +275,15 @@ function ConnectionPill({ provider, checking }: { provider: HarnessProviderInfo;
 }
 
 function ProviderDetails({
-  provider, isDefault, busy, onTest, onMakeDefault,
+  provider, isDefault, busy, onTest, onMakeDefault, onSignIn, onSignOut,
 }: {
   provider: HarnessProviderInfo;
   isDefault: boolean;
   busy: boolean;
   onTest: () => void;
   onMakeDefault: () => void;
+  onSignIn: () => void;
+  onSignOut: () => void;
 }) {
   return (
     <div className="space-y-3">
@@ -221,6 +297,30 @@ function ProviderDetails({
         >
           Test connection
         </Button>
+        {provider.supportsLogin && provider.installed && !provider.authenticated && (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={onSignIn}
+            disabled={busy}
+            leftIcon={<LogIn className="h-3.5 w-3.5" />}
+            data-testid={`provider-sign-in-${provider.type}`}
+          >
+            Sign in
+          </Button>
+        )}
+        {provider.supportsLogin && provider.authenticated && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onSignOut}
+            disabled={busy}
+            leftIcon={<LogOut className="h-3.5 w-3.5" />}
+            data-testid={`provider-sign-out-${provider.type}`}
+          >
+            Sign out
+          </Button>
+        )}
         {provider.ready && !isDefault && (
           <Button variant="primary" size="sm" onClick={onMakeDefault} leftIcon={<Star className="h-3.5 w-3.5" />}>
             Make default
@@ -249,8 +349,8 @@ function ProviderDetails({
         {!provider.ready ? (
           <p className="text-xs text-muted-foreground">
             {provider.installed
-              ? 'Sign in to this provider, then test the connection to load its catalog.'
-              : 'This provider\u2019s SDK is not installed in this build.'}
+              ? (SIGN_IN_HINTS[provider.type] ?? 'Sign in to this provider, then test the connection to load its catalog.')
+              : (INSTALL_HINTS[provider.type] ?? 'This provider\u2019s SDK is not installed in this build.')}
           </p>
         ) : provider.models.length === 0 ? (
           <p className="text-xs text-muted-foreground">No models available for this account.</p>

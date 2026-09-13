@@ -254,6 +254,9 @@ export interface ChatSummary {
   defaultAgentMode?: AgentMode | null;
   permissionMode?: string | null;
   orchestratorMode?: boolean;
+  /** Conversation-branch provenance (a fork stays in the sidebar; workers do not). */
+  forkedFromChatId?: string | null;
+  forkedAtTurnId?: string | null;
   /**
    * One line of the newest message, for a catalogue row. Present on the LIST
    * response only — a single chat is fetched with its messages anyway.
@@ -337,6 +340,30 @@ export interface InteractionSummary {
 }
 
 /** A worker spawned by an orchestrator chat. */
+export type RewindScope = 'all' | 'code' | 'conversation';
+
+export interface RewindChatResponse {
+  chatId: string;
+  turnId: string;
+  scope: RewindScope;
+  /** The prompt of the turn that was rewound — offered back in the composer. */
+  prompt?: string;
+  /** How the provider's own history was moved: natively, by a seeded fresh session, or not at all (`code` scope). */
+  conversation: 'native' | 'synthetic' | 'skipped';
+  files?: {
+    mounts: Array<{ alias: string; ok: boolean; restored?: number; deleted?: number; skipped?: number; error?: string }>;
+    restored: number;
+    deleted: number;
+    skipped: number;
+  };
+}
+
+export interface ForkChatResponse {
+  chat: ChatSummary;
+  turnId?: string;
+  conversation: 'native' | 'synthetic';
+}
+
 export interface BackgroundTaskSummary {
   taskId: string;
   taskName: string;
@@ -491,14 +518,33 @@ export interface ChangeFileEntry {
   oldBlob?: string;
   newBlob?: string;
   lang?: string;
+  /** True while the user's accepted blob still equals the head blob. */
+  kept?: boolean;
+}
+
+/** Either side of a comparison, as the summary resolved it. */
+export interface ChangeRevisionEntry {
+  kind: 'baseline' | 'checkpoint' | 'working' | 'ref';
+  id?: string;
+  treeish?: string;
+  label?: string;
+  normalized?: boolean;
 }
 
 export interface ChangeRepoEntry {
   alias: string;
   kind: string;
   hasBaseline: boolean;
+  /**
+   * THIS mount's base / head. Optional only so an older server still
+   * type-checks; every mount resolves the selector differently, so the
+   * response-level pair is wrong for all but the first.
+   */
+  base?: ChangeRevisionEntry;
+  head?: ChangeRevisionEntry;
   stats: { files: number; additions: number; deletions: number };
   files: ChangeFileEntry[];
+  keptCount?: number;
 }
 
 export interface ChangeSummary {
@@ -506,6 +552,39 @@ export interface ChangeSummary {
   hasGit: boolean;
   repos: ChangeRepoEntry[];
   stats: { files: number; additions: number; deletions: number };
+  keptCount?: number;
+}
+
+/** One file, named the way both review routes want it. */
+export interface ChangeFileRef {
+  alias: string;
+  /** Repo-relative, never alias-prefixed. */
+  path: string;
+}
+
+export interface ReviewChangesResult {
+  workspaceId: string;
+  kept: number;
+  unkept: number;
+  /** Total kept files in the workspace after the change. */
+  keptCount: number;
+}
+
+export interface DiscardChangesResult {
+  workspaceId: string;
+  mounts: Array<{
+    alias: string;
+    ok: boolean;
+    restored: number;
+    deleted: number;
+    preRestoreCheckpointId?: string | null;
+    error?: string;
+  }>;
+  restoredCount: number;
+  deletedCount: number;
+  discardedCount: number;
+  /** Paths refused for safety — symlinks / hard links. */
+  skipped: Array<{ alias: string; path: string; reason: string }>;
 }
 
 export interface ChangeFilePatch {
@@ -1076,6 +1155,24 @@ export function createApiClient(fetchImpl: ApiFetch) {
           json(response),
         ),
 
+      /** The whole transcript, oldest first (no page cap). */
+      transcript: (id: string) =>
+        request<{ chatId: string; name: string; messages: ChatMessage[] }>(
+          fetchImpl,
+          `/api/chats/${id}/transcript`,
+        ),
+
+      /**
+       * Rewind to the START of a turn — files, conversation or both. The
+       * server answers 409 `CHAT_BUSY` while a turn is streaming.
+       */
+      rewind: (id: string, input: { turnId: string; scope?: RewindScope }) =>
+        request<RewindChatResponse>(fetchImpl, `/api/chats/${id}/rewind`, json(input)),
+
+      /** Branch the conversation after a turn (default: the last one) into a new chat. */
+      fork: (id: string, input: { turnId?: string; name?: string } = {}) =>
+        request<ForkChatResponse>(fetchImpl, `/api/chats/${id}/fork`, json(input)),
+
       setPermissionMode: (id: string, mode: string) =>
         request<void>(fetchImpl, `/api/chats/${id}/permission-mode`, {
           method: 'PATCH',
@@ -1246,6 +1343,40 @@ export function createApiClient(fetchImpl: ApiFetch) {
           fetchImpl,
           `/api/workspaces/${id}/checkpoints/${checkpointId}/restore`,
           json(body ?? {}),
+        ),
+
+      /**
+       * Record which files the user has accepted ("Keep"), or drop that.
+       *
+       * `blob` is the head blob the client saw — `''` for a deleted file.
+       * Content identity, not a flag: the acceptance evaporates on its own
+       * the moment the agent edits the file again.
+       */
+      reviewChanges: (
+        id: string,
+        body: {
+          keep?: Array<ChangeFileRef & { blob: string }>;
+          unkeep?: ChangeFileRef[];
+          keepAll?: boolean;
+        },
+      ) =>
+        request<ReviewChangesResult>(
+          fetchImpl,
+          `/api/workspaces/${id}/changes/review`,
+          json(body),
+        ),
+
+      /**
+       * Undo files, each mount restored from its OWN base. Works for every
+       * mount kind, including those whose base is a bare commit rather than
+       * a checkpoint — and writes a `pre_restore` snapshot first, so it is
+       * itself undoable.
+       */
+      discardChanges: (id: string, body: { files?: ChangeFileRef[]; all?: boolean }) =>
+        request<DiscardChangesResult>(
+          fetchImpl,
+          `/api/workspaces/${id}/changes/discard`,
+          json(body),
         ),
     },
 

@@ -53,6 +53,33 @@ export function nativeBrowserEnabled(): boolean {
   return process.env['GENERATORAI_DESKTOP_NATIVE_BROWSER'] !== '0';
 }
 
+/** Largest favicon inlined as a data URL; anything bigger is not an icon. */
+const MAX_FAVICON_BYTES = 256 * 1024;
+
+/**
+ * A page favicon as a `data:` URL, or undefined when it is missing, not an
+ * image, too large, or cannot be fetched within a few seconds.
+ */
+async function faviconAsDataUrl(
+  sess: Electron.Session,
+  url: string | undefined,
+): Promise<string | undefined> {
+  if (!url) return undefined;
+  if (url.startsWith('data:image/')) return url;
+  if (!/^https?:\/\//i.test(url)) return undefined;
+  try {
+    const res = await sess.fetch(url, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return undefined;
+    const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim();
+    if (!type.startsWith('image/')) return undefined;
+    const body = Buffer.from(await res.arrayBuffer());
+    if (body.byteLength === 0 || body.byteLength > MAX_FAVICON_BYTES) return undefined;
+    return `data:${type};base64,${body.toString('base64')}`;
+  } catch {
+    return undefined;
+  }
+}
+
 // The embedded server can still be starting (or restarting after a crash)
 // when a browser tab activates, so the endpoint push gets a few tries
 // before we give up and discard the proxy.
@@ -90,6 +117,8 @@ interface Session {
   view: WebContentsView;
   visible: boolean;
   lastBounds: BrowserBounds | null;
+  /** Last favicon as a data URL, so a remounted renderer can show it again. */
+  favicon: string | null;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -322,14 +351,24 @@ export class NativeBrowserHost extends EventEmitter {
       this.emit('title-updated', { tabId, workspaceId, title } as NativeBrowserEvent);
     });
     wc.on('page-favicon-updated', (_e, favicons) => {
-      this.emit('favicon-updated', { tabId, workspaceId, favicon: favicons[0] } as NativeBrowserEvent);
+      // The app's CSP only admits `data:` / `blob:` images, so a remote favicon
+      // URL handed to the renderer was blocked and every tab showed a generic
+      // globe. Fetch it here — through the tab's own session, so it carries
+      // that tab's cookies and proxy — and pass a data URL instead.
+      void faviconAsDataUrl(wc.session, favicons[0]).then((favicon) => {
+        if (wc.isDestroyed()) return;
+        const owner = this.sessions.get(tabId);
+        if (owner) owner.favicon = favicon ?? null;
+        this.emit('favicon-updated', { tabId, workspaceId, favicon } as NativeBrowserEvent);
+      });
     });
 
     this.ownerWindow.contentView.addChildView(view);
-    // Start off-screen so we don't paint before the renderer sends bounds.
+    // Hidden until the renderer has placed it and marked it visible.
+    view.setVisible(false);
     view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
 
-    sess = { tabId, workspaceId, view, visible: false, lastBounds: null };
+    sess = { tabId, workspaceId, view, visible: false, lastBounds: null, favicon: null };
     this.sessions.set(tabId, sess);
     // First tab of a workspace (or an explicit `active`) becomes the active
     // tab and inherits the workspace discovery marker.
@@ -521,11 +560,12 @@ export class NativeBrowserHost extends EventEmitter {
     const sess = this.sessions.get(tabId);
     if (!sess) return;
     sess.visible = visible;
-    if (!visible) {
-      sess.view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
-    } else if (sess.lastBounds) {
-      sess.view.setBounds(sess.lastBounds);
-    }
+    // A real hide. "Hiding" by collapsing the view to a 0×0 rect at the window
+    // origin still left it painting there — the browser page appeared over the
+    // top-left of the app whenever another right-pane tab was selected. The
+    // bounds are left alone so showing it again needs no fresh layout.
+    if (visible && sess.lastBounds) sess.view.setBounds(sess.lastBounds);
+    sess.view.setVisible(visible);
   }
 
   async navigate(tabId: string, url: string): Promise<NativeBrowserDescriptor> {
@@ -932,6 +972,7 @@ export class NativeBrowserHost extends EventEmitter {
       workspaceId: sess.workspaceId,
       currentUrl: wc.getURL() || null,
       title: wc.getTitle() || null,
+      favicon: sess.favicon,
       isLoading: wc.isLoading(),
       canGoBack,
       canGoForward,
@@ -955,6 +996,7 @@ export class NativeBrowserHost extends EventEmitter {
       workspaceId,
       currentUrl: null,
       title: null,
+      favicon: null,
       isLoading: false,
       canGoBack: false,
       canGoForward: false,

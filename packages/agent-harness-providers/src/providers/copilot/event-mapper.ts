@@ -102,25 +102,28 @@ function populatePayload(
     case 'harness.reasoning_complete':
       return { content: eventData.content ?? '' };
 
-    case 'harness.tool_start':
+    case 'harness.tool_start': {
+      const parent = parentToolCallIdOf(eventData, sdkEvent);
       return {
         tool: eventData.toolName ?? 'unknown-tool',
         args: eventData.arguments,
         callId: eventData.toolCallId ?? null,
-        ...(eventData.parentToolCallId ? { parentToolCallId: eventData.parentToolCallId } : {}),
+        ...(parent ? { parentToolCallId: parent } : {}),
       };
+    }
 
     case 'harness.tool_complete': {
       const rawResult = eventData.result;
       const result = rawResult != null && typeof rawResult === 'object' && 'content' in rawResult
         ? (rawResult as Record<string, unknown>).content
         : rawResult ?? null;
+      const parent = parentToolCallIdOf(eventData, sdkEvent);
       return {
         tool: eventData.toolName ?? 'unknown-tool',
         callId: eventData.toolCallId ?? null,
         result,
         success: eventData.success ?? true,
-        ...(eventData.parentToolCallId ? { parentToolCallId: eventData.parentToolCallId } : {}),
+        ...(parent ? { parentToolCallId: parent } : {}),
       };
     }
 
@@ -166,7 +169,7 @@ function populatePayload(
       return { turnId: eventData.turnId ?? '' };
 
     case 'harness.session_info':
-      return populateSessionInfoPayload(sdkEventType, eventData);
+      return populateSessionInfoPayload(sdkEventType, eventData, sdkEvent);
 
     case 'harness.cancelled':
       // W13 / X-4 — cancellation is a semantic success value, not an error.
@@ -194,6 +197,51 @@ function populatePayload(
 function agentIdOf(sdkEvent: SessionEvent): string | undefined {
   const id = (sdkEvent as unknown as { agentId?: unknown }).agentId;
   return typeof id === 'string' && id.length > 0 ? id : undefined;
+}
+
+// ── Sub-agent nesting ────────────────────────────────────────────
+//
+// `subagent.started` is the ONLY event that pairs a sub-agent instance
+// (`agentId`) with the tool call that spawned it (`data.toolCallId`). Every
+// later event from that sub-agent carries `agentId` but not the tool call, so
+// without this table a sub-agent's Read/Grep storm arrived as top-level tool
+// calls and was indistinguishable from the main agent's own work.
+//
+// Module-level and bounded, mirroring the claude-agent mapper's tool-name
+// cache: the mapper is a pure per-event function by design, and this is the
+// one piece of cross-event state the protocol forces.
+const SUBAGENT_PARENT_CACHE_MAX = 64;
+const parentCallByAgentId = new Map<string, string>();
+
+function rememberSubagentParent(agentId: string | undefined, toolCallId: unknown): void {
+  if (!agentId || typeof toolCallId !== 'string' || !toolCallId) return;
+  if (!parentCallByAgentId.has(agentId) && parentCallByAgentId.size >= SUBAGENT_PARENT_CACHE_MAX) {
+    const oldest = parentCallByAgentId.keys().next().value;
+    if (oldest !== undefined) parentCallByAgentId.delete(oldest);
+  }
+  parentCallByAgentId.set(agentId, toolCallId);
+}
+
+/**
+ * The tool call a sub-agent event nests under.
+ *
+ * `eventData.parentToolCallId` wins when the SDK supplies it directly; the
+ * `agentId` table is the fallback that makes nesting work on the SDK as it
+ * actually ships (1.0.8 sets `agentId` on sub-agent events and nothing else).
+ */
+function parentToolCallIdOf(
+  eventData: Record<string, unknown>,
+  sdkEvent: SessionEvent,
+): string | undefined {
+  const explicit = eventData['parentToolCallId'];
+  if (typeof explicit === 'string' && explicit) return explicit;
+  const agentId = agentIdOf(sdkEvent);
+  return agentId ? parentCallByAgentId.get(agentId) : undefined;
+}
+
+/** Test seam: drop the sub-agent nesting table. */
+export function _resetCopilotSubagentNesting(): void {
+  parentCallByAgentId.clear();
 }
 
 function num(v: unknown): number | undefined {
@@ -264,6 +312,7 @@ function populateContextUsagePayload(
 function populateSessionInfoPayload(
   sdkEventType: string,
   eventData: Record<string, unknown>,
+  sdkEvent?: SessionEvent,
 ): Record<string, unknown> {
   switch (sdkEventType) {
     case 'session.info':
@@ -297,6 +346,8 @@ function populateSessionInfoPayload(
         message: `Sub-agent started: ${eventData.agentDisplayName ?? eventData.agentName ?? 'unknown'}`,
         agentName: eventData.agentName,
         toolCallId: eventData.toolCallId,
+        ...(eventData.model ? { model: eventData.model } : {}),
+        ...(sdkEvent && agentIdOf(sdkEvent) ? { agentId: agentIdOf(sdkEvent) } : {}),
       };
 
     case 'subagent.completed':
@@ -305,6 +356,7 @@ function populateSessionInfoPayload(
         message: `Sub-agent completed: ${eventData.agentDisplayName ?? eventData.agentName ?? 'unknown'}`,
         agentName: eventData.agentName,
         toolCallId: eventData.toolCallId,
+        ...(sdkEvent && agentIdOf(sdkEvent) ? { agentId: agentIdOf(sdkEvent) } : {}),
       };
 
     case 'subagent.failed':
@@ -314,6 +366,7 @@ function populateSessionInfoPayload(
         agentName: eventData.agentName,
         error: eventData.error,
         toolCallId: eventData.toolCallId,
+        ...(sdkEvent && agentIdOf(sdkEvent) ? { agentId: agentIdOf(sdkEvent) } : {}),
       };
 
     case 'session.task_complete':
@@ -347,6 +400,16 @@ export function mapSdkEventToAgentEvent(sdkEvent: SessionEvent): AgentEvent {
     sdkEvent.data != null && typeof sdkEvent.data === 'object'
       ? (sdkEvent.data as Record<string, unknown>)
       : {};
+
+  // Learn the sub-agent → spawning-tool-call binding BEFORE the payload is
+  // built, so the `subagent.started` event itself already resolves, and forget
+  // it once the sub-agent has settled.
+  if (sdkEvent.type === 'subagent.started') {
+    rememberSubagentParent(agentIdOf(sdkEvent), eventData['toolCallId']);
+  } else if (sdkEvent.type === 'subagent.completed' || sdkEvent.type === 'subagent.failed') {
+    const agentId = agentIdOf(sdkEvent);
+    if (agentId) parentCallByAgentId.delete(agentId);
+  }
 
   // Phase 2: Payload population
   const payload = populatePayload(kind, sdkEvent.type, eventData, sdkEvent);

@@ -17,6 +17,12 @@ export interface Session {
   tags: string[];
   /** Harness conversation ID */
   conversationId?: string;
+  /**
+   * The PROVIDER's own session handle for `conversationId` — Claude's SDK
+   * session id, Codex's thread id. Persisted after every turn so a fork or
+   * rewind after a server restart still has something to branch from.
+   */
+  providerSessionId?: string;
   /** Who owns this session */
   ownerType?: SessionOwnerType;
   /** FK to the owning Chat or StageRun record */

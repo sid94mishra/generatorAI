@@ -38,10 +38,13 @@ export function Sidebar() {
       key={path}
       variant="ghost"
       onClick={() => navigate(path)}
+      aria-current={isActive ? 'page' : undefined}
       className={cn(
         'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+        // The ghost variant's own hover colours would otherwise replace the
+        // active ones while the pointer rests on the current item.
         isActive
-          ? 'bg-[var(--color-sidebar-accent)] text-[var(--color-sidebar-accent-foreground)]'
+          ? 'bg-[var(--color-sidebar-accent)] text-[var(--color-sidebar-accent-foreground)] hover:bg-[var(--color-sidebar-accent)] hover:text-[var(--color-sidebar-accent-foreground)]'
           : 'text-[var(--color-sidebar-foreground)] hover:bg-[var(--color-sidebar-accent)]',
       )}
     >

@@ -103,7 +103,7 @@ to one file with esbuild, then generates a manifest and runs `pnpm install
 --prod` against it in a staging directory — rather than copying `node_modules`
 out of the monorepo, which would mean reimplementing module resolution and
 shipping pnpm's symlinks. See
-[apps/desktop/scripts/stage-server-runtime.mjs](../../apps/desktop/scripts/stage-server-runtime.mjs).
+[apps/desktop/scripts/stage-server-runtime.mjs](../../apps/desktop/scripts/stage-server-runtime.mjs). The list (`RUNTIME_PACKAGES` in `apps/server/bundle-externals.mjs`) includes **`@openai/codex`**: the packaged app ships the pinned Codex CLI (its `bin/codex.js` launcher plus the host platform's binary package) so the Codex provider works without a separate install; the user's sign-in still lives in `CODEX_HOME`.
 
 It then asserts the result: every runtime package present, no symlinks, and a
 loadable native binary for each native dependency. A mis-staged tree otherwise

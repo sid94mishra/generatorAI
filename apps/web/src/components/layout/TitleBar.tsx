@@ -11,7 +11,6 @@
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { Zap } from 'lucide-react';
 import { desktopWindow } from '@/lib/desktop.js';
 
 interface TitleBarProps {
@@ -25,7 +24,7 @@ export function TitleBar({ visible }: TitleBarProps) {
   return (
     <div
       data-testid="app-titlebar"
-      className="app-titlebar app-drag-region flex shrink-0 select-none items-center gap-2 border-b border-border bg-background"
+      className="app-titlebar app-drag-region relative flex shrink-0 select-none items-center border-b border-border bg-background"
       onDoubleClick={(e) => {
         // Native convention: double-clicking empty title-bar space zooms the
         // window. Ignore double-clicks that land on a control.
@@ -33,12 +32,12 @@ export function TitleBar({ visible }: TitleBarProps) {
         desktopWindow.toggleMaximize();
       }}
     >
-      <div className="flex h-4 w-4 items-center justify-center rounded bg-[var(--color-primary)]">
-        <Zap className="h-2.5 w-2.5 text-white" />
-      </div>
-      {/* Just the product name — the breadcrumb for the current page already
-          sits in the header directly below this strip. */}
-      <span className="truncate text-xs font-medium text-[var(--color-muted-foreground)]">
+      {/* A native window title: the product name, centred and muted. The logo
+          lives once, in the sidebar header directly below — repeating it here
+          stacked two identical brand marks 40 px apart. Centred on the window
+          (not the padded strip) and non-interactive, so double-click-to-zoom
+          still reaches the strip itself. */}
+      <span className="pointer-events-none absolute inset-x-0 truncate px-[max(var(--titlebar-inset-left),var(--titlebar-inset-right))] text-center text-xs font-medium text-[var(--color-muted-foreground)]">
         GeneratorAI
       </span>
     </div>

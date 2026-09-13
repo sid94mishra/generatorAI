@@ -53,6 +53,13 @@ interface ChatMessageListProps {
   /** Workspace behind this chat — resolves agent screenshot previews. */
   workspaceId?: string;
   /**
+   * May a turn be rewound right now? The page owns this: it knows whether a
+   * turn is in flight (the server answers 409 CHAT_BUSY otherwise) and
+   * whether the chat is still active. A plain boolean rather than a callback
+   * so `MessageRow`'s memo keeps holding.
+   */
+  canRewind?: boolean;
+  /**
    * External scroll container ref.
    *
    * Kept for call-site compatibility. Containment needs no scroll root — the
@@ -96,6 +103,9 @@ function hasRenderableContent(message: ChatMessage): boolean {
   if (message.content?.trim()) return true;
   const meta = message.metadata;
   if (!meta) return false;
+  // A turn stopped before it produced anything is still a row: its "stopped"
+  // note is the only record of what happened to the question.
+  if (message.role === 'assistant' && meta.partial) return true;
   return Boolean(
     meta.thinkingText?.trim() ||
       meta.toolCalls?.length ||
@@ -113,6 +123,8 @@ function renderMessage(
   onOpenChanges?: (filePath?: string) => void,
   onOpenShell?: (callId: string) => void,
   workspaceId?: string,
+  canRewind?: boolean,
+  isLatestAssistant?: boolean,
 ): React.ReactNode {
   // System messages are always meaningful and tool messages display
   // toolName/toolArgs rather than content, so only user/assistant rows are
@@ -123,11 +135,18 @@ function renderMessage(
 
   switch (message.role) {
     case 'user':
-      return <UserMessage message={message} />;
+      return (
+        <UserMessage
+          message={message}
+          canRewind={canRewind ?? false}
+          {...(workspaceId ? { workspaceId } : {})}
+        />
+      );
     case 'assistant':
       return (
         <AssistantMessage
           message={message}
+          isLatest={isLatestAssistant ?? false}
           {...(onOpenPlan ? { onOpenPlan } : {})}
           {...(onOpenChanges ? { onOpenChanges } : {})}
           {...(onOpenShell ? { onOpenShell } : {})}
@@ -157,6 +176,8 @@ const MessageRow = React.memo(function MessageRow({
   onOpenChanges,
   onOpenShell,
   workspaceId,
+  canRewind,
+  isLatestAssistant,
 }: {
   message: ChatMessage;
   contained: boolean;
@@ -164,8 +185,18 @@ const MessageRow = React.memo(function MessageRow({
   onOpenChanges?: (filePath?: string) => void;
   onOpenShell?: (callId: string) => void;
   workspaceId?: string;
+  canRewind?: boolean;
+  isLatestAssistant?: boolean;
 }) {
-  const node = renderMessage(message, onOpenPlan, onOpenChanges, onOpenShell, workspaceId);
+  const node = renderMessage(
+    message,
+    onOpenPlan,
+    onOpenChanges,
+    onOpenShell,
+    workspaceId,
+    canRewind,
+    isLatestAssistant,
+  );
   if (!node) return null;
   return (
     <div
@@ -184,8 +215,18 @@ const MessageRow = React.memo(function MessageRow({
   );
 });
 
-export function ChatMessageList({ messages, onOpenPlan, onOpenChanges, onOpenShell, workspaceId }: ChatMessageListProps) {
+export function ChatMessageList({ messages, onOpenPlan, onOpenChanges, onOpenShell, workspaceId, canRewind = false }: ChatMessageListProps) {
   const contained = messages.length > CONTAINMENT_THRESHOLD;
+  // The newest response keeps its action bar visible; every earlier one
+  // reveals it on hover. Computed here because only the list knows which row
+  // that is, and it stays a per-row boolean so the memo still holds.
+  let latestAssistantId: string | undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'assistant') {
+      latestAssistantId = messages[i]?.id;
+      break;
+    }
+  }
   return (
     <div className="space-y-5">
       {messages.map((message) => (
@@ -193,6 +234,8 @@ export function ChatMessageList({ messages, onOpenPlan, onOpenChanges, onOpenShe
           key={message.id}
           message={message}
           contained={contained}
+          canRewind={canRewind}
+          isLatestAssistant={message.id === latestAssistantId}
           {...(onOpenPlan ? { onOpenPlan } : {})}
           {...(onOpenChanges ? { onOpenChanges } : {})}
           {...(onOpenShell ? { onOpenShell } : {})}

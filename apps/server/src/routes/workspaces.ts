@@ -8,7 +8,12 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Container } from '../composition-root.js';
 import { resolveWorktreePath, type WorkspaceTreeRepo } from '@generatorai/core';
-import { stripAliasPrefix, type MountRef } from '@generatorai/changes';
+import {
+  stripAliasPrefix,
+  type ChangeSummary,
+  type MountRef,
+} from '@generatorai/changes';
+import type { WorkspaceFileReviewRow } from '@generatorai/core';
 import type { WorkspaceFilters, WorkspaceInfo, WorkspaceOwnerType, WorkspaceStatus } from '@generatorai/shared';
 
 /**
@@ -38,9 +43,113 @@ export function createWorkspaceRoutes(container: Container): Router {
     workspaceTreeService,
     checkpointService,
     workspaceCheckpointService,
+    workspaceFileReviewRepo,
     sourceControlService,
+    eventBus,
     logger,
   } = container;
+
+  /** Key a review row is stored under. NUL cannot occur in a path. */
+  const reviewKey = (alias: string, filePath: string): string => `${alias}\u0000${filePath}`;
+
+  /**
+   * Overlay per-file review state onto a change summary.
+   *
+   * `kept` is deliberately NOT a stored boolean: a row records the blob sha
+   * the user accepted, and a file counts as kept only while its CURRENT head
+   * blob still equals that sha. So the agent editing a kept file un-keeps it
+   * automatically, with no invalidation step to forget — and a file that was
+   * discarded (or edited back to its base, and so is no longer in the
+   * summary at all) leaves a row that can never match again.
+   *
+   * Those dead rows are swept here, on read, because this is the only place
+   * that knows the full current change set. `cleanupStale` gates it: a
+   * summary narrowed to one alias, or taken against a different base, does
+   * not list files that are legitimately kept elsewhere.
+   */
+  async function applyKeptState(
+    workspaceId: string,
+    summary: ChangeSummary,
+    cleanupStale: boolean,
+  ): Promise<ChangeSummary> {
+    let rows: WorkspaceFileReviewRow[];
+    try {
+      rows = await workspaceFileReviewRepo.list(workspaceId);
+    } catch (err) {
+      // Review state is an aid, not the answer to "what changed?" — never
+      // fail the summary over it.
+      logger.warn(`[WorkspaceRoutes] Could not read review rows for ${workspaceId}: ${err}`);
+      return summary;
+    }
+    if (rows.length === 0) {
+      return {
+        ...summary,
+        repos: summary.repos.map((r) => ({ ...r, keptCount: 0 })),
+        keptCount: 0,
+      };
+    }
+
+    const accepted = new Map(rows.map((r) => [reviewKey(r.alias, r.path), r.acceptedBlob]));
+    const matched = new Set<string>();
+    let total = 0;
+
+    const repos = summary.repos.map((repo) => {
+      let keptCount = 0;
+      const files = repo.files.map((file) => {
+        const key = reviewKey(repo.alias, file.path);
+        const acceptedBlob = accepted.get(key);
+        if (acceptedBlob === undefined) return file;
+        // A deleted file has no head object; `''` is the sha we store for it.
+        if (acceptedBlob !== (file.newBlob ?? '')) return file;
+        matched.add(key);
+        keptCount += 1;
+        return { ...file, kept: true };
+      });
+      total += keptCount;
+      return { ...repo, files, keptCount };
+    });
+
+    if (cleanupStale && matched.size !== rows.length) {
+      const stale = rows
+        .filter((r) => !matched.has(reviewKey(r.alias, r.path)))
+        .map((r) => ({ alias: r.alias, path: r.path }));
+      // Best effort and off the response path: a failed sweep only means the
+      // row is retried on the next read.
+      void workspaceFileReviewRepo
+        .deleteMany(workspaceId, stale)
+        .catch((err) =>
+          logger.warn(`[WorkspaceRoutes] Stale review sweep failed for ${workspaceId}: ${err}`),
+        );
+    }
+
+    return { ...summary, repos, keptCount: total };
+  }
+
+  /** Tell every client viewing this workspace that `kept` moved. */
+  async function announceReviewChanged(workspaceId: string): Promise<void> {
+    try {
+      await eventBus.emitGlobal({ kind: 'workspace.review_changed', data: { workspaceId } });
+    } catch (err) {
+      logger.warn(`[WorkspaceRoutes] review_changed emit failed for ${workspaceId}: ${err}`);
+    }
+  }
+
+  /** `{ alias, path }` pairs off a request body, normalised and validated. */
+  function readFileRefs(value: unknown): Array<{ alias: string; path: string }> {
+    if (!Array.isArray(value)) return [];
+    const out: Array<{ alias: string; path: string }> = [];
+    for (const entry of value) {
+      if (!entry || typeof entry !== 'object') continue;
+      const raw = entry as Record<string, unknown>;
+      const alias = typeof raw['alias'] === 'string' && raw['alias'].trim() ? raw['alias'].trim() : '.';
+      const filePath = typeof raw['path'] === 'string' ? raw['path'].trim() : '';
+      if (!filePath) continue;
+      // Repo-relative, never alias-prefixed — the same rule checkpoint
+      // restore paths follow, since both index into ONE mount's tree.
+      out.push({ alias, path: stripAliasPrefix(filePath, alias) });
+    }
+    return out;
+  }
 
   /**
    * Parse a revision selector from a query string.
@@ -226,6 +335,10 @@ export function createWorkspaceRoutes(container: Container): Router {
 
       const base = await parseRevision(req.query['base'], 'baseline', id);
       const head = await parseRevision(req.query['head'], 'working', id);
+      const aliasFilter =
+        typeof req.query['alias'] === 'string' && req.query['alias']
+          ? String(req.query['alias'])
+          : undefined;
       const summary = await changeSummaryService.getSummary({
         workspaceId: id,
         rootPath,
@@ -235,11 +348,13 @@ export function createWorkspaceRoutes(container: Container): Router {
         head,
         autoInit,
         includeTree: String(req.query['includeTree'] ?? '') === 'true',
-        ...(typeof req.query['alias'] === 'string' && req.query['alias']
-          ? { repoAlias: String(req.query['alias']) }
-          : {}),
+        ...(aliasFilter ? { repoAlias: aliasFilter } : {}),
       });
-      res.json(summary);
+      // Only the default view (every mount, session start → working tree) is
+      // the complete picture, so only it may sweep rows it cannot account for.
+      const isFullDefaultView =
+        !aliasFilter && base.kind === 'baseline' && head.kind === 'working';
+      res.json(await applyKeptState(id, summary, isFullDefaultView));
     } catch (err) {
       next(err);
     }
@@ -273,6 +388,12 @@ export function createWorkspaceRoutes(container: Container): Router {
       const head = await parseRevision(req.query['head'], 'working', id);
       const form = String(req.query['form'] ?? 'versions');
 
+      // A renamed file lives under its OLD name on the base side. Without
+      // this the base blob lookup misses and the rename renders as a pure
+      // addition — the one case where the expanded diff contradicted the
+      // summary, which already knew the old path.
+      const oldPath = typeof req.query['oldPath'] === 'string' ? req.query['oldPath'].trim() : '';
+
       const common = {
         workspaceId: id,
         rootPath,
@@ -283,6 +404,7 @@ export function createWorkspaceRoutes(container: Container): Router {
         autoInit: false,
         filePath,
         alias,
+        ...(oldPath ? { oldPath } : {}),
       };
 
       /**
@@ -317,6 +439,285 @@ export function createWorkspaceRoutes(container: Container): Router {
       // when unchanged.
       res.setHeader('Cache-Control', 'private, no-cache');
       res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ── Per-file review (Keep / Undo) ────────────────────────────
+
+  // POST /workspaces/:id/changes/review — record what the user has accepted
+  //
+  //   { keep:   [{ alias, path, blob }] }  accept these files AT THIS content
+  //   { unkeep: [{ alias, path }] }        drop the acceptance
+  //   { keepAll: true }                    accept every currently changed file
+  //
+  // `blob` is the head blob sha the client saw (`''` for a deleted file).
+  // Storing the content identity rather than a flag is what makes the state
+  // self-correcting: a later edit moves the head blob and the file is simply
+  // no longer kept. Unkeep wins over keep for the same file in one request,
+  // since it is applied first.
+  router.post('/:id/changes/review', async (req, res, next) => {
+    try {
+      const id = String(req.params['id']);
+      const loaded = await loadWorkspace(id, res);
+      if (!loaded) return;
+      const { worktrees, mounts, rootPath } = loaded;
+
+      const now = new Date();
+      const keepRows: WorkspaceFileReviewRow[] = [];
+      const seen = new Set<string>();
+      const pushKeep = (alias: string, filePath: string, blob: string): void => {
+        const key = reviewKey(alias, filePath);
+        if (seen.has(key)) return;
+        seen.add(key);
+        keepRows.push({
+          workspaceId: id,
+          alias,
+          path: filePath,
+          acceptedBlob: blob,
+          acceptedAt: now,
+        });
+      };
+
+      if (req.body?.keepAll === true) {
+        // Resolved server-side rather than trusting a client-supplied list:
+        // the blob each file is accepted AT must be the one on disk right
+        // now, or a race with the agent would record an acceptance of
+        // content nobody reviewed.
+        const summary = await changeSummaryService.getSummary({
+          workspaceId: id,
+          rootPath,
+          worktrees,
+          mounts,
+          base: { kind: 'baseline' },
+          head: { kind: 'working' },
+          autoInit: false,
+        });
+        for (const repo of summary.repos) {
+          for (const file of repo.files) {
+            pushKeep(repo.alias, file.path, file.newBlob ?? '');
+          }
+        }
+      }
+
+      for (const entry of Array.isArray(req.body?.keep) ? (req.body.keep as unknown[]) : []) {
+        if (!entry || typeof entry !== 'object') continue;
+        const raw = entry as Record<string, unknown>;
+        const alias =
+          typeof raw['alias'] === 'string' && raw['alias'].trim() ? raw['alias'].trim() : '.';
+        const filePath =
+          typeof raw['path'] === 'string' ? stripAliasPrefix(raw['path'].trim(), alias) : '';
+        if (!filePath) continue;
+        const blob = typeof raw['blob'] === 'string' ? raw['blob'].trim() : '';
+        // Anything that is not a plain object id (or the deleted-file
+        // sentinel) could never match a head blob, so a row built from it
+        // would be permanently stale.
+        if (blob && !/^[0-9a-f]{40}$/i.test(blob)) {
+          res.status(400).json({
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: `Not a blob sha: ${blob}`,
+            },
+          });
+          return;
+        }
+        pushKeep(alias, filePath, blob.toLowerCase());
+      }
+
+      const unkeep = readFileRefs(req.body?.unkeep);
+
+      if (keepRows.length === 0 && unkeep.length === 0) {
+        res.status(400).json({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Nothing to do: supply keep, unkeep or keepAll',
+          },
+        });
+        return;
+      }
+
+      // Unkeep first so a request carrying both for one file ends up kept.
+      if (unkeep.length > 0) await workspaceFileReviewRepo.deleteMany(id, unkeep);
+      if (keepRows.length > 0) await workspaceFileReviewRepo.upsertMany(keepRows);
+
+      const keptCount = (await workspaceFileReviewRepo.list(id)).length;
+      await announceReviewChanged(id);
+      logger.info(
+        `[WorkspaceRoutes] Review ${id}: +${keepRows.length} kept, -${unkeep.length} unkept`,
+        { requestId: req.requestId },
+      );
+      res.json({ workspaceId: id, kept: keepRows.length, unkept: unkeep.length, keptCount });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workspaces/:id/changes/discard — undo files, per mount
+  //
+  //   { files: [{ alias, path }] }   discard exactly these
+  //   { all: true }                  discard every changed file, every mount
+  //
+  // Each mount is restored from ITS OWN base, which is the whole point: the
+  // per-file "Undo" used to go through the first mount's checkpoint id, so
+  // it was wrong on a second mount and unavailable entirely on any mount
+  // whose base is a bare commit (a linked worktree's branch base, a git
+  // folder's first commit). `restoreFromRevision` covers those, so every
+  // mount kind can be undone.
+  //
+  // Always undoable in turn: each mount gets a `pre_restore` checkpoint
+  // before anything is written.
+  router.post('/:id/changes/discard', async (req, res, next) => {
+    try {
+      const id = String(req.params['id']);
+      const loaded = await loadWorkspace(id, res);
+      if (!loaded) return;
+      const { worktrees, mounts, rootPath } = loaded;
+
+      const all = req.body?.all === true;
+      const requested = readFileRefs(req.body?.files);
+      if (!all && requested.length === 0) {
+        res.status(400).json({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Supply files: [{ alias, path }] or all: true',
+          },
+        });
+        return;
+      }
+
+      // The summary is what defines "changed", carries each mount's own base
+      // (repos[].base), and knows which files were renamed.
+      const summary = await changeSummaryService.getSummary({
+        workspaceId: id,
+        rootPath,
+        worktrees,
+        mounts,
+        base: { kind: 'baseline' },
+        head: { kind: 'working' },
+        autoInit: false,
+      });
+
+      const results: Array<{
+        alias: string;
+        ok: boolean;
+        restored: number;
+        deleted: number;
+        preRestoreCheckpointId?: string | null;
+        error?: string;
+      }> = [];
+      const skipped: Array<{ alias: string; path: string; reason: string }> = [];
+      const discarded: Array<{ alias: string; path: string }> = [];
+
+      for (const repo of summary.repos) {
+        const wanted = new Set(
+          all
+            ? repo.files.map((f) => f.path)
+            : requested.filter((r) => r.alias === repo.alias).map((r) => r.path),
+        );
+        if (wanted.size === 0) continue;
+
+        // A rename needs both halves in the pathspec: the new path to delete,
+        // the old one to put back. Without the old path the file would simply
+        // vanish instead of returning to its previous name.
+        const pathspec = new Set(wanted);
+        for (const file of repo.files) {
+          if (file.oldPath && wanted.has(file.path)) pathspec.add(file.oldPath);
+        }
+
+        const repoDir = await workspaceCheckpointService.resolveRepoDir(id, repo.alias);
+        if (!repoDir) {
+          results.push({
+            alias: repo.alias,
+            ok: false,
+            restored: 0,
+            deleted: 0,
+            error: `Repository "${repo.alias}" is no longer present in this workspace`,
+          });
+          continue;
+        }
+        const treeish = repo.base.treeish;
+        if (!treeish) {
+          results.push({
+            alias: repo.alias,
+            ok: false,
+            restored: 0,
+            deleted: 0,
+            error: `No base revision for mount "${repo.alias}"`,
+          });
+          continue;
+        }
+
+        try {
+          // Prefer the checkpoint row when the base IS one — the label it
+          // carries is what the rewind timeline shows for the undo snapshot.
+          const baseCheckpoint = repo.base.id
+            ? await checkpointService.getById(repo.base.id)
+            : null;
+          const result =
+            baseCheckpoint && baseCheckpoint.repoAlias === repo.alias
+              ? await checkpointService.restore(baseCheckpoint, repoDir, [...pathspec])
+              : await checkpointService.restoreFromRevision(
+                  id,
+                  repo.alias,
+                  repoDir,
+                  treeish,
+                  [...pathspec],
+                  repo.base.label ?? 'the base revision',
+                );
+
+          // Drop the memoised working tree BEFORE announcing: clients refetch
+          // the instant they see the event, well inside the cache TTL.
+          changeSummaryService.invalidateWorkingTree(repoDir);
+          await workspaceCheckpointService.announceRestore(
+            id,
+            baseCheckpoint?.id ?? treeish,
+            repo.alias,
+            result,
+          );
+
+          for (const entry of result.skipped) {
+            skipped.push({ alias: repo.alias, path: entry.path, reason: entry.reason });
+          }
+          for (const filePath of wanted) discarded.push({ alias: repo.alias, path: filePath });
+          results.push({
+            alias: repo.alias,
+            ok: true,
+            restored: result.restoredPaths.length,
+            deleted: result.deletedPaths.length,
+            preRestoreCheckpointId: result.preRestoreCheckpointId,
+          });
+        } catch (err) {
+          results.push({
+            alias: repo.alias,
+            ok: false,
+            restored: 0,
+            deleted: 0,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      // A discarded file is no longer changed, so its acceptance is moot.
+      if (discarded.length > 0) {
+        await workspaceFileReviewRepo.deleteMany(id, discarded).catch((err) => {
+          logger.warn(`[WorkspaceRoutes] Could not clear review rows for ${id}: ${err}`);
+        });
+        await announceReviewChanged(id);
+      }
+
+      logger.info(
+        `[WorkspaceRoutes] Discarded ${discarded.length} file(s) across ${results.length} mount(s) in ${id}`,
+        { requestId: req.requestId },
+      );
+      res.json({
+        workspaceId: id,
+        mounts: results,
+        restoredCount: results.reduce((n, r) => n + r.restored, 0),
+        deletedCount: results.reduce((n, r) => n + r.deleted, 0),
+        discardedCount: discarded.length,
+        skipped,
+      });
     } catch (err) {
       next(err);
     }

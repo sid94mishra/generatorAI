@@ -35,6 +35,19 @@ export const DPOP_NONCE_HEADER = 'dpop-nonce';
 /** RFC 9449 §7.1 — the challenge returned when a fresh nonce is required. */
 export const DPOP_NONCE_ERROR = 'use_dpop_nonce';
 
+/**
+ * Failures a client fixes by retrying with a fresh server nonce, so the
+ * response should carry one: a skewed or delayed proof (`IAT_OUT_OF_WINDOW`),
+ * and a nonce that is missing, expired or already spent.
+ *
+ * Nonces are single-use. Answering a spent one with a bare `INVALID_PROOF`
+ * gave the client nothing to retry with — every later request carried the
+ * same spent nonce and the session was locked out until the device re-paired.
+ */
+export function isNonceChallenge(code: DpopFailureCode): boolean {
+  return code === 'IAT_OUT_OF_WINDOW' || code === 'NONCE_REQUIRED' || code === 'NONCE_INVALID';
+}
+
 export type DpopFailureCode =
   | 'MISSING_PROOF'
   | 'MULTIPLE_PROOFS'

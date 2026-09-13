@@ -29,6 +29,26 @@ export interface TimelineActions {
   readAloud?: (text: string) => void;
   /** Open a full-page widget — mobile currently only explains the limitation. */
   toast?: (message: string) => void;
+
+  // ── History actions (§1–§3 of the chat overhaul) ───────────────
+  //
+  // These live on the CONTEXT rather than on the rows for the reason the
+  // header above gives: a row is memoised on its block identity inside a
+  // virtualised list, so a fresh `onRewind` per render would defeat the memo
+  // for every row in the transcript. The screen owns the sheets, the
+  // mutations and the composer draft; a row only says which turn was tapped.
+
+  /**
+   * Open the rewind sheet anchored on a user message's turn.
+   *
+   * `prompt` is passed so the sheet can show what is being rewound to
+   * without re-deriving it from a row id.
+   */
+  onRewind?: (turnId: string, prompt: string) => void;
+  /** Branch a new chat from the end of this turn. */
+  onForkFrom?: (turnId: string) => void;
+  /** Copy the WHOLE chat as markdown (not just this row). */
+  onCopyTranscript?: () => void;
 }
 
 export const TimelineActionsContext = createContext<TimelineActions>({ workspaceId: null, streamKey: null });

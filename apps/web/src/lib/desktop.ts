@@ -142,9 +142,17 @@ interface WindowControlsOverlayApi {
  *   • A transient frame can still yield an absurd inset, so anything that
  *     would eat more than half the header is rejected rather than applied.
  *
+ * Only an `overlay` window has its controls drawn through the overlay. A
+ * `hidden-inset` window (macOS traffic lights) still exposes
+ * `navigator.windowControlsOverlay`, permanently `visible: false` — treating
+ * that as "fullscreen" zeroed the inset the main process reserved and put the
+ * title-bar content underneath the window buttons. Every other style keeps the
+ * main process's insets; see `trackFullscreenInsets` for their fullscreen case.
+ *
  * Returns a cleanup function; a no-op where the overlay is not present.
  */
-export function trackWindowControlsOverlay(): () => void {
+export function trackWindowControlsOverlay(chrome: DesktopWindowChrome): () => void {
+  if (chrome.titleBarStyle !== 'overlay') return () => undefined;
   if (typeof navigator === 'undefined') return () => undefined;
   const wco = (navigator as Navigator & { windowControlsOverlay?: WindowControlsOverlayApi })
     .windowControlsOverlay;
@@ -182,4 +190,21 @@ export function trackWindowControlsOverlay(): () => void {
     wco.removeEventListener('geometrychange', sync);
     window.removeEventListener('resize', sync);
   };
+}
+
+/**
+ * Releases the reserved insets while the window is fullscreen, for chrome
+ * whose controls are not tracked through the Window Controls Overlay (the OS
+ * hides them in fullscreen, so the reservation would strand empty space), and
+ * restores the main process's values on exit. `overlay` chrome is left to
+ * `trackWindowControlsOverlay`, which reads the live geometry instead, and
+ * `native` chrome reserves nothing.
+ */
+export function applyFullscreenInsets(chrome: DesktopWindowChrome, fullScreen: boolean): void {
+  // `native` also covers the placeholder chrome in effect before the real value
+  // arrives from the main process — applying it would wipe the real insets.
+  if (typeof document === 'undefined' || chrome.titleBarStyle !== 'hidden-inset') return;
+  const root = document.documentElement;
+  root.style.setProperty('--titlebar-inset-left', `${fullScreen ? 0 : chrome.insetLeft}px`);
+  root.style.setProperty('--titlebar-inset-right', `${fullScreen ? 0 : chrome.insetRight}px`);
 }

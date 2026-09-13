@@ -135,6 +135,30 @@ Operation: `POST /api/chats/:id/stop` (mapped to `harness.abortConversation(sess
 
 ---
 
+### 2.7 Rewind, fork and copy transcript
+
+Three per-turn actions, modelled on Claude Code's `/rewind` menu and `/branch`:
+
+| Action | Route | What it does |
+|---|---|---|
+| **Rewind to here** (on a user message) | `POST /api/chats/:id/rewind { turnId, scope }` | Back to the START of that turn — i.e. the end of the previous turn. `scope: 'all'` (default) restores files **and** conversation, `'code'` only files, `'conversation'` only the transcript. 409 `CHAT_BUSY` while a turn streams. |
+| **Fork from here** (on an assistant message) | `POST /api/chats/:id/fork { turnId?, name? }` | A new chat whose transcript is the parent's through that turn (default: the last). The fork **shares the parent's workspace** — files are whatever they are now; it is a conversation branch, not a snapshot. `forkedFromChatId` / `forkedAtTurnId` mark provenance (never `parentChatId`, which means "orchestrator worker" and hides the chat). |
+| **Copy transcript** | `GET /api/chats/:id/transcript[?format=markdown]` | The whole chat (no 50-message page cap), rendered to markdown on the client (`formatTranscriptMarkdown` in `@generatorai/client-core`). |
+
+**Files.** Every turn already captures a `before` snapshot per mount (`kind: 'turn', phase: 'before'`, `skipIfUnchanged: false`). `WorkspaceCheckpointService.restoreTurn` restores every mount in ONE call (a mount without a snapshot for that turn falls back to its newest earlier snapshot) and reports per mount; it covers edits made through shell commands and sub-agents, which the SDK's own file checkpointing does not.
+
+**Conversation — native first, synthetic otherwise.** The provider's own history is moved with the anchors persisted per turn in `ChatMessageMetadata.providerAnchor` (Claude: the final `SDKAssistantMessage.uuid`, carried on `harness.message_complete.providerMessageId`; Codex: `turn.id`, carried on `harness.turn_end.providerTurnId`) and the provider handle persisted in `sessions.provider_session_id`:
+
+| Provider | Fork | Rewind |
+|---|---|---|
+| claude-agent | `forkSession(id, { upToMessageId })` — copies the transcript file under fresh uuids, no CLI process, no tokens; the old→new `anchorMap` re-keys the copied turns' anchors | same fork, then the chat is re-pointed at the branch (live CLI process closed) |
+| codex | `thread/fork { threadId, lastTurnId }` | `thread/revert { beforeTurnId }` in place; `thread/rollback { numTurns }` (deprecated) when revert is refused; a fresh thread when nothing survives |
+| copilot / acp / opencode | not native | not native |
+
+Declared via `capabilities().conversationFork` / `conversationRewind` (`IAgentHarness.forkConversation` / `rewindConversation`). When the provider cannot branch, or a surviving turn predates anchor capture, the service falls back to a **synthetic** branch: the provider session is destroyed and `chats.conversation_seed` gets a digest of the surviving turns (`buildConversationSeed`, ≤ 24 KB, oldest turns dropped first) that `sendPrompt` prepends to the next prompt exactly once. The response's `conversation` field says which path ran (`native` | `synthetic` | `skipped`), and the UI tells the user.
+
+Events: `chat.rewound { chatId, turnId, scope, prompt, conversation, files }` (clients refetch messages and workspace queries and offer `prompt` back in the composer, as Claude Code does) and `chat.forked { chatId, forkChatId, turnId }`. Pending plan/question/permission gates of the dropped turns are expired.
+
 ## 3. Right side pane (Changes / Browser / Terminal / Widget)
 
 `ChatPage` renders a unified tabbed dock on the right — the `RightPane` component ([apps/web/src/components/layout/RightPane.tsx](../../apps/web/src/components/layout/RightPane.tsx)) — that is toggled from the streaming banner or input toolbar. It hosts four tab kinds, all workspace-scoped:
@@ -154,6 +178,8 @@ Two surfaces show what the agent changed, and they all name files the same way a
 
 - **Per-op step rows** — a `Write`/`Edit` step carries `+A −D` from `harness.tool_complete.fileOp`. Expanding the row renders an inline unified diff ([`InlineDiff.tsx`](../../apps/web/src/components/chat/InlineDiff.tsx)): the provider's `structuredPatch` hunks when it shipped them (Claude; capped at 160 lines, `hunksTruncated` links to the full diff), else rebuilt from the tool's `old_string`/`new_string`/`content`. The raw tool call stays one click away.
 - **Composer tray** ([`ChatChangesTray.tsx`](../../apps/web/src/components/chat/ChatChangesTray.tsx)) — docked above the input: "N files changed in this chat · +A −D", a live pulse while file ops are still landing, an expandable tree (status letter, +/−, click → Changes tab at that file) and a **Review changes** button. The list is the workspace change summary (baseline → working tree) with the live stream's file ops overlaid until the summary refetches (1.5 s after each op, and again when the turn settles).
+
+**Reviewing changes — Keep / Undo.** Every row in the Changes tab has **Keep** (accept: the file moves into a collapsed "Kept (N)" group and stops counting as pending review) and **Undo** (discard: the file goes back to the mount's own base — its baseline checkpoint, or the branch base / worktree HEAD / first commit for a mount that has no checkpoint row yet, so Undo works for every mount kind). The action bar and the composer tray add **Keep all** / **Undo all** (Undo all confirms first), and the tray reads "N to review · M kept". A kept file is stored as `(workspace, alias, path, accepted_blob)` in `workspace_file_reviews`; it counts as kept only while its working-tree blob still equals the accepted one, so an agent edit after a Keep automatically puts it back in the review list. Routes: `POST /api/workspaces/:id/changes/review { keep | unkeep | keepAll }` and `POST /api/workspaces/:id/changes/discard { files | all }`; both invalidate the working-tree cache and emit `workspace.changed` + `workspace.review_changed`. The summary carries a per-mount `repos[].base` (the top-level `base` is only the first mount's), and per-file bodies/patches honour the same EOL normalisation and rename `oldPath` as the summary counts.
 
 **What counts as a change.** When the workspace has a real codebase (a linked worktree or an agent-generated repo), files the agent scaffolds at the workspace root — an orchestrator's `orchestrator/state.json` (git-ignored by the workspace template), task summaries, notes — are hidden from the tray and from the Changes tab, behind a "+N workspace files" toggle ([`changeVisibility.ts`](../../apps/web/src/components/diff/changeVisibility.ts)). A workspace with no codebase keeps its root files: there they are the work. `artifacts/`, `uploads/`, `browser/` and `output/` never appear at all.
 
@@ -336,6 +362,9 @@ const messages = await ai.services.chatMessageRepository.getByChatId(chat.id);
 | List | `/chats` page | `chat list` | `ai.chat.list()` | `GET /api/chats` |
 | Watch | open the chat page | `chat watch <id>` | `ai.chat.onMessage(id, h)` | `GET /api/stream?scope=chat&id=<id>` |
 | Stop streaming | red "Stop" button in input | Ctrl-C while watching | abort via SDK service | `POST /api/chats/:id/stop` |
+| Rewind to a turn | hover a user message → Rewind | n/a yet | `ai.services.chatManagementService.rewindChat(id, turnId, scope)` | `POST /api/chats/:id/rewind` |
+| Fork from a turn | hover an assistant message → Fork | n/a yet | `ai.services.chatManagementService.forkChat(id, { turnId })` | `POST /api/chats/:id/fork` |
+| Copy transcript | hover an assistant message → Copy | n/a yet | `ai.services.chatManagementService.getTranscript(id)` | `GET /api/chats/:id/transcript` |
 | Archive | menu → Archive | `chat archive <id>` | `ai.chat.archive(id)` | `POST /api/chats/:id/archive` |
 | Delete | menu → Delete (confirm) | `chat delete <id>` | `ai.services.chatManagementService.delete(id)` | `DELETE /api/chats/:id` |
 | View files | "Files & Changes" toggle in banner | n/a yet | `ai.services.workspaceManager.listFiles(...)` | `GET /api/chats/:id/workspace` |

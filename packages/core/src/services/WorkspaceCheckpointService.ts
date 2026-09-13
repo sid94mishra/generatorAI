@@ -48,6 +48,23 @@ export interface CheckpointEventScope {
   workflowRunId?: string;
 }
 
+/** Outcome of `WorkspaceCheckpointService.restoreTurn`, per mount and in total. */
+export interface RestoreTurnResult {
+  mounts: Array<{
+    alias: string;
+    ok: boolean;
+    checkpointId?: string;
+    restored?: number;
+    deleted?: number;
+    skipped?: number;
+    preRestoreCheckpointId?: string | null;
+    error?: string;
+  }>;
+  restored: number;
+  deleted: number;
+  skipped: number;
+}
+
 export class WorkspaceCheckpointService {
   /**
    * Debounce state for rolling `live` captures, keyed by workspace. Prevents
@@ -73,6 +90,83 @@ export class WorkspaceCheckpointService {
   /** Late-wire the event bus so checkpoint activity reaches the SSE stream. */
   setEventBus(bus: EventBus): void {
     this.eventBus = bus;
+  }
+
+  /**
+   * Called with a repo directory right after its working tree was rewritten
+   * by a restore, BEFORE the restore is announced. The change-summary cache
+   * memoises the working tree; without dropping it here clients that refetch
+   * on the announcement would be served the pre-restore tree.
+   */
+  private restoreListener?: (repoDir: string) => void;
+  setRestoreListener(fn: (repoDir: string) => void): void {
+    this.restoreListener = fn;
+  }
+
+  /**
+   * Rewind every mount of a workspace to the snapshot taken at `phase` of one
+   * chat turn, in one call.
+   *
+   * Each mount has its own `before` snapshot for the turn (captured with
+   * `skipIfUnchanged: false`, so one exists for every mount that was ready at
+   * the time). A mount that has none — it was added later, or its capture
+   * failed — falls back to its newest snapshot taken before the turn's, so
+   * the rewind still lands the mount on its state at that moment rather than
+   * silently leaving it alone. Results are per mount; a failure on one mount
+   * does not stop the others, and the caller reports all of them.
+   */
+  async restoreTurn(
+    workspaceId: string,
+    turnId: string,
+    scope: CheckpointEventScope = {},
+    phase: 'before' | 'after' = 'before',
+  ): Promise<RestoreTurnResult> {
+    const result: RestoreTurnResult = { mounts: [], restored: 0, deleted: 0, skipped: 0 };
+    const workspace = await this.workspaceRepo.findById(workspaceId);
+    if (!workspace) return result;
+    const repos = await this.resolveRepos(workspace);
+    const all = await this.checkpoints.list({ workspaceId, limit: 5_000, excludeLive: true });
+    const exact = all.filter((c) => c.turnId === turnId && (c.phase ?? 'before') === phase);
+    // Every mount's snapshot of the turn shares one capture moment; a mount
+    // without one falls back to its latest snapshot taken before that moment.
+    const momentMs = exact.length
+      ? Math.min(...exact.map((c) => c.createdAt.getTime()))
+      : undefined;
+
+    for (const repo of repos) {
+      let target = exact.find((c) => c.repoAlias === repo.alias);
+      if (!target && momentMs !== undefined) {
+        target = all
+          .filter((c) => c.repoAlias === repo.alias && c.createdAt.getTime() <= momentMs)
+          .sort((a, b) => b.seq - a.seq)[0];
+      }
+      if (!target) {
+        result.mounts.push({ alias: repo.alias, ok: false, error: 'No snapshot for this turn' });
+        continue;
+      }
+      try {
+        const r = await this.checkpoints.restore(target, repo.repoDir);
+        this.restoreListener?.(repo.repoDir);
+        await this.announceRestore(workspaceId, target.id, repo.alias, r, scope);
+        result.restored += r.restoredPaths.length;
+        result.deleted += r.deletedPaths.length;
+        result.skipped += r.skipped.length;
+        result.mounts.push({
+          alias: repo.alias,
+          ok: true,
+          checkpointId: target.id,
+          restored: r.restoredPaths.length,
+          deleted: r.deletedPaths.length,
+          skipped: r.skipped.length,
+          preRestoreCheckpointId: r.preRestoreCheckpointId,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`[WorkspaceCheckpoints] restoreTurn ${turnId} failed for ${repo.alias}: ${message}`);
+        result.mounts.push({ alias: repo.alias, ok: false, checkpointId: target.id, error: message });
+      }
+    }
+    return result;
   }
 
   /**

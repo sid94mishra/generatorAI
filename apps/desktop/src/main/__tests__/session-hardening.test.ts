@@ -86,6 +86,13 @@ describe('permission policies', () => {
     expect(decidePermission({ permission: 'notifications', origin: APP }, policy)).toBe(false);
   });
 
+  it('the app window may WRITE to the clipboard (Copy transcript), never read it', () => {
+    const policy = appWindowPermissionPolicy(() => APP);
+    expect(decidePermission({ permission: 'clipboard-sanitized-write', origin: APP }, policy)).toBe(true);
+    expect(decidePermission({ permission: 'clipboard-sanitized-write', origin: 'https://evil.example' }, policy)).toBe(false);
+    expect(decidePermission({ permission: 'clipboard-read', origin: APP }, policy)).toBe(false);
+  });
+
   it('a throwing policy denies', () => {
     expect(decidePermission({ permission: 'media', origin: APP }, () => { throw new Error('x'); })).toBe(false);
   });

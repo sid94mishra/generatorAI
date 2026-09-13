@@ -5,24 +5,48 @@
 // neither). Attachments come from the message's `attachments` array; each
 // renders as a chip so a prompt that shipped a screenshot says so, instead
 // of reading as bare text once history replaces the optimistic bubble.
+//
+// A user bubble is also the anchor for REWIND: "go back to just before I
+// sent this" is a thing you say about a prompt, which is exactly why Claude
+// Code's `/rewind` lists user prompts and nothing else. That action is
+// reachable two ways on purpose:
+//
+//   • long-press, the gesture the row already taught, and
+//   • an explicit "⋯" button under the bubble.
+//
+// The button is not redundant. A long-press is undiscoverable — nothing on
+// screen says a message has actions — and it is unavailable to a switch- or
+// screen-reader user, who gets it through the actions rotor instead. Both
+// routes open the SAME menu, built once here.
 // ────────────────────────────────────────────────────────────────
 
 import React, { memo, useMemo } from 'react';
 import { Platform, Share, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { Copy, FileImage, Paperclip, Share2 } from 'lucide-react-native';
+import { Copy, Ellipsis, FileImage, History, Paperclip, Share2 } from 'lucide-react-native';
 import type { ChatMessage } from '@generatorai/client-core';
 
 import { StaticChip } from '../../ui/Chip';
-import { ContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
+import { IconButton } from '../../ui/Button';
+import { ContextMenu, useContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
 import { useToast } from '../../ui/Toast';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { messageAttachments } from './chatMessageToBlocks';
+import { useTimelineActions } from './TimelineActions';
+
+const MENU_TITLE = 'Your message';
 
 export const UserMessageRow = memo(function UserMessageRow({ message }: { message: ChatMessage }): React.ReactElement {
   const toast = useToast();
   const { colors } = useTheme();
+  const { open } = useContextMenu();
+  const { onRewind } = useTimelineActions();
   const attachments = useMemo(() => messageAttachments(message), [message]);
+
+  // Optimistic bubbles have no turn id yet (the server assigns it), so the
+  // rewind item simply is not offered on them — there is nothing to anchor
+  // to, and an item that always failed would be worse than its absence.
+  const turnId = message.metadata?.turnId;
 
   const items = useMemo<ContextMenuItem[]>(
     () => [
@@ -33,6 +57,16 @@ export const UserMessageRow = memo(function UserMessageRow({ message }: { messag
           void Clipboard.setStringAsync(message.content).then(() => toast({ message: 'Copied.', tone: 'success' }));
         },
       },
+      ...(onRewind && turnId
+        ? [
+            {
+              label: 'Rewind to here',
+              detail: 'Restore the files, the conversation, or both.',
+              icon: <History size={18} color={colors.foreground} />,
+              onPress: () => onRewind(turnId, message.content),
+            },
+          ]
+        : []),
       // react-native-web's `Share` rejects on browsers without the Web Share
       // API; offer the item only where a share sheet can actually open.
       ...(Platform.OS !== 'web' || typeof navigator?.share === 'function'
@@ -49,13 +83,15 @@ export const UserMessageRow = memo(function UserMessageRow({ message }: { messag
           ]
         : []),
     ],
-    [message.content, colors.foreground, toast],
+    [message.content, colors.foreground, toast, onRewind, turnId],
   );
+
+  const hasMenu = Boolean(message.content) && items.length > 0;
 
   return (
     <ContextMenu
       items={message.content ? items : []}
-      title="Your message"
+      title={MENU_TITLE}
       accessibilityLabel={`You said: ${message.content}`}
       className="items-end"
     >
@@ -84,6 +120,17 @@ export const UserMessageRow = memo(function UserMessageRow({ message }: { messag
               {message.content}
             </Text>
           </View>
+        ) : null}
+        {hasMenu ? (
+          <IconButton
+            testID="user-message-actions"
+            accessibilityLabel="Message actions"
+            accessibilityHint="Copy, rewind to here, or share"
+            variant="ghost"
+            compact
+            icon={<Ellipsis size={16} color={colors['muted-foreground']} />}
+            onPress={() => open(items, { title: MENU_TITLE })}
+          />
         ) : null}
       </View>
     </ContextMenu>

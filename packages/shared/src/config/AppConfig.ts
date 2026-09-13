@@ -76,7 +76,7 @@ export const AppConfigSchema = z.object({
   // Additional provider values will land as their adapter packages ship.
   harness: z
     .object({
-      type: z.enum(['copilot', 'claude-agent']).default('copilot'),
+      type: z.enum(['copilot', 'claude-agent', 'codex']).default('copilot'),
       /** Copilot-specific harness options. These supplement the top-level
        *  `copilot` section (which covers CLI transport concerns) with
        *  adapter-level overrides that are SDK-version-specific. */
@@ -98,6 +98,22 @@ export const AppConfigSchema = z.object({
           maxBudgetUsd: z.number().positive().optional(),
           includePartialMessages: z.boolean().optional(),
           enableFileCheckpointing: z.boolean().optional(),
+        })
+        .default({}),
+      /** Codex (`codex app-server`) options. Codex runs alongside the other
+       *  providers whenever its CLI is found — these only tune it. Codex's own
+       *  `~/.codex/config.toml` and sign-in stay in effect underneath. */
+      codex: z
+        .object({
+          /** Explicit CLI path. Unset → `CODEX_CLI_PATH`, then PATH, then the
+           *  CLI bundled with the ChatGPT desktop app. */
+          binaryPath: z.string().optional(),
+          /** Model for new threads. Unset → the account's Codex default. */
+          defaultModel: z.string().optional(),
+          /** When Codex asks before running a command. `on-request` routes
+           *  its approvals to the chat's approval UI. */
+          approvalPolicy: z.enum(['untrusted', 'on-request', 'never']).optional(),
+          sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access']).optional(),
         })
         .default({}),
     })

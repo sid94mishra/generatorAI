@@ -26,6 +26,7 @@ import { parseSecretRef, type SecretStore } from '@generatorai/secrets';
 import { makeProviderInstanceId, type ProviderWireProtocol } from '@generatorai/core';
 import {
   ProviderInstanceRegistry,
+  resolveCodexCommand,
   type HarnessRegistry,
   type HarnessType,
   type HarnessProviderConfig,
@@ -122,12 +123,24 @@ export async function buildInstanceProviderConfig(
     }
     case 'codex': {
       const apiKey = await resolveCredential(record, 'apiKey', secretStore);
+      // Same discovery as the default Codex provider (configured path →
+      // CODEX_CLI_PATH → PATH → the ChatGPT desktop app's bundled CLI). An
+      // instance with no CLI to run cannot be started, so it is skipped.
+      const command = await resolveCodexCommand({ configuredPath: readString('binaryPath') });
+      if (!command) return null;
+      const home = record.homeDirectory ?? undefined;
+      const env: Record<string, string> = {
+        ...command.env,
+        ...(home ? { CODEX_HOME: home } : {}),
+        ...(apiKey ? { OPENAI_API_KEY: apiKey } : {}),
+      };
       return {
         type,
         codex: {
           defaultModel: record.defaultModel ?? undefined,
           defaultCwd: opts.artifactsDir,
-          binaryPath: readString('binaryPath'),
+          binaryPath: command.command,
+          args: [...command.argsPrefix, 'app-server'],
           // Codex runs model-authored commands. Both of these are declared
           // rather than left to the binary's own config file, so what the
           // sandbox permits is a property of this instance row.
@@ -135,7 +148,7 @@ export async function buildInstanceProviderConfig(
             | 'untrusted' | 'on-request' | 'never' | undefined,
           sandboxMode: readString('sandboxMode') as
             | 'read-only' | 'workspace-write' | 'danger-full-access' | undefined,
-          env: apiKey ? { OPENAI_API_KEY: apiKey } : undefined,
+          ...(Object.keys(env).length ? { env } : {}),
         },
       };
     }

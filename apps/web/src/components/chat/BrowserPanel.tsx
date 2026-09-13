@@ -539,7 +539,10 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
 
   // ── Scroll state polling ──────────────────────────────
   useEffect(() => {
-    if (!open || !workspaceId || !descriptor?.ready) { setScrollState(null); return; }
+    // Only the screencast view draws an overlay scrollbar (headless frames
+    // carry no native one). A native view scrolls itself, so polling it every
+    // 250 ms over CDP was pure cost.
+    if (!open || !workspaceId || !descriptor?.ready || descriptor.mode === 'native') { setScrollState(null); return; }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async (): Promise<void> => {
@@ -555,7 +558,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
     };
     void tick();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [open, workspaceId, descriptor?.ready]);
+  }, [open, workspaceId, descriptor?.ready, descriptor?.mode]);
 
   // ── Native browser probe (desktop) ────────────────────
   useEffect(() => {
@@ -1567,7 +1570,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
       {/* Top bar — VSCode-parity chrome ───────────────── */}
       <form
         onSubmit={handleNavigate}
-        className="flex items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-card)] px-2 py-1.5"
+        className="@container flex items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-card)] px-2 py-1.5"
       >
         {showNavControls && (
           <>
@@ -1590,7 +1593,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
             onFocus={() => setUrlInputFocused(true)}
             onBlur={() => setUrlInputFocused(false)}
             placeholder={nativeAvailable ? 'Search or enter address' : (isOn ? 'https://example.com' : 'https://…  (press Start)')}
-            className="h-auto min-w-0 flex-1 rounded-full border-[var(--color-input)] bg-[var(--color-background)] px-3 py-1 text-xs text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] focus:border-[var(--color-primary)]"
+            className="h-auto min-w-24 flex-1 rounded-full border-[var(--color-input)] bg-[var(--color-background)] px-3 py-1 text-xs text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] focus:border-[var(--color-primary)]"
           />
         ) : (
           // Restricted mode — the user sees the current URL as a read-only pill.
@@ -1602,7 +1605,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
           </div>
         )}
         {/* Right cluster: Share / Inspect / Capture / Start-Stop */}
-        <div className="flex items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5">
           {isOn && (
             <Button
               type="button"
@@ -1621,7 +1624,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
               )}
             >
               {attachedToChat ? <Share2 className="h-3.5 w-3.5" /> : <Link2Off className="h-3.5 w-3.5" />}
-              <span>{attachedToChat ? 'Sharing' : 'Share'}</span>
+              <span className="hidden @[30rem]:inline">{attachedToChat ? 'Sharing' : 'Share'}</span>
             </Button>
           )}
           {isOn && (

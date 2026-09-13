@@ -112,6 +112,19 @@ function makeBridge(opts: FakeOptions, bridgeOptions: Record<string, unknown> = 
         },
       },
     } as never,
+    // Give the bridge a spawnable daemon by default so these tests exercise
+    // the BEHAVIOUR they are about (window selection, session recovery, key
+    // escalation) rather than endpoint discovery.
+    //
+    // Without it they fell through to the in-process driver, which
+    // `inProcessAllowed()` refuses on darwin by design — a driver created
+    // inside the server process has no stable bundle identity, so macOS TCC
+    // grants do not apply to it. That made 28 assertions pass on Windows and
+    // Linux and fail on macOS for a reason that had nothing to do with what
+    // they were testing. `EmbeddedCuaDriverHost` is already faked above, so
+    // this resolves to the stub socket on every platform. Overridable: the
+    // spread below still wins for tests that probe discovery itself.
+    driverBinaryPath: '/opt/cua-driver',
     ...bridgeOptions,
   });
 
@@ -898,10 +911,24 @@ describe('CuaDriverBridge endpoint resolution', () => {
     expect(fake.connectedTo).toEqual(['/tmp/pushed.sock']);
   });
 
-  it('falls back in-process when nothing else is reachable', async () => {
-    const fake = makeBridge(quiet);
-    const handle = await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: process.cwd() });
+  // The in-process driver is deliberately unavailable on darwin: it has no
+  // stable bundle identity, so the user's TCC grants never apply to it and
+  // every call would fail silently. The fallback is therefore a per-platform
+  // contract, and the test asserts the rule rather than one platform's half
+  // of it — otherwise it green-lights Windows/Linux and fails on macOS for a
+  // behaviour that is working as designed.
+  it('falls back in-process when nothing else is reachable, except on darwin', async () => {
+    const fake = makeBridge(quiet, { driverBinaryPath: undefined });
 
+    if (process.platform === 'darwin') {
+      await expect(
+        fake.bridge.start({ workspaceId: 'ws', workspaceRoot: process.cwd() }),
+      ).rejects.toThrow(/No driver endpoint available/);
+      expect(fake.inProcessCreated()).toBe(0);
+      return;
+    }
+
+    const handle = await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: process.cwd() });
     expect(fake.spawned).toEqual([]);
     expect(fake.inProcessCreated()).toBe(1);
     expect(handle.hostRef).toBe('in-process');

@@ -128,6 +128,39 @@ describe('ChangeSummaryService (real git)', () => {
 
   const params = () => ({ workspaceId: 'ws', rootPath: repoDir, autoInit: false });
 
+  it('reports no changes while the working tree cannot be snapshotted, and retries next time', async () => {
+    // A new chat's summary is requested while its shadow git store is still
+    // being created, so the snapshot's `git add` fails. That used to diff the
+    // baseline against nothing — every scaffold file read as deleted — and the
+    // failure was cached for the whole TTL.
+    await fs.writeFile(path.join(repoDir, 'scaffold.txt'), 'line\n'.repeat(19));
+    await snapshot('baseline');
+
+    let failAdds = 1;
+    const flakyRunner: IGitProcessRunner = {
+      run(command, args, options) {
+        if (args.includes('add') && failAdds > 0) {
+          failAdds -= 1;
+          return Promise.resolve({ exitCode: 128, stdout: '', stderr: 'fatal: not a git repository', durationMs: 1 });
+        }
+        return realRunner.run(command, args, options);
+      },
+    };
+    const flaky = new ChangeSummaryService(
+      new GitClient(flakyRunner, silentLogger, { workspacesDir: tmpRoot }),
+      checkpoints,
+      silentLogger,
+    );
+
+    const first = await flaky.getSummary(params());
+    expect(first.repos[0]!.files).toEqual([]);
+    expect(first.repos[0]!.stats).toEqual({ files: 0, additions: 0, deletions: 0 });
+
+    await fs.writeFile(path.join(repoDir, 'added.txt'), 'new\n');
+    const second = await flaky.getSummary(params());
+    expect(second.repos[0]!.files.map((f) => f.path)).toEqual(['added.txt']);
+  });
+
   it('reports per-file stats without shipping any diff text', async () => {
     await fs.writeFile(path.join(repoDir, 'a.txt'), 'one\ntwo\n');
     await snapshot('baseline');
@@ -380,6 +413,112 @@ describe('ChangeSummaryService (real git)', () => {
     expect(summary.base.normalized).toBe(true);
     expect(summary.repos[0]!.files.map((f) => f.path)).toEqual(['b.txt']);
     expect(summary.repos[0]!.files[0]).toMatchObject({ additions: 1, deletions: 0 });
+  });
+
+  it('reports each repo\'s OWN base and head, not just the first repo\'s', async () => {
+    // Two mounts: one with a checkpoint baseline, one with only a commit.
+    // The response-level `base` describes the first; `repos[].base` is what
+    // a per-file action has to read, and it differs per mount.
+    const second = path.join(tmpRoot, 'second');
+    await fs.mkdir(second, { recursive: true });
+    await git.initIfNeeded(second);
+    await fs.writeFile(path.join(second, 's.txt'), 'v1\n');
+    await git.commit(second, 'initial');
+    await fs.writeFile(path.join(second, 's.txt'), 'v2\n');
+
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'a1\n');
+    await snapshot('baseline');
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'a2\n');
+
+    const summary = await service.getSummary({
+      ...params(),
+      mounts: [
+        { alias: '.', path: repoDir },
+        { alias: 'second', path: second },
+      ],
+    });
+
+    const root = summary.repos.find((r) => r.alias === '.')!;
+    const other = summary.repos.find((r) => r.alias === 'second')!;
+    expect(root.base.label).toBe('Session start');
+    expect(root.base.id).toBeDefined();
+    // The second mount never had a baseline captured, so it anchors on its
+    // own HEAD — a revision the top-level `base` knows nothing about, and one
+    // with no checkpoint id at all (which is exactly what used to make the
+    // per-file discard unavailable there).
+    expect(other.base.label).toBe('Worktree HEAD');
+    expect(other.base.id).toBeUndefined();
+    expect(other.base.normalized).toBe(true);
+    expect(other.base.treeish).toBeDefined();
+    expect(other.base.treeish).not.toBe(root.base.treeish);
+    for (const repo of summary.repos) expect(repo.head.kind).toBe('working');
+  });
+
+  it('marks the first-commit fallback normalized, so a CRLF checkout is not all-changed', async () => {
+    const g = (...args: string[]) =>
+      realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repoDir, timeout: 15_000 });
+    await g('config', 'core.autocrlf', 'true');
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'one\r\r\ntwo\r\r\n');
+    await fs.writeFile(path.join(repoDir, 'b.txt'), 'x\r\r\n');
+    await g('add', '-A');
+    await g('commit', '-q', '-m', 'initial');
+    await fs.writeFile(path.join(repoDir, 'b.txt'), 'x\r\r\ny\r\r\n');
+
+    // No checkpoints at all: the base falls back to the first commit, which
+    // is a real commit and so EOL-normalised like any other.
+    const summary = await service.getSummary(params());
+    expect(summary.base.label).toBe('First commit');
+    expect(summary.base.normalized).toBe(true);
+    expect(summary.repos[0]!.files.map((f) => f.path)).toEqual(['b.txt']);
+  });
+
+  it('reads one file the same way the summary counted it (EOL parity)', async () => {
+    const g = (...args: string[]) =>
+      realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repoDir, timeout: 15_000 });
+    await g('config', 'core.autocrlf', 'true');
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'one\r\r\ntwo\r\r\n');
+    await g('add', '-A');
+    await g('commit', '-q', '-m', 'initial');
+
+    const base = { kind: 'ref' as const, id: 'HEAD' };
+    // Untouched file against a commit base: the summary reports no change, so
+    // the per-file read must agree rather than showing a full rewrite.
+    const summary = await service.getSummary({ ...params(), base });
+    expect(summary.repos[0]!.files).toEqual([]);
+
+    const versions = await service.getFileVersions({ ...params(), base, filePath: 'a.txt' });
+    const [oldSha, newSha] = versions.cacheKey.split(':');
+    expect(oldSha).toBe(newSha);
+
+    const patch = await service.getFilePatch({ ...params(), base, filePath: 'a.txt' });
+    expect(patch.patch).toBe('');
+  });
+
+  it('looks the base side of a renamed file up under its old path', async () => {
+    await fs.writeFile(path.join(repoDir, 'old-name.txt'), 'x'.repeat(200) + '\n');
+    await snapshot('baseline');
+    await fs.rename(path.join(repoDir, 'old-name.txt'), path.join(repoDir, 'new-name.txt'));
+
+    // Without `oldPath` the base lookup misses and the rename reads as a
+    // pure addition — no old side at all.
+    const blind = await service.getFileVersions({ ...params(), filePath: 'new-name.txt' });
+    expect(blind.old).toBeNull();
+
+    const versions = await service.getFileVersions({
+      ...params(),
+      filePath: 'new-name.txt',
+      oldPath: 'old-name.txt',
+    });
+    expect(versions.old?.contents).toBe('x'.repeat(200) + '\n');
+    expect(versions.new?.contents).toBe('x'.repeat(200) + '\n');
+
+    const patch = await service.getFilePatch({
+      ...params(),
+      filePath: 'new-name.txt',
+      oldPath: 'old-name.txt',
+    });
+    expect(patch.patch).toContain('old-name.txt');
+    expect(patch.patch).toContain('new-name.txt');
   });
 
   it('includes the full path list only when the tree view asks for it', async () => {

@@ -68,8 +68,14 @@ export interface ToolCallBlock {
  * `warning` is distinct from `error` on purpose: the turn continues. It marks
  * something the user has to act on — an MCP server that failed to start or
  * needs credentials — which previously had nowhere to surface at all.
+ *
+ * `plan` is the agent's own checklist (Codex `turn/plan/updated`, and any
+ * provider's todo-list equivalent). It is a state SNAPSHOT rather than a
+ * notice, so it renders as its own expandable step — a plain `system` note is
+ * dropped by the timeline, which is where a plan update used to go to die. The
+ * message is "Plan: 2/5 done" on the first line, one `[x] step` per line after.
  */
-export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning';
+export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning' | 'plan';
 
 export interface SystemBlock {
   type: 'system';
@@ -192,6 +198,48 @@ export interface PermissionBlock {
   openedAt?: number;
 }
 
+/**
+ * One orchestrator background WORKER, rendered inside the ORCHESTRATOR's
+ * transcript rather than only in the Background Tasks panel.
+ *
+ * A worker is a real chat with its own session, so none of its own stream
+ * events reach the parent's connection. What does reach it is the
+ * `chat.background_task.*` family the server emits on the PARENT chat scope;
+ * this block is their accumulated state, upserted by `taskId`.
+ *
+ * `parentCallId` carries the same meaning it does on `ToolCallBlock`: the
+ * callId of the `spawn_background_agent` tool call that created this worker,
+ * so the timeline nests the worker under the call that asked for it. It is
+ * absent when the spawn call is outside the replay window, and the worker then
+ * renders as a top-level step rather than disappearing.
+ *
+ * Deliberately platform-free so mobile can reuse it unchanged.
+ */
+export interface BackgroundTaskBlock {
+  type: 'background_task';
+  blockId: number;
+  /** The worker chat's id — `/chats/<taskId>` opens it. */
+  taskId: string;
+  taskName: string;
+  /** Model the worker was routed to, when the spawn event reported one. */
+  model?: string;
+  /** `spawned` | `running` | `needs_review` | `completed` | `failed` | `cancelled`. */
+  status: string;
+  /** What the worker is doing right now: a tool name, or 'thinking' / 'writing'. */
+  currentStep?: string;
+  /** Tail of the worker's assistant text (already truncated by the emitter). */
+  lastText?: string;
+  toolCalls: number;
+  /** Epoch ms the worker's current turn started. */
+  startedAt: number;
+  /** Epoch ms the worker settled. Absent while it is running. */
+  endedAt?: number;
+  /** Digest summary, when the completion event carried one. */
+  summary?: string;
+  /** See {@link ToolCallBlock.parentCallId}. */
+  parentCallId?: string;
+}
+
 export type StreamBlock =
   | ThinkingBlock
   | TextBlock
@@ -200,7 +248,8 @@ export type StreamBlock =
   | WidgetBlock
   | PlanBlock
   | QuestionBlock
-  | PermissionBlock;
+  | PermissionBlock
+  | BackgroundTaskBlock;
 
 export interface StreamUsage {
   model: string;

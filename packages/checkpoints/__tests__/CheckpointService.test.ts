@@ -265,6 +265,70 @@ describe('CheckpointService (real git)', () => {
     expect(await fs.readFile(path.join(repoDir, 'a.txt'), 'utf-8')).toBe('v2\n');
   });
 
+  it('restores from a plain commit, for mounts whose base is not a checkpoint', async () => {
+    // The case the per-file discard could never serve: a git folder mounted
+    // in place, whose "base" is its own HEAD commit rather than any
+    // checkpoint row. `restoreFromRevision` takes the commit directly.
+    const g = (...args: string[]) =>
+      realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
+        cwd: repoDir,
+        timeout: 15_000,
+      });
+    await g('init', '-q');
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'v1\n');
+    await fs.writeFile(path.join(repoDir, 'b.txt'), 'keep\n');
+    await g('add', '-A');
+    await g('commit', '-q', '-m', 'initial');
+    const head = (await git.revParse(repoDir, 'HEAD'))!;
+    expect(head).toBeTruthy();
+
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'v2\n');
+    await fs.writeFile(path.join(repoDir, 'b.txt'), 'touched\n');
+    await fs.writeFile(path.join(repoDir, 'extra.txt'), 'new file\n');
+
+    // Scoped to one path: the other edits must survive untouched, which is
+    // what makes this usable as a per-file "Undo".
+    const result = await service.restoreFromRevision(
+      WORKSPACE_ID,
+      '.',
+      repoDir,
+      head,
+      ['a.txt'],
+      'Worktree HEAD',
+    );
+
+    expect(result.restoredPaths).toEqual(['a.txt']);
+    expect(await fs.readFile(path.join(repoDir, 'a.txt'), 'utf-8')).toBe('v1\n');
+    expect(await fs.readFile(path.join(repoDir, 'b.txt'), 'utf-8')).toBe('touched\n');
+    expect(await fs.readFile(path.join(repoDir, 'extra.txt'), 'utf-8')).toBe('new file\n');
+
+    // Undoable in turn, exactly like a checkpoint restore.
+    const pre = await repo.findById(result.preRestoreCheckpointId!);
+    expect(pre?.kind).toBe('pre_restore');
+    expect(pre?.label).toBe('Before rewind to Worktree HEAD');
+    await service.restore(pre!, repoDir);
+    expect(await fs.readFile(path.join(repoDir, 'a.txt'), 'utf-8')).toBe('v2\n');
+  });
+
+  it('restoring from a revision deletes files the revision never had', async () => {
+    const g = (...args: string[]) =>
+      realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
+        cwd: repoDir,
+        timeout: 15_000,
+      });
+    await g('init', '-q');
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'v1\n');
+    await g('add', '-A');
+    await g('commit', '-q', '-m', 'initial');
+    const head = (await git.revParse(repoDir, 'HEAD'))!;
+
+    await fs.writeFile(path.join(repoDir, 'added.txt'), 'agent wrote this\n');
+
+    const result = await service.restoreFromRevision(WORKSPACE_ID, '.', repoDir, head);
+    expect(result.deletedPaths).toContain('added.txt');
+    await expect(fs.access(path.join(repoDir, 'added.txt'))).rejects.toThrow();
+  });
+
   it('round-trips line endings byte-exactly (no autocrlf rewriting)', async () => {
     // Regression: with the user's global `core.autocrlf=true` (the Windows
     // default), `add` normalises CRLF→LF and `checkout-index` re-expands

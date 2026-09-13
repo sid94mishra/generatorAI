@@ -7,7 +7,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle2, XCircle, Clock, Eye, ExternalLink, Ban } from 'lucide-react';
-import { useBackgroundTasks, useBackgroundTaskDigest } from '@/hooks/queries.js';
+import { useBackgroundTasks, useBackgroundTaskDigest, useChat } from '@/hooks/queries.js';
+import { useStreamStore } from '@/stores/streamStore.js';
+import type { BackgroundTaskBlock } from '@generatorai/client-core';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
 import { cn } from '@/lib/utils.js';
@@ -92,10 +94,39 @@ function TaskDigest({ chatId, taskId }: { chatId: string; taskId: string }) {
   );
 }
 
+/**
+ * Live progress for running workers comes from the orchestrator's own stream
+ * (`chat.background_task.progress` folds into a BackgroundTaskBlock), so the
+ * tab shows the same "Edit · 12 tools" the collapsed block in the chat shows,
+ * without polling the worker chats.
+ */
+function useLiveTaskBlocks(sessionId: string | undefined): Map<string, BackgroundTaskBlock> {
+  const blocks = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.blocks : undefined));
+  return React.useMemo(() => {
+    const map = new Map<string, BackgroundTaskBlock>();
+    for (const b of blocks ?? []) if (b.type === 'background_task') map.set(b.taskId, b);
+    return map;
+  }, [blocks]);
+}
+
+function LiveProgress({ block }: { block: BackgroundTaskBlock | undefined }) {
+  if (!block || (block.status !== 'running' && block.status !== 'spawned')) return null;
+  const step = block.currentStep ?? 'starting';
+  return (
+    <div className="mt-1 truncate text-[10px] text-[var(--color-muted-foreground)]" data-testid="bg-task-live">
+      <span className="font-medium text-[var(--color-foreground)]">{step}</span>
+      {block.toolCalls > 0 && <span> · {block.toolCalls} tool{block.toolCalls === 1 ? '' : 's'}</span>}
+      {block.lastText && <span className="italic"> · {block.lastText}</span>}
+    </div>
+  );
+}
+
 export function BackgroundTasksPanel({ chatId }: BackgroundTasksPanelProps) {
   const navigate = useNavigate();
   const platform = usePlatform() as HttpPlatformClient;
   const { data, isLoading } = useBackgroundTasks(chatId);
+  const { data: chat } = useChat(chatId);
+  const live = useLiveTaskBlocks(chat?.sessionId);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const tasks = data?.tasks ?? [];
@@ -133,6 +164,7 @@ export function BackgroundTasksPanel({ chatId }: BackgroundTasksPanelProps) {
                         {t.model && <span className="rounded bg-[var(--color-muted)]/60 px-1 py-0.5 font-mono">{t.model}</span>}
                         {t.reviewRounds > 0 && <span>· {t.reviewRounds} review{t.reviewRounds === 1 ? '' : 's'}</span>}
                       </div>
+                      <LiveProgress block={live.get(t.taskId)} />
                     </div>
                     <div className="flex items-center gap-1">
                       <Button

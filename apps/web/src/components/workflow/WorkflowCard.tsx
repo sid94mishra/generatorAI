@@ -81,7 +81,7 @@ export function WorkflowCard({
         selectionMode && selected && 'ring-2 ring-primary bg-primary/5',
       )}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-start gap-2">
         <div className="flex min-w-0 items-center gap-2">
           {selectionMode ? (
             <button
@@ -113,9 +113,11 @@ export function WorkflowCard({
           )}
         </div>
         {hasActions && (
-          // `relative` keeps these above the stretched link overlay so their
-          // own clicks land on the button rather than navigating the card.
-          <div className="relative flex shrink-0 items-center gap-0.5 opacity-0 transition-all group-hover:opacity-100 focus-within:opacity-100">
+          // Collapsed until hover/focus rather than merely transparent: hidden
+          // actions that still took up room truncated every title to make
+          // space for invisible icons. `relative` keeps them above the
+          // stretched link overlay so their clicks land on the button.
+          <div className="relative ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex group-focus-within:flex">
             {onEdit && (
               <Button onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit"
                 variant="ghost" size="icon-sm"

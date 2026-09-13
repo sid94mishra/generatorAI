@@ -145,9 +145,41 @@ interface TaskRecord {
   lastError?: string;
   /** Pending teardown of the worker's harness runtime — see `scheduleWorkerRelease`. */
   releaseTimer?: ReturnType<typeof setTimeout>;
+
+  // ── Live progress (chat.background_task.progress) ──────────────────────
+  /** Epoch ms the worker's current turn started — the progress event's `startedAt`. */
+  startedAt: number;
+  /** What the worker is doing right now: a tool name, or 'thinking' / 'writing'. */
+  currentStep?: string;
+  /** Tool calls observed on this worker since it was spawned. */
+  toolCalls: number;
+  /**
+   * True while this worker holds one slot in `activeByParent`, i.e. the wave
+   * is waiting on it. Taken at spawn and at every follow-up, released by the
+   * FIRST `harness.idle` of that activation. A worker's stop produces two
+   * idles (the provider's and the chat service's); counted twice, one
+   * cancelled worker read as the whole wave settling and the orchestrator was
+   * re-prompted while its other workers were still running.
+   */
+  waveSlot: boolean;
+  /** Epoch ms of the last emitted progress event (the throttle's clock). */
+  lastProgressAt: number;
 }
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Minimum gap between two `chat.background_task.progress` events for the SAME
+ * worker. A worker streaming tokens produces hundreds of events a second and
+ * every one of them would cross the parent's SSE connection and re-render the
+ * orchestrator's transcript; the transcript only needs to say what the worker
+ * is on right now. A final, unthrottled emit rides on `harness.idle` so the
+ * last state is never the one the throttle swallowed.
+ */
+const PROGRESS_THROTTLE_MS = 500;
+
+/** How much of a worker's assistant text rides on a progress event. */
+const PROGRESS_TEXT_TAIL = 240;
 
 /** What a worker inherits from the orchestrator that spawned it (G15). */
 export interface InheritedWorkerCapabilities {
@@ -273,6 +305,27 @@ export class OrchestratorService {
    * termination concept and must not depend on a caching flag.
    */
   private waveOpen = new Set<string>();
+  /**
+   * parentChatIds whose orchestrator has gone idle since its last wave — the
+   * user's request was answered, so the NEXT spawn belongs to a new request.
+   *
+   * Without this the termination arbiter judged a new user turn by the
+   * previous turn's wave: its workers had (rightly) reported `converged`, so
+   * every later `spawn_background_agent` on the chat was refused with
+   * "convergence threshold met" and the orchestrator either did the work
+   * itself or re-used stale workers. Measured live (2026-09-13): the second
+   * delegation on an orchestrator chat could not start a single worker. The
+   * time budget and wave cap are per request for the same reason — an
+   * orchestrator chat is a conversation, not one 30-minute job.
+   */
+  private episodeEnded = new Set<string>();
+  /**
+   * parentChatIds whose running workers were just stopped BY the platform
+   * (the orchestrator was stopped, rewound, archived or deleted). Their
+   * settling would otherwise read as "the wave finished" and re-prompt the
+   * orchestrator to consolidate — restarting a chat the user just stopped.
+   */
+  private suppressNudge = new Set<string>();
 
   private chatManagementService!: ChatManagementService;
   private workspaceManager?: WorkspaceManager;
@@ -341,9 +394,24 @@ export class OrchestratorService {
       return { ok: false, error: verdict.reason };
     }
 
-    // Enforce max workers per orchestrator.
+    // Enforce max CONCURRENT workers per orchestrator. Finished workers stay
+    // on the record (the panel lists them, their digests are re-readable) but
+    // they hold no slot: counting them made the cap a lifetime quota, so an
+    // orchestrator chat's fourth request could not start a worker at all.
+    // A worker holds a slot while it WORKS (spawned/running). One waiting in
+    // `needs_review` has finished its turn; its result is a digest to read,
+    // not a process to keep.
+    const isActive = (st: string | undefined): boolean => st === 'spawned' || st === 'running';
+    const active = new Set<string>();
+    for (const r of this.tasks.values()) {
+      if (r.parentChatId === parentChatId && isActive(r.status)) active.add(r.taskId);
+    }
+    // Rows the DB still holds as active from before a restart count too.
     const existing = await this.chatRepo.listBackgroundTasks(parentChatId).catch(() => []);
-    if (existing.length >= this.config.maxWorkers) {
+    for (const c of existing) {
+      if (isActive(c.backgroundTask?.status)) active.add(c.id);
+    }
+    if (active.size >= this.config.maxWorkers) {
       return {
         ok: false,
         error: `Worker limit reached (${this.config.maxWorkers}). Consolidate existing results instead of spawning more.`,
@@ -464,6 +532,12 @@ export class OrchestratorService {
     // consuming one of `maxWaves`.
     if (!this.waveOpen.has(parentChatId)) {
       this.waveOpen.add(parentChatId);
+      this.suppressNudge.delete(parentChatId);
+      if (this.episodeEnded.delete(parentChatId)) {
+        // A new request: the wave count and the clock start over.
+        this.waveCount.set(parentChatId, 0);
+        this.orchestrationStartedAt.set(parentChatId, Date.now());
+      }
       const nextWaveCount = (this.waveCount.get(parentChatId) ?? 0) + 1;
       this.waveCount.set(parentChatId, nextWaveCount);
       // Persist immediately (not just on dispose) so a restart mid-orchestration
@@ -485,14 +559,19 @@ export class OrchestratorService {
       wave: this.waveCount.get(parentChatId) ?? 1,
       reviewRounds: 0,
       lastAssistantText: '',
+      startedAt: Date.now(),
+      toolCalls: 0,
+      lastProgressAt: 0,
       idlePromise: Promise.resolve(),
       resolveIdle: () => {},
       firstOutput: Promise.resolve(),
       resolveFirstOutput: () => {},
       unsub: undefined,
+      waveSlot: false,
     };
     this.armIdle(record);
     this.tasks.set(record.taskId, record);
+    record.waveSlot = true;
     this.activeByParent.set(parentChatId, (this.activeByParent.get(parentChatId) ?? 0) + 1);
 
     // Track the wave leader's warmup (the first running worker of this wave).
@@ -570,6 +649,16 @@ export class OrchestratorService {
     record.reviewRounds += 1;
     record.status = 'running';
     record.lastAssistantText = '';
+    // Back in the wave: its settlement waits on this turn too.
+    if (!record.waveSlot) {
+      record.waveSlot = true;
+      this.activeByParent.set(record.parentChatId, (this.activeByParent.get(record.parentChatId) ?? 0) + 1);
+    }
+    // A follow-up is a new turn: its progress starts from now, not from the
+    // spawn, or the row would report an elapsed time spanning the idle gap.
+    record.startedAt = Date.now();
+    record.currentStep = undefined;
+    record.lastProgressAt = 0;
     // A follow-up within the grace window keeps the worker's process; the
     // release is re-armed when this turn goes idle.
     if (record.releaseTimer) {
@@ -633,13 +722,49 @@ export class OrchestratorService {
       return mem.map((t) => ({ taskId: t.taskId, taskName: t.taskName, status: t.status, model: t.model, reviewRounds: t.reviewRounds }));
     }
     const rows = await this.chatRepo.listBackgroundTasks(parentChatId).catch(() => []);
-    return rows.map((c) => ({
-      taskId: c.id,
-      taskName: c.backgroundTask?.taskName ?? c.name,
-      status: c.backgroundTask?.status ?? 'spawned',
-      model: c.model,
-      reviewRounds: 0,
+    return Promise.all(rows.map(async (c) => {
+      let status: BackgroundTaskStatus = c.backgroundTask?.status ?? 'spawned';
+      // A worker the DB still calls running has no record in this process, so
+      // nothing is driving it: its turn died with the previous server process
+      // (background turns are fire-and-forget and are not resumed on boot).
+      // Left as "running" it spun in the panel forever and blocked the
+      // concurrency cap. Say what happened instead.
+      if (status === 'running' || status === 'spawned') {
+        status = 'failed';
+        await this.chatRepo.updateBackgroundTaskStatus(c.id, 'failed').catch(() => undefined);
+        void this.emitToParent(this.parentSessions.get(parentChatId) ?? '', {
+          kind: 'chat.background_task.failed',
+          data: { chatId: parentChatId, parentChatId, taskId: c.id, taskName: c.backgroundTask?.taskName ?? c.name, error: 'Interrupted by a server restart' },
+        });
+      }
+      return {
+        taskId: c.id,
+        taskName: c.backgroundTask?.taskName ?? c.name,
+        status,
+        model: c.model,
+        reviewRounds: 0,
+      };
     }));
+  }
+
+  /**
+   * Stop every worker still running under an orchestrator — the user pressed
+   * Stop on the orchestrator (or rewound past the turn that spawned them), so
+   * nobody will read what they produce. Claude Code and Codex end their
+   * sub-agents on interrupt for the same reason; leaving ours running kept
+   * burning tokens on files the orchestrator would never verify.
+   */
+  async cancelWorkersForParent(parentChatId: string, reason = 'orchestrator stopped'): Promise<string[]> {
+    const cancelled: string[] = [];
+    this.suppressNudge.add(parentChatId);
+    for (const record of this.tasks.values()) {
+      if (record.parentChatId !== parentChatId) continue;
+      if (record.status !== 'running' && record.status !== 'spawned') continue;
+      record.lastError = `cancelled:${reason}`;
+      await this.cancelBackgroundAgent(record.taskId);
+      cancelled.push(record.taskId);
+    }
+    return cancelled;
   }
 
   /** Cancel a running worker (abort its turn). */
@@ -663,6 +788,7 @@ export class OrchestratorService {
    * its live stream) or when the chat is gone/archived.
    */
   private async nudgeParentAfterWave(parentChatId: string): Promise<void> {
+    if (this.suppressNudge.has(parentChatId)) return;
     try {
       const streaming = this.chatManagementService.getStreamingChatIds?.() ?? [];
       if (streaming.includes(parentChatId)) return;
@@ -693,6 +819,8 @@ export class OrchestratorService {
   private async evaluateTermination(
     parentChatId: string,
   ): Promise<{ shouldStop: true; reason: string } | { shouldStop: false }> {
+    // The previous request is over; nothing about it may block this one.
+    if (this.episodeEnded.has(parentChatId)) return { shouldStop: false };
     const { startedAt } = await this.getOrInitWaveState(parentChatId);
 
     // 1. Time budget — wall-clock limit on the whole orchestration.
@@ -827,19 +955,67 @@ export class OrchestratorService {
     record.resolveFirstOutput = resolveFirst;
   }
 
+  /**
+   * Emit `chat.background_task.progress` for one worker on the PARENT chat
+   * scope — the same path `chat.background_task.status` takes, so the parent's
+   * transcript and the Background Tasks panel see it on one connection.
+   *
+   * Throttled to at most one event per `PROGRESS_THROTTLE_MS` per worker
+   * (`force` bypasses it for the final emit on idle). Silently no-ops when the
+   * worker is not in a live wave.
+   */
+  private emitWorkerProgress(record: TaskRecord, force = false): void {
+    const now = Date.now();
+    if (!force && now - record.lastProgressAt < PROGRESS_THROTTLE_MS) return;
+    record.lastProgressAt = now;
+    void this.emitToParent(record.parentSessionId, {
+      kind: 'chat.background_task.progress',
+      data: {
+        chatId: record.parentChatId,
+        parentChatId: record.parentChatId,
+        taskId: record.taskId,
+        taskName: record.taskName,
+        status: record.status,
+        ...(record.currentStep ? { currentStep: record.currentStep } : {}),
+        ...(record.lastAssistantText
+          ? { lastText: record.lastAssistantText.slice(-PROGRESS_TEXT_TAIL) }
+          : {}),
+        toolCalls: record.toolCalls,
+        startedAt: record.startedAt,
+      },
+    });
+  }
+
   private onWorkerEvent(record: TaskRecord, event: { kind: string; data?: unknown }): void {
     const data = event.data as Record<string, unknown> | undefined;
     switch (event.kind) {
       case 'harness.token':
-      case 'harness.reasoning_delta':
-      case 'harness.tool_start':
         record.resolveFirstOutput();
+        record.currentStep = 'writing';
+        this.emitWorkerProgress(record);
         break;
+      case 'harness.reasoning_delta':
+        record.resolveFirstOutput();
+        record.currentStep = 'thinking';
+        this.emitWorkerProgress(record);
+        break;
+      case 'harness.tool_start': {
+        record.resolveFirstOutput();
+        record.toolCalls += 1;
+        const tool = (data?.['tool'] as string) || 'tool';
+        record.currentStep = tool;
+        // A tool call is the single most informative thing a worker does, so
+        // it is never swallowed by the throttle — the row would otherwise sit
+        // on a stale "writing" for the length of a long build.
+        this.emitWorkerProgress(record, true);
+        break;
+      }
       case 'harness.message_complete': {
         const content = (data?.['content'] as string) ?? '';
         if (content.length > record.lastAssistantText.length) {
           record.lastAssistantText = content;
         }
+        this.emitWorkerProgress(record);
         break;
       }
       case 'harness.error':
@@ -854,6 +1030,10 @@ export class OrchestratorService {
         record.lastError = `cancelled:${(data?.['reason'] as string) ?? 'user_abort'}`;
         break;
       case 'harness.idle': {
+        // A second idle for the same activation (a stop emits one from the
+        // provider and one from the chat service) has nothing left to settle.
+        if (!record.waveSlot) break;
+        record.waveSlot = false;
         record.resolveFirstOutput();
         const hasDigest = /<TASK_RESULT>/i.test(record.lastAssistantText);
         // F4 fix: the original condition `record.lastError && !record.lastAssistantText`
@@ -899,6 +1079,11 @@ export class OrchestratorService {
           this.activeByParent.set(record.parentChatId, remaining);
         }
         const finalStatus: BackgroundTaskStatus = record.status;
+        // One last, unthrottled progress event so the worker's row settles on
+        // what it actually ended on rather than on whatever the throttle let
+        // through last.
+        record.currentStep = undefined;
+        this.emitWorkerProgress(record, true);
         void this.chatRepo.updateBackgroundTaskStatus(record.taskId, finalStatus).catch(() => {});
         this.scheduleWorkerRelease(record);
         void this.writeScratchpad(record.parentChatId);
@@ -927,7 +1112,9 @@ export class OrchestratorService {
     try {
       const msgs = await this.messageRepo.getByChatId(record.taskId, 50, 0);
       for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i]!.role === 'assistant') {
+        // A stopped turn leaves an empty assistant row; the answer is the last
+        // one that actually says something.
+        if (msgs[i]!.role === 'assistant' && msgs[i]!.content.trim()) {
           candidates.push(msgs[i]!.content);
           break;
         }
@@ -1090,6 +1277,15 @@ export class OrchestratorService {
    */
   private onParentEvent(parentChatId: string, event: { kind: string }): void {
     if (event.kind !== 'harness.idle') return;
+    // The orchestrator answered; whatever it spawns next is a new request.
+    // The persisted wave state goes too: it exists so a restart MID-request
+    // keeps the request's budget, and a request that has been answered has no
+    // budget left to keep — read back after a restart it refused every later
+    // spawn with "time budget exhausted" once the chat was half an hour old.
+    if (!this.waveOpen.has(parentChatId)) {
+      this.episodeEnded.add(parentChatId);
+      void this.chatRepo.clearOrchestratorWaveState(parentChatId).catch(() => undefined);
+    }
     let changed = false;
     for (const record of this.tasks.values()) {
       if (record.parentChatId === parentChatId && record.status === 'needs_review') {

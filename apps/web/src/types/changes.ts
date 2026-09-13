@@ -20,6 +20,8 @@ export interface ChangeRevision {
   treeish?: string;
   label?: string;
   createdAt?: string;
+  /** True when `treeish` is a real commit (its blobs are EOL-normalised). */
+  normalized?: boolean;
 }
 
 export interface ChangeSummaryFile {
@@ -33,24 +35,73 @@ export interface ChangeSummaryFile {
   oldBlob?: string;
   newBlob?: string;
   lang?: string;
+  /**
+   * True while the file's head blob still equals the blob the user accepted.
+   * Any later edit moves the head blob and the file silently stops being
+   * kept — there is no flag to invalidate.
+   */
+  kept?: boolean;
 }
 
 export interface ChangeSummaryRepo {
   alias: string;
   kind: ChangeRepoKind;
   hasBaseline: boolean;
+  /**
+   * THIS mount's resolved base / head.
+   *
+   * Optional only so an older server still type-checks. Read these, not the
+   * response-level pair: that one describes the FIRST mount, which is why
+   * "Undo" used to be hidden (or aimed at the wrong tree) on every other one.
+   */
+  base?: ChangeRevision;
+  head?: ChangeRevision;
   stats: { files: number; additions: number; deletions: number };
   files: ChangeSummaryFile[];
+  keptCount?: number;
   paths?: string[];
 }
 
 export interface ChangeSummary {
   workspaceId: string;
   hasGit: boolean;
+  /** The FIRST repo's resolution. Prefer `repos[].base` / `repos[].head`. */
   base: ChangeRevision;
   head: ChangeRevision;
   repos: ChangeSummaryRepo[];
   stats: { files: number; additions: number; deletions: number };
+  keptCount?: number;
+}
+
+// ── Per-file review (Keep / Undo) ──
+
+/** One file, as both review routes name it. Path is repo-relative. */
+export interface ChangeFileRef {
+  alias: string;
+  path: string;
+}
+
+export interface ReviewChangesResult {
+  workspaceId: string;
+  kept: number;
+  unkept: number;
+  keptCount: number;
+}
+
+export interface DiscardChangesResult {
+  workspaceId: string;
+  mounts: Array<{
+    alias: string;
+    ok: boolean;
+    restored: number;
+    deleted: number;
+    preRestoreCheckpointId?: string | null;
+    error?: string;
+  }>;
+  restoredCount: number;
+  deletedCount: number;
+  discardedCount: number;
+  skipped: Array<{ alias: string; path: string; reason: string }>;
 }
 
 export interface ChangeFileVersions {

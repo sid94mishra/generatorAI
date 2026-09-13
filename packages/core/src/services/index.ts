@@ -20,7 +20,12 @@ export { ErrorHandler } from './ErrorHandler.js';
 // Workflow execution services
 export { SessionAllocator } from './SessionAllocator.js';
 export { ChatManagementService } from './ChatManagementService.js';
-export type { ChatManagementServiceExtensions } from './ChatManagementService.js';
+export type {
+  ChatManagementServiceExtensions,
+  RewindChatResult,
+  ForkChatResult,
+  InternalCreateChatExtras,
+} from './ChatManagementService.js';
 export { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
 export { DAGScheduler } from './DAGScheduler.js';
 export { StageExecutionService } from './StageExecutionService.js';
@@ -137,7 +142,16 @@ export type { ParsedAgentMarkdown } from './agentMarkdown.js';
 export { WorkspaceManager, WorkspaceTreeBusyError, resolveWorktreePath } from './WorkspaceManager.js';
 export type { WorkspaceManagerConfig, WorkspaceTeardownPhase } from './WorkspaceManager.js';
 export { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
-export type { MountSource } from './WorkspaceCheckpointService.js';
+export type { MountSource, RestoreTurnResult } from './WorkspaceCheckpointService.js';
+export {
+  groupTurns,
+  lastAnchor,
+  firstAnchor,
+  turnsAreAnchored,
+  buildConversationSeed,
+  applyConversationSeed,
+} from './chatTranscript.js';
+export type { ChatTurn } from './chatTranscript.js';
 export {
   MountService,
   buildExposure,

@@ -73,6 +73,15 @@ export interface ChatMessageMetadata {
    *  replaces content-based matching which double-counts when identical
    *  text is sent twice. */
   turnId?: string;
+  /**
+   * The provider-side coordinate of this assistant turn: the Claude message
+   * uuid or the Codex turn id the turn ended on. It is what a conversation
+   * fork or rewind is expressed in (`forkSession.upToMessageId`,
+   * `thread/fork.lastTurnId`, `thread/revert.beforeTurnId`). Absent for
+   * providers with no native branching (Copilot) and for turns recorded before
+   * anchors were captured — those fall back to the synthetic rewind.
+   */
+  providerAnchor?: { kind: 'message' | 'turn'; id: string };
   /** Widget instance IDs rendered as part of this message.
    *  The client uses these to reconstitute inline widget blocks on
    *  history replay (see chatMessageToBlocks). */

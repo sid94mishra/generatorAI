@@ -123,6 +123,7 @@ export function IconButton({
   badge = false,
   selected,
   haptic = 'tap',
+  testID,
 }: {
   icon: React.ReactNode;
   onPress?: () => void;
@@ -140,6 +141,8 @@ export function IconButton({
   /** Toggle buttons pass this so the state is announced, not just drawn. */
   selected?: boolean;
   haptic?: HapticIntent;
+  /** For E2E: an icon-only control has no text for a test to find. */
+  testID?: string;
 }): React.ReactElement {
   const box = compact ? 32 : MIN_TARGET;
   const slop = Math.max(0, Math.round((MIN_TARGET - box) / 2));
@@ -149,6 +152,7 @@ export function IconButton({
       accessibilityLabel={accessibilityLabel}
       {...(accessibilityHint ? { accessibilityHint } : {})}
       {...(selected === undefined ? {} : { accessibilityState: { selected } })}
+      {...(testID ? { testID } : {})}
       disabled={disabled}
       haptic={haptic}
       onPress={onPress}

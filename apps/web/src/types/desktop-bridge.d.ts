@@ -23,6 +23,8 @@ interface GeneratorAIDesktopNativeBrowserDescriptor {
   workspaceId: string;
   currentUrl: string | null;
   title: string | null;
+  /** Page favicon as a data URL, when one has loaded. */
+  favicon: string | null;
   isLoading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;

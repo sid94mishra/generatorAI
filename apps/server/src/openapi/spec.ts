@@ -488,6 +488,88 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         responses: { '202': { description: 'Accepted — stream via /api/stream' } },
       },
     },
+    '/api/chats/{id}/transcript': {
+      get: {
+        tags: ['Chats'],
+        summary: 'Whole transcript, oldest first (no page cap)',
+        parameters: [
+          idParam,
+          { in: 'query', name: 'format', schema: { type: 'string', enum: ['json', 'markdown'] } },
+        ],
+        responses: {
+          '200': {
+            description: 'Transcript',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    chatId: { type: 'string' },
+                    name: { type: 'string' },
+                    messages: { type: 'array', items: { $ref: '#/components/schemas/ChatMessage' } },
+                  },
+                },
+              },
+              'text/markdown': { schema: { type: 'string' } },
+            },
+          },
+        },
+      },
+    },
+    '/api/chats/{id}/rewind': {
+      post: {
+        tags: ['Chats'],
+        summary: 'Rewind to the start of a turn (files, conversation or both)',
+        description:
+          'Files go back to the snapshot taken before the turn on every mount; the conversation drops the turn and everything after it, natively when the provider can branch (Claude, Codex) and otherwise by seeding a fresh provider session with a digest of the surviving turns.',
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  turnId: { type: 'string' },
+                  scope: { type: 'string', enum: ['all', 'code', 'conversation'] },
+                },
+                required: ['turnId'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Rewound — `conversation` is native | synthetic | skipped' },
+          '404': { description: 'Unknown turn' },
+          '409': { description: 'CHAT_BUSY — a turn is still streaming' },
+        },
+      },
+    },
+    '/api/chats/{id}/fork': {
+      post: {
+        tags: ['Chats'],
+        summary: 'Branch the conversation after a turn into a new chat',
+        description:
+          'The fork shares the parent workspace (files as they are now) and copies the transcript through the chosen turn (default: the last). Provider history is copied natively where supported, else seeded.',
+        parameters: [idParam],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { turnId: { type: 'string' }, name: { type: 'string' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Forked — `{ chat, turnId?, conversation }`' },
+          '404': { description: 'Unknown turn' },
+          '409': { description: 'CHAT_BUSY — a turn is still streaming' },
+        },
+      },
+    },
 
     // ── Agents (AGT-01) ──
     // Reading the catalog needs `read:workflows`; AUTHORING an agent grants

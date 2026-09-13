@@ -46,8 +46,8 @@ export function GeneralSection() {
         <SettingsCard title="About GeneratorAI">
           <p className="text-xs text-muted-foreground">
             An autonomous AI agent platform with a provider-agnostic harness — run agents on
-            GitHub Copilot or the Claude Agent SDK. Supports multi-session workflow execution
-            with real-time streaming.
+            GitHub Copilot, Claude Code, Codex and more, side by side. Supports multi-session
+            workflow execution with real-time streaming.
           </p>
           <div className="mt-3 flex gap-3 text-xs text-muted-foreground">
             <span>Version {__APP_VERSION__}</span>

@@ -861,17 +861,31 @@ export class HarnessRegistry {
     return this.isStale();
   }
 
+  /**
+   * The types a refresh probes: the managed providers, plus every breadth
+   * provider (`codex` / `opencode` / `acp`) this deployment has configured.
+   *
+   * Configuring one used to change nothing observable — `refresh()` walked
+   * `AUTO_PROBE_TYPES` alone, so a configured, installed, signed-in Codex never
+   * got a status, never became `ready`, and never reached the model picker.
+   * Unconfigured breadth types stay out, which is what keeps them from making
+   * the snapshot permanently stale (see `isStale`).
+   */
+  private probeTypes(): HarnessType[] {
+    return ALL_HARNESS_TYPES.filter((t) => this.isConfigurable(t));
+  }
+
   /** The entries a refresh actually probes. */
   private autoProbeEntries(): Entry[] {
-    return AUTO_PROBE_TYPES.map((t) => this.entries.get(t)!);
+    return this.probeTypes().map((t) => this.entries.get(t)!);
   }
 
   /**
    * Is the cached snapshot old enough to warrant a background refresh?
    *
-   * Computed over the AUTO-PROBED types only. Asking it of all five was a
-   * silent performance defect: `refresh()` probes copilot and claude-agent and
-   * nothing else, so codex/opencode/acp never get a `checkedAt` and were
+   * Computed over the PROBED types only. Asking it of all five was a silent
+   * performance defect: `refresh()` probes only the managed and configured
+   * providers, so an unconfigured codex/opencode/acp never gets a `checkedAt` and was
    * therefore *permanently* stale. Every `getAllModels()` and every
    * `resolveProviderForModel()` — i.e. every new chat and every model lookup —
    * consequently fired `requestRefresh()`, whose success path writes the whole
@@ -895,9 +909,9 @@ export class HarnessRegistry {
     const fresh = (e: Entry): boolean =>
       !force && e.status.checkedAt != null && Date.now() - e.status.checkedAt < this.statusTtlMs;
 
-    // Only the AUTO-PROBED types can ever be fresh — nothing sets `checkedAt`
-    // on codex/opencode/acp. Asking `every entry` here meant this early return
-    // never fired; see `isStale()` for the same bug's expensive half.
+    // Only the PROBED types can ever be fresh — nothing sets `checkedAt` on an
+    // unconfigured codex/opencode/acp. Asking `every entry` here meant this
+    // early return never fired; see `isStale()` for the same bug's expensive half.
     if (!force && this.autoProbeEntries().every(fresh)) return this.getStatuses();
     if (this.refreshInFlight) return this.refreshInFlight;
 
@@ -907,11 +921,11 @@ export class HarnessRegistry {
     const gen = ++this.#generation;
 
     this.refreshInFlight = (async () => {
-      // Only probe the managed providers (copilot, claude-agent).
-      // codex / opencode / acp require live external services; they are
-      // surfaced in the status snapshot only when explicitly configured.
+      // The managed providers, plus whichever breadth providers are configured
+      // (codex / opencode / acp need an external binary or server, so they are
+      // probed only once `buildConfig` supplies their section).
       await Promise.all(
-        AUTO_PROBE_TYPES.map(async (type) => {
+        this.probeTypes().map(async (type) => {
           const entry = this.entries.get(type)!;
           if (fresh(entry)) return;
           try {

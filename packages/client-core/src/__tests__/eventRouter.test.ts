@@ -309,3 +309,60 @@ describe('StreamEventRouter — non-streaming providers', () => {
     expect(effects.some((e) => e.op === 'processInlineToolCalls')).toBe(true);
   });
 });
+
+// ── `harness.session_info` is an allow-list, and the list is provider-neutral.
+//
+// Codex's plan, provider warnings and compaction boundary land on the same
+// infoTypes Claude already uses, so neither provider gets its own branch here —
+// and everything OUTSIDE the list stays silent, which is what keeps a chatty
+// provider from filling the transcript with per-chunk frames.
+
+describe('StreamEventRouter — session_info notices', () => {
+  const info = (infoType: string, message: string, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'harness.session_info', data: { infoType, message, ...extra } });
+
+  const systemMessages = (effects: StreamEffect[]) =>
+    effects
+      .filter((e) => e.op === 'addSystemMessage')
+      .map((e) => {
+        const m = e as { message: string; category: string };
+        return `${m.category}:${m.message}`;
+      });
+
+  it('files a plan update as its own category so the timeline can expand it', () => {
+    const effects = run([info('plan_update', 'Plan: 1/2 done\n[x] a\n[ ] b')]);
+    expect(systemMessages(effects)).toEqual(['plan:Plan: 1/2 done\n[x] a\n[ ] b']);
+  });
+
+  it('surfaces provider warnings, retries and reroutes rather than dropping them', () => {
+    const effects = run([
+      info('provider_warning', 'Unknown key "modl" (~/.codex/config.toml)'),
+      info('provider_retry', 'Codex is retrying: upstream hiccup'),
+      info('model_rerouted', 'Model rerouted from a to b (highRiskCyberActivity)'),
+    ]);
+    // `warning`, not `system`: a plain system note is dropped by the timeline,
+    // and these are precisely the things the user has to be told.
+    expect(systemMessages(effects)).toEqual([
+      'warning:Unknown key "modl" (~/.codex/config.toml)',
+      'warning:Codex is retrying: upstream hiccup',
+      'warning:Model rerouted from a to b (highRiskCyberActivity)',
+    ]);
+  });
+
+  it('records a compaction boundary, whichever provider reports it', () => {
+    const effects = run([info('compact_boundary', 'Context compacted (auto)')]);
+    expect(systemMessages(effects)).toEqual(['system:Context compacted (auto)']);
+  });
+
+  it('stays silent for the high-volume informational types', () => {
+    // These are per-chunk or per-poll frames that no surface reads; admitting
+    // them would put a transcript row on every line of command output.
+    const effects = run([
+      info('tool_progress', 'line one\n', { toolCallId: 'c1' }),
+      info('turn_diff', 'diff --git a/x b/x'),
+      info('rate_limits', 'Codex: primary 42% used'),
+      info('pending_messages', '1'),
+    ]);
+    expect(systemMessages(effects)).toEqual([]);
+  });
+});

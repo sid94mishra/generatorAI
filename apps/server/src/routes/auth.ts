@@ -19,6 +19,7 @@ import {
   DEFAULT_DEVICE_SCOPES,
   DEFAULT_MOBILE_SCOPES,
   DpopError,
+  isNonceChallenge,
   HIGH_RISK_SCOPES,
   PairingError,
   SCOPES,
@@ -177,7 +178,7 @@ export function createAuthRoutes(container: Container): Router {
         provenThumbprint = result.thumbprint;
       } catch (err) {
         const code = err instanceof DpopError ? err.code : 'INVALID_PROOF';
-        if (err instanceof DpopError && err.code === 'IAT_OUT_OF_WINDOW') {
+        if (err instanceof DpopError && isNonceChallenge(err.code)) {
           res.set('DPoP-Nonce', await dpop.issueNonce());
         }
         res.status(401).json({
@@ -289,7 +290,7 @@ export function createAuthRoutes(container: Container): Router {
         });
         thumbprint = result.thumbprint;
       } catch (err) {
-        if (err instanceof DpopError && err.code === 'IAT_OUT_OF_WINDOW') {
+        if (err instanceof DpopError && isNonceChallenge(err.code)) {
           res.set('DPoP-Nonce', await dpop.issueNonce());
         }
         res.status(401).json({

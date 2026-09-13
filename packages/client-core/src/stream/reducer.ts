@@ -32,6 +32,7 @@ import { parseInlineToolCalls } from './parseInlineToolCalls.js';
 import type { ContextUsageSnapshot } from './contextUsage.js';
 import {
   DEFAULT_STREAM,
+  type BackgroundTaskBlock,
   type PermissionBlock,
   type PlanBlock,
   type QuestionBlock,
@@ -404,6 +405,89 @@ export function completeHook(
   });
 }
 
+// ── Background tasks (orchestrator workers) ─────────────────────
+
+/**
+ * Insert or merge one orchestrator worker's block, keyed by `taskId`.
+ *
+ * The `chat.background_task.*` family is five separate events describing ONE
+ * worker over its lifetime, so this is an upsert rather than an append: the
+ * `spawned` event creates the block and every later event narrows it. Fields
+ * the incoming patch does not mention are preserved — `progress` carries no
+ * `model` and `completed` carries no `currentStep`, and losing either would
+ * make the row flicker between half-populated states.
+ *
+ * Returns the ORIGINAL record when the patch changes nothing, so a repeated
+ * status event is a genuine no-op rather than a re-render.
+ */
+export function upsertBackgroundTask(
+  streams: StreamsRecord,
+  sessionId: string,
+  task: Partial<Omit<BackgroundTaskBlock, 'type' | 'blockId'>> & { taskId: string },
+): StreamsRecord {
+  if (!task.taskId) return streams;
+  const existing = existingOrDefault(streams, sessionId);
+  const index = existing.blocks.findIndex(
+    (b) => b.type === 'background_task' && b.taskId === task.taskId,
+  );
+
+  if (index === -1) {
+    const block: BackgroundTaskBlock = {
+      type: 'background_task',
+      blockId: existing._nextBlockId,
+      taskId: task.taskId,
+      taskName: task.taskName ?? task.taskId,
+      status: task.status ?? 'running',
+      toolCalls: task.toolCalls ?? 0,
+      startedAt: task.startedAt ?? 0,
+      ...(task.model ? { model: task.model } : {}),
+      ...(task.currentStep ? { currentStep: task.currentStep } : {}),
+      ...(task.lastText ? { lastText: task.lastText } : {}),
+      ...(task.endedAt ? { endedAt: task.endedAt } : {}),
+      ...(task.summary ? { summary: task.summary } : {}),
+      ...(task.parentCallId ? { parentCallId: task.parentCallId } : {}),
+    };
+    return put(streams, sessionId, {
+      ...existing,
+      // A worker's progress is not the orchestrator's turn. While the parent
+      // is streaming its status stays; when it is idle (workers outlive the
+      // turn that spawned them, and a page reload starts from `idle`) the
+      // stream only needs to be non-idle so the row renders — `complete`
+      // keeps the composer enabled and the Stop button hidden. Escalating to
+      // `streaming` here made an idle orchestrator read "Generating response…"
+      // with its input disabled until the next reload.
+      status: existing.status === 'idle' ? liveStatus(existing, 'complete') : existing.status,
+      blocks: [...existing.blocks, block],
+      _nextBlockId: existing._nextBlockId + 1,
+    });
+  }
+
+  const prior = existing.blocks[index] as BackgroundTaskBlock;
+  // Only defined keys of the patch win; `undefined` means "unchanged".
+  const merged: BackgroundTaskBlock = { ...prior };
+  let changed = false;
+  for (const key of [
+    'taskName', 'model', 'status', 'currentStep', 'lastText',
+    'toolCalls', 'startedAt', 'endedAt', 'summary', 'parentCallId',
+  ] as const) {
+    const value = task[key];
+    if (value === undefined) continue;
+    if (prior[key] === value) continue;
+    (merged as unknown as Record<string, unknown>)[key] = value;
+    changed = true;
+  }
+  // A settled worker never goes back to a live step line.
+  if (task.status && task.status !== 'running' && task.status !== 'spawned' && prior.currentStep) {
+    delete (merged as { currentStep?: string }).currentStep;
+    changed = true;
+  }
+  if (!changed) return streams;
+
+  const blocks = existing.blocks.slice();
+  blocks[index] = merged;
+  return put(streams, sessionId, { ...existing, blocks });
+}
+
 // ── System messages ─────────────────────────────────────────────
 
 export function addSystemMessage(
@@ -629,13 +713,21 @@ export function clearStreamText(streams: StreamsRecord, sessionId: string): Stre
 export function clearStream(streams: StreamsRecord, sessionId: string): StreamsRecord {
   const existing = streams[sessionId];
   // Invariant 4 — callers that truly want widgets gone must close them first.
-  const priorWidgets = (existing?.blocks ?? []).filter((b) => b.type === 'widget');
+  // Orchestrator workers still running are kept for the same reason: they
+  // live only in the event stream, and they outlive the turn that spawned
+  // them — the transcript cleanup after that turn used to drop their rows
+  // while they were still working. Settled workers go with the rest.
+  const carried = (existing?.blocks ?? []).filter(
+    (b) =>
+      b.type === 'widget' ||
+      (b.type === 'background_task' && (b.status === 'running' || b.status === 'spawned')),
+  );
 
   return put(streams, sessionId, {
     ...DEFAULT_STREAM,
     // Invariant 2.
     _nextBlockId: existing?._nextBlockId ?? 0,
-    blocks: priorWidgets,
+    blocks: carried,
     // Invariant 5.
     usage: existing?.usage ?? null,
     contextUsage: existing?.contextUsage ?? null,

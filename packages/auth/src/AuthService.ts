@@ -19,7 +19,7 @@
 // `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK=1`.
 // ────────────────────────────────────────────────────────────────
 
-import { DpopError } from './dpop.js';
+import { DpopError, isNonceChallenge } from './dpop.js';
 import type { DpopVerifier } from './dpop.js';
 import { TokenError, principalFromClaims } from './TokenService.js';
 import type { TokenService } from './TokenService.js';
@@ -191,8 +191,9 @@ export class AuthService {
       });
     } catch (err) {
       if (err instanceof DpopError) {
-        if (err.code === 'IAT_OUT_OF_WINDOW') {
-          // Hand the client a server nonce so a skewed clock can still connect.
+        if (isNonceChallenge(err.code)) {
+          // Hand the client a server nonce: a skewed clock can still connect,
+          // and a client holding a spent nonce gets a fresh one.
           const nonce = await this.options.dpop.issueNonce();
           throw new AuthError(err.message, 'NONCE_REQUIRED', 401, nonce);
         }

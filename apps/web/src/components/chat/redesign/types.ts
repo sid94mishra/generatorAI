@@ -58,6 +58,12 @@ export interface TimelineStep {
    *  "open in terminal" affordance. */
   isShell?: boolean;
   /**
+   * The chat id of an orchestrator background WORKER this step stands for.
+   * Present only on `kind: 'subagent'` steps derived from a `background_task`
+   * block; the row turns it into an "Open worker chat" link.
+   */
+  workerChatId?: string;
+  /**
    * An image this step produced (a browser screenshot the agent took).
    * `relativePath` is workspace-relative; the row resolves it to a URL via
    * the stream-actions context, which knows the workspace.

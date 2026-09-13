@@ -174,7 +174,7 @@ export function AgentsListPage() {
               leftIcon={<Plus className="h-4 w-4" />}
               data-testid="agent-create-button"
             >
-              New agent
+              New Agent
             </Button>
           </div>
         }
@@ -190,6 +190,7 @@ export function AgentsListPage() {
         />
         <Select
           aria-label="Filter by scope"
+          className="sm:w-40 sm:shrink-0"
           value={scope}
           onChange={(v) => setScope(v as AgentScope | '')}
           options={[
@@ -201,6 +202,7 @@ export function AgentsListPage() {
         />
         <Select
           aria-label="Filter by role"
+          className="sm:w-40 sm:shrink-0"
           value={role}
           onChange={(v) => setRole(v as AgentRole | '')}
           options={[
@@ -218,7 +220,7 @@ export function AgentsListPage() {
           hint="Create an agent to bundle instructions with a fixed set of skills, MCP servers and capabilities."
           action={
             <Button onClick={() => navigate('/agents/new')} leftIcon={<Plus className="h-4 w-4" />}>
-              New agent
+              New Agent
             </Button>
           }
         />

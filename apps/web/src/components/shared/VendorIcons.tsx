@@ -92,8 +92,8 @@ export function GeminiMark({ className }: VendorIconProps): React.JSX.Element {
 }
 
 /**
- * Neutral mark for a provider with no dedicated brand glyph (`codex`,
- * `opencode`, `acp`). W48 — these used to fall through to the GitHub
+ * Neutral mark for a provider with no dedicated brand glyph (`opencode`,
+ * `acp`). W48 — these used to fall through to the GitHub
  * Copilot mark below, which misattributed three unrelated harness
  * providers to a fourth vendor's logo. A plain glyph is honest about
  * "no brand mark yet" instead of borrowing someone else's.
@@ -122,8 +122,8 @@ export type VendorId = keyof typeof VENDOR_ICONS;
  * Brand mark for a harness/agent provider id.
  *
  * `claude-agent` resolves to the Claude Code mark (that provider is the
- * Claude Agent SDK). `copilot` is GitHub's mark. Everything else — including
- * `codex` / `opencode` / `acp`, the three breadth-adapter harnesses that used
+ * Claude Agent SDK). `copilot` is GitHub's mark, `codex` OpenAI's. The rest —
+ * `opencode` / `acp`, breadth-adapter harnesses that used
  * to fall through to the Copilot mark and read as "GitHub Copilot" in the
  * picker — gets the neutral `GenericProviderMark` instead of another
  * vendor's logo (W48 provider honesty).
@@ -134,7 +134,9 @@ export function ProviderBrandIcon({ provider, className }: { provider: string; c
   }
   if (provider === 'anthropic') return <AnthropicMark className={className} />;
   if (provider === 'copilot') return <GitHubCopilotMark className={className} />;
-  if (provider === 'openai') return <OpenAIMark className={className} />;
+  // Codex is OpenAI's own agent, so its maker's mark is the honest one — the
+  // same mapping the mobile client uses.
+  if (provider === 'openai' || provider === 'codex') return <OpenAIMark className={className} />;
   if (provider === 'gemini' || provider === 'google') return <GeminiMark className={className} />;
   return <GenericProviderMark className={className} />;
 }

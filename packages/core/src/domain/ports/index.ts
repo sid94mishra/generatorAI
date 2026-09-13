@@ -38,6 +38,10 @@ export type {
   ConversationResult,
   HarnessAgentInfo,
   ToolBinaryAttachment,
+  ConversationAnchor,
+  ForkConversationOptions,
+  ForkConversationResult,
+  RewindConversationOptions,
 } from './IAgentHarness.js';
 export { TOOL_BINARY_KEY, takeToolBinaries } from './IAgentHarness.js';
 
@@ -129,6 +133,11 @@ export type { IWorktreeRepository } from './IWorktreeRepository.js';
 export type { IExecutionWorkspaceRepository } from './IExecutionWorkspaceRepository.js';
 export type { IWorkspaceMountRepository, WorkspaceMountUpdate } from './IWorkspaceMountRepository.js';
 export type { IWorkspaceArtifactRepository } from './IWorkspaceArtifactRepository.js';
+export type {
+  IWorkspaceFileReviewRepository,
+  WorkspaceFileReviewRow,
+  WorkspaceFileReviewKey,
+} from './IWorkspaceFileReviewRepository.js';
 
 // ── Integrated Browser Port ──
 export type {

@@ -7,7 +7,7 @@
 import { useStreamStore } from '../stores/streamStore.js';
 import type { PersistedEvent } from '@generatorai/shared';
 import type { SystemCategory, QuestionBlock } from '../stores/streamStore.js';
-import type { ContextUsageSnapshot, ToolFileOp } from '@generatorai/client-core';
+import type { ContextUsageSnapshot, StreamEffect, ToolFileOp } from '@generatorai/client-core';
 
 /** Apply a persisted `harness.context_usage` payload to the stream store. */
 function applyContextUsage(
@@ -31,6 +31,61 @@ function applyContextUsage(
     breakdown: (data['breakdown'] as ContextUsageSnapshot['breakdown']) ?? undefined,
     apiUsage: (data['apiUsage'] as ContextUsageSnapshot['apiUsage']) ?? undefined,
   });
+}
+
+type BackgroundTaskPatch = Extract<StreamEffect, { op: 'upsertBackgroundTask' }>['task'];
+
+/**
+ * Orchestrator workers that are still running when the page loads.
+ *
+ * A worker is a real chat: nothing it streams reaches the orchestrator's
+ * session, only the `chat.background_task.*` family does — and those blocks
+ * live nowhere but the stream store. A reload mid-run therefore lost every
+ * worker row from the transcript and the live line from the Background Tasks
+ * tab until the worker's next progress event happened to arrive. Fold the
+ * family here, one block per worker, for workers whose LAST known state is
+ * still live. Settled workers are left out on purpose: their history is in
+ * the persisted messages and the tab, and re-adding a row for every worker
+ * an orchestrator ever had would pile them up at the end of each reload.
+ */
+function replayLiveBackgroundTasks(
+  store: ReturnType<typeof useStreamStore.getState>,
+  streamKey: string,
+  events: PersistedEvent[],
+): void {
+  const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  const patches = new Map<string, BackgroundTaskPatch>();
+  for (const ev of events) {
+    if (!ev.kind.startsWith('chat.background_task.')) continue;
+    const data = (ev.data ?? {}) as Record<string, unknown>;
+    const taskId = str(data['taskId']);
+    if (!taskId) continue;
+    const status = ev.kind === 'chat.background_task.spawned'
+      ? 'spawned'
+      : ev.kind === 'chat.background_task.failed'
+        ? 'failed'
+        : str(data['status']);
+    const prior = patches.get(taskId) ?? { taskId };
+    const summary = str(data['summary']) ?? str(data['error']);
+    patches.set(taskId, {
+      ...prior,
+      ...(str(data['taskName']) ? { taskName: str(data['taskName'])! } : {}),
+      ...(str(data['model']) ? { model: str(data['model'])! } : {}),
+      ...(status ? { status } : {}),
+      ...(str(data['currentStep']) ? { currentStep: str(data['currentStep'])! } : {}),
+      ...(str(data['lastText']) ? { lastText: str(data['lastText'])! } : {}),
+      ...(num(data['toolCalls']) !== undefined ? { toolCalls: num(data['toolCalls'])! } : {}),
+      ...(num(data['startedAt']) !== undefined ? { startedAt: num(data['startedAt'])! } : {}),
+      ...(summary ? { summary } : {}),
+    });
+  }
+  const effects: StreamEffect[] = [];
+  for (const task of patches.values()) {
+    if (task.status !== 'running' && task.status !== 'spawned') continue;
+    effects.push({ op: 'upsertBackgroundTask', key: streamKey, task });
+  }
+  if (effects.length > 0) store.applyEffects(effects);
 }
 
 /**
@@ -245,6 +300,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
         applyContextUsage(store, streamKey, d);
         break;
       }
+      replayLiveBackgroundTasks(store, streamKey, events);
       return;
     }
   }
@@ -657,4 +713,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
       store.completeStream(streamKey);
     }
   }
+  // After the turn bookkeeping (which may have cleared the stream) so the
+  // rows are what remains, not what gets cleared.
+  replayLiveBackgroundTasks(store, streamKey, events);
 }

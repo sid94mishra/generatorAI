@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import * as path from 'node:path';
-import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider } from '@generatorai/agent-harness-providers';
+import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
 import { readAudioPreferences } from './settings/audio.js';
@@ -72,6 +72,7 @@ import {
   DrizzleComputerUseRepository,
   DrizzleCheckpointRepository,
   DrizzleReviewRepository,
+  DrizzleWorkspaceFileReviewRepository,
   DrizzlePlanRepository,
   DrizzleAgentInteractionRepository,
   // Widget & Extension repositories
@@ -351,9 +352,41 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // lands at `<root>/apps/agent-host/dist/index.js`.
   const agentHostSupervisor = new AgentHostSupervisor();
 
+  // Codex joins the provider set whenever its CLI can be found — configured
+  // path, `CODEX_CLI_PATH`, PATH, or the copy bundled with the ChatGPT desktop
+  // app. Resolved once at boot; without a CLI there is nothing to run, so the
+  // provider is left unconfigured and Settings reports it as not installed.
+  const codexCommand = await resolveCodexCommand({ configuredPath: config.harness?.codex?.binaryPath });
+  if (codexCommand) {
+    logger.info(`[Container] Codex CLI found (${codexCommand.source}): ${codexCommand.path}`);
+  } else {
+    logger.info('[Container] Codex CLI not found — install Codex or set CODEX_CLI_PATH to enable the Codex provider');
+  }
+  const codexHome = harnessHomeDir('codex') ?? process.env['CODEX_HOME'];
+
   /** Per-provider construction options, resolved lazily by the registry. */
   const buildHarnessConfig = (type: HarnessType) => ({
     type,
+    codex: type === 'codex' && codexCommand ? {
+      binaryPath: codexCommand.command,
+      args: [...codexCommand.argsPrefix, 'app-server'],
+      env: {
+        ...codexCommand.env,
+        // Codex keeps sign-in, config and history under its home. The user's
+        // own is used unless homes are isolated per harness (see above).
+        ...(codexHome ? { CODEX_HOME: codexHome } : {}),
+      },
+      defaultModel: config.harness?.codex?.defaultModel,
+      defaultCwd: config.artifactsDir,
+      // `on-request` + `workspace-write`: commands inside the workspace sandbox
+      // run without prompting, and anything Codex wants to do beyond it is
+      // asked through the chat's approval UI. A chat's own permission mode
+      // still overrides this per turn (see CodexProvider.approvalPolicyForTurn).
+      approvalPolicy: config.harness?.codex?.approvalPolicy ?? 'on-request',
+      sandboxMode: config.harness?.codex?.sandboxMode ?? 'workspace-write',
+      clientName: 'generatorai',
+      logger,
+    } : undefined,
     copilot: type === 'copilot' ? {
       useStdio: config.copilot.useStdio,
       defaultModel: config.copilot.defaultModel,
@@ -1247,6 +1280,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
   );
 
+  // A turn-level rewind rewrites several mounts in one call; each rewrite must
+  // drop the memoised working tree before it is announced (see the restore
+  // route, which does the same inline).
+  workspaceCheckpointService.setRestoreListener((repoDir) => changeSummaryService.invalidateWorkingTree(repoDir));
+
   // "What files are here?" — the browsing counterpart to the change summary.
   // Kept as its own service because its cache lifetime is completely
   // different: the path list only moves when files are created or deleted,
@@ -1259,6 +1297,16 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // service re-hashes the anchored lines against current file content and
   // walks the patch to find where they moved to.
   const reviewRepo = new DrizzleReviewRepository(db);
+
+  // ── Per-file review state ("Keep") ──
+  //
+  // One row per file the user has accepted, at the exact blob they accepted.
+  // The Changes tab reads it to sort reviewed files out of the way; the
+  // review/discard routes write it. Deliberately not a service: there is no
+  // behaviour beyond the four row operations, and the interesting rule (a
+  // row stops counting the moment its blob no longer matches the head) lives
+  // where the summary is assembled.
+  const workspaceFileReviewRepo = new DrizzleWorkspaceFileReviewRepository(db);
   const reviewThreadService = new ReviewThreadService(
     reviewRepo,
     {
@@ -1299,6 +1347,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // `storage`: rows only, nothing native — must not run ahead of handle release.
   workspaceManager.registerBeforeDelete(async (workspaceId) => {
     await reviewThreadService.deleteWorkspace(workspaceId);
+  }, 'storage');
+
+  // Same for "kept" rows: they describe files in this workspace and nothing
+  // else, so they must not outlive it.
+  workspaceManager.registerBeforeDelete(async (workspaceId) => {
+    await workspaceFileReviewRepo.deleteWorkspace(workspaceId);
   }, 'storage');
 
   // Re-anchor review comments whenever the workspace changes.
@@ -2136,6 +2190,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     workspaceTreeService,
     reviewThreadService,
     reviewRepo,
+    workspaceFileReviewRepo,
 
     // Integrated Browser (v13)
     browserService,
@@ -2592,6 +2647,8 @@ export interface Container {
   workspaceTreeService: WorkspaceTreeService;
   reviewThreadService: ReviewThreadService;
   reviewRepo: DrizzleReviewRepository;
+  /** Per-file "Keep" rows behind the Changes tab's review flow. */
+  workspaceFileReviewRepo: DrizzleWorkspaceFileReviewRepository;
 
   /** Integrated Browser service (v13). Optional per workspace/chat/run. */
   browserService: BrowserService;

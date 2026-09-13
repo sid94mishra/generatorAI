@@ -27,7 +27,9 @@ import type { IAgentHarness, HarnessModel } from '@generatorai/core';
 
 let dir: string;
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'harness-registry-')); });
-afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+// Retries: a routing lookup kicks off a background refresh whose disk-cache
+// write can land while the directory is being removed (ENOTEMPTY / EBUSY).
+afterEach(async () => { await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
 
 /** A harness stub that answers `getModels()` and counts how often it is asked. */
 function stubHarness(models: HarnessModel[], onGetModels: () => void): IAgentHarness {

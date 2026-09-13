@@ -5288,8 +5288,9 @@ body {
 }
 
 /* == Focus Visible (WCAG 2.1 AA) == */
-/* cmdk command inputs — and any other search field that sits inside a
-   bordered dialog/popover (`data-inline-search`) — provide their own
+/* cmdk command inputs — and any other input that sits inside a bordered
+   container which draws the focus ring itself (`data-inline-search`: search
+   fields in dialogs/popovers, chip/tag fields) — provide their own
    affordance, so they opt out of the offset ring. */
 button:focus-visible,
 a:focus-visible,

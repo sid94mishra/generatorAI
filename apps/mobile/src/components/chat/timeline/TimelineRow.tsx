@@ -26,7 +26,9 @@ import {
   FileDiff,
   FileImage,
   FilePlus2,
+  Ellipsis,
   FileText,
+  GitFork,
   Globe,
   LayoutGrid,
   ListTree,
@@ -46,8 +48,8 @@ import type { StreamBlock, StreamHookInvocation, StreamUsage } from '@generatora
 
 import { Markdown } from '../../markdown/Markdown';
 import { Badge } from '../../ui/primitives';
-import { Button } from '../../ui/Button';
-import { ContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
+import { Button, IconButton } from '../../ui/Button';
+import { ContextMenu, useContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
 import { Spinner } from '../../ui/States';
 import { useToast } from '../../ui/Toast';
 import { useTheme } from '../../../theme/ThemeProvider';
@@ -123,12 +125,29 @@ async function copyText(text: string, toast: ReturnType<typeof useToast>): Promi
 // ── Dispatcher ───────────────────────────────────────────────────
 
 export const TimelineRowView = memo(
-  function TimelineRowView({ row }: { row: TimelineRow }): React.ReactElement | null {
+  function TimelineRowView({
+    row,
+    turnId,
+  }: {
+    row: TimelineRow;
+    /**
+     * The server turn this row belongs to, when it came from history.
+     *
+     * Only the settled prose row uses it — it is the anchor for "Fork from
+     * here". Live rows have no server turn id yet, and rows derived from
+     * tool calls are not a place anyone means to branch from.
+     */
+    turnId?: string | undefined;
+  }): React.ReactElement | null {
     switch (row.kind) {
       case 'thinking':
         return row.live ? <LiveThinkingRow blockId={row.block.blockId} /> : <ThinkingRow block={row.block} />;
       case 'text':
-        return row.live ? <LiveTextRow blockId={row.block.blockId} /> : <TextRow content={row.block.content} />;
+        return row.live ? (
+          <LiveTextRow blockId={row.block.blockId} />
+        ) : (
+          <TextRow content={row.block.content} turnId={turnId} />
+        );
       case 'tool':
         return <ToolStepRow step={row.step} />;
       case 'group':
@@ -149,7 +168,7 @@ export const TimelineRowView = memo(
         return null;
     }
   },
-  (prev, next) => rowsEqual(prev.row, next.row),
+  (prev, next) => prev.turnId === next.turnId && rowsEqual(prev.row, next.row),
 );
 
 function UsageRow({ usage }: { usage: StreamUsage }): React.ReactElement {
@@ -206,10 +225,10 @@ function LiveThinkingRow({ blockId }: { blockId: number }): React.ReactElement |
 
 // ── Settled prose ────────────────────────────────────────────────
 
-function useTextMenu(content: string): ContextMenuItem[] {
+function useTextMenu(content: string, turnId?: string | undefined): ContextMenuItem[] {
   const toast = useToast();
   const { colors } = useTheme();
-  const { readAloud } = useTimelineActions();
+  const { readAloud, onCopyTranscript, onForkFrom } = useTimelineActions();
   return useMemo(() => {
     const items: ContextMenuItem[] = [
       {
@@ -225,15 +244,57 @@ function useTextMenu(content: string): ContextMenuItem[] {
         onPress: () => readAloud(content),
       });
     }
+    // History actions hang off the ANSWER, not the prompt: "fork from here"
+    // means "keep everything up to and including this reply, then diverge".
+    // They are only offered on a settled history row, which is the only kind
+    // that knows its server turn id.
+    if (onCopyTranscript) {
+      items.push({
+        label: 'Copy transcript',
+        detail: 'The whole chat, as markdown.',
+        testID: 'copy-transcript',
+        icon: <Copy size={18} color={colors.foreground} />,
+        onPress: onCopyTranscript,
+      });
+    }
+    if (onForkFrom && turnId) {
+      items.push({
+        label: 'Fork from here',
+        detail: 'A new chat that shares this one\u2019s files and its history up to this point.',
+        testID: 'fork-chat',
+        icon: <GitFork size={18} color={colors.foreground} />,
+        onPress: () => onForkFrom(turnId),
+      });
+    }
     return items;
-  }, [content, toast, colors.foreground, readAloud]);
+  }, [content, toast, colors.foreground, readAloud, onCopyTranscript, onForkFrom, turnId]);
 }
 
-function TextRow({ content }: { content: string }): React.ReactElement {
-  const items = useTextMenu(content);
+/**
+ * Settled prose, with the same two routes to its menu the user bubble has:
+ * long-press anywhere, or the explicit "\u22ef" under the text. See the header
+ * of `UserMessageRow` for why both exist.
+ */
+function TextRow({ content, turnId }: { content: string; turnId?: string | undefined }): React.ReactElement {
+  const items = useTextMenu(content, turnId);
+  const { colors } = useTheme();
+  const { open } = useContextMenu();
   return (
     <ContextMenu items={items} title="Agent message" accessibilityLabel={content}>
-      <Markdown content={content} />
+      <View className="gap-0.5">
+        <Markdown content={content} />
+        <View className="flex-row">
+          <IconButton
+            testID="assistant-message-actions"
+            accessibilityLabel="Message actions"
+            accessibilityHint="Copy, copy the transcript, or fork from here"
+            variant="ghost"
+            compact
+            icon={<Ellipsis size={16} color={colors['muted-foreground']} />}
+            onPress={() => open(items, { title: 'Agent message' })}
+          />
+        </View>
+      </View>
     </ContextMenu>
   );
 }

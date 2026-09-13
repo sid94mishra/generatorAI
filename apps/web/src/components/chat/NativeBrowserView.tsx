@@ -131,6 +131,7 @@ export function NativeBrowserView({ tabId, workspaceId, onUrlChange, onTitleChan
       if (cancelled) return;
       onUrlChange?.(descriptor.currentUrl);
       onTitleChange?.(descriptor.title);
+      if (descriptor.favicon) onFaviconChange?.(descriptor.favicon);
       // Restore the page this tab had open before it was torn down. Skipped
       // when the view already carries a real page (tab reuse) so we never
       // clobber live navigation state.
@@ -176,6 +177,10 @@ export function NativeBrowserView({ tabId, workspaceId, onUrlChange, onTitleChan
       const y = Math.max(0, Math.floor(snap(rect.top)));
       const w = Math.max(0, Math.floor(snap(rect.width)));
       const h = Math.max(0, Math.floor(snap(rect.height)));
+      // A collapsed container (its tab hidden, the pane closing) is not a
+      // place to put the view: sending it moved the view to the window origin.
+      // Keep the last real bounds; visibility is handled by the loop below.
+      if (w < 4 || h < 4) return;
       if (x === lastX && y === lastY && w === lastW && h === lastH) return;
       lastX = x; lastY = y; lastW = w; lastH = h;
       void api.setBounds(tabId, { x, y, width: w, height: h }).catch(() => undefined);

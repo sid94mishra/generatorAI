@@ -78,6 +78,10 @@ export interface IChatMessageRepository {
    */
   latestBySessionIds(sessionIds: readonly string[]): Promise<Map<string, ChatMessage>>;
   deleteBySession(sessionId: string): Promise<void>;
+  /** Delete specific rows (rewind drops the tail of a chat). */
+  deleteByIds(ids: readonly string[]): Promise<void>;
+  /** Replace one row's metadata (anchor re-keying after a provider fork). */
+  updateMetadata(id: string, metadata: ChatMessage['metadata']): Promise<void>;
 }
 
 // ── Artifact Repository ──

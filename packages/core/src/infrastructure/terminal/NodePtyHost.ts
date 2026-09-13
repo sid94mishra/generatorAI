@@ -119,8 +119,20 @@ export class NodePtyHost implements ITerminalHost {
         handleFlowControl: true,
       });
     } catch (err) {
+      const detail = (err as Error).message;
+      // On POSIX, node-pty exec's a prebuilt `spawn-helper` to set up the
+      // controlling terminal. Package managers routinely drop that file's
+      // exec bit, and the addon then reports only `posix_spawnp failed` —
+      // which reads like a bad shell or a missing cwd and sends people
+      // chasing the wrong thing. Name the real cause and the fix.
+      const looksLikePermission =
+        process.platform !== 'win32' && /posix_spawnp|EACCES|permission denied/i.test(detail);
       throw new Error(
-        `[NodePtyHost] spawn failed shell=${shell} cwd=${options.cwd}: ${(err as Error).message}`,
+        `[NodePtyHost] spawn failed shell=${shell} cwd=${options.cwd}: ${detail}` +
+          (looksLikePermission
+            ? " — node-pty's spawn-helper is likely missing its executable bit;" +
+              ' run `node scripts/fix-native-exec-bits.mjs` (or reinstall dependencies) to restore it.'
+            : ''),
       );
     }
 

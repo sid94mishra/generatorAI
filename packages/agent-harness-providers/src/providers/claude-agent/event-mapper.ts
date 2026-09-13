@@ -57,8 +57,11 @@ function buildTokenPayload(text: string) {
   return { text };
 }
 
-function buildMessageCompletePayload(content: string) {
-  return { content };
+function buildMessageCompletePayload(content: string, providerMessageId?: string) {
+  // The assistant message uuid is the coordinate a conversation fork or
+  // rewind is expressed in (`forkSession.upToMessageId`), so it rides along
+  // with the text it closed; the chat service keeps the last one of a turn.
+  return providerMessageId ? { content, providerMessageId } : { content };
 }
 
 function buildReasoningDeltaPayload(text: string) {
@@ -386,6 +389,27 @@ function recallToolName(callId: string): string {
   return toolNamesByCallId.get(callId) ?? 'unknown';
 }
 
+/**
+ * The SDK's own delegation tools. A `Task`/`Agent` call IS a sub-agent: its
+ * `tool_use` opens one and its `tool_result` is the moment it finished.
+ */
+const SUBAGENT_TOOLS: ReadonlySet<string> = new Set(['task', 'agent']);
+
+function isSubagentTool(name: string): boolean {
+  return SUBAGENT_TOOLS.has(name.toLowerCase());
+}
+
+/** The sub-agent's own label, from the `Task` tool's arguments. */
+function describeSubagentTask(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const a = input as Record<string, unknown>;
+  for (const key of ['subagent_type', 'description', 'name']) {
+    const v = a[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
 export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEvent[] {
   const events: AgentEvent[] = [];
 
@@ -400,7 +424,7 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
           case 'text':
             events.push(createAgentEvent(
               'harness.message_complete',
-              buildMessageCompletePayload(block.text),
+              buildMessageCompletePayload(block.text, message.uuid),
             ));
             break;
 
@@ -415,6 +439,19 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
                 message.parent_tool_use_id ?? undefined,
               ),
             ));
+            if (isSubagentTool(block.name)) {
+              // The `task_started` system message is the SDK's own signal, but
+              // it is not guaranteed and carries no tool-call id, so the step
+              // it opened could never be matched to the call that settles it.
+              // This one does, and it arrives with the call itself.
+              events.push(createAgentEvent('harness.session_info', {
+                ...buildSessionInfoPayload(
+                  'subagent_started',
+                  `Sub-agent started: ${describeSubagentTask(block.input) ?? block.name}`,
+                ),
+                toolCallId: block.id,
+              }));
+            }
             break;
 
           case 'thinking':
@@ -459,11 +496,12 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
               ? block.content
               : '';
 
+          const completedTool = recallToolName(block.tool_use_id);
           events.push(createAgentEvent(
             'harness.tool_complete',
             {
               ...buildToolCompletePayload(
-                recallToolName(block.tool_use_id),
+                completedTool,
                 block.tool_use_id,
                 resultContent,
                 !block.is_error,
@@ -474,6 +512,19 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
                 : {}),
             },
           ));
+          if (isSubagentTool(completedTool)) {
+            // The SDK never emits a `task_completed` system message, so a
+            // sub-agent step opened by `task_started` had nothing to settle it
+            // and spun until the whole turn ended. The tool result IS the
+            // completion, and it arrives while the turn is still live.
+            events.push(createAgentEvent('harness.session_info', {
+              ...buildSessionInfoPayload(
+                block.is_error ? 'subagent_failed' : 'subagent_completed',
+                block.is_error ? 'Sub-agent failed' : 'Sub-agent completed',
+              ),
+              toolCallId: block.tool_use_id,
+            }));
+          }
         }
       }
       break;
@@ -707,12 +758,23 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
           events.push(createAgentEvent(kind, buildSessionInfoPayload('status', String(sys.status ?? ''))));
           break;
 
-        case 'task_notification':
+        case 'task_notification': {
+          // Forwarded as a sub-agent PROGRESS note (the transcript attaches it
+          // to the matching sub-agent step) as well as under its raw type, so
+          // nothing that already keys off `task_<status>` changes behaviour.
+          const summary = String(sys.summary ?? sys.description ?? sys.status ?? '');
           events.push(createAgentEvent(kind, buildSessionInfoPayload(
             `task_${String(sys.status ?? 'unknown')}`,
             `Task ${String(sys.task_id ?? '')}: ${String(sys.status ?? '')}`,
           )));
+          if (summary) {
+            events.push(createAgentEvent('harness.session_info', {
+              ...buildSessionInfoPayload('subagent_progress', summary),
+              ...(sys.task_id ? { toolCallId: String(sys.task_id) } : {}),
+            }));
+          }
           break;
+        }
 
         case 'task_started':
           events.push(createAgentEvent(kind, buildSessionInfoPayload(
@@ -721,12 +783,17 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
           )));
           break;
 
-        case 'task_progress':
-          events.push(createAgentEvent(kind, buildSessionInfoPayload(
-            'task_progress',
-            String(sys.summary ?? sys.description ?? ''),
-          )));
+        case 'task_progress': {
+          const summary = String(sys.summary ?? sys.description ?? '');
+          events.push(createAgentEvent(kind, buildSessionInfoPayload('task_progress', summary)));
+          if (summary) {
+            events.push(createAgentEvent('harness.session_info', {
+              ...buildSessionInfoPayload('subagent_progress', summary),
+              ...(sys.task_id ? { toolCallId: String(sys.task_id) } : {}),
+            }));
+          }
           break;
+        }
 
         case 'task_updated':
           events.push(createAgentEvent(kind, buildSessionInfoPayload(

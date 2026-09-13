@@ -31,9 +31,14 @@ import type { ChatModel } from '@/platform/HttpPlatformClient.js';
 // The LLM providers this build supports. Readiness (installed / connected /
 // authenticated) is reported live per provider by `useHarnessProviders()`;
 // providers that fail that probe render locked.
+// Labels match the server's `harnessTypeLabel`, so a provider is named the
+// same everywhere (a missing entry showed up as its raw id, e.g. "codex").
 export const PROVIDERS: Array<{ id: string; label: string }> = [
   { id: 'copilot', label: 'GitHub Copilot' },
   { id: 'claude-agent', label: 'Claude Code' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'opencode', label: 'OpenCode' },
+  { id: 'acp', label: 'ACP Agent' },
 ];
 
 /** Human label for a harness/agent provider id. */
@@ -183,9 +188,27 @@ export function ModelPicker({
     [providerInfos],
   );
 
+  /**
+   * Tab to browse when nothing is selected yet.
+   *
+   * `primary` is the server's *configured* preference and is reported whether
+   * or not that provider can actually serve models — a Copilot that was never
+   * signed in is still `primary`. Landing on it left anyone without that
+   * provider's CLI logged in staring at an empty "unavailable" list, with no
+   * hint that a different provider had a full catalog one click away; the
+   * common reading of that screen is "starting a chat is broken". This is not
+   * specific to any OS — it reproduces wherever the primary provider is
+   * unauthenticated — so prefer `primary` while it is ready and otherwise fall
+   * back to the first provider that is.
+   */
+  const defaultBrowseProvider = useMemo(() => {
+    if (providerInfos.find((p) => p.type === primaryProvider)?.ready) return primaryProvider;
+    return providerInfos.find((p) => p.ready)?.type ?? primaryProvider;
+  }, [providerInfos, primaryProvider]);
+
   // Browse the selected model's provider by default so opening the picker
   // lands on the tab the user is actually using.
-  const effectiveProviderTab = providerTab ?? selectedProvider;
+  const effectiveProviderTab = providerTab ?? selectedModel?.provider ?? defaultBrowseProvider;
   const activeTabInfo = providerInfos.find((p) => p.type === effectiveProviderTab);
 
   const filteredModels = useMemo(() => {
@@ -379,7 +402,7 @@ export function ModelPicker({
             )}
 
             {/* Model list (from the active provider — no hardcoding) */}
-            <div className="flex w-72 flex-col">
+            <div className="flex w-80 flex-col">
               {/* Search header — mirrors the app's standard in-dropdown search
                   (`CommandInput`): 4-unit icon, `text-sm`, fixed row height and
                   a full-opacity placeholder so the text is legible. */}

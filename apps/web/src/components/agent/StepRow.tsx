@@ -14,7 +14,9 @@ import {
   BookOpen, Search, FileEdit, Play, Wrench, Brain, Bot,
   Database, StickyNote, AlertCircle, CheckCircle2, ChevronRight, Circle, PauseCircle,
   FileDiff, SquareTerminal, TriangleAlert, XCircle, Image as ImageIcon, Layers,
+  ExternalLink,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useStreamActions, browserArtifactUrl } from '@/components/agent/streamActions.js';
 import { Button, Spinner } from '@/components/ui/index.js';
 import { InlineDiff } from '@/components/chat/InlineDiff.js';
@@ -260,6 +262,19 @@ export const StepRow = React.memo(function StepRow({ step, nested }: StepRowProp
               step.meta && <span>{step.meta}</span>
             )}
             {step.durationMs != null && <span>{formatDuration(step.durationMs)}</span>}
+            {step.workerChatId && (
+              <Link
+                to={`/chats/${step.workerChatId}`}
+                title="Open this worker's chat"
+                aria-label="Open worker chat"
+                data-testid="step-worker-chat-link"
+                className="inline-flex items-center gap-1 rounded p-0.5 text-[var(--color-muted-foreground)]/70 hover:bg-[var(--color-subtle)] hover:text-[var(--color-primary)]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="h-3 w-3" />
+                <span className="text-[10.5px]">Open worker chat</span>
+              </Link>
+            )}
             {imageUrl && step.image && (
               <ImageHoverPreview src={imageUrl} alt={step.image.label} caption={`Screenshot · ${step.image.label}`} side="left">
                 <a
@@ -321,9 +336,11 @@ export const StepRow = React.memo(function StepRow({ step, nested }: StepRowProp
         </div>
       )}
 
-      {/* expanded content */}
+      {/* expanded content — a worker's panel is a little taller than a tool's:
+          it holds a step line, a text excerpt and a model chip rather than one
+          blob of JSON, and 260px clipped it mid-excerpt. */}
       {expanded && (
-        <DetailPanel>
+        <DetailPanel className={step.workerChatId ? 'max-h-[360px]' : undefined}>
           {diff && (
             <InlineDiff
               hunks={diff.hunks}

@@ -33,7 +33,7 @@ import { isAppOriginForPermission } from './navigation-guard';
  */
 export const DESKTOP_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'sha256-BQvRuMaCC1KXd/oQ2/DaWqL9fxp/Evdu7lSis8R+8hQ='",
+  "script-src 'self' 'sha256-eMFruOxq9rBnZocnEAOZp+Z+m20i9sL8vOW+Ch9Xk9U='",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data: blob:",
@@ -114,9 +114,20 @@ export type PermissionPolicy = (request: PermissionRequest) => boolean;
 /** Deny everything — the browser-tab default. */
 export const denyAllPermissions: PermissionPolicy = () => false;
 
-/** The main window: microphone for the app's own origin, nothing else. */
+/**
+ * The main window: microphone and clipboard WRITES for the app's own origin,
+ * nothing else.
+ *
+ * `clipboard-sanitized-write` is what Chromium asks for behind
+ * `navigator.clipboard.writeText`. Denying it made every "Copy" in the app —
+ * transcript, code block — fail inside the desktop shell while working in a
+ * browser. Writing to the clipboard reveals nothing; reads stay denied.
+ */
 export function appWindowPermissionPolicy(getAppUrl: () => string | null): PermissionPolicy {
   return ({ permission, origin, mediaTypes }) => {
+    if (permission === 'clipboard-sanitized-write') {
+      return isAppOriginForPermission(origin, getAppUrl());
+    }
     if (permission !== 'media') return false;
     if (mediaTypes && mediaTypes.length > 0 && mediaTypes.some((t) => t !== 'audio')) return false;
     return isAppOriginForPermission(origin, getAppUrl());

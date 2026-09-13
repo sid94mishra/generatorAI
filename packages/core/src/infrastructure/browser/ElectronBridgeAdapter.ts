@@ -75,6 +75,8 @@ interface HostEntry {
   /** See ServerPlaywrightHost.HostEntry.refMap. */
   refMap: Map<string, string>;
   refCounter: number;
+  /** In-flight reconnect, shared by every caller — see `entryFor`. */
+  reconnecting?: Promise<HostEntry>;
   deferredResults: Map<string, {
     promise: Promise<InvokeFunctionResult>;
     settled: boolean;
@@ -100,6 +102,12 @@ export interface ElectronBridgeAdapterOptions {
 
 export class ElectronBridgeAdapter implements IBrowserBridge {
   private entries = new Map<string, HostEntry>();
+  /**
+   * In-flight `start()` per workspace. The scoped proxy admits ONE client and
+   * drops the previous one when another connects, so two concurrent starts
+   * would each evict the other's half-open connection.
+   */
+  private starting = new Map<string, Promise<BrowserHandle>>();
   /** Per-workspace scoped-proxy endpoint, pushed by Electron main via
    *  `setEndpoint()` (routes/internal-browser.ts). Populated lazily — a
    *  workspace has no entry until its desktop tab starts a proxy. */
@@ -148,6 +156,14 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
   async start(opts: BrowserStartOptions, observer?: BrowserHostObserver): Promise<BrowserHandle> {
     const existing = this.entries.get(opts.workspaceId);
     if (existing && !existing.disposed) return existing.handle;
+    const inFlight = this.starting.get(opts.workspaceId);
+    if (inFlight) return inFlight;
+    const started = this.startOnce(opts, observer).finally(() => this.starting.delete(opts.workspaceId));
+    this.starting.set(opts.workspaceId, started);
+    return started;
+  }
+
+  private async startOnce(opts: BrowserStartOptions, observer?: BrowserHostObserver): Promise<BrowserHandle> {
 
     const ep = await this.waitForEndpoint(opts.workspaceId);
     this.logger.info(`[ElectronBridgeAdapter] Connecting over CDP to scoped proxy for workspace ${opts.workspaceId}`);
@@ -815,6 +831,18 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
     if (!current) {
       throw new Error(`[ElectronBridgeAdapter] No CDP endpoint registered for workspace ${wid} (its browser tab may have been closed).`);
     }
+    // One reconnect for everyone. The scoped proxy admits a single client and
+    // evicts the previous one on each new connection, so concurrent callers
+    // (status polls racing an agent's tool call) each reconnecting knocked the
+    // others off mid-handshake — the agent's call and the polls then hung.
+    entry.reconnecting ??= this.reconnect(entry, current).finally(() => {
+      entry.reconnecting = undefined;
+    });
+    return entry.reconnecting;
+  }
+
+  private async reconnect(entry: HostEntry, current: string): Promise<HostEntry> {
+    const wid = entry.handle.workspaceId;
     this.logger.info(`[ElectronBridgeAdapter] Reconnecting CDP for workspace ${wid} (active tab changed)`);
     const browser = await chromium.connectOverCDP(current);
     const context = browser.contexts()[0];

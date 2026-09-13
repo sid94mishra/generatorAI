@@ -59,6 +59,9 @@ import type {
   HarnessAgentInfo,
   ProviderCapabilities,
   HarnessRuntimeDiagnostics,
+  ForkConversationOptions,
+  ForkConversationResult,
+  RewindConversationOptions,
 } from '@generatorai/core';
 import type { HookBridge } from '@generatorai/core';
 import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
@@ -227,6 +230,13 @@ interface TurnState {
   /** Set by Stop. Everything the runtime sends afterwards is discarded. */
   aborted: boolean;
   cancellation?: CancellationInFlight;
+  /**
+   * The live session this turn was pushed into (persistent mode). The
+   * session's reader is what settles the turn when the CLI answers the
+   * interrupt or dies — without the link a reader ending could settle a turn
+   * that belongs to a session rebuilt after it.
+   */
+  session?: PersistentSession;
   settled: boolean;
   /** Resolves when the turn has reached a terminal state, however it got there. */
   done: Promise<void>;
@@ -914,6 +924,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
       fullToolGating: this.hasDefaultToolGate(),
       sessionPersistence: true,
       budgetTracking: true,
+      // `forkSession(id, { upToMessageId })` copies the transcript file up to
+      // an assistant message uuid — no CLI process, no tokens. A rewind is the
+      // same fork with the chat re-pointed at the branch.
+      conversationFork: true,
+      conversationRewind: true,
       maxContextTokens: 200_000,
       // MINOR-4 fix: computerUse must be explicitly declared (L9 fail-closed).
       // Claude supports the native computer_use tool via its SDK.
@@ -1428,11 +1443,22 @@ export class ClaudeAgentProvider implements IAgentHarness {
   }
 
   runtimeDiagnostics(): HarnessRuntimeDiagnostics {
+    const slots = this.supervisor?.snapshot?.();
     return {
       liveConversations: this.conversations.size,
       liveSessions: this.sessions.size,
       warmSessions: this.warmSessions.size,
       maxLiveSessions: this.maxLiveConversations,
+      // Turns in flight vs. the concurrency cap, and how many are queued
+      // behind it. A queue that never drains while nothing runs is a leaked
+      // permit — the number that explains "every prompt hangs".
+      ...(slots
+        ? {
+            turnsInFlight: slots.activeExecutions,
+            maxConcurrentTurns: slots.maxConcurrentExecutions,
+            turnsQueued: slots.executionQueueDepth,
+          }
+        : {}),
     };
   }
 
@@ -1447,6 +1473,128 @@ export class ClaudeAgentProvider implements IAgentHarness {
    */
   getProviderSessionId(conversationId: string): string | undefined {
     return this.conversations.get(conversationId)?.sdkSessionId;
+  }
+
+  /** The SDK session id backing `conversationId`, from memory or the caller's record. */
+  private sourceSessionIdFor(conversationId: string, fallback: string | undefined): string | undefined {
+    return (
+      this.conversations.get(conversationId)?.sdkSessionId ??
+      this.evictedSessionIds.get(conversationId) ??
+      fallback
+    );
+  }
+
+  /**
+   * Branch the SDK transcript. `forkSession` copies the session file up to
+   * `upToMessageId` (inclusive) under a fresh id, remapping message uuids and
+   * keeping the parent chain, so the new session resumes with exactly the
+   * history the caller asked for and the source is untouched.
+   *
+   * Note: like `deleteSession` above, the standalone SDK function reads
+   * `CLAUDE_CONFIG_DIR` from THIS process, not the per-instance `homeDir`
+   * handed to the CLI child. Isolated homes are opt-in and rare; when they are
+   * on, the fork falls back to a resume-and-fork through the CLI.
+   */
+  async forkConversation(
+    conversationId: string,
+    options: ForkConversationOptions,
+  ): Promise<ForkConversationResult> {
+    const source = this.sourceSessionIdFor(conversationId, options.sourceProviderSessionId);
+    if (!source) {
+      throw new HarnessSessionError(`Conversation ${conversationId} has no SDK session to fork`);
+    }
+    const anchor = options.throughAnchor;
+    if (anchor && anchor.kind !== 'message') {
+      throw new HarnessSessionError(`Claude forks by message uuid; got a ${anchor.kind} anchor`);
+    }
+    const { sessionId: forkedId, anchorMap } = await this.forkSdkSession(source, anchor?.id);
+    await this.createConversation({
+      ...options.params,
+      conversationId: options.newConversationId,
+      resumeProviderSessionId: forkedId,
+    });
+    return { providerSessionId: forkedId, ...(anchorMap ? { anchorMap } : {}) };
+  }
+
+  /**
+   * Rewind = fork the transcript through `keepThrough` and re-point the
+   * conversation at the branch. The live CLI process (if any) holds the old
+   * history in memory, so it is closed; the next prompt resumes the branch.
+   */
+  async rewindConversation(
+    conversationId: string,
+    options: RewindConversationOptions,
+  ): Promise<ForkConversationResult> {
+    if (this.activeQueries.has(conversationId)) {
+      throw new HarnessSessionError(`Conversation ${conversationId} has a turn in flight`);
+    }
+    const live = this.sessions.get(conversationId);
+    if (live) await this.closeSession(live, 'conversation rewound');
+    this.discardWarmSession(conversationId, 'conversation rewound');
+    this.evictedSessionIds.delete(conversationId);
+
+    const config = this.conversations.get(conversationId);
+    if (!options.keepThrough) {
+      // Nothing survives: forget the session id so the next prompt starts cold.
+      if (config) delete config.sdkSessionId;
+      return {};
+    }
+    if (options.keepThrough.kind !== 'message') {
+      throw new HarnessSessionError(`Claude rewinds by message uuid; got a ${options.keepThrough.kind} anchor`);
+    }
+    const source = this.sourceSessionIdFor(conversationId, options.providerSessionId);
+    if (!source) {
+      throw new HarnessSessionError(`Conversation ${conversationId} has no SDK session to rewind`);
+    }
+    const { sessionId: forkedId, anchorMap } = await this.forkSdkSession(source, options.keepThrough.id);
+    if (config) {
+      config.sdkSessionId = forkedId;
+    } else {
+      // Not in memory: the caller resumes with the returned id.
+      this.evictedSessionIds.set(conversationId, forkedId);
+    }
+    return { providerSessionId: forkedId, ...(anchorMap ? { anchorMap } : {}) };
+  }
+
+  /**
+   * `forkSession` copies the transcript through `upToMessageId` under FRESH
+   * uuids (parent chain preserved, order preserved). The anchors the chat
+   * service persisted name the OLD uuids, so the two transcripts are aligned
+   * by position and an old→new map handed back; a fork whose messages cannot
+   * be read still succeeds, just without the map.
+   */
+  private async forkSdkSession(
+    sourceSessionId: string,
+    upToMessageId: string | undefined,
+  ): Promise<{ sessionId: string; anchorMap?: Record<string, string> }> {
+    const sdk = await loadClaudeSdk(); // W41
+    const result = await sdk.forkSession(sourceSessionId, {
+      ...(upToMessageId ? { upToMessageId } : {}),
+    });
+    if (!result?.sessionId) {
+      throw new HarnessSessionError(`forkSession(${sourceSessionId}) returned no session id`);
+    }
+    let anchorMap: Record<string, string> | undefined;
+    try {
+      const [before, after] = await Promise.all([
+        sdk.getSessionMessages(sourceSessionId, {}),
+        sdk.getSessionMessages(result.sessionId, {}),
+      ]);
+      const oldAssistants = before.filter((m) => m.type === 'assistant');
+      const newAssistants = after.filter((m) => m.type === 'assistant');
+      anchorMap = {};
+      for (let i = 0; i < newAssistants.length && i < oldAssistants.length; i += 1) {
+        const o = oldAssistants[i]!.uuid;
+        const n = newAssistants[i]!.uuid;
+        if (o && n && o !== n) anchorMap[o] = n;
+      }
+      if (Object.keys(anchorMap).length === 0) anchorMap = undefined;
+    } catch (err) {
+      if (this.verbose) {
+        console.warn(`[ClaudeAgentAdapter] could not align anchors after fork: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return { sessionId: result.sessionId, ...(anchorMap ? { anchorMap } : {}) };
   }
 
   getConversationWarnings(conversationId: string): ConversationWarning[] {
@@ -1575,6 +1723,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
       try {
         const session = await this.ensureSession(conversationId, config, options);
+        turn.session = session;
         // `closeHandle` is what stop()/cleanup reach for to kill the process.
         activeQuery.closeHandle = () => {
           void this.closeSession(session, 'turn handle closed');
@@ -3169,7 +3318,19 @@ export class ClaudeAgentProvider implements IAgentHarness {
         if (!turn || turn.aborted) {
           // Nothing is waiting for this (a cancelled turn, or output that
           // arrived after settlement) — record the session id and drop it.
-          if (message.type === 'result') this.rememberSdkSessionId(session, message);
+          if (message.type === 'result') {
+            this.rememberSdkSessionId(session, message);
+            // The CLI answered the interrupt: the aborted turn is over. This
+            // is what releases its execution permit and lets the next prompt
+            // on this conversation (which waits on `done`) start. Before this
+            // the aborted turn was never settled — four stopped workers held
+            // all four permits and every later turn queued forever behind
+            // "Waiting for a free agent slot".
+            if (turn && turn.session === session) {
+              turn.cancellation?.acknowledgeTerminal();
+              this.completeTurn(turn, 'aborted');
+            }
+          }
           continue;
         }
         await this.applyMessageToTurn(turn, message, session.query);
@@ -3187,6 +3348,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
     } finally {
       session.closed = true;
       if (this.sessions.get(conversationId) === session) this.sessions.delete(conversationId);
+      // The reader ended — the CLI exited, or the session was closed because an
+      // interrupt was never acknowledged. Whatever turn was pushed into THIS
+      // session is over, whether or not a `result` ever came.
+      const turn = this.turns.get(conversationId);
+      if (turn && !turn.settled && turn.session === session) {
+        turn.cancellation?.acknowledgeTerminal();
+        if (turn.aborted) this.completeTurn(turn, 'aborted');
+        else await this.failTurn(turn, new Error('The agent session ended before the turn produced a result'));
+      }
     }
   }
 

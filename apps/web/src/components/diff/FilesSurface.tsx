@@ -299,7 +299,9 @@ export function FilesSurface({
             title="Refresh"
             onClick={() => {
               void treeQuery.refetch();
-              void file.refetch();
+              // `refetch()` ignores `enabled`, so without a selection it asked
+              // the server for a file at path "undefined".
+              if (selection) void file.refetch();
             }}
             disabled={treeQuery.isRefetching}
           >
@@ -332,7 +334,10 @@ export function FilesSurface({
               sections.map((section) => (
                 <div
                   key={section.alias}
-                  className={cn('flex min-h-0 flex-col', showSectionHeaders && 'border-b last:border-b-0')}
+                  // A lone section must fill the column: the tree is virtualized
+                  // and sized `height: 100%`, so under an auto-height wrapper it
+                  // resolved to zero rows and the Files tab listed nothing.
+                  className={cn('flex min-h-0 flex-col', showSectionHeaders ? 'border-b last:border-b-0' : 'flex-1')}
                 >
                   {showSectionHeaders && (
                     <MountSectionHeader

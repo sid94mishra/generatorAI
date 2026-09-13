@@ -39,6 +39,76 @@ const CancelTurnBodySchema = z
   })
   .strip();
 
+/** Map the chat service's coded errors onto HTTP; false when not coded. */
+function sendCodedError(res: { status: (n: number) => { json: (b: unknown) => void } }, err: unknown): boolean {
+  const code = (err as { code?: string })?.code;
+  const message = (err as Error)?.message ?? 'Request failed';
+  if (code === 'CHAT_BUSY') {
+    res.status(409).json({ error: { code, message } });
+    return true;
+  }
+  if (code === 'NOT_FOUND') {
+    res.status(404).json({ error: { code, message } });
+    return true;
+  }
+  return false;
+}
+
+const RewindChatSchema = z
+  .object({
+    turnId: z.string().min(1),
+    scope: z.enum(['all', 'code', 'conversation']).optional(),
+  })
+  .strip();
+
+const ForkChatSchema = z
+  .object({
+    turnId: z.string().min(1).optional(),
+    name: z.string().trim().min(1).max(200).optional(),
+  })
+  .strip();
+
+/**
+ * Markdown rendering of a transcript for "Copy transcript". Kept small and
+ * deterministic: prompts and answers verbatim, the agent's actions as a
+ * compact list, thinking left out.
+ */
+function formatTranscriptMarkdown(name: string, messages: ChatMessage[]): string {
+  const out: string[] = [`# ${name}`, ''];
+  for (const m of messages) {
+    if (m.role === 'system' || m.role === 'tool') continue;
+    const when = new Date(m.timestamp).toISOString();
+    if (m.role === 'user') {
+      out.push(`## You  <sub>${when}</sub>`, '');
+      out.push(m.content.trim(), '');
+      if (m.attachments?.length) {
+        out.push(`*Attachments:* ${m.attachments.map((a) => `\`${a.name}\``).join(', ')}`, '');
+      }
+      continue;
+    }
+    out.push(`## Assistant  <sub>${when}</sub>`, '');
+    const tools = m.metadata?.toolCalls ?? [];
+    if (tools.length > 0) {
+      out.push('<details><summary>Actions (' + tools.length + ')</summary>', '');
+      for (const tc of tools) {
+        const args = (tc.args ?? {}) as Record<string, unknown>;
+        const target =
+          (typeof args['file_path'] === 'string' && args['file_path']) ||
+          (typeof args['path'] === 'string' && args['path']) ||
+          (typeof args['command'] === 'string' && args['command']) ||
+          '';
+        const op = tc.fileOp ? ` (+${tc.fileOp.additions ?? 0} −${tc.fileOp.deletions ?? 0})` : '';
+        out.push(`- \`${tc.tool}\`${target ? ` ${String(target).slice(0, 200)}` : ''}${op}${tc.success === false ? ' — failed' : ''}`);
+      }
+      out.push('', '</details>', '');
+    }
+    const segments = m.metadata?.textSegments?.length ? m.metadata.textSegments.map((s) => s.content) : [m.content];
+    out.push(segments.map((t) => t.trim()).filter(Boolean).join('\n\n'), '');
+    if (m.metadata?.partial) out.push('*Stopped before the response finished.*', '');
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 5 }, // 10MB max per file, 5 files max
@@ -87,7 +157,14 @@ function previewText(content: string): string {
   return flat.length > 160 ? `${flat.slice(0, 159)}…` : flat;
 }
 
-async function withWorkspacePrep<T extends { workspaceId?: string }>(container: Container, chat: T): Promise<T> {
+async function withWorkspacePrep<T extends { workspaceId?: string; conversationSeed?: string }>(
+  container: Container,
+  input: T,
+): Promise<T> {
+  // The synthetic-rewind seed is server-internal: it is the model's context,
+  // not the user's transcript, and it can be long.
+  const { conversationSeed: _seed, ...rest } = input;
+  const chat = rest as T;
   if (!chat.workspaceId) return chat;
   try {
     const ws = await container.workspaceManager.getExecutionWorkspace(chat.workspaceId);
@@ -631,6 +708,70 @@ export function createChatApiRoutes(container: Container): Router {
       res.setHeader('X-Page-Limit', String(page.limit));
       res.json(page.messages);
     } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /chats/:id/transcript — the WHOLE transcript, oldest first.
+  // `?format=markdown` renders it for the clipboard; default is JSON rows.
+  router.get('/:id/transcript', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      const chat = await container.chatEntityRepo.getById(chatId);
+      const messages = await chatManagementService.getTranscript(chatId);
+      if (String(req.query['format'] ?? 'json') === 'markdown') {
+        res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+        res.send(formatTranscriptMarkdown(chat.name, messages));
+        return;
+      }
+      res.json({ chatId, name: chat.name, messages });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /chats/:id/rewind — back to the START of a turn (files / conversation / both).
+  router.post('/:id/rewind', validate(RewindChatSchema), async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      const { turnId, scope } = req.body as { turnId: string; scope?: 'all' | 'code' | 'conversation' };
+      const result = await chatManagementService.rewindChat(chatId, turnId, scope ?? 'all');
+      logger.info(`[ChatRoutes] Rewound chat ${chatId} to turn ${turnId} (${scope ?? 'all'}, ${result.conversation})`, {
+        requestId: req.requestId,
+      });
+      res.json(result);
+    } catch (err) {
+      if (sendCodedError(res, err)) return;
+      next(err);
+    }
+  });
+
+  // POST /chats/:id/fork — branch the conversation after a turn into a new chat.
+  router.post('/:id/fork', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      // A bare POST (no body) forks after the last turn, like a bare cancel.
+      const parsed = ForkChatSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: 'Fork body validation failed', fields: parsed.error.flatten().fieldErrors },
+        });
+        return;
+      }
+      const { turnId, name } = parsed.data;
+      const result = await chatManagementService.forkChat(chatId, {
+        ...(turnId ? { turnId } : {}),
+        ...(name ? { name } : {}),
+      });
+      logger.info(`[ChatRoutes] Forked chat ${chatId} → ${result.chat.id} (${result.conversation})`, {
+        requestId: req.requestId,
+      });
+      res.status(201).json({
+        ...result,
+        chat: await withWorkspacePrep(container, result.chat),
+      });
+    } catch (err) {
+      if (sendCodedError(res, err)) return;
       next(err);
     }
   });

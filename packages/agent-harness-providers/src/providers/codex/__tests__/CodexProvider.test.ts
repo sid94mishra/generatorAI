@@ -90,6 +90,7 @@ describe('CodexProvider — lifecycle over a real JSON-RPC child process', () =>
         provider: 'codex',
         description: 'Fixture model',
         supportsReasoning: false,
+        supportsVision: false,
       },
     ]);
   }, 15_000);
@@ -322,6 +323,56 @@ describe('CodexProvider — W13-B1 truncation guard fails only OPEN tool calls',
   }, 15_000);
 });
 
+// ── Defect: Codex multi-agent items were dropped entirely ──
+//
+// `collabAgentToolCall` and `subAgentActivity` were not in TOOL_ITEM_TYPES and
+// had no handler, so a Codex collab turn produced no tool events at all: the
+// transcript showed the model doing nothing for as long as its sub-agents ran.
+
+describe('CodexProvider — multi-agent (collab) items surface as sub-agent activity', () => {
+  it('maps collabAgentToolCall to an `Agent` tool call carrying the collab arguments', async () => {
+    const p = await started();
+    await p.createConversation(CONV('c-collab'));
+    const { events, stop } = collect(p, 'c-collab');
+    await p.sendPromptAndWait('c-collab', 'COLLAB now');
+    stop();
+
+    const start = events.find(
+      (e): e is Extract<AgentEvent, { kind: 'harness.tool_start' }> =>
+        e.kind === 'harness.tool_start' && e.data.tool === 'Agent',
+    );
+    expect(start).toBeDefined();
+    expect(start?.data.args).toMatchObject({
+      tool: 'spawnAgent',
+      prompt: 'investigate the parser',
+      model: 'gpt-5.6-terra',
+      receiverThreadIds: ['thread_child'],
+    });
+
+    const complete = events.find(
+      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> =>
+        e.kind === 'harness.tool_complete' && e.data.tool === 'Agent',
+    );
+    // `completed` is the only collab status that means success.
+    expect(complete?.data.success).toBe(true);
+    expect(complete?.data.callId).toBe(start?.data.callId);
+  }, 15_000);
+
+  it('maps subAgentActivity to subagent_started / subagent_completed, each exactly once', async () => {
+    const p = await started();
+    await p.createConversation(CONV('c-collab2'));
+    const { events, stop } = collect(p, 'c-collab2');
+    await p.sendPromptAndWait('c-collab2', 'COLLAB now');
+    stop();
+
+    const infoTypes = events
+      .filter((e): e is Extract<AgentEvent, { kind: 'harness.session_info' }> => e.kind === 'harness.session_info')
+      .map((e) => e.data.infoType);
+    expect(infoTypes.filter((t) => t === 'subagent_started')).toHaveLength(1);
+    expect(infoTypes.filter((t) => t === 'subagent_completed')).toHaveLength(1);
+  }, 15_000);
+});
+
 // ── Defect: `void this.sendPromptAndWait(...)` with no .catch ──
 
 describe('CodexProvider — sendPrompt() never produces an unhandled rejection', () => {
@@ -549,4 +600,192 @@ describe('CodexProvider — per-conversation workspace', () => {
       ]),
     );
   }, 20_000);
+});
+
+// ── Integration parity: what a real 0.153 turn carries reaches the host ──
+//
+// Before this block the provider relayed only tokens and tool start/complete.
+// Reasoning, per-segment messages, token usage, file-op stats, host tools,
+// MCP servers, skills, effort, sign-in state and the chat's own approval UI
+// were all dropped, so a Codex chat rendered as a bare, run-together stream.
+
+describe('CodexProvider — integration parity with the other providers', () => {
+  it('reports sign-in state from account/read', async () => {
+    const signedIn = await started();
+    await expect(signedIn.getAccountInfo()).resolves.toEqual({ email: 'dev@example.com', subscriptionType: 'pro', apiProvider: 'openai' });
+    const apiKey = await started({ env: { FAKE_CODEX_ACCOUNT: 'apikey' } });
+    await expect(apiKey.getAccountInfo()).resolves.toMatchObject({ apiKeySource: 'OPENAI_API_KEY' });
+    const signedOut = await started({ env: { FAKE_CODEX_ACCOUNT: 'none' } });
+    await expect(signedOut.getAccountInfo()).resolves.toEqual({ tokenSource: 'none' });
+  }, 20_000);
+
+  it('relays reasoning, discrete messages, host tools, file ops and usage from one turn', async () => {
+    const p = await started();
+    const calls: unknown[] = [];
+    await p.createConversation({
+      conversationId: 'rich',
+      tools: [{
+        name: 'get_magic_number',
+        description: 'magic',
+        parametersSchema: { type: 'object' },
+        handler: async (args: Record<string, unknown>) => { calls.push(args); return 'The magic number is 4242.'; },
+      }],
+    } as unknown as CreateConversationParams);
+    const { events, stop } = collect(p, 'rich');
+    const res = await p.sendPromptAndWait('rich', 'RICH');
+    stop();
+
+    expect(calls).toEqual([{ label: 'fixture' }]);
+    // The final answer, not commentary glued onto it.
+    expect(res.content).toBe('MAGIC=4242');
+    const kinds = events.map((e) => e.kind);
+    expect(kinds[0]).toBe('harness.turn_start');
+    expect(kinds.slice(-2)).toEqual(['harness.turn_end', 'harness.idle']);
+
+    const reasoning = events.filter((e) => e.kind === 'harness.reasoning_delta').map((e) => (e.data as { text: string }).text).join('');
+    expect(reasoning).toBe('Plan the work'); // the raw delta for the same item is not relayed twice
+    expect(events.find((e) => e.kind === 'harness.reasoning_complete')?.data).toEqual({ content: 'Plan the work' });
+
+    expect(events.filter((e) => e.kind === 'harness.message_complete').map((e) => (e.data as { content: string }).content))
+      .toEqual(['Checking first.', 'MAGIC=4242']);
+
+    const patch = events.find((e) => e.kind === 'harness.tool_complete' && (e.data as { tool: string }).tool === 'apply_patch');
+    expect((patch?.data as { fileOp?: unknown }).fileOp).toEqual({ kind: 'edit', filePath: 'src/a.ts', additions: 2, deletions: 1 });
+
+    expect(events.find((e) => e.kind === 'harness.context_usage')?.data).toMatchObject({
+      provider: 'codex', source: 'provider', currentTokens: 1150, totalContextWindow: 272000,
+    });
+    expect(events.find((e) => e.kind === 'harness.usage')?.data).toMatchObject({ inputTokens: 1000, outputTokens: 150, provider: 'codex' });
+  }, 20_000);
+
+  it('answers a call to an unregistered host tool as a failure instead of hanging the turn', async () => {
+    const p = await started();
+    await p.createConversation(CONV('notool'));
+    const { events, stop } = collect(p, 'notool');
+    const res = await p.sendPromptAndWait('notool', 'RICH');
+    stop();
+    expect(res.content).toBe('MAGIC=');
+    const call = events.find((e) => e.kind === 'harness.tool_complete' && (e.data as { tool: string }).tool === 'get_magic_number');
+    expect((call?.data as { success: boolean }).success).toBe(false);
+  }, 20_000);
+
+  it('sends MCP servers, host tools and the chat effort over the wire', async () => {
+    const p = await started();
+    const warn: unknown[] = [];
+    await p.createConversation({
+      conversationId: 'wire',
+      reasoningEffort: 'high',
+      mcpServers: {
+        local: { type: 'stdio', command: 'node', args: ['srv.js'], env: { A: '1' }, tools: ['t1'], timeoutMs: 1500 },
+        remote: { type: 'http', url: 'https://mcp.example.com', headers: { Authorization: 'x' } },
+        legacy: { type: 'sse', url: 'https://old.example.com' },
+        off: { type: 'stdio', command: 'nope', enabled: false },
+      },
+      tools: [{ name: 'ask_user', description: 'Ask', parametersSchema: { type: 'object' }, handler: async () => 'ok' }],
+      skillDirectories: ['/skills/b', '/skills/a'],
+    } as unknown as CreateConversationParams);
+    warn.push(...p.getConversationWarnings('wire'));
+    const echoed = JSON.parse((await p.sendPromptAndWait('wire', 'ECHO_PARAMS')).content) as {
+      thread: { config?: { mcp_servers?: Record<string, unknown>; projects?: unknown }; dynamicTools?: unknown[] };
+      turn: { effort?: string };
+      skillRoots: string[] | null;
+    };
+    expect(echoed.thread.config?.projects).toEqual({ [process.cwd()]: { trust_level: 'trusted' } });
+    expect(echoed.thread.config?.mcp_servers).toEqual({
+      node_repl: { enabled: false },
+      local: { command: 'node', args: ['srv.js'], env: { A: '1' }, enabled_tools: ['t1'], tool_timeout_sec: 2 },
+      remote: { url: 'https://mcp.example.com', http_headers: { Authorization: 'x' } },
+    });
+    expect(echoed.thread.dynamicTools).toEqual([{ type: 'function', name: 'ask_user', description: 'Ask', inputSchema: { type: 'object' } }]);
+    expect(echoed.turn.effort).toBe('high');
+    expect(echoed.skillRoots).toEqual(['/skills/a', '/skills/b']);
+    expect(warn).toContainEqual(expect.objectContaining({ params: expect.objectContaining({ field: 'mcpServers.legacy' }) }));
+  }, 20_000);
+
+  it("routes approvals to the conversation's own permission handler", async () => {
+    const p = await started({ env: { FAKE_CODEX_APPROVAL: '1' }, rpcTimeoutMs: 3_000 });
+    const asked: string[] = [];
+    await p.createConversation({
+      conversationId: 'hitl',
+      onPermissionRequest: async (req: { type: string; description: string }) => { asked.push(`${req.type}:${req.description}`); return { granted: true }; },
+    } as unknown as CreateConversationParams);
+    const res = await p.sendPromptAndWait('hitl', 'ECHO_DECISION');
+    expect(asked).toEqual(['shell_exec:Run command: rm -rf /']);
+    expect(JSON.parse(res.content)).toEqual({ decision: 'accept' });
+  }, 20_000);
+
+  it('destroying a conversation keeps its Codex thread; deleting removes it', async () => {
+    const p = await started();
+    const sent: string[] = [];
+    const rpc = (p as unknown as { rpc: (m: string, params?: unknown) => Promise<unknown> }).rpc.bind(p);
+    (p as unknown as { rpc: typeof rpc }).rpc = (m, params) => { sent.push(m); return rpc(m, params); };
+    await p.createConversation(CONV('keep'));
+    await p.destroyConversation('keep');
+    expect(sent).not.toContain('thread/delete');
+    expect(p.hasLiveConversation('keep')).toBe(false);
+    await p.createConversation(CONV('gone'));
+    await p.deleteConversation('gone');
+    expect(sent).toContain('thread/delete');
+  }, 20_000);
+
+  it("Stop terminates the stopped turn's command but not an earlier turn's background terminal", async () => {
+    const p = await started();
+    const sent: Array<{ m: string; params: unknown }> = [];
+    const rpc = (p as unknown as { rpc: (m: string, params?: unknown) => Promise<unknown> }).rpc.bind(p);
+    (p as unknown as { rpc: typeof rpc }).rpc = (m, params) => { sent.push({ m, params }); return rpc(m, params); };
+    await p.createConversation(CONV('stop'));
+    const { events, stop } = collect(p, 'stop');
+    const turn = p.sendPromptAndWait('stop', 'LONG_CMD');
+    await new Promise((r) => setTimeout(r, 300));
+    await p.abortConversation('stop');
+    await turn;
+    await new Promise((r) => setTimeout(r, 300));
+    stop();
+    const terminated = sent.filter((c) => c.m === 'thread/backgroundTerminals/terminate').map((c) => (c.params as { processId: string }).processId);
+    expect(sent.map((c) => c.m)).toContain('turn/interrupt');
+    expect(terminated).toEqual(['p-long']);
+    const card = events.find((e) => e.kind === 'harness.tool_complete' && (e.data as { callId: string }).callId === 'call_long');
+    expect((card?.data as { success: boolean }).success).toBe(false);
+  }, 20_000);
+
+  it("turns Codex's own multi-agent delegation off when the platform excludes native delegation", async () => {
+    const p = await started();
+    await p.createConversation({ conversationId: 'orch', excludedBuiltinTools: ['Agent', 'Task'] } as unknown as CreateConversationParams);
+    const orch = JSON.parse((await p.sendPromptAndWait('orch', 'ECHO_PARAMS')).content) as { thread: { config?: Record<string, unknown> } };
+    expect(orch.thread.config).toMatchObject({ features: { multi_agent: false } });
+
+    await p.createConversation(CONV('plain'));
+    const plain = JSON.parse((await p.sendPromptAndWait('plain', 'ECHO_PARAMS')).content) as { thread: { config?: Record<string, unknown> } };
+    expect(plain.thread.config?.['features']).toBeUndefined();
+  }, 20_000);
+
+  it('re-asserts instructions, MCP servers and delegation policy when resuming a thread', async () => {
+    const p = await started();
+    await p.createConversation({
+      conversationId: 'resume-me',
+      resumeProviderSessionId: 'thr_existing',
+      systemPromptAppend: 'You are an orchestrator.',
+      mcpServers: { local: { type: 'stdio', command: 'node' } },
+      excludedBuiltinTools: ['Agent'],
+    } as unknown as CreateConversationParams);
+    const echoed = JSON.parse((await p.sendPromptAndWait('resume-me', 'ECHO_PARAMS')).content) as {
+      thread: { developerInstructions?: string; config?: Record<string, unknown> };
+    };
+    expect(echoed.thread.developerInstructions).toBe('You are an orchestrator.');
+    expect(echoed.thread.config).toEqual({
+      projects: { [process.cwd()]: { trust_level: 'trusted' } },
+      plugins: {
+        'unified-computer-use@openai-bundled': { enabled: false },
+        'computer-use@openai-bundled': { enabled: false },
+        'browser@openai-bundled': { enabled: false },
+      },
+      mcp_servers: { node_repl: { enabled: false }, local: { command: 'node' } },
+      features: { multi_agent: false },
+    });
+  }, 20_000);
+
+  it('reads the Codex version from the handshake', async () => {
+    const p = await started();
+    expect(p.getVersion()).toBe('0.0.0');
+  }, 15_000);
 });

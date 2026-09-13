@@ -39,6 +39,50 @@ import type {
   WorkspacePrepStatus,
 } from '@generatorai/shared';
 
+/** Response of `GET /api/chats/:id/transcript`. */
+export interface ChatTranscript {
+  chatId: string;
+  name: string;
+  messages: ChatMessage[];
+}
+
+/** What a rewind moves: the files, the conversation, or both. */
+export type RewindScope = 'all' | 'code' | 'conversation';
+
+/** Response of `POST /api/chats/:id/rewind`. */
+export interface RewindChatResult {
+  chatId: string;
+  turnId: string;
+  scope: RewindScope;
+  /** The prompt of the rewound turn — offered back in the composer. */
+  prompt?: string;
+  /**
+   * How the provider's own history moved: natively, by seeding a fresh
+   * session with a digest of what survives, or not at all (`code` scope).
+   */
+  conversation: 'native' | 'synthetic' | 'skipped';
+  files?: {
+    mounts: Array<{
+      alias: string;
+      ok: boolean;
+      restored?: number;
+      deleted?: number;
+      skipped?: number;
+      error?: string;
+    }>;
+    restored: number;
+    deleted: number;
+    skipped: number;
+  };
+}
+
+/** Response of `POST /api/chats/:id/fork`. */
+export interface ForkChatResult {
+  chat: Chat;
+  turnId?: string;
+  conversation: 'native' | 'synthetic';
+}
+
 /** Response of `GET /api/agents/:id/usage`. */
 export interface AgentUsageResponse {
   chats: Array<{ id: string; name: string }>;
@@ -219,10 +263,13 @@ import { getAuthRuntime } from './authRuntime.js';
 import { openMultiplexedStream } from './muxStream.js';
 import type {
   ChangeSummary,
+  ChangeFileRef,
   ChangeFileVersions,
   ChangeFilePatch,
   CheckpointRecord,
+  DiscardChangesResult,
   RestoreCheckpointResult,
+  ReviewChangesResult,
   WorkspaceTree,
   WorkspaceTreeFile,
 } from '../types/changes.js';
@@ -750,6 +797,49 @@ export class HttpPlatformClient implements IPlatformClient {
     await apiFetch(`${this.baseUrl}/api/chats/${chatId}/prompt`, {
       method: 'POST',
       body: formData,
+    });
+  }
+
+  /**
+   * The WHOLE transcript, oldest first — no page cap.
+   *
+   * "Copy transcript" must copy the conversation, not the last page of it,
+   * and `getChatMessages` is deliberately bounded. This is the unbounded
+   * read, used only for export.
+   */
+  async getChatTranscript(chatId: string): Promise<ChatTranscript> {
+    return apiFetch<ChatTranscript>(`${this.baseUrl}/api/chats/${chatId}/transcript`);
+  }
+
+  /**
+   * Rewind to the START of a turn — files, conversation, or both.
+   *
+   * Answers 409 `CHAT_BUSY` while a turn is in flight and 404 for a turn the
+   * server does not know, both surfaced as `ApiError` with those codes.
+   */
+  async rewindChat(
+    chatId: string,
+    input: { turnId: string; scope?: RewindScope },
+  ): Promise<RewindChatResult> {
+    return apiFetch<RewindChatResult>(`${this.baseUrl}/api/chats/${chatId}/rewind`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId: input.turnId, scope: input.scope ?? 'all' }),
+    });
+  }
+
+  /** Branch the conversation after a turn (default: the last one) into a new chat. */
+  async forkChat(
+    chatId: string,
+    input: { turnId?: string; name?: string } = {},
+  ): Promise<ForkChatResult> {
+    return apiFetch<ForkChatResult>(`${this.baseUrl}/api/chats/${chatId}/fork`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...(input.turnId ? { turnId: input.turnId } : {}),
+        ...(input.name ? { name: input.name } : {}),
+      }),
     });
   }
 
@@ -1294,6 +1384,44 @@ export class HttpPlatformClient implements IPlatformClient {
     );
   }
 
+  // ── Per-file review (Keep / Undo) ──
+
+  /**
+   * Accept files ("Keep"), drop the acceptance, or accept everything.
+   *
+   * `blob` is the head blob the client is looking at (`''` for a deleted
+   * file). The server stores that, not a flag, so an acceptance expires by
+   * itself the moment the agent touches the file again.
+   */
+  async reviewWorkspaceChanges(
+    workspaceId: string,
+    body: {
+      keep?: Array<ChangeFileRef & { blob: string }>;
+      unkeep?: ChangeFileRef[];
+      keepAll?: boolean;
+    },
+  ): Promise<ReviewChangesResult> {
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/changes/review`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Undo files. Each mount is restored from its OWN base, so this works on
+   * every mount kind — including the ones whose base is a plain commit and
+   * therefore had no discard action at all before.
+   */
+  async discardWorkspaceChanges(
+    workspaceId: string,
+    body: { files?: ChangeFileRef[]; all?: boolean },
+  ): Promise<DiscardChangesResult> {
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/changes/discard`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
   /** Both versions of one changed file (enables expand-unchanged rendering). */
   async getWorkspaceChangeFile(
     workspaceId: string,
@@ -1309,6 +1437,8 @@ export class HttpPlatformClient implements IPlatformClient {
        */
       oldBlob?: string | undefined;
       newBlob?: string | undefined;
+      /** The file's path on the base side, for a rename. */
+      oldPath?: string | undefined;
     } = {},
   ): Promise<ChangeFileVersions> {
     const params = new URLSearchParams({ path: filePath, form: 'versions' });
@@ -1317,6 +1447,7 @@ export class HttpPlatformClient implements IPlatformClient {
     if (options.head) params.set('head', options.head);
     if (options.oldBlob) params.set('oldBlob', options.oldBlob);
     if (options.newBlob) params.set('newBlob', options.newBlob);
+    if (options.oldPath) params.set('oldPath', options.oldPath);
     return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/changes/file?${params}`);
   }
 
@@ -1324,12 +1455,13 @@ export class HttpPlatformClient implements IPlatformClient {
   async getWorkspaceChangeFilePatch(
     workspaceId: string,
     filePath: string,
-    options: { alias?: string; base?: string; head?: string } = {},
+    options: { alias?: string; base?: string; head?: string; oldPath?: string } = {},
   ): Promise<ChangeFilePatch> {
     const params = new URLSearchParams({ path: filePath, form: 'patch' });
     if (options.alias) params.set('alias', options.alias);
     if (options.base) params.set('base', options.base);
     if (options.head) params.set('head', options.head);
+    if (options.oldPath) params.set('oldPath', options.oldPath);
     return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/changes/file?${params}`);
   }
 

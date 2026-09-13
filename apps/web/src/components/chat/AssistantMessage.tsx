@@ -17,6 +17,7 @@ import { toast } from '@/components/Toast.js';
 import { Button, Spinner } from '@/components/ui/index.js';
 import { READ_ALOUD_ENABLED } from '@/components/chat/featureFlags.js';
 import { AttachmentChips } from '@/components/chat/AttachmentChips.js';
+import { MessageActions } from '@/components/chat/MessageActions.js';
 
 interface AssistantMessageProps {
   message: ChatMessage;
@@ -36,9 +37,15 @@ interface AssistantMessageProps {
   onOpenShell?: (callId: string) => void;
   /** Workspace behind this chat — resolves agent screenshot previews. */
   workspaceId?: string;
+  /**
+   * The newest response in the transcript. Its action bar is shown without a
+   * hover, because it is the one people act on — and on touch there is no
+   * hover to reveal any of them with.
+   */
+  isLatest?: boolean;
 }
 
-export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOpenChanges, onOpenShell, workspaceId }: AssistantMessageProps) {
+export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOpenChanges, onOpenShell, workspaceId, isLatest = false }: AssistantMessageProps) {
   // Persisted history is never active — sub-agent steps resolve to done.
   const view = useMemo(
     () => deriveStreamView(chatMessageToBlocks(message), { active: false }),
@@ -66,7 +73,7 @@ export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOp
   }, [isSpeakingOrConnecting, stopSpeaking, speak, view.answer]);
 
   return (
-    <div className={showHeader ? 'flex gap-3' : undefined}>
+    <div className={showHeader ? 'group flex gap-3' : 'group'}>
       {/* Avatar — only shown when showHeader is true */}
       {showHeader && (
         <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm">
@@ -97,6 +104,17 @@ export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOp
           {...(workspaceId ? { workspaceId } : {})}
         />
 
+        {/* Copy the conversation / branch it from this response. Rendered
+            before "Read aloud" so the two sit on the same row. */}
+        <div className="flex flex-wrap items-center gap-1">
+          {message.chatId && (
+            <MessageActions
+              chatId={message.chatId}
+              turnId={message.metadata?.turnId}
+              alwaysVisible={isLatest}
+            />
+          )}
+
         {/* Read this message aloud (Phase 3) — only offered once there's
             actual answer text and the platform supports playback. */}
         {READ_ALOUD_ENABLED && ttsSupported && view.answer.trim() && (
@@ -119,13 +137,17 @@ export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOp
             {isSpeakingOrConnecting ? 'Stop' : 'Read aloud'}
           </Button>
         )}
+        </div>
 
         {/* A stopped turn keeps everything it streamed, so say that it is not
             the whole answer rather than letting it read as one. */}
         {message.metadata?.partial && (
-          <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[var(--color-muted-foreground)]">
+          <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[var(--color-muted-foreground)]" data-testid="message-stopped-note">
             <CircleSlash className="h-3 w-3" />
-            Stopped before the response finished.
+            {/* Same wording as the live stream (StreamingMessage). */}
+            {view.answer.trim() || view.steps.length > 0 || view.segments.length > 0
+              ? 'Stopped before the response finished.'
+              : 'Stopped before the agent responded.'}
           </p>
         )}
 

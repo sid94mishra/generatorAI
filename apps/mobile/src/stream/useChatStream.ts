@@ -49,6 +49,7 @@ import { MOBILE_CAPABILITIES } from '@generatorai/shared';
 import { useStreamStore } from './streamStore';
 import { useMuxStream } from './MuxStreamProvider';
 import { connectionFromDisconnect, useStreamHealth } from './streamHealth';
+import { partitionRewound, rewoundMatchesChat, type ChatRewoundEffect } from './rewindEffects';
 
 const FLUSH_INTERVAL_MS = 16;
 
@@ -85,6 +86,14 @@ export interface UseChatStreamOptions {
   /** Skip connecting (e.g. the screen is not focused). */
   enabled?: boolean;
   onStatusChange?(status: SseStatus): void;
+  /**
+   * The transcript was rewound — by this device, or by another one.
+   *
+   * Called AFTER the local live-turn state for this chat has been dropped,
+   * so a handler that reseeds the composer or toasts cannot race a stale
+   * block model. Identity may change per render; it is read through a ref.
+   */
+  onChatRewound?(effect: ChatRewoundEffect): void;
 }
 
 export function useChatStream({
@@ -92,11 +101,17 @@ export function useChatStream({
   sessionId,
   enabled = true,
   onStatusChange,
+  onChatRewound,
 }: UseChatStreamOptions): void {
   const streamKey = sessionId ?? chatId;
   const queryClient = useQueryClient();
   const stream = useMuxStream();
   const applyEffects = useStreamStore((s) => s.applyEffects);
+  // Read at flush time, never a dependency: a screen-owned callback closes
+  // over the composer and is rebuilt on every keystroke, and re-subscribing
+  // the mux scope per keystroke would drop the resume cursor each time.
+  const rewoundRef = useRef(onChatRewound);
+  rewoundRef.current = onChatRewound;
 
   // Refs, not state: these must not trigger a re-render, and the effect must
   // not re-run when a callback identity changes mid-stream.
@@ -132,13 +147,25 @@ export function useChatStream({
       // release everything, or the sentence the user was reading is lost when
       // they navigate away mid-block.
       const drained = final ? router.drainFinal() : router.drain();
-      const effects = pendingRef.current.concat(drained);
+      const queued = pendingRef.current.concat(drained);
       pendingRef.current = [];
+
+      // A rewind is not a block-model edit, so `applyStreamEffects` has
+      // nothing to do with it: the turns it dropped live in the REST
+      // transcript (refetched by the `invalidate` effects that ride along)
+      // and in THIS store, which would otherwise keep re-rendering the
+      // discarded turn on top of the restored history. Dropping the stream
+      // key is the whole fix — the next event rebuilds it from the server.
+      const { rewound, rest: effects } = partitionRewound(queued);
+      for (const effect of rewound) {
+        if (!rewoundMatchesChat(effect, chatId)) continue;
+        useStreamStore.getState().clear(streamKey);
+      }
 
       if (effects.length > 0) applyEffects(effects);
 
       const resources = invalidateRef.current;
-      let didWork = effects.length > 0 || resources.size > 0;
+      let didWork = effects.length > 0 || resources.size > 0 || rewound.length > 0;
       if (resources.size > 0) {
         for (const [resource, id] of resources) {
           switch (resource) {
@@ -171,6 +198,14 @@ export function useChatStream({
         }
         resources.clear();
       }
+
+      // Last, so the handler runs against a cleared store and a refetch
+      // already in flight: it restores the rewound prompt into the composer
+      // and says what happened, and both of those read the screen's state.
+      for (const effect of rewound) {
+        if (rewoundMatchesChat(effect, chatId)) rewoundRef.current?.(effect);
+      }
+
       // Text the router is still holding back to a block boundary (W30-d)
       // counts as pending: a later tick may be the one that releases it.
       if (router.hasPending) didWork = true;

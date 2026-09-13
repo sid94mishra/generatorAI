@@ -209,7 +209,8 @@ Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 | `GENERATORAI_WORKSPACES_DIR` | `~/.generatorai/workspaces` | Worktree + workspace root |
 | `GENERATORAI_ARTIFACTS_DIR` | `~/.generatorai/artifacts` | Project + artifact root |
 | `GENERATORAI_TEMPLATES_DIR` | `~/.generatorai/templates` | System templates + system MCP / artifacts |
-| `HARNESS_TYPE` | `copilot` | `copilot` or `claude-agent` |
+| `HARNESS_TYPE` | `copilot` | Default provider: `copilot`, `claude-agent` or `codex` |
+| `CODEX_CLI_PATH` | auto-resolved | Codex CLI location (unset: PATH, then the ChatGPT desktop app's bundled CLI) |
 | `COPILOT_GH_HOST` | (none) | Set for GHEC tenants (`https://<tenant>.ghe.com/`) |
 | `COPILOT_CLI_PATH` | auto-resolved | Override the platform binary path |
 | `SANDBOX_ENABLED` | `false` | Enable Docker sandbox for `script` hooks |

@@ -49,6 +49,7 @@ export { DrizzleEventRepository } from './repositories/EventRepository.js';
 export { DrizzleChatMessageRepository } from './repositories/ChatMessageRepository.js';
 export { DrizzleArtifactRepository } from './repositories/ArtifactRepository.js';
 export { DrizzleWebhookRepository } from './repositories/WebhookRepository.js';
+export { DrizzleWorkspaceFileReviewRepository } from './repositories/WorkspaceFileReviewRepository.js';
 
 // v2 repositories
 export { DrizzleChatRepository } from './repositories/ChatRepository.js';

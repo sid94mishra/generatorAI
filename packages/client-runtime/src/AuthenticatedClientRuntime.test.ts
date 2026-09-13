@@ -185,4 +185,57 @@ describe('AuthenticatedClientRuntime endpoint trust', () => {
     expect(await sessionStore.load()).toBeNull();
     expect(runtime.currentState.status).toBe('revoked');
   });
+
+  it('spends a server nonce on one proof instead of signing it into every later request', async () => {
+    // Server nonces are single-use. The runtime used to keep the nonce from a
+    // `use_dpop_nonce` challenge and put it in every later proof, so every
+    // request after the retry carried a spent nonce, was rejected, and the
+    // client stayed locked out until it re-paired.
+    const spent = new Set<string>();
+    let challenged = false;
+    const nonceOf = (init: RequestInit | undefined): string | undefined => {
+      const proof = (init?.headers as Record<string, string> | undefined)?.['dpop'];
+      if (!proof) return undefined;
+      const payload = JSON.parse(Buffer.from(proof.split('.')[1]!, 'base64url').toString('utf8')) as { nonce?: string };
+      return payload.nonce;
+    };
+    const runtime = new AuthenticatedClientRuntime({
+      endpoint: 'http://127.0.0.1:3100',
+      keyStore: new MemoryDeviceKeyStore(),
+      sessionStore: new MemorySessionStore(),
+      fetchImpl: vi.fn(async (input, init) => {
+        const url = String(input);
+        if (url.endsWith('/api/auth/server-info')) return Response.json({ serverId: SERVER_ID });
+        if (url.endsWith('/api/auth/pair/complete')) return sessionResponse();
+        const nonce = nonceOf(init);
+        if (nonce) {
+          if (spent.has(nonce)) {
+            return Response.json({ error: { code: 'INVALID_PROOF' } }, { status: 401 });
+          }
+          spent.add(nonce);
+          return Response.json({ ok: true });
+        }
+        if (!challenged) {
+          challenged = true; // one delayed proof, e.g. after the laptop slept
+          return Response.json({ error: { code: 'NONCE_REQUIRED' } }, {
+            status: 401,
+            headers: { 'www-authenticate': 'DPoP error="use_dpop_nonce"', 'dpop-nonce': 'nonce-1' },
+          });
+        }
+        return Response.json({ ok: true });
+      }),
+    });
+    await runtime.completePairing({
+      endpoint: 'http://127.0.0.1:3100',
+      serverId: SERVER_ID,
+      pairingToken: 'pairing-secret',
+      deviceName: 'Desktop',
+      platform: 'desktop',
+    });
+
+    const statuses: number[] = [];
+    for (let i = 0; i < 3; i++) statuses.push((await runtime.fetch('/api/chats')).status);
+    expect(statuses).toEqual([200, 200, 200]);
+    expect([...spent]).toEqual(['nonce-1']);
+  });
 });

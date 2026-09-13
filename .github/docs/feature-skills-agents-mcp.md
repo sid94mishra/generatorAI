@@ -301,13 +301,49 @@ than being shown under one of those two logos.
   (`{code: 'MCP_SERVER_FAILED' | 'MCP_SERVER_NEEDS_AUTH', message, details}`)
   — see §9.6 for exactly which call sites still need to invoke it.
 
-### codex / opencode / acp
+### codex
+
+A first-class provider since the `@openai/codex` CLI (0.154.0) ships with the
+build as an optional dependency of `packages/agent-harness-providers` (see
+[operations.md](./operations.md#harness-provider) for the resolution order and
+[packaging.md](./packaging.md) for how the desktop app stages it). The adapter
+speaks the app-server JSON-RPC protocol whose types are generated from that
+exact binary (`schemas/versions.json`). What a Codex chat gets, mapped onto the
+provider-neutral events:
+
+- streamed assistant text, reasoning summaries (per part), per-item tool rows
+  for `commandExecution` / `fileChange` (with `+/−` stats) / `mcpToolCall` /
+  `webSearch` / dynamic host tools; command output and MCP progress as
+  `tool_progress`; `turn/plan/updated` as a `plan_update` checklist step;
+  `thread/compacted` as a compact boundary; `model/rerouted`, `warning`,
+  `configWarning`, `deprecationNotice`, `guardianWarning` and retried errors as
+  provider notices; `account/rateLimits/updated` as `rate_limits`;
+- **approvals**: `item/commandExecution/requestApproval`,
+  `item/fileChange/requestApproval` and `item/permissions/requestApproval` go
+  through the chat's permission gate (the same card Claude uses; "remember"
+  answers `acceptForSession`), `item/tool/requestUserInput` through the question
+  gate, MCP elicitations through the permission gate — nothing is auto-granted;
+- per-turn `effort` (reasoning effort) and approval policy from the chat's
+  permission mode; sandbox `workspace-write` with the chat's extra mounts as
+  writable roots; MCP servers and instructions layered per thread; skills roots
+  via `skills/extraRoots/set`; a warning when an MCP server fails to start;
+- conversation **fork** (`thread/fork { lastTurnId }`) and **rewind**
+  (`thread/revert { beforeTurnId }`) for the chat's Fork / Rewind actions;
+- in-app **sign-in** (`account/login/start`, ChatGPT browser flow) and
+  sign-out from Settings → Providers.
+
+Not offered by Codex itself: hooks, a PreToolUse gate on every call
+(`fullToolGating: false` — approvals fire only under an asking policy), plan
+mode, and Codex's own `update_plan` tool is not available on every model or
+config. Sub-agent (`collabAgentToolCall`) items render as sub-agent steps when
+Codex's multi-agent feature is on; orchestrator chats turn it off.
+
+### opencode / acp
 
 Real adapters, not stubs, but see the provider-honesty paragraph above: not
 selectable unless explicitly configured, and each drops capabilities a
 Claude/Copilot chat takes for granted (always hooks; check each adapter's
-`capabilities()` for the rest). `opencode` and `codex` both declare
-`mcpServers: true` (native MCP support in their own protocols); `acp`
+`capabilities()` for the rest). `opencode` declares `mcpServers: true`; `acp`
 declares `mcpServers: false`.
 
 ---

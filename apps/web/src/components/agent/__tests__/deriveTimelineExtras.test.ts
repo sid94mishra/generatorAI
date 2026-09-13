@@ -110,3 +110,40 @@ describe('tool failure + screenshots', () => {
     expect(none[0]!.image).toBeUndefined();
   });
 });
+
+// ── A plan the agent published used to land in the `system` category and be
+// dropped outright, so a Codex/Claude checklist reached nobody. ──
+
+describe('plan updates render as one collapsed step with the checklist as children', () => {
+  function planBlock(message: string): StreamBlock {
+    return { type: 'system', blockId: nextId++, message, category: 'plan' } as StreamBlock;
+  }
+
+  it('summarises the plan on the row and keeps each step as a child', () => {
+    const steps = deriveTimeline(
+      [planBlock('Plan: 1/3 done\nThree steps.\n[x] read the parser\n[~] fix the bug\n[ ] add a test')],
+      { active: true },
+    );
+    expect(steps).toHaveLength(1);
+    const plan = steps[0]!;
+    expect(plan.verb).toBe('Plan');
+    // The "Plan: " prefix is the row's own label, not part of the target.
+    expect(plan.target).toBe('1/3 done');
+    // The explanation is a child alongside the steps rather than being lost.
+    expect(plan.children?.map((c) => c.target)).toEqual([
+      'Three steps.',
+      'read the parser',
+      'fix the bug',
+      'add a test',
+    ]);
+    // Each step carries its OWN state, so a half-finished plan does not read
+    // as though every line were done.
+    expect(plan.children?.map((c) => c.status)).toEqual(['done', 'done', 'running', 'pending']);
+  });
+
+  it('renders a plan with no steps without inventing children', () => {
+    const steps = deriveTimeline([planBlock('Plan updated')], { active: false });
+    expect(steps[0]!.target).toBe('Plan updated');
+    expect(steps[0]!.children).toBeUndefined();
+  });
+});

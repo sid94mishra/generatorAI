@@ -94,6 +94,10 @@ export function useDiffSources({
           // instant instead of taking a couple of seconds.
           ...(entry.file.oldBlob ? { oldBlob: entry.file.oldBlob } : {}),
           ...(entry.file.newBlob ? { newBlob: entry.file.newBlob } : {}),
+          // A renamed file is stored under its OLD name on the base side;
+          // without this the server finds nothing there and the diff renders
+          // as a pure addition.
+          ...(entry.file.oldPath ? { oldPath: entry.file.oldPath } : {}),
         }),
       enabled: !!workspaceId,
       // Safe precisely because the blob pair is in the key: the content behind

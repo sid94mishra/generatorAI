@@ -72,11 +72,16 @@ The Vite dev port (`5173`) is hardcoded in `apps/web/vite.config.ts`; there is n
 
 | Var | Default | Purpose |
 |---|---|---|
-| `HARNESS_TYPE` | `copilot` | `copilot` or `claude-agent`. (There is no GENERATORAI_HARNESS_TYPE alias — only the unprefixed name is read.) |
+| `HARNESS_TYPE` | `copilot` | Default provider: `copilot`, `claude-agent` or `codex`. Every other available provider still runs alongside it. (There is no GENERATORAI_HARNESS_TYPE alias — only the unprefixed name is read.) |
 | `COPILOT_CLI_PATH` | auto-resolved | Override platform binary path |
 | `COPILOT_GH_HOST` | (none) | Set for GHEC tenants (`https://<tenant>.ghe.com/`) |
 | `COPILOT_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN` | (none) | Fallback auth. **Scrub these when using `COPILOT_GH_HOST`** to avoid 401. |
 | `ANTHROPIC_API_KEY` | (none) | Claude Agent uses `~/.claude/.credentials.json` by default; only set this if you've configured the SDK to read from env |
+| `CODEX_CLI_PATH` | auto-resolved | Codex CLI location — the same variable the Codex desktop app reads. Resolution order: this variable (or `harness.codex.binaryPath`), then the **`@openai/codex` package pinned by this build** (an optional dependency of `packages/agent-harness-providers`, currently 0.154.0 — the exact binary the generated protocol types were captured from, present on every platform pnpm installed a platform package for), then `codex` on PATH, then the CLI bundled with the ChatGPT desktop app (macOS). A Windows npm shim (`codex.cmd`) is resolved to the `@openai/codex` script it launches. Sign-in is shared by every binary through `CODEX_HOME`. |
+| `CODEX_MODEL` | account default | Model for new Codex threads when a chat names none. |
+| `CODEX_APPROVAL_POLICY` | `on-request` | When Codex asks before acting. `on-request` runs sandboxed workspace commands freely and routes anything beyond the sandbox to the chat's approval UI; `untrusted` asks for more; `never` never asks (explicit opt-in only). A chat's permission mode overrides this per turn. |
+| `CODEX_SANDBOX_MODE` | `workspace-write` | `read-only`, `workspace-write` or `danger-full-access`. |
+| `CODEX_HOME` | `~/.codex` | Codex keeps sign-in, config and history here; forwarded to the Codex child. Codex uses your own sign-in (`codex login` or the ChatGPT desktop app) and `config.toml` — GeneratorAI only layers per-chat settings (MCP servers, instructions, host tools) on top. |
 | `GENERATORAI_CLAUDE_SETTING_SOURCES` | (empty) | Comma-separated Claude Agent SDK `settingSources` (`user`, `project`, `local`). **Defaults to none** — the SDK would otherwise silently inherit the operator's local `~/.claude` settings, including hooks and permissions, into every run. |
 
 ### Agents (AGT-01)
@@ -481,6 +486,8 @@ Returns:
   "subscribers": { "session": 0, "run": 1, "chat": 2, "global": 1 }
 }
 ```
+
+`harness.runtime` (and `harness.runtime.providers.<type>`) reports what the harness is holding: `liveConversations`, `liveSessions` (one CLI process each), `warmSessions`, and for providers that cap concurrent turns, `turnsInFlight` / `maxConcurrentTurns` (default 4, `GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`) / `turnsQueued`. **`turnsQueued > 0` while `turnsInFlight` is 0 means a permit leaked** — every new prompt would sit on "Waiting for a free agent slot"; `runningChatIds` lists the chats the server thinks are mid-turn.
 
 `GET /api/health/config` returns non-sensitive resolved config (paths, models, ports, flags). Use this in CI to verify deployment.
 

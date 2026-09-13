@@ -95,6 +95,16 @@ export interface Chat {
   parentChatId?: string;
   /** Set on WORKER chats: background-task metadata. */
   backgroundTask?: BackgroundTaskMeta;
+  /** The chat this one was forked from (a conversation branch, not a worker). */
+  forkedFromChatId?: string;
+  /** The turn of `forkedFromChatId` the fork branched after. */
+  forkedAtTurnId?: string;
+  /**
+   * Transcript digest a SYNTHETIC rewind/fork left behind for the provider
+   * (one without native branching): prepended to the next prompt once, then
+   * cleared. Server-internal; never sent to clients.
+   */
+  conversationSeed?: string;
   /**
    * Sticky per-chat default agent mode. The composer can override it per turn.
    * Defaults to 'auto'.
@@ -167,4 +177,7 @@ export interface CreateChatParams {
   agentRef?: string;
   /** Additive capability delta layered on top of the bound agent. */
   agentOverrides?: AgentOverrides;
+  /** Set by `forkChat`: the source chat and turn. Never accepted from the API. */
+  forkedFromChatId?: string;
+  forkedAtTurnId?: string;
 }

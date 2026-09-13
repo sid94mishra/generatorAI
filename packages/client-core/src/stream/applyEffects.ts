@@ -59,6 +59,8 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
       );
     case 'addSystemMessage':
       return r.addSystemMessage(streams, effect.key, effect.message, effect.category);
+    case 'upsertBackgroundTask':
+      return r.upsertBackgroundTask(streams, effect.key, effect.task);
     case 'hookStarted':
       return r.addHookStarted(streams, effect.key, effect.hookName, effect.phase, {
         hookId: effect.hookId,
@@ -133,6 +135,9 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
     case 'stageSettled':
     case 'widgetInvoke':
     case 'widgetTeardown':
+    // A rewind moves what the SERVER holds; the host refetches history, drops
+    // the local turn state and offers the prompt back. Nothing here to fold.
+    case 'chatRewound':
       return streams;
     default:
       return streams;
@@ -174,6 +179,7 @@ const HOST_OPS: ReadonlySet<StreamEffect['op']> = new Set<StreamEffect['op']>([
   'stageSettled',
   'widgetInvoke',
   'widgetTeardown',
+  'chatRewound',
 ]);
 
 /** Fold a batch. Returns the original record when the batch changed nothing. */

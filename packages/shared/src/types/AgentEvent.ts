@@ -51,7 +51,20 @@ export type AgentEvent =
   // These events are the common interface that all harness adapters
   // (agent-harness-providers: copilot, claude-agent) map their native SDK events to.
   | { kind: 'harness.token'; data: { text: string } }
-  | { kind: 'harness.message_complete'; data: { content: string } }
+  | {
+      kind: 'harness.message_complete';
+      data: {
+        content: string;
+        /**
+         * The provider's own id for the assistant message this text closed —
+         * on Claude the `SDKAssistantMessage.uuid`. It is the anchor a
+         * conversation fork/rewind is expressed in (`forkSession.upToMessageId`),
+         * so the chat service persists the last one seen in a turn as
+         * `ChatMessageMetadata.providerAnchor`.
+         */
+        providerMessageId?: string;
+      };
+    }
   | { kind: 'harness.user_message'; data: { content: string } }
   | { kind: 'harness.reasoning_delta'; data: { text: string } }
   | { kind: 'harness.reasoning_complete'; data: { content: string } }
@@ -121,7 +134,17 @@ export type AgentEvent =
       };
     }
   | { kind: 'harness.turn_start'; data: { turnId: string } }
-  | { kind: 'harness.turn_end'; data: { turnId: string } }
+  | {
+      kind: 'harness.turn_end';
+      data: {
+        turnId: string;
+        /**
+         * The provider's own id for the turn that just ended (Codex `turn.id`).
+         * Anchor for `thread/fork { lastTurnId }` / `thread/revert { beforeTurnId }`.
+         */
+        providerTurnId?: string;
+      };
+    }
   | { kind: 'harness.session_info'; data: { infoType: string; message: string; [key: string]: unknown } }
   | { kind: 'harness.unknown'; data: { raw: unknown; provider?: string } }
   // ── Harness Client Lifecycle Events ──
@@ -144,6 +167,38 @@ export type AgentEvent =
   | { kind: 'chat.background_task.status'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; status: string } }
   | { kind: 'chat.background_task.completed'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; status: string; summary?: string } }
   | { kind: 'chat.background_task.failed'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; error?: string } }
+  // Live progress of one background worker, on the PARENT chat scope (throttled by the emitter).
+  | {
+      kind: 'chat.background_task.progress';
+      data: {
+        chatId: string;
+        parentChatId: string;
+        taskId: string;
+        taskName: string;
+        status: string;
+        /** What the worker is doing right now: a tool name, or 'thinking' / 'writing'. */
+        currentStep?: string;
+        /** Last assistant text excerpt (truncated). */
+        lastText?: string;
+        toolCalls: number;
+        startedAt: number;
+      };
+    }
+  // ── Rewind / fork (chat-scoped) ──
+  | {
+      kind: 'chat.rewound';
+      data: {
+        chatId: string;
+        /** The turn the user rewound TO THE START OF. */
+        turnId: string;
+        scope: 'all' | 'code' | 'conversation';
+        /** The prompt of that turn, so the composer can offer it back. */
+        prompt?: string;
+        conversation: 'native' | 'synthetic' | 'skipped';
+        files?: { restored: number; deleted: number; skipped: number; mounts: number };
+      };
+    }
+  | { kind: 'chat.forked'; data: { chatId: string; forkChatId: string; turnId?: string; conversation: 'native' | 'synthetic' } }
   // ── Plan Mode Events (chat-scoped; every payload MUST carry chatId) ──
   | { kind: 'chat.mode_changed'; data: { chatId: string; previous: string; next: string } }
   | { kind: 'chat.plan.drafting'; data: { chatId: string; turnId: string } }
@@ -263,6 +318,17 @@ export type AgentEvent =
         changedPaths: string[];
         stats: { files: number; additions: number; deletions: number };
         checkpointId?: string;
+        chatId?: string;
+        workflowRunId?: string;
+      };
+    }
+  // A file's review state moved (Keep / Unkeep / a discard that dropped
+  // rows). Carries only the workspace id: the client's response is to
+  // refetch the change summary, which is where `kept` actually lives.
+  | {
+      kind: 'workspace.review_changed';
+      data: {
+        workspaceId: string;
         chatId?: string;
         workflowRunId?: string;
       };

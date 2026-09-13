@@ -165,15 +165,20 @@ describe('cancelling a turn keeps the partial answer', () => {
     expect(assistant[0]!.content).toContain('Partial answer that must survive.');
   });
 
-  it('writes nothing when the turn was cancelled before the model said anything', async () => {
+  it('records a turn cancelled before the model said anything as an empty partial row', async () => {
+    // The live view says "Stopped before the agent responded"; without a row
+    // that note vanished on reload. The transcript renders such a row as the
+    // note alone, never as a blank bubble.
     const chat = await service.createChat({ name: 'instant-stop' });
     void service.sendPrompt(chat.id, 'hello').catch(() => {});
     await new Promise((r) => setTimeout(r, 200));
     await service.cancelTurn(chat.id);
     await new Promise((r) => setTimeout(r, 50));
 
-    // An empty row would show as a blank assistant bubble.
-    expect(messages.all.filter((m) => m.chatId === chat.id && m.role === 'assistant')).toHaveLength(0);
+    const assistant = messages.all.filter((m) => m.chatId === chat.id && m.role === 'assistant');
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0]!.content).toBe('');
+    expect(assistant[0]!.metadata?.partial).toBe(true);
   });
 
   it('does not leak the cancelled flag onto the NEXT turn', async () => {
@@ -201,5 +206,24 @@ describe('cancelling a turn keeps the partial answer', () => {
     const second = assistant.at(-1)!;
     expect(second.content).toBe('a complete second answer');
     expect(second.metadata?.partial).toBeUndefined();
+  });
+  it('records a tool call that was still running as stopped, not as running', async () => {
+    // A stopped command used to be persisted as `running`, which history
+    // rendered as a completed call with a tick.
+    const { chat, conversationId } = await streamThenReturn('Running your command now. ');
+    harness.simulateConversationEvent(conversationId, {
+      kind: 'harness.tool_start',
+      data: { tool: 'shell', args: { command: 'sleep 60' }, callId: 'call_1' },
+    } as never);
+    await new Promise((r) => setTimeout(r, 100));
+    harness.idleOnAbort = false;
+    await service.cancelTurn(chat.id);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const assistant = messages.all.filter((m) => m.chatId === chat.id && m.role === 'assistant');
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0]!.metadata?.toolCalls).toEqual([
+      expect.objectContaining({ id: 'call_1', status: 'complete', success: false, result: 'Stopped before it finished.' }),
+    ]);
   });
 });

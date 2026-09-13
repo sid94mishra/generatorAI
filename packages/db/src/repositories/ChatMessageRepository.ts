@@ -77,6 +77,18 @@ export class DrizzleChatMessageRepository implements IChatMessageRepository {
     await this.db.delete(chatMessages).where(eq(chatMessages.sessionId, sessionId));
   }
 
+  async updateMetadata(id: string, metadata: ChatMessage['metadata']): Promise<void> {
+    await this.db.update(chatMessages).set({ metadata: metadata ?? null }).where(eq(chatMessages.id, id));
+  }
+
+  async deleteByIds(ids: readonly string[]): Promise<void> {
+    if (ids.length === 0) return;
+    // SQLite caps bound parameters; chunk so a long rewind cannot exceed it.
+    for (let i = 0; i < ids.length; i += 500) {
+      await this.db.delete(chatMessages).where(inArray(chatMessages.id, [...ids.slice(i, i + 500)]));
+    }
+  }
+
   async getByChatId(
     chatId: string,
     limit?: number,

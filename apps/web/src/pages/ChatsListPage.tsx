@@ -72,7 +72,7 @@ export function ChatsListPage() {
   // Measured on /chats with 359 real chats: 7,538 DOM nodes, worst long task
   // 334ms. Mounting only the rows near the viewport is the fix.
   //
-  // PageContainer (variant="narrow") is the actual scroll parent here
+  // PageContainer is the actual scroll parent here
   // (`h-full overflow-y-auto` — see layout/PageContainer.tsx), not the
   // window, so the virtualizer observes that node directly.
   const scrollElRef = useRef<HTMLDivElement>(null);
@@ -150,7 +150,7 @@ export function ChatsListPage() {
   };
 
   return (
-    <PageContainer ref={scrollElRef} variant="narrow" className="animate-fade-in">
+    <PageContainer ref={scrollElRef} className="animate-fade-in">
       {/* Bulk-delete confirmation dialog */}
       <ConfirmDialog
         open={bulkDeleteOpen}

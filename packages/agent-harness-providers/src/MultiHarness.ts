@@ -28,7 +28,11 @@ import type {
   HarnessAgentInfo,
   ProviderCapabilities,
   HarnessRuntimeDiagnostics,
+  ForkConversationOptions,
+  ForkConversationResult,
+  RewindConversationOptions,
 } from '@generatorai/core';
+import { HarnessConnectionError } from '@generatorai/shared';
 import type { HarnessRegistry } from './HarnessRegistry.js';
 import { ALL_HARNESS_TYPES } from './HarnessRegistry.js';
 import type { HarnessType } from './types.js';
@@ -341,7 +345,63 @@ export class MultiHarness implements IAgentHarness {
       }
     }
 
-    return current ?? this.registry.primary;
+    return current ?? this.defaultTarget();
+  }
+
+  /**
+   * Provider to use when nothing in the request picks one.
+   *
+   * `registry.primary` is pure configuration — it is whatever `harness.type`
+   * says (default `'copilot'`) and carries no claim that the provider can
+   * actually serve a conversation. Returning it blind is a real failure, not a
+   * theoretical one: an unauthenticated Copilot still reports `connected:true`
+   * (its stdio client resolves `start()` before the child is known good), so a
+   * chat created with no model routed to it and only died at the first
+   * JSON-RPC write to the dead stdin — surfacing as `ERR_STREAM_DESTROYED`,
+   * normalized to a bare 502 "Action failed" with no hint that another
+   * provider was sitting there ready.
+   *
+   * This has nothing to do with the host OS — it reproduces on any machine
+   * where the primary provider is not signed in — so the fix is readiness,
+   * not a platform branch. Prefer `primary`, fall back to whatever is ready,
+   * and fail with a provider-specific reason when nothing is.
+   */
+  private defaultTarget(): HarnessType {
+    const primary = this.registry.primary;
+    // A registry that exposes no status at all (a narrow test double, or a
+    // future implementation) must not be able to break routing — an absent
+    // snapshot says nothing about readiness, so it is treated exactly like
+    // "not probed yet" below rather than as evidence against `primary`.
+    const snapshot = this.registry.statusSnapshot as
+      | Readonly<Record<string, { ready?: boolean; checkedAt?: number; error?: string } | undefined>>
+      | undefined;
+    const primaryStatus = snapshot?.[primary];
+
+    // `checkedAt == null` means no probe has completed yet. On a cold boot
+    // every provider looks unready, and demoting `primary` there would route
+    // the first conversation somewhere the user never asked for. Trust the
+    // configured provider until a probe actually contradicts it.
+    if (primaryStatus?.ready || primaryStatus?.checkedAt == null) return primary;
+
+    const [fallback] = this.registry.readyTypes ?? [];
+    if (fallback) {
+      this.logger?.warn(
+        `[MultiHarness] primary provider '${primary}' is not ready` +
+          `${primaryStatus.error ? ` (${primaryStatus.error})` : ''} — routing to '${fallback}' instead. ` +
+          `Sign in to '${primary}' or set a default model to silence this.`,
+      );
+      return fallback;
+    }
+
+    const reasons = ALL_HARNESS_TYPES.map((type) => {
+      const status = snapshot?.[type];
+      return `${type}: ${status?.error ?? (status?.ready ? 'ready' : 'not ready')}`;
+    }).join('; ');
+    throw new HarnessConnectionError(
+      `No agent provider is ready. Sign in to a provider in Settings → Model Providers, ` +
+        `or pick a model from one that is available. Provider status — ${reasons}`,
+      primary,
+    );
   }
 
   /**
@@ -468,7 +528,9 @@ export class MultiHarness implements IAgentHarness {
     const current = this.owners.get(conversationId);
     // `current` is passed so a model-name inference cannot silently move an
     // established conversation to another provider — see `resolveTarget`.
-    const target = params ? await this.resolveTarget(params, current) : (current ?? this.registry.primary);
+    // Same readiness rule as creation: resuming a conversation with no
+    // recorded owner must not land on a provider that cannot serve it.
+    const target = params ? await this.resolveTarget(params, current) : (current ?? this.defaultTarget());
 
     // W34 — the thread is bound to an account that has since been deleted.
     //
@@ -528,6 +590,45 @@ export class MultiHarness implements IAgentHarness {
     this.owners.set(conversationId, target);
     const adapter = await this.registry.get(target);
     return adapter.resumeConversation(conversationId, this.withModelSupportedBy(target, params));
+  }
+
+  getProviderSessionId(conversationId: string): string | undefined {
+    if (this.orphanedInstanceFor(conversationId)) return undefined;
+    const instanceId = this.resolveInstance(conversationId);
+    const adapter = instanceId
+      ? this.registry.peekInstance(instanceId)
+      : this.registry.peek(this.ownerOf(conversationId));
+    return adapter?.getProviderSessionId?.(conversationId);
+  }
+
+  /**
+   * A fork stays with the provider that owns the source: the new conversation
+   * is recorded under the same owner (and instance) before the adapter is
+   * asked, so later calls for it route the same way.
+   */
+  async forkConversation(conversationId: string, options: ForkConversationOptions): Promise<ForkConversationResult> {
+    const adapter = await this.adapterFor(conversationId);
+    if (!adapter.forkConversation) throw new Error('This provider cannot fork conversations');
+    const owner = this.owners.get(conversationId);
+    if (owner) {
+      this.owners.set(options.newConversationId, owner);
+      await this.store?.save(options.newConversationId, owner).catch((e: unknown) =>
+        this.logger?.warn(`[MultiHarness] Failed to persist ownership for fork ${options.newConversationId} → ${owner}: ${e}`),
+      );
+    }
+    const instanceId = this.resolveInstance(conversationId);
+    if (instanceId) {
+      await this.instanceRegistry?.assignConversation(options.newConversationId, instanceId).catch((e: unknown) =>
+        this.logger?.warn(`[MultiHarness] Failed to bind fork ${options.newConversationId} to instance ${instanceId}: ${e}`),
+      );
+    }
+    return adapter.forkConversation(conversationId, options);
+  }
+
+  async rewindConversation(conversationId: string, options: RewindConversationOptions): Promise<ForkConversationResult> {
+    const adapter = await this.adapterFor(conversationId);
+    if (!adapter.rewindConversation) throw new Error('This provider cannot rewind conversations');
+    return adapter.rewindConversation(conversationId, options);
   }
 
   hasLiveConversation(conversationId: string): boolean {
@@ -767,6 +868,9 @@ export class MultiHarness implements IAgentHarness {
         liveSessions: diag.liveSessions,
         warmSessions: diag.warmSessions,
         ...(diag.maxLiveSessions !== undefined ? { maxLiveSessions: diag.maxLiveSessions } : {}),
+        ...(diag.turnsInFlight !== undefined ? { turnsInFlight: diag.turnsInFlight } : {}),
+        ...(diag.maxConcurrentTurns !== undefined ? { maxConcurrentTurns: diag.maxConcurrentTurns } : {}),
+        ...(diag.turnsQueued !== undefined ? { turnsQueued: diag.turnsQueued } : {}),
       };
     }
     return total;
@@ -841,6 +945,8 @@ export class MultiHarness implements IAgentHarness {
       fullToolGating: caps.every((c) => c.fullToolGating),
       sessionPersistence: caps.every((c) => c.sessionPersistence),
       budgetTracking: caps.every((c) => c.budgetTracking),
+      conversationFork: caps.every((c) => c.conversationFork === true),
+      conversationRewind: caps.every((c) => c.conversationRewind === true),
     };
   }
 

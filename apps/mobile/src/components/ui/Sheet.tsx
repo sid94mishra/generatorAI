@@ -495,6 +495,7 @@ export function SheetRow({
   left,
   right,
   disabled = false,
+  testID,
 }: {
   title: string;
   subtitle?: string | null;
@@ -505,6 +506,8 @@ export function SheetRow({
   left?: React.ReactNode;
   right?: React.ReactNode;
   disabled?: boolean;
+  /** For E2E: the rows of a decision sheet have to be addressable by name. */
+  testID?: string;
 }): React.ReactElement {
   const { colors } = useTheme();
 
@@ -514,6 +517,7 @@ export function SheetRow({
       accessibilityHint={subtitle ?? undefined}
       accessibilityState={{ selected }}
       disabled={disabled}
+      {...(testID ? { testID } : {})}
       haptic="select"
       scale="large"
       onPress={onPress}

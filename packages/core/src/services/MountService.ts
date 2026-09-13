@@ -463,7 +463,16 @@ export class MountService {
     const mounts = await this.deps.mountRepo.findByWorkspace(workspaceId);
     const pending = mounts.filter((m) => m.status === 'preparing' || m.status === 'error');
     if (pending.length === 0) {
-      if (workspace.prepStatus !== 'ready') await this.deps.workspaceRepo.updatePrep(workspaceId, 'ready', null);
+      if (workspace.prepStatus !== 'ready') {
+        await this.deps.workspaceRepo.updatePrep(workspaceId, 'ready', null);
+        // Every other transition announces itself; this one used to flip the
+        // row silently. A client that is gating Send on `workspacePrep` then
+        // never hears that it may proceed, so the composer stays disabled on
+        // a workspace that is in fact ready — which is exactly what the
+        // Retry button (`POST /workspace/prepare`) lands in when the mounts
+        // turned out to need no work.
+        await this.emitPrep(workspace, 'ready', undefined, scope);
+      }
       return;
     }
 
@@ -729,7 +738,7 @@ export class MountService {
     const existing = await this.deps.mountRepo.findByWorkspace(workspace.id);
 
     const keyOf = (m: { originPath?: string; mode: string; path: string; alias: string }) =>
-      `${m.alias} ${m.mode} ${path.resolve(m.path)} ${m.originPath ? path.resolve(m.originPath) : ''}`;
+      `${m.alias}\u0000${m.mode}\u0000${path.resolve(m.path)}\u0000${m.originPath ? path.resolve(m.originPath) : ''}`;
     const plannedKeys = new Map(planned.map((p) => [keyOf(p), p]));
 
     for (const m of existing) {

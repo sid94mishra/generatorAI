@@ -120,7 +120,8 @@ Frequently used:
 | `GENERATORAI_BIND_HOST` | `127.0.0.1` | Bind interface. Anything non-loopback forces authentication on |
 | `GENERATORAI_HOME` | `~/.generatorai` | Data root |
 | `GENERATORAI_SESSION_TTL_HOURS` | `48` | How long a paired device may resume before pairing again |
-| `HARNESS_TYPE` | `copilot` | Agent harness to use |
+| `HARNESS_TYPE` | `copilot` | Default agent provider (`copilot`, `claude-agent` or `codex`); other available providers run alongside it |
+| `CODEX_CLI_PATH` | auto-resolved | Codex CLI location; unset uses PATH, then the ChatGPT desktop app's bundled CLI |
 
 ## Security
 

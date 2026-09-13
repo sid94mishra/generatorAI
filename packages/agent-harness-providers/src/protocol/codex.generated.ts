@@ -1,9 +1,9 @@
 // AUTO-GENERATED — do not edit. Run `pnpm generate:schemas` to update.
 // Protocol:        codex
-// Source artifact: schemas/codex/codex_app_server_protocol.schemas.json@0.151.0
-// Captured by:     npx --yes @openai/codex@0.151.0 codex app-server generate-json-schema --out <dir>  →  codex_app_server_protocol.schemas.json
-// Artifact sha256: 424b204943b18e5ffa52667a2aa397c9950730ec1e49ad767e2a016743990541
-// Definitions:     686
+// Source artifact: schemas/codex/codex_app_server_protocol.schemas.json@0.154.0
+// Captured by:     node packages/agent-harness-providers/node_modules/@openai/codex/bin/codex.js app-server generate-json-schema --out <dir>  →  codex_app_server_protocol.schemas.json (the @openai/codex optionalDependency pinned in packages/agent-harness-providers/package.json)
+// Artifact sha256: d71ddf3bf5484f8de2799f7a4793c2e66808a9ec1a330e2307accb088ab5948a
+// Definitions:     700
 //
 // The sha256 above is of the upstream file itself. If the pinned dependency
 // changes, this hash and the types below change with it, and CI's
@@ -226,6 +226,10 @@ export type ClientRequest = {
   params: V2PluginInstalledParams;
 } | {
   id: V2RequestId;
+  method: "plugin/reconcile";
+  params: V2PluginReconcileParams;
+} | {
+  id: V2RequestId;
   method: "plugin/read";
   params: V2PluginReadParams;
 } | {
@@ -388,11 +392,11 @@ export type ClientRequest = {
   id: V2RequestId;
   method: "account/logout";
   params?: null;
-} | {
+} | ({
   id: V2RequestId;
   method: "account/rateLimits/read";
-  params?: null;
-} | {
+  params?: V2GetAccountRateLimitsParams | null;
+}) | {
   id: V2RequestId;
   method: "account/rateLimitResetCredit/consume";
   params: V2ConsumeAccountRateLimitResetCreditParams;
@@ -818,6 +822,11 @@ export type McpServerElicitationRequestParams = {
   requestedSchema: unknown;
 } | {
   _meta?: unknown;
+  message: string;
+  mode: "openaiForm";
+  requestedSchema: unknown;
+} | {
+  _meta?: unknown;
   elicitationId: string;
   message: string;
   mode: "url";
@@ -871,7 +880,7 @@ export type ParsedCommand = {
 export type PermissionGrantScope = "turn" | "session";
 
 export type PermissionsRequestApprovalParams = {
-  cwd: V2AbsolutePathBuf;
+  cwd: V2LegacyAppPathString;
   environmentId?: string | null;
   itemId: string;
   permissions: V2RequestPermissionProfile;
@@ -1078,6 +1087,12 @@ export type ServerNotification = {
 } | {
   method: "model/verification";
   params: V2ModelVerificationNotification;
+} | {
+  method: "modelProvider/authRecoveryStarted";
+  params: V2AuthRecoveryNotification;
+} | {
+  method: "modelProvider/authRecoveryCompleted";
+  params: V2AuthRecoveryNotification;
 } | {
   method: "turn/moderationMetadata";
   params: V2TurnModerationMetadataNotification;
@@ -1355,6 +1370,8 @@ export type V2AppConfig = {
   default_tools_enabled?: boolean | null;
   destructive_enabled?: boolean | null;
   enabled?: boolean;
+  /** Per-account approval settings keyed by link ID. */
+  links?: V2AppLinksConfig | null;
   open_world_enabled?: boolean | null;
   tools?: V2AppToolsConfig | null;
 };
@@ -1378,6 +1395,15 @@ export type V2AppInfo = {
   name: string;
   pluginDisplayNames?: Array<string>;
 };
+
+/** Approval settings for a connected account within an app. */
+export type V2AppLinkConfig = {
+  approvals_reviewer?: V2ApprovalsReviewer | null;
+  default_tools_approval_mode?: V2AppToolApproval | null;
+};
+
+/** Account settings for a single app. */
+export type V2AppLinksConfig = Record<string, unknown>;
 
 /** EXPERIMENTAL - notification emitted when the app list changes. */
 export type V2AppListUpdatedNotification = {
@@ -1449,6 +1475,16 @@ export type V2AppToolSummary = {
 };
 
 export type V2AppToolsConfig = Record<string, unknown>;
+
+export type V2ApplicationNetworkRequirements = {
+  domains: Record<string, V2NetworkDomainPermission>;
+  /** When enabled, only explicitly allowed exact domains may be contacted. */
+  enabled: boolean;
+};
+
+export type V2ApplicationRequirements = {
+  network?: V2ApplicationNetworkRequirements | null;
+};
 
 /** Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `auto_review` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request. The legacy value `guardian_subagent` is accepted for compatibility. */
 export type V2ApprovalsReviewer = "user" | "auto_review" | "guardian_subagent";
@@ -1523,8 +1559,20 @@ export type V2AskForApproval = ("untrusted" | "on-request" | "never") | {
   };
 };
 
+export type V2AsyncUserInputQuestion = {
+  options?: Array<string> | null;
+  title: string;
+};
+
 /** Authentication mode for OpenAI-backed providers. */
 export type V2AuthMode = "apikey" | "chatgpt" | "chatgptAuthTokens" | "headers" | "agentIdentity" | "personalAccessToken" | "bedrockApiKey" | "bedrockAccessKeys";
+
+export type V2AuthRecoveryNotification = {
+  message: string;
+  provider: string;
+  threadId: string;
+  turnId: string;
+};
 
 /** Selects which part of the active context is charged against `model_auto_compact_token_limit`. */
 export type V2AutoCompactTokenLimitScope = "total" | "body_after_prefix";
@@ -1565,6 +1613,7 @@ export type V2BrowserUseOriginPolicyConfig = {
 export type V2BrowserUseRequirements = {
   allowGlobalPersistentApproval?: boolean | null;
   allowHistoryAccess?: boolean | null;
+  allowWebmcp?: boolean | null;
   defaultOriginPolicy?: V2BrowserUseOriginPolicy | null;
   disableAutoReview?: boolean | null;
   origins?: Record<string, V2BrowserUseOriginPolicy> | null;
@@ -2046,6 +2095,11 @@ export type V2ConfigWriteResponse = {
   overriddenMetadata?: V2OverriddenMetadata | null;
   status: V2WriteStatus;
   version: string;
+};
+
+/** Reasoning settings interpreted by the backend for the routed model. */
+export type V2ConfigurationReasoning = {
+  effort: V2ReasoningEffort;
 };
 
 export type V2ConfiguredHookHandler = ({
@@ -2612,8 +2666,22 @@ export type V2GetAccountParams = {
   refreshToken?: boolean;
 };
 
+/** Usage-read capabilities of the requesting client, never inferred from its experiment arm. */
+export type V2GetAccountRateLimitsParams = {
+  /** Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads. */
+  excludeResetCreditDetails?: boolean;
+  /** The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked. */
+  supportsLunaReserve?: boolean;
+};
+
 export type V2GetAccountRateLimitsResponse = {
+  /** Account associated with this usage snapshot, when supplied by the backend. */
+  accountId?: string | null;
+  /** Backend permission for ordinary included usage, validated against the active account. Null means unavailable; clients must not infer recovery from percentages or reset times. */
+  ordinaryUsageAllowed?: boolean | null;
   rateLimitResetCredits?: V2RateLimitResetCreditsSummary | null;
+  /** Optional backend-owned banner from the same usage read. Its nested keys retain the backend's snake_case contract; an absent banner leaves the client's existing UI unchanged. */
+  rateLimitUpsell?: unknown;
   /** Backward-compatible single-bucket view; mirrors the historical payload. */
   rateLimits: V2RateLimitSnapshot;
   /** Multi-bucket view keyed by metered `limit_id` (for example, `codex`). */
@@ -2660,7 +2728,7 @@ export type V2GuardianApprovalReview = {
 
 export type V2GuardianApprovalReviewAction = {
   command: string;
-  cwd: V2AbsolutePathBuf;
+  cwd: V2LegacyAppPathString;
   source: V2GuardianCommandSource;
   type: "command";
 } | {
@@ -2676,8 +2744,8 @@ export type V2GuardianApprovalReviewAction = {
   stdin: string;
   type: "writeStdin";
 } | {
-  cwd: V2AbsolutePathBuf;
-  files: Array<V2AbsolutePathBuf>;
+  cwd: V2LegacyAppPathString;
+  files: Array<V2LegacyAppPathString>;
   type: "applyPatch";
 } | {
   host: string;
@@ -3134,6 +3202,8 @@ export type V2McpServerStatus = {
   runtimeStatus?: V2McpServerConnectionStatus | null;
   serverInfo?: V2McpServerInfo | null;
   tools: Record<string, V2Tool>;
+  /** Tool discovery failed and no catalog was returned. Null when a catalog is returned, including cached or empty catalogs. */
+  toolsError?: string | null;
 };
 
 export type V2McpServerStatusDetail = "full" | "toolsAndAuthOnly";
@@ -3380,6 +3450,8 @@ export type V2NewThreadModelDefaults = {
 
 export type V2NonSteerableTurnKind = "review" | "compact";
 
+export type V2NullableGetAccountRateLimitsParams = V2GetAccountRateLimitsParams | null;
+
 export type V2NullableGetAccountTokenUsageParams = V2GetAccountTokenUsageParams | null;
 
 export type V2OverriddenMetadata = {
@@ -3555,6 +3627,32 @@ export type V2PluginReadParams = {
 
 export type V2PluginReadResponse = {
   plugin: V2PluginDetail;
+};
+
+/** Runtime categories affected by this change, not just capabilities currently present. Flags describe declarations before runtime policy filtering. Updates OR the old and new bundle flags; enablement changes and cached reinstalls use the cached bundle; removals retain the old bundle's flags. */
+export type V2PluginReconcileChangedPlugin = {
+  hasApps: boolean;
+  hasHooks: boolean;
+  hasMcps: boolean;
+  /** Whether either bundle declares skill roots; not a validated inventory of enabled skills. */
+  hasSkills: boolean;
+  /** Local plugin ID (`name@marketplace`), matching `PluginSummary.id`. */
+  id: string;
+};
+
+export type V2PluginReconcileParams = {
+  /** Optional client-provided reason recorded with the reconciliation attempt. */
+  reason?: string | null;
+};
+
+/** Bundle and installed-state changes observed by this pass, not a runtime-readiness acknowledgement or a cumulative diff since the client's last request. Other metadata-only changes are not listed. */
+export type V2PluginReconcileResponse = {
+  /** Plugins affected by bundle changes, enablement changes, or removals. Installed-state changes compare against the previous cached snapshot, including cached reinstalls. Removal hints survive cache cleanup failures; unchanged plugins are omitted. */
+  changedPlugins: Array<V2PluginReconcileChangedPlugin>;
+  /** Subset of failures for which the requested bundle could not be materialized. A previously cached version may still be available. */
+  failedMaterializationRemotePluginIds: Array<string>;
+  /** Backend remote plugin IDs whose bundle or identity update failed. */
+  failedRemotePluginIds: Array<string>;
 };
 
 export type V2PluginSearchResult = {
@@ -3787,6 +3885,8 @@ export type V2Project = {
   metadata: Record<string, string>;
   name: string;
   position: number;
+  /** Newest non-archived member thread's recency, in Unix seconds; null when none exist. */
+  recencyAt?: number | null;
   roots: Array<V2ProjectRoot>;
   updatedAt: number;
 };
@@ -3801,6 +3901,8 @@ export type V2ProjectChangedNotification = {
 export type V2ProjectRoot = {
   path: V2AbsolutePathBuf;
 };
+
+export type V2ProjectSortKey = "position" | "recencyAt";
 
 export type V2QueuedSubmission = {
   clientUserMessageId: string;
@@ -3844,6 +3946,8 @@ export type V2RateLimitSnapshot = {
   individualLimit?: V2SpendControlLimitSnapshot | null;
   limitId?: string | null;
   limitName?: string | null;
+  /** Normal model whose display name and reasoning options describe this quota alias. */
+  normalModelSlug?: string | null;
   planType?: V2PlanType | null;
   primary?: V2RateLimitWindow | null;
   rateLimitReachedType?: V2RateLimitReachedType | null;
@@ -4096,6 +4200,9 @@ export type V2ResponseItem = ({
   internal_chat_message_metadata_passthrough?: V2InternalChatMessageMetadataPassthrough | null;
   type: "compaction";
 }) | {
+  reasoning: V2ConfigurationReasoning;
+  type: "configuration_update";
+} | {
   type: "compaction_trigger";
 } | ({
   encrypted_content?: string | null;
@@ -4109,6 +4216,7 @@ export type V2ResponseItem = ({
 /** Usage metadata reported for one upstream response. */
 export type V2ResponseUsageMetadata = {
   amount?: string | null;
+  metadata?: unknown;
 };
 
 export type V2ResponsesApiWebSearchAction = ({
@@ -4129,7 +4237,7 @@ export type V2ResponsesApiWebSearchAction = ({
 export type V2ReviewDelivery = "inline" | "detached";
 
 export type V2ReviewStartParams = {
-  /** Where to run the review: inline (default) on the current thread or detached on a new thread (returned in `reviewThreadId`). */
+  /** Where to run the review: inline (default) on the current thread or detached on a new thread (returned in `reviewThreadId`). Detached delivery is deprecated and emits `deprecationNotice`. Use `thread/start` followed by an inline review for a separate review thread. */
   delivery?: V2ReviewDelivery | null;
   target: V2ReviewTarget;
   threadId: string;
@@ -4445,10 +4553,14 @@ export type V2Thread = {
   historyMode?: V2ThreadHistoryMode;
   /** Identifier for this thread. Codex-generated thread IDs are UUIDv7. */
   id: string;
+  /** Current configured model when loaded, otherwise the latest persisted model. Null when unavailable. This is not per-turn execution telemetry. */
+  model?: string | null;
   /** Model provider used for this thread (for example, 'openai'). */
   modelProvider: string;
   /** Optional user-facing thread title. */
   name?: string | null;
+  /** Originator recorded when the thread was created, independent of its current client or executor. Null when the recorded originator is unavailable. */
+  originator?: string | null;
   /** The ID of the parent thread. This will only be set if this thread is a subagent. */
   parentThreadId?: string | null;
   /** [UNSTABLE] Path to the thread on disk. */
@@ -4457,6 +4569,8 @@ export type V2Thread = {
   preview: string;
   /** Canonical project assignment owned by app-server, if any. */
   projectId: string | null;
+  /** Current configured reasoning effort when loaded, otherwise the latest persisted effort. Null when unset or unavailable. This is not per-turn execution telemetry. */
+  reasoningEffort?: V2ReasoningEffort | null;
   /** Unix timestamp (in seconds) used for thread recency ordering. */
   recencyAt?: number | null;
   /** The independently persisted section selected for this thread, if any. */
@@ -4515,6 +4629,13 @@ export type V2ThreadDeleteResponse = Record<string, unknown>;
 
 export type V2ThreadDeletedNotification = {
   threadId: string;
+};
+
+/** An environment selected by a loaded thread, independent of connection status. */
+export type V2ThreadEnvironment = {
+  cwd: V2LegacyAppPathString;
+  environmentId: string;
+  runtimeWorkspaceRoots: Array<V2LegacyAppPathString>;
 };
 
 /** Extra app-server data for a thread. */
@@ -4646,6 +4767,7 @@ export type V2ThreadItem = ({
   id: string;
   memoryCitation?: V2MemoryCitation | null;
   phase?: V2MessagePhase | null;
+  questions?: Array<V2AsyncUserInputQuestion> | null;
   text: string;
   type: "agentMessage";
 }) | ({
@@ -4824,6 +4946,8 @@ export type V2ThreadListParams = {
   limit?: number | null;
   /** Optional provider filter; when set, only sessions recorded under these providers are returned. When present but empty, includes all providers. */
   modelProviders?: Array<string> | null;
+  /** Optional originator allowlist, matching any supplied value exactly. Supported by hosted backends only; the local app-server rejects a nonempty list. Omitted or empty lists leave originators unrestricted. */
+  originators?: Array<string> | null;
   /** Optional substring filter for the extracted thread title. */
   searchTerm?: string | null;
   /** Omit to include every section, set to `null` for unsectioned threads, or provide a section ID to return only threads in that section. */
@@ -5270,6 +5394,8 @@ export type V2ThreadShellCommandParams = {
   /** Shell command string evaluated by the thread's configured shell. Unlike `command/exec`, this intentionally preserves shell syntax such as pipes, redirects, and quoting. This runs unsandboxed with full access rather than inheriting the thread sandbox policy. */
   command: string;
   threadId: string;
+  /** Maximum execution time in milliseconds. Defaults to one hour when omitted or null. Must be non-negative; zero requests an immediate timeout, not unlimited execution. Does not affect the immediate RPC acknowledgement. */
+  timeoutMs?: number | null;
 };
 
 export type V2ThreadShellCommandResponse = Record<string, unknown>;
@@ -5780,6 +5906,7 @@ export const CODEX_METHODS = {
     "plugin/installed",
     "plugin/list",
     "plugin/read",
+    "plugin/reconcile",
     "plugin/share/checkout",
     "plugin/share/delete",
     "plugin/share/list",
@@ -5863,6 +5990,8 @@ export const CODEX_METHODS = {
     "model/rerouted",
     "model/safetyBuffering/updated",
     "model/verification",
+    "modelProvider/authRecoveryCompleted",
+    "modelProvider/authRecoveryStarted",
     "process/exited",
     "process/outputDelta",
     "project/changed",

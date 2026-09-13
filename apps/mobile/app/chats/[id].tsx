@@ -37,7 +37,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useShallow } from 'zustand/react/shallow';
-import { Archive, ArchiveRestore, ArrowDown, Pencil, Share2, Square, Volume2 } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
+import {
+  Archive,
+  ArchiveRestore,
+  ArrowDown,
+  Copy,
+  GitFork,
+  Pencil,
+  Share2,
+  Square,
+  Volume2,
+} from 'lucide-react-native';
 import {
   ApiError,
   isArchived,
@@ -45,13 +56,20 @@ import {
   type AgentMode,
   type ChatMessage,
   type ChatSummary,
+  type RewindScope,
   type StreamBlock,
   type StreamUsage,
 } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
+import {
+  useCopyTranscriptMarkdown,
+  useForkChat,
+  useRewindChat,
+} from '../../src/api/useChatBranching';
 import { useModels } from '../../src/api/useModels';
 import { useChatStream, type SseStatus } from '../../src/stream/useChatStream';
+import { restoredPromptFrom, type ChatRewoundEffect } from '../../src/stream/rewindEffects';
 import { useTwoPhaseStop } from '../../src/stream/useTwoPhaseStop';
 import { protectStream, useStreamStore } from '../../src/stream/streamStore';
 import { useStreamHealth } from '../../src/stream/streamHealth';
@@ -59,7 +77,10 @@ import { useAuth } from '../../src/auth/AuthProvider';
 import { checkFeature } from '../../src/auth/featureGate';
 import { useTextToSpeech } from '../../src/voice/useTextToSpeech';
 import { Composer, type ComposerPane } from '../../src/components/chat/Composer';
-import { useComposerController } from '../../src/components/chat/composer/useComposerController';
+import {
+  useComposerController,
+  type ComposerController,
+} from '../../src/components/chat/composer/useComposerController';
 import { readAllAttachmentBytes } from '../../src/components/chat/composer/attachmentPickers';
 import type { ComposerSendPayload, WorkspacePrepState } from '../../src/components/chat/composer/types';
 import type { BoundAgentProps } from '../../src/components/chat/composer/ComposerBanners';
@@ -68,6 +89,13 @@ import { PermissionCard } from '../../src/components/chat/PermissionCard';
 import { PlanCard } from '../../src/components/chat/PlanCard';
 import { QuestionCard } from '../../src/components/chat/QuestionCard';
 import { RenameSheet } from '../../src/components/chat/RenameSheet';
+import { RewindSheet } from '../../src/components/chat/RewindSheet';
+import {
+  describeFork,
+  describeRewind,
+  forkedFromLabel,
+  shouldRestorePrompt,
+} from '../../src/components/chat/rewindOptions';
 import { toPlanDecision } from '../../src/components/chat/gateActions';
 import { pendingGateFrom } from '../../src/components/chat/gateFromInteraction';
 import { ChatHeaderMenuButton, ChatHeaderTitle } from '../../src/components/chat/ChatHeader';
@@ -99,7 +127,9 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 /** A transcript row: a user bubble, a derived timeline row, or the working indicator. */
 type Row =
   | { kind: 'user'; id: string; message: ChatMessage }
-  | { kind: 'row'; id: string; row: TimelineRow }
+  // `turnId` is what "Fork from here" anchors to. Only history rows have
+  // one: the live turn has no server turn id until it settles.
+  | { kind: 'row'; id: string; row: TimelineRow; turnId?: string }
   | { kind: 'activity'; id: string; label: string };
 
 /** How many messages are fetched at a time. */
@@ -167,6 +197,9 @@ export default function ChatScreen(): React.ReactElement {
   const [more, setMore] = useState<MoreSection | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  // The user message a rewind is anchored on: its turn id, and its text so
+  // the sheet can show what it is about to go back to.
+  const [rewindTarget, setRewindTarget] = useState<{ turnId: string; prompt: string } | null>(null);
   const [consoleCallId, setConsoleCallId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<LightboxImage | null>(null);
   const [, setConnection] = useState<SseStatus>({ state: 'idle' });
@@ -185,8 +218,47 @@ export default function ChatScreen(): React.ReactElement {
     queryFn: () => api.chats.get(chatId!),
   });
 
+  /**
+   * The composer controller, reachable from callbacks declared above it.
+   *
+   * A rewind restores its prompt into the DRAFT (Claude Code does the same:
+   * the prompt comes back in the input box so it can be edited and resent —
+   * never auto-sent). The controller is created further down, because it
+   * needs the send handler, so the stream callback reaches it through this
+   * ref rather than by reordering the whole screen around one arrow.
+   */
+  const composerRef = useRef<ComposerController | null>(null);
+
+  /**
+   * Rewinds initiated HERE, so the stream echo does not toast twice.
+   *
+   * Keyed `turnId:scope`. The local mutation has the file counts and says
+   * them; the broadcast only knows that it happened, which is exactly what a
+   * second device needs to hear and this one does not.
+   */
+  const selfRewound = useRef(new Set<string>());
+
+  const onChatRewound = useCallback(
+    (effect: ChatRewoundEffect) => {
+      const prompt = restoredPromptFrom(effect);
+      // Idempotent, and it must happen on BOTH paths: a rewind from another
+      // device should hand this composer the prompt too.
+      if (prompt) composerRef.current?.setDraft(prompt);
+
+      const key = `${effect.turnId}:${effect.scope}`;
+      if (selfRewound.current.delete(key)) return;
+      toast({ message: 'This chat was rewound on another device.', tone: 'info' });
+    },
+    [toast],
+  );
+
   // Keyed by the chat's session id once known (the store key the screen reads).
-  useChatStream({ chatId: chatId!, sessionId: chat.data?.sessionId, onStatusChange: setConnection });
+  useChatStream({
+    chatId: chatId!,
+    sessionId: chat.data?.sessionId,
+    onStatusChange: setConnection,
+    onChatRewound,
+  });
 
   const messages = useQuery({
     queryKey: [...queryKeys.chatMessages(chatId!), limit],
@@ -418,6 +490,112 @@ export default function ChatScreen(): React.ReactElement {
       api.chats.cancel(chatId!, options),
   });
 
+  // ── History: rewind, fork, copy transcript ───────────────────
+  const rewind = useRewindChat(chatId!, workspaceId);
+  const fork = useForkChat(chatId!, workspaceId);
+  const copyTranscript = useCopyTranscriptMarkdown(chatId!);
+
+  /**
+   * Run the rewind the sheet asked for.
+   *
+   * The 409 the server answers while a turn is in flight is a real outcome,
+   * not a bug: the sheet already disables its rows while `isStreaming`, but
+   * a turn can start between the tap and the request, and another device can
+   * start one at any moment.
+   */
+  const runRewind = useCallback(
+    async (scope: RewindScope) => {
+      const target = rewindTarget;
+      if (!target) return;
+      setRewindTarget(null);
+      const key = `${target.turnId}:${scope}`;
+      selfRewound.current.add(key);
+      try {
+        const result = await rewind.mutateAsync({ turnId: target.turnId, scope });
+        // The dropped turn is still in this device's block model until the
+        // broadcast lands; clearing now means the transcript does not render
+        // the discarded turn over the restored history for a frame or two.
+        if (scope !== 'code') useStreamStore.getState().clear(streamKey);
+        if (shouldRestorePrompt(result.scope, result.prompt)) {
+          composerRef.current?.setDraft(result.prompt);
+        }
+        haptics.select();
+        toast({ message: describeRewind(result), tone: 'success' });
+      } catch (error) {
+        selfRewound.current.delete(key);
+        haptics.error();
+        const busy = error instanceof ApiError && error.status === 409;
+        toast({
+          message: busy
+            ? 'The agent is still working on this chat. Stop the turn, then rewind.'
+            : 'Could not rewind this chat. Nothing was changed.',
+          tone: 'error',
+        });
+      }
+    },
+    [rewindTarget, rewind, streamKey, toast],
+  );
+
+  /**
+   * Branch a new chat from the end of a turn and go to it.
+   *
+   * `turnId` omitted means "from the last turn", which is what the chat-level
+   * menu asks for.
+   */
+  const runFork = useCallback(
+    async (turnId?: string) => {
+      try {
+        const result = await fork.mutateAsync(turnId ? { turnId } : {});
+        haptics.select();
+        toast({ message: describeFork(result.chat.name, result.conversation), tone: 'success' });
+        router.push({ pathname: '/chats/[id]', params: { id: result.chat.id } });
+      } catch (error) {
+        haptics.error();
+        const busy = error instanceof ApiError && error.status === 409;
+        toast({
+          message: busy
+            ? 'The agent is still working on this chat. Stop the turn, then fork.'
+            : 'Could not fork this chat.',
+          tone: 'error',
+        });
+      }
+    },
+    [fork, toast],
+  );
+
+  /**
+   * The WHOLE chat on the clipboard as markdown.
+   *
+   * Deliberately not the paged `messages` query: that one is capped at
+   * `limit`, so copying from it would silently truncate a long chat at
+   * whatever the user happened to have scrolled into view.
+   */
+  const runCopyTranscript = useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync(await copyTranscript());
+      toast({ message: 'Transcript copied', tone: 'success' });
+    } catch {
+      haptics.error();
+      toast({ message: 'Could not copy the transcript.', tone: 'error' });
+    }
+  }, [copyTranscript, toast]);
+
+  /**
+   * The chat this one was branched from.
+   *
+   * Fetched lazily and only when there is a parent: it is a chip, not a
+   * reason to spend a request on every chat open. The name falls back in
+   * `forkedFromLabel` when the parent has been deleted or is still loading.
+   */
+  const forkedFromChatId =
+    (chat.data as { forkedFromChatId?: string | null } | undefined)?.forkedFromChatId ?? null;
+  const parentChat = useQuery({
+    queryKey: queryKeys.chat(forkedFromChatId ?? ''),
+    queryFn: () => api.chats.get(forkedFromChatId!),
+    enabled: Boolean(forkedFromChatId),
+    staleTime: 60_000,
+  });
+
   const decidePlan = useMutation({
     mutationFn: ({ planId, action, feedback }: { planId: string; action: string; feedback?: string }) =>
       api.chats.decidePlan(chatId!, planId, toPlanDecision(action, feedback)),
@@ -506,7 +684,10 @@ export default function ChatScreen(): React.ReactElement {
         out.push({ kind: 'user', id: message.id, message });
         continue;
       }
-      for (const row of rowsOf(message)) out.push({ kind: 'row', id: row.id, row });
+      const turnId = message.metadata?.turnId;
+      for (const row of rowsOf(message)) {
+        out.push({ kind: 'row', id: row.id, row, ...(turnId ? { turnId } : {}) });
+      }
     }
 
     if (view.pendingUserMessage) {
@@ -593,9 +774,25 @@ export default function ChatScreen(): React.ReactElement {
       openImage: workspaceId ? (image) => void openImage(image) : undefined,
       readAloud: voice.available ? readAloud : undefined,
       toast: (message) => toast({ message, tone: 'info' }),
+      // A row only names the turn that was tapped; the screen owns the
+      // sheet, the mutation and the composer.
+      onRewind: (turnId, prompt) => setRewindTarget({ turnId, prompt }),
+      onForkFrom: (turnId) => void runFork(turnId),
+      onCopyTranscript: () => void runCopyTranscript(),
     }),
     // `usageRef.current.previous` only moves when `view.usage` does.
-    [workspaceId, streamKey, view.usage, openInChanges, openImage, readAloud, voice.available, toast],
+    [
+      workspaceId,
+      streamKey,
+      view.usage,
+      openInChanges,
+      openImage,
+      readAloud,
+      voice.available,
+      toast,
+      runFork,
+      runCopyTranscript,
+    ],
   );
 
   // Every block in the chat — for the Agent Console, built only while open.
@@ -666,6 +863,10 @@ export default function ChatScreen(): React.ReactElement {
     onOpenPane,
     messages: messages.data,
   });
+  // Written during render on purpose: the stream's rewind callback is
+  // declared above the controller and must see the CURRENT one, not the one
+  // that existed when an effect last ran.
+  composerRef.current = composer;
 
   /**
    * "Cancel and send" — resolve whatever is holding the turn, then send the
@@ -751,7 +952,7 @@ export default function ChatScreen(): React.ReactElement {
   const renderRow = useCallback(
     ({ item }: { item: Row }) => {
       if (item.kind === 'user') return <UserMessageRow message={item.message} />;
-      if (item.kind === 'row') return <TimelineRowView row={item.row} />;
+      if (item.kind === 'row') return <TimelineRowView row={item.row} turnId={item.turnId} />;
       return (
         <ActivityRow
           label={item.label}
@@ -769,6 +970,23 @@ export default function ChatScreen(): React.ReactElement {
   const renderChat = useCallback(
     (): React.ReactNode => (
       <KeyboardSticky mode="padding" className="flex-1">
+        {forkedFromChatId ? (
+          <Touchable
+            testID="fork-provenance"
+            accessibilityLabel={`${forkedFromLabel(parentChat.data?.name)}. Open the original chat`}
+            haptic="tap"
+            scale="none"
+            ripple={false}
+            onPress={() => router.push({ pathname: '/chats/[id]', params: { id: forkedFromChatId } })}
+            className="flex-row items-center gap-1.5 bg-subtle px-4 py-1.5"
+          >
+            <GitFork size={12} color={colors['muted-foreground']} />
+            <Text numberOfLines={1} className="flex-1 text-xs text-muted-foreground">
+              {forkedFromLabel(parentChat.data?.name)}
+            </Text>
+          </Touchable>
+        ) : null}
+
         {archived ? (
           <View accessibilityLiveRegion="polite" className="flex-row items-center gap-2 bg-subtle px-4 py-2">
             <Archive size={14} color={colors['muted-foreground']} />
@@ -928,6 +1146,7 @@ export default function ChatScreen(): React.ReactElement {
     // must re-render on every keystroke.
     [
       archived, rows, renderRow, hasMore, messages.isFetching, atBottom, keyboardShown, insets.bottom,
+      forkedFromChatId, parentChat.data?.name,
       changes.data, openInChanges, blockingPermission, blockingQuestion, blockingPlan, decidePlan.isPending,
       openPlan, composer.props, gate, boundAgent, workspacePrep, stop,
       isStreaming, blocked, models.data, models.isLoading, chat.data, mode, effort, contextTier,
@@ -996,6 +1215,19 @@ export default function ChatScreen(): React.ReactElement {
 
         <ImageLightbox image={lightbox} onClose={() => setLightbox(null)} />
 
+        <RewindSheet
+          visible={rewindTarget !== null}
+          onClose={() => setRewindTarget(null)}
+          onChoose={(scope) => void runRewind(scope)}
+          busy={rewind.isPending}
+          preview={rewindTarget?.prompt ?? null}
+          availability={{
+            streaming: isStreaming,
+            archived,
+            missingTurn: rewindTarget === null,
+          }}
+        />
+
         <RenameSheet
           visible={renameOpen}
           title="Rename chat"
@@ -1034,6 +1266,24 @@ export default function ChatScreen(): React.ReactElement {
                   toast({ message: 'Could not open the share sheet.', tone: 'error' });
                 });
               },
+            },
+            {
+              label: 'Copy transcript',
+              detail: 'The whole chat, as markdown.',
+              testID: 'copy-transcript',
+              icon: <Copy size={18} color={colors.foreground} />,
+              disabled: (messages.data?.length ?? 0) === 0,
+              onPress: () => void runCopyTranscript(),
+            },
+            {
+              label: 'Fork chat',
+              // No turn id: the server forks from the LAST turn, which is
+              // what "fork this chat" means from a chat-level menu.
+              detail: 'A new chat that shares these files and this history.',
+              testID: 'fork-chat',
+              icon: <GitFork size={18} color={colors.foreground} />,
+              disabled: fork.isPending || archived || (messages.data?.length ?? 0) === 0,
+              onPress: () => void runFork(),
             },
             {
               // Not destructive: red is for Delete. Archiving is a filing

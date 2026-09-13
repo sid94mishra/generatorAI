@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { useSendPrompt, useModels, useHarnessConfig } from '@/hooks/queries.js';
+import { useSendPrompt, useModels, useHarnessConfig, useHarnessProviders } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import { useSlashCommands, useWorkspaceFileIndex } from '@/hooks/composerQueries.js';
@@ -165,6 +165,14 @@ interface ChatInputProps {
    * only needs to reflect what the server has persisted.
    */
   promptHistory?: PromptHistoryEntry[];
+  /**
+   * A prompt handed back by a rewind, to be dropped into the box for editing.
+   *
+   * `at` is the delivery token: the same text rewound twice is still two
+   * offers, and re-rendering with an unchanged token must not overwrite what
+   * the user has since typed. Never auto-sent.
+   */
+  restoredDraft?: { text: string; at: number } | undefined;
 }
 
 /**
@@ -215,6 +223,7 @@ export function ChatInput({
   agentName,
   aboveComposer,
   promptHistory,
+  restoredDraft,
 }: ChatInputProps) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -266,6 +275,26 @@ export function ChatInput({
     [promptHistory, text],
   );
 
+  // ── Restored draft (after a rewind) ──
+  // The prompt the rewind gave back lands in the box, selected at the end so
+  // the user can edit or delete it immediately. Keyed on the offer token, not
+  // the text, so a re-render never clobbers what they have typed since.
+  const restoredAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!restoredDraft) return;
+    if (restoredAtRef.current === restoredDraft.at) return;
+    restoredAtRef.current = restoredDraft.at;
+    setHistoryIdx(null);
+    draftRef.current = null;
+    setText(restoredDraft.text);
+    const el = textareaRef.current;
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = restoredDraft.text.length;
+    });
+  }, [restoredDraft]);
+
   // ── Composer data (slash commands + `@` file index) ──
   const platform = usePlatform();
   const slashCommands = useSlashCommands(projectId);
@@ -299,10 +328,21 @@ export function ChatInput({
   // silently vanished from the composer. Falling back to the first available
   // model keeps the toolbar intact and keeps the label honest about what
   // will actually be used.
+  //
+  // The catalog only lists models of providers that are ready right now, so a
+  // selection can also be missing because its provider is briefly not ready
+  // (a re-probe, a CLI restart, a stale disk cache). That is not a reason to
+  // move the chat to another provider's model: substitute only when the
+  // absence is conclusive — a fresh catalog in which every installed provider
+  // answered.
+  const { data: providerCatalog } = useHarnessProviders();
+  const catalogIsConclusive =
+    !!providerCatalog && !providerCatalog.stale && providerCatalog.providers.every((p) => p.ready || !p.installed);
   const displayModel = useMemo(() => {
     if (selectedModel && modelList.some((m) => m.id === selectedModel)) return selectedModel;
+    if (selectedModel && !catalogIsConclusive) return selectedModel;
     return modelList[0]?.id ?? selectedModel ?? '';
-  }, [selectedModel, modelList]);
+  }, [selectedModel, modelList, catalogIsConclusive]);
   const activeModel = useMemo(
     () => modelList.find((m) => m.id === displayModel),
     [modelList, displayModel],
@@ -310,8 +350,9 @@ export function ChatInput({
 
   // Persist the substitution so the label, the gauge and the model the server
   // actually runs stay in agreement. Only fires when we genuinely had to
-  // substitute (no selection, or a selection the catalog no longer offers) —
-  // not on every open — and self-terminates once the parent echoes it back.
+  // substitute (no selection, or a selection a conclusive catalog no longer
+  // offers) — not on every open — and self-terminates once the parent echoes
+  // it back.
   const onModelChangeRef = useRef(onModelChange);
   onModelChangeRef.current = onModelChange;
   useEffect(() => {

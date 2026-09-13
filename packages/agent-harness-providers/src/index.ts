@@ -83,6 +83,15 @@ export type { ClaudeAgentProviderOptions as ClaudeAgentProviderOptionsInternal }
 
 // W37 — Codex provider (JSON-RPC over stdio to `codex app-server`)
 export type { CodexProvider } from './providers/codex/CodexProvider.js';
+// Codex CLI discovery (config → CODEX_CLI_PATH → PATH → desktop-app bundle).
+// Separate module from the provider so resolving a path never loads it.
+export {
+  resolveCodexCommand,
+  CODEX_CLI_PATH_ENV,
+  type ResolvedCodexCommand,
+  type ResolveCodexCommandOptions,
+  type CodexCommandSource,
+} from './providers/codex/resolveCodexBinary.js';
 export type {
   CodexProviderOptions,
   CodexApprovalRequest,

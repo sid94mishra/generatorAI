@@ -4,7 +4,7 @@
 export { WedgeDetector, LoopTurnProber } from './WedgeDetector.js';
 export type { WedgeDetectorConfig, WedgeDiagnosticReport, LoopTurnProberConfig } from './WedgeDetector.js';
 
-export { SandboxedScriptRunner } from './SandboxedScriptRunner.js';
+export { SandboxedScriptRunner, resolveOnPath } from './SandboxedScriptRunner.js';
 export type { SandboxedScriptRunnerOptions } from './SandboxedScriptRunner.js';
 export { GitManager } from './GitManager.js';
 export type { GitManagerOptions, PullRequestResult } from './GitManager.js';

@@ -94,6 +94,13 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'chat.background_task.status': 'item',
   'chat.background_task.completed': 'item',
   'chat.background_task.failed': 'item',
+  // Throttled by the emitter (≤2/s per worker) and the LAST tick of a worker
+  // carries its settled state, so it is kept an item like its siblings: a
+  // dropped final tick would leave a finished worker spinning in the transcript.
+  'chat.background_task.progress': 'item',
+  // Rewind/fork move the transcript itself — every viewer must refetch.
+  'chat.rewound': 'item',
+  'chat.forked': 'item',
 
   // chat.plan — plan mode is human-in-the-loop. `review_requested` and
   // `decided` gate a turn; losing either strands the run waiting on an approval
@@ -189,6 +196,7 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
 
   // workspace
   'workspace.changed': 'item',
+  'workspace.review_changed': 'item',
 
   // checkpoint
   'checkpoint.created': 'item',
@@ -298,6 +306,12 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
 export const DELTA_SESSION_INFO_TYPES: ReadonlySet<string> = new Set([
   'tool_partial_result',
   'tool_progress',
+  // Codex re-sends the WHOLE unified diff of the turn's working tree on every
+  // file write (`turn/diff/updated`), so it is a snapshot each later one
+  // supersedes, emitted many times per turn — the delta bar exactly. Nothing
+  // depends on it either: the Changes tray refetches from git on each file op,
+  // so this is a convenience preview, not the source of truth.
+  'turn_diff',
 ]);
 
 /**
