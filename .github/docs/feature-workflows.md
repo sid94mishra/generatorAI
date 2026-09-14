@@ -215,6 +215,7 @@ type OrchestratorConfig = {
   createWorktrees?: boolean;                    // default true
   requiresCodebase?: boolean;
   autoCommit?: boolean;                         // commit the worktrees after a successful run
+  autoPush?: boolean;                           // push the work branch (implied by autoCreatePR)
   autoCreatePR?: boolean;
   gitRepositories?: Array<{                     // LEGACY clone-a-URL path; not accepted by
     url?: string;                               // the server schema, which strips it. New
@@ -240,8 +241,32 @@ clone-a-URL path; the server schema does not declare it, so anything sent there 
 silently dropped by zod. `loadDefinition` still falls back to `gitRepositories` aliases
 when reading so definitions saved before `codebaseAliases` existed keep working.
 
-`autoCommit` / `autoCreatePR` apply to whatever the run actually has checked out — the
-legacy cloned repos *or* the worktrees created from `codebaseAliases`.
+`autoCommit` / `autoPush` / `autoCreatePR` apply to whatever the run actually has checked out
+— the legacy cloned repos *or* the worktrees created from `codebaseAliases`.
+
+**They run through the source-control flow.** `buildPostProcessingSteps` turns the flags into a
+`commit_and_push` step (`generateMessage: true`, `push: autoPush || autoCreatePR`) at order 100
+and a `create_pr` step (`generateText: true`) at order 200, and `WorkflowPreprocessor` routes
+both through `SourceControlFlowService.run`, once per run worktree — the same flow the Changes
+tab and agent-native chats use, so there is one branch policy, one base-branch sync and one
+conflict dry-run. The generated commit message / PR text is written from the diff with
+`"<workflow name> (workflow run <run id>)"` as the hint; the PR base is the codebase's
+`defaultBranch` (`OrchestratorContext.baseBranches`), overridden by an explicit
+`create_pr.baseBranch`. See [feature-source-control.md](./feature-source-control.md) §4–§5.
+
+**Failure semantics.** Both auto-steps are `failOnError: true`. A result that is not `ok` —
+`conflicts`, `blocked` or `failed` — fails the step and stops the post-processing sequence, so a
+PR is never opened on top of a commit that did not land. The failed `PreprocessingResult` carries
+`error` (one user-facing line) **and** `scm: ScmFlowResult[]` — the conflict report, the blocking
+reason and every step the flow ran — which is what the run page renders. A conflict never leaves
+a half-applied merge: the flow probes the merge with `git merge-tree --write-tree` (falling back
+to a `--no-commit` merge it immediately aborts), so `ScmConflictReport.mergeStarted` is `false`
+and the worktree is exactly as the run left it.
+
+**Legacy fallback.** When no flow service is wired (older embedders — e.g. the SDK's own
+composition in `packages/sdk/src/GeneratorAI.ts`), `commit_and_push` falls back to
+`GitManager.commitAndPush` and `create_pr` to `SourceControlService` / the `gh` CLI, exactly as
+before. The PR url + number are still reported in the step's `output`.
 
 ### 3.7 `tags`
 

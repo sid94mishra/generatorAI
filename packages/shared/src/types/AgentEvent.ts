@@ -12,6 +12,7 @@ import type {
   ComputerRefusalCode,
 } from './ComputerUse.js';
 import type { TerminalHostKind } from './Terminal.js';
+import type { ScmFlowResult } from './SourceControl.js';
 import type { SttEngineKind } from './Voice.js';
 
 /**
@@ -162,6 +163,15 @@ export type AgentEvent =
   | { kind: 'chat.prompt_failed'; data: { chatId: string; error: string } }
   | { kind: 'chat.archived'; data: { chatId: string } }
   | { kind: 'chat.deleted'; data: { chatId: string } }
+  // ── Agent-native source control (doc §5) ──
+  //
+  // Emitted on the chat's SESSION scope after a turn whose chat opted into
+  // `sourceControl.autoCommit`: the PLATFORM committed (and optionally pushed
+  // / opened a PR), not the agent. One event per git-capable mount, keyed by
+  // `turnId` so a re-run after a resolved conflict corrects the same card.
+  // `blocked` / `conflicts` results are emitted too — that is how the
+  // transcript explains "no PR possible: <reason>".
+  | { kind: 'chat.scm.result'; data: { chatId: string; turnId: string; alias: string; result: ScmFlowResult } }
   // ── Orchestrator Background-Task Events (routed to the PARENT chat scope) ──
   | { kind: 'chat.background_task.spawned'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; model?: string; taskIndex?: number } }
   | { kind: 'chat.background_task.status'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; status: string } }

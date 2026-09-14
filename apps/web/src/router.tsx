@@ -23,7 +23,7 @@ function withBoundary(pageName: string, element: React.ReactElement) {
 const DashboardPage = lazy(() => import('@/pages/DashboardPage.js').then((m) => ({ default: m.DashboardPage })));
 const ChatsListPage = lazy(() => import('@/pages/ChatsListPage.js').then((m) => ({ default: m.ChatsListPage })));
 const ChatPage = lazy(() => import('@/pages/ChatPage.js').then((m) => ({ default: m.ChatPage })));
-const SettingsRoute = lazy(() => import('@/pages/SettingsRoute.js').then((m) => ({ default: m.SettingsRoute })));
+const SettingsPage = lazy(() => import('@/pages/SettingsPage.js').then((m) => ({ default: m.SettingsPage })));
 const WorkflowListPage = lazy(() => import('@/pages/WorkflowListPage.js').then((m) => ({ default: m.WorkflowListPage })));
 const WorkflowDefinitionPage = lazy(() => import('@/pages/WorkflowDefinitionPage.js').then((m) => ({ default: m.WorkflowDefinitionPage })));
 const WorkflowBuilderPage = lazy(() => import('@/pages/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })));
@@ -35,6 +35,7 @@ const ProjectsListPage = lazy(() => import('@/pages/ProjectsListPage.js').then((
 const CreateProjectPage = lazy(() => import('@/pages/CreateProjectPage.js').then((m) => ({ default: m.CreateProjectPage })));
 const ProjectDetailPage = lazy(() => import('@/pages/ProjectDetailPage.js').then((m) => ({ default: m.ProjectDetailPage })));
 const CodebaseDetailPage = lazy(() => import('@/pages/CodebaseDetailPage.js').then((m) => ({ default: m.CodebaseDetailPage })));
+const PullRequestPage = lazy(() => import('@/pages/PullRequestPage.js').then((m) => ({ default: m.PullRequestPage })));
 const ScriptsListPage = lazy(() => import('@/pages/ScriptsListPage.js').then((m) => ({ default: m.ScriptsListPage })));
 const ScriptDetailPage = lazy(() => import('@/pages/ScriptDetailPage.js').then((m) => ({ default: m.ScriptDetailPage })));
 const AgentsListPage = lazy(() => import('@/pages/AgentsListPage.js').then((m) => ({ default: m.AgentsListPage })));
@@ -68,7 +69,10 @@ export const router = createBrowserRouter([
       { path: 'agents', element: withBoundary('Agents', <AgentsListPage />) },
       { path: 'agents/new', element: withBoundary('New Agent', <AgentEditorPage />) },
       { path: 'agents/:id', element: withBoundary('Agent', <AgentEditorPage />) },
-      { path: 'settings', element: withBoundary('Settings', <SettingsRoute />) },
+      // Settings is a routed page, not a modal. `/settings` is kept as the
+      // bare entry (= General) so old links and the desktop menu still land.
+      { path: 'settings', element: withBoundary('Settings', <SettingsPage />) },
+      { path: 'settings/:section', element: withBoundary('Settings', <SettingsPage />) },
       { path: 'workflows', element: withBoundary('Workflows', <WorkflowListPage />) },
       { path: 'workflows/new', element: withBoundary('Workflow Builder', <WorkflowBuilderPage />) },
       { path: 'workflows/:id', element: withBoundary('Workflow', <WorkflowDefinitionPage />) },
@@ -81,6 +85,10 @@ export const router = createBrowserRouter([
       { path: 'projects/new', element: withBoundary('Create Project', <CreateProjectPage />) },
       { path: 'projects/:id', element: withBoundary('Project', <ProjectDetailPage />) },
       { path: 'projects/:id/codebases/:cid', element: withBoundary('Codebase', <CodebaseDetailPage />) },
+      {
+        path: 'projects/:id/codebases/:cid/pull-requests/:number',
+        element: withBoundary('Pull Request', <PullRequestPage />),
+      },
       { path: 'scripts', element: withBoundary('Scripts', <ScriptsListPage />) },
       { path: 'scripts/:id', element: withBoundary('Script', <ScriptDetailPage />) },
       {

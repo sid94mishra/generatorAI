@@ -162,14 +162,17 @@ export {
 } from './MountService.js';
 export type { PlannedMount, PlanOptions, MountServiceDeps, PrepareScope } from './MountService.js';
 export { buildWorkspaceHint } from './chatSystemHints.js';
+export { buildAutoCommitHint } from './chatSystemHints.js';
 export type {
   CaptureWorkspaceCheckpointParams,
   WorkspaceRepoRef,
 } from './WorkspaceCheckpointService.js';
 export { SourceControlService } from './SourceControlService.js';
 export type { CreatePrParams } from './SourceControlService.js';
-export { SourceControlConfigService } from './SourceControlConfigService.js';
-export type { SafeSourceControlConfig, SourceControlConfigDeps } from './SourceControlConfigService.js';
+// Source control — accounts, readiness, commit → PR flow, PR review, editors.
+// `SourceControlConfigService` now lives under ./scm/ (accounts + secret-store
+// tokens); the legacy `getConfig`/`setConfig` shims are still on it.
+export * from './scm/index.js';
 export { PathResolver, PathEscapeError, SymlinkEscapeError } from './PathResolver.js';
 
 // Workflow Script services

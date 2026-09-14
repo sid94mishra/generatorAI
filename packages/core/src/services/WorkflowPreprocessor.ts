@@ -18,6 +18,8 @@ import type {
   CreatePRStepConfig,
   PostRunScriptStepConfig,
   ILogger,
+  ScmFlowRequest,
+  ScmFlowResult,
 } from '@generatorai/shared';
 import { interpolateVariables } from '@generatorai/shared';
 import type { GitManager } from '../infrastructure/GitManager.js';
@@ -25,6 +27,53 @@ import type { IScriptRunner } from '../domain/ports/IScriptRunner.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { SourceControlService } from './SourceControlService.js';
 import * as path from 'node:path';
+
+/**
+ * The slice of `SourceControlFlowService` post-processing needs (doc §5).
+ *
+ * A port rather than the class so the preprocessor keeps no dependency on the
+ * git client, the account registry or the text generator — and so the routing
+ * can be tested with a fake that returns canned `ScmFlowResult`s.
+ */
+export interface WorkflowScmFlowPort {
+  run(input: {
+    workspaceId?: string;
+    repoDir: string;
+    alias: string;
+    request: ScmFlowRequest;
+    context?: { chatName?: string; hint?: string };
+  }): Promise<ScmFlowResult>;
+}
+
+/**
+ * A post-processing step that could not complete because source control said
+ * no. Carries the `ScmFlowResult`s so the run page can render the conflict
+ * report / blocking reason instead of a bare message.
+ */
+export class ScmPostProcessingError extends Error {
+  constructor(
+    message: string,
+    readonly results: ScmFlowResult[],
+  ) {
+    super(message);
+    this.name = 'ScmPostProcessingError';
+  }
+}
+
+/** One user-facing line explaining a flow result that did not succeed. */
+export function scmFailureReason(result: ScmFlowResult): string {
+  if (result.status === 'conflicts') {
+    const files = result.conflicts?.files ?? [];
+    return (
+      `${result.alias}: merge conflicts with ${result.conflicts?.base ?? 'the base branch'} in ` +
+      `${files.length} file(s)${files.length ? ` (${files.slice(0, 5).join(', ')})` : ''}` +
+      ' — the working tree was left untouched'
+    );
+  }
+  if (result.error) return `${result.alias}: ${result.error}`;
+  const stopped = result.steps.find((s) => s.status === 'blocked' || s.status === 'failed');
+  return `${result.alias}: ${stopped?.detail ?? 'the source-control flow did not complete'}`;
+}
 
 /** Max bytes per `GEN_VAR_*` env var value — prevents blowing past ARG_MAX. */
 const MAX_ENV_VALUE_BYTES = 32 * 1024;
@@ -63,6 +112,16 @@ export interface PreprocessorContext {
   featureBranches: Record<string, string>;
   /** Per-run workspace directory where repos are cloned into */
   runWorkspaceDir?: string;
+  /** Workflow name — seeds the generated commit message / PR text. */
+  workflowName?: string;
+  /** Base branch per repo alias (the codebase's `defaultBranch`). */
+  baseBranches?: Record<string, string>;
+}
+
+/** What one post-processing step produced. */
+interface PostStepOutcome {
+  output?: string;
+  scm?: ScmFlowResult[];
 }
 
 export class WorkflowPreprocessor {
@@ -73,6 +132,14 @@ export class WorkflowPreprocessor {
     private readonly logger: ILogger,
     /** Optional — when set + enabled, PRs go through the active provider. */
     private readonly sourceControlService?: SourceControlService,
+    /**
+     * Agent-native source control (doc §5). When wired, commit/push/PR
+     * post-processing runs through the ONE flow that also serves the Changes
+     * tab and agent-native chats — same branch policy, same base-branch sync,
+     * same conflict dry-run. The legacy `GitManager` path below stays only as
+     * a fallback for embedders that have not wired it.
+     */
+    private readonly scmFlow?: WorkflowScmFlowPort,
   ) {}
 
   /**
@@ -206,12 +273,13 @@ export class WorkflowPreprocessor {
           },
         });
 
-        const output = await this.executePostStep(step, context);
+        const outcome = await this.executePostStep(step, context);
 
         const result: PreprocessingResult = {
           stepName: step.name,
           success: true,
-          output,
+          ...(outcome.output !== undefined ? { output: outcome.output } : {}),
+          ...(outcome.scm ? { scm: outcome.scm } : {}),
           durationMs: Date.now() - start,
         };
         results.push(result);
@@ -227,10 +295,15 @@ export class WorkflowPreprocessor {
         });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
+        // A source-control failure carries the full `ScmFlowResult`s — the
+        // conflict report, the blocking reason, which steps ran — so the run
+        // page can explain what happened rather than showing one line.
+        const scm = error instanceof ScmPostProcessingError ? error.results : undefined;
         const result: PreprocessingResult = {
           stepName: step.name,
           success: false,
           error: errorMsg,
+          ...(scm ? { scm } : {}),
           durationMs: Date.now() - start,
         };
         results.push(result);
@@ -274,7 +347,7 @@ export class WorkflowPreprocessor {
   private async executePostStep(
     step: PostProcessingStep,
     context: PreprocessorContext,
-  ): Promise<string | undefined> {
+  ): Promise<PostStepOutcome> {
     const config = step.config;
 
     switch (config.type) {
@@ -283,78 +356,198 @@ export class WorkflowPreprocessor {
       case 'create_pr':
         return this.executeCreatePR(config, context);
       case 'run_script':
-        return this.executePostRunScript(config, context);
+        return { output: await this.executePostRunScript(config, context) };
       default:
         throw new Error(`Unknown post-processing step type: ${(config as { type: string }).type}`);
     }
   }
 
-  private async executeCommitAndPush(
-    config: CommitAndPushStepConfig,
+  // ── Source-control flow routing (doc §5) ─────────────────────────────
+  //
+  // `commit_and_push` and `create_pr` are the SAME flow with different
+  // requested steps, so they share one runner: resolve the repos, run
+  // `SourceControlFlowService.run` per repo, and fail the step when any of
+  // them comes back `conflicts` / `blocked` / `failed`. The flow's sync step
+  // probes the merge without touching the working tree, so a step that fails
+  // this way never leaves a half-applied merge behind.
+
+  /** The repos a post-processing step acts on, in a stable order. */
+  private scmTargets(
+    repoAlias: string | undefined,
     context: PreprocessorContext,
-  ): Promise<string> {
-    const message = interpolateVariables(config.commitMessage, context.variables);
-    const results: string[] = [];
-
-    // If repoAlias is specified, commit only that repo; otherwise commit all
-    const aliases = config.repoAlias
-      ? [config.repoAlias]
-      : Object.keys(context.clonedPaths);
-
-    if (!config.repoAlias && aliases.length > 1) {
-      this.logger.info(`[Preprocessor] Auto-committing all ${aliases.length} cloned repos`);
-    }
-
+  ): Array<{ alias: string; repoDir: string }> {
+    const aliases = repoAlias ? [repoAlias] : Object.keys(context.clonedPaths);
+    const out: Array<{ alias: string; repoDir: string }> = [];
     for (const alias of aliases) {
       const repoDir = context.clonedPaths[alias];
       if (!repoDir) {
-        this.logger.warn(`[Preprocessor] No cloned path for alias "${alias}", skipping commit`);
+        this.logger.warn(`[Preprocessor] No cloned path for alias "${alias}", skipping`);
         continue;
       }
-      const branch = context.featureBranches[alias];
-      await this.gitManager.commitAndPush(repoDir, message, branch);
-      results.push(`Committed and pushed ${alias} on branch ${branch ?? 'HEAD'}`);
+      out.push({ alias, repoDir });
+    }
+    return out;
+  }
+
+  /** Hint the generated commit message / PR text is written from. */
+  private scmHint(context: PreprocessorContext): string {
+    const name = context.workflowName?.trim();
+    return name
+      ? `${name} (workflow run ${context.workflowRunId})`
+      : `Workflow run ${context.workflowRunId}`;
+  }
+
+  /**
+   * Run one flow request per repo and summarise. Throws
+   * `ScmPostProcessingError` — with every result attached — as soon as one
+   * repo does not come back `ok`.
+   */
+  private async runScmFlow(
+    targets: Array<{ alias: string; repoDir: string }>,
+    context: PreprocessorContext,
+    build: (alias: string) => ScmFlowRequest,
+    describe: (result: ScmFlowResult) => string,
+  ): Promise<PostStepOutcome> {
+    const flow = this.scmFlow;
+    if (!flow) throw new Error('Source-control flow service is not wired');
+
+    const results: ScmFlowResult[] = [];
+    const lines: string[] = [];
+    const hint = this.scmHint(context);
+
+    for (const target of targets) {
+      const result = await flow.run({
+        repoDir: target.repoDir,
+        alias: target.alias,
+        request: { ...build(target.alias), hint },
+        context: { hint },
+      });
+      results.push(result);
+      if (result.status !== 'ok') {
+        throw new ScmPostProcessingError(scmFailureReason(result), results);
+      }
+      lines.push(describe(result));
     }
 
-    return results.join('; ');
+    return { output: lines.join('; '), scm: results };
+  }
+
+  private async executeCommitAndPush(
+    config: CommitAndPushStepConfig,
+    context: PreprocessorContext,
+  ): Promise<PostStepOutcome> {
+    const message = interpolateVariables(config.commitMessage, context.variables);
+    const targets = this.scmTargets(config.repoAlias, context);
+
+    if (!config.repoAlias && targets.length > 1) {
+      this.logger.info(`[Preprocessor] Auto-committing all ${targets.length} run repos`);
+    }
+
+    if (this.scmFlow) {
+      const push = config.push !== false;
+      return this.runScmFlow(
+        targets,
+        context,
+        (alias) => ({
+          alias,
+          commit: config.generateMessage
+            ? { generate: true }
+            : { message, generate: false },
+          push,
+          // No `pullRequest` here, so the sync step falls back to the repo's
+          // own default branch — which is what a commit-only step wants.
+        }),
+        (result) => {
+          const sha = result.commit?.sha.slice(0, 8);
+          const where = result.branch ?? result.readiness.branch ?? 'HEAD';
+          if (!sha) return `${result.alias}: nothing to commit on ${where}`;
+          return `${result.alias}: committed ${sha} on ${where}${result.pushed ? ' and pushed' : ''}`;
+        },
+      );
+    }
+
+    // ── Legacy fallback: embedders that have not wired the flow service. ──
+    const results: string[] = [];
+    for (const target of targets) {
+      const branch = context.featureBranches[target.alias];
+      await this.gitManager.commitAndPush(target.repoDir, message, branch);
+      results.push(`Committed and pushed ${target.alias} on branch ${branch ?? 'HEAD'}`);
+    }
+    return { output: results.join('; ') };
+  }
+
+  /** Explicit base > the codebase's default branch > let the flow resolve it. */
+  private baseFor(
+    explicit: string | undefined,
+    alias: string,
+    context: PreprocessorContext,
+  ): string | undefined {
+    return explicit ?? context.baseBranches?.[alias];
   }
 
   private async executeCreatePR(
     config: CreatePRStepConfig,
     context: PreprocessorContext,
-  ): Promise<string> {
+  ): Promise<PostStepOutcome> {
     const title = interpolateVariables(config.title, context.variables);
     const body = interpolateVariables(config.body, context.variables);
-    const results: string[] = [];
+    const targets = this.scmTargets(config.repoAlias, context);
 
-    const aliases = config.repoAlias
-      ? [config.repoAlias]
-      : Object.keys(context.clonedPaths);
-
-    if (!config.repoAlias && aliases.length > 1) {
-      this.logger.info(`[Preprocessor] Auto-creating PR for all ${aliases.length} cloned repos`);
+    if (!config.repoAlias && targets.length > 1) {
+      this.logger.info(`[Preprocessor] Auto-creating PR for all ${targets.length} run repos`);
     }
 
-    for (const alias of aliases) {
-      const repoDir = context.clonedPaths[alias];
-      if (!repoDir) continue;
+    if (this.scmFlow) {
+      return this.runScmFlow(
+        targets,
+        context,
+        (alias) => {
+          const base = this.baseFor(config.baseBranch, alias, context);
+          return {
+            alias,
+            push: true,
+            pullRequest: {
+              ...(config.generateText
+                ? { generate: true }
+                : { title, body, generate: false }),
+              ...(base ? { base } : {}),
+              ...(config.draft !== undefined ? { draft: config.draft } : {}),
+            },
+          };
+        },
+        (result) => {
+          const pr = result.pullRequest;
+          return pr
+            ? `PR #${pr.number} created for ${result.alias}: ${pr.url}`
+            : `${result.alias}: no pull request was opened`;
+        },
+      );
+    }
+
+    // ── Legacy fallback: embedders that have not wired the flow service. ──
+    const results: string[] = [];
+    for (const target of targets) {
       // Prefer the pluggable source-control provider when enabled; fall back
       // to the legacy gh-CLI path on GitManager otherwise.
       if (this.sourceControlService && (await this.sourceControlService.isEnabled())) {
         const pr = await this.sourceControlService.createPullRequest({
-          repoDir,
+          repoDir: target.repoDir,
           title,
           body,
           base: config.baseBranch,
         });
-        results.push(`PR #${pr.number} created for ${alias}: ${pr.url}`);
+        results.push(`PR #${pr.number} created for ${target.alias}: ${pr.url}`);
       } else {
-        const pr = await this.gitManager.createPullRequest(repoDir, title, body, config.baseBranch);
-        results.push(`PR #${pr.number} created for ${alias}: ${pr.url}`);
+        const pr = await this.gitManager.createPullRequest(
+          target.repoDir,
+          title,
+          body,
+          config.baseBranch,
+        );
+        results.push(`PR #${pr.number} created for ${target.alias}: ${pr.url}`);
       }
     }
-
-    return results.join('; ');
+    return { output: results.join('; ') };
   }
 
   private async executePostRunScript(

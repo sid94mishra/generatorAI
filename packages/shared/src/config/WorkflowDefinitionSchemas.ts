@@ -152,6 +152,8 @@ const OrchestratorConfigSchema = z.object({
   resultValidations: z.array(StageResultValidationSchema).default([]),
   requiresCodebase: z.boolean().default(false),
   autoCommit: z.boolean().optional(),
+  /** Push the run's work branch after committing (implied by autoCreatePR). */
+  autoPush: z.boolean().optional(),
   autoCreatePR: z.boolean().optional(),
   postProcessingSteps: z.array(z.object({
     type: z.string(),

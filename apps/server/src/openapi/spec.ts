@@ -57,6 +57,21 @@ const idParam = {
   schema: { type: 'string' },
 };
 
+const cidParam = {
+  in: 'path',
+  name: 'cid',
+  required: true,
+  schema: { type: 'string' },
+};
+
+/** A pull-request number. Must parse as a positive integer, or the route 400s. */
+const prNumberParam = {
+  in: 'path',
+  name: 'number',
+  required: true,
+  schema: { type: 'integer', minimum: 1 },
+};
+
 const runIdParam = {
   in: 'path',
   name: 'runId',
@@ -84,6 +99,424 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
   components: {
     schemas: {
       Error: errorResponseSchema,
+      // ── Source control (feature-source-control.md; shapes mirror
+      // packages/shared/src/types/SourceControl.ts) ──
+      ChatSourceControlOptions: {
+        type: 'object',
+        description: 'Agent-native source control for a chat: what the server does after each completed turn.',
+        properties: {
+          autoCommit: { type: 'boolean' },
+          autoPush: { type: 'boolean' },
+          autoPullRequest: { type: 'boolean' },
+          base: { type: 'string' },
+          draft: { type: 'boolean' },
+        },
+        required: ['autoCommit', 'autoPush', 'autoPullRequest'],
+      },
+      SourceControlAccount: {
+        type: 'object',
+        description: 'A connected VCS-host account. The token lives in the secret store and never appears here.',
+        properties: {
+          id: { type: 'string' },
+          provider: { type: 'string', enum: ['github'] },
+          label: { type: 'string' },
+          host: { type: 'string' },
+          login: { type: 'string' },
+          avatarUrl: { type: 'string' },
+          scopes: { type: 'array', items: { type: 'string' } },
+          authMethod: { type: 'string', enum: ['token', 'device', 'gh-cli'] },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'provider', 'label', 'authMethod', 'createdAt'],
+      },
+      SourceControlProviderInfo: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', enum: ['github'] },
+          name: { type: 'string' },
+          loginMethods: {
+            type: 'array',
+            items: { type: 'string', enum: ['token', 'device', 'gh-cli'] },
+          },
+        },
+        required: ['id', 'name', 'loginMethods'],
+      },
+      SourceControlSettings: {
+        type: 'object',
+        properties: {
+          accounts: { type: 'array', items: { $ref: '#/components/schemas/SourceControlAccount' } },
+          defaultAccountId: { type: 'string', nullable: true },
+          generation: {
+            type: 'object',
+            description: 'Harness provider/model used to write commit messages and PR text. Null = heuristic text.',
+            properties: {
+              provider: { type: 'string', nullable: true },
+              model: { type: 'string', nullable: true },
+            },
+            required: ['provider', 'model'],
+          },
+          editor: {
+            type: 'object',
+            properties: { defaultEditor: { $ref: '#/components/schemas/EditorId' } },
+            required: ['defaultEditor'],
+          },
+          defaultBase: { type: 'string', nullable: true },
+        },
+        required: ['accounts', 'defaultAccountId', 'generation', 'editor', 'defaultBase'],
+      },
+      SourceControlSettingsResponse: {
+        type: 'object',
+        properties: {
+          settings: { $ref: '#/components/schemas/SourceControlSettings' },
+          providers: { type: 'array', items: { $ref: '#/components/schemas/SourceControlProviderInfo' } },
+          editors: { type: 'array', items: { $ref: '#/components/schemas/EditorInfo' } },
+        },
+        required: ['settings', 'providers', 'editors'],
+      },
+      DeviceLoginStart: {
+        type: 'object',
+        properties: {
+          loginId: { type: 'string' },
+          userCode: { type: 'string' },
+          verificationUri: { type: 'string' },
+          expiresIn: { type: 'integer' },
+          interval: { type: 'integer' },
+        },
+        required: ['loginId', 'userCode', 'verificationUri', 'expiresIn', 'interval'],
+      },
+      DeviceLoginStatus: {
+        type: 'object',
+        properties: {
+          loginId: { type: 'string' },
+          status: { type: 'string', enum: ['pending', 'complete', 'expired', 'error'] },
+          account: { $ref: '#/components/schemas/SourceControlAccount' },
+          error: { type: 'string' },
+        },
+        required: ['loginId', 'status'],
+      },
+      EditorId: {
+        type: 'string',
+        nullable: true,
+        enum: ['vscode', 'vscode-insiders', 'cursor', 'windsurf', null],
+      },
+      EditorInfo: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', enum: ['vscode', 'vscode-insiders', 'cursor', 'windsurf'] },
+          name: { type: 'string' },
+          available: { type: 'boolean', description: 'The server host can launch this editor (CLI found).' },
+          scheme: { type: 'string', description: 'URL scheme for the browser-side fallback, e.g. `vscode`.' },
+        },
+        required: ['id', 'name', 'available', 'scheme'],
+      },
+      OpenInEditorRequest: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description:
+              'Absolute path on the SERVER host. Must resolve inside a known workspace mount, project codebase or worktree, or the request is refused with 403.',
+          },
+          line: { type: 'integer', minimum: 1 },
+          column: { type: 'integer', minimum: 1 },
+          editor: { type: 'string', enum: ['vscode', 'vscode-insiders', 'cursor', 'windsurf'] },
+        },
+        required: ['path'],
+      },
+      OpenInEditorResult: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          editor: { type: 'string', enum: ['vscode', 'vscode-insiders', 'cursor', 'windsurf'] },
+          fallbackUrl: {
+            type: 'string',
+            description: 'A URL the client can try when the server could not launch anything.',
+          },
+          error: { type: 'string' },
+        },
+        required: ['ok'],
+      },
+      PullRequestSummary: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['github'] },
+          number: { type: 'integer' },
+          url: { type: 'string' },
+          title: { type: 'string' },
+          state: { type: 'string', enum: ['open', 'closed', 'merged'] },
+          head: { type: 'string' },
+          base: { type: 'string' },
+          draft: { type: 'boolean' },
+          author: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['provider', 'number', 'url', 'title', 'state', 'head', 'base'],
+      },
+      ChecksSummary: {
+        type: 'object',
+        properties: {
+          total: { type: 'integer' },
+          passed: { type: 'integer' },
+          failed: { type: 'integer' },
+          pending: { type: 'integer' },
+          conclusion: {
+            type: 'string',
+            enum: ['success', 'failure', 'neutral', 'cancelled', 'pending', 'unknown'],
+          },
+        },
+        required: ['total', 'passed', 'failed', 'pending', 'conclusion'],
+      },
+      PullRequestDetail: {
+        allOf: [
+          { $ref: '#/components/schemas/PullRequestSummary' },
+          {
+            type: 'object',
+            properties: {
+              body: { type: 'string' },
+              mergeable: { type: 'boolean', nullable: true, description: 'Null while the host is still computing it.' },
+              mergeableState: { type: 'string' },
+              additions: { type: 'integer' },
+              deletions: { type: 'integer' },
+              changedFiles: { type: 'integer' },
+              commits: { type: 'integer' },
+              headSha: { type: 'string' },
+              baseSha: { type: 'string' },
+              labels: { type: 'array', items: { type: 'string' } },
+              checks: { $ref: '#/components/schemas/ChecksSummary' },
+            },
+            required: [
+              'body', 'mergeable', 'additions', 'deletions', 'changedFiles',
+              'commits', 'headSha', 'baseSha', 'labels',
+            ],
+          },
+        ],
+      },
+      PullRequestFile: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          previousPath: { type: 'string' },
+          status: { type: 'string', enum: ['added', 'modified', 'removed', 'renamed'] },
+          additions: { type: 'integer' },
+          deletions: { type: 'integer' },
+          patch: { type: 'string', description: 'Unified diff hunks; absent for binary / very large files.' },
+        },
+        required: ['path', 'status', 'additions', 'deletions'],
+      },
+      PullRequestComment: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          author: { type: 'string' },
+          body: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          url: { type: 'string' },
+          path: { type: 'string' },
+          line: { type: 'integer' },
+          kind: { type: 'string', enum: ['review', 'issue'] },
+        },
+        required: ['id', 'author', 'body', 'createdAt', 'kind'],
+      },
+      ProjectPullRequest: {
+        allOf: [
+          { $ref: '#/components/schemas/PullRequestSummary' },
+          {
+            type: 'object',
+            properties: {
+              codebaseId: { type: 'string' },
+              codebaseAlias: { type: 'string' },
+            },
+            required: ['codebaseId', 'codebaseAlias'],
+          },
+        ],
+      },
+      ProjectPullRequestsResponse: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/ProjectPullRequest' } },
+          unavailable: {
+            type: 'array',
+            description: 'Codebases that could not be listed, each with a user-facing reason.',
+            items: {
+              type: 'object',
+              properties: {
+                codebaseId: { type: 'string' },
+                alias: { type: 'string' },
+                reason: { type: 'string' },
+              },
+              required: ['codebaseId', 'alias', 'reason'],
+            },
+          },
+        },
+        required: ['items', 'unavailable'],
+      },
+      RepoReadiness: {
+        type: 'object',
+        description: 'Whether one mount can commit / push / open a PR — and, when it cannot, why.',
+        properties: {
+          alias: { type: 'string' },
+          repoDir: { type: 'string' },
+          isRepo: { type: 'boolean' },
+          hasRemote: { type: 'boolean' },
+          remoteUrl: { type: 'string' },
+          slug: {
+            type: 'object',
+            properties: {
+              owner: { type: 'string' },
+              repo: { type: 'string' },
+              host: { type: 'string' },
+            },
+            required: ['owner', 'repo', 'host'],
+          },
+          providerId: { type: 'string', enum: ['github'] },
+          accountId: { type: 'string' },
+          connected: { type: 'boolean' },
+          branch: { type: 'string', nullable: true },
+          detached: { type: 'boolean' },
+          defaultBranch: { type: 'string', nullable: true },
+          onDefaultBranch: { type: 'boolean' },
+          dirty: { type: 'boolean' },
+          changedFiles: { type: 'integer' },
+          ahead: { type: 'integer', nullable: true },
+          behind: { type: 'integer', nullable: true },
+          hasUpstream: { type: 'boolean' },
+          mergeInProgress: { type: 'boolean' },
+          conflictedFiles: { type: 'array', items: { type: 'string' } },
+          openPullRequest: {
+            allOf: [{ $ref: '#/components/schemas/PullRequestSummary' }],
+            nullable: true,
+          },
+          can: {
+            type: 'object',
+            properties: {
+              commit: { type: 'boolean' },
+              push: { type: 'boolean' },
+              pullRequest: { type: 'boolean' },
+            },
+            required: ['commit', 'push', 'pullRequest'],
+          },
+          reasons: {
+            type: 'object',
+            properties: {
+              commit: { type: 'string' },
+              push: { type: 'string' },
+              pullRequest: { type: 'string' },
+            },
+          },
+        },
+        required: [
+          'alias', 'repoDir', 'isRepo', 'hasRemote', 'connected', 'branch',
+          'detached', 'defaultBranch', 'onDefaultBranch', 'dirty', 'changedFiles',
+          'ahead', 'behind', 'hasUpstream', 'mergeInProgress', 'conflictedFiles',
+          'openPullRequest', 'can', 'reasons',
+        ],
+      },
+      WorkspaceReadinessResponse: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string' },
+          repos: { type: 'array', items: { $ref: '#/components/schemas/RepoReadiness' } },
+        },
+        required: ['workspaceId', 'repos'],
+      },
+      ScmFlowRequest: {
+        type: 'object',
+        properties: {
+          alias: { type: 'string', description: 'Mount alias; `.` for the root.' },
+          commit: {
+            type: 'object',
+            properties: { message: { type: 'string' }, generate: { type: 'boolean' } },
+          },
+          push: { type: 'boolean' },
+          pullRequest: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              body: { type: 'string' },
+              base: { type: 'string' },
+              draft: { type: 'boolean' },
+              generate: { type: 'boolean' },
+            },
+          },
+          sync: {
+            type: 'boolean',
+            description: 'Merge the base branch in before push/PR. Default true when pushing or opening a PR.',
+          },
+          branch: {
+            type: 'object',
+            properties: { createIfOnDefault: { type: 'boolean' }, name: { type: 'string' } },
+          },
+          hint: { type: 'string', description: 'Hint for generated text (e.g. the chat task).' },
+        },
+      },
+      ScmFlowStep: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            enum: ['readiness', 'branch', 'commit', 'sync', 'push', 'pull_request'],
+          },
+          status: { type: 'string', enum: ['done', 'skipped', 'failed', 'blocked'] },
+          detail: { type: 'string' },
+        },
+        required: ['id', 'status'],
+      },
+      ScmConflictReport: {
+        type: 'object',
+        properties: {
+          base: { type: 'string' },
+          head: { type: 'string' },
+          files: { type: 'array', items: { type: 'string' } },
+          mergeStarted: {
+            type: 'boolean',
+            description: 'True when the merge was applied to the working tree and markers are present.',
+          },
+        },
+        required: ['base', 'head', 'files', 'mergeStarted'],
+      },
+      ScmFlowResult: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['ok', 'conflicts', 'blocked', 'failed'] },
+          alias: { type: 'string' },
+          steps: { type: 'array', items: { $ref: '#/components/schemas/ScmFlowStep' } },
+          branch: { type: 'string' },
+          commit: {
+            type: 'object',
+            properties: { sha: { type: 'string' }, message: { type: 'string' } },
+            required: ['sha', 'message'],
+          },
+          pushed: { type: 'boolean' },
+          pullRequest: { $ref: '#/components/schemas/PullRequestSummary' },
+          conflicts: { $ref: '#/components/schemas/ScmConflictReport' },
+          error: { type: 'string' },
+          readiness: { $ref: '#/components/schemas/RepoReadiness' },
+        },
+        required: ['status', 'alias', 'steps', 'readiness'],
+      },
+      ScmGenerateRequest: {
+        type: 'object',
+        properties: {
+          alias: { type: 'string' },
+          kind: { type: 'string', enum: ['commit', 'pull_request'] },
+          hint: { type: 'string' },
+          base: { type: 'string' },
+        },
+        required: ['kind'],
+      },
+      ScmGenerateResult: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['commit', 'pull_request'] },
+          message: { type: 'string' },
+          title: { type: 'string' },
+          body: { type: 'string' },
+          model: { type: 'string' },
+          source: { type: 'string', enum: ['model', 'heuristic'] },
+        },
+        required: ['kind', 'source'],
+      },
       Chat: {
         type: 'object',
         properties: {
@@ -92,6 +525,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           sessionId: { type: 'string' },
           status: { type: 'string', enum: ['active', 'archived'] },
           model: { type: 'string', nullable: true },
+          sourceControl: { $ref: '#/components/schemas/ChatSourceControlOptions' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -1133,6 +1567,559 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           { in: 'query', name: 'afterSequence', required: false, schema: { type: 'integer' } },
         ],
         responses: { '200': { description: 'Events' } },
+      },
+    },
+
+    // ── Source control: accounts + settings (doc §2) ──
+
+    '/api/source-control/settings': {
+      get: {
+        tags: ['SourceControl'],
+        summary: 'Settings, available sign-in methods, and launchable editors',
+        responses: {
+          '200': {
+            description: 'Settings',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SourceControlSettingsResponse' },
+              },
+            },
+          },
+        },
+      },
+      put: {
+        tags: ['SourceControl'],
+        summary: 'Update settings (partial; absent keys are left alone)',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  defaultAccountId: { type: 'string', nullable: true },
+                  generation: {
+                    type: 'object',
+                    properties: {
+                      provider: { type: 'string', nullable: true },
+                      model: { type: 'string', nullable: true },
+                    },
+                  },
+                  editor: {
+                    type: 'object',
+                    properties: { defaultEditor: { $ref: '#/components/schemas/EditorId' } },
+                  },
+                  defaultBase: { type: 'string', nullable: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated settings',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/SourceControlSettings' } },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/source-control/accounts': {
+      post: {
+        tags: ['SourceControl'],
+        summary: 'Connect an account (token / gh-cli / completed device flow)',
+        description:
+          'The token is validated against the host, stored in the secret store and dropped. ' +
+          'It never appears in a response or a log line.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  provider: { type: 'string', enum: ['github'] },
+                  method: { type: 'string', enum: ['token', 'gh-cli', 'device'] },
+                  token: { type: 'string', description: 'Required when `method` is `token`. Write-only.' },
+                  host: { type: 'string' },
+                  label: { type: 'string' },
+                },
+                required: ['provider', 'method'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Connected account',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/SourceControlAccount' } },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/source-control/accounts/{id}': {
+      delete: {
+        tags: ['SourceControl'],
+        summary: 'Disconnect an account and forget its token',
+        parameters: [idParam],
+        responses: { '204': { description: 'Removed' } },
+      },
+    },
+    '/api/source-control/accounts/device/start': {
+      post: {
+        tags: ['SourceControl'],
+        summary: 'Start the OAuth device flow',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  provider: { type: 'string', enum: ['github'] },
+                  host: { type: 'string' },
+                },
+                required: ['provider'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'User code + verification URL',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DeviceLoginStart' } },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/source-control/accounts/device/{loginId}': {
+      get: {
+        tags: ['SourceControl'],
+        summary: 'Poll a device login (the server does the token polling)',
+        parameters: [
+          { in: 'path', name: 'loginId', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Login status',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DeviceLoginStatus' } },
+            },
+          },
+          '404': { description: 'Unknown login id', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/source-control/config': {
+      get: {
+        tags: ['SourceControl'],
+        summary: 'Legacy provider selection (kept for older clients)',
+        responses: { '200': { description: 'Config' } },
+      },
+      put: {
+        tags: ['SourceControl'],
+        summary: 'Legacy provider selection update',
+        responses: { '200': { description: 'Config' }, '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } } },
+      },
+    },
+    '/api/source-control/status': {
+      get: {
+        tags: ['SourceControl'],
+        summary: 'Whether source control is usable (`enabled` = at least one account)',
+        responses: {
+          '200': {
+            description: 'Status',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    activeProvider: { type: 'string', enum: ['github', 'none'] },
+                    enabled: { type: 'boolean' },
+                  },
+                  required: ['activeProvider', 'enabled'],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    // ── Source control: workspace mounts (doc §3 / §4) ──
+
+    '/api/workspaces/{id}/scm/readiness': {
+      get: {
+        tags: ['SourceControl', 'Workspaces'],
+        summary: 'Can this workspace commit / push / open a PR — and if not, why',
+        description: 'Without `alias`, one RepoReadiness per git-capable mount; non-repos are reported with `isRepo: false`.',
+        parameters: [
+          idParam,
+          { in: 'query', name: 'alias', required: false, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Readiness per mount',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WorkspaceReadinessResponse' },
+              },
+            },
+          },
+          '404': { description: 'Workspace not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/workspaces/{id}/scm/flow': {
+      post: {
+        tags: ['SourceControl', 'Workspaces'],
+        summary: 'Run the commit → sync → push → pull-request flow',
+        description:
+          '`blocked` and `conflicts` are ordinary 200 results carrying the reason or the ' +
+          'conflicted file list — both are states the client renders, not request failures.',
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ScmFlowRequest' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Flow result',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ScmFlowResult' } },
+            },
+          },
+          '404': { description: 'Workspace not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/workspaces/{id}/scm/generate': {
+      post: {
+        tags: ['SourceControl', 'Workspaces'],
+        summary: 'Generate a commit message or PR title/body (no git steps run)',
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ScmGenerateRequest' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Generated text',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ScmGenerateResult' } },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Workspace not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/workspaces/{id}/scm/conflicts/start': {
+      post: {
+        tags: ['SourceControl', 'Workspaces'],
+        summary: 'Apply the base merge to the working tree so conflicts can be edited',
+        parameters: [idParam],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { alias: { type: 'string' }, base: { type: 'string' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Conflict report',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ScmConflictReport' } },
+            },
+          },
+          '404': { description: 'Workspace not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/workspaces/{id}/scm/conflicts/continue': {
+      post: {
+        tags: ['SourceControl', 'Workspaces'],
+        summary: 'Commit the merge once no conflict markers remain',
+        description: '`ok: false` is a 200 — "these files are still conflicted" is a normal answer, not an error.',
+        parameters: [idParam],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { alias: { type: 'string' }, message: { type: 'string' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Merge committed, or the files still to resolve',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    ok: { type: 'boolean' },
+                    sha: { type: 'string' },
+                    remaining: { type: 'array', items: { type: 'string' } },
+                  },
+                  required: ['ok', 'remaining'],
+                },
+              },
+            },
+          },
+          '404': { description: 'Workspace not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/workspaces/{id}/scm/conflicts/abort': {
+      post: {
+        tags: ['SourceControl', 'Workspaces'],
+        summary: 'git merge --abort',
+        parameters: [idParam],
+        responses: {
+          '204': { description: 'Aborted' },
+          '404': { description: 'Workspace not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/workspaces/{id}/scm/conflicts/resolve-with-agent': {
+      post: {
+        tags: ['SourceControl', 'Workspaces'],
+        summary: 'Start the merge and ask a chat to resolve the conflicts',
+        description:
+          'A normal chat turn the user can watch, stop and rewind. Nothing is pushed until ' +
+          'the user presses Continue.',
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { alias: { type: 'string' }, chatId: { type: 'string' } },
+                required: ['chatId'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Prompt sent',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    chatId: { type: 'string' },
+                    files: { type: 'array', items: { type: 'string' } },
+                  },
+                  required: ['chatId', 'files'],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Workspace or chat not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'The chat is busy', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
+    // ── Source control: pull requests under a project (doc §6) ──
+
+    '/api/projects/{id}/pull-requests': {
+      get: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'Pull requests across every codebase of a project',
+        description: 'A codebase without a remote, without a connected account, or whose host call failed is listed under `unavailable` — it never fails the response.',
+        parameters: [
+          idParam,
+          { in: 'query', name: 'state', required: false, schema: { type: 'string', enum: ['open', 'closed', 'all'] } },
+        ],
+        responses: {
+          '200': {
+            description: 'Pull requests + unavailable codebases',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProjectPullRequestsResponse' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/pull-requests/{number}': {
+      get: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'Pull request detail (checks attached when the host answers)',
+        parameters: [idParam, cidParam, prNumberParam],
+        responses: {
+          '200': {
+            description: 'Pull request',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/PullRequestDetail' } },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'The remote host is not connected', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/pull-requests/{number}/files': {
+      get: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'Files changed by a pull request',
+        parameters: [idParam, cidParam, prNumberParam],
+        responses: {
+          '200': {
+            description: 'Changed files',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/PullRequestFile' } },
+              },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'The remote host is not connected', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/pull-requests/{number}/comments': {
+      get: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'Review + issue comments on a pull request',
+        parameters: [idParam, cidParam, prNumberParam],
+        responses: {
+          '200': {
+            description: 'Comments',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/PullRequestComment' } },
+              },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'The remote host is not connected', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/pull-requests/{number}/review-chat': {
+      post: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'Create a chat on the PR head branch and send the review prompt',
+        parameters: [idParam, cidParam, prNumberParam],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  instructions: { type: 'string' },
+                  model: { type: 'string' },
+                  agentRef: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Created chat',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { chat: { $ref: '#/components/schemas/Chat' } },
+                  required: ['chat'],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'The remote host is not connected', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/readiness': {
+      get: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'Readiness for a codebase checkout',
+        parameters: [idParam, cidParam],
+        responses: {
+          '200': {
+            description: 'Readiness',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/RepoReadiness' } },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
+    // ── Open in editor (doc §7) ──
+
+    '/api/editor/editors': {
+      get: {
+        tags: ['Editor'],
+        summary: 'Editors this server host can launch',
+        responses: {
+          '200': {
+            description: 'Editors',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/EditorInfo' } },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/editor/open': {
+      post: {
+        tags: ['Editor'],
+        summary: 'Open a path in an editor on the server host',
+        description:
+          'The path must resolve (symlinks followed) inside a known workspace mount, project ' +
+          'codebase or worktree. `ok: false` is still a 200 — `fallbackUrl` is what the ' +
+          'browser tries when the server could not launch anything.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/OpenInEditorRequest' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Launch result',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/OpenInEditorResult' } },
+            },
+          },
+          '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '403': { description: 'Path is outside every known root', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
       },
     },
 

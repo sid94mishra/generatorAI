@@ -15,6 +15,13 @@ import type { ScreenshotRef } from './deriveTimeline';
 export interface TimelineActions {
   /** The chat's workspace, when it has one. */
   workspaceId: string | null;
+  /**
+   * The chat itself.
+   *
+   * The SCM result row needs it to ask the agent to resolve a merge
+   * conflict — the block carries the flow's result, not the chat it ran for.
+   */
+  chatId?: string | null;
   /** Stream store key (the chat's session id) — what live rows subscribe to. */
   streamKey: string | null;
   /** Usage of the turn before the live one, for the cache-miss rule. */

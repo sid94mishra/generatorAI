@@ -7,7 +7,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { GitClient } from '../src/GitClient.js';
 import type {
   IGitProcessRunner,
@@ -16,7 +15,6 @@ import type {
 } from '../src/ports/IGitProcessRunner.js';
 import type { ILogger } from '@generatorai/shared';
 
-const execFileAsync = promisify(execFile);
 
 // Real process runner backed by node:child_process — validates that the
 // GitClient's argument construction produces correct git behavior.
@@ -28,11 +26,20 @@ class NodeGitRunner implements IGitProcessRunner {
   ): Promise<GitProcessRunResult> {
     const start = Date.now();
     try {
-      const { stdout, stderr } = await execFileAsync(command, args, {
-        cwd: options.cwd,
-        timeout: options.timeout ?? 30_000,
-        env: options.env ? { ...process.env, ...options.env } : process.env,
-        maxBuffer: 32 * 1024 * 1024,
+      const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        const child = execFile(
+          command,
+          args,
+          {
+            cwd: options.cwd,
+            timeout: options.timeout ?? 30_000,
+            env: options.env ? { ...process.env, ...options.env } : process.env,
+            maxBuffer: 32 * 1024 * 1024,
+          },
+          (error, out, errOut) => (error ? reject(Object.assign(error, { stdout: out, stderr: errOut })) : resolve({ stdout: out, stderr: errOut })),
+        );
+        // `git commit -F -` reads the message from stdin; close it either way.
+        child.stdin?.end(options.stdin ?? '');
       });
       return { exitCode: 0, stdout, stderr, durationMs: Date.now() - start };
     } catch (err: unknown) {

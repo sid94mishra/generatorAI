@@ -4,6 +4,7 @@
 // validation, system/custom workflows, and parameterized execution.
 // ────────────────────────────────────────────────────────────────
 
+import type { ScmFlowResult } from './SourceControl.js';
 import type { HarnessConfig } from './Workflow.js';
 import type { StageRunOverride } from './RunProfile.js';
 
@@ -131,6 +132,19 @@ export interface CommitAndPushStepConfig {
   repoAlias?: string;
   /** Commit message — supports {{variable}} interpolation */
   commitMessage: string;
+  /**
+   * Push the work branch after committing. Defaults to true (the step is
+   * named commit_AND_PUSH); set false for `autoCommit` without `autoPush`,
+   * which commits locally and leaves the branch for the user.
+   */
+  push?: boolean;
+  /**
+   * Let the flow generate the commit message from the diff instead of using
+   * `commitMessage` verbatim. The auto-step built from `autoCommit` sets this.
+   */
+  generateMessage?: boolean;
+  /** Base branch to sync before pushing; defaults to the repo's default. */
+  baseBranch?: string;
 }
 
 export interface CreatePRStepConfig {
@@ -143,6 +157,10 @@ export interface CreatePRStepConfig {
   body: string;
   /** Base branch to merge into (defaults to original branch) */
   baseBranch?: string;
+  /** Let the flow generate the title/body from the branch instead of using
+   *  `title`/`body` verbatim. The auto-step built from `autoCreatePR` sets it. */
+  generateText?: boolean;
+  draft?: boolean;
 }
 
 export interface PostRunScriptStepConfig {
@@ -174,6 +192,12 @@ export interface OrchestratorConfig {
   requiresCodebase: boolean;
   /** Whether to auto-commit changes after workflow completes */
   autoCommit: boolean;
+  /**
+   * Whether to push the run's work branch after committing. Implied by
+   * `autoCreatePR` (a PR needs a pushed head), so it only matters on its own
+   * for "commit + push, but do not open a PR".
+   */
+  autoPush?: boolean;
   /** Whether to auto-create PR after workflow completes */
   autoCreatePR: boolean;
 }
@@ -198,6 +222,11 @@ export interface OrchestratorContext {
   clonedRepositories: Record<string, string>;
   /** Map of repo alias → feature branch name */
   featureBranches: Record<string, string>;
+  /**
+   * Map of repo alias → the codebase's default branch. Post-processing opens
+   * pull requests against it, and syncs it into the work branch first.
+   */
+  baseBranches?: Record<string, string>;
   /** Resolved variables (after preprocessing) */
   resolvedVariables: Record<string, unknown>;
   /** Preprocessing results */
@@ -214,6 +243,12 @@ export interface PreprocessingResult {
   error?: string;
   output?: string;
   durationMs: number;
+  /**
+   * Source-control flow results, one per repo the step touched, when the step
+   * ran through `SourceControlFlowService`. Carries the conflict report /
+   * blocking reason the run page renders; `error` stays the one-line summary.
+   */
+  scm?: ScmFlowResult[];
 }
 
 export interface StageValidationResult {

@@ -2468,6 +2468,17 @@ export const MIGRATIONS: readonly Migration[] = [
         `CREATE INDEX IF NOT EXISTS idx_workspace_file_reviews_ws ON workspace_file_reviews(workspace_id);`,
       ],
     },
+    // v54 — agent-native source control on a chat.
+    //
+    // Holds the chat's `ChatSourceControlOptions` as JSON: whether a completed
+    // turn should commit, push and open a pull request, plus the base branch
+    // and draft flag those use. NULL (the value every existing chat gets) means
+    // the chat never touches source control, which is the pre-v54 behaviour.
+    {
+      version: 54,
+      name: 'chat_source_control_options',
+      sql: [`ALTER TABLE chats ADD COLUMN source_control TEXT;`],
+    },
   ];
 
 

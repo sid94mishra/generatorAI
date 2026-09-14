@@ -105,7 +105,10 @@ import {
   SourceControlService,
   SourceControlConfigService,
   SourceControlRegistry,
-  GitHubProvider,
+  RepoReadinessService,
+  ScmTextGenerator,
+  SourceControlFlowService,
+  EditorLauncherService,
   DockerSandboxProvider,
   HostProcessSandboxProvider,
   SandboxScriptRunner,
@@ -576,11 +579,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // ── Change-set engine (centralized diff/status) ──
   const changeSetService = new ChangeSetService(gitManager, logger);
 
-  // ── Source Control (VCS-host provider registry + service) ──
-  // GitHub is the only provider for now. Configuration comes from persisted
-  // settings (loaded later) with env fallbacks. Default active provider is
-  // resolved from GENERATORAI_SCM_PROVIDER, else 'github' when a token is set,
-  // else 'none'.
+  // ── Source Control (accounts registry + config + the commit → PR flow) ──
+  //
+  // The registry is populated by `SourceControlConfigService.load()`, which
+  // reads `<dataDir>/source-control.json`, migrates a legacy `github.token`,
+  // seeds an account from the env token when nothing is configured yet, and
+  // registers one provider per account. Nothing is registered from env here
+  // any more — a single env-built provider could not answer "which account
+  // owns this remote host?", which is what every SCM route now asks.
   const scmRegistry = new SourceControlRegistry();
   const githubToken =
     process.env['GENERATORAI_GITHUB_TOKEN'] ??
@@ -588,33 +594,65 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     process.env['GH_TOKEN'] ??
     undefined;
   const githubHost = process.env['GENERATORAI_GITHUB_HOST'] ?? process.env['COPILOT_GH_HOST'] ?? undefined;
-  scmRegistry.register(
-    new GitHubProvider(
-      httpClient,
-      logger,
-      { token: githubToken, host: githubHost, allowCliFallback: true },
-      scriptRunner,
-    ),
-  );
-  const scmEnv = process.env['GENERATORAI_SCM_PROVIDER'];
-  const initialActive: 'github' | 'none' =
-    scmEnv === 'github' || scmEnv === 'none' ? scmEnv : githubToken ? 'github' : 'none';
-  scmRegistry.setActive(initialActive);
-  const sourceControlService = new SourceControlService(scmRegistry, gitManager, logger);
 
-  // Persistent provider config (JSON-file backed under the data dir).
+  // Persistent settings + accounts (JSON-file backed under the data dir;
+  // tokens live in the secret store, never in the file).
+  // Operators running GitHub Enterprise on a private network allow-list its
+  // hostname(s) here; everything else keeps the public-only address policy.
+  const scmAllowedHosts = (process.env['GENERATORAI_SCM_ALLOWED_HOSTS'] ?? '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean);
+  const scmHttpClient = scmAllowedHosts.length > 0 ? new FetchHttpClient({ allowedHosts: scmAllowedHosts }) : httpClient;
   const sourceControlConfigService = new SourceControlConfigService(scmRegistry, {
-    http: httpClient,
+    http: scmHttpClient,
     processRunner: scriptRunner,
+    secrets: security.secretStore,
     logger,
     configDir: resolve(config.dbPath, '..'),
-    initial: {
-      activeProvider: initialActive,
-      github: { token: githubToken, host: githubHost },
+    env: {
+      ...(githubToken ? { githubToken } : {}),
+      ...(githubHost ? { githubHost } : {}),
+      ...(process.env['GENERATORAI_GITHUB_OAUTH_CLIENT_ID']
+        ? { oauthClientId: process.env['GENERATORAI_GITHUB_OAUTH_CLIENT_ID'] }
+        : {}),
     },
   });
   await sourceControlConfigService.load();
-  logger.info(`[Container] Source control provider active=${scmRegistry.getActive()}`);
+
+  // Legacy surface (`/api/source-control/config|status`, the workspace
+  // commit/PR routes) — reads the registry through its `getActiveProvider()`
+  // shim, which now resolves to the default account's provider.
+  const sourceControlService = new SourceControlService(scmRegistry, gitManager, logger);
+
+  const repoReadinessService = new RepoReadinessService({
+    git: gitManager,
+    registry: scmRegistry,
+    logger,
+    settings: () => sourceControlConfigService.getSettings(),
+  });
+  const scmTextGenerator = new ScmTextGenerator({
+    harness,
+    logger,
+    generation: () => sourceControlConfigService.generation(),
+  });
+  const sourceControlFlowService = new SourceControlFlowService({
+    git: gitManager,
+    registry: scmRegistry,
+    readiness: repoReadinessService,
+    text: scmTextGenerator,
+    logger,
+    settings: () => sourceControlConfigService.getSettings(),
+  });
+  const editorLauncherService = new EditorLauncherService({
+    logger,
+    processRunner: scriptRunner,
+    defaultEditor: () => sourceControlConfigService.defaultEditor(),
+  });
+  logger.info(
+    `[Container] Source control — ${sourceControlConfigService.getSettings().accounts.length} account(s), ` +
+      `active=${scmRegistry.getActive()}`,
+  );
 
   // ── Sandbox Infrastructure (conditional) ──
   let sandboxProvider: ISandboxProvider | undefined;
@@ -757,6 +795,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const chatExtensions: ChatManagementServiceExtensions = {
     customToolRegistry,
     mcpHub,
+    // Agent-native source control (doc §5) — the post-turn commit → push → PR
+    // hook for chats created with `sourceControl.autoCommit`.
+    sourceControlFlowService,
+    repoReadinessService,
   };
 
   // Core services factory — shared with the CLI composition root. Any
@@ -1067,6 +1109,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     eventBus,
     logger,
     sourceControlService,
+    // Post-processing commit/push/PR runs through the SAME flow as the
+    // Changes tab and agent-native chats (doc §5) — one branch policy, one
+    // base-branch sync, one conflict dry-run.
+    sourceControlFlowService,
   );
 
   const resultValidator = new ResultValidator(
@@ -2149,6 +2195,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     sourceControlService,
     sourceControlRegistry: scmRegistry,
     sourceControlConfigService,
+    sourceControlFlowService,
+    repoReadinessService,
+    scmTextGenerator,
+    editorLauncherService,
 
     // Automation
     automationService,
@@ -2609,6 +2659,14 @@ export interface Container {
   sourceControlService: SourceControlService;
   sourceControlRegistry: SourceControlRegistry;
   sourceControlConfigService: SourceControlConfigService;
+  /** The commit → sync → push → PR flow (doc §4), shared by chat/workspace routes. */
+  sourceControlFlowService: SourceControlFlowService;
+  /** "Can this mount commit / push / open a PR, and if not why" (doc §3). */
+  repoReadinessService: RepoReadinessService;
+  /** Model-written commit messages and PR text (heuristic fallback). */
+  scmTextGenerator: ScmTextGenerator;
+  /** "Open in editor" — probes the editor CLIs and launches one detached (doc §7). */
+  editorLauncherService: EditorLauncherService;
 
   // Automation
   automationService: AutomationService;

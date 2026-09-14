@@ -21,7 +21,7 @@ import {
   SetChatPermissionModeSchema,
   coerceAgentMode,
 } from '@generatorai/shared';
-import type { ChatMessage, PlanDocument } from '@generatorai/shared';
+import type { ChatMessage, ChatSourceControlOptions, PlanDocument } from '@generatorai/shared';
 
 /**
  * Body of `POST /chats/:id/cancel`. The budget is clamped, not rejected: the
@@ -52,6 +52,65 @@ function sendCodedError(res: { status: (n: number) => { json: (b: unknown) => vo
     return true;
   }
   return false;
+}
+
+/**
+ * Validate + normalise the per-chat agent-native source-control option.
+ *
+ * The three flags are a LADDER, not three independent switches: you cannot
+ * open a pull request without pushing, and you cannot push without having
+ * committed. Rather than 400-ing a caller that asks for `autoPullRequest`
+ * alone — which is unambiguous about what it wants — the weaker flags are
+ * forced on ("normalised upward"), so what is stored can never describe a
+ * turn the post-turn hook is unable to carry out.
+ *
+ * Returns the value to persist, or a message for the route's 400.
+ */
+function normaliseSourceControl(
+  input: unknown,
+): { ok: true; value: ChatSourceControlOptions } | { ok: false; message: string } {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return { ok: false, message: '`sourceControl` must be an object' };
+  }
+  const raw = input as Record<string, unknown>;
+
+  const flag = (key: 'autoCommit' | 'autoPush' | 'autoPullRequest'): boolean | string => {
+    const v = raw[key];
+    // Absent means "off" — a partial object is a legitimate way to ask for
+    // just one rung of the ladder.
+    if (v === undefined) return false;
+    if (typeof v !== 'boolean') return `\`sourceControl.${key}\` must be a boolean`;
+    return v;
+  };
+
+  const flags: Record<string, boolean> = {};
+  for (const key of ['autoCommit', 'autoPush', 'autoPullRequest'] as const) {
+    const v = flag(key);
+    if (typeof v === 'string') return { ok: false, message: v };
+    flags[key] = v;
+  }
+
+  if (raw['base'] !== undefined && (typeof raw['base'] !== 'string' || raw['base'].trim() === '')) {
+    return { ok: false, message: '`sourceControl.base` must be a non-empty string' };
+  }
+  if (raw['draft'] !== undefined && typeof raw['draft'] !== 'boolean') {
+    return { ok: false, message: '`sourceControl.draft` must be a boolean' };
+  }
+
+  const autoPullRequest = flags['autoPullRequest']!;
+  const autoPush = flags['autoPush']! || autoPullRequest;
+  const autoCommit = flags['autoCommit']! || autoPush;
+
+  return {
+    ok: true,
+    value: {
+      autoCommit,
+      autoPush,
+      autoPullRequest,
+      ...(raw['base'] !== undefined ? { base: (raw['base'] as string).trim() } : {}),
+      ...(raw['draft'] !== undefined ? { draft: raw['draft'] as boolean } : {}),
+    },
+  };
 }
 
 const RewindChatSchema = z
@@ -225,6 +284,15 @@ export function createChatApiRoutes(container: Container): Router {
       }
       if (params.harnessConfig.streaming === undefined) {
         params.harnessConfig.streaming = true;
+      }
+
+      if (params.sourceControl !== undefined) {
+        const sc = normaliseSourceControl(params.sourceControl);
+        if (!sc.ok) {
+          res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: sc.message } });
+          return;
+        }
+        params.sourceControl = sc.value;
       }
 
       // Creation is the front door, and it takes `permissionMode` directly.
@@ -411,6 +479,7 @@ export function createChatApiRoutes(container: Container): Router {
         agentRef,
         agentOverrides,
         orchestratorMode,
+        sourceControl,
       } = req.body ?? {};
 
       // Archive via PATCH { status: 'archived' }
@@ -472,6 +541,19 @@ export function createChatApiRoutes(container: Container): Router {
       }
       if (agentOverrides !== undefined) updates.agentOverrides = agentOverrides ?? null;
       if (orchestratorMode !== undefined) updates.orchestratorMode = !!orchestratorMode;
+      if (sourceControl !== undefined) {
+        // `null` turns agent-native source control back off for this chat.
+        if (sourceControl === null) {
+          updates.sourceControl = null;
+        } else {
+          const sc = normaliseSourceControl(sourceControl);
+          if (!sc.ok) {
+            res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: sc.message } });
+            return;
+          }
+          updates.sourceControl = sc.value;
+        }
+      }
 
       const updated = await container.chatEntityRepo.update(chatId, updates);
       if (agentRef !== undefined || agentOverrides !== undefined) {

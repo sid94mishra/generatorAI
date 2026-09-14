@@ -13,14 +13,19 @@ import { GitError } from '@generatorai/shared';
 import type { GitProcessRunOptions, IGitProcessRunner } from './ports/IGitProcessRunner.js';
 import type {
   AddWorktreeOptions,
+  GitAheadBehind,
   GitBlobEntry,
   GitClientOptions,
+  GitCommitResult,
+  GitMergeResult,
+  GitMergeTreeResult,
   GitNameStatusEntry,
   GitNumstatEntry,
   GitRawDiffEntry,
   GitRef,
   GitTreeEntry,
   IGitClient,
+  MergeOptions,
   ShadowRepoOptions,
   WriteTreeOptions,
 } from './ports/IGitClient.js';
@@ -68,6 +73,17 @@ function normalizeSha(sha: string | undefined): string | undefined {
  */
 const REPO_PROBE_TTL_MS = 5 * 60_000;
 
+/**
+ * How long a resolved (or unresolvable) default branch is trusted.
+ *
+ * Short on purpose: `origin/HEAD` is created by `clone` and by an explicit
+ * `git remote set-head`, so a repo that has no answer now can grow one a
+ * moment later, and a repo whose default branch was renamed upstream should
+ * not stay wrong for the lifetime of the process. A minute is long enough to
+ * collapse the burst of calls a single UI refresh makes.
+ */
+const DEFAULT_BRANCH_TTL_MS = 60_000;
+
 export class GitClient implements IGitClient {
   private readonly workspacesDir: string;
   private readonly timeout: number;
@@ -89,6 +105,21 @@ export class GitClient implements IGitClient {
    * one as soon as `initIfNeeded` runs, so caching `false` would defeat it.
    */
   private readonly repoProbeCache = new Map<string, number>();
+  /**
+   * Resolved default branches, keyed by `repoDir\0remote`.
+   *
+   * `defaultBranch` costs up to three git invocations and the last of them
+   * (`ls-remote`) talks to the network, so a UI that asks once per rendered
+   * row would be unusable without this. Negative answers are cached too —
+   * a repo with no `origin/HEAD` is exactly the case that pays the full
+   * three-probe price.
+   */
+  private readonly defaultBranchCache = new Map<string, { value: string | null; at: number }>();
+  /**
+   * `git --version` never changes while the process runs, so it is resolved
+   * at most once per client.
+   */
+  private gitVersionCache: { value: string | null } | undefined;
 
   constructor(
     private readonly baseRunner: IGitProcessRunner,
@@ -408,9 +439,13 @@ export class GitClient implements IGitClient {
       return false;
     }
 
-    result = await this.runner.run('git', ['commit', '-m', message, '--allow-empty-message'], {
+    // The message goes through stdin (`-F -`), never argv: generated messages
+    // legitimately contain backticks and quotes, which the process runner's
+    // argument guard would otherwise reject as shell metacharacters.
+    result = await this.runner.run('git', ['commit', '-F', '-', '--allow-empty-message'], {
       cwd: repoDir,
       timeout: 30_000,
+      stdin: message,
     });
     if (result.exitCode !== 0) {
       throw new GitError(`Failed to commit: ${result.stderr}`);
@@ -1263,5 +1298,393 @@ export class GitClient implements IGitClient {
         this.logger.warn(`[Git] checkout-index partial failure: ${result.stderr}`);
       }
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // Source control — remote sync, merge, review
+  // ══════════════════════════════════════════════════════════════
+
+  async fetch(repoDir: string, remote = 'origin', ref?: string): Promise<void> {
+    const args = ['fetch', remote];
+    if (ref) args.push(ref);
+
+    const result = await this.runner.run('git', args, {
+      cwd: repoDir,
+      timeout: this.timeout,
+    });
+    if (result.exitCode !== 0) {
+      throw new GitError(`Failed to fetch ${remote}${ref ? ` ${ref}` : ''} in ${repoDir}: ${result.stderr}`);
+    }
+  }
+
+  async defaultBranch(repoDir: string, remote = 'origin'): Promise<string | null> {
+    const key = `${repoDir}\0${remote}`;
+    const cached = this.defaultBranchCache.get(key);
+    if (cached && Date.now() - cached.at < DEFAULT_BRANCH_TTL_MS) return cached.value;
+
+    const value = await this.resolveDefaultBranch(repoDir, remote);
+    this.defaultBranchCache.set(key, { value, at: Date.now() });
+    return value;
+  }
+
+  /** The three probes behind `defaultBranch`, cheapest (and most local) first. */
+  private async resolveDefaultBranch(repoDir: string, remote: string): Promise<string | null> {
+    // 1. The local symbolic ref written by `clone` / `remote set-head`.
+    try {
+      const symbolic = await this.runner.run(
+        'git',
+        ['symbolic-ref', '--short', `refs/remotes/${remote}/HEAD`],
+        { cwd: repoDir, timeout: 5_000 },
+      );
+      if (symbolic.exitCode === 0) {
+        const short = symbolic.stdout.trim();
+        // `origin/main` → `main`. A bare `main` (no prefix) is already right.
+        const prefix = `${remote}/`;
+        const branch = short.startsWith(prefix) ? short.slice(prefix.length) : short;
+        if (branch) return branch;
+      }
+    } catch {
+      /* fall through */
+    }
+
+    // 2. `remote show` — resolves the head even when the symbolic ref is
+    //    missing, but contacts the remote.
+    try {
+      const show = await this.runner.run('git', ['remote', 'show', remote], {
+        cwd: repoDir,
+        timeout: 30_000,
+      });
+      if (show.exitCode === 0) {
+        const match = show.stdout.match(/^\s*HEAD branch:\s*(.+)$/m);
+        const branch = match?.[1]?.trim();
+        // git prints `(unknown)` for a remote whose HEAD it could not read.
+        if (branch && branch !== '(unknown)') return branch;
+      }
+    } catch {
+      /* fall through */
+    }
+
+    // 3. Ask the remote directly for its symref.
+    try {
+      const lsRemote = await this.runner.run('git', ['ls-remote', '--symref', remote, 'HEAD'], {
+        cwd: repoDir,
+        timeout: 30_000,
+      });
+      if (lsRemote.exitCode === 0) {
+        const match = lsRemote.stdout.match(/^ref:\s+refs\/heads\/(\S+)\s+HEAD$/m);
+        const branch = match?.[1]?.trim();
+        if (branch) return branch;
+      }
+    } catch {
+      /* give up */
+    }
+
+    return null;
+  }
+
+  async aheadBehind(repoDir: string, ref: string, upstream: string): Promise<GitAheadBehind | null> {
+    try {
+      const result = await this.runner.run(
+        'git',
+        ['rev-list', '--left-right', '--count', `${upstream}...${ref}`],
+        { cwd: repoDir, timeout: 30_000 },
+      );
+      if (result.exitCode !== 0) return null;
+      // "<left>\t<right>": left is reachable from upstream only (behind),
+      // right from ref only (ahead).
+      const parts = result.stdout.trim().split(/\s+/);
+      if (parts.length < 2) return null;
+      const behind = Number.parseInt(parts[0] ?? '', 10);
+      const ahead = Number.parseInt(parts[1] ?? '', 10);
+      if (!Number.isFinite(behind) || !Number.isFinite(ahead)) return null;
+      return { ahead, behind };
+    } catch {
+      return null;
+    }
+  }
+
+  async upstreamOf(repoDir: string, branch: string): Promise<string | null> {
+    try {
+      const result = await this.runner.run(
+        'git',
+        ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`],
+        { cwd: repoDir, timeout: 5_000 },
+      );
+      if (result.exitCode !== 0) return null;
+      const upstream = result.stdout.trim();
+      return upstream.length > 0 ? upstream : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async isDetached(repoDir: string): Promise<boolean> {
+    try {
+      const result = await this.runner.run('git', ['rev-parse', '--symbolic-full-name', 'HEAD'], {
+        cwd: repoDir,
+        timeout: 5_000,
+      });
+      if (result.exitCode !== 0) return false;
+      return result.stdout.trim() === 'HEAD';
+    } catch {
+      return false;
+    }
+  }
+
+  async mergeInProgress(repoDir: string): Promise<boolean> {
+    const gitDir = (await this.absoluteGitDir(repoDir)) ?? path.join(repoDir, '.git');
+    return fs
+      .access(path.join(gitDir, 'MERGE_HEAD'))
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  async unmergedFiles(repoDir: string): Promise<string[]> {
+    try {
+      const result = await this.runner.run('git', ['diff', '--name-only', '--diff-filter=U'], {
+        cwd: repoDir,
+        timeout: 30_000,
+      });
+      if (result.exitCode !== 0) return [];
+      return result.stdout
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Ask git whether a merge would conflict without performing it.
+   *
+   * `merge-tree --write-tree` runs the whole merge in the object store, so the
+   * working tree, index and HEAD are all untouched — which is what makes a
+   * "would this conflict?" badge safe to render next to a branch the user has
+   * uncommitted work in. It needs git >= 2.38; older git exits 129 on the
+   * unknown flag, and that is reported as `supported: false` so callers fall
+   * back to a real `--no-commit` merge rather than mistaking an empty list for
+   * a clean result.
+   */
+  async mergeTreeConflicts(repoDir: string, ours: string, theirs: string): Promise<GitMergeTreeResult> {
+    let result;
+    try {
+      result = await this.runner.run(
+        'git',
+        ['merge-tree', '--write-tree', '--name-only', ours, theirs],
+        { cwd: repoDir, timeout: 60_000 },
+      );
+    } catch {
+      return { supported: false, conflicts: [] };
+    }
+
+    if (result.exitCode === 0) return { supported: true, conflicts: [] };
+    if (result.exitCode !== 1) return { supported: false, conflicts: [] };
+
+    // stdout is "<tree oid>\n<conflicted path>\n…" optionally followed by a
+    // blank line and an informational messages section.
+    const lines = result.stdout.split('\n').map((l) => l.replace(/\r$/, ''));
+    const conflicts: string[] = [];
+    const seen = new Set<string>();
+    for (const line of lines.slice(1)) {
+      if (line.trim().length === 0) break; // messages section starts here
+      if (seen.has(line)) continue;
+      seen.add(line);
+      conflicts.push(line);
+    }
+    return { supported: true, conflicts };
+  }
+
+  async merge(repoDir: string, ref: string, opts: MergeOptions = {}): Promise<GitMergeResult> {
+    const args = ['merge'];
+    if (opts.noCommit) {
+      // --no-ff as well, or a fast-forwardable merge would silently move HEAD
+      // and leave nothing for the caller to inspect or abort.
+      args.push('--no-commit', '--no-ff');
+    } else if (opts.message) {
+      args.push('-m', opts.message);
+    }
+    args.push(ref);
+
+    const result = await this.runner.run('git', args, { cwd: repoDir, timeout: this.timeout });
+    if (result.exitCode === 0) return { ok: true, conflicts: [] };
+
+    const conflicts = await this.unmergedFiles(repoDir);
+    if (conflicts.length > 0) {
+      // A conflicted merge is an expected outcome, not an error: the caller
+      // resolves the files and calls `commitMerge`, or `mergeAbort`s.
+      this.logger.info(`[Git] Merge of ${ref} left ${conflicts.length} conflicted file(s) in ${repoDir}`);
+      return { ok: false, conflicts };
+    }
+    throw new GitError(`Failed to merge ${ref} in ${repoDir}: ${result.stderr || result.stdout}`);
+  }
+
+  async mergeAbort(repoDir: string): Promise<void> {
+    // Exit code is deliberately ignored: "there is nothing to abort" is the
+    // common case for a caller cleaning up defensively.
+    await this.runner
+      .run('git', ['merge', '--abort'], { cwd: repoDir, timeout: 30_000 })
+      .catch(() => undefined);
+  }
+
+  async commitMerge(repoDir: string, message: string): Promise<string> {
+    const unmerged = await this.unmergedFiles(repoDir);
+    if (unmerged.length > 0) {
+      throw new GitError(
+        `Cannot commit merge in ${repoDir}: ${unmerged.length} unresolved conflict(s): ${unmerged.join(', ')}`,
+      );
+    }
+
+    await this.addAll(repoDir);
+
+    // `--allow-empty` because a merge whose result equals HEAD is still a
+    // legitimate merge commit — it records the second parent.
+    const commit = await this.runner.run(
+      'git',
+      ['commit', '-F', '-', '--allow-empty-message', '--allow-empty'],
+      { cwd: repoDir, timeout: 30_000, stdin: message },
+    );
+    if (commit.exitCode !== 0) {
+      throw new GitError(`Failed to commit merge in ${repoDir}: ${commit.stderr || commit.stdout}`);
+    }
+
+    const sha = await this.revParse(repoDir, 'HEAD');
+    if (!sha) throw new GitError(`Merge committed in ${repoDir} but HEAD could not be resolved`);
+    return sha;
+  }
+
+  async addAll(repoDir: string): Promise<void> {
+    const result = await this.runner.run('git', ['add', '-A'], { cwd: repoDir, timeout: 60_000 });
+    if (result.exitCode !== 0) {
+      throw new GitError(`Failed to stage files in ${repoDir}: ${result.stderr}`);
+    }
+  }
+
+  async commitWithSha(repoDir: string, message: string): Promise<GitCommitResult | null> {
+    await this.addAll(repoDir);
+
+    const staged = await this.runner.run('git', ['diff', '--cached', '--quiet'], {
+      cwd: repoDir,
+      timeout: 10_000,
+    });
+    if (staged.exitCode === 0) {
+      this.logger.info('[Git] No changes to commit');
+      return null;
+    }
+
+    const commit = await this.runner.run('git', ['commit', '-F', '-', '--allow-empty-message'], {
+      cwd: repoDir,
+      timeout: 30_000,
+      stdin: message,
+    });
+    if (commit.exitCode !== 0) {
+      throw new GitError(`Failed to commit in ${repoDir}: ${commit.stderr || commit.stdout}`);
+    }
+
+    const sha = await this.revParse(repoDir, 'HEAD');
+    if (!sha) throw new GitError(`Committed in ${repoDir} but HEAD could not be resolved`);
+    return { sha, message };
+  }
+
+  async pushSetUpstream(repoDir: string, remote: string, branch: string): Promise<void> {
+    const result = await this.runner.run('git', ['push', '-u', remote, branch], {
+      cwd: repoDir,
+      timeout: this.timeout,
+    });
+    if (result.exitCode !== 0) {
+      throw new GitError(`Failed to push ${branch} to ${remote}: ${result.stderr}`);
+    }
+    this.logger.info(`[Git] Pushed ${branch} to ${remote} (upstream set)`);
+  }
+
+  async log(repoDir: string, range: string, max = 100): Promise<string[]> {
+    try {
+      const result = await this.runner.run(
+        'git',
+        ['log', '--no-merges', '--pretty=format:%s', '-n', String(max), range],
+        { cwd: repoDir, timeout: 30_000 },
+      );
+      if (result.exitCode !== 0) return [];
+      return result.stdout
+        .split('\n')
+        .map((l) => l.replace(/\r$/, '').trim())
+        .filter((l) => l.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Everything that differs from HEAD in the working copy — staged, unstaged
+   * and untracked — in ONE git invocation.
+   *
+   * `status --porcelain=v1 -z` is used rather than `diff --name-status HEAD`
+   * plus a second `ls-files --others` pass, because status already reports
+   * untracked files and both sides of a rename. Untracked entries are mapped
+   * to `A`: to a reviewer a brand new file is an addition, whether or not the
+   * index knows about it yet.
+   */
+  async changedFilesSummary(repoDir: string): Promise<GitNameStatusEntry[]> {
+    let result;
+    try {
+      result = await this.runner.run('git', ['status', '--porcelain=v1', '-uall', '-z'], {
+        cwd: repoDir,
+        timeout: 30_000,
+      });
+    } catch {
+      return [];
+    }
+    if (result.exitCode !== 0) return [];
+
+    // -z record: "XY <path>\0", and for renames/copies "XY <newPath>\0<oldPath>\0".
+    const fields = result.stdout.split('\0');
+    const out: GitNameStatusEntry[] = [];
+    for (let i = 0; i < fields.length; i++) {
+      const record = fields[i];
+      if (!record || record.length < 4) continue;
+      const index = record[0] ?? ' ';
+      const worktree = record[1] ?? ' ';
+      const filePath = record.slice(3);
+      if (!filePath) continue;
+
+      if (index === '?' || worktree === '?') {
+        out.push({ code: 'A', path: filePath });
+        continue;
+      }
+
+      // Prefer the index letter; fall back to the worktree letter when the
+      // change is unstaged (" M", " D", …).
+      const code = index !== ' ' ? index : worktree;
+      if (code === ' ') continue;
+
+      if (code === 'R' || code === 'C') {
+        const oldPath = fields[++i] ?? '';
+        out.push(oldPath ? { code, path: filePath, oldPath } : { code, path: filePath });
+        continue;
+      }
+      out.push({ code, path: filePath });
+    }
+    return out;
+  }
+
+  async gitVersion(): Promise<string | null> {
+    if (this.gitVersionCache) return this.gitVersionCache.value;
+
+    let value: string | null = null;
+    try {
+      const result = await this.runner.run('git', ['--version'], {
+        cwd: process.cwd(),
+        timeout: 10_000,
+      });
+      if (result.exitCode === 0) {
+        // "git version 2.45.1" / "git version 2.39.3 (Apple Git-146)"
+        const match = result.stdout.match(/(\d+(?:\.\d+)*)/);
+        value = match?.[1] ?? null;
+      }
+    } catch {
+      value = null;
+    }
+    this.gitVersionCache = { value };
+    return value;
   }
 }

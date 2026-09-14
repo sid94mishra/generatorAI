@@ -60,6 +60,8 @@ export const SecretNamespace = {
   harness: (instanceId: string) => `harness/${instanceId}`,
   /** Source control / project management integrations. */
   integration: (provider: string, account: string) => `integration/${provider}/${account}`,
+  /** Per source-control account credentials. Secret name is `token`. */
+  sourceControl: (accountId: string) => `source-control/${accountId}`,
   /** Relay host keypair + relay control-plane credentials. */
   relay: 'relay',
   /** SSH private keys + known-hosts material. */

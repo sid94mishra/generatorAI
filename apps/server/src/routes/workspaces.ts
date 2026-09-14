@@ -14,7 +14,15 @@ import {
   type MountRef,
 } from '@generatorai/changes';
 import type { WorkspaceFileReviewRow } from '@generatorai/core';
-import type { WorkspaceFilters, WorkspaceInfo, WorkspaceOwnerType, WorkspaceStatus } from '@generatorai/shared';
+import type {
+  ScmFlowRequest,
+  ScmFlowResult,
+  ScmGenerateRequest,
+  WorkspaceFilters,
+  WorkspaceInfo,
+  WorkspaceOwnerType,
+  WorkspaceStatus,
+} from '@generatorai/shared';
 
 /**
  * Cheap, order-sensitive digest of a tree's path set, used only to build an
@@ -45,6 +53,10 @@ export function createWorkspaceRoutes(container: Container): Router {
     workspaceCheckpointService,
     workspaceFileReviewRepo,
     sourceControlService,
+    sourceControlFlowService,
+    repoReadinessService,
+    chatManagementService,
+    chatEntityRepo,
     eventBus,
     logger,
   } = container;
@@ -239,6 +251,273 @@ export function createWorkspaceRoutes(container: Container): Router {
     return null;
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // Source control (doc §3 / §4) — readiness, the flow, conflicts
+  // ════════════════════════════════════════════════════════════════
+
+  /**
+   * Resolve `{ info, alias, repoDir }` for an SCM call, or send a 404.
+   *
+   * `alias` comes from the body first (POSTs) then the query (GETs) and
+   * defaults to `'.'`, the mount root. An alias that matches no mount falls
+   * back to the working directory rather than 404-ing: the flow's readiness
+   * step already answers "that is not a git repository" with a reason, which
+   * is a better error than "no such alias" for a client that just guessed.
+   */
+  async function scmTarget(req: { params: Record<string, string | undefined>; body?: Record<string, unknown>; query: Record<string, unknown> }, res: Response) {
+    const id = String(req.params['id']);
+    const info = await workspaceManager.getWorkspaceInfo(id);
+    if (!info) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: `Workspace not found: ${id}` } });
+      return null;
+    }
+    const raw = req.body?.['alias'] ?? req.query['alias'] ?? '.';
+    const alias = typeof raw === 'string' && raw ? raw : '.';
+    return { id, info, alias, repoDir: mountDir(info, alias) ?? info.workingDirectory };
+  }
+
+  /**
+   * The chat name, when this workspace belongs to one — it seeds the branch
+   * slug and the generated commit/PR text. Best effort: a workspace owned by
+   * a run or an automation simply has none, and a repository hiccup must not
+   * fail the flow over a naming nicety.
+   */
+  async function flowContext(info: WorkspaceInfo): Promise<{ context?: { chatName: string } }> {
+    if (info.ownerType !== 'chat' || !info.ownerId) return {};
+    try {
+      const chat = await chatEntityRepo.getById(info.ownerId);
+      return chat?.name ? { context: { chatName: chat.name } } : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** One user-facing line explaining a flow result that produced no PR. */
+  function scmFailureReason(result: ScmFlowResult): string {
+    if (result.error) return result.error;
+    if (result.status === 'conflicts') {
+      const files = result.conflicts?.files ?? [];
+      return `Merge conflicts in ${files.length} file(s) — resolve them before opening a pull request`;
+    }
+    const stopped = result.steps.find((step) => step.status === 'blocked' || step.status === 'failed');
+    return stopped?.detail ?? 'The source-control flow did not produce a pull request';
+  }
+
+  /**
+   * Every git-capable directory this workspace exposes, as `{ alias, dir }`.
+   *
+   * Mounts come first so each keeps its own alias (mounts[0] is usually the
+   * working directory, and answering for it under `'.'` would lose the alias
+   * every other SCM call needs). The root is appended only when it is not
+   * already one of them.
+   */
+  function scmMounts(info: WorkspaceInfo): Array<{ alias: string; dir: string }> {
+    const out: Array<{ alias: string; dir: string }> = [];
+    const seen = new Set<string>();
+    for (const mount of info.mounts ?? []) {
+      const key = path.resolve(mount.path);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ alias: mount.alias, dir: mount.path });
+    }
+    const rootKey = path.resolve(info.workingDirectory);
+    if (!seen.has(rootKey)) out.push({ alias: '.', dir: info.workingDirectory });
+    return out;
+  }
+
+  // GET /workspaces/:id/scm/readiness — can this mount commit / push / PR?
+  //
+  // Without `alias`, one RepoReadiness per mount. Non-repos are reported, not
+  // omitted: `isRepo: false` plus the reasons is exactly what the client
+  // needs to grey the buttons out and say why.
+  router.get('/:id/scm/readiness', async (req, res, next) => {
+    try {
+      const id = String(req.params['id']);
+      const info = await workspaceManager.getWorkspaceInfo(id);
+      if (!info) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Workspace not found: ${id}` } });
+        return;
+      }
+      const aliasQuery = req.query['alias'];
+      const targets =
+        typeof aliasQuery === 'string' && aliasQuery
+          ? [{ alias: aliasQuery, dir: mountDir(info, aliasQuery) ?? info.workingDirectory }]
+          : scmMounts(info);
+
+      const repos = await Promise.all(
+        targets.map((t) => repoReadinessService.readiness({ repoDir: t.dir, alias: t.alias })),
+      );
+      res.json({ workspaceId: id, repos });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workspaces/:id/scm/flow — commit → sync → push → open a PR.
+  //
+  // Never throws on a "cannot": `blocked` and `conflicts` are ordinary 200
+  // results carrying the reason or the file list, because both are states the
+  // client renders rather than errors it reports.
+  router.post('/:id/scm/flow', async (req, res, next) => {
+    try {
+      const target = await scmTarget(req, res);
+      if (!target) return;
+      const body = (req.body ?? {}) as ScmFlowRequest;
+      const context = await flowContext(target.info);
+      const hint = typeof body.hint === 'string' ? body.hint : undefined;
+      const result = await sourceControlFlowService.run({
+        workspaceId: target.id,
+        repoDir: target.repoDir,
+        alias: target.alias,
+        request: body,
+        ...(context.context || hint
+          ? { context: { ...(context.context ?? {}), ...(hint ? { hint } : {}) } }
+          : {}),
+      });
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workspaces/:id/scm/generate — commit message / PR text for the
+  // "Generate" buttons, without running any of the flow's git steps.
+  router.post('/:id/scm/generate', async (req, res, next) => {
+    try {
+      const kind = req.body?.kind;
+      if (kind !== 'commit' && kind !== 'pull_request') {
+        res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: "kind must be 'commit' or 'pull_request'" },
+        });
+        return;
+      }
+      const target = await scmTarget(req, res);
+      if (!target) return;
+      const result = await sourceControlFlowService.generate({
+        repoDir: target.repoDir,
+        alias: target.alias,
+        request: { ...(req.body as ScmGenerateRequest), kind },
+        ...(await flowContext(target.info)),
+      });
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workspaces/:id/scm/conflicts/start — apply the base merge to the
+  // working tree so the user (or the agent) can edit the markers.
+  router.post('/:id/scm/conflicts/start', async (req, res, next) => {
+    try {
+      const target = await scmTarget(req, res);
+      if (!target) return;
+      const base = typeof req.body?.base === 'string' ? req.body.base : undefined;
+      const report = await sourceControlFlowService.startConflictMerge({
+        repoDir: target.repoDir,
+        alias: target.alias,
+        ...(base ? { base } : {}),
+      });
+      if (report.files.length === 0) {
+        res.status(409).json({
+          error: { code: 'NO_CONFLICTS', message: `Nothing to resolve — ${report.head} is already in sync with ${report.base}` },
+        });
+        return;
+      }
+      res.json(report);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workspaces/:id/scm/conflicts/continue — commit the merge once no
+  // unmerged paths remain.
+  //
+  // `ok: false` is a 200: "you still have three files to resolve" is the
+  // normal answer to pressing Continue too early, not a failed request.
+  router.post('/:id/scm/conflicts/continue', async (req, res, next) => {
+    try {
+      const target = await scmTarget(req, res);
+      if (!target) return;
+      const message = typeof req.body?.message === 'string' ? req.body.message : undefined;
+      const result = await sourceControlFlowService.continueAfterConflicts({
+        repoDir: target.repoDir,
+        alias: target.alias,
+        ...(message ? { message } : {}),
+      });
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workspaces/:id/scm/conflicts/abort — `git merge --abort`.
+  router.post('/:id/scm/conflicts/abort', async (req, res, next) => {
+    try {
+      const target = await scmTarget(req, res);
+      if (!target) return;
+      await sourceControlFlowService.abortConflicts({
+        repoDir: target.repoDir,
+        alias: target.alias,
+      });
+      res.status(204).send();
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workspaces/:id/scm/conflicts/resolve-with-agent — hand the conflict
+  // to the chat that owns the mount.
+  //
+  // Deliberately just a normal chat turn: the user watches it, can stop it,
+  // and nothing is pushed until they press Continue themselves (doc §4).
+  router.post('/:id/scm/conflicts/resolve-with-agent', async (req, res, next) => {
+    try {
+      const chatId = req.body?.chatId;
+      if (typeof chatId !== 'string' || !chatId.trim()) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'chatId is required' } });
+        return;
+      }
+      const target = await scmTarget(req, res);
+      if (!target) return;
+
+      // Starting the merge is what puts the markers in the tree for the agent
+      // to read, so it has to have happened first. `startConflictMerge` is
+      // idempotent — it reports the already-conflicted paths when a merge is
+      // in progress rather than starting a second one.
+      const report = await sourceControlFlowService.startConflictMerge({
+        repoDir: target.repoDir,
+        alias: target.alias,
+      });
+
+      if (report.files.length === 0) {
+        res.status(409).json({
+          error: { code: 'NO_CONFLICTS', message: `Nothing to resolve — ${report.head} is already in sync with ${report.base}` },
+        });
+        return;
+      }
+
+      const prompt = sourceControlFlowService.buildAgentConflictPrompt(report);
+      try {
+        await chatManagementService.sendPrompt(chatId.trim(), prompt);
+      } catch (err) {
+        const code = (err as { code?: string })?.code;
+        const message = (err as Error)?.message ?? 'Could not send the prompt';
+        if (code === 'CHAT_BUSY') {
+          res.status(409).json({ error: { code, message } });
+          return;
+        }
+        if (code === 'NOT_FOUND' || /not found/i.test(message)) {
+          res.status(404).json({ error: { code: 'NOT_FOUND', message } });
+          return;
+        }
+        throw err;
+      }
+      res.json({ chatId: chatId.trim(), files: report.files });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // GET /workspaces — List workspaces with filters
   router.get('/', async (req, res, next) => {
     try {
@@ -287,12 +566,32 @@ export function createWorkspaceRoutes(container: Container): Router {
   });
 
   // POST /workspaces/:id/commit — Commit workspace changes
+  //
+  // Now a thin front for the SCM flow (doc §4) with everything after the
+  // commit step switched off, so one code path stages, generates the message
+  // and commits. The answer shape (`{ committed }`) is the one older clients
+  // already read, so they keep working unchanged.
   router.post('/:id/commit', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
-      const message = req.body?.message;
-      const committed = await workspaceManager.commitWorkspace(id, message);
-      res.json({ committed });
+      const info = await workspaceManager.getWorkspaceInfo(id);
+      if (!info) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Workspace not found: ${id}` } });
+        return;
+      }
+      const alias = String(req.body?.alias ?? req.query['alias'] ?? '.');
+      const message = typeof req.body?.message === 'string' ? req.body.message : undefined;
+      const result = await sourceControlFlowService.run({
+        workspaceId: id,
+        repoDir: mountDir(info, alias) ?? info.workingDirectory,
+        alias,
+        request: {
+          commit: { ...(message ? { message } : { generate: true }) },
+          sync: false,
+        },
+        ...(await flowContext(info)),
+      });
+      res.json({ committed: Boolean(result.commit) });
     } catch (err) {
       next(err);
     }
@@ -968,7 +1267,13 @@ export function createWorkspaceRoutes(container: Container): Router {
     }
   });
 
-  // POST /workspaces/:id/pull-request — Open a PR via the active provider
+  // POST /workspaces/:id/pull-request — Open a PR via the connected account
+  //
+  // Also flow-backed now (push then PR), so the branch-off-default guard, the
+  // base sync and the "an open PR already exists" short-circuit apply here
+  // too. Still answers the bare `PullRequestSummary` older clients expect.
+  // `head` is no longer honoured: the flow always proposes the branch the
+  // mount is actually on, which is the only branch it can have pushed.
   router.post('/:id/pull-request', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
@@ -983,16 +1288,35 @@ export function createWorkspaceRoutes(container: Container): Router {
         return;
       }
       const alias = String(req.body?.alias ?? req.query['alias'] ?? '.');
-      const repoDir = mountDir(info, alias) ?? info.workingDirectory;
-      const pr = await sourceControlService.createPullRequest({
-        repoDir,
-        title,
-        body: req.body?.body,
-        base: req.body?.base,
-        head: req.body?.head,
-        draft: req.body?.draft === true,
+      const message = typeof req.body?.message === 'string' ? req.body.message : undefined;
+      const result = await sourceControlFlowService.run({
+        workspaceId: id,
+        repoDir: mountDir(info, alias) ?? info.workingDirectory,
+        alias,
+        request: {
+          ...(message ? { commit: { message } } : {}),
+          push: true,
+          pullRequest: {
+            title,
+            ...(typeof req.body?.body === 'string' ? { body: req.body.body } : {}),
+            ...(typeof req.body?.base === 'string' ? { base: req.body.base } : {}),
+            draft: req.body?.draft === true,
+          },
+        },
+        ...(await flowContext(info)),
       });
-      res.json(pr);
+      if (!result.pullRequest) {
+        // The flow reports "why not" rather than throwing; surface that
+        // instead of a bare 500 so the client can show the reason.
+        res.status(409).json({
+          error: {
+            code: 'SCM_FLOW_INCOMPLETE',
+            message: scmFailureReason(result),
+          },
+        });
+        return;
+      }
+      res.json(result.pullRequest);
     } catch (err) {
       next(err);
     }

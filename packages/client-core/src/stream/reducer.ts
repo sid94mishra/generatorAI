@@ -28,11 +28,13 @@
 //     — for the lifetime of the tab (W27 "bounded stores").
 // ────────────────────────────────────────────────────────────────
 
+import type { ScmFlowResult } from '@generatorai/shared';
 import { parseInlineToolCalls } from './parseInlineToolCalls.js';
 import type { ContextUsageSnapshot } from './contextUsage.js';
 import {
   DEFAULT_STREAM,
   type BackgroundTaskBlock,
+  type ScmResultBlock,
   type PermissionBlock,
   type PlanBlock,
   type QuestionBlock,
@@ -488,6 +490,56 @@ export function upsertBackgroundTask(
   return put(streams, sessionId, { ...existing, blocks });
 }
 
+// ── Source-control results ──────────────────────────────────────
+
+/**
+ * Insert or replace the source-control result for one turn.
+ *
+ * Upsert rather than append, keyed by `turnId`: a turn runs the flow once,
+ * but the user may resolve a merge conflict and re-run it, and the second
+ * outcome is a correction of the first — not a second event. Appending
+ * would leave "conflicts" standing above "pushed" forever.
+ *
+ * Returns the ORIGINAL record when the result is identical, so a replayed
+ * event is a genuine no-op.
+ */
+export function upsertScmResult(
+  streams: StreamsRecord,
+  sessionId: string,
+  turnId: string,
+  result: ScmFlowResult,
+): StreamsRecord {
+  if (!turnId || !result) return streams;
+  const existing = existingOrDefault(streams, sessionId);
+  const index = existing.blocks.findIndex(
+    (b) => b.type === 'scm_result' && b.turnId === turnId,
+  );
+
+  if (index === -1) {
+    const block: ScmResultBlock = {
+      type: 'scm_result',
+      blockId: existing._nextBlockId,
+      turnId,
+      result,
+    };
+    return put(streams, sessionId, {
+      ...existing,
+      // The flow runs AFTER the turn settles, so the stream is usually idle
+      // by the time this lands. Nudging it off `idle` is what makes the block
+      // render at all; `complete` keeps the composer enabled and Stop hidden.
+      status: existing.status === 'idle' ? liveStatus(existing, 'complete') : existing.status,
+      blocks: [...existing.blocks, block],
+      _nextBlockId: existing._nextBlockId + 1,
+    });
+  }
+
+  const prior = existing.blocks[index] as ScmResultBlock;
+  if (prior.result === result) return streams;
+  const blocks = existing.blocks.slice();
+  blocks[index] = { ...prior, result };
+  return put(streams, sessionId, { ...existing, blocks });
+}
+
 // ── System messages ─────────────────────────────────────────────
 
 export function addSystemMessage(
@@ -717,9 +769,13 @@ export function clearStream(streams: StreamsRecord, sessionId: string): StreamsR
   // live only in the event stream, and they outlive the turn that spawned
   // them — the transcript cleanup after that turn used to drop their rows
   // while they were still working. Settled workers go with the rest.
+  // Source-control results are kept too: the commit / PR / conflict card is
+  // only ever in the stream (nothing in the message history carries it), and
+  // the conflict card in particular is something the user still has to act on.
   const carried = (existing?.blocks ?? []).filter(
     (b) =>
       b.type === 'widget' ||
+      b.type === 'scm_result' ||
       (b.type === 'background_task' && (b.status === 'running' || b.status === 'spawned')),
   );
 

@@ -11,6 +11,7 @@ import { useTheme } from '@/providers/ThemeProvider.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { ConnectionStatus } from '@/components/status/ConnectionStatus.js';
+import { OpenInEditorButton } from '@/components/shared/OpenInEditorButton.js';
 import { cn } from '@/lib/utils.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import { Badge, type BadgeTone, Button } from '@/components/ui/index.js';
@@ -144,6 +145,12 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
             server killed mid-turn, page showed nothing), and a resume that had
             to skip past a hole was never surfaced at all. */}
         <ConnectionStatus quietWhenHealthy />
+
+        {/* Open the page's subject in a real editor. Page-agnostic: chat,
+            workflow run, project and codebase pages each publish their own
+            path into `editorTargetStore`, and the button hides itself when
+            nothing is published. */}
+        <OpenInEditorButton />
 
         {/* Chat Actions */}
         {isChatContext && chatId && (

@@ -20,6 +20,7 @@ import type {
   ResolvedAgentProjection,
   SkillReference,
   AgentReference,
+  ChatSourceControlOptions,
 } from '@generatorai/shared';
 
 // ── Sessions ──
@@ -312,6 +313,9 @@ export const chats = sqliteTable(
     // ── Mount plan (v51) — what the agent works on ──
     sources: text('sources', { mode: 'json' }),
     primarySource: text('primary_source'),
+    // ── Agent-native source control (v54) ──
+    /** Per-chat commit / push / open-PR options; NULL = source control off. */
+    sourceControl: text('source_control', { mode: 'json' }).$type<ChatSourceControlOptions>(),
     // ── Orchestrator mode (v17) ──
     orchestratorMode: integer('orchestrator_mode', { mode: 'boolean' }).notNull().default(false),
     // ── W24 fix (v41) — durable orchestrator termination state ──

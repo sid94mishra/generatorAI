@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   FolderKanban,
   GitBranch,
+  GitPullRequest,
   Settings,
   FileText,
   AlertCircle,
@@ -56,6 +57,8 @@ import {
   useDeleteMcpServer,
 } from '@/hooks/projectQueries.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
+import { ProjectPullRequestsTab } from '@/components/scm/ProjectPullRequestsTab.js';
+import { useEditorTarget } from '@/stores/editorTargetStore.js';
 import { SourceBadge } from '@/components/common/SourceBadge.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import { SyntaxHighlightedCode, extToLang } from '@/components/common/SyntaxHighlightedCode.js';
@@ -66,7 +69,7 @@ import { useProjectCatalogPrefsStore } from '@/stores/projectCatalogPrefsStore.j
 import { cn } from '@/lib/utils.js';
 import type { CodebaseType, ConfigType, ArtifactWithSource, McpServerEntry } from '@generatorai/shared';
 
-type Tab = 'codebases' | 'artifacts' | 'settings';
+type Tab = 'codebases' | 'artifacts' | 'pull-requests' | 'settings';
 type ArtifactCategory = 'skill' | 'prompt' | 'agent' | 'mcp';
 
 const ARTIFACT_CATEGORIES: { key: ArtifactCategory; label: string; icon: typeof Wrench }[] = [
@@ -223,6 +226,12 @@ export function ProjectDetailPage() {
   const deleteProject = useDeleteProject();
 
   const [tab, setTab] = useState<Tab>('codebases');
+
+  // "Open in editor" on a project opens its FIRST codebase's checkout — the
+  // project itself is not a directory, and a list of four is not something a
+  // single button can open.
+  const firstCodebasePath = codebases?.[0]?.clonePath ?? codebases?.[0]?.localPath;
+  useEditorTarget(firstCodebasePath, project?.name ?? 'Project');
   const [showAddCodebase, setShowAddCodebase] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string } | null>(null);
   const [showDeleteProject, setShowDeleteProject] = useState(false);
@@ -447,6 +456,7 @@ export function ProjectDetailPage() {
         items={[
           { id: 'codebases', label: 'Codebases', icon: <GitBranch className="h-4 w-4" /> },
           { id: 'artifacts', label: 'Project Customization', icon: <FileText className="h-4 w-4" /> },
+          { id: 'pull-requests', label: 'Pull requests', icon: <GitPullRequest className="h-4 w-4" /> },
           { id: 'settings', label: 'Settings', icon: <Settings className="h-4 w-4" /> },
         ]}
         value={tab}
@@ -702,6 +712,8 @@ export function ProjectDetailPage() {
           )}
         </div>
       )}
+
+      {tab === 'pull-requests' && <ProjectPullRequestsTab projectId={id} />}
 
       {tab === 'settings' && <ProjectSettingsForm project={project} />}
 

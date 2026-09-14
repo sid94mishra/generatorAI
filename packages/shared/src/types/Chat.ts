@@ -8,6 +8,7 @@ import type { BrowserConfig } from './BrowserSession.js';
 import type { AgentMode } from './AgentMode.js';
 import type { AgentOverrides, ResolvedAgentProjection } from './Agent.js';
 import type { ChatSourceSpec, WorkspacePrepStatus } from './Workspace.js';
+import type { ChatSourceControlOptions } from './SourceControl.js';
 
 /**
  * Chat-scoped permission policy. Mirrors the harness permission modes so the
@@ -87,6 +88,11 @@ export interface Chat {
   /** Integrated Browser configuration (per-chat opt-in). */
   browserConfig?: BrowserConfig;
   /**
+   * Agent-native source control (per-chat opt-in): commit / push / open a PR
+   * on the chat's behalf. Absent means the chat never touches source control.
+   */
+  sourceControl?: ChatSourceControlOptions;
+  /**
    * Orchestrator mode — when true, this chat runs the orchestrator system
    * prompt and gets the background-agent tool set (spawn/check/send/list).
    */
@@ -156,6 +162,8 @@ export interface CreateChatParams {
   tags?: string[];
   /** Integrated Browser configuration (per-chat opt-in). */
   browserConfig?: BrowserConfig;
+  /** Agent-native source control for this chat (commit / push / open a PR). */
+  sourceControl?: ChatSourceControlOptions;
   /** Enable orchestrator mode (inject orchestrator prompt + background-agent tools). */
   orchestratorMode?: boolean;
   /** Set when this chat is a spawned worker: the orchestrator chat id. */

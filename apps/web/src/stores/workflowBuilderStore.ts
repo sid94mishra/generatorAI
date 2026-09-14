@@ -69,6 +69,8 @@ interface WorkflowBuilderState {
   gitRepositories: GitRepositoryConfig[];
   /** Whether to auto-commit changes after workflow completes */
   autoCommit: boolean;
+  /** Whether to push the work branch after committing */
+  autoPush: boolean;
   /** Whether to auto-create PR after workflow completes */
   autoCreatePR: boolean;
   /** Scope: 'global' or array of project IDs */
@@ -132,6 +134,7 @@ interface WorkflowBuilderState {
   setTags: (tags: string[]) => void;
   setGitRepositories: (repos: GitRepositoryConfig[]) => void;
   setAutoCommit: (autoCommit: boolean) => void;
+  setAutoPush: (autoPush: boolean) => void;
   setAutoCreatePR: (autoCreatePR: boolean) => void;
   setScope: (scope: EntityScope) => void;
   setProjectId: (projectId: string | null) => void;
@@ -244,6 +247,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   tags: [],
   gitRepositories: [],
   autoCommit: true,
+  autoPush: false,
   autoCreatePR: false,
   scope: 'global',
   projectId: null,
@@ -283,6 +287,8 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       tags: definition.tags ?? [],
       gitRepositories: definition.orchestratorConfig?.gitRepositories ?? [],
       autoCommit: definition.orchestratorConfig?.autoCommit ?? true,
+      autoPush:
+        (definition.orchestratorConfig as { autoPush?: boolean } | undefined)?.autoPush ?? false,
       autoCreatePR: definition.orchestratorConfig?.autoCreatePR ?? false,
       scope: (definition as unknown as { scope?: EntityScope }).scope ?? 'global',
       projectId: definition.projectId ?? null,
@@ -319,6 +325,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       tags: [],
       gitRepositories: [],
       autoCommit: true,
+      autoPush: false,
       autoCreatePR: false,
       scope: 'global',
       projectId: null,
@@ -522,8 +529,15 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   setVariables: (variables) => set({ variables, isDirty: true }),
   setTags: (tags) => set({ tags, isDirty: true }),
   setGitRepositories: (gitRepositories) => set({ gitRepositories, isDirty: true }),
-  setAutoCommit: (autoCommit) => set({ autoCommit, isDirty: true }),
-  setAutoCreatePR: (autoCreatePR) => set({ autoCreatePR, isDirty: true }),
+  // A PR needs a pushed branch and a push needs a commit, so turning one off
+  // turns off everything downstream of it — the same rule the chat options and
+  // the server's own flow follow.
+  setAutoCommit: (autoCommit) =>
+    set(autoCommit ? { autoCommit, isDirty: true } : { autoCommit, autoPush: false, autoCreatePR: false, isDirty: true }),
+  setAutoPush: (autoPush) =>
+    set(autoPush ? { autoPush, autoCommit: true, isDirty: true } : { autoPush, autoCreatePR: false, isDirty: true }),
+  setAutoCreatePR: (autoCreatePR) =>
+    set(autoCreatePR ? { autoCreatePR, autoPush: true, autoCommit: true, isDirty: true } : { autoCreatePR, isDirty: true }),
   setScope: (scope) => set({ scope, isDirty: true }),
   setProjectId: (projectId) => set({ projectId, isDirty: true, selectedCodebases: [] }),
   setSelectedCodebases: (selectedCodebases) => set({ selectedCodebases, isDirty: true }),

@@ -13,6 +13,11 @@ export type {
   WriteTreeOptions,
   ShadowRepoOptions,
   AddWorktreeOptions,
+  GitAheadBehind,
+  GitMergeTreeResult,
+  GitMergeResult,
+  GitCommitResult,
+  MergeOptions,
 } from './ports/IGitClient.js';
 export type {
   IGitProcessRunner,

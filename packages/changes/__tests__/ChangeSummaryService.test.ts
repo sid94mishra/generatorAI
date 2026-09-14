@@ -23,6 +23,8 @@ const realRunner: IGitProcessRunner = {
         env: options.env ? { ...process.env, ...options.env } : process.env,
         shell: false,
       });
+      // `git commit -F -` reads the message from stdin; close it either way.
+      child.stdin?.end(options.stdin ?? '');
       let stdout = '';
       let stderr = '';
       child.stdout.on('data', (d) => (stdout += d.toString()));

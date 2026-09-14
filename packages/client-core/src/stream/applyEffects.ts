@@ -61,6 +61,8 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
       return r.addSystemMessage(streams, effect.key, effect.message, effect.category);
     case 'upsertBackgroundTask':
       return r.upsertBackgroundTask(streams, effect.key, effect.task);
+    case 'upsertScmResult':
+      return r.upsertScmResult(streams, effect.key, effect.turnId, effect.result);
     case 'hookStarted':
       return r.addHookStarted(streams, effect.key, effect.hookName, effect.phase, {
         hookId: effect.hookId,

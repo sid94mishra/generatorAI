@@ -230,7 +230,7 @@ export const EXTENSION_AUTHORING_HINT =
 // go. Built from the persisted mounts on create AND resume, so the text is
 // byte-identical across restarts (the prompt-cache prefix depends on it).
 
-import type { WorkspaceMount } from '@generatorai/shared';
+import type { ChatSourceControlOptions, WorkspaceMount } from '@generatorai/shared';
 
 export interface WorkspaceHintInput {
   workingDirectory: string;
@@ -273,4 +273,46 @@ export function buildWorkspaceHint(input: WorkspaceHintInput): string {
   lines.push('- Do not run git checkout/switch/stash/reset in a mount; the user controls branches.');
   lines.push(`- Do not create files in ${input.rootPath} outside scratch/ and plans/.`);
   return lines.join('\n');
+}
+
+// ────────────────────────────────────────────────────────────────
+// Agent-native source control (doc §5)
+// ────────────────────────────────────────────────────────────────
+
+/**
+ * Told to a chat whose `sourceControl.autoCommit` is on.
+ *
+ * Two jobs. First, stop the agent doing the platform's work: a model that
+ * commits and pushes on its own defeats the whole flow — it pushes straight to
+ * the branch it is standing on, skips the base-branch sync, and leaves the
+ * user with history nobody reviewed. Second, ask for the ONE line the commit
+ * message is generated from, so the message describes the change instead of
+ * the diff.
+ *
+ * Appended to the system message, so keep it short: it is paid for on every
+ * request for the life of the chat.
+ */
+export function buildAutoCommitHint(options: ChatSourceControlOptions): string {
+  if (!options.autoCommit) return '';
+  const base = options.base?.trim() || "the repository's default branch";
+
+  const what: string[] = ['commits your change set to the current work branch after every turn'];
+  if (options.autoPullRequest) {
+    what.push(`pushes it and opens a pull request against \`${base}\``);
+  } else if (options.autoPush) {
+    what.push('pushes the work branch');
+  }
+
+  return [
+    '',
+    '',
+    '[Source control]',
+    `The platform ${what.join(', and ')}. You do not have to — and must not — do any of it yourself.`,
+    '- Do NOT run `git commit`, `git push`, `git merge`, `git rebase`, or any branch command ' +
+      '(`git checkout`/`switch`/`branch`). Leave your work uncommitted in the working tree; the platform takes it from there.',
+    '- Reading git is fine: `git status`, `git diff` and `git log` are useful and safe.',
+    '- End your final message with a single line starting `Summary:` that describes the change in one sentence ' +
+      '(for example: `Summary: fix the token refresh race in the auth client`). That line seeds the commit message, ' +
+      'so make it about WHAT changed and WHY, not about which files you touched.',
+  ].join('\n');
 }

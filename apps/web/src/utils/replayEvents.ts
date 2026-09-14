@@ -5,7 +5,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useStreamStore } from '../stores/streamStore.js';
-import type { PersistedEvent } from '@generatorai/shared';
+import type { PersistedEvent, ScmFlowResult } from '@generatorai/shared';
 import type { SystemCategory, QuestionBlock } from '../stores/streamStore.js';
 import type { ContextUsageSnapshot, StreamEffect, ToolFileOp } from '@generatorai/client-core';
 
@@ -86,6 +86,42 @@ function replayLiveBackgroundTasks(
     effects.push({ op: 'upsertBackgroundTask', key: streamKey, task });
   }
   if (effects.length > 0) store.applyEffects(effects);
+}
+
+
+/**
+ * Source-control results from THIS page's history.
+ *
+ * The flow runs after a turn settles and its outcome lives only in the
+ * stream store, so a reload used to lose "Committed abc1234 · PR #12" from
+ * the transcript entirely — and, worse, lose the conflict card the user was
+ * meant to act on. Folded by `turnId` with LAST-write-wins, so a turn whose
+ * conflict was later resolved shows the resolved result rather than both.
+ *
+ * Every turn's result is replayed, not just the newest: unlike a running
+ * background worker, a settled commit is permanent history the transcript
+ * should still account for.
+ */
+function replayScmResults(
+  store: ReturnType<typeof useStreamStore.getState>,
+  streamKey: string,
+  events: PersistedEvent[],
+): void {
+  const byTurn = new Map<string, ScmFlowResult>();
+  for (const ev of events) {
+    if ((ev.kind as string) !== 'chat.scm.result') continue;
+    const data = (ev.data ?? {}) as Record<string, unknown>;
+    const turnId = typeof data['turnId'] === 'string' ? data['turnId'] : '';
+    const result = data['result'] as ScmFlowResult | undefined;
+    if (!turnId || !result || typeof result !== 'object') continue;
+    byTurn.set(turnId, result);
+  }
+  if (byTurn.size === 0) return;
+  const effects: StreamEffect[] = [];
+  for (const [turnId, result] of byTurn) {
+    effects.push({ op: 'upsertScmResult', key: streamKey, turnId, result });
+  }
+  store.applyEffects(effects);
 }
 
 /**
@@ -301,6 +337,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
         break;
       }
       replayLiveBackgroundTasks(store, streamKey, events);
+      replayScmResults(store, streamKey, events);
       return;
     }
   }
@@ -716,4 +753,5 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
   // After the turn bookkeeping (which may have cleared the stream) so the
   // rows are what remains, not what gets cleared.
   replayLiveBackgroundTasks(store, streamKey, events);
+  replayScmResults(store, streamKey, events);
 }

@@ -6,6 +6,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import type { CreateSessionParams, CreateChatParams } from '@generatorai/shared';
 import type { AgentMode, PlanAction } from '@generatorai/shared';
+import type {
+  ScmFlowRequest,
+  ScmGenerateRequest,
+  OpenInEditorRequest,
+  ChatSourceControlOptions,
+} from '@generatorai/shared';
 import type { HttpPlatformClient, ChatModel, RewindScope } from '../platform/HttpPlatformClient.js';
 import { formatTranscriptMarkdown } from '@generatorai/client-core';
 import { toast } from '../components/Toast.js';
@@ -1203,6 +1209,327 @@ export function useBulkDeleteChats() {
     onError: () => {
       // Still refresh — some deletions may have succeeded
       queryClient.invalidateQueries({ queryKey: queryKeys.chats });
+    },
+  });
+}
+
+// ── Source control v2 ────────────────────────────────────────────
+//
+// Accounts + settings, per-mount readiness, the commit → PR flow, project
+// pull requests and the editor launcher. Query keys are exported so any
+// surface that mutates a repo can invalidate the right things without
+// re-deriving the tuple (getting that wrong is how a committed change set
+// keeps showing the old "3 changes · ahead 0").
+
+export const scmKeys = {
+  settings: ['scm-settings'] as const,
+  deviceLogin: (loginId: string) => ['scm-device-login', loginId] as const,
+  readiness: (workspaceId: string, alias?: string) =>
+    ['scm-readiness', workspaceId, alias ?? '*'] as const,
+  codebaseReadiness: (projectId: string, codebaseId: string) =>
+    ['scm-codebase-readiness', projectId, codebaseId] as const,
+  editors: ['scm-editors'] as const,
+  projectPullRequests: (projectId: string, state: string) =>
+    ['project-pull-requests', projectId, state] as const,
+  pullRequest: (projectId: string, codebaseId: string, number: number) =>
+    ['pull-request', projectId, codebaseId, number] as const,
+  pullRequestFiles: (projectId: string, codebaseId: string, number: number) =>
+    ['pull-request-files', projectId, codebaseId, number] as const,
+  pullRequestComments: (projectId: string, codebaseId: string, number: number) =>
+    ['pull-request-comments', projectId, codebaseId, number] as const,
+};
+
+/** Accounts, generation model, editor + the login methods the server offers. */
+export function useSourceControlSettings() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.settings,
+    queryFn: () => platform.getSourceControlSettings(),
+    staleTime: 30_000,
+  });
+}
+
+export function useUpdateSourceControlSettings() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (update: Parameters<HttpPlatformClient['updateSourceControlSettings']>[0]) =>
+      platform.updateSourceControlSettings(update),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: scmKeys.settings });
+      void queryClient.invalidateQueries({ queryKey: ['source-control-status'] });
+    },
+  });
+}
+
+export function useAddSourceControlAccount() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<HttpPlatformClient['addSourceControlAccount']>[0]) =>
+      platform.addSourceControlAccount(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: scmKeys.settings });
+      void queryClient.invalidateQueries({ queryKey: ['source-control-status'] });
+      // A newly connected host can flip `connected` on every open mount.
+      void queryClient.invalidateQueries({ queryKey: ['scm-readiness'] });
+    },
+  });
+}
+
+export function useRemoveSourceControlAccount() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (accountId: string) => platform.removeSourceControlAccount(accountId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: scmKeys.settings });
+      void queryClient.invalidateQueries({ queryKey: ['source-control-status'] });
+      void queryClient.invalidateQueries({ queryKey: ['scm-readiness'] });
+    },
+  });
+}
+
+/** Start the OAuth device flow. The caller polls with `useDeviceLoginStatus`. */
+export function useStartDeviceLogin() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useMutation({
+    mutationFn: (input: { provider: 'github'; host?: string }) =>
+      platform.startSourceControlDeviceLogin(input),
+  });
+}
+
+/**
+ * Poll one device login until the host settles it.
+ *
+ * `intervalSeconds` is GitHub's own `interval` from the start response —
+ * polling faster than it earns a `slow_down` and restarts the clock. Polling
+ * stops on any terminal status so a forgotten dialog does not keep a timer
+ * alive for the rest of the session.
+ */
+export function useDeviceLoginStatus(loginId: string | undefined, intervalSeconds = 5) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: scmKeys.deviceLogin(loginId ?? ''),
+    queryFn: async () => {
+      const status = await platform.getSourceControlDeviceLogin(loginId!);
+      if (status.status === 'complete') {
+        void queryClient.invalidateQueries({ queryKey: scmKeys.settings });
+        void queryClient.invalidateQueries({ queryKey: ['source-control-status'] });
+      }
+      return status;
+    },
+    enabled: !!loginId,
+    refetchInterval: (query) => {
+      const s = query.state.data?.status;
+      if (s === 'complete' || s === 'expired' || s === 'error') return false;
+      return Math.max(1, intervalSeconds) * 1000;
+    },
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
+/** Per-mount readiness for a workspace. */
+export function useWorkspaceReadiness(workspaceId: string | undefined, alias?: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.readiness(workspaceId ?? '', alias),
+    queryFn: () => platform.getWorkspaceScmReadiness(workspaceId!, alias),
+    enabled: !!workspaceId,
+    staleTime: 10_000,
+  });
+}
+
+/** Readiness for a project codebase's own checkout. */
+export function useCodebaseReadiness(projectId: string | undefined, codebaseId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.codebaseReadiness(projectId ?? '', codebaseId ?? ''),
+    queryFn: () => platform.getCodebaseScmReadiness(projectId!, codebaseId!),
+    enabled: !!projectId && !!codebaseId,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Everything a source-control action invalidates: readiness (branch, ahead,
+ * open PR), the change list and its summary.
+ */
+function invalidateScmSurfaces(queryClient: ReturnType<typeof useQueryClient>, workspaceId?: string) {
+  void queryClient.invalidateQueries({ queryKey: ['scm-readiness', workspaceId ?? ''] });
+  void queryClient.invalidateQueries({ queryKey: ['workspace-changes', workspaceId] });
+  void queryClient.invalidateQueries({ queryKey: ['workspace-change-summary', workspaceId] });
+  void queryClient.invalidateQueries({ queryKey: ['workspace-pull-requests', workspaceId] });
+}
+
+/** Run branch → commit → sync → push → PR. */
+export function useRunScmFlow(workspaceId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: ScmFlowRequest) => platform.runWorkspaceScmFlow(workspaceId!, request),
+    onSettled: () => invalidateScmSurfaces(queryClient, workspaceId),
+  });
+}
+
+/** Ask the server for a commit message or PR title/body. */
+export function useGenerateScmText(workspaceId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useMutation({
+    mutationFn: (request: ScmGenerateRequest) => platform.generateScmText(workspaceId!, request),
+  });
+}
+
+/** The four conflict verbs, behind one mutation keyed by `action`. */
+export function useScmConflictAction(workspaceId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      action: 'start' | 'continue' | 'abort' | 'resolve-with-agent';
+      alias?: string;
+      chatId?: string;
+    }) => {
+      const alias = input.alias !== undefined ? { alias: input.alias } : {};
+      switch (input.action) {
+        case 'start':
+          return platform.startScmConflictResolution(workspaceId!, alias);
+        case 'continue':
+          return platform.continueScmConflictResolution(workspaceId!, alias);
+        case 'abort':
+          return platform.abortScmConflictResolution(workspaceId!, alias);
+        case 'resolve-with-agent':
+          return platform.resolveScmConflictWithAgent(workspaceId!, {
+            ...alias,
+            chatId: input.chatId!,
+          });
+      }
+    },
+    onSettled: () => invalidateScmSurfaces(queryClient, workspaceId),
+  });
+}
+
+/** Pull requests across every codebase of a project. */
+export function useProjectPullRequests(
+  projectId: string | undefined,
+  state: 'open' | 'closed' | 'all' = 'open',
+) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.projectPullRequests(projectId ?? '', state),
+    queryFn: () => platform.listProjectPullRequests(projectId!, state),
+    enabled: !!projectId,
+    staleTime: 30_000,
+  });
+}
+
+export function usePullRequest(
+  projectId: string | undefined,
+  codebaseId: string | undefined,
+  number: number | undefined,
+) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.pullRequest(projectId ?? '', codebaseId ?? '', number ?? 0),
+    queryFn: () => platform.getPullRequest(projectId!, codebaseId!, number!),
+    enabled: !!projectId && !!codebaseId && Number.isFinite(number),
+    // `mergeable` is computed asynchronously by the host; a null answer is a
+    // "check back shortly", not a final one.
+    refetchInterval: (query) => (query.state.data?.mergeable === null ? 5_000 : false),
+  });
+}
+
+export function usePullRequestFiles(
+  projectId: string | undefined,
+  codebaseId: string | undefined,
+  number: number | undefined,
+) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.pullRequestFiles(projectId ?? '', codebaseId ?? '', number ?? 0),
+    queryFn: () => platform.getPullRequestFiles(projectId!, codebaseId!, number!),
+    enabled: !!projectId && !!codebaseId && Number.isFinite(number),
+    staleTime: 60_000,
+  });
+}
+
+export function usePullRequestComments(
+  projectId: string | undefined,
+  codebaseId: string | undefined,
+  number: number | undefined,
+) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.pullRequestComments(projectId ?? '', codebaseId ?? '', number ?? 0),
+    queryFn: () => platform.getPullRequestComments(projectId!, codebaseId!, number!),
+    enabled: !!projectId && !!codebaseId && Number.isFinite(number),
+    staleTime: 30_000,
+  });
+}
+
+/** Create the review chat for a PR and hand back the chat to navigate to. */
+export function useCreatePullRequestReviewChat(
+  projectId: string | undefined,
+  codebaseId: string | undefined,
+  number: number | undefined,
+) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { instructions?: string; model?: string; agentRef?: string }) =>
+      platform.createPullRequestReviewChat(projectId!, codebaseId!, number!, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chats });
+    },
+  });
+}
+
+/** Editors the server host can launch. */
+export function useEditors() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.editors,
+    queryFn: () => platform.listEditors(),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * Open a path in an editor.
+ *
+ * When the server cannot launch anything it answers `ok:false` with a
+ * `fallbackUrl` (`vscode://file/…`); the browser tries that instead, which is
+ * the only thing that works when the server runs on another machine. Both
+ * halves live here so every call site behaves identically.
+ */
+export function useOpenInEditor() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useMutation({
+    mutationFn: async (request: OpenInEditorRequest) => {
+      const result = await platform.openInEditor(request);
+      if (!result.ok && result.fallbackUrl && typeof window !== 'undefined') {
+        window.open(result.fallbackUrl, '_blank', 'noopener');
+      }
+      return result;
+    },
+    onError: (error: Error) => {
+      toast({ variant: 'error', title: 'Could not open the editor', description: error.message });
+    },
+  });
+}
+
+/** Agent-native source-control options on an existing chat. */
+export function useUpdateChatSourceControl(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sourceControl: ChatSourceControlOptions | null) =>
+      platform.updateChatSourceControl(chatId!, sourceControl),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId ?? '') });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chats });
     },
   });
 }

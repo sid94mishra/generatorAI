@@ -38,6 +38,7 @@ import { CodebaseFileBrowser } from '@/components/codebase/CodebaseFileBrowser.j
 import { FileExplorer, FileExplorerEmptyState } from '@/components/shared/FileExplorer.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
+import { useEditorTarget } from '@/stores/editorTargetStore.js';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
 import { extToLang } from '@/components/common/SyntaxHighlightedCode.js';
 import { FileCodeView } from '@/components/diff/FileCodeView.js';
@@ -73,6 +74,9 @@ export function CodebaseDetailPage() {
   const [showLogViewer, setShowLogViewer] = useState(false);
 
   const codebase = codebases?.find((cb) => cb.id === codebaseId);
+
+  // "Open in editor" opens this codebase's own checkout.
+  useEditorTarget(codebase?.clonePath ?? codebase?.localPath, codebase?.alias ?? 'Codebase');
 
   // Derive log content reactively from current codebase data
   const logContent = useMemo(() => {

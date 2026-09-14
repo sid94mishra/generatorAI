@@ -3,10 +3,22 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Router } from 'express';
+import type { Response } from 'express';
 import multer from 'multer';
 import { McpServerBodySchema, mcpCredentialNamespace } from '@generatorai/shared';
-import { McpCredentialVault, toMcpServerEntry } from '@generatorai/core';
-import type { CatalogMcpServer } from '@generatorai/core';
+import {
+  McpCredentialVault,
+  buildPullRequestReviewPrompt,
+  parseRepoSlug,
+  redactTokens,
+  toMcpServerEntry,
+} from '@generatorai/core';
+import type {
+  CatalogMcpServer,
+  ISourceControlProvider,
+  PullRequestRef,
+} from '@generatorai/core';
+import type { ProjectCodebase, ProjectPullRequest, ScmPullRequestState } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 
 const upload = multer({
@@ -25,6 +37,10 @@ export function createProjectRoutes(container: Container): Router {
     systemArtifactService,
     artifactCatalog,
     security,
+    sourceControlRegistry,
+    repoReadinessService,
+    chatManagementService,
+    gitManager,
     logger,
   } = container;
 
@@ -576,6 +592,302 @@ export function createProjectRoutes(container: Container): Router {
       // project from a project-scoped endpoint.
       const result = await worktreeCleanupService.runCleanupForProject(String(req.params['id']));
       res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // Pull requests under a project (doc §6) + codebase readiness (doc §3)
+  // ════════════════════════════════════════════════════════════════
+
+  /** Where a codebase's git repository actually lives on this host. */
+  function codebaseRepoDir(codebase: ProjectCodebase): string | null {
+    return codebase.clonePath || codebase.localPath || null;
+  }
+
+  /**
+   * Resolve `{ slug, provider }` for a codebase, or the user-facing reason
+   * why there is none. Every failure mode here is something the user can act
+   * on (link a remote, connect an account), so it is phrased for them and
+   * never swallowed into a generic 500.
+   */
+  async function resolveCodebaseRemote(
+    codebase: ProjectCodebase,
+  ): Promise<
+    | { ok: true; repoDir: string; slug: { owner: string; repo: string; host: string }; provider: ISourceControlProvider }
+    | { ok: false; reason: string; host?: string }
+  > {
+    const repoDir = codebaseRepoDir(codebase);
+    if (!repoDir) return { ok: false, reason: 'This codebase has no local checkout yet' };
+
+    let remoteUrl: string | null = null;
+    try {
+      remoteUrl = await gitManager.getRemoteUrl(repoDir);
+    } catch (err) {
+      return { ok: false, reason: redactTokens(err instanceof Error ? err.message : String(err)) };
+    }
+    if (!remoteUrl) return { ok: false, reason: 'No git remote configured' };
+
+    const slug = parseRepoSlug(remoteUrl);
+    if (!slug) return { ok: false, reason: 'The git remote is not a recognisable repository URL' };
+
+    const provider = sourceControlRegistry.providerFor(slug.host);
+    if (!provider) {
+      return {
+        ok: false,
+        host: slug.host,
+        reason: `Remote host ${slug.host} is not connected — connect it in Settings → Source Control`,
+      };
+    }
+    return { ok: true, repoDir, slug, provider };
+  }
+
+  /**
+   * Resolve the codebase + provider for a single-PR route, or send the right
+   * error. `409 SCM_NOT_CONNECTED` specifically, rather than a 404, because
+   * the PR exists — the server just has no credentials to read it with.
+   */
+  async function loadPullRequestTarget(
+    codebaseId: string,
+    numberRaw: string,
+    res: Response,
+  ): Promise<
+    | { codebase: ProjectCodebase; repoDir: string; provider: ISourceControlProvider; ref: PullRequestRef }
+    | null
+  > {
+    const number = Number(numberRaw);
+    if (!Number.isInteger(number) || number <= 0) {
+      res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Pull request number must be a positive integer' },
+      });
+      return null;
+    }
+    const codebase = await codebaseService.getCodebaseStatus(codebaseId);
+    const resolved = await resolveCodebaseRemote(codebase);
+    if (!resolved.ok) {
+      if (resolved.host) {
+        res.status(409).json({ error: { code: 'SCM_NOT_CONNECTED', message: resolved.reason } });
+      } else {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: resolved.reason } });
+      }
+      return null;
+    }
+    return {
+      codebase,
+      repoDir: resolved.repoDir,
+      provider: resolved.provider,
+      ref: {
+        owner: resolved.slug.owner,
+        repo: resolved.slug.repo,
+        number,
+        host: resolved.slug.host,
+      },
+    };
+  }
+
+  // GET /projects/:id/pull-requests — every codebase's PRs in one list.
+  //
+  // One unreachable codebase must never blank the page, so each is resolved
+  // independently and its failure becomes an `unavailable` row carrying the
+  // reason; the codebases are walked concurrently because each is a network
+  // round trip to the host.
+  router.get('/:id/pull-requests', async (req, res, next) => {
+    try {
+      const stateRaw = req.query['state'];
+      const state: ScmPullRequestState | 'all' =
+        stateRaw === 'closed' || stateRaw === 'all' ? stateRaw : 'open';
+
+      const codebases = await codebaseService.getByProjectId(String(req.params['id']));
+      const items: ProjectPullRequest[] = [];
+      const unavailable: Array<{ codebaseId: string; alias: string; reason: string }> = [];
+
+      await Promise.all(
+        codebases.map(async (codebase) => {
+          const resolved = await resolveCodebaseRemote(codebase);
+          if (!resolved.ok) {
+            unavailable.push({ codebaseId: codebase.id, alias: codebase.alias, reason: resolved.reason });
+            return;
+          }
+          try {
+            const prs = await resolved.provider.listPullRequests({
+              owner: resolved.slug.owner,
+              repo: resolved.slug.repo,
+              state,
+              host: resolved.slug.host,
+            });
+            for (const pr of prs) {
+              items.push({ ...pr, codebaseId: codebase.id, codebaseAlias: codebase.alias });
+            }
+          } catch (err) {
+            unavailable.push({
+              codebaseId: codebase.id,
+              alias: codebase.alias,
+              reason: redactTokens(err instanceof Error ? err.message : String(err)),
+            });
+          }
+        }),
+      );
+
+      res.json({ items, unavailable });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /projects/:id/codebases/:cid/pull-requests/:number — PR detail.
+  // Checks are composed in here (the provider port keeps them separate) and
+  // dropped silently when the host cannot answer — a PR is still readable
+  // without its CI state.
+  router.get('/:id/codebases/:cid/pull-requests/:number', async (req, res, next) => {
+    try {
+      const target = await loadPullRequestTarget(
+        String(req.params['cid']),
+        String(req.params['number']),
+        res,
+      );
+      if (!target) return;
+
+      const detail = await target.provider.getPullRequestDetail(target.ref);
+      try {
+        const checks = await target.provider.getStatusChecks(target.ref);
+        res.json({ ...detail, checks });
+      } catch (err) {
+        logger.debug(
+          `[ProjectRoutes] Could not read checks for PR #${target.ref.number}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        res.json(detail);
+      }
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET …/pull-requests/:number/files — changed files with unified diffs.
+  router.get('/:id/codebases/:cid/pull-requests/:number/files', async (req, res, next) => {
+    try {
+      const target = await loadPullRequestTarget(
+        String(req.params['cid']),
+        String(req.params['number']),
+        res,
+      );
+      if (!target) return;
+      res.json(await target.provider.listPullRequestFiles(target.ref));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET …/pull-requests/:number/comments — review + issue comments.
+  router.get('/:id/codebases/:cid/pull-requests/:number/comments', async (req, res, next) => {
+    try {
+      const target = await loadPullRequestTarget(
+        String(req.params['cid']),
+        String(req.params['number']),
+        res,
+      );
+      if (!target) return;
+      res.json(await target.provider.listPullRequestComments(target.ref));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST …/pull-requests/:number/review-chat — "Review in chat" (doc §6).
+  //
+  // The chat's workspace is the codebase in worktree mode on the PR's head
+  // branch, so the agent reads the surrounding repository rather than judging
+  // a diff in isolation.
+  router.post('/:id/codebases/:cid/pull-requests/:number/review-chat', async (req, res, next) => {
+    try {
+      const projectId = String(req.params['id']);
+      const codebaseId = String(req.params['cid']);
+      const target = await loadPullRequestTarget(codebaseId, String(req.params['number']), res);
+      if (!target) return;
+
+      const instructions = typeof req.body?.instructions === 'string' ? req.body.instructions : undefined;
+      const model = typeof req.body?.model === 'string' ? req.body.model : undefined;
+      const agentRef = typeof req.body?.agentRef === 'string' ? req.body.agentRef : undefined;
+
+      const [detail, files] = await Promise.all([
+        target.provider.getPullRequestDetail(target.ref),
+        target.provider.listPullRequestFiles(target.ref),
+      ]);
+
+      // Fetch the head first so the worktree can be cut from it. A failure
+      // here is not fatal: the branch may already be local, and worktree
+      // creation reports its own, better error if it is not.
+      try {
+        await gitManager.fetch(target.repoDir, 'origin', detail.head);
+      } catch (err) {
+        logger.warn(
+          `[ProjectRoutes] Could not fetch ${detail.head} for PR #${detail.number}: ${
+            err instanceof Error ? redactTokens(err.message) : String(err)
+          }`,
+        );
+      }
+
+      const prompt = buildPullRequestReviewPrompt({
+        pr: detail,
+        files,
+        ...(instructions ? { instructions } : {}),
+      });
+
+      const chat = await chatManagementService.createChat({
+        name: `Review PR #${detail.number}: ${detail.title}`,
+        projectId,
+        sources: [
+          {
+            kind: 'codebase',
+            codebaseId,
+            mode: 'worktree',
+            // A dedicated review branch cut from the fetched head, rather
+            // than the head branch itself: the PR branch may not exist
+            // locally (fresh clone), or may already be checked out in the
+            // user's own worktree, where `git worktree add` refuses it. The
+            // review never pushes, so the name is local-only (doc §6).
+            newBranch: `generatorai/review-pr-${detail.number}-${Math.random().toString(16).slice(2, 8)}`,
+            baseRef: `origin/${detail.head}`,
+          },
+        ],
+        ...(model ? { model } : {}),
+        ...(agentRef ? { agentRef } : {}),
+      });
+
+      // The chat is the deliverable. If seeding the review turn fails the
+      // user still has a workspace on the PR branch and can retry from the
+      // composer — losing the chat to report that would be strictly worse.
+      try {
+        await chatManagementService.sendPrompt(chat.id, prompt);
+      } catch (err) {
+        logger.error(
+          `[ProjectRoutes] Review chat ${chat.id} was created but the prompt could not be sent: ${
+            err instanceof Error ? redactTokens(err.message) : String(err)
+          }`,
+        );
+      }
+
+      res.status(201).json({ chat });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /projects/:id/codebases/:cid/readiness — the doc §3 shape for a
+  // codebase checkout (the workspace route answers the same for a mount).
+  router.get('/:id/codebases/:cid/readiness', async (req, res, next) => {
+    try {
+      const codebase = await codebaseService.getCodebaseStatus(String(req.params['cid']));
+      const repoDir = codebaseRepoDir(codebase);
+      if (!repoDir) {
+        res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: 'This codebase has no local checkout yet' },
+        });
+        return;
+      }
+      res.json(await repoReadinessService.readiness({ repoDir, alias: codebase.alias }));
     } catch (err) {
       next(err);
     }

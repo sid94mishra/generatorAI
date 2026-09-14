@@ -12,6 +12,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { AgentMode } from '@generatorai/client-core';
+import type { ChatSourceControlOptions } from '@generatorai/shared';
 
 import { pickerValueToBrowserConfig, type BrowserPickerValue } from './browserConfig';
 import { draftsToSources, resolvePrimary, type DraftSource } from './sourceModel';
@@ -40,6 +41,8 @@ export interface NewChatFormValues {
   sources?: DraftSource[];
   primaryAlias?: string;
   browser?: BrowserPickerValue;
+  /** Agent-native source control: commit / push / PR after every turn. */
+  sourceControl?: ChatSourceControlOptions;
 }
 
 export interface CreateChatBody {
@@ -56,6 +59,50 @@ export interface CreateChatBody {
   sources?: ReturnType<typeof draftsToSources>;
   primary?: string;
   browserConfig?: Record<string, unknown>;
+  sourceControl?: ChatSourceControlOptions;
+}
+
+/** The switches all off — nothing is committed unless the user asks. */
+export const NO_SOURCE_CONTROL: ChatSourceControlOptions = {
+  autoCommit: false,
+  autoPush: false,
+  autoPullRequest: false,
+};
+
+/**
+ * Close the implications and drop the option entirely when nothing commits.
+ *
+ * A pull request needs a push needs a commit, so turning the last one on
+ * turns the earlier ones on rather than sending a combination the server
+ * would have to repair. `base` and `draft` only mean something for a PR, so
+ * they are not sent without one, and an autoCommit-less object is omitted
+ * from the body altogether — absence is how the server reads "manual".
+ */
+export function normalizeSourceControl(
+  options: ChatSourceControlOptions | undefined,
+): ChatSourceControlOptions | undefined {
+  if (!options) return undefined;
+  const autoPullRequest = options.autoPullRequest === true;
+  const autoPush = options.autoPush === true || autoPullRequest;
+  const autoCommit = options.autoCommit === true || autoPush;
+  if (!autoCommit) return undefined;
+  const base = options.base?.trim();
+  return {
+    autoCommit: true,
+    autoPush,
+    autoPullRequest,
+    ...(autoPullRequest && base ? { base } : {}),
+    ...(autoPullRequest && options.draft ? { draft: true } : {}),
+  };
+}
+
+/** The one-line value shown on the picker row. */
+export function sourceControlSummary(options: ChatSourceControlOptions | undefined): string {
+  const normalized = normalizeSourceControl(options);
+  if (!normalized) return 'Off';
+  if (normalized.autoPullRequest) return normalized.draft ? 'Commit, push, draft PR' : 'Commit, push, PR';
+  if (normalized.autoPush) return 'Commit and push';
+  return 'Commit';
 }
 
 export function isEmptyOverrides(o: AgentOverrides | undefined): boolean {
@@ -70,6 +117,7 @@ export function buildCreateChatBody(values: NewChatFormValues): CreateChatBody {
   const sources = draftsToSources(values.sources ?? [], name);
   const primary = resolvePrimary(values.sources ?? [], values.primaryAlias);
   const browserConfig = values.browser ? pickerValueToBrowserConfig(values.browser) : undefined;
+  const sourceControl = normalizeSourceControl(values.sourceControl);
 
   return {
     name,
@@ -85,6 +133,7 @@ export function buildCreateChatBody(values: NewChatFormValues): CreateChatBody {
     ...(sources.length > 0 ? { sources } : {}),
     ...(sources.length > 0 && primary ? { primary } : {}),
     ...(browserConfig ? { browserConfig } : {}),
+    ...(sourceControl ? { sourceControl } : {}),
   };
 }
 

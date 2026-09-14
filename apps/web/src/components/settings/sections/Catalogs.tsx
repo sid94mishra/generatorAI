@@ -23,7 +23,6 @@ import {
 import { useTemplates } from '@/hooks/queries.js';
 import { useCreateFromTemplate } from '@/hooks/workflowQueries.js';
 import { Badge, Spinner, Button, SearchInput, Switch, Input } from '@/components/ui/index.js';
-import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { useCatalogPrefsStore } from '@/stores/catalogPrefsStore.js';
 import { readLegacyCustomMcpServers, clearLegacyCustomMcpServers } from '@/stores/customMcpStore.js';
 import { toast } from '@/components/Toast.js';
@@ -676,7 +675,6 @@ export function TemplatesSection() {
   const { data: templates, isLoading, isError, refetch, isFetching } = useTemplates();
   const createFromTemplate = useCreateFromTemplate();
   const navigate = useNavigate();
-  const closeSettings = useSettingsUiStore((s) => s.closeSettings);
   const [q, setQ] = useState('');
 
   const filtered = useMemo(() => {
@@ -738,7 +736,7 @@ export function TemplatesSection() {
                 rightIcon={!createFromTemplate.isPending ? <ChevronRight className="h-3.5 w-3.5" /> : undefined}
                 onClick={async () => {
                   const def = await createFromTemplate.mutateAsync({ templateId: t.id });
-                  closeSettings();
+                  // Settings is a page; navigating away IS closing it.
                   navigate(`/workflows/${def.id}`);
                 }}
               >

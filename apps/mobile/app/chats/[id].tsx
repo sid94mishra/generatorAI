@@ -105,6 +105,13 @@ import { UserMessageRow } from '../../src/components/chat/timeline/UserMessageRo
 import { TimelineActionsContext, type TimelineActions } from '../../src/components/chat/timeline/TimelineActions';
 import { deriveTimeline, type ScreenshotRef, type TimelineRow } from '../../src/components/chat/timeline/deriveTimeline';
 import { chatMessageToBlocks, messageWasStopped } from '../../src/components/chat/timeline/chatMessageToBlocks';
+import {
+  liveScmTurnIds,
+  mergeScmRows,
+  replayedScmBlock,
+  replayedScmRowId,
+} from '../../src/components/chat/timeline/mergeScmRows';
+import { useScmResults } from '../../src/components/scm/useScmResults';
 import { activityLabelFor, selectChatView } from '../../src/components/chat/timeline/selectChatView';
 import { SessionPanes } from '../../src/components/chat/panes/SessionPanes';
 import { routeSection, type PaneId } from '../../src/components/chat/panes/paneModel';
@@ -269,6 +276,13 @@ export default function ChatScreen(): React.ReactElement {
     queryKey: queryKeys.chatPlans(chatId!),
     queryFn: () => api.chats.plans(chatId!),
   });
+
+  // The commit / PR / conflict cards for turns that settled before this
+  // screen opened. They exist only as stream events, and the mux
+  // subscription starts at the live cursor, so without this replay a
+  // reopened chat showed its answers with no record of what was committed
+  // for them.
+  const scmResults = useScmResults(chatId);
 
   const workspaceId = chat.data?.workspaceId ?? null;
   const archived = chat.data ? isArchived(chat.data) : false;
@@ -666,6 +680,10 @@ export default function ChatScreen(): React.ReactElement {
    */
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
+    // History rows are collected apart from the live ones: the replayed
+    // source-control cards are merged into THEM (by turn), and the live
+    // turn carries its own `scm_result` block already.
+    const historyOut: Row[] = [];
     const history = messages.data ?? [];
     const liveTurnId = view.serverTurnId;
     const turnUserMessage = view.turnUserMessage?.trim();
@@ -681,13 +699,34 @@ export default function ChatScreen(): React.ReactElement {
         continue;
       }
       if (message.role === 'user') {
-        out.push({ kind: 'user', id: message.id, message });
+        historyOut.push({ kind: 'user', id: message.id, message });
         continue;
       }
       const turnId = message.metadata?.turnId;
       for (const row of rowsOf(message)) {
-        out.push({ kind: 'row', id: row.id, row, ...(turnId ? { turnId } : {}) });
+        historyOut.push({ kind: 'row', id: row.id, row, ...(turnId ? { turnId } : {}) });
       }
+    }
+
+    const live = useStreamStore.getState().streams[streamKey];
+    // A turn that settled while the screen was open is already a block in
+    // the live stream; the replayed copy of it would be a duplicate card.
+    for (const row of mergeScmRows(
+      historyOut,
+      (row) => (row.kind === 'row' ? row.turnId : undefined),
+      scmResults.data,
+      (turnId, result): Row => {
+        const id = replayedScmRowId(turnId);
+        return {
+          kind: 'row',
+          id,
+          row: { kind: 'scm_result', id, block: replayedScmBlock(turnId, result, chatId!) },
+          turnId,
+        };
+      },
+      liveScmTurnIds(live?.blocks),
+    )) {
+      out.push(row);
     }
 
     if (view.pendingUserMessage) {
@@ -699,7 +738,6 @@ export default function ChatScreen(): React.ReactElement {
       });
     }
 
-    const live = useStreamStore.getState().streams[streamKey];
     const liveRows = deriveTimeline(live?.blocks, {
       active: view.isLive,
       idPrefix: 'live:',
@@ -718,6 +756,7 @@ export default function ChatScreen(): React.ReactElement {
     // `view.signature` is the dependency that stands in for the blocks array.
   }, [
     messages.data,
+    scmResults.data,
     chatId,
     streamKey,
     activityLabel,
@@ -767,6 +806,7 @@ export default function ChatScreen(): React.ReactElement {
   const timelineActions = useMemo<TimelineActions>(
     () => ({
       workspaceId,
+      chatId,
       streamKey,
       previousUsage: usageRef.current.previous,
       openInChanges: workspaceId ? openInChanges : undefined,
@@ -783,6 +823,7 @@ export default function ChatScreen(): React.ReactElement {
     // `usageRef.current.previous` only moves when `view.usage` does.
     [
       workspaceId,
+      chatId,
       streamKey,
       view.usage,
       openInChanges,

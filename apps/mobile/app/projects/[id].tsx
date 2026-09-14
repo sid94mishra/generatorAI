@@ -10,14 +10,15 @@
 
 import React from 'react';
 import { Text, View } from 'react-native';
-import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { FolderGit2, GitBranch, HardDrive, Info } from 'lucide-react-native';
+import { FolderGit2, GitBranch, GitPullRequest, HardDrive, Info } from 'lucide-react-native';
 import { queryKeys, type CodebaseSummary } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
 import { relativeTime } from '../../src/components/runs/formatTime';
 import { Badge, Card, SectionHeader, type Tone } from '../../src/components/ui/primitives';
+import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { PlainScroll } from '../../src/components/ui/Screen';
 import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
@@ -78,6 +79,18 @@ export default function ProjectDetailScreen(): React.ReactElement {
           </Text>
         ) : null}
       </Card>
+
+      <SectionHeader title="Source control" />
+      <ListGroup>
+        <ListRow
+          title="Pull requests"
+          subtitle="Open and closed pull requests across this project's codebases"
+          icon={<GitPullRequest size={18} color={colors.primary} />}
+          onPress={() =>
+            router.push({ pathname: '/projects/[id]/pull-requests', params: { id: String(id) } })
+          }
+        />
+      </ListGroup>
 
       <SectionHeader title={`Codebases (${codebases.length})`} />
       {codebases.length === 0 ? (

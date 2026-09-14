@@ -20,6 +20,8 @@ export function ProjectCodebasesTab() {
   const setGitRepositories = useWorkflowBuilderStore((s) => s.setGitRepositories);
   const autoCommit = useWorkflowBuilderStore((s) => s.autoCommit);
   const setAutoCommit = useWorkflowBuilderStore((s) => s.setAutoCommit);
+  const autoPush = useWorkflowBuilderStore((s) => s.autoPush);
+  const setAutoPush = useWorkflowBuilderStore((s) => s.setAutoPush);
   const autoCreatePR = useWorkflowBuilderStore((s) => s.autoCreatePR);
   const setAutoCreatePR = useWorkflowBuilderStore((s) => s.setAutoCreatePR);
 
@@ -168,6 +170,7 @@ export function ProjectCodebasesTab() {
                 type="checkbox"
                 checked={autoCommit}
                 onChange={(e) => setAutoCommit(e.target.checked)}
+                data-testid="workflow-auto-commit"
                 className="h-4 w-4 rounded text-primary"
               />
               <div>
@@ -175,7 +178,25 @@ export function ProjectCodebasesTab() {
                   Auto-commit changes
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  Automatically commit and push generated changes to the feature branch after workflow completes.
+                  Commit the run's changes to the work branch when the workflow completes.
+                </div>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 rounded-lg border border-border p-3 cursor-pointer transition-all hover:border-primary/50">
+              <input
+                type="checkbox"
+                checked={autoPush}
+                disabled={!autoCommit}
+                onChange={(e) => setAutoPush(e.target.checked)}
+                data-testid="workflow-auto-push"
+                className="h-4 w-4 rounded text-primary"
+              />
+              <div>
+                <div className="text-sm font-medium text-foreground">
+                  Push the work branch
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Push after committing. Never to the default branch — the run cuts a work branch first.
                 </div>
               </div>
             </label>
@@ -183,7 +204,9 @@ export function ProjectCodebasesTab() {
               <input
                 type="checkbox"
                 checked={autoCreatePR}
+                disabled={!autoCommit}
                 onChange={(e) => setAutoCreatePR(e.target.checked)}
+                data-testid="workflow-auto-create-pr"
                 className="h-4 w-4 rounded text-primary"
               />
               <div>

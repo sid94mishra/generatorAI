@@ -253,7 +253,7 @@ export function WorkflowBuilderPage() {
   // ── Save ──
   const buildOrchestratorConfig = useCallback(() => {
     // Fresh snapshot — these are only needed at Save/Run time, not reactively.
-    const { selectedCodebases: codebases, gitRepositories, autoCommit, autoCreatePR } = useWorkflowBuilderStore.getState();
+    const { selectedCodebases: codebases, gitRepositories, autoCommit, autoPush, autoCreatePR } = useWorkflowBuilderStore.getState();
     const hasCodebases = codebases.length > 0;
     const hasGitRepos = gitRepositories.length > 0;
     if (!hasCodebases && !hasGitRepos) return undefined;
@@ -275,6 +275,7 @@ export function WorkflowBuilderPage() {
       resultValidations: [],
       requiresCodebase: true,
       autoCommit,
+      autoPush,
       autoCreatePR,
     };
   }, []);

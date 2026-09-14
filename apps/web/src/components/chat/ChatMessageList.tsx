@@ -52,6 +52,8 @@ interface ChatMessageListProps {
   onOpenShell?: (callId: string) => void;
   /** Workspace behind this chat — resolves agent screenshot previews. */
   workspaceId?: string;
+  /** Owning chat — reaches the transcript's `scm_result` conflict actions. */
+  chatId?: string;
   /**
    * May a turn be rewound right now? The page owns this: it knows whether a
    * turn is in flight (the server answers 409 CHAT_BUSY otherwise) and
@@ -125,6 +127,7 @@ function renderMessage(
   workspaceId?: string,
   canRewind?: boolean,
   isLatestAssistant?: boolean,
+  chatId?: string,
 ): React.ReactNode {
   // System messages are always meaningful and tool messages display
   // toolName/toolArgs rather than content, so only user/assistant rows are
@@ -151,6 +154,7 @@ function renderMessage(
           {...(onOpenChanges ? { onOpenChanges } : {})}
           {...(onOpenShell ? { onOpenShell } : {})}
           {...(workspaceId ? { workspaceId } : {})}
+          {...(chatId ? { chatId } : {})}
         />
       );
     case 'system':
@@ -178,6 +182,7 @@ const MessageRow = React.memo(function MessageRow({
   workspaceId,
   canRewind,
   isLatestAssistant,
+  chatId,
 }: {
   message: ChatMessage;
   contained: boolean;
@@ -187,6 +192,7 @@ const MessageRow = React.memo(function MessageRow({
   workspaceId?: string;
   canRewind?: boolean;
   isLatestAssistant?: boolean;
+  chatId?: string;
 }) {
   const node = renderMessage(
     message,
@@ -196,6 +202,7 @@ const MessageRow = React.memo(function MessageRow({
     workspaceId,
     canRewind,
     isLatestAssistant,
+    chatId,
   );
   if (!node) return null;
   return (
@@ -215,7 +222,7 @@ const MessageRow = React.memo(function MessageRow({
   );
 });
 
-export function ChatMessageList({ messages, onOpenPlan, onOpenChanges, onOpenShell, workspaceId, canRewind = false }: ChatMessageListProps) {
+export function ChatMessageList({ messages, onOpenPlan, onOpenChanges, onOpenShell, workspaceId, chatId, canRewind = false }: ChatMessageListProps) {
   const contained = messages.length > CONTAINMENT_THRESHOLD;
   // The newest response keeps its action bar visible; every earlier one
   // reveals it on hover. Computed here because only the list knows which row
@@ -240,6 +247,7 @@ export function ChatMessageList({ messages, onOpenPlan, onOpenChanges, onOpenShe
           {...(onOpenChanges ? { onOpenChanges } : {})}
           {...(onOpenShell ? { onOpenShell } : {})}
           {...(workspaceId ? { workspaceId } : {})}
+          {...(chatId ? { chatId } : {})}
         />
       ))}
     </div>

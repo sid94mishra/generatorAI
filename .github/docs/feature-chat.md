@@ -213,6 +213,46 @@ Every right-pane surface reads `chat.workspaceId` and calls the workspace routes
 
 > **Legacy chats:** workspaces created before v51 get their mounts back-filled on first read, so the panel keeps working; their old checkpoints stay in the mount's own `.git`.
 
+### 3.3 Auto-commit / agent-native source control
+
+A chat created with `sourceControl: ChatSourceControlOptions` (`autoCommit`, `autoPush`,
+`autoPullRequest`, `base`, `draft` — persisted on `chats.source_control`, migration v54,
+accepted by `POST /api/chats` and `PATCH /api/chats/:id`) has the **platform** commit for it.
+
+After every completed turn, `ChatManagementService`'s `harness.idle` handler — once the
+"after" checkpoint is captured, so a base-branch sync cannot rewrite the tree the snapshot
+describes — walks the workspace's git-capable mounts (primary first, sequentially) and runs
+`SourceControlFlowService.run` per mount: commit with a generated message, push when
+`autoPush || autoPullRequest`, and open one PR against `base` (or the repo's default branch)
+when `autoPullRequest`. A mount with no changed files and no merge in progress is skipped in
+silence.
+
+Each result is emitted on the chat's **session** scope as
+
+```ts
+{ kind: 'chat.scm.result',
+  data: { chatId, turnId, alias, result: ScmFlowResult } }
+```
+
+which the stream fans out to `scope=chat` (the payload carries `chatId`) and the event store
+persists for replay, exactly like `chat.background_task.*`. The transcript renders it as an
+`scm_result` block — commit · pushed · PR link, or the conflict card. `blocked` results are
+emitted too: that is how the transcript answers *"why is there no PR?"* ("Remote host … is not
+connected", "Detached HEAD"). The one silent case is a pure *Nothing to commit*.
+
+The hook never throws out of the idle handler, never runs for a turn the user stopped, never
+runs for a background worker chat (`parentChatId` set — workers inherit nothing), and skips
+any workspace+alias that already has a flow in progress.
+
+The agent is told about all this in a short system block (`buildAutoCommitHint`): the platform
+commits, do not run `git commit` / `git push` / branch commands, and end the final message with
+one `Summary:` line describing the change — that line seeds the commit message
+(`extractSummaryLine` / `narrowHint`).
+
+Full contract: [feature-source-control.md](./feature-source-control.md) §5.
+
+---
+
 ---
 
 ## 4. Configurations & where they live

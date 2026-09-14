@@ -9,7 +9,7 @@
 // Every client (web, desktop, mobile) renders exactly this model.
 // ────────────────────────────────────────────────────────────────
 
-import type { PlanStatus } from '@generatorai/shared';
+import type { PlanStatus, ScmFlowResult } from '@generatorai/shared';
 
 import type { ContextUsageSnapshot } from './contextUsage.js';
 
@@ -240,6 +240,28 @@ export interface BackgroundTaskBlock {
   parentCallId?: string;
 }
 
+/**
+ * The outcome of ONE automatic source-control run, rendered in the
+ * transcript where it happened.
+ *
+ * Emitted as `chat.scm.result` after a turn whose chat opted into
+ * agent-native mode: the platform — not the agent — did the committing, so
+ * the transcript has to say what landed (commit · pushed · PR) or why
+ * nothing did. Upserted by `turnId`: one turn produces exactly one result,
+ * and a re-run after resolving a conflict REPLACES it rather than stacking
+ * a second card under the same turn.
+ *
+ * Deliberately platform-free so mobile can reuse it unchanged.
+ */
+export interface ScmResultBlock {
+  type: 'scm_result';
+  blockId: number;
+  /** The turn the flow ran for — the upsert key. */
+  turnId: string;
+  /** The whole server-side result: status, steps, commit, PR, conflicts. */
+  result: ScmFlowResult;
+}
+
 export type StreamBlock =
   | ThinkingBlock
   | TextBlock
@@ -249,7 +271,8 @@ export type StreamBlock =
   | PlanBlock
   | QuestionBlock
   | PermissionBlock
-  | BackgroundTaskBlock;
+  | BackgroundTaskBlock
+  | ScmResultBlock;
 
 export interface StreamUsage {
   model: string;

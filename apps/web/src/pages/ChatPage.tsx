@@ -13,6 +13,7 @@ import { ChatChangesTray } from '@/components/chat/ChatChangesTray.js';
 import { LiveActivityStrip, useRunningBackgroundTaskCount } from '@/components/agent/LiveActivityStrip.js';
 import { PathRootsContext, toDisplayPath, type PathRoot } from '@/components/chat/changes/changePaths.js';
 import { useWorkspaceInfo, usePrepareChatWorkspace } from '@/hooks/sourceQueries.js';
+import { useEditorTarget } from '@/stores/editorTargetStore.js';
 import { EditSourcesDialog } from '@/components/chat/sources/EditSourcesDialog.js';
 import { providerLabel } from '@/components/shared/ModelPicker.js';
 // PLN-01 — plan mode
@@ -122,6 +123,7 @@ const LiveTranscript = React.memo(function LiveTranscript({
   onOpenChanges,
   onOpenShell,
   workspaceId,
+  chatId,
   onApprovePlan,
   onRequestPlanChanges,
   onAnswerQuestion,
@@ -135,6 +137,8 @@ const LiveTranscript = React.memo(function LiveTranscript({
   onOpenChanges: (filePath?: string) => void;
   onOpenShell: (callId: string) => void;
   workspaceId: string | undefined;
+  /** Owning chat — gates "Ask the agent" on a conflicting `scm_result`. */
+  chatId: string | undefined;
   onApprovePlan: (planId: string, action: 'implement_interactive' | 'implement_autopilot') => void;
   onRequestPlanChanges: (planId: string, feedback: string) => void;
   onAnswerQuestion: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) => void;
@@ -147,10 +151,14 @@ const LiveTranscript = React.memo(function LiveTranscript({
   const hasActiveWidgetBlock = stream != null && stream.blocks.some(
     (b) => b.type === 'widget' && b.surface === 'inline' && b.status !== 'closed',
   );
+  // Source-control results land after the turn settles and survive the
+  // transcript cleanup; an idle stream that still holds one must render it,
+  // otherwise "Committed · PR #12" (or the conflict card) is invisible on reload.
+  const hasScmResult = stream != null && stream.blocks.some((b) => b.type === 'scm_result');
   const showStreamingMessage =
     stream != null &&
     (stream.blocks.length > 0 || stream.cancelRequested) &&
-    (stream.status !== 'idle' || hasActiveWidgetBlock);
+    (stream.status !== 'idle' || hasActiveWidgetBlock || hasScmResult);
 
   if (!showStreamingMessage || !stream) return null;
 
@@ -164,6 +172,7 @@ const LiveTranscript = React.memo(function LiveTranscript({
       onOpenChanges={onOpenChanges}
       onOpenShell={onOpenShell}
       {...(workspaceId ? { workspaceId } : {})}
+      {...(chatId ? { chatId } : {})}
       onApprovePlan={onApprovePlan}
       onRequestPlanChanges={onRequestPlanChanges}
       onAnswerQuestion={onAnswerQuestion}
@@ -260,6 +269,13 @@ export function ChatPage() {
     if (!sessionId) return false;
     const s = state.streams[sessionId];
     return s != null && s.blocks.some((b) => b.type === 'widget' && b.surface === 'inline' && b.status !== 'closed');
+  });
+  // A settled commit / PR / conflict card lives only in the stream and
+  // survives the transcript cleanup; it must keep the transcript visible.
+  const hasScmResultBlock = useStreamStore((state) => {
+    if (!sessionId) return false;
+    const s = state.streams[sessionId];
+    return s != null && s.blocks.some((b) => b.type === 'scm_result');
   });
   const awaitingUserDecision = useStreamStore((state) =>
     awaitsUserDecision(sessionId ? state.streams[sessionId]?.blocks : undefined),
@@ -470,6 +486,16 @@ export function ChatPage() {
   // legacy local-folder list for chats created before mounts existed.
   const { data: workspaceInfo } = useWorkspaceInfo(chat?.workspaceId);
   const workspaceMounts = workspaceInfo?.mounts;
+
+  // The top bar's "Open in editor" opens the chat's PRIMARY mount — the
+  // directory the agent has as its cwd — not the workspace scratch root,
+  // which is where state files live and nothing the user wants to edit.
+  const primaryMountPath = useMemo(() => {
+    const live = (workspaceMounts ?? []).filter((m) => m.status !== 'removed');
+    const sorted = [...live].sort((a, b) => a.position - b.position);
+    return sorted[0]?.path ?? workspaceInfo?.workingDirectory;
+  }, [workspaceMounts, workspaceInfo?.workingDirectory]);
+  useEditorTarget(primaryMountPath, chat?.name ?? 'Chat');
   const legacyFolders = chat?.gitRepositories;
   const pathRoots = useMemo<PathRoot[]>(() => {
     const mounts = (workspaceMounts ?? []).filter((m) => m.status !== 'removed');
@@ -936,7 +962,9 @@ export function ChatPage() {
   // Whether the transcript has anything to show right now — gates both the
   // empty state below and whether `<LiveTranscript>` renders anything.
   const showStreamingMessage =
-    hasStream && (blocksLength > 0 || stoppedByUser) && (streamStatus !== 'idle' || hasActiveWidgetBlock);
+    hasStream &&
+    (blocksLength > 0 || stoppedByUser) &&
+    (streamStatus !== 'idle' || hasActiveWidgetBlock || hasScmResultBlock);
 
   // Display messages dedup (same logic as ChatView)
   const isInActiveTurn = hasStream && streamStatus !== 'idle' && !!turnUserMessage;
@@ -1098,6 +1126,8 @@ export function ChatPage() {
             <ChangesSurface
               embedded
               workspaceId={chat?.workspaceId}
+              {...(chatId ? { chatId } : {})}
+              {...(chat?.name ? { scmHint: chat.name } : {})}
               enableReview
               // Threads are scoped to the chat; the send target is also the
               // chat, so "Send all" posts the batch as a new user turn.
@@ -1387,6 +1417,7 @@ export function ChatPage() {
             onOpenChanges={openChangesTab}
             onOpenShell={openAgentShell}
             {...(chat?.workspaceId ? { workspaceId: chat.workspaceId } : {})}
+            {...(chatId ? { chatId } : {})}
             // Thread the page-level scroll ref so VirtualChatList can attach
             // to the outer scroll container rather than creating a nested one.
             // This avoids dual scroll bars and the 60-vh height cap (W30 fix).
@@ -1421,6 +1452,7 @@ export function ChatPage() {
             onOpenChanges={openChangesTab}
             onOpenShell={openAgentShell}
             workspaceId={chat?.workspaceId}
+            chatId={chatId}
             onApprovePlan={handleApprovePlan}
             onRequestPlanChanges={handleRequestPlanChanges}
             onAnswerQuestion={handleAnswerQuestion}

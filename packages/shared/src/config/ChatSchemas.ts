@@ -105,6 +105,15 @@ export const UpdateChatSourcesSchema = z.object({
   primary: z.string().max(64).optional(),
 });
 
+/**
+ * Agent-native source control on a chat (commit / push / open a PR after a
+ * turn). Deliberately lenient here — the chats route owns the shape checks,
+ * the upward normalisation of the three flags and the error messages, so all
+ * this has to do is stop Zod's unknown-key stripping from dropping the field
+ * on its way to the route handler.
+ */
+const ChatSourceControlInputSchema = z.unknown().optional();
+
 /** Zod schema for creating a Chat */
 export const CreateChatSchema = z.object({
   name: z.string().min(1).max(200),
@@ -144,6 +153,8 @@ export const CreateChatSchema = z.object({
    * attach.
    */
   browserConfig: BrowserConfigSchema.optional(),
+  /** Agent-native source control for this chat (validated in the route). */
+  sourceControl: ChatSourceControlInputSchema,
   /**
    * Orchestrator mode — when true, this chat runs the orchestrator system
    * prompt and gets the background-agent tool set. The UI restricts this to
@@ -248,6 +259,8 @@ export const UpdateChatSchema = z.object({
   agentRef: z.string().max(128).nullable().optional(),
   agentOverrides: AgentOverridesSchema.nullable().optional(),
   orchestratorMode: z.boolean().optional(),
+  /** Agent-native source control for this chat (validated in the route). */
+  sourceControl: ChatSourceControlInputSchema,
 });
 
 /**

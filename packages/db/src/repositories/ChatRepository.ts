@@ -23,6 +23,7 @@ export class DrizzleChatRepository implements IChatRepository {
       // paper over on read.
       validateJsonColumn(chat.harnessConfig, jsonRecord, { column: 'harnessConfig', table: 'chats' });
       validateJsonColumn(chat.tags, stringArray, { column: 'tags', table: 'chats' });
+      validateJsonColumn(chat.sourceControl, jsonRecord, { column: 'sourceControl', table: 'chats' });
       validateJsonColumn(chat.agentOverrides, jsonRecord, { column: 'agentOverrides', table: 'chats' });
       validateJsonColumn(chat.agentSnapshot, jsonRecord, { column: 'agentSnapshot', table: 'chats' });
 
@@ -39,6 +40,7 @@ export class DrizzleChatRepository implements IChatRepository {
         workspacePath: null,
         gitRepositories: chat.gitRepositories ?? null,
         sources: chat.sources ?? null,
+        sourceControl: chat.sourceControl ?? null,
         primarySource: chat.primarySource ?? null,
         workspaceId: chat.workspaceId ?? null,
         tags: chat.tags,
@@ -126,6 +128,9 @@ export class DrizzleChatRepository implements IChatRepository {
     if (updates.tags !== undefined) {
       validateJsonColumn(updates.tags, stringArray, { column: 'tags', table: 'chats' });
     }
+    if (updates.sourceControl !== undefined) {
+      validateJsonColumn(updates.sourceControl, jsonRecord, { column: 'sourceControl', table: 'chats' });
+    }
     if (updates.agentOverrides !== undefined) {
       validateJsonColumn(updates.agentOverrides, jsonRecord, { column: 'agentOverrides', table: 'chats' });
     }
@@ -154,6 +159,8 @@ export class DrizzleChatRepository implements IChatRepository {
     if (updates.sources !== undefined) values['sources'] = updates.sources ?? null;
     if (updates.primarySource !== undefined) values['primarySource'] = updates.primarySource ?? null;
     if (updates.conversationSeed !== undefined) values['conversationSeed'] = updates.conversationSeed ?? null;
+    // Agent-native source control is togglable for the life of the chat.
+    if (updates.sourceControl !== undefined) values['sourceControl'] = updates.sourceControl ?? null;
     values['updatedAt'] = new Date();
 
     await this.db.update(chats).set(values).where(eq(chats.id, id));
@@ -259,6 +266,7 @@ export class DrizzleChatRepository implements IChatRepository {
       gitRepositories: safeJsonColumn(row.gitRepositories, objectArray, { fallback: undefined }) as ChatLocalFolder[] | undefined,
       sources: safeJsonColumn(row.sources, objectArray, { fallback: undefined }) as Chat['sources'],
       primarySource: row.primarySource ?? undefined,
+      sourceControl: safeJsonColumn(row.sourceControl, jsonRecord, { fallback: undefined }) as Chat['sourceControl'],
       tags: safeJsonColumn(row.tags, stringArray, { fallback: [] }) ?? [],
       status: row.status as ChatStatus,
       projectId: row.projectId ?? undefined,

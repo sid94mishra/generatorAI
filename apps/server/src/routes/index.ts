@@ -32,6 +32,7 @@ import { createFsRoutes } from './fs.js';
 import { createReviewRoutes } from './review.js';
 import { createHarnessRoutes } from './harness.js';
 import { createSourceControlRoutes } from './sourceControl.js';
+import { createEditorRoutes } from './editor.js';
 import { createWorkflowScriptRoutes } from './workflowScripts.js';
 import { createBrowserRoutes } from './browser.js';
 import { createComputerRoutes } from './computer.js';
@@ -83,6 +84,9 @@ export function createApiRouter(container: Container): Router {
 
   // Source Control — provider selection (GitHub) + PR config
   router.use('/source-control', createSourceControlRoutes(container));
+
+  // Open in editor — probe the host's editor CLIs and launch one detached.
+  router.use('/editor', createEditorRoutes(container));
 
   // Integrated Browser (v13) — nested under workspaces so a browser session
   // is scoped to its owning workspace/chat/run/automation-iteration.

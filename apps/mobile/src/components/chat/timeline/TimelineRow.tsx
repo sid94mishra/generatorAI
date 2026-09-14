@@ -58,6 +58,7 @@ import { UsageFooter } from '../UsageFooter';
 import { formatDuration, type ToolKind } from '../toolPresentation';
 import { InlineDiff } from './InlineDiff';
 import { RowFrame, statusColor, type RowTone } from './RowFrame';
+import { ScmResultRow } from './ScmResultRow';
 import { useTimelineActions } from './TimelineActions';
 import {
   countSteps,
@@ -164,6 +165,8 @@ export const TimelineRowView = memo(
         return <HookRow hook={row.hook} />;
       case 'usage':
         return <UsageRow usage={row.usage} />;
+      case 'scm_result':
+        return <ScmResultRow block={row.block} />;
       default:
         return null;
     }

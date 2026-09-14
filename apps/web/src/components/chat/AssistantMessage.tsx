@@ -37,6 +37,8 @@ interface AssistantMessageProps {
   onOpenShell?: (callId: string) => void;
   /** Workspace behind this chat — resolves agent screenshot previews. */
   workspaceId?: string;
+  /** Owning chat — gates "Ask the agent" on a conflicting `scm_result`. */
+  chatId?: string;
   /**
    * The newest response in the transcript. Its action bar is shown without a
    * hover, because it is the one people act on — and on touch there is no
@@ -45,7 +47,7 @@ interface AssistantMessageProps {
   isLatest?: boolean;
 }
 
-export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOpenChanges, onOpenShell, workspaceId, isLatest = false }: AssistantMessageProps) {
+export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOpenChanges, onOpenShell, workspaceId, chatId, isLatest = false }: AssistantMessageProps) {
   // Persisted history is never active — sub-agent steps resolve to done.
   const view = useMemo(
     () => deriveStreamView(chatMessageToBlocks(message), { active: false }),
@@ -102,6 +104,7 @@ export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOp
           {...(onOpenChanges ? { onOpenChanges } : {})}
           {...(onOpenShell ? { onOpenShell } : {})}
           {...(workspaceId ? { workspaceId } : {})}
+          {...(chatId ? { chatId } : {})}
         />
 
         {/* Copy the conversation / branch it from this response. Rendered

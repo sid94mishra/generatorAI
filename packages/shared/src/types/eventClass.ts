@@ -87,6 +87,11 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'chat.mode_changed': 'item',
   'chat.agent_changed': 'item',
 
+  // chat.scm.result — the platform's commit/push/PR outcome for one turn.
+  // Item: it is the only record in the transcript that anything was committed
+  // (or why nothing was), and nothing later supersedes it.
+  'chat.scm.result': 'item',
+
   // chat.background_task — `status` is a progress tick, but a background task
   // is exactly the thing a user is not watching, so a dropped status leaves the
   // only indication it is alive missing. Item.

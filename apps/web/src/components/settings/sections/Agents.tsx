@@ -11,14 +11,12 @@ import { useNavigate } from 'react-router-dom';
 import { Bot, Network, ExternalLink, Plus } from 'lucide-react';
 
 import { useAgents } from '@/hooks/agentQueries.js';
-import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { Badge, Button, SearchInput, Spinner } from '@/components/ui/index.js';
 import { SectionHeader, SectionListHeader } from '../shared.js';
 import { SCOPE_LABELS, ROLE_LABELS, scopeTone } from '@/lib/agentCopy.js';
 
 export function AgentsSection() {
   const navigate = useNavigate();
-  const closeSettings = useSettingsUiStore((s) => s.closeSettings);
   const { data: agents, isLoading } = useAgents();
   const [q, setQ] = useState('');
 
@@ -31,8 +29,10 @@ export function AgentsSection() {
     );
   }, [agents, q]);
 
+  // Settings is a page now, so leaving it IS the navigation — closing a
+  // modal first would leave a stray "/" entry in the history between here
+  // and where the user actually asked to go.
   const go = (path: string) => {
-    closeSettings();
     navigate(path);
   };
 

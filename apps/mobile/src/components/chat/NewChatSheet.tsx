@@ -32,6 +32,7 @@ import {
   Eye,
   FolderGit2,
   GitBranch,
+  GitPullRequest,
   Lock,
   ShieldCheck,
   Tag,
@@ -39,6 +40,7 @@ import {
   Wand2,
 } from 'lucide-react-native';
 import type { AgentMode, AgentSummary, ModelInfo, ProjectSummary } from '@generatorai/client-core';
+import type { ChatSourceControlOptions } from '@generatorai/shared';
 
 import { Sheet, SheetRow, SheetSection } from '../ui/Sheet';
 import { Button, IconButton } from '../ui/Button';
@@ -60,10 +62,12 @@ import {
   type BrowserPickerValue,
 } from './composer/browserConfig';
 import {
+  NO_SOURCE_CONTROL,
   addTag,
   buildCreateChatBody,
   isEmptyOverrides,
   overrideIncludes,
+  sourceControlSummary,
   toggleOverrideId,
   type AgentOverrides,
   type CreateChatBody,
@@ -99,7 +103,8 @@ type Page =
   | 'sources'
   | 'source'
   | 'tags'
-  | 'browser';
+  | 'browser'
+  | 'source-control';
 
 const PAGE_TITLES: Record<Page, string> = {
   main: 'New chat',
@@ -112,6 +117,7 @@ const PAGE_TITLES: Record<Page, string> = {
   source: 'Source',
   tags: 'Tags',
   browser: 'Browser',
+  'source-control': 'Source control',
 };
 
 interface Projection {
@@ -177,6 +183,7 @@ export function NewChatSheet({
   const [primaryAlias, setPrimaryAlias] = useState<string | undefined>(undefined);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [browser, setBrowser] = useState<BrowserPickerValue>(DEFAULT_BROWSER_PICKER_VALUE);
+  const [sourceControl, setSourceControl] = useState<ChatSourceControlOptions>(NO_SOURCE_CONTROL);
   const [expanded, setExpanded] = useState(false);
 
   // `write:workspaces` has no entry in FEATURE_REQUIREMENTS yet, so it is
@@ -275,6 +282,7 @@ export function NewChatSheet({
     setPrimaryAlias(undefined);
     setEditingId(null);
     setBrowser(DEFAULT_BROWSER_PICKER_VALUE);
+    setSourceControl(NO_SOURCE_CONTROL);
     setExpanded(false);
   };
 
@@ -305,6 +313,7 @@ export function NewChatSheet({
         sources: drafts,
         ...(primaryAlias ? { primaryAlias } : {}),
         browser,
+        sourceControl,
       }),
     );
   };
@@ -545,6 +554,8 @@ export function NewChatSheet({
             </Text>
           )}
         </View>
+      ) : page === 'source-control' ? (
+        <SourceControlPage value={sourceControl} onChange={setSourceControl} />
       ) : page === 'browser' ? (
         <>
           <SheetSection title="Visibility" />
@@ -708,6 +719,13 @@ export function NewChatSheet({
                   label="Browser"
                   value={browserSummary(browser)}
                   onPress={() => setPage('browser')}
+                />
+                <View className="ml-4 h-px bg-border-muted" />
+                <PickerRow
+                  icon={<GitPullRequest size={18} color={colors['muted-foreground']} />}
+                  label="Source control"
+                  value={sourceControlSummary(sourceControl)}
+                  onPress={() => setPage('source-control')}
                 />
               </View>
             </View>
@@ -1146,6 +1164,103 @@ function CapabilitiesPage({
 }
 
 // ── Rows ────────────────────────────────────────────────────────
+
+/**
+ * Agent-native source control.
+ *
+ * Three switches that imply each other downward — a pull request needs a
+ * push needs a commit — so turning the bottom one on turns the ones above it
+ * on rather than leaving a combination the server has to repair. Base and
+ * draft only appear once there is a pull request to apply them to.
+ */
+function SourceControlPage({
+  value,
+  onChange,
+}: {
+  value: ChatSourceControlOptions;
+  onChange: (next: ChatSourceControlOptions) => void;
+}): React.ReactElement {
+  const { colors } = useTheme();
+
+  return (
+    <>
+      <View className="px-4 pb-2 pt-3">
+        <Text className="text-xs leading-relaxed text-muted-foreground">
+          Runs after every completed turn that changed files. Conflicts stop it and ask you what to
+          do — nothing is force-pushed, and the default branch is never pushed to.
+        </Text>
+      </View>
+      <View className="mx-4 overflow-hidden rounded-3xl border border-border bg-card">
+        <ToggleRow
+          icon={<GitBranch size={18} color={colors['muted-foreground']} />}
+          label="Auto-commit"
+          help="Commit the change set when the agent finishes a turn."
+          value={value.autoCommit}
+          onChange={(autoCommit) =>
+            onChange(
+              autoCommit
+                ? { ...value, autoCommit: true }
+                : { ...value, autoCommit: false, autoPush: false, autoPullRequest: false },
+            )
+          }
+        />
+        <View className="ml-4 h-px bg-border-muted" />
+        <ToggleRow
+          icon={<GitBranch size={18} color={colors['muted-foreground']} />}
+          label="Push"
+          help="Push the work branch after committing."
+          value={value.autoPush}
+          onChange={(autoPush) =>
+            onChange(
+              autoPush
+                ? { ...value, autoCommit: true, autoPush: true }
+                : { ...value, autoPush: false, autoPullRequest: false },
+            )
+          }
+        />
+        <View className="ml-4 h-px bg-border-muted" />
+        <ToggleRow
+          icon={<GitPullRequest size={18} color={colors['muted-foreground']} />}
+          label="Open pull request"
+          help="Opens one against the base branch, once."
+          value={value.autoPullRequest}
+          onChange={(autoPullRequest) =>
+            onChange(
+              autoPullRequest
+                ? { ...value, autoCommit: true, autoPush: true, autoPullRequest: true }
+                : { ...value, autoPullRequest: false },
+            )
+          }
+        />
+      </View>
+
+      {value.autoPullRequest ? (
+        <View className="gap-4 px-4 pb-6 pt-4">
+          <Field
+            label="Base branch"
+            hint="Empty means the repository's default branch."
+            placeholder="main"
+            value={value.base ?? ''}
+            onChangeText={(base) => onChange({ ...value, base })}
+            autoCapitalize="none"
+            autoCorrect={false}
+            accessibilityLabel="Base branch"
+          />
+          <View className="flex-row items-center justify-between">
+            <Text className="text-sm text-foreground">Open as draft</Text>
+            <Switch
+              value={value.draft === true}
+              onValueChange={(draft) => onChange({ ...value, draft })}
+              accessibilityLabel="Open as draft"
+            />
+          </View>
+        </View>
+      ) : (
+        <View className="px-4 pb-6 pt-2" />
+      )}
+    </>
+  );
+}
 
 function PickerRow({
   icon,

@@ -424,7 +424,12 @@ export function ChangesSection({
         </View>
       ) : null}
 
-      <CommitBar workspaceId={workspaceId} fileCount={changes.files.length} active={active} />
+      <CommitBar
+        workspaceId={workspaceId}
+        fileCount={changes.files.length}
+        chatId={chatId}
+        active={active}
+      />
       {sheets}
     </View>
   );

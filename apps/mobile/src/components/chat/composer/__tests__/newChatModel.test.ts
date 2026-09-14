@@ -7,10 +7,13 @@ import {
   pickerValueToBrowserConfig,
 } from '../browserConfig';
 import {
+  NO_SOURCE_CONTROL,
   addTag,
   buildCreateChatBody,
   isEmptyOverrides,
+  normalizeSourceControl,
   overrideIncludes,
+  sourceControlSummary,
   toggleOverrideId,
 } from '../newChatModel';
 import {
@@ -163,6 +166,57 @@ describe('buildCreateChatBody', () => {
     expect(body.agentOverrides).toEqual({ removeSkillIds: ['s1'], appendInstructions: 'be brief' });
     expect(body.browserConfig).toEqual({ enabled: true, visibility: 'visible' });
     expect(body.primary).toBeUndefined();
+  });
+});
+
+describe('source control on a new chat', () => {
+  it('sends nothing while auto-commit is off', () => {
+    expect(normalizeSourceControl(undefined)).toBeUndefined();
+    expect(normalizeSourceControl(NO_SOURCE_CONTROL)).toBeUndefined();
+    expect('sourceControl' in buildCreateChatBody({ name: 'x', sourceControl: NO_SOURCE_CONTROL })).toBe(
+      false,
+    );
+    expect(sourceControlSummary(NO_SOURCE_CONTROL)).toBe('Off');
+  });
+
+  it('closes the implications: a PR needs a push needs a commit', () => {
+    expect(
+      normalizeSourceControl({ autoCommit: false, autoPush: false, autoPullRequest: true, base: 'main', draft: true }),
+    ).toEqual({ autoCommit: true, autoPush: true, autoPullRequest: true, base: 'main', draft: true });
+    expect(normalizeSourceControl({ autoCommit: false, autoPush: true, autoPullRequest: false })).toEqual({
+      autoCommit: true,
+      autoPush: true,
+      autoPullRequest: false,
+    });
+  });
+
+  it('drops base and draft when there is no pull request to apply them to', () => {
+    expect(
+      normalizeSourceControl({ autoCommit: true, autoPush: true, autoPullRequest: false, base: ' main ', draft: true }),
+    ).toEqual({ autoCommit: true, autoPush: true, autoPullRequest: false });
+  });
+
+  it('rides in the create body only when something commits', () => {
+    const body = buildCreateChatBody({
+      name: 'Cart fix',
+      sourceControl: { autoCommit: true, autoPush: true, autoPullRequest: true, base: ' release ', draft: false },
+    });
+    expect(body.sourceControl).toEqual({
+      autoCommit: true,
+      autoPush: true,
+      autoPullRequest: true,
+      base: 'release',
+    });
+  });
+
+  it('summarises what the switches add up to', () => {
+    expect(sourceControlSummary({ autoCommit: true, autoPush: false, autoPullRequest: false })).toBe('Commit');
+    expect(sourceControlSummary({ autoCommit: true, autoPush: true, autoPullRequest: false })).toBe(
+      'Commit and push',
+    );
+    expect(
+      sourceControlSummary({ autoCommit: true, autoPush: true, autoPullRequest: true, draft: true }),
+    ).toBe('Commit, push, draft PR');
   });
 });
 

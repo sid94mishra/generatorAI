@@ -45,9 +45,12 @@ For the component map and pages list, see [apps.md → apps/web](./apps.md#appsw
 | **MCP Servers** | System + project MCP server toggles + create/edit form. |
 | **Worktrees** | Active worktrees for this project; remove + cleanup. |
 | **Artifacts** | Project-level artifacts (uploaded outputs). |
+| **Pull requests** | Every PR across the project's codebases, filtered Open / Closed / All. A row shows number, title, codebase alias, `head → base`, author, a Draft badge and the last update; clicking it opens the PR page below. Codebases that could not be listed are shown as muted rows with the server's reason — and a **Connect GitHub** link to `/settings/source-control` when that is the fix, because a silently short list is indistinguishable from "nothing in flight". |
 | **Settings** | Project settings (maxCodebases, worktreeRetention, autoFetchInterval, …). |
 
 `/projects/:id/codebases/:cid` — Codebase detail page with file browser (tree view + viewer), branches list, fetch button.
+
+`/projects/:id/codebases/:cid/pull-requests/:number` — Pull request page: title, state badge, author, `head → base` and **Open on GitHub**; mergeability (`computing…` while the host has not answered yet) and the checks roll-up; the description rendered as markdown; **Files** (each expandable to its diff, parsed from the patch); **Comments**; and **Review in chat** — optional instructions plus a model picker, which creates a chat on the PR's head branch seeded with the review prompt and navigates to it.
 
 ---
 
@@ -63,6 +66,7 @@ For the component map and pages list, see [apps.md → apps/web](./apps.md#appsw
 - Project picker (optional) → exposes codebase checkboxes (up to 3)
 - "Create worktree" toggle (default ON when project + codebases set)
 - Alternative: ad-hoc git URLs + aliases
+- **Source control** — *Auto-commit after each turn* / *Push* / *Open pull request*, plus a base branch and a Draft switch once a PR is requested. The switches imply one another downstream (push needs a commit, a PR needs a push), and the block is sent as `sourceControl` only when auto-commit is on — nothing commits to git unless asked. The same controls are on **Edit sources** for a live chat (`PATCH /api/chats/:id`).
 
 ### Chat page (`/chats/:id`)
 - Message list with streaming live tokens, thinking blocks, tool calls, system messages.
@@ -82,10 +86,23 @@ Same shared `RightPane` component the workflow-run page uses. Tab strip + `+` ad
 
 | Tab | Purpose |
 |---|---|
-| **Changes** *(always present, default)* | `ChatFilesPanel` — workspace files, per-worktree files, response markdown, attachments. Click any file → `FileViewerModal`. |
+| **Changes** *(always present, default)* | `ChangesSurface` — the change set with per-file diffs, Keep / Undo, review comments, checkpoints, a per-file **Open in editor** action, and the **source-control block** described below. |
 | **Browser** *(add-able, singleton)* | Integrated Browser panel (`BrowserPanel`) — VSCode-style share/inspect/capture bar, WebSocket JPEG live-view with click-through + typing, viewport that follows the panel size (no letterbox), overlay scroll indicator on the right edge. Disabled until the chat has a workspace. See [feature-integrated-browser.md](./feature-integrated-browser.md). |
 | **Terminal** *(add-able, multi-tab)* | Integrated Terminal panel (`TerminalPanel`) — xterm.js with inline search, Attach-selection-to-chat, Clear, Kill. Multiple parallel terminals per workspace. See [feature-integrated-terminal.md](./feature-integrated-terminal.md). |
 | **Canvas** *(auto-added on first widget render)* | `CanvasHost` — stacked sandboxed widget iframes served from `/api/widget-assets`. Agent-rendered UI (polls, forms, editors, dashboards) that users can click through; clicks and typing round-trip back to the agent via `read_widget`. See [feature-extensions-widgets.md](./feature-extensions-widgets.md). |
+
+### Source control in the Changes tab
+
+Driven by `GET /api/workspaces/:id/scm/readiness`, so the block states what each mount can do rather than offering buttons that fail at the server:
+
+- **Status line** — branch, ahead/behind, and a link to the open PR for that branch when one exists. With more than one mount, a row of chips picks which one to act on.
+- **Blocked** — the server's own reason ("Not a git repository", "No git remote configured", "Remote host … is not connected"). When the fix is connecting an account, a **Connect GitHub** button links to `/settings/source-control`; when it is not (this is not a repository), no button is offered.
+- **Actions** — a commit message box with a **Generate** button (`POST …/scm/generate {kind:'commit'}`), a **Push** toggle, and an **Open pull request** toggle revealing title/body (each with its own Generate), base branch (defaulting to the repo's default) and **Draft**. One primary button runs `POST …/scm/flow`; the step list it renders is the server's own, and the outcome shows the commit sha, whether it pushed, and the PR link.
+- **Conflicts** — the flow reports them with the working tree untouched. The card lists the files and offers three decisions: **Resolve manually** (applies the merge, you edit, then **Continue** re-runs the flow), **Ask the agent** (a normal, watchable chat turn — only where a chat is in scope, so not on a run page), and **Abort**. Nothing is pushed until Continue succeeds.
+
+Keep / Undo and the checkpoint timeline are unchanged; source control is a separate layer from the agent's per-turn undo.
+
+In agent-native mode the same result appears **in the transcript** as a compact card under the turn it belongs to — "Committed abc1234 · pushed · PR #12 ↗", the blocking reason, or the same conflict card with the same three actions. It survives a reload.
 
 ---
 
@@ -123,7 +140,7 @@ Canvas: React Flow with `StageNode` (rounded rectangle, input/output handles) an
 | Tab | Contents |
 |---|---|
 | **General** | Name, Description, **Session Mode** radio (Automatic / Single Session / Per-Stage Sessions) |
-| **Project & Codebases** | Project dropdown (Global or per-project) |
+| **Project & Codebases** | Project dropdown (Global or per-project), the codebase picker, and **Post-processing**: *Auto-commit changes* / *Push the work branch* / *Auto-create Pull Request* (`OrchestratorConfig.autoCommit | autoPush | autoCreatePR`). They imply one another downstream, and the run uses the same commit → sync → push → PR flow the Changes tab does; a conflict fails the step with the report attached to the run. |
 | **Variables** | Add/Edit/Delete variables (Name + Label + Type + Required + Default). Type dropdown: String / Number / Boolean / Choice / Text multiline |
 | **Hooks** | Workflow-scope hooks with phase dropdown (15 options), Type (Script/HTTP/Function), Failure policy, etc. |
 | **Tags & Metadata** | Free-form tag input |
@@ -243,7 +260,13 @@ Buttons: Enable / Disable / Trigger / Rotate Webhook Token / Delete.
 
 ## 10. Settings
 
-`/settings` page, grouped into sections:
+A routed **page** at `/settings/:section?` inside the app layout — not a modal. The section is in the URL, so `/settings/source-control` is a link every "Connect GitHub" call-to-action uses, and a reload keeps you where you were. `/settings` alone is General.
+
+- **Back** (top left) returns to the page you came from, or the dashboard when Settings was opened directly in a fresh tab. **Esc** does the same.
+- Picking a section from the nav rail *replaces* the history entry, so paging through sections never buries the page you arrived from.
+- `openSettings(section)` — the sidebar gear, the command palette and every in-app deep link — navigates here.
+
+Sections:
 
 | Tab | Contents |
 |---|---|
@@ -251,8 +274,19 @@ Buttons: Enable / Disable / Trigger / Rotate Webhook Token / Delete.
 | **Appearance** | **Mode** — Light / Dark / System (System shows which variant it resolved to); **Theme** — 17 palettes, each with a light and a dark variant and a live mini-preview, grouped as *Product* (GitHub, Graphite, Carbon, Clay), *Editor* (One, Dracula, Tokyo Night, Catppuccin, Ayu, Night Owl, Rosé Pine) and *Low glare* (Nord, Everforest, Gruvbox, Solarized, Flexoki, High Contrast). A theme owns surfaces, hues, type stack and corner radii; **Accent** — six accents drawn from the active theme's own palette. All three apply instantly, persist per device, and drive every surface including the integrated terminal, code blocks, the DAG canvas and charts. `High Contrast` targets WCAG AAA rather than AA. See [apps/web/DESIGN_SYSTEM.md](../../apps/web/DESIGN_SYSTEM.md#1-tokens--theming). |
 | **Browser & Terminal** | **Integrated Browser** — web-only interactivity toggle (default OFF: user can only view + scroll + Inspect; desktop always full); **Integrated Terminal** — default shell override, Load PowerShell profile toggle, Allow SSH/AWS secrets toggle (all persisted to localStorage; apply next time you open a Terminal tab). |
 | **Provider** | One card per provider (GitHub Copilot, Claude Agent SDK, Codex) with live status (installed → client running → authenticated), the models it serves, **Test connection**, **Make default**, and — for providers with an in-app flow (Codex: ChatGPT browser sign-in via `account/login/start`) — **Sign in** / **Sign out**. The Codex CLI ships with the build (`@openai/codex`), so only the sign-in is needed. |
+| **Source Control** | Connected **accounts** (avatar, login, host, sign-in method, a *Default* badge, **Set default** and **Disconnect**). **Connect account** offers exactly the methods the server reports: *Sign in with GitHub* (device flow — shows the user code with a copy button and an **Open GitHub** link, then polls at the interval GitHub asked for), *Paste a token* (PAT + optional Enterprise host + label) and *Use GitHub CLI* (imports the token `gh` already holds on the server host). Below: **Model for commit messages & PR text** (or *Heuristic (no model)*), **Default editor** (editors the server host cannot launch are named "not found on this machine" — they still work through their URL scheme in a browser) and a **Fallback base branch**. Tokens are write-only and never come back to the browser. |
 | **Copilot** | SDK Connection: Connected (Refresh button), 12+ Available Models list |
 | **Advanced** | Server Health (Status/Database/Copilot SDK/Uptime), Sandbox status, Configuration info |
+
+---
+
+## 10b. Open in editor
+
+A split button in the top bar on chat, workflow-run, project and codebase pages. The left half opens the page's subject in the default editor; the caret lists every editor the server knows about (marking the ones it cannot launch) plus **Copy path**.
+
+What it opens comes from the page, not the header: each page publishes a path into `editorTargetStore` while it is mounted — a chat's primary mount, a run's workspace root, a project's first codebase checkout, a codebase's own path. No target, no button.
+
+The launch happens on the **server** host (`POST /api/editor/open`). When it cannot launch anything — typically a browser talking to a server on another machine — the response carries a `vscode://`-style `fallbackUrl` and the browser opens that instead. The Changes tab's per-file **Open in editor** action uses the same path, and is hidden when the server reports no editor and we are not in the desktop shell.
 
 ---
 

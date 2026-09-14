@@ -700,6 +700,7 @@ export function deriveTimeline(
       case 'plan':
       case 'question':
       case 'permission':
+      case 'scm_result':
         // PLN-01 / 5.1 — rendered as their own interactive segments, not steps.
         break;
     }
@@ -755,7 +756,8 @@ export type StreamSegment =
   | { type: 'widget'; id: string; widget: Extract<StreamBlock, { type: 'widget' }> }
   | { type: 'plan'; id: string; plan: Extract<StreamBlock, { type: 'plan' }> }
   | { type: 'question'; id: string; question: Extract<StreamBlock, { type: 'question' }> }
-  | { type: 'permission'; id: string; permission: Extract<StreamBlock, { type: 'permission' }> };
+  | { type: 'permission'; id: string; permission: Extract<StreamBlock, { type: 'permission' }> }
+  | { type: 'scm_result'; id: string; scmResult: Extract<StreamBlock, { type: 'scm_result' }> };
 
 /** Walk stream blocks in order and produce interleaved step / answer /
  *  inline-widget segments that preserve the temporal sequence in which
@@ -819,6 +821,13 @@ export function deriveSegments(
       flushSteps();
       flushText();
       segments.push({ type: 'question', id: `question-${b.interactionId}`, question: b });
+    } else if (b.type === 'scm_result') {
+      // The platform's commit lands after the turn's prose, where it
+      // happened — not folded into the step timeline, because its conflict
+      // state carries actions the user has to take.
+      flushSteps();
+      flushText();
+      segments.push({ type: 'scm_result', id: `scm-${b.turnId}`, scmResult: b });
     } else if (b.type === 'permission') {
       // Review finding 5.1 — the permission card sits exactly where the
       // agent tried to run the tool, same reasoning as the plan/question

@@ -267,6 +267,14 @@ function RootStack(): React.ReactElement {
         options={{ title: 'Project', headerLeft: headerBack('/(tabs)/projects') }}
       />
       <Stack.Screen
+        name="projects/[id]/pull-requests"
+        options={{ title: 'Pull requests' }}
+      />
+      <Stack.Screen
+        name="projects/[id]/codebases/[cid]/pull-requests/[number]"
+        options={{ title: 'Pull request' }}
+      />
+      <Stack.Screen
         name="automations/[id]"
         options={{ title: 'Automation', headerLeft: headerBack('/(tabs)/runs') }}
       />

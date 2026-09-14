@@ -46,6 +46,7 @@ import {
 } from '@generatorai/client-core';
 import { MOBILE_CAPABILITIES } from '@generatorai/shared';
 
+import { scmKeys } from '../components/scm/api';
 import { useStreamStore } from './streamStore';
 import { useMuxStream } from './MuxStreamProvider';
 import { connectionFromDisconnect, useStreamHealth } from './streamHealth';
@@ -163,6 +164,16 @@ export function useChatStream({
       }
 
       if (effects.length > 0) applyEffects(effects);
+
+      // The commit / PR / conflict card is the one thing in the transcript
+      // that lives ONLY in the stream — there is no REST message for it, so
+      // a reload would lose it. `useScmResults` re-reads the persisted
+      // events; this is what tells it a new one landed. Keyed off the effect
+      // rather than an `invalidate` effect because client-core's invalidate
+      // resources are a closed set that has no source-control member.
+      if (effects.some((e) => e.op === 'upsertScmResult')) {
+        void queryClient.invalidateQueries({ queryKey: scmKeys.chatResults(chatId) });
+      }
 
       const resources = invalidateRef.current;
       let didWork = effects.length > 0 || resources.size > 0 || rewound.length > 0;

@@ -32,6 +32,7 @@ import type {
 } from '@generatorai/client-core';
 
 import { isShellTool, rowFromToolCall, type AgentConsoleRow } from '../../../terminal/agentConsoleRows';
+import { asScmResultBlock, type ScmResultBlock } from './scmResultBlock';
 import { toolKind, toolLabel, toolSummary, type ToolKind } from '../toolPresentation';
 
 export type StepStatus = 'running' | 'done' | 'failed' | 'waiting' | 'pending';
@@ -97,7 +98,9 @@ export type TimelineRow =
   | { kind: 'waiting'; id: string; gate: 'permission' | 'question' | 'plan' }
   | { kind: 'stopped'; id: string }
   | { kind: 'hook'; id: string; hook: StreamHookInvocation }
-  | { kind: 'usage'; id: string; usage: StreamUsage };
+  | { kind: 'usage'; id: string; usage: StreamUsage }
+  // Emitted by `chat.scm.result` (agent-native commits); see `scmResultBlock.ts`.
+  | { kind: 'scm_result'; id: string; block: ScmResultBlock };
 
 export interface DeriveTimelineOptions {
   /** True while the turn is live — decides whether an open call spins. */
@@ -438,6 +441,14 @@ export function deriveTimeline(
 
   for (let i = 0; i < list.length; i += 1) {
     const b = list[i]!;
+    // Shape-checked rather than switched on: the block reaches mobile from
+    // client-core's reducer and must render even before the union names it.
+    const scm = asScmResultBlock(b);
+    if (scm) {
+      flushRun();
+      rows.push({ kind: 'scm_result', id: `${prefix}scm-${scm.blockId}`, block: scm });
+      continue;
+    }
     switch (b.type) {
       case 'thinking': {
         if (!b.text.trim()) break;
@@ -568,6 +579,8 @@ export function rowsEqual(a: TimelineRow, b: TimelineRow): boolean {
       return a.hook === (b as typeof a).hook;
     case 'usage':
       return a.usage === (b as typeof a).usage;
+    case 'scm_result':
+      return a.block === (b as typeof a).block;
     default:
       return false;
   }
@@ -592,6 +605,11 @@ export function blocksSignature(blocks: readonly StreamBlock[] | undefined): str
   if (!blocks || blocks.length === 0) return '';
   let out = '';
   for (const b of blocks) {
+    const scm = asScmResultBlock(b);
+    if (scm) {
+      out += `g${scm.blockId}${scm.result.status}|`;
+      continue;
+    }
     switch (b.type) {
       case 'thinking':
         out += `t${b.blockId}${b.isComplete ? 'c' : 'l'}${b.text ? '' : 'e'}|`;

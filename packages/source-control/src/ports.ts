@@ -6,8 +6,14 @@ import type {
   ChecksSummary,
   CreatePullRequestInput,
   ListPullRequestsInput,
+  ProviderRepository,
+  ProviderUser,
   PullRequest,
+  PullRequestComment,
+  PullRequestDetail,
+  PullRequestFile,
   PullRequestRef,
+  PullRequestSummary,
   SourceControlProviderId,
 } from './types.js';
 
@@ -20,6 +26,24 @@ export interface ISourceControlProvider {
   getPullRequest(ref: PullRequestRef): Promise<PullRequest | null>;
   listPullRequests(input: ListPullRequestsInput): Promise<PullRequest[]>;
   getStatusChecks(ref: PullRequestRef): Promise<ChecksSummary>;
+
+  /** The account behind the configured credentials — login, avatar and granted scopes. */
+  getAuthenticatedUser(): Promise<ProviderUser>;
+  /** Host metadata for one repository. */
+  getRepository(owner: string, repo: string, host?: string): Promise<ProviderRepository>;
+  /** Full PR detail (body, mergeability, diff stats, labels). Checks are composed by the caller. */
+  getPullRequestDetail(ref: PullRequestRef): Promise<PullRequestDetail>;
+  /** Files changed by a PR, with unified-diff patches when the host provides them. */
+  listPullRequestFiles(ref: PullRequestRef): Promise<PullRequestFile[]>;
+  /** Review + issue comments on a PR, merged and sorted oldest first. */
+  listPullRequestComments(ref: PullRequestRef): Promise<PullRequestComment[]>;
+  /** The open PR whose head is `headBranch`, or null when there is none (or no access). */
+  findOpenPullRequestForHead(
+    owner: string,
+    repo: string,
+    headBranch: string,
+    host?: string,
+  ): Promise<PullRequestSummary | null>;
 }
 
 /** Minimal HTTP port (structurally compatible with core's IHttpClient). */

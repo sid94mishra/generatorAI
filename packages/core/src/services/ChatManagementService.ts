@@ -80,7 +80,15 @@ import {
   COMPUTER_USE_SYSTEM_HINT,
   EXTENSION_AUTHORING_HINT,
   WIDGET_SYSTEM_HINT,
+  buildAutoCommitHint,
 } from './chatSystemHints.js';
+import {
+  AutoSourceControlRunner,
+  type AutoScmFlowPort,
+  type AutoScmReadinessPort,
+} from './scm/AutoSourceControlRunner.js';
+import { scmMountTargets } from './scm/workspaceMounts.js';
+import { buildTurnHint } from './scm/turnHint.js';
 import { isExtensionAuthorToolName } from '../tools/extensionAuthorTools.js';
 import { mergeMcpServers } from '../mcp/mergeMcpServers.js';
 import type { McpServerConfig } from '@generatorai/shared';
@@ -245,6 +253,14 @@ export interface ChatManagementServiceExtensions {
   agentStaging?: AgentStagingService;
   /** Source of platform-owned skill bodies (Computer Use). */
   systemArtifacts?: SystemArtifactService;
+  /**
+   * Agent-native source control (doc §5). Both are wired together: the flow
+   * runs the commit → sync → push → PR sequence, readiness decides whether a
+   * mount has anything to run it on. Omit both and `sourceControl.autoCommit`
+   * simply never fires — the chat itself is unaffected.
+   */
+  sourceControlFlowService?: AutoScmFlowPort;
+  repoReadinessService?: AutoScmReadinessPort;
 }
 
 export class ChatManagementService {
@@ -280,6 +296,15 @@ export class ChatManagementService {
   /** Chats whose current turn the user stopped, so the abort rejection that
    *  follows is not reported as an error. */
   private cancelledTurns = new Set<string>();
+
+  /**
+   * Agent-native source control (doc §5) — the post-turn commit/push/PR hook.
+   *
+   * Built lazily and held for the life of the service because it owns the
+   * per-workspace re-entrancy guard: a fresh runner per turn would have no
+   * memory of the flow the previous turn still has running.
+   */
+  private autoScmRunner?: AutoSourceControlRunner;
 
   /**
    * Enrich an AgentEvent's data with `chatId` so that `bridgeEvent` in
@@ -1787,6 +1812,21 @@ export class ChatManagementService {
       };
     }
 
+    // Agent-native source control (doc §5) — tell the agent the platform
+    // commits for it, and ask for the `Summary:` line that seeds the message.
+    // Appended on BOTH the create and the resume path so the prompt prefix
+    // stays byte-identical across a restart.
+    if (params.sourceControl?.autoCommit) {
+      const scmHint = buildAutoCommitHint(params.sourceControl);
+      const existingSys = conversationConfig['systemMessage'] as
+        | { mode?: string; content?: string }
+        | undefined;
+      conversationConfig['systemMessage'] = {
+        mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
+        content: (existingSys?.content ?? '') + scmHint,
+      };
+    }
+
     // TOL-06 — resolve MCP server config through the hub so run-level
     // overrides / disable-flags take effect. Falls back to the declared
     // map when no hub is wired (behaviour-identical to pre-rollout).
@@ -1963,6 +2003,9 @@ export class ChatManagementService {
       ...(params.forkedFromChatId ? { forkedFromChatId: params.forkedFromChatId } : {}),
       ...(params.forkedAtTurnId ? { forkedAtTurnId: params.forkedAtTurnId } : {}),
       ...(params.conversationSeed ? { conversationSeed: params.conversationSeed } : {}),
+      // Agent-native source control: persisted verbatim; the route has already
+      // shape-checked and normalised the flags.
+      ...(params.sourceControl ? { sourceControl: params.sourceControl } : {}),
       tags: params.tags ?? [],
       status: 'active',
       projectId: params.projectId,
@@ -2272,6 +2315,18 @@ export class ChatManagementService {
       }
     }
 
+    // Agent-native source control — same block, same place in the order.
+    if (chat.sourceControl?.autoCommit) {
+      const scmHint = buildAutoCommitHint(chat.sourceControl);
+      const existingSys = conversationConfig['systemMessage'] as
+        | { mode?: string; content?: string }
+        | undefined;
+      conversationConfig['systemMessage'] = {
+        mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
+        content: (existingSys?.content ?? '') + scmHint,
+      };
+    }
+
     // Surface registered custom tools.
     if (this.extensions.customToolRegistry && this.extensions.customToolRegistry.size > 0) {
       const existing = Array.isArray(conversationConfig['tools']) ? (conversationConfig['tools'] as unknown[]) : [];
@@ -2360,6 +2415,92 @@ export class ChatManagementService {
     // can still be attributed, so testing it would mark a chat busy forever
     // after its first prompt.
     return this.turnFinalizers.has(chatId) || this.startingTurns.has(chatId);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // Agent-native source control (doc §5)
+  // ══════════════════════════════════════════════════════════════
+
+  /**
+   * Commit (and optionally push / open a PR) what the turn just changed.
+   *
+   * Called from the `harness.idle` handler, after the turn has been persisted
+   * and the "after" checkpoint captured. Emits one `chat.scm.result` per
+   * git-capable mount on the chat's SESSION scope — the same bus path the
+   * orchestrator's `chat.background_task.*` events take, so the web stream
+   * receives it live and the event store keeps it for replay.
+   *
+   * NEVER throws and never rejects: the turn is already complete, and a git
+   * or model failure here must not surface as a failed answer.
+   */
+  private async runAutoSourceControl(args: {
+    chat: Chat;
+    turnId: string;
+    prompt: string;
+    assistantText: string;
+    afterCheckpoint?: Promise<unknown>;
+  }): Promise<void> {
+    const { chat, turnId } = args;
+    const options = chat.sourceControl;
+    try {
+      if (!options?.autoCommit) return;
+      // Workers inherit NOTHING. A background worker commits under its own
+      // chat only if that chat was itself created with `autoCommit`, so an
+      // orchestrator's parent flags can never commit a worker's tree twice.
+      if (chat.parentChatId) return;
+      if (!chat.workspaceId) return;
+      // The user stopped this turn. Half of an aborted edit is not a change
+      // set anybody asked to have committed.
+      if (this.cancelledTurns.has(chat.id)) return;
+
+      const flow = this.extensions.sourceControlFlowService;
+      const readiness = this.extensions.repoReadinessService;
+      const workspaceManager = this.extensions.workspaceManager;
+      if (!flow || !readiness || !workspaceManager) return;
+
+      // The `sync` step MERGES the base branch into the work branch, which
+      // rewrites the working tree. Letting that race the "after" checkpoint
+      // would snapshot a tree the turn never produced.
+      if (args.afterCheckpoint) await args.afterCheckpoint.catch(() => undefined);
+
+      const info = await workspaceManager.getWorkspaceInfo(chat.workspaceId);
+      if (!info) return;
+      const mounts = scmMountTargets(info);
+      if (mounts.length === 0) return;
+
+      const hint = buildTurnHint({
+        prompt: args.prompt,
+        assistantText: args.assistantText,
+        ...(chat.name ? { chatName: chat.name } : {}),
+      });
+
+      this.autoScmRunner ??= new AutoSourceControlRunner({
+        flow,
+        readiness,
+        emit: async (event) => {
+          await this.eventBus.emit(chat.sessionId, event);
+        },
+        logger: {
+          info: (msg: string) => console.info(msg),
+          warn: (msg: string) => console.warn(msg),
+        },
+      });
+
+      await this.autoScmRunner.run({
+        chatId: chat.id,
+        turnId,
+        workspaceId: chat.workspaceId,
+        ...(chat.name ? { chatName: chat.name } : {}),
+        options,
+        mounts,
+        ...(hint ? { hint } : {}),
+      });
+    } catch (err) {
+      console.warn(
+        `[ChatManagement] Auto source control failed for chat ${chat.id} turn ${turnId}:`,
+        err,
+      );
+    }
   }
 
   async sendPrompt(
@@ -2908,19 +3049,41 @@ export class ChatManagementService {
           // Fire-and-forget: the turn is already complete from the user's
           // point of view and `capture` swallows its own errors, so blocking
           // the idle handler on disk I/O would only delay the UI.
+          let afterCheckpoint: Promise<unknown> | undefined;
           if (chat.workspaceId && this.extensions.workspaceCheckpointService) {
-            void this.extensions.workspaceCheckpointService.capture({
+            afterCheckpoint = this.extensions.workspaceCheckpointService.capture({
               workspaceId: chat.workspaceId,
               kind: 'turn',
               turnId,
               chatId,
               sessionId: chat.sessionId,
               phase: 'after',
-            });
+            })
+              // `capture` swallows its own errors, but this promise is now
+              // ALSO awaited by the source-control hook — an un-handled
+              // rejection here would take the process down under
+              // `--unhandled-rejections=strict`.
+              .catch(() => undefined);
+            void afterCheckpoint;
           }
           if (chat.workspaceId && this.extensions.mountService) {
             void this.extensions.mountService.refreshStatus(chat.workspaceId).catch(() => undefined);
           }
+
+          // ── Agent-native source control (doc §5) ──
+          //
+          // Fire-and-forget for the same reason the checkpoint above is: the
+          // turn is over from the user's point of view, and a commit that
+          // takes seconds (it generates its message with a model) must not
+          // hold the idle handler open. `runAutoSourceControl` swallows
+          // everything, so nothing here can reject.
+          void this.runAutoSourceControl({
+            chat,
+            turnId,
+            prompt,
+            assistantText: turnContent,
+            afterCheckpoint,
+          });
 
           this.turnFinalizers.delete(chatId);
           this.activeSubscriptions.delete(chatId);

@@ -10,14 +10,14 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useRef } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar.js';
 import { Header } from './Header.js';
 import { TitleBar } from './TitleBar.js';
 import { CommandPalette } from './CommandPalette.js';
-import { SettingsModal } from '@/components/settings/SettingsModal.js';
 import { Drawer } from '@/components/ui/Drawer.js';
 import { useUiStore } from '@/stores/uiStore.js';
+import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { useDesktopIntegration } from '@/hooks/useDesktopIntegration.js';
 import { useIsNarrowViewport } from '@/hooks/useMediaQuery.js';
 import { isDesktop } from '@/lib/desktop.js';
@@ -37,6 +37,17 @@ export function AppLayout() {
   const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
   const isMobile = useIsNarrowViewport();
   const location = useLocation();
+  const navigate = useNavigate();
+  const setSettingsNavigator = useSettingsUiStore((s) => s.setNavigator);
+
+  // Settings is a routed page; `openSettings(section)` is a navigation, and
+  // the store cannot hold a router hook. The shell lends it one — imported
+  // the other way round (store → router.tsx) it would close an import cycle
+  // through every lazy page.
+  useEffect(() => {
+    setSettingsNavigator((path, opts) => navigate(path, { replace: opts?.replace ?? false }));
+    return () => setSettingsNavigator(null);
+  }, [navigate, setSettingsNavigator]);
 
   // Publishes window chrome, handles native menu commands, and mirrors UI
   // state back into the menu. No-op outside the Electron shell.
@@ -126,8 +137,6 @@ export function AppLayout() {
       {/* Global ⌘K command palette */}
       <CommandPalette />
 
-      {/* Global settings modal */}
-      <SettingsModal />
     </div>
   );
 }

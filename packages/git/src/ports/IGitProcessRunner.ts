@@ -12,6 +12,8 @@ export interface GitProcessRunOptions {
   timeout?: number;
   abortSignal?: AbortSignal;
   streamTo?: (line: string, stream: 'stdout' | 'stderr') => void;
+  /** Text written to the process's stdin (e.g. a commit message for `git commit -F -`). */
+  stdin?: string;
 }
 
 export interface GitProcessRunResult {

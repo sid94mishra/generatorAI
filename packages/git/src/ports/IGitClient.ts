@@ -54,6 +54,44 @@ export interface GitRawDiffEntry {
   newSha?: string;
 }
 
+/** Commits `ahead` of / `behind` an upstream ref. */
+export interface GitAheadBehind {
+  ahead: number;
+  behind: number;
+}
+
+/** Result of the working-tree-free merge probe (`git merge-tree --write-tree`). */
+export interface GitMergeTreeResult {
+  /**
+   * False when git could not answer the question at all — most often a git
+   * older than 2.38 (no `--write-tree`), but also unresolvable refs. Callers
+   * must fall back to a real `--no-commit` merge rather than treating an
+   * empty `conflicts` list as "clean".
+   */
+  supported: boolean;
+  conflicts: string[];
+}
+
+/** Outcome of a real `git merge`. */
+export interface GitMergeResult {
+  ok: boolean;
+  conflicts: string[];
+}
+
+/** A commit created by `commitWithSha`. */
+export interface GitCommitResult {
+  sha: string;
+  message: string;
+}
+
+/** Options for `merge`. */
+export interface MergeOptions {
+  /** Merge without creating the commit (`--no-commit --no-ff`). */
+  noCommit?: boolean;
+  /** Commit message for the merge commit (`-m`). Ignored when `noCommit`. */
+  message?: string;
+}
+
 /** One blob from `git ls-tree -r --long`. */
 export interface GitBlobEntry {
   path: string;
@@ -266,4 +304,67 @@ export interface IGitClient {
     indexFile: string,
     paths: string[],
   ): Promise<void>;
+
+  // ── Source control (remote sync / merge / review) ─────────────
+  //
+  // Still purely local git; "source control" here means the operations a
+  // review-and-merge UI needs on top of the plumbing above.
+
+  /** `git fetch <remote> [<ref>]`. Throws GitError on failure. */
+  fetch(repoDir: string, remote?: string, ref?: string): Promise<void>;
+  /**
+   * Default branch of `origin`, e.g. `main`. Tries, in order:
+   *   git symbolic-ref --short refs/remotes/origin/HEAD   (strip the `origin/` prefix)
+   *   git remote show origin                              (parse "HEAD branch: x")
+   *   git ls-remote --symref origin HEAD                  (parse "ref: refs/heads/x\tHEAD")
+   * Null when none can be determined. Cached per repoDir for 60s (positive AND
+   * negative results; a short TTL is fine for both).
+   */
+  defaultBranch(repoDir: string, remote?: string): Promise<string | null>;
+  /**
+   * `git rev-list --left-right --count <upstream>...<ref>` → commits `ahead` of
+   * and `behind` upstream. Null when the refs can't be resolved.
+   */
+  aheadBehind(repoDir: string, ref: string, upstream: string): Promise<GitAheadBehind | null>;
+  /** `git rev-parse --abbrev-ref <branch>@{upstream}` → e.g. `origin/main`, or null. */
+  upstreamOf(repoDir: string, branch: string): Promise<string | null>;
+  /** `git rev-parse --symbolic-full-name HEAD` === 'HEAD' (detached). */
+  isDetached(repoDir: string): Promise<boolean>;
+  /** True when `<gitdir>/MERGE_HEAD` exists (use `absoluteGitDir`, fall back to `<repoDir>/.git`). */
+  mergeInProgress(repoDir: string): Promise<boolean>;
+  /** `git diff --name-only --diff-filter=U` — paths with unresolved conflicts. */
+  unmergedFiles(repoDir: string): Promise<string[]>;
+  /**
+   * Dry-run merge of `theirs` into `ours` WITHOUT touching the working tree,
+   * via `git merge-tree --write-tree --name-only <ours> <theirs>` (git >= 2.38).
+   * Exit 0 → clean. Exit 1 → conflicts. Any other exit code (old git that
+   * lacks `--write-tree`, bad refs) → `{ supported: false, conflicts: [] }`.
+   */
+  mergeTreeConflicts(repoDir: string, ours: string, theirs: string): Promise<GitMergeTreeResult>;
+  /**
+   * `git merge [--no-commit --no-ff | -m <message>] <ref>`. Does NOT throw on a
+   * conflicted merge: exit != 0 with unmerged files present →
+   * `{ ok: false, conflicts: [...] }`. Exit != 0 with NO unmerged files (e.g.
+   * local changes would be overwritten) → throws GitError.
+   */
+  merge(repoDir: string, ref: string, opts?: MergeOptions): Promise<GitMergeResult>;
+  /** `git merge --abort` — swallows failure when no merge is in progress. */
+  mergeAbort(repoDir: string): Promise<void>;
+  /**
+   * After conflicts are resolved: `git add -A` then commit with `message`.
+   * Returns the new sha. Throws GitError when unmerged paths remain.
+   */
+  commitMerge(repoDir: string, message: string): Promise<string>;
+  /** `git add -A`. Throws GitError on failure. */
+  addAll(repoDir: string): Promise<void>;
+  /** Stage everything and commit; returns `{ sha, message }`, or null when there was nothing to commit. */
+  commitWithSha(repoDir: string, message: string): Promise<GitCommitResult | null>;
+  /** `git push -u <remote> <branch>`. Throws GitError on failure. */
+  pushSetUpstream(repoDir: string, remote: string, branch: string): Promise<void>;
+  /** `git log --no-merges --pretty=format:%s -n <max> <range>` → subject lines. Empty array on failure. */
+  log(repoDir: string, range: string, max?: number): Promise<string[]>;
+  /** Name-status of staged + unstaged + untracked changes in the working tree. */
+  changedFilesSummary(repoDir: string): Promise<GitNameStatusEntry[]>;
+  /** `git --version` → e.g. `2.45.1`, or null. Cached for the client's lifetime. */
+  gitVersion(): Promise<string | null>;
 }

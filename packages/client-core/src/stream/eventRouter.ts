@@ -21,7 +21,7 @@
 // rather than a comment.
 // ────────────────────────────────────────────────────────────────
 
-import type { TransportCapabilitySet } from '@generatorai/shared';
+import type { ScmFlowResult, TransportCapabilitySet } from '@generatorai/shared';
 
 import type {
   BackgroundTaskBlock,
@@ -119,6 +119,12 @@ export type StreamEffect =
       key: string;
       task: Partial<Omit<BackgroundTaskBlock, 'type' | 'blockId'>> & { taskId: string };
     }
+  /**
+   * The outcome of ONE automatic source-control run, keyed by `turnId`.
+   * Replaces any previous result for that turn — a re-run after a resolved
+   * conflict corrects the card rather than adding a second one.
+   */
+  | { op: 'upsertScmResult'; key: string; turnId: string; result: ScmFlowResult }
   /** `hook.started` — see `StreamHookInvocation`; routed to the stage-aware
    *  `key` so `deriveRunView` can read a stage's hooks off its own stream. */
   | {
@@ -1450,6 +1456,25 @@ export class StreamEventRouter {
         // this turn — the spinner would run until the page was reloaded.
         out.push({ op: 'errorStream', key: sessionKey });
         break;
+
+      // ── Agent-native source control ──────────────────────────────
+      //
+      // Emitted on the session scope after a turn whose chat opted in: the
+      // PLATFORM committed (and maybe pushed / opened a PR), not the agent,
+      // so the transcript has to say what landed or why nothing did. Keyed
+      // by `turnId` so a re-run after a resolved conflict corrects the card.
+      case 'chat.scm.result': {
+        // Both the change set and the branch state moved under the user.
+        out.push({ op: 'invalidate', resource: 'workspace', ...chatId() });
+        const turnId = optStr(data['turnId']);
+        const result = data['result'] as ScmFlowResult | undefined;
+        if (!turnId || !result || typeof result !== 'object') break;
+        // Commit any buffered prose first so the card lands after the
+        // assistant's closing message rather than in the middle of it.
+        this.flushKey(key, out);
+        out.push({ op: 'upsertScmResult', key, turnId, result });
+        break;
+      }
 
       // ── Orchestrator background workers ──────────────────────────
       //

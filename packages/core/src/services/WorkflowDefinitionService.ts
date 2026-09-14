@@ -36,6 +36,11 @@ export interface ImportFromTemplateOptions {
   variableOverrides?: Record<string, unknown>;
   /** Auto-commit post-processing; default false. */
   autoCommit?: boolean;
+  /**
+   * Push the run's work branch after the auto-commit; default false. Implied
+   * by `autoCreatePR`, so it only matters for "commit + push, no PR".
+   */
+  autoPush?: boolean;
 }
 
 /**
@@ -425,6 +430,7 @@ export class WorkflowDefinitionService {
           postProcessingSteps: [],
           resultValidations: (template.resultValidations ?? []) as unknown as OrchestratorConfig['resultValidations'],
           autoCommit: options.autoCommit ?? false,
+          autoPush: options.autoPush ?? false,
           autoCreatePR: false,
         } satisfies OrchestratorConfig,
       });

@@ -13,9 +13,15 @@ import type {
   CheckConclusion,
   CreatePullRequestInput,
   ListPullRequestsInput,
+  ProviderRepository,
+  ProviderUser,
   PullRequest,
+  PullRequestComment,
+  PullRequestDetail,
+  PullRequestFile,
   PullRequestRef,
   PullRequestState,
+  PullRequestSummary,
 } from './types.js';
 import { ProviderNotConfiguredError, SourceControlError } from './errors.js';
 
@@ -35,10 +41,48 @@ interface GitHubPr {
   state: string;
   draft?: boolean;
   merged_at?: string | null;
-  head?: { ref?: string };
-  base?: { ref?: string };
+  created_at?: string;
+  updated_at?: string;
+  user?: { login?: string } | null;
+  head?: { ref?: string; sha?: string };
+  base?: { ref?: string; sha?: string };
 }
 
+interface GitHubPrDetail extends GitHubPr {
+  body?: string | null;
+  mergeable?: boolean | null;
+  mergeable_state?: string;
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
+  commits?: number;
+  labels?: Array<{ name?: string }>;
+}
+
+interface GitHubPrFile {
+  filename: string;
+  previous_filename?: string;
+  status?: string;
+  additions?: number;
+  deletions?: number;
+  patch?: string;
+}
+
+interface GitHubComment {
+  id: number | string;
+  body?: string | null;
+  created_at?: string;
+  html_url?: string;
+  user?: { login?: string } | null;
+  path?: string;
+  line?: number | null;
+  original_line?: number | null;
+}
+
+/**
+ * One instance per connected account: `{ token, host }` identify the account,
+ * so an Enterprise account and a github.com account are two providers.
+ */
 export class GitHubProvider implements ISourceControlProvider {
   readonly id = 'github' as const;
   private readonly allowCliFallback: boolean;
@@ -50,6 +94,11 @@ export class GitHubProvider implements ISourceControlProvider {
     private readonly processRunner?: IScmProcessRunner,
   ) {
     this.allowCliFallback = options.allowCliFallback ?? true;
+  }
+
+  /** Enterprise host base this provider was constructed for (undefined = github.com). */
+  get host(): string | undefined {
+    return this.options.host;
   }
 
   async isConfigured(): Promise<boolean> {
@@ -140,6 +189,171 @@ export class GitHubProvider implements ISourceControlProvider {
     return this.summarizeChecks(data.check_runs ?? []);
   }
 
+  // ── Account / repo metadata ──
+
+  async getAuthenticatedUser(): Promise<ProviderUser> {
+    this.requireToken('getAuthenticatedUser');
+    const res = await this.http.request({
+      method: 'GET',
+      url: `${this.apiBase()}/user`,
+      headers: this.headers(),
+      timeout: 15_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(`GitHub getAuthenticatedUser failed (${res.status})`);
+    }
+    const data = JSON.parse(res.body) as { login?: string; avatar_url?: string };
+    const user: ProviderUser = { login: data.login ?? '' };
+    if (data.avatar_url) user.avatarUrl = data.avatar_url;
+    // Classic PATs / OAuth tokens report their grants here; fine-grained PATs omit it.
+    const scopes = parseScopeHeader(headerValue(res.headers, 'x-oauth-scopes'));
+    if (scopes) user.scopes = scopes;
+    return user;
+  }
+
+  async getRepository(owner: string, repo: string, host?: string): Promise<ProviderRepository> {
+    this.requireToken('getRepository');
+    const res = await this.http.request({
+      method: 'GET',
+      url: `${this.apiBase(host)}/repos/${owner}/${repo}`,
+      headers: this.headers(),
+      timeout: 15_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(`GitHub getRepository failed (${res.status}): ${res.body}`);
+    }
+    const data = JSON.parse(res.body) as {
+      default_branch?: string;
+      private?: boolean;
+      html_url?: string;
+    };
+    return {
+      defaultBranch: data.default_branch ?? 'main',
+      private: data.private ?? false,
+      url: data.html_url ?? '',
+    };
+  }
+
+  // ── Pull-request detail / files / comments ──
+
+  /** Full PR detail. Checks are *not* fetched here — the caller composes them. */
+  async getPullRequestDetail(ref: PullRequestRef): Promise<PullRequestDetail> {
+    this.requireToken('getPullRequestDetail');
+    const res = await this.http.request({
+      method: 'GET',
+      url: `${this.apiBase(ref.host)}/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`,
+      headers: this.headers(),
+      timeout: 15_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(`GitHub getPullRequestDetail failed (${res.status}): ${res.body}`);
+    }
+    const pr = JSON.parse(res.body) as GitHubPrDetail;
+    return {
+      ...this.mapPr(pr),
+      body: pr.body ?? '',
+      mergeable: pr.mergeable ?? null,
+      mergeableState: pr.mergeable_state ?? 'unknown',
+      additions: pr.additions ?? 0,
+      deletions: pr.deletions ?? 0,
+      changedFiles: pr.changed_files ?? 0,
+      commits: pr.commits ?? 0,
+      headSha: pr.head?.sha ?? '',
+      baseSha: pr.base?.sha ?? '',
+      labels: (pr.labels ?? []).map((l) => l.name ?? '').filter(Boolean),
+    };
+  }
+
+  async listPullRequestFiles(ref: PullRequestRef): Promise<PullRequestFile[]> {
+    this.requireToken('listPullRequestFiles');
+    const res = await this.http.request({
+      method: 'GET',
+      url: `${this.apiBase(ref.host)}/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/files?per_page=100`,
+      headers: this.headers(),
+      timeout: 20_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(`GitHub listPullRequestFiles failed (${res.status}): ${res.body}`);
+    }
+    const files = JSON.parse(res.body) as GitHubPrFile[];
+    return files.map((f) => {
+      const mapped: PullRequestFile = {
+        path: f.filename,
+        status: mapFileStatus(f.status),
+        additions: f.additions ?? 0,
+        deletions: f.deletions ?? 0,
+      };
+      if (f.previous_filename) mapped.previousPath = f.previous_filename;
+      if (f.patch !== undefined) mapped.patch = f.patch;
+      return mapped;
+    });
+  }
+
+  /** Review comments (anchored to a file line) + issue comments, merged oldest first. */
+  async listPullRequestComments(ref: PullRequestRef): Promise<PullRequestComment[]> {
+    this.requireToken('listPullRequestComments');
+    const base = `${this.apiBase(ref.host)}/repos/${ref.owner}/${ref.repo}`;
+    const [reviewRes, issueRes] = await Promise.all([
+      this.http.request({
+        method: 'GET',
+        url: `${base}/pulls/${ref.number}/comments?per_page=100`,
+        headers: this.headers(),
+        timeout: 20_000,
+      }),
+      this.http.request({
+        method: 'GET',
+        url: `${base}/issues/${ref.number}/comments?per_page=100`,
+        headers: this.headers(),
+        timeout: 20_000,
+      }),
+    ]);
+    if (reviewRes.status >= 400) {
+      throw new SourceControlError(
+        `GitHub listPullRequestComments (review) failed (${reviewRes.status})`,
+      );
+    }
+    if (issueRes.status >= 400) {
+      throw new SourceControlError(
+        `GitHub listPullRequestComments (issue) failed (${issueRes.status})`,
+      );
+    }
+    const review = (JSON.parse(reviewRes.body) as GitHubComment[]).map((c) =>
+      mapComment(c, 'review'),
+    );
+    const issue = (JSON.parse(issueRes.body) as GitHubComment[]).map((c) => mapComment(c, 'issue'));
+    return [...review, ...issue].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  /**
+   * The open PR whose head branch is `headBranch`. Returns null when there is
+   * none, and also when the host says the repo is missing or the token cannot
+   * see it (404/401/403) — "no open PR" is the useful answer for readiness.
+   */
+  async findOpenPullRequestForHead(
+    owner: string,
+    repo: string,
+    headBranch: string,
+    host?: string,
+  ): Promise<PullRequestSummary | null> {
+    this.requireToken('findOpenPullRequestForHead');
+    const head = `${owner}:${encodeURIComponent(headBranch)}`;
+    const res = await this.http.request({
+      method: 'GET',
+      url: `${this.apiBase(host)}/repos/${owner}/${repo}/pulls?state=open&head=${head}&per_page=1`,
+      headers: this.headers(),
+      timeout: 15_000,
+    });
+    if (res.status === 401 || res.status === 403 || res.status === 404) return null;
+    if (res.status >= 400) {
+      throw new SourceControlError(
+        `GitHub findOpenPullRequestForHead failed (${res.status}): ${res.body}`,
+      );
+    }
+    const arr = JSON.parse(res.body) as GitHubPr[];
+    const first = arr[0];
+    return first ? this.mapPr(first) : null;
+  }
+
   // ── REST create ──
 
   private async createViaApi(input: CreatePullRequestInput): Promise<PullRequest> {
@@ -219,11 +433,15 @@ export class GitHubProvider implements ISourceControlProvider {
   }
 
   private apiBase(host?: string): string {
-    const h = host ?? this.options.host;
-    if (!h || /(^|\/\/)(www\.)?github\.com/.test(h)) {
+    // The account's configured host is authoritative (it carries scheme and
+    // port); a bare hostname parsed from a remote URL only fills in when the
+    // provider was built without one.
+    const raw = this.options.host ?? host;
+    if (!raw || /(^|\/\/)(www\.)?github\.com/.test(raw)) {
       return 'https://api.github.com';
     }
-    const clean = h.replace(/\/+$/, '');
+    const withScheme = /^https?:\/\//.test(raw) ? raw : `https://${raw}`;
+    const clean = withScheme.replace(/\/+$/, '');
     // Enterprise Server REST base is <host>/api/v3
     return clean.endsWith('/api/v3') ? clean : `${clean}/api/v3`;
   }
@@ -251,6 +469,9 @@ export class GitHubProvider implements ISourceControlProvider {
       head: pr.head?.ref ?? '',
       base: pr.base?.ref ?? '',
       draft: pr.draft ?? false,
+      author: pr.user?.login ?? undefined,
+      createdAt: pr.created_at,
+      updatedAt: pr.updated_at,
     };
   }
 
@@ -280,4 +501,59 @@ export class GitHubProvider implements ISourceControlProvider {
   private emptyChecks(): ChecksSummary {
     return { total: 0, passed: 0, failed: 0, pending: 0, conclusion: 'neutral' };
   }
+}
+
+// ── module helpers ──
+
+/** Case-insensitive header lookup (http clients differ on casing). */
+function headerValue(headers: Record<string, string>, name: string): string | undefined {
+  const lower = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers ?? {})) {
+    if (key.toLowerCase() === lower) return value;
+  }
+  return undefined;
+}
+
+/** `repo, workflow` → `['repo','workflow']`. Undefined when the header is absent. */
+function parseScopeHeader(raw: string | undefined): string[] | undefined {
+  if (raw === undefined) return undefined;
+  const scopes = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return scopes;
+}
+
+function mapFileStatus(status: string | undefined): PullRequestFile['status'] {
+  switch (status) {
+    case 'added':
+    case 'copied':
+      return 'added';
+    case 'removed':
+      return 'removed';
+    case 'renamed':
+      return 'renamed';
+    case 'modified':
+    case 'changed':
+      return 'modified';
+    default:
+      return 'modified';
+  }
+}
+
+function mapComment(c: GitHubComment, kind: 'review' | 'issue'): PullRequestComment {
+  const mapped: PullRequestComment = {
+    id: String(c.id),
+    author: c.user?.login ?? '',
+    body: c.body ?? '',
+    createdAt: c.created_at ?? '',
+    kind,
+  };
+  if (c.html_url) mapped.url = c.html_url;
+  if (kind === 'review') {
+    if (c.path) mapped.path = c.path;
+    const line = c.line ?? c.original_line;
+    if (typeof line === 'number') mapped.line = line;
+  }
+  return mapped;
 }

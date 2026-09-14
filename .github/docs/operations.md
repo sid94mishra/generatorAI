@@ -115,6 +115,8 @@ Pretty-printing is NOT configurable — pino auto-selects `pino-pretty` when `NO
 | `SANDBOX_IMAGE` | `generatorai/sandbox:latest` | Override sandbox image |
 | `SANDBOX_PROVIDER` | `auto` | `docker` (require Docker, error if unavailable), `host` (explicit unsandboxed opt-in), or `auto` (prefer Docker, fall back to host-process — but only if `GENERATORAI_ALLOW_HOST_SANDBOX=true` is also set; otherwise boot fails rather than running agent code unsandboxed) |
 | `GENERATORAI_ALLOW_HOST_SANDBOX` | `false` | Required alongside `SANDBOX_PROVIDER=auto` to permit the unsandboxed host-process fallback when Docker is unavailable |
+| `GENERATORAI_SCM_ALLOWED_HOSTS` | unset | Comma-separated hostnames of source-control hosts on private networks (e.g. an on-prem GitHub Enterprise) that the source-control HTTP client may call despite the private-address policy |
+| `GENERATORAI_GITHUB_OAUTH_CLIENT_ID` | unset | OAuth App client id enabling "Sign in with GitHub" (device flow) in Settings → Source Control |
 
 ### Streaming
 

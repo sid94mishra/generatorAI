@@ -17,6 +17,7 @@ import {
   Check,
   CheckCheck,
   ChevronDown,
+  Code2,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -50,13 +51,13 @@ import { toast } from '@/components/Toast.js';
 import {
   useWorkspaceChangeSummary,
   useWorkspaceCheckpoints,
-  useCommitWorkspaceChanges,
   useDiscardWorkspaceChanges,
   useReviewWorkspaceChanges,
-  useSourceControlStatus,
-  useCreateWorkspacePullRequest,
-  useWorkspacePullRequests,
+  useEditors,
+  useOpenInEditor,
 } from '@/hooks/queries.js';
+import { SourceControlPanel, joinPath } from '@/components/scm/SourceControlPanel.js';
+import { isDesktop } from '@/lib/desktop.js';
 import type { ChangeSummary } from '@/types/changes.js';
 import type {
   ReviewIntent,
@@ -96,6 +97,16 @@ import { ReviewBatchBar } from './review/ReviewBatchBar.js';
 
 export interface ChangesSurfaceProps {
   workspaceId?: string;
+  /**
+   * The chat that owns this workspace, when there is one.
+   *
+   * Only used by source control: "Ask the agent" to resolve a merge conflict
+   * is a real chat turn, so it is offered only where a chat exists (the run
+   * page has none).
+   */
+  chatId?: string;
+  /** Seeds generated commit messages / PR text. The chat or run name. */
+  scmHint?: string;
   /** Renders without outer chrome (inside the RightPane host). */
   embedded?: boolean;
   /** Pre-select a base revision, e.g. `stage:<stageRunId>` on a run page. */
@@ -207,6 +218,8 @@ export function splitKeptFiles(summary: ChangeSummary | undefined): {
 
 export function ChangesSurface({
   workspaceId,
+  chatId,
+  scmHint,
   embedded = false,
   defaultBase = 'baseline',
   enableReview = false,
@@ -229,9 +242,6 @@ export function ChangesSurface({
   const [treePosition, setTreePosition] = useState<'left' | 'right'>('left');
   const [wrapLines, setWrapLines] = useState(false);
   const [activePath, setActivePath] = useState<string | null>(null);
-  const [showPrForm, setShowPrForm] = useState(false);
-  const [prTitle, setPrTitle] = useState('');
-  const [prBody, setPrBody] = useState('');
   // The timeline lives here rather than in each host page so every surface
   // that renders changes gets rewind for free. `onOpenCheckpoints` still wins
   // when a host wants to present it somewhere else.
@@ -273,11 +283,27 @@ export function ChangesSurface({
   const checkpoints = useWorkspaceCheckpoints(workspaceId);
   const reviewChanges = useReviewWorkspaceChanges(workspaceId);
   const discardChanges = useDiscardWorkspaceChanges(workspaceId);
-  const scmStatus = useSourceControlStatus();
-  const commit = useCommitWorkspaceChanges(workspaceId);
-  const createPr = useCreateWorkspacePullRequest(workspaceId);
-  const scmEnabled = scmStatus.data?.enabled ?? false;
-  const prs = useWorkspacePullRequests(workspaceId, '.', scmEnabled);
+
+  // "Open in editor", per file. Hidden when the server host has no editor AND
+  // we are not in the desktop shell — in a plain browser talking to a remote
+  // server the `vscode://` fallback is the only thing that could work, and
+  // offering it where nothing is installed anywhere is a dead control.
+  const editors = useEditors();
+  const openInEditor = useOpenInEditor();
+  const canOpenInEditor =
+    (editors.data?.some((e) => e.available) ?? false) || isDesktop;
+  const mountPathByAlias = useMemo(
+    () => new Map(mounts.map((m) => [m.alias, m.path])),
+    [mounts],
+  );
+  const openFileInEditor = useCallback(
+    (alias: string, filePath: string) => {
+      const root = mountPathByAlias.get(alias);
+      if (!root) return;
+      openInEditor.mutate({ path: joinPath(root, filePath) });
+    },
+    [mountPathByAlias, openInEditor],
+  );
 
   // Supporting files the agent scaffolds at the workspace root stay out of the
   // way while a real codebase is being reviewed — see changeVisibility.ts.
@@ -1147,6 +1173,23 @@ export function ChangesSurface({
                   {rowBusy ? <Spinner size="xs" /> : <Check className="h-3 w-3" />}
                 </Button>
               )}
+              {canOpenInEditor && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Open in editor"
+                  aria-label={`Open ${item.path} in editor`}
+                  data-testid="open-file-in-editor"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openFileInEditor(item.alias, item.path);
+                  }}
+                  className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <Code2 className="h-3 w-3" />
+                </Button>
+              )}
               {canUndo && (
                 <Button
                   type="button"
@@ -1186,6 +1229,8 @@ export function ChangesSurface({
       openThreadCountByFile,
       display,
       multiMount,
+      canOpenInEditor,
+      openFileInEditor,
     ],
   );
 
@@ -1530,89 +1575,17 @@ export function ChangesSurface({
         </div>
       )}
 
-      {/* ── Source-control actions ─────────────────────────────── */}
-      {scmEnabled && stats.files > 0 && (
-        <div className="flex items-center gap-1.5 border-b px-2 py-1.5">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => void commit.mutateAsync(undefined)}
-            loading={commit.isPending}
-            leftIcon={<GitCommit className="h-3 w-3" />}
-          >
-            Commit
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowPrForm((v) => !v)}
-            leftIcon={<GitPullRequest className="h-3 w-3" />}
-          >
-            Pull request
-          </Button>
-          {commit.isSuccess && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-500">
-              <Check className="h-3 w-3" /> Committed
-            </span>
-          )}
-        </div>
-      )}
-
-      {showPrForm && (
-        <div className="space-y-1.5 border-b px-2 py-2">
-          <Input
-            value={prTitle}
-            onChange={(e) => setPrTitle(e.target.value)}
-            placeholder="Pull request title"
-            aria-label="Pull request title"
-            className="h-7 px-2 text-xs"
-          />
-          <Textarea
-            value={prBody}
-            onChange={(e) => setPrBody(e.target.value)}
-            placeholder="Description (optional)"
-            aria-label="Pull request description"
-            rows={2}
-            className="resize-none px-2 py-1 text-xs"
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={!prTitle.trim()}
-            loading={createPr.isPending}
-            onClick={() => {
-              void createPr.mutateAsync({ title: prTitle.trim(), body: prBody }).then(() => {
-                setShowPrForm(false);
-                setPrTitle('');
-                setPrBody('');
-              });
-            }}
-          >
-            Create
-          </Button>
-        </div>
-      )}
-
-      {(prs.data?.pullRequests?.length ?? 0) > 0 && (
-        <div className="border-b px-2 py-1.5">
-          {prs.data!.pullRequests.map((pr) => (
-            <a
-              key={pr.number}
-              href={pr.url}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1.5 py-0.5 text-[11px] hover:underline"
-            >
-              <GitPullRequest className="h-3 w-3 shrink-0" />
-              <span className="truncate">#{pr.number} {pr.title}</span>
-              <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-60" />
-            </a>
-          ))}
-        </div>
-      )}
+      {/* ── Source control ─────────────────────────────────────
+          Readiness-driven: each mount says what it can do and, when it
+          cannot, why — with a link to Settings when the fix is an account. */}
+      <SourceControlPanel
+        workspaceId={workspaceId}
+        {...(chatId ? { chatId } : {})}
+        {...(scmHint ? { hint: scmHint } : {})}
+        {...(canOpenInEditor
+          ? { onOpenFile: (absolutePath: string) => openInEditor.mutate({ path: absolutePath }) }
+          : {})}
+      />
 
       {/* ── Body ───────────────────────────────────────────────── */}
       {revertError && (

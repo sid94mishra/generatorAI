@@ -1,25 +1,60 @@
 // ────────────────────────────────────────────────────────────────
 // Source-control types — VCS-host (PR) provider abstraction
 // ────────────────────────────────────────────────────────────────
+//
+// The client-facing shapes live in `@generatorai/shared`
+// (`packages/shared/src/types/SourceControl.ts`) and are the contract the
+// server, web, desktop and mobile clients all share. This module re-exports
+// them under the names this package (and its existing call sites) use, so
+// there is exactly one definition of each shape. Only the types that are
+// purely internal to the provider port (`CreatePullRequestInput`,
+// `PullRequestRef`, `ListPullRequestsInput`, `SourceControlConfig`,
+// `ActiveProvider`) are declared here.
+
+import type {
+  ScmChecksSummary,
+  ScmCheckConclusion,
+  ScmProviderId,
+  ScmPullRequestState,
+  PullRequestSummary,
+} from '@generatorai/shared';
+
+// ── Shared contract re-exports (canonical names) ──
+
+export type {
+  DeviceLoginStart,
+  DeviceLoginStatus,
+  PullRequestComment,
+  PullRequestDetail,
+  PullRequestFile,
+  PullRequestSummary,
+  SourceControlAccount,
+  SourceControlAuthMethod,
+  SourceControlProviderInfo,
+  SourceControlSettings,
+} from '@generatorai/shared';
 
 /** Identifier of a source-control host provider. GitHub is the only one enabled for now. */
-export type SourceControlProviderId = 'github';
+export type SourceControlProviderId = ScmProviderId;
 
 /** Active provider selection — a provider id, or `none` (disabled). */
 export type ActiveProvider = SourceControlProviderId | 'none';
 
-export type PullRequestState = 'open' | 'closed' | 'merged';
+export type PullRequestState = ScmPullRequestState;
 
-export interface PullRequest {
-  provider: SourceControlProviderId;
-  number: number;
-  url: string;
-  title: string;
-  state: PullRequestState;
-  head: string;
-  base: string;
-  draft?: boolean;
-}
+export type CheckConclusion = ScmCheckConclusion;
+
+/** Aggregate CI state for a pull request (shared shape, exported as `ScmChecksSummary`). */
+export type ChecksSummary = ScmChecksSummary;
+
+/**
+ * A pull request as this package returns it. Structurally the shared
+ * `PullRequestSummary`; kept under its historical name for existing call
+ * sites (`SourceControlService`, the workspace routes).
+ */
+export type PullRequest = PullRequestSummary;
+
+// ── Provider-port inputs (not part of the client contract) ──
 
 export interface CreatePullRequestInput {
   /** Repo owner / org (e.g. `acme`). */
@@ -53,14 +88,18 @@ export interface ListPullRequestsInput {
   host?: string;
 }
 
-export type CheckConclusion = 'success' | 'failure' | 'neutral' | 'cancelled' | 'pending' | 'unknown';
+/** The authenticated user behind a provider's credentials (never carries the token). */
+export interface ProviderUser {
+  login: string;
+  avatarUrl?: string;
+  scopes?: string[];
+}
 
-export interface ChecksSummary {
-  total: number;
-  passed: number;
-  failed: number;
-  pending: number;
-  conclusion: CheckConclusion;
+/** The host's view of a repository. */
+export interface ProviderRepository {
+  defaultBranch: string;
+  private: boolean;
+  url: string;
 }
 
 /** Persisted configuration for the source-control feature. */

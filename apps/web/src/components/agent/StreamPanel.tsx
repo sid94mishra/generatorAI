@@ -26,6 +26,7 @@ import { WidgetFrame } from '@/components/widgets/WidgetFrame.js';
 import { PlanCard } from '@/components/chat/PlanCard.js';
 import { QuestionCard } from '@/components/chat/QuestionCard.js';
 import { PermissionCard } from '@/components/chat/PermissionCard.js';
+import { ScmResultCard } from '@/components/scm/ScmResultCard.js';
 import type { StreamBlock } from '@/stores/streamStore.js';
 import type { StreamSegment } from '@/components/agent/deriveTimeline.js';
 import type { TimelineStep, UsageInfo } from '@/components/chat/redesign/types.js';
@@ -112,15 +113,19 @@ export interface StreamPanelProps {
   onOpenChanges?: (filePath?: string) => void;
   /** Open the terminal's agent-command console at one shell call. */
   onOpenShell?: (callId: string) => void;
-  /** Workspace behind this transcript — resolves agent screenshot previews. */
+  /** Workspace behind this transcript — resolves agent screenshot previews,
+   *  and is the workspace the `scm_result` card's conflict actions act on. */
   workspaceId?: string;
+  /** The chat this transcript belongs to. Gates "Ask the agent" on a
+   *  conflicting `scm_result` card — that action is a turn in THIS chat. */
+  chatId?: string;
 }
 
 export function StreamPanel({
   segments, steps, answer, widgets, streamKey, answerStreaming = false, active, loading = false,
   usage, prevUsage, prevCompletedAt, error, className,
   onOpenPlan, onApprovePlan, onRequestPlanChanges, onAnswerQuestion, onAnswerPermission, planBusy,
-  onOpenChanges, onOpenShell, workspaceId,
+  onOpenChanges, onOpenShell, workspaceId, chatId,
 }: StreamPanelProps) {
   const isActive = active ?? answerStreaming;
   const showAnswer = !!answer || loading;
@@ -214,6 +219,16 @@ export function StreamPanel({
                 question={seg.question}
                 {...(onAnswerQuestion ? { onSubmit: onAnswerQuestion } : {})}
                 busy={planBusy ?? false}
+              />
+            );
+          }
+          if (seg.type === 'scm_result') {
+            return (
+              <ScmResultCard
+                key={seg.id}
+                result={seg.scmResult.result}
+                {...(workspaceId ? { workspaceId } : {})}
+                {...(chatId ? { chatId } : {})}
               />
             );
           }

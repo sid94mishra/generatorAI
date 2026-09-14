@@ -16,11 +16,15 @@ import {
 } from '@/components/chat/sources/sourceModel.js';
 import { getDefaultChatModel } from '@/lib/appPreferences.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
+import {
+  SourceControlOptionsFields,
+  DEFAULT_SOURCE_CONTROL_OPTIONS,
+} from '@/components/scm/SourceControlOptionsFields.js';
 import { AgentPicker } from '@/components/agents/AgentPicker.js';
 import { AgentOverridesEditor } from '@/components/agents/AgentOverridesEditor.js';
 import { EffectiveCapabilitiesPanel } from '@/components/agents/EffectiveCapabilitiesPanel.js';
 import { useResolveAgentPreview } from '@/hooks/agentQueries.js';
-import type { Agent, AgentOverrides, CreateChatParams, ResolvedAgentProjection } from '@generatorai/shared';
+import type { Agent, AgentOverrides, ChatSourceControlOptions, CreateChatParams, ResolvedAgentProjection } from '@generatorai/shared';
 import {
   BrowserVisibilityPicker,
   DEFAULT_BROWSER_PICKER_VALUE,
@@ -53,6 +57,13 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [browserPicker, setBrowserPicker] = useState<BrowserPickerValue>(DEFAULT_BROWSER_PICKER_VALUE);
   const [orchestratorMode, setOrchestratorMode] = useState(false);
+  /**
+   * Agent-native source control. Off by default: nothing commits to git
+   * unless the user asked for it (principle 1 of the design).
+   */
+  const [sourceControl, setSourceControl] = useState<ChatSourceControlOptions>(
+    DEFAULT_SOURCE_CONTROL_OPTIONS,
+  );
 
   // AGT-01 — agent binding. The chat stores the portable `scope:slug` ref plus
   // an additive override delta; the server resolves the union at create time.
@@ -176,6 +187,10 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
         orchestratorMode: orchestratorMode || undefined,
         agentRef: agentRef || undefined,
         agentOverrides: Object.keys(agentOverrides).length > 0 ? agentOverrides : undefined,
+        // Only sent when the user actually opted in — an all-false object
+        // would read on the server as "explicitly disabled" rather than
+        // "not configured".
+        ...(sourceControl.autoCommit ? { sourceControl } : {}),
       };
 
       // Browser config from the visibility picker.
@@ -188,7 +203,7 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
     } catch (err) {
       setSourceError(err instanceof Error ? err.message : 'Could not create the chat.');
     }
-  }, [name, description, model, tags, selectedProjectId, sourceDrafts, primaryAlias, browserPicker, orchestratorMode, agentRef, agentOverrides, createMutation, onOpenChange, navigate]);
+  }, [name, description, model, tags, selectedProjectId, sourceDrafts, primaryAlias, browserPicker, orchestratorMode, agentRef, agentOverrides, sourceControl, createMutation, onOpenChange, navigate]);
 
   return (
     <Modal
@@ -261,6 +276,10 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
               ariaLabel="Chat model"
             />
           </div>
+
+          {/* Agent-native source control — the platform commits for the
+              agent, so the agent never runs `git commit` itself. */}
+          <SourceControlOptionsFields value={sourceControl} onChange={setSourceControl} />
 
           {/* Agent binding — reusable instructions with their own skills, MCP
               servers and capabilities. Capabilities selected below are a

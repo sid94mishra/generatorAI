@@ -32,6 +32,43 @@ import type {
   ResolvedAgentProjection,
   ResolutionWarning,
 } from '@generatorai/shared';
+// Source control — accounts, readiness, the commit→PR flow, PR browsing, editors.
+// Aliased to the `Scm*` names the shared barrel exports so the two vocabularies
+// (this file's older `PullRequest*` helpers and the contract's) cannot collide.
+import type {
+  SourceControlAccount as ScmAccount,
+  SourceControlSettings as ScmSettings,
+  SourceControlSettingsResponse as ScmSettingsResponse,
+  DeviceLoginStart as ScmDeviceLoginStart,
+  DeviceLoginStatus as ScmDeviceLoginStatus,
+  EditorId as ScmEditorId,
+  EditorInfo as ScmEditorInfo,
+  RepoReadiness as ScmRepoReadiness,
+  WorkspaceReadinessResponse as ScmWorkspaceReadiness,
+  ScmFlowRequest,
+  ScmFlowResult,
+  ScmGenerateRequest,
+  ScmGenerateResult,
+  ProjectPullRequestsResponse as ScmProjectPullRequests,
+  PullRequestDetail as ScmPullRequestDetail,
+  PullRequestFile as ScmPullRequestFile,
+  PullRequestComment as ScmPullRequestComment,
+  OpenInEditorRequest as ScmOpenInEditorRequest,
+  OpenInEditorResult as ScmOpenInEditorResult,
+  ChatSourceControlOptions,
+} from '@generatorai/shared';
+
+/** What the conflict endpoints answer with. The flow result is re-run by the
+ *  client afterwards, so these only have to say whether the step worked. */
+export interface ScmConflictActionResult {
+  ok: boolean;
+  /** Paths still carrying conflict markers (returned by `continue`). */
+  unmerged?: string[];
+  /** Set by `continue` once the merge commit landed. */
+  committed?: boolean;
+  error?: string;
+}
+
 // Workspace mounts — what the chat actually works on.
 import type {
   ChatSourceSpec,
@@ -1711,6 +1748,224 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async getSourceControlStatus(): Promise<{ activeProvider: 'github' | 'none'; enabled: boolean }> {
     return apiFetch(`${this.baseUrl}/api/source-control/status`);
+  }
+
+
+  // ── Source control v2 — accounts, readiness, flow, PRs, editors ──
+  //
+  // Every path here is the contract in `.github/docs/feature-source-control.md`.
+  // Tokens are write-only: they go up in `addSourceControlAccount` and never
+  // come back in any response shape.
+
+  /** Accounts + settings + which login methods and editors the server has. */
+  async getSourceControlSettings(): Promise<ScmSettingsResponse> {
+    return apiFetch(`${this.baseUrl}/api/source-control/settings`);
+  }
+
+  /** Patch the client-safe settings. Omitted keys are left untouched. */
+  async updateSourceControlSettings(update: {
+    defaultAccountId?: string | null;
+    generation?: { provider: string | null; model: string | null };
+    editor?: { defaultEditor: ScmEditorId | null };
+    defaultBase?: string | null;
+  }): Promise<ScmSettings> {
+    return apiFetch(`${this.baseUrl}/api/source-control/settings`, {
+      method: 'PUT',
+      body: JSON.stringify(update),
+    });
+  }
+
+  /** Connect an account by pasted token or by importing the `gh` CLI's. */
+  async addSourceControlAccount(
+    input:
+      | { provider: 'github'; method: 'token'; token: string; host?: string; label?: string }
+      | { provider: 'github'; method: 'gh-cli'; host?: string },
+  ): Promise<ScmAccount> {
+    return apiFetch(`${this.baseUrl}/api/source-control/accounts`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async removeSourceControlAccount(accountId: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/source-control/accounts/${encodeURIComponent(accountId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /** Begin the OAuth device flow; the UI shows the code and polls below. */
+  async startSourceControlDeviceLogin(
+    input: { provider: 'github'; host?: string },
+  ): Promise<ScmDeviceLoginStart> {
+    return apiFetch(`${this.baseUrl}/api/source-control/accounts/device/start`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async getSourceControlDeviceLogin(loginId: string): Promise<ScmDeviceLoginStatus> {
+    return apiFetch(
+      `${this.baseUrl}/api/source-control/accounts/device/${encodeURIComponent(loginId)}`,
+    );
+  }
+
+  /** Per-mount answer to "can I commit / push / open a PR here, and why not". */
+  async getWorkspaceScmReadiness(
+    workspaceId: string,
+    alias?: string,
+  ): Promise<ScmWorkspaceReadiness> {
+    const qs = alias ? `?${new URLSearchParams({ alias })}` : '';
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/readiness${qs}`);
+  }
+
+  /** The same shape for a project codebase's checkout. */
+  async getCodebaseScmReadiness(projectId: string, codebaseId: string): Promise<ScmRepoReadiness> {
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/readiness`);
+  }
+
+  /** branch → commit → sync → push → pull request, in one call. */
+  async runWorkspaceScmFlow(workspaceId: string, request: ScmFlowRequest): Promise<ScmFlowResult> {
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/flow`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  /** Commit message / PR title+body, written by the configured model. */
+  async generateScmText(
+    workspaceId: string,
+    request: ScmGenerateRequest,
+  ): Promise<ScmGenerateResult> {
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/generate`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  /** Apply the conflicting merge to the working tree so it can be edited. */
+  async startScmConflictResolution(
+    workspaceId: string,
+    input: { alias?: string },
+  ): Promise<ScmConflictActionResult> {
+    // The server answers with the conflict report (no `ok` field); an HTTP
+    // error is thrown by apiFetch, so reaching here means the merge started.
+    const report = await apiFetch<{ files: string[]; mergeStarted: boolean }>(
+      `${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/start`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+    return { ok: true, unmerged: report.files };
+  }
+
+  /** Verify nothing is unmerged and commit the merge. */
+  async continueScmConflictResolution(
+    workspaceId: string,
+    input: { alias?: string },
+  ): Promise<ScmConflictActionResult> {
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/continue`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  /** Hand the conflict to the chat's agent as a normal, watchable turn. */
+  async resolveScmConflictWithAgent(
+    workspaceId: string,
+    input: { alias?: string; chatId: string },
+  ): Promise<ScmConflictActionResult> {
+    const sent = await apiFetch<{ chatId: string; files: string[] }>(
+      `${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/resolve-with-agent`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+    return { ok: true, unmerged: sent.files };
+  }
+
+  /** `git merge --abort`. */
+  async abortScmConflictResolution(
+    workspaceId: string,
+    input: { alias?: string },
+  ): Promise<ScmConflictActionResult> {
+    await apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/abort`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return { ok: true };
+  }
+
+  /** Every open/closed PR across a project's codebases, plus the ones we
+   *  could not reach and why. */
+  async listProjectPullRequests(
+    projectId: string,
+    state: 'open' | 'closed' | 'all' = 'open',
+  ): Promise<ScmProjectPullRequests> {
+    const params = new URLSearchParams({ state });
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/pull-requests?${params}`);
+  }
+
+  async getPullRequest(
+    projectId: string,
+    codebaseId: string,
+    number: number,
+  ): Promise<ScmPullRequestDetail> {
+    return apiFetch(
+      `${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/pull-requests/${number}`,
+    );
+  }
+
+  async getPullRequestFiles(
+    projectId: string,
+    codebaseId: string,
+    number: number,
+  ): Promise<ScmPullRequestFile[]> {
+    return apiFetch(
+      `${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/pull-requests/${number}/files`,
+    );
+  }
+
+  async getPullRequestComments(
+    projectId: string,
+    codebaseId: string,
+    number: number,
+  ): Promise<ScmPullRequestComment[]> {
+    return apiFetch(
+      `${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/pull-requests/${number}/comments`,
+    );
+  }
+
+  /** Create a chat on the PR's head branch, seeded with the review prompt. */
+  async createPullRequestReviewChat(
+    projectId: string,
+    codebaseId: string,
+    number: number,
+    input: { instructions?: string; model?: string; agentRef?: string },
+  ): Promise<{ chat: Chat }> {
+    return apiFetch(
+      `${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/pull-requests/${number}/review-chat`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  }
+
+  /** Editors the SERVER host can launch, plus their URL scheme for the
+   *  browser-side fallback when it cannot. */
+  async listEditors(): Promise<ScmEditorInfo[]> {
+    return apiFetch(`${this.baseUrl}/api/editor/editors`);
+  }
+
+  async openInEditor(request: ScmOpenInEditorRequest): Promise<ScmOpenInEditorResult> {
+    return apiFetch(`${this.baseUrl}/api/editor/open`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  /** Agent-native source-control options on an existing chat. */
+  async updateChatSourceControl(
+    chatId: string,
+    sourceControl: ChatSourceControlOptions | null,
+  ): Promise<Chat> {
+    return apiFetch(`${this.baseUrl}/api/chats/${chatId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ sourceControl }),
+    });
   }
 
   // ── Workflow-Level File Management ──

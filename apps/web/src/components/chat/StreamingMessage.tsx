@@ -60,6 +60,8 @@ interface StreamingMessageProps {
   onOpenShell?: (callId: string) => void;
   /** Workspace behind this chat — resolves agent screenshot previews. */
   workspaceId?: string;
+  /** Owning chat — gates "Ask the agent" on a conflicting `scm_result`. */
+  chatId?: string;
 }
 
 export function StreamingMessage({
@@ -76,6 +78,7 @@ export function StreamingMessage({
   onAnswerPermission,
   planBusy,
   workspaceId,
+  chatId,
 }: StreamingMessageProps) {
   const isActive = stream.status === 'streaming' || stream.status === 'thinking';
   const hasContent = stream.blocks.length > 0;
@@ -146,6 +149,7 @@ export function StreamingMessage({
           {...(onOpenChanges ? { onOpenChanges } : {})}
           {...(onOpenShell ? { onOpenShell } : {})}
           {...(workspaceId ? { workspaceId } : {})}
+          {...(chatId ? { chatId } : {})}
           {...(onApprovePlan ? { onApprovePlan } : {})}
           {...(onRequestPlanChanges ? { onRequestPlanChanges } : {})}
           {...(onAnswerQuestion ? { onAnswerQuestion } : {})}

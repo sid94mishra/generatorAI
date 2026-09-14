@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { Modal, EmptyState, Button, Spinner } from '@/components/ui/index.js';
 
+import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
+import { useEditorTarget } from '@/stores/editorTargetStore.js';
 import { useWorkflowRunStore } from '@/stores/workflowRunStore.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useShallow } from 'zustand/react/shallow';
@@ -185,6 +187,14 @@ export function WorkflowRunPageV2() {
   // the right pane when the run's workspace signals `browser.session_created`.
   // This lets the user watch the agent's browser without a manual click.
   const runWorkspaceId = runData?.workspaceId;
+
+  // "Open in editor" opens the run's workspace root: a run's stages share one
+  // checkout, so the root IS the thing a user wants in front of them.
+  const { data: runWorkspaceInfo } = useWorkspaceInfo(runWorkspaceId);
+  useEditorTarget(
+    runWorkspaceInfo?.workingDirectory ?? runWorkspaceInfo?.rootPath,
+    runData?.name ?? 'Workflow run',
+  );
   useEffect(() => {
     if (!runWorkspaceId) return;
     let cancelled = false;
@@ -577,6 +587,7 @@ export function WorkflowRunPageV2() {
                   <ChangesSurface
                     embedded
                     workspaceId={runData.workspaceId}
+                    {...(runData.name ? { scmHint: runData.name } : {})}
                     enableReview
                     reviewScope={{ scope: 'run', scopeId: runId ?? '' }}
                     // A run only accepts feedback while a stage is parked in
