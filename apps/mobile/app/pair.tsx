@@ -20,16 +20,21 @@
 // workstation" read as different decisions rather than two long lists.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Camera, KeyRound, Link2, QrCode, Server, ShieldAlert, ShieldCheck } from 'lucide-react-native';
 import { PairingCodeError, parsePairingCode, type PairingConsent } from '@generatorai/client-runtime';
 import { isPairingCode } from '@generatorai/shared';
 
 import { useAuth } from '../src/auth/AuthProvider';
+import {
+  classifyPairingFailure,
+  shouldAutoRetryPairing,
+  type PairingFailure,
+} from '../src/auth/pairingFailure';
 import { describeScope, isSensitiveScope } from '../src/auth/scopeLabels';
 import { groupScopes, matchScopePreset } from '../src/auth/scopePresets';
 import { Button } from '../src/components/ui/Button';
@@ -86,6 +91,18 @@ export default function PairScreen(): React.ReactElement {
     }
   }, []);
 
+  // A tapped `generatorai://pair?code=…` link (the server's `pairingUrl`)
+  // routes here with the code as a param. It goes through `acceptCode` like a
+  // scan, so it still lands on the consent screen — a link is exactly as
+  // attacker-controllable as a QR and gets the same fingerprint check.
+  const { code: linkedCode } = useLocalSearchParams<{ code?: string }>();
+  const consumedLink = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof linkedCode !== 'string' || !linkedCode || consumedLink.current === linkedCode) return;
+    consumedLink.current = linkedCode;
+    if (!acceptCode(`generatorai://pair?code=${linkedCode}`)) setPhase('manual');
+  }, [linkedCode, acceptCode]);
+
   const onScanned = useCallback(
     (data: string) => {
       if (scanned) return;
@@ -104,22 +121,89 @@ export default function PairScreen(): React.ReactElement {
     acceptCode(raw);
   }, [manualCode, acceptCode]);
 
-  const onConfirm = useCallback(async () => {
-    if (!consent) return;
-    setPhase('enrolling');
-    setError(null);
-    try {
-      await completePairing(consent, deviceName.trim() || 'Mobile device');
-      haptics.success();
-      router.replace('/(tabs)');
-    } catch (err) {
-      haptics.error();
-      setError(err instanceof Error ? err.message : String(err));
-      setPhase('consent');
-    }
-  }, [consent, deviceName, completePairing]);
+  // ── Enrolment, with one automatic retry for the Local Network prompt ──
+  // On a fresh iOS install the pairing request is the app's first LAN
+  // request: iOS shows the Local Network prompt and fails that request while
+  // it is up. `pairingFailure.ts` classifies the failure; a network one is
+  // retried once, automatically, when the app is active again (the prompt
+  // makes it inactive), and otherwise offers "Try again" with a hint.
+  const [failure, setFailure] = useState<PairingFailure | null>(null);
+  const failureRef = useRef<PairingFailure | null>(null);
+  const enrollingRef = useRef(false);
+  const autoRetriedRef = useRef(false);
+  const interruptedRef = useRef(false);
+
+  const attempt = useCallback(
+    async (automatic: boolean) => {
+      if (!consent || enrollingRef.current) return;
+      // A tap is a new confirmation and earns its own automatic retry.
+      if (!automatic) autoRetriedRef.current = false;
+      enrollingRef.current = true;
+      interruptedRef.current = AppState.currentState !== 'active';
+      failureRef.current = null;
+      setFailure(null);
+      setPhase('enrolling');
+      setError(null);
+      try {
+        await completePairing(consent, deviceName.trim() || 'Mobile device');
+        enrollingRef.current = false;
+        haptics.success();
+        router.replace('/(tabs)');
+      } catch (err) {
+        enrollingRef.current = false;
+        const next = classifyPairingFailure(err);
+        failureRef.current = next;
+        setFailure(next);
+        setError(next.message);
+        setPhase('consent');
+        if (
+          shouldAutoRetryPairing({
+            failure: next,
+            autoRetried: autoRetriedRef.current,
+            interrupted: interruptedRef.current,
+            appState: AppState.currentState,
+          })
+        ) {
+          // The prompt was already dismissed by the time the failure landed.
+          autoRetriedRef.current = true;
+          setTimeout(() => void attemptRef.current(true), 400);
+          return;
+        }
+        haptics.error();
+      }
+    },
+    [consent, deviceName, completePairing],
+  );
+  const attemptRef = useRef(attempt);
+  attemptRef.current = attempt;
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') {
+        if (enrollingRef.current) interruptedRef.current = true;
+        return;
+      }
+      if (enrollingRef.current) return;
+      if (
+        shouldAutoRetryPairing({
+          failure: failureRef.current,
+          autoRetried: autoRetriedRef.current,
+          interrupted: interruptedRef.current,
+          appState: next,
+        })
+      ) {
+        autoRetriedRef.current = true;
+        void attemptRef.current(true);
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  const onConfirm = useCallback(() => attempt(false), [attempt]);
 
   const reset = useCallback(() => {
+    failureRef.current = null;
+    setFailure(null);
     setPhase('scan');
     setConsent(null);
     setScanned(false);
@@ -318,9 +402,9 @@ export default function PairScreen(): React.ReactElement {
         }
       />
       {preset ? (
-        <Text className="px-1 text-xs leading-relaxed text-muted-foreground">{preset.hint}</Text>
+        <Text className="text-xs leading-relaxed text-muted-foreground">{preset.hint}</Text>
       ) : (
-        <Text className="px-1 text-xs leading-relaxed text-muted-foreground">
+        <Text className="text-xs leading-relaxed text-muted-foreground">
           This offer does not match a standard preset. Read the list before you continue.
         </Text>
       )}
@@ -329,7 +413,7 @@ export default function PairScreen(): React.ReactElement {
         <View key={group.id} className="gap-2">
           <Text
             accessibilityRole="header"
-            className={`px-1 text-sm font-semibold ${group.id === 'sensitive' ? 'text-warning' : 'text-muted-foreground'}`}
+            className={`text-sm font-semibold ${group.id === 'sensitive' ? 'text-warning' : 'text-muted-foreground'}`}
           >
             {group.title}
             {group.id === 'sensitive' ? ' — granted only when you say so' : ''}
@@ -353,7 +437,7 @@ export default function PairScreen(): React.ReactElement {
         </View>
       ))}
 
-      <Text className="px-1 text-xs leading-relaxed text-muted-foreground">
+      <Text className="text-xs leading-relaxed text-muted-foreground">
         {sensitiveCount === 0
           ? 'Terminal and browser control are not included. You can grant them later, per device.'
           : `${sensitiveCount} sensitive permission${sensitiveCount === 1 ? '' : 's'} let this phone act on the machine running GeneratorAI. You can revoke any of them later, per device.`}
@@ -376,7 +460,7 @@ export default function PairScreen(): React.ReactElement {
       ) : null}
 
       <Button
-        label="Pair this device"
+        label={failure?.retryable ? 'Try again' : 'Pair this device'}
         size="lg"
         full
         loading={enrolling}

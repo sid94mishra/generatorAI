@@ -142,7 +142,7 @@ export default function DiagnosticsScreen(): React.ReactElement {
         />
       </ListGroup>
 
-      <Text className="px-1 pt-2 text-xs leading-relaxed text-muted-foreground">
+      <Text className="pt-2 text-xs leading-relaxed text-muted-foreground">
         Tap Connection to force a re-probe of the host. That is worth doing after changing networks —
         the app pins a host identity, so it will not silently attach to a different machine.
       </Text>

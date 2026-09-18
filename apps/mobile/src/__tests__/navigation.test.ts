@@ -9,7 +9,15 @@ import {
   planRoute,
   runRoute,
 } from '../navigation/routes';
-import { LABEL_MAX_SCALE, USE_NATIVE_TABS, tabBarMetrics, withAlpha } from '../navigation/tabsImplementation';
+import {
+  FAB_MARGIN,
+  FAB_SIZE,
+  LABEL_MAX_SCALE,
+  USE_NATIVE_TABS,
+  tabBarMetrics,
+  tabContentInsets,
+  withAlpha,
+} from '../navigation/tabsImplementation';
 import {
   DEFAULT_WORK_SEGMENT,
   WORK_SEGMENTS,
@@ -83,6 +91,34 @@ describe('tabBarMetrics', () => {
   });
 });
 
+describe('tabContentInsets', () => {
+  it('only reserves room for the bar where it overlays the scene (iOS)', () => {
+    const ios = tabContentInsets('ios', tabBarMetrics('ios', 34));
+    expect(ios.barOverlap).toBe(83);
+    expect(tabContentInsets('android', tabBarMetrics('android', 24)).barOverlap).toBe(0);
+    expect(tabContentInsets('web', tabBarMetrics('web', 0)).barOverlap).toBe(0);
+  });
+
+  it('floats the FAB a margin above the bar on every platform', () => {
+    for (const platform of ['ios', 'android', 'web'] as const) {
+      const metrics = tabBarMetrics(platform, 34);
+      const insets = tabContentInsets(platform, metrics);
+      expect(insets.fabBottom).toBe(insets.barOverlap + FAB_MARGIN);
+    }
+  });
+
+  it('pads a list so its last row clears the FAB entirely', () => {
+    for (const platform of ['ios', 'android', 'web'] as const) {
+      const insets = tabContentInsets(platform, tabBarMetrics(platform, 34));
+      // The last row must end above the FAB's top edge.
+      expect(insets.listBottom(true)).toBeGreaterThanOrEqual(insets.fabBottom + FAB_SIZE);
+      // Without a FAB it still clears the bar.
+      expect(insets.listBottom(false)).toBeGreaterThan(insets.barOverlap);
+      expect(insets.listBottom(false)).toBeLessThan(insets.listBottom(true));
+    }
+  });
+});
+
 describe('withAlpha', () => {
   it('tints a hex token and leaves anything else alone', () => {
     expect(withAlpha('#161b22', 0.94)).toBe('rgba(22, 27, 34, 0.94)');
@@ -103,16 +139,14 @@ describe('resolveWorkSegment', () => {
     expect(resolveWorkSegment(['automations', 'runs'], undefined)).toBe('automations');
   });
 
-  it('exposes the three built segments and a stable pref key', () => {
-    expect(WORK_SEGMENTS).toEqual(['workflows', 'runs', 'automations']);
+  it('exposes the four built segments and a stable pref key', () => {
+    expect(WORK_SEGMENTS).toEqual(['workflows', 'runs', 'automations', 'scripts']);
     expect(WORK_SEGMENT_PREF_KEY).toBe('work.segment');
   });
 
-  it('lands a phone left on the retired scripts segment back on the default', () => {
-    // `scripts` was a placeholder-only segment that the tab could OPEN on,
-    // because the last-used one is remembered.
-    expect(resolveWorkSegment(undefined, 'scripts')).toBe(DEFAULT_WORK_SEGMENT);
-    expect(resolveWorkSegment('scripts', 'runs')).toBe('runs');
+  it('restores a phone left on the scripts segment now that it lists real scripts', () => {
+    expect(resolveWorkSegment(undefined, 'scripts')).toBe('scripts');
+    expect(resolveWorkSegment('scripts', 'runs')).toBe('scripts');
   });
 });
 
@@ -122,8 +156,9 @@ describe('scope requests', () => {
     const scopes = missing.map((m) => m.scope);
     expect(scopes).toContain('exec:terminal');
     expect(scopes).toContain('write:workflows');
-    // `projectEdit` is structurally impossible on a phone: never requestable.
-    expect(scopes).not.toContain('write:projects');
+    // `write:projects` is requestable for project editing, but the structural
+    // `codebaseLinkLocal` (host folder picking) never rides along with it.
+    expect(missing.find((m) => m.scope === 'write:projects')?.features).toEqual(['projectEdit']);
     expect(missing.find((m) => m.scope === 'write:workflows')?.features.sort()).toEqual(
       ['runControl', 'workflowEdit'],
     );

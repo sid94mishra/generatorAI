@@ -20,6 +20,7 @@
 import React, { useState } from 'react';
 import { Linking, Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ExternalLink, GitBranch, GitCommitHorizontal, TriangleAlert } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 import type { RepoReadiness, ScmFlowResult } from '@generatorai/shared';
@@ -60,6 +61,8 @@ export function CommitBar({
   hint?: string | undefined;
   active?: boolean;
 }): React.ReactElement | null {
+  // The bar is the last thing on screen; keep it clear of the gesture bar.
+  const bottomInset = useSafeAreaInsets().bottom;
   const scm = useScmApi();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -170,8 +173,8 @@ export function CommitBar({
   if (!commitCap.available) {
     if (fileCount === 0) return null;
     return (
-      <View className="border-t border-border-muted bg-card px-4 py-2">
-        <Text className="text-xs text-muted-foreground">{commitCap.reason}</Text>
+      <View className="border-t border-border-muted bg-card px-4 pt-2" style={{ paddingBottom: Math.max(bottomInset, 8) }}>
+        <Text className="text-sm text-muted-foreground">{commitCap.reason}</Text>
       </View>
     );
   }
@@ -185,7 +188,7 @@ export function CommitBar({
 
   return (
     <>
-      <View className="gap-1.5 border-t border-border bg-card px-3 py-2.5">
+      <View className="gap-1.5 border-t border-border bg-card px-3 pt-2.5" style={{ paddingBottom: Math.max(bottomInset, 10) }}>
         {repos.map((mount) => (
           <MountLine
             key={mount.alias}

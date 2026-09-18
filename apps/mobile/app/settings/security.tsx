@@ -15,7 +15,19 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, Clock, Eye, KeyRound, ShieldAlert, ShieldCheck, Smartphone } from 'lucide-react-native';
+import {
+  ChevronDown,
+  Clock,
+  Eye,
+  KeyRound,
+  QrCode as QrCodeIcon,
+  RefreshCcw,
+  ShieldAlert,
+  ShieldCheck,
+  SlidersHorizontal,
+  Smartphone,
+  Trash2,
+} from 'lucide-react-native';
 
 import {
   lastResolvedRequestOf,
@@ -31,8 +43,12 @@ import { useAuth } from '../../src/auth/AuthProvider';
 import { revokeDeviceRequest } from '../../src/auth/deviceRequests';
 import { requireStepUp } from '../../src/auth/stepUp';
 import { describeScope, isSensitiveScope } from '../../src/auth/scopeLabels';
+import { matchScopePreset } from '../../src/auth/scopePresets';
 import { checkFeature, grantableFeatures, type MobileFeature } from '../../src/auth/featureGate';
-import { ConfirmSheet } from '../../src/components/ui/ActionSheet';
+import { ActionSheet, ConfirmSheet } from '../../src/components/ui/ActionSheet';
+import { EditScopesSheet } from '../../src/components/devices/EditScopesSheet';
+import { PairDeviceSheet } from '../../src/components/devices/PairDeviceSheet';
+import { rotateDeviceRequest, setDeviceScopesRequest } from '../../src/components/devices/deviceAdmin';
 import { Button } from '../../src/components/ui/Button';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { Card, Divider, SectionHeader } from '../../src/components/ui/primitives';
@@ -51,6 +67,9 @@ const FEATURE_LABELS: Record<MobileFeature, string> = {
   runControl: 'Start, pause and cancel runs',
   workflowEdit: 'Edit workflows',
   projectEdit: 'Link codebases',
+  codebaseLinkLocal: 'Link a local folder',
+  capabilityAdmin: 'Manage MCP servers, agents and extensions',
+  computer: 'Watch and approve computer use',
   deviceAdmin: 'Manage other devices',
 };
 
@@ -99,6 +118,14 @@ export default function SecurityScreen(): React.ReactElement {
   /** Another device's access request awaiting the "approve?" confirmation. */
   const [approving, setApproving] = useState<DeviceScopeRequest | null>(null);
   const [unpairing, setUnpairing] = useState(false);
+  /** Device whose actions menu is open. */
+  const [managing, setManaging] = useState<DeviceRecord | null>(null);
+  /** Device whose scopes are being edited. */
+  const [editing, setEditing] = useState<DeviceRecord | null>(null);
+  /** Device awaiting the "rotate credentials?" confirmation. */
+  const [rotating, setRotating] = useState<DeviceRecord | null>(null);
+  const [pairingOpen, setPairingOpen] = useState(false);
+  const thisDeviceId = state.status === 'authenticated' ? state.deviceId : null;
 
   const scopes = state.status === 'authenticated' ? state.scopes : [];
   // Split by consequence, not alphabetically: "can change this machine" is
@@ -254,6 +281,58 @@ export default function SecurityScreen(): React.ReactElement {
       }
     },
     [cancelRequest, toast],
+  );
+
+  /**
+   * Replace another device's scopes (the endpoint replaces, not merges). The
+   * sheet has already stepped up if anything sensitive is being added; the
+   * server re-checks that nothing exceeds this phone's own grant.
+   */
+  const saveDeviceScopes = useCallback(
+    async (device: { deviceId: string; deviceName: string }, next: string[]) => {
+      try {
+        const { path, init } = setDeviceScopesRequest(device.deviceId, next);
+        const res = await authFetch(path, init);
+        if (!res.ok) throw new Error(await responseError(res, 'Update'));
+        await queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] });
+        // Editing this phone's own grant: re-mint so the app sees it now.
+        if (device.deviceId === thisDeviceId) await refreshPermissions();
+        toast({ message: `Updated access for ${device.deviceName}.`, tone: 'success' });
+      } catch (err) {
+        toast({
+          message: `Could not update access: ${err instanceof Error ? err.message : String(err)}`,
+          tone: 'error',
+        });
+        throw err;
+      }
+    },
+    [authFetch, queryClient, refreshPermissions, thisDeviceId, toast],
+  );
+
+  /**
+   * Rotating ends every session the device holds; it must pair again. For a
+   * suspected-lost laptop that should not be revoked outright.
+   */
+  const rotateDevice = useCallback(
+    async (device: DeviceRecord) => {
+      if (!(await requireStepUp(`Confirm signing out ${device.deviceName}`))) return;
+      setBusy(device.deviceId);
+      try {
+        const { path, init } = rotateDeviceRequest(device.deviceId);
+        const res = await authFetch(path, init);
+        if (!res.ok) throw new Error(await responseError(res, 'Rotate'));
+        await queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] });
+        toast({ message: `Rotated credentials for ${device.deviceName}.`, tone: 'success' });
+      } catch (err) {
+        toast({
+          message: `Could not rotate: ${err instanceof Error ? err.message : String(err)}`,
+          tone: 'error',
+        });
+      } finally {
+        setBusy(null);
+      }
+    },
+    [authFetch, queryClient, toast],
   );
 
   /**
@@ -570,37 +649,46 @@ export default function SecurityScreen(): React.ReactElement {
           <Spinner />
         </Card>
       ) : devices.data ? (
-        <ListGroup>
-          {devices.data.map((device) => (
-            <ListRow
-              key={device.deviceId}
-              title={device.deviceName}
-              subtitle={[
-                device.platform,
-                device.revokedAt ? 'revoked' : null,
-                device.lastUsedAt
-                  ? `last used ${new Date(device.lastUsedAt).toLocaleDateString()}`
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(' — ')}
-              icon={<Smartphone size={18} color={colors['muted-foreground']} />}
-              trailing={
-                !device.revokedAt ? (
-                  <Button
-                    label="Revoke"
-                    variant="danger"
-                    size="sm"
-                    haptic="tap"
-                    loading={busy === device.deviceId}
-                    accessibilityLabel={`Revoke ${device.deviceName}`}
-                    onPress={() => setRevoking(device)}
-                  />
-                ) : undefined
-              }
-            />
-          ))}
-        </ListGroup>
+        <>
+          <ListGroup>
+            {devices.data.map((device) => {
+              const isThis = device.deviceId === thisDeviceId;
+              const access = matchScopePreset(device.scopes)?.label ?? `${device.scopes.length} permissions`;
+              return (
+                <ListRow
+                  key={device.deviceId}
+                  title={isThis ? `${device.deviceName} (this device)` : device.deviceName}
+                  subtitle={[
+                    device.platform,
+                    device.revokedAt ? 'revoked' : access,
+                    device.lastUsedAt
+                      ? `last used ${new Date(device.lastUsedAt).toLocaleDateString()}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' — ')}
+                  icon={<Smartphone size={18} color={colors['muted-foreground']} />}
+                  trailing={busy === device.deviceId ? <Spinner /> : undefined}
+                  disabled={Boolean(device.revokedAt)}
+                  {...(!device.revokedAt
+                    ? { onPress: () => setManaging(device) }
+                    : {})}
+                  accessibilityLabel={`${device.deviceName}${isThis ? ', this device' : ''}, ${
+                    device.revokedAt ? 'revoked' : access
+                  }`}
+                  accessibilityHint={device.revokedAt ? undefined : 'Edit access, rotate or revoke'}
+                />
+              );
+            })}
+          </ListGroup>
+          <Button
+            label="Pair a device"
+            variant="secondary"
+            full
+            icon={<QrCodeIcon size={16} color={colors.foreground} />}
+            onPress={() => setPairingOpen(true)}
+          />
+        </>
       ) : (
         <Card className="p-4">
           <Text className="text-sm text-danger">{String(devices.error)}</Text>
@@ -621,6 +709,68 @@ export default function SecurityScreen(): React.ReactElement {
           const device = revoking;
           setRevoking(null);
           if (device) void revokeDevice(device);
+        }}
+      />
+
+      <ActionSheet
+        visible={managing !== null}
+        onClose={() => setManaging(null)}
+        title={managing?.deviceName ?? ''}
+        message={managing ? `Access: ${matchScopePreset(managing.scopes)?.label ?? 'Custom'}` : undefined}
+        actions={
+          managing
+            ? [
+                {
+                  label: 'Edit access',
+                  icon: <SlidersHorizontal size={18} color={colors.foreground} />,
+                  onPress: () => setEditing(managing),
+                },
+                {
+                  label: 'Rotate credentials',
+                  icon: <RefreshCcw size={18} color={colors.foreground} />,
+                  disabled: managing.deviceId === thisDeviceId,
+                  detail:
+                    managing.deviceId === thisDeviceId
+                      ? 'Not available for the device you are holding'
+                      : 'Signs it out everywhere; it must pair again',
+                  onPress: () => setRotating(managing),
+                },
+                {
+                  label: `Revoke ${managing.deviceName}`,
+                  icon: <Trash2 size={18} color={colors.danger} />,
+                  destructive: true,
+                  onPress: () => setRevoking(managing),
+                },
+              ]
+            : []
+        }
+      />
+
+      <EditScopesSheet
+        device={editing}
+        callerScopes={scopes}
+        isThisDevice={editing?.deviceId === thisDeviceId}
+        onClose={() => setEditing(null)}
+        onSave={saveDeviceScopes}
+      />
+
+      <PairDeviceSheet
+        visible={pairingOpen}
+        callerScopes={scopes}
+        onClose={() => setPairingOpen(false)}
+        onChanged={() => void queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] })}
+      />
+
+      <ConfirmSheet
+        visible={rotating !== null}
+        onClose={() => setRotating(null)}
+        title={`Rotate credentials for “${rotating?.deviceName ?? ''}”?`}
+        message="Every session on that device ends now and it will need a new pairing code to reconnect. Its permissions and history are kept."
+        confirmLabel="Rotate credentials"
+        onConfirm={() => {
+          const device = rotating;
+          setRotating(null);
+          if (device) void rotateDevice(device);
         }}
       />
 
@@ -670,6 +820,18 @@ function Field({
       <Text className={`text-sm text-foreground ${mono ? 'font-mono' : ''}`}>{children}</Text>
     </View>
   );
+}
+
+/** The server's error sentence, or a status line when the body is not JSON. */
+async function responseError(res: Response, action: string): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: { message?: string } | string };
+    if (typeof body.error === 'string') return body.error;
+    if (body.error?.message) return body.error.message;
+  } catch {
+    // Non-JSON body.
+  }
+  return `${action} failed (${res.status})`;
 }
 
 /** Same grouping the pairing screen and the server use, so they can be compared. */

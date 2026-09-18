@@ -74,6 +74,10 @@ export const GLOBAL_SCOPE_FILTER: readonly string[] = [
   'chat.',
   'workflow_run.',
   'automation_execution.',
+  // A scope request being answered. Without it the phone kept its old
+  // permissions for up to the access-token lifetime after an admin approved
+  // it, and "Request access" appeared not to work.
+  'device.scope_request',
 ];
 
 /** `scope=global` is addressed by the literal id `all`. */
@@ -95,6 +99,9 @@ export function listKeysForEvent(kind: string): readonly (readonly unknown[])[] 
   if (kind.startsWith('chat.')) return [queryKeys.chats()];
   if (kind.startsWith('workflow_run.')) return [queryKeys.runs(), queryKeys.workflows()];
   if (kind.startsWith('automation_execution.')) return [queryKeys.automations()];
+  if (kind.startsWith('device.scope_request')) {
+    return [queryKeys.myScopeRequests(), queryKeys.pendingScopeRequests()];
+  }
   return [];
 }
 
@@ -106,4 +113,17 @@ export function invalidateListKeys(
   for (const key of keys) {
     void queryClient.invalidateQueries({ queryKey: JSON.parse(key) as unknown[] });
   }
+}
+
+/**
+ * True when `event` says a scope request from THIS device was approved — the
+ * moment to refresh the session so the new permissions apply immediately.
+ */
+export function isOwnScopeApproval(
+  event: { kind: string; data?: unknown },
+  deviceId: string | null,
+): boolean {
+  if (!deviceId || event.kind !== 'device.scope_request_resolved') return false;
+  const data = event.data as { deviceId?: unknown; status?: unknown } | undefined;
+  return data?.deviceId === deviceId && data?.status === 'approved';
 }

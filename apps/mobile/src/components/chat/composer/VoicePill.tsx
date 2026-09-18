@@ -13,13 +13,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
-import Animated, {
-  FadeIn,
-  FadeOut,
-  useAnimatedStyle,
-  withTiming,
-  type SharedValue,
-} from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, withTiming, type SharedValue } from 'react-native-reanimated';
 import { Check, Pause, Play, X } from 'lucide-react-native';
 
 import { IconButton } from '../../ui/Button';
@@ -28,6 +22,7 @@ import { MAX_SCALE, useReduceMotion } from '../../ui/accessibility';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { WAVEFORM_BARS, WAVEFORM_WEIGHTS, formatElapsed } from '../../../voice/dictationCommit';
 import type { VoiceUiState } from './types';
+import { useChatMotion } from '../chatMotion';
 
 const BAR_MIN = 3;
 const BAR_MAX = 22;
@@ -81,6 +76,7 @@ export function VoicePill({
   onCancel: () => void;
   onAccept: () => void;
 }): React.ReactElement {
+  const motion = useChatMotion();
   const { colors } = useTheme();
   const reduceMotion = useReduceMotion();
   const [now, setNow] = useState(() => Date.now());
@@ -104,8 +100,8 @@ export function VoicePill({
 
   return (
     <Animated.View
-      entering={FadeIn.duration(140)}
-      exiting={FadeOut.duration(120)}
+      entering={motion.fadeIn(140)}
+      exiting={motion.fadeOut(120)}
       accessible
       accessibilityRole="progressbar"
       accessibilityLabel={`Dictation ${statusLabel}, ${elapsed}`}

@@ -12,7 +12,7 @@
 
 import React from 'react';
 import { Text, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { Bot, CircleAlert, RotateCcw } from 'lucide-react-native';
 
 import { Chip } from '../../ui/Chip';
@@ -21,6 +21,7 @@ import { Touchable } from '../../ui/Touchable';
 import { MAX_SCALE } from '../../ui/accessibility';
 import { useTheme } from '../../../theme/ThemeProvider';
 import type { WorkspacePrepState } from './types';
+import { useChatMotion } from '../chatMotion';
 
 export interface BoundAgentProps {
   name: string;
@@ -30,9 +31,10 @@ export interface BoundAgentProps {
 }
 
 export function BoundAgentChip({ agent }: { agent: BoundAgentProps }): React.ReactElement {
+  const motion = useChatMotion();
   const { colors } = useTheme();
   return (
-    <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(120)} className="px-3 pt-2">
+    <Animated.View entering={motion.fadeIn(120)} exiting={motion.fadeOut(120)} className="px-3 pt-2">
       <View className="flex-row">
         <Chip
           accessibilityLabel={`Agent ${agent.name}${agent.role === 'orchestrator' ? ', orchestrator' : ''}`}
@@ -54,13 +56,14 @@ export interface WorkspacePrepProps extends WorkspacePrepState {
 }
 
 export function WorkspacePrepBar({ prep }: { prep: WorkspacePrepProps }): React.ReactElement | null {
+  const motion = useChatMotion();
   const { colors } = useTheme();
   if (prep.status === 'ready') return null;
   const failed = prep.status === 'error';
   return (
     <Animated.View
-      entering={FadeIn.duration(120)}
-      exiting={FadeOut.duration(120)}
+      entering={motion.fadeIn(120)}
+      exiting={motion.fadeOut(120)}
       accessibilityLiveRegion="polite"
       className={`mx-3 mt-2 flex-row items-center gap-2 rounded-2xl border px-3 py-2 ${
         failed ? 'border-danger bg-danger-muted' : 'border-border bg-subtle'
@@ -107,11 +110,12 @@ export interface GateBannerProps {
 }
 
 export function GateBanner({ gate }: { gate: GateBannerProps }): React.ReactElement {
+  const motion = useChatMotion();
   const { colors } = useTheme();
   return (
     <Animated.View
-      entering={FadeIn.duration(120)}
-      exiting={FadeOut.duration(120)}
+      entering={motion.fadeIn(120)}
+      exiting={motion.fadeOut(120)}
       accessibilityLiveRegion="assertive"
       className="mx-3 mt-2 flex-row items-center gap-2 rounded-2xl border border-warning bg-warning-muted px-3 py-2"
     >

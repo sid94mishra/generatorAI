@@ -1,129 +1,141 @@
 // ────────────────────────────────────────────────────────────────
-// Run detail — stage timeline, live status, and the HITL gate.
+// Run — live stage timeline, the decisions it is waiting on, and control.
 //
-// The gate is the reason this screen exists on a phone. A stage parked in
-// `awaiting_input` blocks everything downstream, costs seconds to unblock,
-// and otherwise waits until someone returns to a desk. So blocked stages
-// float to the top and every other section is subordinate to them.
+// A stage parked in `awaiting_input` blocks everything downstream and costs
+// seconds to unblock, so decisions float to the top. Failed and paused
+// stages surface too, but with the action that actually applies to them
+// (Retry / Resume) — never with approval buttons.
 //
-// Run CONTROL (start / pause / cancel / retry) is deliberately absent: the
-// route policy requires `write:workflows`, which a paired mobile device does
-// not hold. Rather than render buttons that 403, the screen says where those
-// controls live. See packages/auth/src/routePolicy.ts.
+// Live: the `run` stream scope drives refreshes while the screen is open;
+// polling stays on as a slow safety net and stops once the run is terminal.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Text, View } from 'react-native';
-import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Animated from 'react-native-reanimated';
-import { FileDiff, Info, TerminalSquare } from 'lucide-react-native';
-import { queryKeys, type StageRunSummary } from '@generatorai/client-core';
+import { Text, View } from 'react-native';
+import { router, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
+import { FileDiff, Lock, MoreHorizontal, TerminalSquare, Trash2, Workflow as WorkflowIcon } from 'lucide-react-native';
+import { queryKeys, type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
-import { useAuth } from '../../src/auth/AuthProvider';
-import { checkFeature } from '../../src/auth/featureGate';
+import { useRunMutations, useRunPermissionMode, type RunAction } from '../../src/api/useRunControl';
+import { useRunStream } from '../../src/stream/useRunStream';
+import { ApprovalCard } from '../../src/components/runs/ApprovalCard';
 import { formatDuration, relativeTime, runElapsed } from '../../src/components/runs/formatTime';
+import { StageTimeline } from '../../src/components/runs/StageTimeline';
+import { StatusGlyph } from '../../src/components/runs/StatusGlyph';
 import {
-  isActive,
-  isTerminal,
-  needsAttention,
-  statusLabel,
-} from '../../src/components/runs/statusStyle';
-import { Badge, Card, SectionHeader, StatusDot, type Tone } from '../../src/components/ui/primitives';
-import { Button } from '../../src/components/ui/Button';
+  awaitsApproval,
+  pollIntervalFor,
+  runControlsFor,
+  runTitle,
+} from '../../src/components/runs/runModel';
+import { isActive, isTerminal, statusLabel } from '../../src/components/runs/statusStyle';
+import { PermissionModeChip, PermissionModeSheet } from '../../src/components/runs/PermissionModeSheet';
+import { toneOf } from '../../src/components/runs/tone';
+import { useFeature } from '../../src/components/runs/useFeature';
+import { usePullRefresh } from '../../src/components/runs/usePullRefresh';
+import { Card, SectionHeader, TONE_TEXT } from '../../src/components/ui/primitives';
+import { ActionSheet, type MenuAction } from '../../src/components/ui/ActionSheet';
+import { Button, IconButton } from '../../src/components/ui/Button';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { PlainScroll } from '../../src/components/ui/Screen';
-import { EmptyState, ErrorState, Spinner } from '../../src/components/ui/States';
+import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
-import { haptics } from '../../src/components/ui/haptics';
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { useCardEntering } from '../../src/components/common/enterMotion';
 
-type Outcome = 'approved' | 'changes_requested' | 'rejected';
-
-function toneOf(status: string): Tone {
-  if (needsAttention(status)) return status === 'failed' ? 'danger' : 'warning';
-  if (isActive(status)) return 'info';
-  if (status === 'completed') return 'success';
-  return 'neutral';
-}
+const ACTION_LABEL: Record<RunAction, string> = {
+  pause: 'Pause run',
+  resume: 'Resume run',
+  cancel: 'Cancel run',
+  retry: 'Retry run',
+};
 
 export default function RunDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const runId = String(id);
   const api = useApi();
   const navigation = useNavigation();
-  const { state } = useAuth();
+  const focused = useIsFocused();
   const { colors } = useTheme();
-  const queryClient = useQueryClient();
+  const terminalGate = useFeature('terminal');
+  const runControl = useFeature('runControl');
   const [busyStage, setBusyStage] = useState<string | null>(null);
+  const [menu, setMenu] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [modeSheet, setModeSheet] = useState(false);
 
-  const scopes = state.status === 'authenticated' ? state.scopes : [];
-  const terminalGate = checkFeature('terminal', scopes);
-  const runControl = checkFeature('runControl', scopes);
+  const { connected } = useRunStream(runId, focused);
+  const { runAction, stageAction, approve, remove } = useRunMutations(runId);
 
   const run = useQuery({
     queryKey: queryKeys.run(runId),
     queryFn: () => api.runs.get(runId),
-    // Poll while in flight; stop once terminal so a finished run does not
-    // keep a phone's radio awake for nothing.
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status && isTerminal(status) ? false : 5_000;
-    },
+    refetchInterval: (query) => (focused ? pollIntervalFor(query.state.data?.status, connected) : false),
   });
 
-  // D19 — the run's own status decides. A finished run has no interrupts to
-  // wait for, and this used to keep polling every 5 s for as long as the
-  // screen stayed mounted.
   const runStatus = run.data?.status;
+  // Only a run that can still call tools has a mode worth showing.
+  const live = Boolean(runStatus) && !isTerminal(runStatus ?? '');
+  const { mode: permissionMode, setMode } = useRunPermissionMode(runId, live);
   const interrupts = useQuery({
     queryKey: queryKeys.runInterrupts(runId),
     queryFn: () => api.runs.pendingInterrupts(runId),
-    refetchInterval: runStatus && isTerminal(runStatus) ? false : 5_000,
+    enabled: Boolean(run.data?.stageRuns?.some((s) => awaitsApproval(s.status))),
+    refetchInterval: focused ? pollIntervalFor(runStatus, connected) : false,
   });
+
+  const pull = usePullRefresh(() => Promise.all([run.refetch(), interrupts.refetch()]));
+
+  const stages = run.data?.stageRuns ?? [];
+  const approvals = useMemo(() => stages.filter((s) => awaitsApproval(s.status)), [stages]);
+  const controls = runControlsFor(runStatus ?? '');
+
+  const doRunAction = useCallback(
+    (action: RunAction) => {
+      runAction.mutate(action, {
+        onSuccess: ({ newRunId }) => {
+          if (newRunId && newRunId !== runId) router.replace(`/runs/${newRunId}`);
+        },
+      });
+    },
+    [runAction, runId],
+  );
 
   React.useLayoutEffect(() => {
-    navigation.setOptions({ title: run.data?.name ?? 'Run' });
-  }, [navigation, run.data?.name]);
-
-  const approve = useMutation({
-    mutationFn: (input: { stageId: string; outcome: Outcome }) =>
-      api.runs.approve(runId, input.stageId, {
-        outcome: input.outcome,
-        approved: input.outcome === 'approved',
-      }),
-    onSuccess: async (_data, input) => {
-      if (input.outcome === 'approved') haptics.success();
-      else haptics.error();
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.run(runId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.runInterrupts(runId) }),
-      ]);
-    },
-    onError: (err) => {
-      haptics.error();
-      Alert.alert('Could not submit', err instanceof Error ? err.message : String(err));
-    },
-    onSettled: () => setBusyStage(null),
-  });
+    navigation.setOptions({
+      title: runTitle(run.data?.name, 'Run'),
+      headerRight: () =>
+        run.data ? (
+          <IconButton
+            icon={<MoreHorizontal size={20} color={colors.foreground} />}
+            accessibilityLabel="Run actions"
+            onPress={() => setMenu(true)}
+          />
+        ) : null,
+    });
+  }, [navigation, run.data, colors.foreground]);
 
   const decide = useCallback(
-    (stageId: string, outcome: Outcome) => {
-      setBusyStage(stageId);
-      approve.mutate({ stageId, outcome });
+    (stage: StageRunSummary, outcome: ApprovalOutcome, feedback?: string) => {
+      setBusyStage(stage.id);
+      approve.mutate(
+        { stageRunId: stage.id, outcome, ...(feedback ? { feedback } : {}) },
+        { onSettled: () => setBusyStage(null) },
+      );
     },
     [approve],
   );
 
-  const stages = run.data?.stageRuns ?? [];
-  const blocked = useMemo(() => stages.filter((s) => needsAttention(s.status)), [stages]);
-  // Only an in-flight run is still accruing time; anything else is measured
-  // to its last update.
-  const elapsed = run.data
-    ? runElapsed(run.data, isActive(run.data.status) ? null : run.data.updatedAt)
-    : null;
+  const openStage = useCallback(
+    (stage: StageRunSummary) =>
+      router.push({
+        pathname: '/runs/[id]/stages/[stageRunId]',
+        params: { id: runId, stageRunId: stage.id },
+      } as never),
+    [runId],
+  );
 
   if (run.isLoading) {
     return (
@@ -132,193 +144,198 @@ export default function RunDetailScreen(): React.ReactElement {
       </View>
     );
   }
-  if (run.error) return <ErrorState message={String(run.error)} onRetry={() => void run.refetch()} />;
-  if (!run.data) return <ErrorState title="Run not found" />;
+  if (run.error || !run.data) {
+    return (
+      <ErrorState
+        title={run.error ? 'Could not load this run' : 'Run not found'}
+        message={run.error instanceof Error ? run.error.message : undefined}
+        onRetry={() => void run.refetch()}
+      />
+    );
+  }
 
-  const workspaceId = run.data.workspaceId;
+  const data = run.data;
+  const elapsed = runElapsed(data, isActive(data.status) ? null : data.completedAt ?? data.updatedAt);
+  const workspaceId = data.workspaceId;
+
+  const menuActions: MenuAction[] = runControl.available
+    ? [
+        ...(['pause', 'resume', 'retry', 'cancel'] as const)
+          .filter((action) => controls[action])
+          .map((action) => ({
+            label: ACTION_LABEL[action],
+            destructive: action === 'cancel',
+            onPress: () => (action === 'cancel' ? setConfirmCancel(true) : doRunAction(action)),
+          })),
+        {
+          label: 'Delete run',
+          destructive: true,
+          icon: <Trash2 size={18} color={colors.danger} />,
+          onPress: () => setConfirmDelete(true),
+        },
+      ]
+    : [
+        {
+          label: 'Request access',
+          detail: 'Pausing, cancelling and retrying runs needs workflow permission on this device.',
+          icon: <Lock size={18} color={colors['muted-foreground']} />,
+          onPress: runControl.requestAccess,
+        },
+      ];
+
+  // The single most relevant control, inline, so it is not hidden in a menu.
+  const primary: RunAction | null = controls.resume ? 'resume' : controls.retry ? 'retry' : null;
 
   return (
-    <PlainScroll
-      onRefresh={() => {
-        void run.refetch();
-        void interrupts.refetch();
-      }}
-      refreshing={run.isFetching}
-    >
-      <Card className="gap-2.5 p-4">
-        <View className="flex-row items-center gap-2">
-          <StatusDot tone={toneOf(run.data.status)} label={null} />
-          <Text className="flex-1 text-lg font-semibold text-foreground">
-            {run.data.name ?? `Run ${runId.slice(0, 8)}`}
-          </Text>
-          {isActive(run.data.status) ? <Spinner /> : null}
-          <Badge label={statusLabel(run.data.status)} tone={toneOf(run.data.status)} />
-        </View>
-        <Text className="text-xs text-muted-foreground">
-          Started {relativeTime(run.data.startedAt ?? run.data.createdAt)}
-          {elapsed != null ? ` · ${formatDuration(elapsed)}` : ''}
-        </Text>
-        {run.data.error ? (
-          <View className="rounded-2xl border border-danger bg-danger-muted p-3">
-            <Text className="text-sm text-foreground">{run.data.error}</Text>
+    <View className="flex-1 bg-background">
+      <PlainScroll onRefresh={pull.onRefresh} refreshing={pull.refreshing}>
+        <Card className="gap-3 p-4">
+          <View className="flex-row items-start gap-3">
+            <StatusGlyph status={data.status} />
+            <View className="flex-1 gap-0.5">
+              <Text className="text-lg font-semibold leading-snug text-foreground">{runTitle(data.name, 'Run')}</Text>
+              <Text className="text-sm text-muted-foreground">
+                <Text className={`font-medium ${TONE_TEXT[toneOf(data.status)]}`}>{statusLabel(data.status)}</Text>
+                {` · started ${relativeTime(data.startedAt ?? data.createdAt)}`}
+                {elapsed != null ? ` · ${formatDuration(elapsed)}` : ''}
+              </Text>
+            </View>
           </View>
-        ) : null}
-      </Card>
-
-      {blocked.length > 0 ? (
-        <>
-          <SectionHeader title="Waiting for you" />
-          {blocked.map((stage) => (
-            <StageGate
-              key={stage.id}
-              stage={stage}
-              prompt={interrupts.data?.find((i) => i.stageId === stage.stageDefinitionId)?.prompt}
-              busy={busyStage === stage.stageDefinitionId}
-              onDecide={(outcome) => decide(stage.stageDefinitionId, outcome)}
+          {live && permissionMode.data ? (
+            <View className="flex-row items-center gap-2">
+              <Text className="text-sm text-muted-foreground">Permissions</Text>
+              <PermissionModeChip
+                mode={permissionMode.data}
+                disabled={!runControl.available || setMode.isPending}
+                onPress={() => setModeSheet(true)}
+              />
+            </View>
+          ) : null}
+          {data.error ? (
+            <View className="rounded-2xl border border-danger bg-danger-muted p-3">
+              <Text className="text-sm text-foreground">{data.error}</Text>
+            </View>
+          ) : null}
+          {primary && runControl.available ? (
+            <Button
+              label={ACTION_LABEL[primary]}
+              variant={primary === 'retry' ? 'primary' : 'secondary'}
+              full
+              haptic="commit"
+              loading={runAction.isPending}
+              disabled={runAction.isPending}
+              onPress={() => doRunAction(primary)}
             />
-          ))}
-        </>
-      ) : null}
+          ) : null}
+        </Card>
 
-      <SectionHeader title={`Stages (${stages.length})`} />
-      {stages.length === 0 ? (
-        <EmptyState title="No stages yet" message="Stages appear as the run reaches them." />
-      ) : (
-        <View className="gap-2">
-          {stages.map((stage, index) => (
-            <StageRow key={stage.id} stage={stage} index={index} last={index === stages.length - 1} />
-          ))}
-        </View>
-      )}
+        {approvals.length > 0 ? (
+          <>
+            <SectionHeader title="Waiting for you" />
+            {approvals.map((stage) => (
+              <ApprovalCard
+                key={stage.id}
+                stage={stage}
+                interruptData={interrupts.data?.find((i) => i.id === stage.id)?.interruptData}
+                busy={busyStage === stage.id}
+                onDecide={(outcome, feedback) => decide(stage, outcome, feedback)}
+                {...(stage.sessionId ? { onOpenStage: () => openStage(stage) } : {})}
+              />
+            ))}
+          </>
+        ) : null}
 
-      {workspaceId ? (
-        <>
-          <SectionHeader title="Workspace" />
-          <ListGroup>
+        <SectionHeader title={`Stages (${stages.length})`} />
+        {stages.length === 0 ? (
+          <EmptyState title="No stages yet" message="Stages appear as the run reaches them." />
+        ) : (
+          <StageTimeline
+            stages={stages}
+            runStatus={data.status}
+            canControl={runControl.available}
+            busyStageId={busyStage}
+            onOpen={openStage}
+            onAction={(stage, action) => {
+              setBusyStage(stage.id);
+              stageAction.mutate(
+                { stageRunId: stage.id, action },
+                { onSettled: () => setBusyStage(null) },
+              );
+            }}
+          />
+        )}
+
+        <SectionHeader title="More" />
+        <ListGroup>
+          {workspaceId ? (
             <ListRow
               title="Changes"
               subtitle="Files this run created or edited"
-              icon={<FileDiff size={18} color={colors.primary} />}
+              icon={<FileDiff size={18} color={colors['muted-foreground']} />}
               onPress={() => router.push(`/changes/${workspaceId}`)}
             />
-            {terminalGate.available ? (
-              <ListRow
-                title="Terminal"
-                subtitle="Run commands in this workspace"
-                icon={<TerminalSquare size={18} color={colors['muted-foreground']} />}
-                onPress={() => router.push(`/terminal/${workspaceId}`)}
-              />
-            ) : null}
-          </ListGroup>
-        </>
+          ) : null}
+          {workspaceId && terminalGate.available ? (
+            <ListRow
+              title="Terminal"
+              subtitle="Run commands in this workspace"
+              icon={<TerminalSquare size={18} color={colors['muted-foreground']} />}
+              onPress={() => router.push(`/terminal/${workspaceId}`)}
+            />
+          ) : null}
+          <ListRow
+            title="Workflow"
+            subtitle="The definition this run executes"
+            icon={<WorkflowIcon size={18} color={colors['muted-foreground']} />}
+            onPress={() => router.push(`/workflows/${data.workflowDefinitionId}`)}
+          />
+        </ListGroup>
+      </PlainScroll>
+
+      <ActionSheet
+        visible={menu}
+        onClose={() => setMenu(false)}
+        title={runTitle(data.name, 'Run')}
+        actions={menuActions}
+      />
+      <ActionSheet
+        visible={confirmCancel}
+        onClose={() => setConfirmCancel(false)}
+        title="Cancel this run?"
+        message="Running stages stop and nothing after them starts. You can retry it later as a new run."
+        actions={[{ label: 'Cancel run', destructive: true, onPress: () => doRunAction('cancel') }]}
+      />
+      <ActionSheet
+        visible={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title="Delete this run?"
+        message={
+          isActive(data.status)
+            ? 'It is still running — it will be cancelled first. Its stages and history are removed for good.'
+            : 'Its stages and history are removed for good. The workflow itself is kept.'
+        }
+        actions={[
+          {
+            label: 'Delete run',
+            destructive: true,
+            onPress: () =>
+              remove.mutate(undefined, {
+                onSuccess: () => {
+                  if (router.canGoBack()) router.back();
+                  else router.replace('/(tabs)/runs');
+                },
+              }),
+          },
+        ]}
+      />
+      {permissionMode.data ? (
+        <PermissionModeSheet
+          visible={modeSheet}
+          onClose={() => setModeSheet(false)}
+          current={permissionMode.data}
+          onChange={(next) => setMode.mutate(next)}
+        />
       ) : null}
-
-      <View className="mt-2 flex-row gap-2.5 rounded-3xl border border-border bg-subtle p-3.5">
-        <Info size={16} color={colors['muted-foreground']} />
-        <Text className="flex-1 text-xs leading-relaxed text-muted-foreground">
-          {runControl.reason}
-        </Text>
-      </View>
-    </PlainScroll>
-  );
-}
-
-/**
- * One stage, drawn as a timeline entry.
- *
- * The connector between rows is what makes the sequence readable at a glance;
- * without it a phone-width list of pills reads as an unordered set.
- */
-function StageRow({
-  stage,
-  index,
-  last,
-}: {
-  stage: StageRunSummary;
-  index: number;
-  last: boolean;
-}): React.ReactElement {
-  const elapsed = runElapsed(stage, isActive(stage.status) ? null : stage.completedAt);
-  const tone = toneOf(stage.status);
-
-  return (
-    <View className="flex-row gap-3">
-      <View className="items-center pt-4">
-        <StatusDot tone={tone} ring label={statusLabel(stage.status)} />
-        {!last ? <View className="mt-1 w-px flex-1 bg-border-muted" /> : null}
-      </View>
-
-      <Card className="mb-1 flex-1 gap-1 p-3.5">
-        <View className="flex-row items-center gap-2">
-          <Text numberOfLines={1} className="flex-1 text-sm font-medium text-foreground">
-            {stage.name ?? stage.stageDefinitionId}
-          </Text>
-          {isActive(stage.status) ? <Spinner /> : null}
-          <Badge label={statusLabel(stage.status)} tone={tone} />
-        </View>
-        <Text numberOfLines={2} className="text-xs text-muted-foreground">
-          {`${index + 1}. `}
-          {elapsed != null ? formatDuration(elapsed) : 'not started'}
-          {stage.retryCount ? ` · retry ${stage.retryCount}` : ''}
-        </Text>
-        {stage.error ? (
-          <Text numberOfLines={3} className="text-xs text-danger">
-            {stage.error}
-          </Text>
-        ) : null}
-      </Card>
     </View>
-  );
-}
-
-/**
- * The approval gate.
- *
- * Three outcomes, matching the server's contract exactly. Targets are full
- * width and stacked because this is the one control on the screen a person
- * must be able to hit correctly on the first try, one-handed.
- */
-function StageGate({
-  stage,
-  prompt,
-  busy,
-  onDecide,
-}: {
-  stage: StageRunSummary;
-  prompt?: string | undefined;
-  busy: boolean;
-  onDecide: (outcome: Outcome) => void;
-}): React.ReactElement {
-  const entering = useCardEntering();
-  return (
-    <Animated.View
-      entering={entering}
-      className="gap-3 rounded-3xl border border-warning bg-warning-muted p-4"
-    >
-      <Text className="text-md font-semibold text-foreground">
-        {stage.name ?? stage.stageDefinitionId}
-      </Text>
-      {prompt ? (
-        <Text className="text-sm leading-relaxed text-muted-foreground">{prompt}</Text>
-      ) : null}
-
-      <View className="gap-2">
-        <Button label="Approve" full size="lg" disabled={busy} onPress={() => onDecide('approved')} />
-        <Button
-          label="Request changes"
-          full
-          variant="secondary"
-          disabled={busy}
-          onPress={() => onDecide('changes_requested')}
-        />
-        <Button
-          label="Reject"
-          full
-          variant="danger"
-          disabled={busy}
-          onPress={() => onDecide('rejected')}
-        />
-      </View>
-    </Animated.View>
   );
 }

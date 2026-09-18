@@ -1,4 +1,4 @@
-// Panes + More sheet + Stop on an existing chat. Usage: MSYS_NO_PATHCONV=1 node panes.mjs /chats/<id>
+// Panes + Workbench sheet (via the header's chat menu) + Stop on an existing chat. Usage: MSYS_NO_PATHCONV=1 node panes.mjs /chats/<id>
 import { launch, step, shot, summary, APP_URL, sleep } from './lib.mjs';
 const { ctx, page, consoleLog } = await launch();
 const body = async () => (await page.locator('body').innerText()).replace(/\s+/g, ' ');
@@ -38,13 +38,16 @@ try {
     await shot(page, 'browser-pane');
     return (await body()).slice(0, 200);
   });
-  await step('More sheet: Files / Plan / Tasks / Inspector', async () => {
+  await step('Workbench sheet (header menu): Files / Plan / Tasks / Session', async () => {
     await seg(/^Chat$/);
-    await vis(/^more:/i).click();
+    await vis(/^chat menu$/i).click();
+    await sleep(1200);
+    await shot(page, 'chat-menu');
+    await vis(/^files$/i).click();
     await sleep(1500);
     await shot(page, 'more-files');
-    for (const tab of ['Plan', 'Tasks', 'Widgets', 'Inspector']) {
-      await page.getByText(new RegExp(`^${tab}$`)).locator('visible=true').first().click({ timeout: 5000 }).catch(() => {});
+    for (const tab of ['Plan', 'Tasks', 'Session']) {
+      await page.getByText(new RegExp(`^${tab}$`)).locator('visible=true').last().click({ timeout: 5000 }).catch(() => {});
       await sleep(1200);
       await shot(page, `more-${tab.toLowerCase()}`);
     }

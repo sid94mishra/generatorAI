@@ -4,6 +4,7 @@ import {
   LAST_ROUTE_TTL_MS,
   isLastRouteFresh,
   isRestorableRoute,
+  isSheetRoute,
   resolveLastRoute,
 } from '../prefs/lastRouteRules';
 import { STEP_UP_WINDOW_MS, isStepUpFresh } from '../auth/stepUpRules';
@@ -39,6 +40,24 @@ describe('last route — expiry', () => {
     }
     expect(isRestorableRoute(undefined)).toBe(false);
     expect(isRestorableRoute('chats/abc')).toBe(false);
+  });
+
+  it('never restores a route-addressable sheet', () => {
+    for (const route of [
+      '/approvals',
+      '/scope-request',
+      '/scope-request?scope=exec%3Aterminal',
+      '/chats/abc/gate/int-1',
+      '/chats/abc/plan/plan-1',
+    ]) {
+      expect(isSheetRoute(route), route).toBe(true);
+      expect(isRestorableRoute(route), route).toBe(false);
+      expect(resolveLastRoute({ route, savedAt: NOW - 1000 }, NOW), route).toBeNull();
+    }
+    // The chat itself, and a chat literally named "gate", still restore.
+    expect(isSheetRoute('/chats/abc')).toBe(false);
+    expect(isSheetRoute('/chats/gate')).toBe(false);
+    expect(isRestorableRoute('/chats/gate')).toBe(true);
   });
 
   it('restores detail routes', () => {

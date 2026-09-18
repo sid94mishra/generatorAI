@@ -19,6 +19,8 @@ import { GitPullRequest, TriangleAlert } from 'lucide-react-native';
 import type { ProjectPullRequest } from '@generatorai/shared';
 
 import { relativeTime } from '../../../src/components/runs/formatTime';
+import { usePullRefresh } from '../../../src/components/runs/usePullRefresh';
+import { Button } from '../../../src/components/ui/Button';
 import { Badge, Card, SectionHeader } from '../../../src/components/ui/primitives';
 import { SegmentedControl } from '../../../src/components/ui/SegmentedControl';
 import { PlainScroll } from '../../../src/components/ui/Screen';
@@ -54,12 +56,14 @@ export default function ProjectPullRequestsScreen(): React.ReactElement {
     staleTime: 30_000,
   });
 
+  const { refreshing, onRefresh } = usePullRefresh(() => prs.refetch());
+
   const items = (prs.data?.items ?? []).filter((pr) => matchesState(pr, state));
   const groups = groupByCodebase(items);
   const unavailable = prs.data?.unavailable ?? [];
 
   return (
-    <PlainScroll onRefresh={() => void prs.refetch()} refreshing={prs.isFetching && !prs.isLoading}>
+    <PlainScroll onRefresh={onRefresh} refreshing={refreshing}>
       <SegmentedControl
         segments={PR_STATE_SEGMENTS.map((s) => ({ value: s.value, label: s.label }))}
         value={state}
@@ -99,7 +103,16 @@ export default function ProjectPullRequestsScreen(): React.ReactElement {
               <TriangleAlert size={16} color={colors.warning} />
               <View className="flex-1 gap-0.5">
                 <Text className="text-md font-medium text-foreground">{row.alias}</Text>
-                <Text className="text-xs leading-relaxed text-muted-foreground">{row.reason}</Text>
+                <Text className="text-sm leading-relaxed text-muted-foreground">{row.reason}</Text>
+                <View className="flex-row pt-1.5">
+                  <Button
+                    label="Open Source Control settings"
+                    variant="secondary"
+                    size="sm"
+                    haptic="tap"
+                    onPress={() => router.push('/settings/source-control')}
+                  />
+                </View>
               </View>
             </Card>
           ))}

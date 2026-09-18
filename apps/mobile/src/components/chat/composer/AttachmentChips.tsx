@@ -9,8 +9,8 @@
 
 import React from 'react';
 import { Image, ScrollView, Text, View } from 'react-native';
-import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
-import { Camera, FileText, X } from 'lucide-react-native';
+import Animated from 'react-native-reanimated';
+import { Camera, FileText, TerminalSquare, X } from 'lucide-react-native';
 
 import { Touchable } from '../../ui/Touchable';
 import { Spinner } from '../../ui/States';
@@ -18,6 +18,7 @@ import { MAX_SCALE } from '../../ui/accessibility';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { formatBytes } from './attachmentPolicy';
 import type { ComposerAttachment } from './types';
+import { useChatMotion } from '../chatMotion';
 
 /** Legacy callers still pass `{ id, name }`; everything else is optional. */
 export type ChipAttachment = Pick<ComposerAttachment, 'id' | 'name'> & Partial<ComposerAttachment>;
@@ -29,6 +30,7 @@ export function AttachmentChips({
   items: readonly ChipAttachment[];
   onRemove: (id: string) => void;
 }): React.ReactElement | null {
+  const motion = useChatMotion();
   const { colors } = useTheme();
   if (items.length === 0) return null;
 
@@ -45,18 +47,18 @@ export function AttachmentChips({
         return (
           <Animated.View
             key={item.id}
-            entering={FadeIn.duration(140)}
-            exiting={FadeOut.duration(120)}
-            layout={LinearTransition.duration(160)}
+            entering={motion.fadeIn(140)}
+            exiting={motion.fadeOut(120)}
+            layout={motion.layout(160)}
             accessible
-            accessibilityLabel={`${item.kind === 'image' ? 'Image' : 'File'} ${item.name}${
+            accessibilityLabel={`${item.kind === 'image' ? 'Image' : item.kind === 'capture' ? 'Capture' : 'File'} ${item.name}${
               failed ? `, failed: ${item.error}` : item.uploading ? ', uploading' : ''
             }`}
             className={`h-11 flex-row items-center gap-2 rounded-2xl border pl-1.5 pr-1 ${
               failed ? 'border-danger bg-danger-muted' : 'border-border bg-raised'
             }`}
           >
-            {item.kind === 'image' && item.previewUri ? (
+            {(item.kind === 'image' || item.kind === 'capture') && item.previewUri ? (
               <Image
                 source={{ uri: item.previewUri }}
                 accessibilityIgnoresInvertColors
@@ -64,7 +66,9 @@ export function AttachmentChips({
               />
             ) : (
               <View className="h-8 w-8 items-center justify-center rounded-lg bg-subtle">
-                {item.kind === 'capture' ? (
+                {item.kind === 'capture' && item.name.startsWith('terminal-') ? (
+                  <TerminalSquare size={16} color={colors['muted-foreground']} />
+                ) : item.kind === 'capture' && item.text === undefined ? (
                   <Camera size={16} color={colors['muted-foreground']} />
                 ) : (
                   <FileText size={16} color={colors['muted-foreground']} />

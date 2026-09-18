@@ -98,8 +98,9 @@ describe('readiness states', () => {
     const reason = actionReason(NOT_CONNECTED, 'pullRequest');
     expect(reason).toContain('Remote host github.com is not connected');
     expect(reason).toContain(CONNECT_ON_DESKTOP);
-    // The desktop-only instruction is gone — this screen cannot act on it.
-    expect(reason).not.toMatch(/Settings/);
+    // The server's desktop wording is replaced by the phone's own path
+    // (Settings › Source control now connects GitHub via the device flow).
+    expect(reason).not.toContain('Settings → Source Control');
     // Committing and pushing are still possible without a host account.
     expect(actionReason(NOT_CONNECTED, 'commit')).toBeNull();
     expect(hasAnyAction(NOT_CONNECTED)).toBe(true);

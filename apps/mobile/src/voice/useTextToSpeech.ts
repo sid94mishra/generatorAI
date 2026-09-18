@@ -29,9 +29,24 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { File, Paths } from 'expo-file-system';
-import { useAudioPlaylist } from 'expo-audio';
+import { setAudioModeAsync, useAudioPlaylist } from 'expo-audio';
 import { useAuth } from '../auth/AuthProvider';
 import { assembleWavBytes, buildWavHeader, floatChunksToInt16 } from './wavEncoding';
+import { PLAYBACK_AUDIO_MODE } from './audioSession';
+
+/**
+ * Put the shared audio session into playback mode. Dictation leaves it in
+ * record mode (receiver routing, and silent under the ring switch on iOS),
+ * so this runs before EVERY utterance rather than once. A failure is not
+ * fatal — playback is attempted in whatever mode the session is in.
+ */
+async function enterPlaybackMode(): Promise<void> {
+  try {
+    await setAudioModeAsync(PLAYBACK_AUDIO_MODE);
+  } catch {
+    /* unsupported on this platform, or the session is busy */
+  }
+}
 
 export type TtsStatus = 'idle' | 'synthesizing' | 'speaking' | 'error';
 
@@ -139,6 +154,8 @@ export function useTextToSpeech(): TextToSpeech {
       setError(null);
       setStatus('synthesizing');
       try {
+        await enterPlaybackMode();
+        if (isCancelled()) return null;
         const url = await socketUrl('/api/tts/stream', 'tts', null);
         if (isCancelled()) return null;
         await streamSentences(url, frame, isCancelled, socketRef, filesRef, () => {

@@ -17,7 +17,7 @@ import '../src/theme/global.css';
 import { installCrypto } from '../src/crypto/installCrypto';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { BackHandler, Platform, Text, View } from 'react-native';
 import { Redirect, Stack, SplashScreen, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -38,6 +38,8 @@ import { usePushNotifications } from '../src/notifications/usePushNotifications'
 import { MuxStreamProvider } from '../src/stream/MuxStreamProvider';
 import { useGlobalStream } from '../src/stream/useGlobalStream';
 import { ConnectionStripHost } from '../src/components/common/ConnectionStrip';
+import { StackHeader, type StackHeaderProps } from '../src/navigation/StackHeader';
+import { backFallbackFor } from '../src/navigation/backFallback';
 import { ErrorBoundary } from '../src/navigation/ErrorBoundary';
 
 installCrypto();
@@ -93,7 +95,7 @@ function ThemedShell({ children }: { children: React.ReactNode }): React.ReactEl
 const PUBLIC_ROUTES = new Set(['/pair', '/revoked']);
 
 function AuthGate({ children }: { children: React.ReactNode }): React.ReactElement {
-  const { state, initializing } = useAuth();
+  const { state, initializing, storageLocked } = useAuth();
   const pathname = usePathname();
 
   // Mounted once for the whole session, above every screen, so a token
@@ -116,14 +118,18 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
   // is consumed either way so a stale route can never replay later.
   const restoredRef = useRef(false);
   useEffect(() => {
-    if (initializing || restoredRef.current) return;
+    // A locked restore has not resolved anything yet: wait for the retry.
+    if (initializing || storageLocked || restoredRef.current) return;
     restoredRef.current = true;
     const target = consumeLastRoute();
     if (!target) return;
     if (state.status !== 'authenticated') return;
     if (pathname !== '/' && pathname !== '/(tabs)') return;
-    router.replace(target as Parameters<typeof router.replace>[0]);
-  }, [initializing, state.status, pathname]);
+    // Pushed on top of the tabs, not swapped in for them: `replace` left the
+    // restored screen as the only history entry, so back closed the app.
+    router.replace('/(tabs)');
+    setTimeout(() => router.push(target as Parameters<typeof router.push>[0]), 0);
+  }, [initializing, storageLocked, state.status, pathname]);
 
   const isPublic = PUBLIC_ROUTES.has(pathname);
 
@@ -136,6 +142,10 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
       </View>
     );
   }
+
+  // Protected storage refused the read (phone locked at launch). Not
+  // `unpaired` — routing to /pair here is what stranded paired users.
+  if (storageLocked) return <StorageLocked />;
 
   if (state.status === 'revoked' && pathname !== '/revoked') {
     return <Redirect href="/revoked" />;
@@ -152,6 +162,28 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
   }
 
   return <>{children}</>;
+}
+
+/**
+ * Shown when the session could not be read because the device is locked.
+ * The restore re-runs by itself when the app becomes active; the button is
+ * for the case where it was already active (a Keystore hiccup on Android).
+ */
+function StorageLocked(): React.ReactElement {
+  const { retryRestore } = useAuth();
+  return (
+    <View className="flex-1 items-center justify-center gap-4 px-8">
+      <Spinner />
+      <Text accessibilityRole="header" className="text-center text-lg font-semibold text-foreground">
+        Unlock to continue
+      </Text>
+      <Text className="text-center text-sm leading-relaxed text-muted-foreground">
+        GeneratorAI keeps its sign-in in this device’s secure storage, which opens once the device is
+        unlocked.
+      </Text>
+      <Button label="Try again" variant="ghost" size="sm" onPress={retryRestore} />
+    </View>
+  );
 }
 
 /**
@@ -185,12 +217,14 @@ function ConnectionError({
           void reconnect();
         }}
       />
-      <Button
-        label="Pair with a different host"
-        variant="ghost"
-        size="sm"
-        onPress={() => router.replace('/pair')}
-      />
+      <View className="self-center">
+        <Button
+          label="Pair with a different host"
+          variant="ghost"
+          size="sm"
+          onPress={() => router.replace('/pair')}
+        />
+      </View>
     </View>
   );
 }
@@ -208,6 +242,25 @@ function ConnectionError({
  */
 function RootStack(): React.ReactElement {
   const { colors } = useTheme();
+  const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
+
+  // Hardware/gesture back on a screen with no history (notification tap, deep
+  // link) returns to its parent instead of closing the app. Registered ONCE,
+  // before any screen mounts, so screens with their own handler (the chat
+  // returning to its Chat pane) always run first. BackHandler never fires on
+  // iOS.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (router.canGoBack()) return false;
+      const fallback = backFallbackFor(pathnameRef.current);
+      if (!fallback) return false;
+      router.replace(fallback as Parameters<typeof router.replace>[0]);
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 
   /**
    * An explicit back button for every pushed screen.
@@ -229,6 +282,9 @@ function RootStack(): React.ReactElement {
   return (
     <Stack
       screenOptions={{
+        // JS header: the native Android one double-pays the status-bar inset
+        // (see StackHeader). Same component on every platform.
+        header: (props) => <StackHeader {...(props as unknown as StackHeaderProps)} />,
         headerStyle: { backgroundColor: colors.background },
         headerTintColor: colors.foreground,
         headerShadowVisible: false,
@@ -259,8 +315,24 @@ function RootStack(): React.ReactElement {
         options={{ title: 'Run', headerLeft: headerBack('/(tabs)/runs') }}
       />
       <Stack.Screen
+        name="runs/[id]/stages/[stageRunId]"
+        options={({ route }) => {
+          const runId = (route.params as { id?: unknown } | undefined)?.id;
+          return {
+            title: 'Stage',
+            headerLeft: headerBack(
+              (typeof runId === 'string' && runId ? `/runs/${encodeURIComponent(runId)}` : '/(tabs)/runs') as Parameters<typeof goBack>[0],
+            ),
+          };
+        }}
+      />
+      <Stack.Screen
         name="workflows/[id]"
         options={{ title: 'Workflow', headerLeft: headerBack('/(tabs)/runs') }}
+      />
+      <Stack.Screen
+        name="scripts/[id]"
+        options={{ title: 'Script', headerLeft: headerBack('/(tabs)/runs') }}
       />
       <Stack.Screen
         name="projects/[id]"
@@ -268,11 +340,34 @@ function RootStack(): React.ReactElement {
       />
       <Stack.Screen
         name="projects/[id]/pull-requests"
-        options={{ title: 'Pull requests' }}
+        // A cold deep link here had no history, so no back button at all.
+        options={({ route }) => ({
+          title: 'Pull requests',
+          headerLeft: headerBack(projectFallback(route.params)),
+        })}
+      />
+      <Stack.Screen
+        name="projects/[id]/codebases/[cid]"
+        options={({ route }) => ({
+          title: 'Codebase',
+          headerLeft: headerBack(projectFallback(route.params)),
+        })}
+      />
+      {/* Read-only file browser under a codebase; a cold deep link backs out to the codebase. */}
+      <Stack.Screen
+        name="projects/[id]/codebases/[cid]/files"
+        options={({ route }) => ({ title: 'Files', headerLeft: headerBack(codebaseFallback(route.params)) })}
+      />
+      <Stack.Screen
+        name="projects/[id]/codebases/[cid]/file"
+        options={({ route }) => ({ title: 'File', headerLeft: headerBack(codebaseFallback(route.params)) })}
       />
       <Stack.Screen
         name="projects/[id]/codebases/[cid]/pull-requests/[number]"
-        options={{ title: 'Pull request' }}
+        options={({ route }) => ({
+          title: 'Pull request',
+          headerLeft: headerBack(projectFallback(route.params, 'pull-requests')),
+        })}
       />
       <Stack.Screen
         name="automations/[id]"
@@ -304,6 +399,9 @@ function RootStack(): React.ReactElement {
       <Stack.Screen name="settings/about" options={{ headerShown: false }} />
       <Stack.Screen name="settings/security" options={{ headerShown: false }} />
       <Stack.Screen name="settings/accessibility" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/extensions" options={{ headerShown: false }} />
+      {/* Global search draws its own back button beside the field. */}
+      <Stack.Screen name="search" options={{ headerShown: false }} />
 
       {/* ── Route-addressable sheets (plan §6.2) ──────────────────────
           These are exactly the routes push notifications carry:
@@ -321,6 +419,20 @@ function RootStack(): React.ReactElement {
       <Stack.Screen name="scope-request" options={sheetOptions} />
     </Stack>
   );
+}
+
+/** The project (or its PR list) a PR screen falls back to when there is no history. */
+function codebaseFallback(params: unknown): Parameters<typeof goBack>[0] {
+  const { id, cid } = (params as { id?: unknown; cid?: unknown } | undefined) ?? {};
+  if (typeof id !== 'string' || !id || typeof cid !== 'string' || !cid) return projectFallback(params);
+  return `/projects/${encodeURIComponent(id)}/codebases/${encodeURIComponent(cid)}` as Parameters<typeof goBack>[0];
+}
+
+function projectFallback(params: unknown, child?: 'pull-requests'): Parameters<typeof goBack>[0] {
+  const id = (params as { id?: unknown } | undefined)?.id;
+  if (typeof id !== 'string' || id.length === 0) return '/(tabs)/projects';
+  const base = `/projects/${encodeURIComponent(id)}`;
+  return (child ? `${base}/${child}` : base) as Parameters<typeof goBack>[0];
 }
 
 /**

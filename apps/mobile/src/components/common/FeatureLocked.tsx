@@ -37,7 +37,7 @@ export function FeatureLocked({
 
       {check.grantable ? (
         <View className="rounded-lg border border-border bg-card p-3">
-          <Text className="text-center text-xs text-muted-foreground">
+          <Text className="text-center text-sm text-muted-foreground">
             To enable it, open Settings → Security on your desktop, find this device, and grant
             the permission there.
           </Text>

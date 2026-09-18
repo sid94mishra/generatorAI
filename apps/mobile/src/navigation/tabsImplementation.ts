@@ -112,3 +112,41 @@ export function withAlpha(color: string, alpha: number): string {
   const a = Math.min(1, Math.max(0, alpha));
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
+
+// ── Content insets inside the tab shell ─────────────────────────
+
+/** HIG / M3 FAB diameter. */
+export const FAB_SIZE = 56;
+/** Gap between the FAB and whatever it floats above. */
+export const FAB_MARGIN = 16;
+
+export interface TabContentInsets {
+  /**
+   * How much of a tab scene the bar covers. The iOS bar is absolutely
+   * positioned so content scrolls under its translucent tint; every other
+   * platform lays the scene out ABOVE the bar, so nothing is covered.
+   */
+  barOverlap: number;
+  /** `bottom` for a FAB in a tab scene. */
+  fabBottom: number;
+  /** Bottom padding a list needs so its last row clears the bar (and the FAB). */
+  listBottom: (hasFab: boolean) => number;
+}
+
+/**
+ * Where floating chrome and list ends sit inside a tab scene.
+ *
+ * This replaced a hard-coded `Fab offset={64}` plus per-screen
+ * `paddingBottom: 140/160`, which was right for no platform: on iOS the last
+ * rows scrolled under the FAB, on Android the FAB floated 64dp above a bar
+ * that the scene already ended at.
+ */
+export function tabContentInsets(platform: TabPlatform, metrics: Pick<TabBarMetrics, 'height'>): TabContentInsets {
+  const barOverlap = platform === 'ios' ? metrics.height : 0;
+  const fabBottom = barOverlap + FAB_MARGIN;
+  return {
+    barOverlap,
+    fabBottom,
+    listBottom: (hasFab) => (hasFab ? fabBottom + FAB_SIZE + FAB_MARGIN : barOverlap + FAB_MARGIN + 8),
+  };
+}

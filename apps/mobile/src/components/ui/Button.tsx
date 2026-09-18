@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Touchable, type HapticIntent } from './Touchable';
 import { MAX_SCALE, MIN_TARGET, useFontScale } from './accessibility';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useTabShell } from '../../navigation/tabShell';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 export type ButtonSize = 'sm' | 'md' | 'lg';
@@ -181,7 +182,10 @@ export function Fab({
   label,
   onPress,
   accessibilityLabel,
-  /** Clearance above the safe area — pass the tab bar height when inside one. */
+  /**
+   * Clearance above the safe area. Ignored inside the tab shell, where the
+   * shell knows the bar's real height (`useTabShell().fabBottom`).
+   */
   offset = 16,
 }: {
   icon: React.ReactNode;
@@ -192,12 +196,15 @@ export function Fab({
 }): React.ReactElement {
   const insets = useSafeAreaInsets();
   const fontScale = useFontScale();
+  const shell = useTabShell();
+  const bottom = shell ? shell.fabBottom : insets.bottom + offset;
 
   return (
-    <View className="absolute right-4" style={{ bottom: insets.bottom + offset }} pointerEvents="box-none">
+    <View className="absolute right-4" style={{ bottom }} pointerEvents="box-none">
       <Touchable
         accessibilityLabel={accessibilityLabel}
-        haptic="commit"
+        // Opening a creation sheet is navigation, not a decision.
+        haptic="tap"
         onPress={onPress}
         scale="default"
         className={`flex-row items-center justify-center gap-2 rounded-full bg-primary ${label ? 'px-5' : ''}`}

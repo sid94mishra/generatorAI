@@ -7,22 +7,21 @@
 // under.
 // ────────────────────────────────────────────────────────────────
 
-export type WorkSegment = 'workflows' | 'runs' | 'automations';
+export type WorkSegment = 'workflows' | 'runs' | 'automations' | 'scripts';
 
 /**
- * `scripts` was a fourth segment whose only content was "Scripts are
- * coming". Because the last-used segment is remembered, the Work tab could
- * OPEN on a permanent placeholder — a destination that can never have
- * content, sitting in primary navigation. It comes back when the listing
- * does; `resolveWorkSegment` already discards an unknown stored value, so a
- * phone left on `scripts` lands on Runs.
+ * `scripts` was once removed because its only content was "Scripts are
+ * coming" and a remembered segment could OPEN the tab on a placeholder. It
+ * is back now that it lists real scripts (`GET /workflow-scripts`) and each
+ * opens a detail screen that can run it. Last, because it is the least used.
  */
-export const WORK_SEGMENTS: readonly WorkSegment[] = ['workflows', 'runs', 'automations'];
+export const WORK_SEGMENTS: readonly WorkSegment[] = ['workflows', 'runs', 'automations', 'scripts'];
 
 export const WORK_SEGMENT_LABEL: Record<WorkSegment, string> = {
   workflows: 'Workflows',
   runs: 'Runs',
   automations: 'Automations',
+  scripts: 'Scripts',
 };
 
 /** The preference key the last-used segment is stored under. */

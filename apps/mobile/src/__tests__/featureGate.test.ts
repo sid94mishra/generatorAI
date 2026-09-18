@@ -5,7 +5,9 @@ import {
   FEATURE_REQUIREMENTS,
   checkFeature,
   grantableFeatures,
+  canRequestFeature,
   isFeatureAvailable,
+  isScopeRequestable,
   type MobileFeature,
 } from '../auth/featureGate';
 
@@ -18,10 +20,19 @@ describe('feature gate — default mobile device', () => {
     // quietly hand a phone the ability to run shell commands.
     expect(isFeatureAvailable('terminal', MOBILE)).toBe(false);
     expect(isFeatureAvailable('browser', MOBILE)).toBe(false);
+    expect(isFeatureAvailable('computer', MOBILE)).toBe(false);
   });
 
   it('withholds every write capability beyond chat and review', () => {
-    for (const feature of ['fileUpload', 'runControl', 'workflowEdit', 'projectEdit', 'deviceAdmin'] as const) {
+    for (const feature of [
+      'fileUpload',
+      'runControl',
+      'workflowEdit',
+      'projectEdit',
+      'codebaseLinkLocal',
+      'capabilityAdmin',
+      'deviceAdmin',
+    ] as const) {
       expect(isFeatureAvailable(feature, MOBILE), feature).toBe(false);
     }
   });
@@ -55,6 +66,14 @@ describe('feature gate — explanations', () => {
     expect(checkFeature('terminal', [...MOBILE, 'exec:terminal']).missing).toEqual([]);
   });
 
+  it('gates run control on BOTH scopes the run routes require', () => {
+    // `/workflow-runs` writes need write:workflows + exec:agent; a device with
+    // only the first would see Cancel/Retry buttons that 403.
+    expect(isFeatureAvailable('runControl', ['write:workflows'])).toBe(false);
+    expect(checkFeature('runControl', ['write:workflows']).missing).toEqual(['exec:agent']);
+    expect(isFeatureAvailable('runControl', [...MOBILE, 'write:workflows'])).toBe(true);
+  });
+
   it('explains that run control is separate from approving a gate', () => {
     // This is the distinction the route-policy fix encodes; if the UI does
     // not say it, a user assumes the approve button will also fail.
@@ -66,18 +85,71 @@ describe('feature gate — grantability', () => {
   it('marks host-filesystem features as NOT grantable', () => {
     // A phone cannot pick a path on the machine running the server, so no
     // permission would make this work. Offering to request it is a lie.
-    expect(checkFeature('projectEdit', MOBILE).grantable).toBe(false);
-    expect(grantableFeatures(MOBILE)).not.toContain('projectEdit');
+    expect(checkFeature('codebaseLinkLocal', MOBILE).grantable).toBe(false);
+    expect(grantableFeatures(MOBILE)).not.toContain('codebaseLinkLocal');
+  });
+
+  it('keeps local linking structural even once the scope is held', () => {
+    // The scope makes the server accept the call; it does not give the phone
+    // a way to browse host paths. The UI must still not offer a folder picker.
+    const withScope = [...MOBILE, 'write:projects'];
+    expect(checkFeature('codebaseLinkLocal', withScope).grantable).toBe(false);
+    expect(grantableFeatures(withScope)).not.toContain('codebaseLinkLocal');
+  });
+
+  it('makes project editing grantable through write:projects', () => {
+    expect(checkFeature('projectEdit', MOBILE)).toMatchObject({
+      available: false,
+      grantable: true,
+      missing: ['write:projects'],
+    });
+    expect(isFeatureAvailable('projectEdit', [...MOBILE, 'write:projects'])).toBe(true);
+  });
+
+  it('gates capability administration on admin:settings', () => {
+    expect(checkFeature('capabilityAdmin', MOBILE).missing).toEqual(['admin:settings']);
+    expect(isFeatureAvailable('capabilityAdmin', [...MOBILE, 'admin:settings'])).toBe(true);
   });
 
   it('lists exactly the features worth asking for', () => {
     expect(grantableFeatures(MOBILE).sort()).toEqual(
-      ['browser', 'deviceAdmin', 'fileUpload', 'runControl', 'terminal', 'workflowEdit'].sort(),
+      [
+        'browser',
+        'capabilityAdmin',
+        'computer',
+        'deviceAdmin',
+        'fileUpload',
+        'projectEdit',
+        'runControl',
+        'terminal',
+        'workflowEdit',
+      ].sort(),
     );
   });
 
   it('drops a feature from the list once granted', () => {
     expect(grantableFeatures([...MOBILE, 'exec:terminal'])).not.toContain('terminal');
+  });
+});
+
+describe('feature gate — requesting from the device', () => {
+  it('lets a device request exec:computer', () => {
+    expect(checkFeature('computer', MOBILE).missing).toEqual(['exec:computer']);
+    expect(canRequestFeature('computer', MOBILE)).toBe(true);
+    expect(isFeatureAvailable('computer', [...MOBILE, 'exec:computer'])).toBe(true);
+  });
+
+  it('mirrors the server: admin:* is only requestable by a device that already holds an admin scope', () => {
+    expect(isScopeRequestable('admin:settings', MOBILE)).toBe(false);
+    expect(isScopeRequestable('admin:settings', [...MOBILE, 'admin:devices'])).toBe(true);
+    expect(isScopeRequestable('write:projects', MOBILE)).toBe(true);
+    expect(canRequestFeature('capabilityAdmin', MOBILE)).toBe(false);
+    expect(canRequestFeature('capabilityAdmin', [...MOBILE, 'admin:devices'])).toBe(true);
+  });
+
+  it('never offers a request for a structural or already-available feature', () => {
+    expect(canRequestFeature('codebaseLinkLocal', MOBILE)).toBe(false);
+    expect(canRequestFeature('voice', MOBILE)).toBe(false);
   });
 });
 

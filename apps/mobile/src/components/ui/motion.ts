@@ -26,6 +26,7 @@ import { Easing, ReduceMotion, type WithSpringConfig, type WithTimingConfig } fr
 
 import { motion } from '../../theme/tokens.generated';
 import { usePreferences, type MotionPreference } from '../../prefs/preferences';
+import { useReduceMotion } from './accessibility';
 
 /** 0 / 120 / 180 / 220 ms — the four steps the plan specifies. */
 export const DURATION = {
@@ -184,10 +185,10 @@ export function presetsFor(policy: ReduceMotion, reduce: boolean): MotionPresets
 export function useReducedMotionPreset(): MotionPresets {
   const { motion: preference } = usePreferences();
   const policy = reduceMotionFor(preference);
-  // `reduce` under `system` mirrors the OS switch, which the worklet-level
-  // flag already tracks; here it only needs to be right for the components
-  // that branch in JS. Reading the OS value would add a listener per caller,
-  // so those components use `useReduceMotion()` directly instead.
-  const reduce = preference === 'reduced';
+  // ONE answer for "is motion reduced": the app preference when explicit,
+  // otherwise the OS switch (`useReduceMotion`). `reduce` used to mirror only
+  // the app preference, so a component branching on it in JS kept animating
+  // under the OS switch while every spring beside it had stopped.
+  const reduce = useReduceMotion();
   return useMemo(() => presetsFor(policy, reduce), [policy, reduce]);
 }

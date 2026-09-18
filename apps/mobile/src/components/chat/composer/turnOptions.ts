@@ -114,6 +114,45 @@ export function shortModelName(model: ModelInfo | undefined): string {
   return model.name.replace(/^(claude|gpt|gemini|openai|anthropic|google)[\s-]*/i, '').trim() || model.name;
 }
 
+/**
+ * The composer's turn chip, split for drawing: the short model name as the
+ * only TEXT, and each non-default setting as a flag the chip draws as a small
+ * glyph. The joined `turnChipLabel` still exists — it is the accessibility
+ * label, so a screen reader hears everything the glyphs stand for.
+ *
+ * Effort counts as "set" only when it differs from the model's own default:
+ * "Medium" on a medium-default model is not a choice anyone made.
+ */
+export interface TurnChipParts {
+  model: string;
+  plan: boolean;
+  /** `null` for the default ("Ask me"). */
+  permission: 'acceptEdits' | 'bypassPermissions' | null;
+  effortOverride: string | null;
+  longContext: boolean;
+}
+
+export function turnChipParts(input: {
+  model: ModelInfo | undefined;
+  mode: AgentMode;
+  effort: string | null;
+  permissionMode: string;
+  contextTier: ContextTier;
+}): TurnChipParts {
+  const permission =
+    input.permissionMode === 'acceptEdits' || input.permissionMode === 'bypassPermissions'
+      ? input.permissionMode
+      : null;
+  const modelDefault = input.model?.defaultReasoningEffort ?? null;
+  return {
+    model: shortModelName(input.model),
+    plan: input.mode === 'plan',
+    permission,
+    effortOverride: input.effort && input.effort !== modelDefault ? input.effort : null,
+    longContext: input.contextTier === 'long_context',
+  };
+}
+
 /** Short summary for the options chip: "High · Ask me". */
 export function optionsChipLabel(input: {
   effort: string | null;

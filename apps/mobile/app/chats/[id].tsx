@@ -2,16 +2,21 @@
 // Chat screen — the core loop.
 //
 // Layout (plan §6.4):
-//   header          title (tap → rename), transport badge, menu
-//   pane strip      Chat · Changes 3 · Terminal · Browser · Computer · ⋯
+//   header          title (tap → rename), transport badge, ONE "⋯" menu
+//                   (Workbench: Files · Plan · Tasks · Session info; Chat actions)
+//   pane strip      Chat · Changes 3 · Tasks 2 · Terminal · Browser
 //   ┌ Chat page ────────────────────────────────────────────────┐
-//   │ transcript      history + live rows, ONE row model, tail-aligned
-//   │ changes tray    "3 files changed +40 −12 · Review ›"
-//   │ decision cards  permission / question / plan, PINNED
+//   │ transcript      history + live rows, ONE row model, tail-aligned;
+//   │                 a settled turn's steps fold to "Worked · N steps"
+//   │ ─ dock ─────────────────────────────────────────────────── │
+//   │ changes strip   "3 files changed +40 −12 · Review ›"
+//   │ decision card   permission / question / plan, PINNED, height-capped
 //   │ composer        always reachable above the keyboard
 //   └───────────────────────────────────────────────────────────┘
-//   panes            Changes / Terminal / Browser / Computer, swipeable
-//   More sheet       Files · Plan · Tasks · Widgets · Inspector
+//   panes            Changes / Tasks / Terminal / Browser, swipeable
+//   Workbench sheet  Files · Plan · Tasks · Session
+//
+// Hardware back on another pane returns to the Chat pane first.
 //
 // The transcript is a LegendList with `alignItemsAtEnd` + `maintainScrollAtEnd`,
 // NOT an inverted FlatList: inversion breaks keyboard avoidance and layout
@@ -30,9 +35,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Share, Text, View } from 'react-native';
+import { BackHandler, Platform, Share, Text, View } from 'react-native';
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -43,17 +48,24 @@ import {
   ArchiveRestore,
   ArrowDown,
   Copy,
+  FolderTree,
+  Gauge,
   GitFork,
+  History,
+  ListTree,
   Pencil,
+  ScrollText,
   Share2,
   Square,
   Volume2,
+  WifiOff,
 } from 'lucide-react-native';
 import {
   ApiError,
   isArchived,
   queryKeys,
   type AgentMode,
+  messageTime,
   type ChatMessage,
   type ChatSummary,
   type RewindScope,
@@ -68,7 +80,7 @@ import {
   useRewindChat,
 } from '../../src/api/useChatBranching';
 import { useModels } from '../../src/api/useModels';
-import { useChatStream, type SseStatus } from '../../src/stream/useChatStream';
+import { useChatStream } from '../../src/stream/useChatStream';
 import { restoredPromptFrom, type ChatRewoundEffect } from '../../src/stream/rewindEffects';
 import { useTwoPhaseStop } from '../../src/stream/useTwoPhaseStop';
 import { protectStream, useStreamStore } from '../../src/stream/streamStore';
@@ -99,6 +111,9 @@ import {
 import { toPlanDecision } from '../../src/components/chat/gateActions';
 import { pendingGateFrom } from '../../src/components/chat/gateFromInteraction';
 import { ChatHeaderMenuButton, ChatHeaderTitle } from '../../src/components/chat/ChatHeader';
+import { ChatMenuSheet, type ChatMenuSection } from '../../src/components/chat/ChatMenuSheet';
+import { useChatMotion } from '../../src/components/chat/chatMotion';
+import { displayChatName } from '../../src/components/common/chatName';
 import { describeSessionTransport } from '../../src/components/chat/sessionTransport';
 import { TimelineRowView } from '../../src/components/chat/timeline/TimelineRow';
 import { UserMessageRow } from '../../src/components/chat/timeline/UserMessageRow';
@@ -113,20 +128,21 @@ import {
 } from '../../src/components/chat/timeline/mergeScmRows';
 import { useScmResults } from '../../src/components/scm/useScmResults';
 import { activityLabelFor, selectChatView } from '../../src/components/chat/timeline/selectChatView';
-import { SessionPanes } from '../../src/components/chat/panes/SessionPanes';
-import { routeSection, type PaneId } from '../../src/components/chat/panes/paneModel';
+import { SessionPanes, type ChangesFocus } from '../../src/components/chat/panes/SessionPanes';
+import { ComposerCaptureContext } from '../../src/components/chat/composer/captureContext';
+import { routeSection, type PaneDescriptor, type PaneId } from '../../src/components/chat/panes/paneModel';
+import { useTasksSummary } from '../../src/components/chat/panes/useTasksSummary';
 import { MoreSheet, type MoreSection } from '../../src/components/chat/panes/MoreSheet';
 import { ChangesTray } from '../../src/components/chat/panes/ChangesTray';
 import { useChangesSummary } from '../../src/components/chat/panes/useChangesSummary';
 import { AgentConsole } from '../../src/terminal';
 import { ImageLightbox, type LightboxImage } from '../../src/components/markdown/MarkdownImage';
 import { Button, IconButton } from '../../src/components/ui/Button';
-import { ActionSheet } from '../../src/components/ui/ActionSheet';
 import { Sheet } from '../../src/components/ui/Sheet';
-import { KeyboardSticky } from '../../src/components/ui/KeyboardSticky';
-import { useKeyboardShown } from '../../src/components/ui/keyboard';
+import { Skeleton } from '../../src/components/ui/Skeleton';
+import { useKeyboardHeight, useKeyboardShown } from '../../src/components/ui/keyboard';
 import { useToast } from '../../src/components/ui/Toast';
-import { EmptyState, ErrorState, LoadingState, Spinner } from '../../src/components/ui/States';
+import { ErrorState, Spinner } from '../../src/components/ui/States';
 import { Touchable } from '../../src/components/ui/Touchable';
 import { haptics } from '../../src/components/ui/haptics';
 import { useTheme } from '../../src/theme/ThemeProvider';
@@ -157,13 +173,31 @@ function blocksOf(message: ChatMessage): StreamBlock[] {
   return blocks;
 }
 
-function rowsOf(message: ChatMessage): TimelineRow[] {
+/** Milliseconds between two message timestamps, when both parse. */
+function elapsedMs(from: ChatMessage | null, to: ChatMessage): number | undefined {
+  if (!from) return undefined;
+  const a = messageTime(from);
+  const b = messageTime(to);
+  if (a == null || b == null) return undefined;
+  const ms = new Date(b).getTime() - new Date(a).getTime();
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+}
+
+/**
+ * A history message's rows. Settled, so its activity folds into one "Worked ·
+ * N steps · duration" row; the duration runs from the prompt that started the
+ * turn (stable for a given message, so the per-message cache still holds).
+ */
+function rowsOf(message: ChatMessage, prompt: ChatMessage | null): TimelineRow[] {
   let rows = historyRows.get(message);
   if (!rows) {
+    const durationMs = elapsedMs(prompt, message);
     rows = deriveTimeline(blocksOf(message), {
       active: false,
       idPrefix: `${message.id}:`,
       stopped: messageWasStopped(message),
+      collapseSettled: true,
+      ...(durationMs !== undefined ? { durationMs } : {}),
     });
     historyRows.set(message, rows);
   }
@@ -198,10 +232,17 @@ export default function ChatScreen(): React.ReactElement {
   const insets = useSafeAreaInsets();
   const keyboardShown = useKeyboardShown();
   const listRef = useRef<LegendListRef | null>(null);
+  const motion = useChatMotion();
+  const keyboard = useKeyboardHeight();
 
   const [pane, setPane] = useState<PaneId>('chat');
-  const [focusedFile, setFocusedFile] = useState<string | null>(null);
+  // A request to open one file in the Changes pane; the nonce re-asks for the same file.
+  const [changesFocus, setChangesFocus] = useState<ChangesFocus | null>(null);
   const [more, setMore] = useState<MoreSection | null>(null);
+  // The plan "Open plan" asked the Workbench to show.
+  const [morePlanId, setMorePlanId] = useState<string | null>(null);
+  // The panes the strip offers, so slash commands can route to them.
+  const panesRef = useRef<ReadonlyArray<PaneDescriptor>>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   // The user message a rewind is anchored on: its turn id, and its text so
@@ -209,7 +250,6 @@ export default function ChatScreen(): React.ReactElement {
   const [rewindTarget, setRewindTarget] = useState<{ turnId: string; prompt: string } | null>(null);
   const [consoleCallId, setConsoleCallId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<LightboxImage | null>(null);
-  const [, setConnection] = useState<SseStatus>({ state: 'idle' });
   const [atBottom, setAtBottom] = useState(true);
   const [limit, setLimit] = useState(PAGE_SIZE);
 
@@ -263,7 +303,6 @@ export default function ChatScreen(): React.ReactElement {
   useChatStream({
     chatId: chatId!,
     sessionId: chat.data?.sessionId,
-    onStatusChange: setConnection,
     onChatRewound,
   });
 
@@ -363,7 +402,8 @@ export default function ChatScreen(): React.ReactElement {
   // ── Header ───────────────────────────────────────────────────
   const streamConnection = useStreamHealth((s) => s.connection);
   const transport = describeSessionTransport(auth.transport, streamConnection);
-  const title = chat.data?.name ?? 'Chat';
+  // Worker chats carry the orchestrator's "⚙ " marker; it is stripped for display.
+  const title = displayChatName(chat.data?.name, 'Chat');
   // What this chat will touch, under its name. The project it is bound to is
   // otherwise only discoverable by opening the New-chat sheet's Project page
   // on a chat that already exists — which is to say, not at all.
@@ -688,7 +728,9 @@ export default function ChatScreen(): React.ReactElement {
     const liveTurnId = view.serverTurnId;
     const turnUserMessage = view.turnUserMessage?.trim();
 
+    let prompt: ChatMessage | null = null;
     for (const message of history) {
+      if (message.role === 'user') prompt = message;
       if (liveTurnId && message.metadata?.turnId === liveTurnId) continue;
       if (
         !liveTurnId &&
@@ -703,7 +745,7 @@ export default function ChatScreen(): React.ReactElement {
         continue;
       }
       const turnId = message.metadata?.turnId;
-      for (const row of rowsOf(message)) {
+      for (const row of rowsOf(message, prompt)) {
         historyOut.push({ kind: 'row', id: row.id, row, ...(turnId ? { turnId } : {}) });
       }
     }
@@ -799,8 +841,34 @@ export default function ChatScreen(): React.ReactElement {
   );
 
   const openInChanges = useCallback((path: string) => {
-    setFocusedFile(path);
+    setChangesFocus((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
     setPane('changes');
+  }, []);
+
+  // iOS edge swipe: on Changes / Terminal / Browser / Computer the left-edge
+  // swipe would pop the WHOLE chat rather than return to the Chat pane (the
+  // pager leaves that edge to the system). Android's back button already
+  // returns to Chat first (below); this gives iOS the same rule by only
+  // allowing the pop gesture from the Chat pane. The strip is the way back.
+  useEffect(() => {
+    navigation.setOptions({ gestureEnabled: pane === 'chat' });
+  }, [navigation, pane]);
+
+  // Hardware back on another pane returns to the Chat pane before it leaves
+  // the chat. (A Changes diff open inside its pane registers its own, newer,
+  // handler and closes first.)
+  useEffect(() => {
+    if (pane === 'chat') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setPane('chat');
+      return true;
+    });
+    return () => sub.remove();
+  }, [pane]);
+
+  const openWorkbench = useCallback((section: MoreSection) => {
+    if (section !== 'plan') setMorePlanId(null);
+    setMore(section);
   }, []);
 
   const timelineActions = useMemo<TimelineActions>(
@@ -885,11 +953,11 @@ export default function ChatScreen(): React.ReactElement {
   // `/browser`, `/terminal`, `/changes` switch the pane; `/files`, `/plan`,
   // `/tasks` open the More sheet. Same table the v1 slash menu used.
   const onOpenPane = useCallback((section: ComposerPane) => {
-    const target = routeSection(section);
+    const target = routeSection(section, panesRef.current);
     if (!target) return;
     if ('pane' in target) setPane(target.pane);
-    else setMore(target.more);
-  }, []);
+    else openWorkbench(target.more);
+  }, [openWorkbench]);
 
   const composer = useComposerController({
     chatId: chatId!,
@@ -903,6 +971,9 @@ export default function ChatScreen(): React.ReactElement {
     disabled: archived,
     onOpenPane,
     messages: messages.data,
+    // "Send to chat" from the Terminal / Browser pane: bring the composer
+    // forward so the new chip (or inserted text) is in view.
+    onCaptured: () => setPane('chat'),
   });
   // Written during render on purpose: the stream's rewind callback is
   // declared above the controller and must see the CURRENT one, not the one
@@ -943,7 +1014,10 @@ export default function ChatScreen(): React.ReactElement {
 
   const gate = useMemo(
     () =>
-      blocked && !archived
+      // The pinned gate card already says the agent is waiting. The banner's
+      // job is its "cancel and send" action, which only means something once
+      // the user has started typing a different instruction.
+      blocked && !archived && composer.draft.trim().length > 0
         ? {
             label: blockingPermission
               ? 'Waiting for your permission decision'
@@ -954,7 +1028,7 @@ export default function ChatScreen(): React.ReactElement {
             onCancelAndSend: () => void cancelGateAndSend(),
           }
         : null,
-    [blocked, archived, blockingPermission, blockingQuestion, gateBusy, cancelGateAndSend],
+    [blocked, archived, blockingPermission, blockingQuestion, gateBusy, cancelGateAndSend, composer.draft],
   );
 
   // The chat DTO's bound agent and mount readiness, when the server sends them.
@@ -983,11 +1057,51 @@ export default function ChatScreen(): React.ReactElement {
     [chatExtras?.workspacePrep, prepareWorkspace],
   );
 
-  const openPlan = useCallback(
-    (planId: string) => {
-      router.push({ pathname: '/chats/[id]/plan/[planId]', params: { id: chatId!, planId } });
-    },
-    [chatId],
+  // "Open plan" lands on the Workbench's Plan section — the full document
+  // with revisions, edits and comments — not the read-only route.
+  const openPlan = useCallback((planId: string) => {
+    setMorePlanId(planId);
+    setMore('plan');
+  }, []);
+
+  // A pinned card already says a decision is waiting; the transcript's own
+  // "Waiting for you" row would be the same message a second time.
+  const listRows = useMemo(
+    () => (blocked ? rows.filter((r) => !(r.kind === 'row' && r.row.kind === 'waiting')) : rows),
+    [rows, blocked],
+  );
+
+  // "N new" on the jump pill: rows that arrived since the reader scrolled up.
+  const seenCount = useRef(0);
+  if (atBottom) seenCount.current = listRows.length;
+  const unseen = atBottom ? 0 : Math.max(0, listRows.length - seenCount.current);
+
+  const tasksSummary = useTasksSummary(chatId!, { pollPaused: pane === 'tasks' });
+  const onPanesChange = useCallback((panes: ReadonlyArray<PaneDescriptor>) => {
+    panesRef.current = panes;
+  }, []);
+
+  // The newest user prompt the server has a turn id for: "Rewind" from the menu.
+  const lastPrompt = useMemo(() => {
+    const list = messages.data ?? [];
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const m = list[i]!;
+      if (m.role === 'user' && m.metadata?.turnId) return { turnId: m.metadata.turnId, prompt: m.content };
+    }
+    return null;
+  }, [messages.data]);
+
+  const streamTrouble = isStreaming && (streamConnection === 'reconnecting' || streamConnection === 'offline');
+
+  const dockStyle = useAnimatedStyle(
+    () => ({
+      // iOS: the keyboard height animates, and the home-indicator inset is
+      // folded into it rather than switched off first (which hopped 34pt).
+      // Android resizes the window, so the reported height stays 0 and the
+      // inset is simply dropped while the keyboard is up.
+      paddingBottom: keyboard.value > 0 ? Math.max(keyboard.value, insets.bottom) : keyboardShown ? 0 : insets.bottom,
+    }),
+    [keyboardShown, insets.bottom],
   );
 
   const renderRow = useCallback(
@@ -1010,7 +1124,7 @@ export default function ChatScreen(): React.ReactElement {
   // ── The chat page ────────────────────────────────────────────
   const renderChat = useCallback(
     (): React.ReactNode => (
-      <KeyboardSticky mode="padding" className="flex-1">
+      <Animated.View className="flex-1" style={dockStyle}>
         {forkedFromChatId ? (
           <Touchable
             testID="fork-provenance"
@@ -1019,10 +1133,10 @@ export default function ChatScreen(): React.ReactElement {
             scale="none"
             ripple={false}
             onPress={() => router.push({ pathname: '/chats/[id]', params: { id: forkedFromChatId } })}
-            className="flex-row items-center gap-1.5 bg-subtle px-4 py-1.5"
+            className="min-h-9 flex-row items-center gap-1.5 bg-subtle px-4 py-1.5"
           >
-            <GitFork size={12} color={colors['muted-foreground']} />
-            <Text numberOfLines={1} className="flex-1 text-xs text-muted-foreground">
+            <GitFork size={14} color={colors['muted-foreground']} />
+            <Text numberOfLines={1} className="flex-1 text-sm text-muted-foreground">
               {forkedFromLabel(parentChat.data?.name)}
             </Text>
           </Touchable>
@@ -1031,24 +1145,43 @@ export default function ChatScreen(): React.ReactElement {
         {archived ? (
           <View accessibilityLiveRegion="polite" className="flex-row items-center gap-2 bg-subtle px-4 py-2">
             <Archive size={14} color={colors['muted-foreground']} />
-            <Text className="flex-1 text-xs font-medium text-muted-foreground">
+            <Text className="flex-1 text-sm font-medium text-muted-foreground">
               This chat is archived. Unarchive it from the chat list to continue.
             </Text>
           </View>
         ) : null}
 
-        {rows.length === 0 ? (
-          <View className="flex-1 justify-center">
-            <EmptyState
-              title="Start the conversation"
-              message="Ask a question, or type / to open changes, files or the terminal."
-            />
-          </View>
+        {streamTrouble ? (
+          <Animated.View
+            entering={motion.fadeIn(160)}
+            exiting={motion.fadeOut(120)}
+            accessibilityLiveRegion="polite"
+            className="flex-row items-center gap-2 bg-warning-muted px-4 py-2"
+          >
+            <WifiOff size={14} color={colors.warning} />
+            <Text className="flex-1 text-sm text-foreground">
+              {streamConnection === 'offline'
+                ? 'Offline — the reply keeps running on your computer and appears when you reconnect.'
+                : 'Reconnecting — the reply will pick up where it left off.'}
+            </Text>
+          </Animated.View>
+        ) : null}
+
+        {messages.isLoading ? (
+          <TranscriptSkeleton />
+        ) : listRows.length === 0 ? (
+          <StarterPrompts
+            disabled={archived}
+            onPick={(text) => {
+              haptics.tap();
+              composer.props.onDraftChange(text);
+            }}
+          />
         ) : (
           <View className="flex-1">
             <LegendList
               ref={listRef}
-              data={rows}
+              data={listRows}
               keyExtractor={(row) => row.id}
               renderItem={renderRow}
               // Chat semantics without inverting the list.
@@ -1065,7 +1198,8 @@ export default function ChatScreen(): React.ReactElement {
               onScroll={(event) => {
                 const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
                 const distance = contentSize.height - contentOffset.y - layoutMeasurement.height;
-                setAtBottom(distance < 120);
+                const next = distance < 120;
+                setAtBottom((prev) => (prev === next ? prev : next));
               }}
               scrollEventThrottle={32}
               ListHeaderComponent={
@@ -1082,103 +1216,101 @@ export default function ChatScreen(): React.ReactElement {
                 ) : null
               }
               style={{ flex: 1 }}
-              contentContainerStyle={{ padding: 16, gap: 12 }}
+              contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, gap: 10 }}
             />
 
             {!atBottom ? (
-              <Animated.View entering={FadeIn.duration(140)} exiting={FadeOut.duration(120)} className="absolute bottom-3 self-center">
+              <Animated.View entering={motion.fadeIn(140)} exiting={motion.fadeOut(120)} className="absolute bottom-3 self-center">
                 <Touchable
-                  accessibilityLabel="Jump to latest"
+                  accessibilityLabel={unseen > 0 ? `Jump to latest, ${unseen} new` : 'Jump to latest'}
                   haptic="tap"
                   onPress={() => {
-                    listRef.current?.scrollToEnd({ animated: true });
+                    listRef.current?.scrollToEnd({ animated: !motion.reduce });
                     setAtBottom(true);
                   }}
-                  className="flex-row items-center gap-1.5 rounded-full border border-border bg-overlay px-3 py-2"
+                  className="min-h-11 flex-row items-center gap-1.5 rounded-full border border-border bg-overlay px-4 py-2"
                 >
-                  <ArrowDown size={14} color={colors.foreground} />
-                  <Text className="text-xs font-medium text-foreground">Latest</Text>
+                  <ArrowDown size={14} color={unseen > 0 ? colors.primary : colors.foreground} />
+                  <Text className={`text-sm font-medium ${unseen > 0 ? 'text-primary' : 'text-foreground'}`}>
+                    {unseen > 0 ? `${unseen} new` : 'Latest'}
+                  </Text>
                 </Touchable>
               </Animated.View>
             ) : null}
           </View>
         )}
 
-        <View style={{ paddingBottom: keyboardShown ? 0 : insets.bottom }}>
-          <ChangesTray
-            summary={changes.data}
-            onReview={() => setPane('changes')}
-            onOpenFile={openInChanges}
-          />
-
-          {blockingPermission ? (
-            <PermissionCard
-              block={blockingPermission}
-              onDecide={async (behavior, message) => {
-                await resolvePermission.mutateAsync({
-                  interactionId: blockingPermission.interactionId,
-                  behavior,
-                  ...(message ? { message } : {}),
-                });
-              }}
-            />
-          ) : blockingQuestion ? (
-            <QuestionCard
-              block={blockingQuestion}
-              onSubmit={async (answers, freeform) => {
-                await answerQuestion.mutateAsync({
-                  interactionId: blockingQuestion.interactionId,
-                  answers,
-                  ...(freeform ? { freeformResponse: freeform } : {}),
-                });
-              }}
-            />
-          ) : blockingPlan ? (
-            <PlanCard
-              plan={blockingPlan}
-              busy={decidePlan.isPending}
-              onOpenPlan={() => openPlan(blockingPlan.planId)}
-              onDecide={async (action, feedback) => {
-                await decidePlan.mutateAsync({
-                  planId: blockingPlan.planId,
-                  action,
-                  ...(feedback ? { feedback } : {}),
-                });
-              }}
-            />
-          ) : null}
-
-          <Composer
-            {...composer.props}
-            onStop={stop.press}
-            stopState={stop}
-            isStreaming={isStreaming}
-            // The server rejects a prompt with 409 while a gate is open, and
-            // an archived chat does not accept turns at all. With `gate` set
-            // the field stays editable so "Cancel and send" has a draft.
-            disabled={blocked || archived}
-            disabledReason={archived ? 'This chat is archived.' : blocked ? 'Answer above to continue.' : undefined}
-            gate={gate}
-            boundAgent={boundAgent}
-            workspacePrep={workspacePrep}
-            models={models.data}
-            modelsLoading={models.isLoading}
-            onRefreshModels={() => void models.refetch()}
-            selectedModelId={chat.data?.model ?? null}
-            onSelectModel={(id) => patchChat.mutate({ model: id })}
-            mode={mode}
-            onModeChange={(next) => patchChat.mutate({ defaultAgentMode: next })}
-            effort={effort}
-            onEffortChange={(next) => patchHarness({ reasoningEffort: next })}
-            contextTier={contextTier}
-            onContextTierChange={(next) => patchHarness({ contextTier: next })}
-            permissionMode={chat.data?.permissionMode ?? 'default'}
-            onPermissionModeChange={(next) => patchChat.mutate({ permissionMode: next })}
-            contextTokens={view.contextTokens}
-            codebaseCount={codebaseCount}
-          />
-        </View>
-      </KeyboardSticky>
+        <Composer
+          {...composer.props}
+          dock={
+            <>
+              <ChangesTray summary={changes.data} onReview={() => setPane('changes')} onOpenFile={openInChanges} />
+              {blockingPermission ? (
+                <PermissionCard
+                  block={blockingPermission}
+                  onDecide={async (behavior, message) => {
+                    await resolvePermission.mutateAsync({
+                      interactionId: blockingPermission.interactionId,
+                      behavior,
+                      ...(message ? { message } : {}),
+                    });
+                  }}
+                />
+              ) : blockingQuestion ? (
+                <QuestionCard
+                  block={blockingQuestion}
+                  onSubmit={async (answers, freeform) => {
+                    await answerQuestion.mutateAsync({
+                      interactionId: blockingQuestion.interactionId,
+                      answers,
+                      ...(freeform ? { freeformResponse: freeform } : {}),
+                    });
+                  }}
+                />
+              ) : blockingPlan ? (
+                <PlanCard
+                  plan={blockingPlan}
+                  busy={decidePlan.isPending}
+                  onOpenPlan={() => openPlan(blockingPlan.planId)}
+                  onDecide={async (action, feedback) => {
+                    await decidePlan.mutateAsync({
+                      planId: blockingPlan.planId,
+                      action,
+                      ...(feedback ? { feedback } : {}),
+                    });
+                  }}
+                />
+              ) : null}
+            </>
+          }
+          onStop={stop.press}
+          stopState={stop}
+          isStreaming={isStreaming}
+          // The server rejects a prompt with 409 while a gate is open, and
+          // an archived chat does not accept turns at all. With `gate` set
+          // the field stays editable so "Cancel and send" has a draft.
+          disabled={blocked || archived}
+          disabledReason={archived ? 'This chat is archived.' : blocked ? 'Answer above to continue.' : undefined}
+          gate={gate}
+          boundAgent={boundAgent}
+          workspacePrep={workspacePrep}
+          models={models.data}
+          modelsLoading={models.isLoading}
+          onRefreshModels={() => void models.refetch()}
+          selectedModelId={chat.data?.model ?? null}
+          onSelectModel={(id) => patchChat.mutate({ model: id })}
+          mode={mode}
+          onModeChange={(next) => patchChat.mutate({ defaultAgentMode: next })}
+          effort={effort}
+          onEffortChange={(next) => patchHarness({ reasoningEffort: next })}
+          contextTier={contextTier}
+          onContextTierChange={(next) => patchHarness({ contextTier: next })}
+          permissionMode={chat.data?.permissionMode ?? 'default'}
+          onPermissionModeChange={(next) => patchChat.mutate({ permissionMode: next })}
+          contextTokens={view.contextTokens}
+          codebaseCount={codebaseCount}
+        />
+      </Animated.View>
     ),
     // Everything the page reads. Re-created on every screen render anyway
     // (the pager calls it per render); the memo only keeps the reference
@@ -1186,8 +1318,8 @@ export default function ChatScreen(): React.ReactElement {
     // a fresh object per controller render, which is the intent: the field
     // must re-render on every keystroke.
     [
-      archived, rows, renderRow, hasMore, messages.isFetching, atBottom, keyboardShown, insets.bottom,
-      forkedFromChatId, parentChat.data?.name,
+      archived, listRows, renderRow, hasMore, messages.isFetching, messages.isLoading, atBottom, unseen, dockStyle,
+      forkedFromChatId, parentChat.data?.name, streamTrouble, streamConnection, motion,
       changes.data, openInChanges, blockingPermission, blockingQuestion, blockingPlan, decidePlan.isPending,
       openPlan, composer.props, gate, boundAgent, workspacePrep, stop,
       isStreaming, blocked, models.data, models.isLoading, chat.data, mode, effort, contextTier,
@@ -1195,7 +1327,91 @@ export default function ChatScreen(): React.ReactElement {
     ],
   );
 
-  if (messages.isLoading) return <LoadingState label="Loading conversation…" />;
+  const menuSections = useMemo<ChatMenuSection[]>(() => {
+    const icon = (Icon: typeof Pencil) => <Icon size={18} color={colors.foreground} />;
+    const hasMessages = (messages.data?.length ?? 0) > 0;
+    return [
+      {
+        title: 'Workbench',
+        items: [
+          { label: 'Files', icon: icon(FolderTree), onPress: () => openWorkbench('files') },
+          { label: 'Plan', icon: icon(ScrollText), onPress: () => openWorkbench('plan') },
+          {
+            label: 'Tasks',
+            icon: icon(ListTree),
+            ...(tasksSummary.running > 0
+              ? { trailing: `${tasksSummary.running} running` }
+              : tasksSummary.total > 0
+                ? { trailing: String(tasksSummary.total) }
+                : {}),
+            onPress: () => (panesRef.current.some((p) => p.id === 'tasks') ? setPane('tasks') : openWorkbench('tasks')),
+          },
+          { label: 'Session info', icon: icon(Gauge), onPress: () => openWorkbench('inspector') },
+        ],
+      },
+      {
+        title: 'Chat',
+        items: [
+          { label: 'Rename', icon: icon(Pencil), onPress: () => setRenameOpen(true) },
+          {
+            label: 'Rewind…',
+            detail: 'Go back to before your last message.',
+            icon: icon(History),
+            disabled: !lastPrompt || archived || isStreaming,
+            onPress: () => {
+              if (lastPrompt) setRewindTarget(lastPrompt);
+            },
+          },
+          {
+            label: 'Share transcript',
+            icon: icon(Share2),
+            disabled: !hasMessages,
+            onPress: () => {
+              const message = transcriptText(messages.data ?? [], title);
+              // react-native-web's `Share` rejects on every browser without
+              // the Web Share API; say so rather than surface a rejection.
+              if (Platform.OS === 'web' && typeof navigator?.share !== 'function') {
+                toast({ message: 'Sharing is not available in the browser preview.', tone: 'info' });
+                return;
+              }
+              void Share.share({ message }).catch(() => {
+                toast({ message: 'Could not open the share sheet.', tone: 'error' });
+              });
+            },
+          },
+          {
+            label: 'Copy transcript',
+            detail: 'The whole chat, as markdown.',
+            testID: 'copy-transcript',
+            icon: icon(Copy),
+            disabled: !hasMessages,
+            onPress: () => void runCopyTranscript(),
+          },
+          {
+            label: 'Fork chat',
+            // No turn id: the server forks from the LAST turn, which is
+            // what "fork this chat" means from a chat-level menu.
+            detail: 'A new chat that shares these files and this history.',
+            testID: 'fork-chat',
+            icon: icon(GitFork),
+            disabled: fork.isPending || archived || !hasMessages,
+            onPress: () => void runFork(),
+          },
+          {
+            // Not destructive: red is for Delete. Archiving is a filing
+            // action and it is undone from this very menu.
+            label: archived ? 'Move to active' : 'Archive',
+            icon: archived ? icon(ArchiveRestore) : icon(Archive),
+            disabled: archive.isPending,
+            onPress: () => archive.mutate(archived ? 'active' : 'archived'),
+          },
+        ],
+      },
+    ];
+  }, [
+    colors.foreground, messages.data, openWorkbench, tasksSummary, lastPrompt, archived, isStreaming,
+    title, toast, runCopyTranscript, fork.isPending, runFork, archive,
+  ]);
 
   if (messages.isError) {
     return (
@@ -1209,138 +1425,87 @@ export default function ChatScreen(): React.ReactElement {
 
   return (
     <TimelineActionsContext.Provider value={timelineActions}>
-      <View className="flex-1">
-        <SessionPanes
-          workspaceId={workspaceId}
-          scopes={scopes}
-          changesCount={changes.data?.stats.files ?? 0}
-          pane={pane}
-          onPaneChange={setPane}
-          focusedFile={focusedFile}
-          onOpenMore={() => setMore('files')}
-          renderChat={renderChat}
-        />
+      <ComposerCaptureContext.Provider value={composer.captures}>
+        <View className="flex-1">
+          <SessionPanes
+            workspaceId={workspaceId}
+            chatId={chatId!}
+            orchestrator={boundAgent?.role === 'orchestrator'}
+            tasksSummary={tasksSummary}
+            scopes={scopes}
+            changesCount={changes.data?.stats.files ?? 0}
+            pane={pane}
+            onPaneChange={setPane}
+            focus={changesFocus}
+            renderChat={renderChat}
+            onPanesChange={onPanesChange}
+            agentBusy={isStreaming}
+          />
 
-        <MoreSheet
-          visible={more !== null}
-          onClose={() => setMore(null)}
-          section={more ?? 'files'}
-          onSectionChange={setMore}
-          chatId={chatId!}
-          workspaceId={workspaceId}
-          chat={chat.data}
-          usage={view.usage}
-          contextTokens={view.contextTokens}
-          transportLabel={`${transport.label} · ${transport.detail}`}
-          streamKey={streamKey}
-        />
+          <MoreSheet
+            visible={more !== null}
+            onClose={() => setMore(null)}
+            section={more ?? 'files'}
+            onSectionChange={setMore}
+            chatId={chatId!}
+            workspaceId={workspaceId}
+            chat={chat.data}
+            usage={view.usage}
+            contextTokens={view.contextTokens}
+            transportLabel={`${transport.label} · ${transport.detail}`}
+            streamKey={streamKey}
+            planId={morePlanId}
+          />
 
-        <Sheet
-          visible={consoleCallId !== null}
-          onClose={() => setConsoleCallId(null)}
-          title="Agent console"
-          detents={[0.6, 0.92]}
-          initialDetent={1}
-          scrollable={false}
-        >
-          <View className="flex-1">
-            {consoleCallId !== null ? (
-              <AgentConsole
-                blocks={consoleBlocks}
-                selectedId={consoleCallId}
-                {...(workspaceId ? { workspaceId } : {})}
-              />
-            ) : null}
-          </View>
-        </Sheet>
+          <Sheet
+            visible={consoleCallId !== null}
+            onClose={() => setConsoleCallId(null)}
+            title="Agent console"
+            detents={[0.6, 0.92]}
+            initialDetent={1}
+            scrollable={false}
+          >
+            <View className="flex-1">
+              {consoleCallId !== null ? (
+                <AgentConsole
+                  blocks={consoleBlocks}
+                  selectedId={consoleCallId}
+                  {...(workspaceId ? { workspaceId } : {})}
+                />
+              ) : null}
+            </View>
+          </Sheet>
 
-        <ImageLightbox image={lightbox} onClose={() => setLightbox(null)} />
+          <ImageLightbox image={lightbox} onClose={() => setLightbox(null)} />
 
-        <RewindSheet
-          visible={rewindTarget !== null}
-          onClose={() => setRewindTarget(null)}
-          onChoose={(scope) => void runRewind(scope)}
-          busy={rewind.isPending}
-          preview={rewindTarget?.prompt ?? null}
-          availability={{
-            streaming: isStreaming,
-            archived,
-            missingTurn: rewindTarget === null,
-          }}
-        />
+          <RewindSheet
+            visible={rewindTarget !== null}
+            onClose={() => setRewindTarget(null)}
+            onChoose={(scope) => void runRewind(scope)}
+            busy={rewind.isPending}
+            preview={rewindTarget?.prompt ?? null}
+            availability={{
+              streaming: isStreaming,
+              archived,
+              missingTurn: rewindTarget === null,
+            }}
+          />
 
-        <RenameSheet
-          visible={renameOpen}
-          title="Rename chat"
-          initialValue={chat.data?.name ?? ''}
-          busy={patchChat.isPending}
-          onClose={() => setRenameOpen(false)}
-          onSubmit={(name) => {
-            setRenameOpen(false);
-            patchChat.mutate({ name } as ChatPatch);
-          }}
-        />
+          <RenameSheet
+            visible={renameOpen}
+            title="Rename chat"
+            initialValue={chat.data?.name ?? ''}
+            busy={patchChat.isPending}
+            onClose={() => setRenameOpen(false)}
+            onSubmit={(name) => {
+              setRenameOpen(false);
+              patchChat.mutate({ name } as ChatPatch);
+            }}
+          />
 
-        <ActionSheet
-          visible={menuOpen}
-          onClose={() => setMenuOpen(false)}
-          title={title}
-          actions={[
-            {
-              label: 'Rename',
-              icon: <Pencil size={18} color={colors.foreground} />,
-              onPress: () => setRenameOpen(true),
-            },
-            {
-              label: 'Share transcript',
-              icon: <Share2 size={18} color={colors.foreground} />,
-              disabled: (messages.data?.length ?? 0) === 0,
-              onPress: () => {
-                const message = transcriptText(messages.data ?? [], title);
-                // react-native-web's `Share` rejects on every browser without
-                // the Web Share API; say so rather than surface a rejection.
-                if (Platform.OS === 'web' && typeof navigator?.share !== 'function') {
-                  toast({ message: 'Sharing is not available in the browser preview.', tone: 'info' });
-                  return;
-                }
-                void Share.share({ message }).catch(() => {
-                  toast({ message: 'Could not open the share sheet.', tone: 'error' });
-                });
-              },
-            },
-            {
-              label: 'Copy transcript',
-              detail: 'The whole chat, as markdown.',
-              testID: 'copy-transcript',
-              icon: <Copy size={18} color={colors.foreground} />,
-              disabled: (messages.data?.length ?? 0) === 0,
-              onPress: () => void runCopyTranscript(),
-            },
-            {
-              label: 'Fork chat',
-              // No turn id: the server forks from the LAST turn, which is
-              // what "fork this chat" means from a chat-level menu.
-              detail: 'A new chat that shares these files and this history.',
-              testID: 'fork-chat',
-              icon: <GitFork size={18} color={colors.foreground} />,
-              disabled: fork.isPending || archived || (messages.data?.length ?? 0) === 0,
-              onPress: () => void runFork(),
-            },
-            {
-              // Not destructive: red is for Delete. Archiving is a filing
-              // action and it is undone from this very menu.
-              label: archived ? 'Move to active' : 'Archive',
-              icon: archived ? (
-                <ArchiveRestore size={18} color={colors.foreground} />
-              ) : (
-                <Archive size={18} color={colors.foreground} />
-              ),
-              disabled: archive.isPending,
-              onPress: () => archive.mutate(archived ? 'active' : 'archived'),
-            },
-          ]}
-        />
-      </View>
+          <ChatMenuSheet visible={menuOpen} onClose={() => setMenuOpen(false)} title={title} sections={menuSections} />
+        </View>
+      </ComposerCaptureContext.Provider>
     </TimelineActionsContext.Provider>
   );
 }
@@ -1360,10 +1525,11 @@ function ActivityRow({
   onSpeakLive?: (() => void) | undefined;
 }): React.ReactElement {
   const { colors } = useTheme();
+  const motion = useChatMotion();
   return (
     <Animated.View
-      entering={FadeIn.duration(160)}
-      exiting={FadeOut.duration(120)}
+      entering={motion.fadeIn(160)}
+      exiting={motion.fadeOut(120)}
       accessibilityLiveRegion="polite"
       accessibilityLabel={label}
       className="flex-row items-center gap-2.5 py-0.5"
@@ -1386,5 +1552,60 @@ function ActivityRow({
         />
       ) : null}
     </Animated.View>
+  );
+}
+
+/** Shaped like a transcript — a prompt bubble, a reply, two step lines — while it loads. */
+function TranscriptSkeleton(): React.ReactElement {
+  return (
+    <View accessibilityLabel="Loading conversation" className="flex-1 justify-end gap-4 px-4 pb-4">
+      <View className="items-end">
+        <Skeleton width="62%" height={44} radius={20} />
+      </View>
+      <View className="gap-2">
+        <Skeleton width="40%" height={14} />
+        <Skeleton width="48%" height={14} />
+      </View>
+      <View className="gap-2">
+        <Skeleton width="92%" height={13} />
+        <Skeleton width="85%" height={13} />
+        <Skeleton width="60%" height={13} />
+      </View>
+    </View>
+  );
+}
+
+const STARTERS = [
+  'Explain how this project is structured',
+  'Find and fix a failing test',
+  'Review my uncommitted changes',
+] as const;
+
+/**
+ * The empty chat: one line and three starter prompts. Tapping one fills the
+ * composer rather than sending it — a starter is a draft to edit.
+ */
+function StarterPrompts({ onPick, disabled }: { onPick: (text: string) => void; disabled: boolean }): React.ReactElement {
+  return (
+    <View className="flex-1 justify-end gap-3 px-4 pb-4">
+      <Text accessibilityRole="header" className="text-lg font-semibold text-foreground">
+        What should the agent do?
+      </Text>
+      <Text className="text-sm text-muted-foreground">Type a request, / for actions, @ to mention a file.</Text>
+      <View className="gap-2 pt-1">
+        {STARTERS.map((text) => (
+          <Touchable
+            key={text}
+            accessibilityLabel={`Start with: ${text}`}
+            disabled={disabled}
+            haptic="none"
+            onPress={() => onPick(text)}
+            className="min-h-11 flex-row items-center gap-2 self-start rounded-2xl border border-border bg-raised px-4 py-2.5"
+          >
+            <Text className="text-sm text-foreground">{text}</Text>
+          </Touchable>
+        ))}
+      </View>
+    </View>
   );
 }

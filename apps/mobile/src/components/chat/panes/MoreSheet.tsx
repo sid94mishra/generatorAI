@@ -1,48 +1,48 @@
 // ────────────────────────────────────────────────────────────────
-// MoreSheet — Files · Plan · Tasks · Widgets · Inspector.
+// MoreSheet — the Workbench: Files · Plan · Tasks · Session info.
 //
 // What is left of the old single Workbench sheet once the heavy surfaces
 // became pages (`SessionPanes`). These are reference views — glanced at
 // while reading the transcript — so a detented sheet that leaves the chat
-// visible underneath is still the right container for them.
+// visible underneath is still the right container for them. It is opened
+// from the header's one "⋯" menu, so it is reachable on a chat that has no
+// workspace (and so no pane strip) too.
+//
+// Widgets are not offered: the placeholder could only say "open this on
+// desktop", and a destination that can never have content teaches people to
+// skip the navigation (the rule `paneModel` applies to Computer). The inline
+// widget row in the transcript still explains the limitation where it arises.
 //
 // Files pushes its detail INSIDE the sheet so dismissing always returns to
 // the chat with the transcript exactly where it was.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { ChevronLeft, FolderTree, Gauge, LayoutGrid, ListTree, ScrollText } from 'lucide-react-native';
+import { View } from 'react-native';
+import { ChevronLeft } from 'lucide-react-native';
 import type { ChatSummary, StreamUsage } from '@generatorai/client-core';
 
 import { Sheet } from '../../ui/Sheet';
 import { IconButton } from '../../ui/Button';
-import { Touchable } from '../../ui/Touchable';
+import { SegmentedControl, type Segment } from '../../ui/SegmentedControl';
 import { EmptyState } from '../../ui/States';
-import { MAX_SCALE } from '../../ui/accessibility';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { FilesSection } from '../workbench/FilesSection';
 import { PlanSection } from '../workbench/PlanSection';
 import { TasksSection } from '../workbench/TasksSection';
 import { InspectorSection } from './InspectorSection';
 
-export type MoreSection = 'files' | 'plan' | 'tasks' | 'widgets' | 'inspector';
+export type MoreSection = 'files' | 'plan' | 'tasks' | 'inspector';
 
 type WithActive<P> = React.ComponentType<P & { active?: boolean }>;
 const FilesPane = FilesSection as WithActive<React.ComponentProps<typeof FilesSection>>;
-const PlanPane = PlanSection as WithActive<React.ComponentProps<typeof PlanSection>>;
 const TasksPane = TasksSection as WithActive<React.ComponentProps<typeof TasksSection>>;
 
-const SECTIONS: Array<{
-  id: MoreSection;
-  label: string;
-  Icon: React.ComponentType<{ size?: number; color?: string }>;
-}> = [
-  { id: 'files', label: 'Files', Icon: FolderTree },
-  { id: 'plan', label: 'Plan', Icon: ScrollText },
-  { id: 'tasks', label: 'Tasks', Icon: ListTree },
-  { id: 'widgets', label: 'Widgets', Icon: LayoutGrid },
-  { id: 'inspector', label: 'Inspector', Icon: Gauge },
+export const WORKBENCH_SECTIONS: ReadonlyArray<Segment<MoreSection>> = [
+  { value: 'files', label: 'Files' },
+  { value: 'plan', label: 'Plan' },
+  { value: 'tasks', label: 'Tasks' },
+  { value: 'inspector', label: 'Session' },
 ];
 
 export function MoreSheet({
@@ -57,6 +57,7 @@ export function MoreSheet({
   contextTokens,
   transportLabel,
   streamKey,
+  planId = null,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -69,14 +70,16 @@ export function MoreSheet({
   contextTokens: number | null;
   transportLabel: string;
   streamKey: string;
+  /** The plan the Plan section opens on (from a plan card's "Open plan"). */
+  planId?: string | null;
 }): React.ReactElement {
   const { colors } = useTheme();
   const [detail, setDetail] = useState<{ path: string; alias?: string } | null>(null);
 
-  const title = useMemo(() => {
-    if (detail) return detail.path.slice(detail.path.lastIndexOf('/') + 1);
-    return SECTIONS.find((s) => s.id === section)?.label ?? 'More';
-  }, [detail, section]);
+  const title = useMemo(
+    () => (detail ? detail.path.slice(detail.path.lastIndexOf('/') + 1) : 'Workbench'),
+    [detail],
+  );
 
   const body = ((): React.ReactElement => {
     switch (section) {
@@ -92,17 +95,10 @@ export function MoreSheet({
           <EmptyState title="No workspace yet" message="A workspace is created the first time the agent runs in this chat." />
         );
       case 'plan':
-        return <PlanPane chatId={chatId} active={visible} />;
+        // Keyed on the requested plan so "Open plan" on a newer card lands on it.
+        return <PlanSection key={planId ?? 'latest'} chatId={chatId} active={visible} initialPlanId={planId} />;
       case 'tasks':
         return <TasksPane chatId={chatId} active={visible} />;
-      case 'widgets':
-        return (
-          <EmptyState
-            icon={<LayoutGrid size={22} color={colors['muted-foreground']} />}
-            title="Widgets"
-            message="Interactive widgets run in a sandboxed frame this app cannot host yet. Open the chat on desktop or web to use them."
-          />
-        );
       case 'inspector':
         return (
           <InspectorSection
@@ -140,41 +136,16 @@ export function MoreSheet({
       }
     >
       {detail ? null : (
-        <View className="border-b border-border-muted">
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ flexGrow: 0, flexShrink: 0 }}
-            contentContainerStyle={{ gap: 6, paddingHorizontal: 12, paddingBottom: 8, alignItems: 'center' }}
-          >
-            {SECTIONS.map(({ id, label, Icon }) => {
-              const selected = id === section;
-              return (
-                <Touchable
-                  key={id}
-                  accessibilityLabel={label}
-                  a11yRole="tab"
-                  accessibilityState={{ selected }}
-                  haptic="select"
-                  onPress={() => {
-                    setDetail(null);
-                    onSectionChange(id);
-                  }}
-                  className={`h-9 flex-row items-center gap-1.5 rounded-full border px-3 ${
-                    selected ? 'border-primary bg-accent' : 'border-border bg-raised'
-                  }`}
-                >
-                  <Icon size={13} color={selected ? colors.primary : colors['muted-foreground']} />
-                  <Text
-                    maxFontSizeMultiplier={MAX_SCALE.chrome}
-                    className={`text-sm font-medium ${selected ? 'text-primary' : 'text-muted-foreground'}`}
-                  >
-                    {label}
-                  </Text>
-                </Touchable>
-              );
-            })}
-          </ScrollView>
+        <View className="border-b border-border-muted px-4 pb-3">
+          <SegmentedControl
+            segments={WORKBENCH_SECTIONS}
+            value={section}
+            onChange={(next) => {
+              setDetail(null);
+              onSectionChange(next);
+            }}
+            accessibilityLabel="Workbench sections"
+          />
         </View>
       )}
       <View className="flex-1">{body}</View>

@@ -5,18 +5,19 @@
 // model that writes commit messages and PR text, and the fallback base
 // branch.
 //
-// Connecting an account is deliberately absent. A personal access token
-// typed on a phone is a credential entered on the least trusted device in
-// the chain, and it would be stored on the host machine anyway — so this
-// screen reads the registry and can change which account is DEFAULT or
-// disconnect one (neither reveals or accepts a secret), and says where to
-// go to add one.
+// Connecting uses GitHub's device-code flow (`ConnectGitHubSheet`): the
+// phone shows a short code, the person approves it on github.com and the
+// SERVER stores the token, so no credential is ever typed on or held by the
+// phone. Pasting a personal access token stays off the phone for exactly
+// that reason. When the server has no OAuth client id the connect row says
+// so instead of offering a flow that cannot start. The screen can also
+// change which account is DEFAULT or disconnect one.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Github, GitBranch, Info, Sparkles, Star, Trash2 } from 'lucide-react-native';
+import { Github, GitBranch, Info, Plus, Sparkles, Star, Trash2 } from 'lucide-react-native';
 import type { SourceControlAccount } from '@generatorai/shared';
 
 import { Badge, SectionHeader } from '../../src/components/ui/primitives';
@@ -27,6 +28,10 @@ import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { Screen } from '../../src/components/ui/Screen';
 import { useToast } from '../../src/components/ui/Toast';
 import { scmKeys } from '../../src/components/scm/api';
+import { ConnectGitHubSheet } from '../../src/components/scm/ConnectGitHubSheet';
+import { deviceConnectAvailability } from '../../src/components/scm/deviceLogin';
+import { useFeature } from '../../src/components/runs/useFeature';
+import { Button } from '../../src/components/ui/Button';
 import { useScmApi } from '../../src/components/scm/useScmApi';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
@@ -37,6 +42,8 @@ export default function SourceControlScreen(): React.ReactElement {
   const { colors } = useTheme();
   const [menuFor, setMenuFor] = useState<SourceControlAccount | null>(null);
   const [confirmFor, setConfirmFor] = useState<SourceControlAccount | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const projectEdit = useFeature('projectEdit');
 
   const settings = useQuery({
     queryKey: scmKeys.settings(),
@@ -68,6 +75,7 @@ export default function SourceControlScreen(): React.ReactElement {
   const data = settings.data?.settings;
   const accounts = data?.accounts ?? [];
   const generation = data?.generation;
+  const connect = deviceConnectAvailability(settings.data?.providers, projectEdit.scopes);
 
   return (
     <Screen
@@ -85,12 +93,32 @@ export default function SourceControlScreen(): React.ReactElement {
         />
       ) : (
         <>
-          <SectionHeader title={`Accounts (${accounts.length})`} />
+          <SectionHeader
+            title={`Accounts (${accounts.length})`}
+            {...(connect.kind === 'available'
+              ? {
+                  action: (
+                    <Button
+                      label="Connect"
+                      variant="ghost"
+                      size="sm"
+                      haptic="tap"
+                      icon={<Plus size={16} color={colors.primary} />}
+                      onPress={() => setConnecting(true)}
+                      accessibilityLabel="Connect GitHub"
+                    />
+                  ),
+                }
+              : {})}
+          />
           {accounts.length === 0 ? (
             <EmptyState
               title="No account connected"
-              message="Connect GitHub from the desktop or web app. Pull requests and pushes need one."
+              message="Pull requests and pushes need a GitHub account."
               icon={<Github size={24} color={colors['muted-foreground']} />}
+              {...(connect.kind === 'available'
+                ? { action: { label: 'Connect GitHub', onPress: () => setConnecting(true) } }
+                : {})}
             />
           ) : (
             <ListGroup>
@@ -131,16 +159,38 @@ export default function SourceControlScreen(): React.ReactElement {
             />
           </ListGroup>
 
-          <View className="mt-3 flex-row gap-2.5 rounded-3xl border border-border bg-subtle p-3.5">
-            <Info size={16} color={colors['muted-foreground']} />
-            <Text className="flex-1 text-xs leading-relaxed text-muted-foreground">
-              Connecting an account means entering a token or signing in, which belongs on the
-              machine running GeneratorAI rather than on a phone. This screen can pick the default
-              account and disconnect one; add accounts from the desktop or web app.
-            </Text>
-          </View>
+          {connect.kind === 'missing-scope' || connect.kind === 'not-configured' ? (
+            <View className="mt-3 gap-2 rounded-3xl border border-border bg-subtle p-3.5">
+              <View className="flex-row gap-2.5">
+                <Info size={16} color={colors['muted-foreground']} />
+                <Text className="flex-1 text-sm leading-relaxed text-muted-foreground">{connect.reason}</Text>
+              </View>
+              {connect.kind === 'missing-scope' && projectEdit.grantable ? (
+                <View className="self-start pl-6">
+                  <Button
+                    label="Request access"
+                    variant="ghost"
+                    size="sm"
+                    haptic="tap"
+                    onPress={projectEdit.requestAccess}
+                  />
+                </View>
+              ) : null}
+            </View>
+          ) : (
+            <View className="mt-3 flex-row gap-2.5 rounded-3xl border border-border bg-subtle p-3.5">
+              <Info size={16} color={colors['muted-foreground']} />
+              <Text className="flex-1 text-sm leading-relaxed text-muted-foreground">
+                Connecting shows a code to approve on github.com. The token is stored on the machine
+                running GeneratorAI, never on this phone. Personal access tokens are added from the
+                desktop or web app.
+              </Text>
+            </View>
+          )}
         </>
       )}
+
+      <ConnectGitHubSheet visible={connecting} onClose={() => setConnecting(false)} />
 
       <ActionSheet
         visible={menuFor !== null}

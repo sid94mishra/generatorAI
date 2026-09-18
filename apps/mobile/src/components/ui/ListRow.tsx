@@ -106,9 +106,12 @@ export function ListRow({
             accessible={false}
             value={toggle.value}
             disabled={disabled}
-            trackColor={{ false: colors.emphasis ?? '', true: colors.primary ?? '' }}
-            thumbColor={colors.background}
-            ios_backgroundColor={colors.emphasis}
+            // Off track on `input` (the form-control border token), not `emphasis`:
+            // on a card, an `emphasis` track with a `background` thumb was a dark
+            // shape on a dark surface and every OFF switch was near-invisible.
+            trackColor={{ false: colors.input ?? colors.border ?? '', true: colors.primary ?? '' }}
+            thumbColor="#ffffff"
+            ios_backgroundColor={colors.input ?? colors.border}
           />
         </View>
       ) : (

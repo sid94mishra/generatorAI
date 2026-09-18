@@ -236,7 +236,9 @@ export function SwipeableRow({
             const match = actions.find((a) => a.label === event.nativeEvent.actionName);
             match?.onPress();
           }}
-          className="bg-card"
+          // Opaque in the list's own ground: rows are flat on the background,
+          // and the action track must not show through the row at rest.
+          className="bg-background"
         >
           {children}
         </Animated.View>

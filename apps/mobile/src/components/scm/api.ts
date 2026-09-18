@@ -11,10 +11,10 @@
 // so this file never re-declares a server type — it only names the paths and
 // the request bodies.
 //
-// Deliberately absent: `POST /api/source-control/accounts` and the device
-// flow. Connecting an account means typing a credential on the least trusted
-// device in the chain; mobile reads accounts and can set the default or
-// disconnect one, and connecting stays a desktop/web action.
+// Deliberately absent: `POST /api/source-control/accounts` (pasting a token
+// would put a credential on the least trusted device in the chain). The
+// GitHub device-code flow, where the SERVER holds the token, lives in
+// `deviceLogin.ts` and `ConnectGitHubSheet.tsx`.
 // ────────────────────────────────────────────────────────────────
 
 import type {

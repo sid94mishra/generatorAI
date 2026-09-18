@@ -24,6 +24,12 @@ const ALLOWED_ROOTS = new Set([
   // and both are legitimate push targets; pushes to them were being dropped.
   'workflows',
   'terminal',
+  'scripts',
+  // Route-addressable sheets. `/approvals` is exactly where an "N things
+  // waiting" push lands, and `/scope-request` is the target of an access
+  // request prompt; both were silently dropped by this allowlist.
+  'approvals',
+  'scope-request',
 ]);
 
 export function isSafeNotificationRoute(route: unknown): route is string {

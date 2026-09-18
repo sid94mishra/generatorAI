@@ -17,16 +17,16 @@
 
 import React, { useMemo, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { ClipboardList, FileText } from 'lucide-react-native';
 import type { PlanSummary } from '@generatorai/client-core';
 
 import { Button } from '../ui/Button';
-import { Badge } from '../ui/primitives';
 import { Touchable } from '../ui/Touchable';
 import { planCardActions, type GateAction } from './gateActions';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useCardEntering } from '../common/enterMotion';
+import { useChatMotion } from './chatMotion';
 
 export function PlanCard({
   plan,
@@ -42,6 +42,7 @@ export function PlanCard({
 }): React.ReactElement {
   const { colors } = useTheme();
   const entering = useCardEntering();
+  const motion = useChatMotion();
   const [pending, setPending] = useState<string | null>(null);
   const [requesting, setRequesting] = useState<GateAction | null>(null);
   const [feedback, setFeedback] = useState('');
@@ -61,11 +62,11 @@ export function PlanCard({
   return (
     <Animated.View
       entering={entering}
-      className="mx-3 mb-2 gap-3 rounded-3xl border border-primary bg-card p-3.5"
+      className="mx-3 mt-2 gap-3 rounded-3xl border border-warning bg-card p-3.5"
     >
       <View className="flex-row items-center gap-2.5">
-        <View className="h-8 w-8 items-center justify-center rounded-2xl bg-accent">
-          <ClipboardList size={16} color={colors.primary} />
+        <View className="h-8 w-8 items-center justify-center rounded-2xl bg-warning-muted">
+          <ClipboardList size={16} color={colors.warning} />
         </View>
         <View className="flex-1 gap-0.5">
           <Text numberOfLines={2} className="text-md font-semibold text-foreground">
@@ -75,11 +76,10 @@ export function PlanCard({
             Revision {plan.revision} · waiting for your review
           </Text>
         </View>
-        <Badge label="Plan" tone="primary" />
       </View>
 
       {plan.summary ? (
-        <Text numberOfLines={4} className="text-sm leading-relaxed text-muted-foreground">
+        <Text numberOfLines={6} className="text-sm leading-relaxed text-muted-foreground">
           {plan.summary}
         </Text>
       ) : null}
@@ -88,14 +88,14 @@ export function PlanCard({
         accessibilityLabel="Open the full plan"
         haptic="tap"
         onPress={onOpenPlan}
-        className="flex-row items-center gap-2 self-start rounded-2xl bg-subtle px-3 py-2"
+        className="min-h-11 flex-row items-center gap-2 self-start rounded-2xl bg-subtle px-3 py-2"
       >
         <FileText size={14} color={colors['muted-foreground']} />
         <Text className="text-sm text-muted-foreground">Open plan{plan.fileName ? ` · ${plan.fileName}` : ''}</Text>
       </Touchable>
 
       {requesting ? (
-        <Animated.View entering={FadeIn.duration(120)} className="gap-2">
+        <Animated.View entering={motion.fadeIn(120)} className="gap-2">
           <TextInput
             accessibilityLabel="What should change?"
             multiline

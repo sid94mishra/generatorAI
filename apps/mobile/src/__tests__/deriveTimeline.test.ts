@@ -5,10 +5,13 @@ import {
   awaitsUserDecision,
   blocksSignature,
   cacheMissHint,
+  collapseWork,
   countSteps,
   deriveTimeline,
+  formatWorkDuration,
   rowsEqual,
   toolFamily,
+  workLabel,
   type TimelineRow,
 } from '../components/chat/timeline/deriveTimeline';
 import { chatMessageToBlocks, messageAttachments, messageWasStopped } from '../components/chat/timeline/chatMessageToBlocks';
@@ -360,5 +363,81 @@ describe('chatMessageToBlocks', () => {
       attachments: [{ name: 'a.png', path: '/x/a.png', mimeType: 'image/png', artifactId: 'art' }, { bogus: true }],
     };
     expect(messageAttachments(message)).toEqual([{ name: 'a.png', path: '/x/a.png', mimeType: 'image/png', artifactId: 'art' }]);
+  });
+});
+
+describe('deriveTimeline — settled turn collapse', () => {
+  const text = (content: string): StreamBlock => ({ type: 'text', blockId: nextId++, content }) as StreamBlock;
+  const system = (message: string, category: 'system' | 'warning' | 'error'): StreamBlock =>
+    ({ type: 'system', blockId: nextId++, message, category }) as StreamBlock;
+
+  it('folds a settled turn\'s steps into one work row and keeps prose visible', () => {
+    const blocks: StreamBlock[] = [
+      text('Looking around.'),
+      tool('ToolSearch', { query: 'x' }),
+      tool('Grep', { pattern: 'y' }),
+      tool('Agent', { description: 'Write alpha.txt' }),
+      text('Done.'),
+    ];
+    const rows = deriveTimeline(blocks, { active: false, collapseSettled: true, durationMs: 42_000 });
+    expect(kinds(rows)).toEqual(['text', 'work', 'text']);
+    const work = rows[1]!;
+    if (work.kind !== 'work') throw new Error('expected work');
+    expect(work.work.steps).toBe(3);
+    expect(work.work.durationMs).toBe(42_000);
+    expect(workLabel(work.work)).toBe('Worked · 3 steps · 42s');
+    expect(kinds(work.work.rows)).toEqual(['tool', 'tool', 'tool']);
+  });
+
+  it('never collapses a live turn, and leaves a single step as a plain row', () => {
+    const live = deriveTimeline([tool('Read', { file_path: 'a' }), tool('Grep', { pattern: 'b' })], { active: true, collapseSettled: true });
+    expect(kinds(live)).not.toContain('work');
+    const single = deriveTimeline([text('hi'), tool('Read', { file_path: 'a' }), text('bye')], { active: false, collapseSettled: true });
+    expect(kinds(single)).toEqual(['text', 'tool', 'text']);
+  });
+
+  it('keeps warnings and errors outside the fold and splits the run around them', () => {
+    const rows = deriveTimeline(
+      [tool('Read', { file_path: 'a' }), tool('Grep', { pattern: 'b' }), system('MCP down', 'warning'), tool('Bash', { command: 'ls' }), tool('Bash', { command: 'pwd' })],
+      { active: false, collapseSettled: true, durationMs: 5_000 },
+    );
+    expect(kinds(rows)).toEqual(['work', 'system', 'work']);
+    // Two disclosures cannot both claim the turn's duration.
+    for (const row of rows) if (row.kind === 'work') expect(row.work.durationMs).toBeUndefined();
+  });
+
+  it('counts failures and nested sub-agent steps', () => {
+    const parent = tool('Agent', { description: 'Worker' }, { callId: 'p1' });
+    const rows = collapseWork(
+      deriveTimeline([parent, tool('Read', { file_path: 'a' }, { parentCallId: 'p1' }), tool('Bash', { command: 'x' }, { error: true })], { active: false }),
+      'h:',
+    );
+    const work = rows[0]!;
+    if (work.kind !== 'work') throw new Error('expected work');
+    expect(work.work.steps).toBe(3);
+    expect(work.work.failed).toBe(1);
+    expect(workLabel(work.work)).toBe('Worked · 3 steps · 1 failed');
+  });
+
+  it('marks only the last prose row of a settled turn as final', () => {
+    const rows = deriveTimeline([text('one'), tool('Read', { file_path: 'a' }), text('two')], { active: false });
+    const texts = rows.filter((r) => r.kind === 'text');
+    expect(texts.map((r) => (r.kind === 'text' ? Boolean(r.final) : null))).toEqual([false, true]);
+    const live = deriveTimeline([text('one')], { active: true });
+    expect(live[0]!.kind === 'text' && live[0]!.final).toBeFalsy();
+  });
+
+  it('compares work rows structurally for the row memo', () => {
+    const blocks: StreamBlock[] = [tool('Read', { file_path: 'a' }), tool('Grep', { pattern: 'b' })];
+    const a = deriveTimeline(blocks, { active: false, collapseSettled: true });
+    const b = deriveTimeline(blocks, { active: false, collapseSettled: true });
+    expect(rowsEqual(a[0]!, b[0]!)).toBe(true);
+  });
+
+  it('formats durations compactly', () => {
+    expect(formatWorkDuration(400)).toBe('1s');
+    expect(formatWorkDuration(42_000)).toBe('42s');
+    expect(formatWorkDuration(125_000)).toBe('2m 5s');
+    expect(formatWorkDuration(3_600_000 + 120_000)).toBe('1h 2m');
   });
 });

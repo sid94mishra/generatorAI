@@ -46,6 +46,7 @@ import { useSharedValue, type SharedValue } from 'react-native-reanimated';
 
 import { useAuth } from '../auth/AuthProvider';
 import { TARGET_SAMPLE_RATE, rms, toMono16k } from './pcm';
+import { PLAYBACK_AUDIO_MODE, RECORDING_AUDIO_MODE } from './audioSession';
 import { WAVEFORM_BARS } from './dictationCommit';
 
 /**
@@ -105,6 +106,8 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
   const sendingRef = useRef(false);
   /** Set by cancel(), so a late `final` frame is not applied to the draft. */
   const cancelledRef = useRef(false);
+  /** True while this hook holds the audio session in record mode. */
+  const recordModeRef = useRef(false);
 
   const supported = Platform.OS === 'ios' || Platform.OS === 'android';
 
@@ -161,6 +164,13 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
     }
     resetLevels();
     setStartedAt(null);
+    // Hand the session back in playback mode. Left in record mode, the next
+    // read-aloud came out of the receiver — or not at all with the silent
+    // switch on (iOS). Only undone if this hook changed it.
+    if (recordModeRef.current) {
+      recordModeRef.current = false;
+      void setAudioModeAsync(PLAYBACK_AUDIO_MODE).catch(() => undefined);
+    }
   }, [stream, resetLevels]);
 
   const fail = useCallback(
@@ -191,7 +201,8 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
       // Without this the capture is silent on iOS when the device is in
       // silent mode — the single most common "the mic is broken" report for
       // any RN app.
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await setAudioModeAsync(RECORDING_AUDIO_MODE);
+      recordModeRef.current = true;
 
       const url = await socketUrl('/api/stt/stream', 'stt', null);
       const socket = new WebSocket(url);

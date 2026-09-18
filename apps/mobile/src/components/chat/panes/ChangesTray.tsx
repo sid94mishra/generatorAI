@@ -1,5 +1,9 @@
 // ────────────────────────────────────────────────────────────────
-// ChangesTray — "N files changed +a −b · Review ›" above the composer.
+// ChangesTray — "N files changed +a −b · Review ›" in the composer dock.
+//
+// A flat strip INSIDE the dock (under its one divider), not a floating card
+// over the transcript: drawn as a rounded card above the divider it read as
+// part of the conversation, with the last row cut off behind it.
 //
 // The one-line answer to "did the agent touch anything?" without leaving
 // the transcript. Collapsed it is a single row; expanded it lists the files
@@ -9,13 +13,14 @@
 
 import React, { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { ChevronDown, ChevronRight, FileDiff } from 'lucide-react-native';
 import type { ChangeFileEntry, ChangeSummary } from '@generatorai/client-core';
 
 import { Touchable } from '../../ui/Touchable';
 import { MAX_SCALE } from '../../ui/accessibility';
 import { useTheme } from '../../../theme/ThemeProvider';
+import { useChatMotion } from '../chatMotion';
 
 const MAX_LISTED = 6;
 
@@ -43,6 +48,7 @@ export function ChangesTray({
   onOpenFile: (path: string) => void;
 }): React.ReactElement | null {
   const { colors } = useTheme();
+  const motion = useChatMotion();
   const [expanded, setExpanded] = useState(false);
 
   const files = useMemo(() => {
@@ -63,9 +69,10 @@ export function ChangesTray({
 
   return (
     <Animated.View
-      entering={FadeIn.duration(160)}
-      exiting={FadeOut.duration(120)}
-      className="mx-3 mb-2 overflow-hidden rounded-2xl border border-border bg-card"
+      entering={motion.fadeIn(160)}
+      exiting={motion.fadeOut(120)}
+      layout={motion.layout(160)}
+      className="border-b border-border-muted bg-background"
     >
       <View className="flex-row items-center">
         <Touchable
@@ -75,13 +82,13 @@ export function ChangesTray({
           ripple={false}
           scale="none"
           onPress={() => setExpanded((v) => !v)}
-          className="min-h-11 flex-1 flex-row items-center gap-2 px-3"
+          className="min-h-11 flex-1 flex-row items-center gap-2 pl-4 pr-3"
         >
           <FileDiff size={14} color={colors['muted-foreground']} />
           <Text numberOfLines={1} maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-sm font-medium text-foreground">
             {label}
           </Text>
-          <Text className="font-mono text-xs">
+          <Text className="font-mono text-sm">
             <Text className="text-success">+{stats.additions}</Text> <Text className="text-danger">−{stats.deletions}</Text>
           </Text>
           <View className="flex-1" />
@@ -97,7 +104,7 @@ export function ChangesTray({
           ripple={false}
           scale="none"
           onPress={onReview}
-          className="min-h-11 flex-row items-center gap-0.5 border-l border-border-muted px-3"
+          className="min-h-11 flex-row items-center gap-0.5 pl-3 pr-4"
         >
           <Text maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-sm font-semibold text-primary">
             Review
@@ -107,7 +114,7 @@ export function ChangesTray({
       </View>
 
       {expanded ? (
-        <Animated.View entering={FadeIn.duration(120)} className="border-t border-border-muted py-1">
+        <Animated.View entering={motion.fadeIn(120)} className="border-t border-border-muted py-1">
           {files.map((file) => (
             <Touchable
               key={file.path}
@@ -116,7 +123,7 @@ export function ChangesTray({
               ripple={false}
               scale="none"
               onPress={() => onOpenFile(file.path)}
-              className="min-h-9 flex-row items-center gap-2 px-3"
+              className="min-h-11 flex-row items-center gap-2 px-4"
             >
               <Text className={`w-3 font-mono text-xs font-semibold ${STATUS_TONE[file.status]}`}>
                 {STATUS_LETTER[file.status]}
@@ -130,7 +137,7 @@ export function ChangesTray({
             </Touchable>
           ))}
           {stats.files > files.length ? (
-            <Text className="px-3 py-1 text-xs text-muted-foreground">
+            <Text className="px-4 py-2 text-sm text-muted-foreground">
               +{stats.files - files.length} more — tap Review for the full list.
             </Text>
           ) : null}

@@ -1,26 +1,37 @@
 // ────────────────────────────────────────────────────────────────
-// Workflow definition.
+// Workflow — what it does, how it went, and a way to run it.
 //
-// A stage LIST, not a DAG. A node graph needs pan, zoom and edge routing to
-// be legible, and at 393pt wide it is a smear — so the stages are shown in
-// dependency order with their edges spelled out in text instead.
-//
-// Read-only. Editing a workflow is a desktop action; this screen exists so
-// you can see what a run is about to do and jump into its history.
+// A stage OUTLINE, not a DAG: a node graph needs pan, zoom and edge routing
+// to be legible and at phone width it is a smear, so the stages are listed
+// in order with their prerequisites spelled out. Editing stays on the
+// desktop; STARTING a run is a phone action and gets the sticky bar.
+// Workflow-level hooks are listed read-only; deleting the definition lives
+// in the header menu behind a confirmation.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useMemo } from 'react';
-import { Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Alert, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
-import { GitBranch, Workflow as WorkflowIcon } from 'lucide-react-native';
-import { queryKeys } from '@generatorai/client-core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { GitBranch, Lock, MoreHorizontal, Play, Trash2, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
+import { epochOr, queryKeys } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
+import { useAdminApi } from '../../src/api/useAdminApi';
+import { parseWorkflowHooks } from '../../src/components/work/workflowHooks';
+import { ActionSheet, ConfirmSheet, type MenuAction } from '../../src/components/ui/ActionSheet';
+import { ListItem } from '../../src/components/ui/ListItem';
+import { haptics } from '../../src/components/ui/haptics';
 import { relativeTime } from '../../src/components/runs/formatTime';
-import { isActive, needsAttention, statusLabel } from '../../src/components/runs/statusStyle';
-import { Badge, Card, SectionHeader, StatusDot, type Tone } from '../../src/components/ui/primitives';
-import { Touchable } from '../../src/components/ui/Touchable';
+import { FlatRows, RunRow } from '../../src/components/runs/RunRow';
+import { StatusGlyph } from '../../src/components/runs/StatusGlyph';
+import { useFeature } from '../../src/components/runs/useFeature';
+import { usePullRefresh } from '../../src/components/runs/usePullRefresh';
+import { STICKY_BAR_SPACE, StickyActionBar } from '../../src/components/work/StickyActionBar';
+import { StartRunSheet } from '../../src/components/work/StartRunSheet';
+import { parseVariables } from '../../src/components/work/variableForm';
+import { Badge, Card, SectionHeader } from '../../src/components/ui/primitives';
+import { Button, IconButton } from '../../src/components/ui/Button';
 import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { PlainScroll } from '../../src/components/ui/Screen';
@@ -40,45 +51,87 @@ interface EdgeNode {
   to?: string;
   source?: string;
   target?: string;
+  sourceStageId?: string;
+  targetStageId?: string;
 }
 
-function runTone(status: string): Tone {
-  if (needsAttention(status)) return status === 'failed' ? 'danger' : 'warning';
-  if (isActive(status)) return 'info';
-  if (status === 'completed') return 'success';
-  return 'neutral';
-}
+const RECENT_RUNS = 5;
 
 export default function WorkflowScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const workflowId = String(id);
   const api = useApi();
   const navigation = useNavigation();
   const { colors } = useTheme();
+  const runControl = useFeature('runControl');
+  const workflowEdit = useFeature('workflowEdit');
+  const admin = useAdminApi();
+  const queryClient = useQueryClient();
+  const [sheet, setSheet] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showAllRuns, setShowAllRuns] = useState(false);
 
   const workflow = useQuery({
-    queryKey: ['workflows', id],
-    queryFn: () => api.workflows.get(id!),
+    queryKey: [...queryKeys.workflows(), 'detail', workflowId],
+    queryFn: () => api.workflows.get(workflowId),
   });
 
   const runs = useQuery({
-    queryKey: queryKeys.runs(id!),
-    queryFn: () => api.runs.list({ definitionId: id! }),
+    queryKey: queryKeys.runs(workflowId),
+    queryFn: () => api.runs.list({ definitionId: workflowId }),
   });
 
+  const pull = usePullRefresh(() => Promise.all([workflow.refetch(), runs.refetch()]));
+
+  const loaded = Boolean(workflow.data);
   React.useLayoutEffect(() => {
-    navigation.setOptions({ title: workflow.data?.name ?? 'Workflow' });
-  }, [navigation, workflow.data?.name]);
+    navigation.setOptions({
+      title: workflow.data?.name ?? 'Workflow',
+      headerRight: () =>
+        loaded ? (
+          <IconButton
+            icon={<MoreHorizontal size={20} color={colors.foreground} />}
+            accessibilityLabel="Workflow actions"
+            onPress={() => setMenu(true)}
+          />
+        ) : null,
+    });
+  }, [navigation, workflow.data?.name, loaded, colors.foreground]);
+
+  const remove = useMutation({
+    // Runs reference the definition (409 without force); the confirmation
+    // says they go too, so the delete is forced only when there are any.
+    mutationFn: () => admin.definitions.remove(workflowId, (runs.data?.length ?? 0) > 0),
+    onSuccess: () => {
+      haptics.commit();
+      queryClient.removeQueries({ queryKey: [...queryKeys.workflows(), 'detail', workflowId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflows() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runs() });
+      if (router.canGoBack()) router.back();
+      else router.replace('/(tabs)/runs');
+    },
+    onError: (err) => {
+      haptics.error();
+      Alert.alert('Could not delete the workflow', err instanceof Error ? err.message : String(err));
+    },
+  });
 
   const stages = (workflow.data?.stages ?? []) as StageNode[];
   const edges = (workflow.data?.edges ?? []) as EdgeNode[];
+  const detail = workflow.data as (Record<string, unknown> & { variables?: unknown }) | undefined;
+  const inputs = useMemo(() => parseVariables(detail?.variables), [detail?.variables]);
+  const hooks = useMemo(() => parseWorkflowHooks(detail?.['hooks']), [detail]);
+  const stageNames = useMemo(
+    () => stages.map((stage, index) => stage.name ?? stage.id ?? `Stage ${index + 1}`),
+    [stages],
+  );
 
-  // Incoming edges per stage, so each row can state its own prerequisites
-  // rather than relying on a picture of the graph.
   const incoming = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const edge of edges) {
-      const from = edge.from ?? edge.source;
-      const to = edge.to ?? edge.target;
+      const from = edge.from ?? edge.source ?? edge.sourceStageId;
+      const to = edge.to ?? edge.target ?? edge.targetStageId;
       if (!from || !to) continue;
       map.set(to, [...(map.get(to) ?? []), from]);
     }
@@ -91,6 +144,11 @@ export default function WorkflowScreen(): React.ReactElement {
     return map;
   }, [stages]);
 
+  const sortedRuns = useMemo(
+    () => [...(runs.data ?? [])].sort((a, b) => epochOr(b.updatedAt) - epochOr(a.updatedAt)),
+    [runs.data],
+  );
+
   if (workflow.isLoading) {
     return (
       <View className="p-4">
@@ -99,98 +157,205 @@ export default function WorkflowScreen(): React.ReactElement {
     );
   }
 
-  if (workflow.isError) {
+  if (workflow.isError || !workflow.data) {
     return <ErrorState message="Could not load this workflow." onRetry={() => void workflow.refetch()} />;
   }
 
+  const latest = sortedRuns[0];
+  const visibleRuns = showAllRuns ? sortedRuns : sortedRuns.slice(0, RECENT_RUNS);
+
   return (
-    <PlainScroll
-      onRefresh={() => {
-        void workflow.refetch();
-        void runs.refetch();
-      }}
-      refreshing={workflow.isFetching || runs.isFetching}
-    >
-      {workflow.data?.description ? (
-        <Text className="px-1 text-sm leading-relaxed text-muted-foreground">
-          {workflow.data.description}
-        </Text>
-      ) : null}
+    <View className="flex-1 bg-background">
+      <PlainScroll onRefresh={pull.onRefresh} refreshing={pull.refreshing}>
+        <Card className="gap-2 p-4">
+          <View className="flex-row items-center gap-3">
+            <View className="h-10 w-10 items-center justify-center rounded-2xl bg-emphasis">
+              <WorkflowIcon size={18} color={colors['muted-foreground']} />
+            </View>
+            <View className="flex-1 gap-0.5">
+              <Text numberOfLines={2} className="text-lg font-semibold text-foreground">
+                {workflow.data.name}
+              </Text>
+              <Text className="text-sm text-muted-foreground">
+                {stages.length} stage{stages.length === 1 ? '' : 's'}
+                {inputs.length > 0 ? ` · ${inputs.length} input${inputs.length === 1 ? '' : 's'}` : ''}
+                {latest ? ` · last run ${relativeTime(latest.updatedAt)}` : ' · never run'}
+              </Text>
+            </View>
+            {latest ? <StatusGlyph status={latest.status} size={28} /> : null}
+          </View>
+          {workflow.data.description ? (
+            <Text className="text-sm leading-relaxed text-muted-foreground">{workflow.data.description}</Text>
+          ) : null}
+        </Card>
 
-      <SectionHeader title={`Stages (${stages.length})`} />
-      {stages.length === 0 ? (
-        <EmptyState title="No stages" message="This definition has no stages yet." />
-      ) : (
-        <View className="gap-2.5">
-          {stages.map((stage, index) => {
-            const deps = (stage.id ? incoming.get(stage.id) : undefined) ?? stage.dependsOn ?? [];
-            return (
-              <Card key={stage.id ?? `${index}`} className="gap-1.5 p-3.5">
-                <View className="flex-row items-center gap-2.5">
-                  <View className="h-7 w-7 items-center justify-center rounded-xl bg-subtle">
-                    <Text className="text-xs font-semibold text-muted-foreground">{index + 1}</Text>
+        <SectionHeader title={`Stages (${stages.length})`} />
+        {stages.length === 0 ? (
+          <EmptyState title="No stages" message="This workflow has no stages yet." />
+        ) : (
+          <Card className="px-4 py-1">
+            {stages.map((stage, index) => {
+              const deps = (stage.id ? incoming.get(stage.id) : undefined) ?? stage.dependsOn ?? [];
+              return (
+                <View
+                  key={stage.id ?? `${index}`}
+                  className={`flex-row gap-3 py-3 ${index > 0 ? 'border-t border-border-muted' : ''}`}
+                >
+                  <View className="h-7 w-7 items-center justify-center rounded-full bg-emphasis">
+                    <Text className="text-sm font-semibold text-muted-foreground">{index + 1}</Text>
                   </View>
-                  <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
-                    {stage.name ?? stage.id ?? `Stage ${index + 1}`}
-                  </Text>
-                  {stage.type ? <Badge label={stage.type} tone="neutral" /> : null}
+                  <View className="flex-1 gap-1">
+                    <View className="min-h-7 flex-row items-center gap-2">
+                      <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
+                        {stage.name ?? stage.id ?? `Stage ${index + 1}`}
+                      </Text>
+                      {stage.type && stage.type !== 'agent' ? <Badge label={stage.type} tone="neutral" /> : null}
+                    </View>
+                    {stage.description ? (
+                      <Text numberOfLines={3} className="text-sm leading-relaxed text-muted-foreground">
+                        {stage.description}
+                      </Text>
+                    ) : null}
+                    {deps.length > 0 ? (
+                      <View className="flex-row items-center gap-1.5">
+                        <GitBranch size={12} color={colors['muted-foreground']} />
+                        <Text numberOfLines={1} className="flex-1 text-sm text-muted-foreground">
+                          after {deps.map((d) => nameOf.get(d) ?? d).join(', ')}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
                 </View>
-                {stage.description ? (
-                  <Text numberOfLines={3} className="text-xs leading-relaxed text-muted-foreground">
-                    {stage.description}
-                  </Text>
-                ) : null}
-                {deps.length > 0 ? (
-                  <View className="flex-row items-center gap-1.5">
-                    <GitBranch size={12} color={colors['muted-foreground']} />
-                    <Text numberOfLines={1} className="flex-1 text-xs text-muted-foreground">
-                      after {deps.map((d) => nameOf.get(d) ?? d).join(', ')}
-                    </Text>
-                  </View>
-                ) : null}
-              </Card>
-            );
-          })}
-        </View>
-      )}
+              );
+            })}
+          </Card>
+        )}
 
-      <SectionHeader title={`Runs (${runs.data?.length ?? 0})`} />
-      {(runs.data ?? []).length === 0 ? (
-        <EmptyState
-          title="Never run"
-          message="Start this workflow from the desktop or web app."
-          icon={<WorkflowIcon size={22} color={colors['muted-foreground']} />}
+        {hooks.length > 0 ? (
+          <>
+            <SectionHeader title={`Hooks (${hooks.length})`} />
+            <FlatRows>
+              {hooks.map((hook) => (
+                <ListItem
+                  key={hook.id}
+                  title={hook.name}
+                  subtitle={hook.subtitle}
+                  avatar={{ icon: <Webhook size={17} color={colors['muted-foreground']} />, tone: 'neutral' }}
+                  badge={hook.enabled ? null : { label: 'Off', tone: 'neutral' }}
+                  separator={false}
+                  accessibilityLabel={`${hook.name}, ${hook.subtitle}${hook.enabled ? '' : ', off'}`}
+                />
+              ))}
+            </FlatRows>
+          </>
+        ) : null}
+
+        <SectionHeader
+          title={`Runs (${sortedRuns.length})`}
+          action={
+            sortedRuns.length > RECENT_RUNS ? (
+              <Button
+                label={showAllRuns ? 'Show fewer' : 'Show all'}
+                variant="ghost"
+                size="sm"
+                onPress={() => setShowAllRuns((v) => !v)}
+              />
+            ) : undefined
+          }
         />
-      ) : (
-        <View className="gap-2.5">
-          {(runs.data ?? []).map((run) => (
-            <Touchable
-              key={run.id}
-              accessibilityLabel={`${run.name ?? 'Run'}, ${statusLabel(run.status)}`}
-              haptic="tap"
-              scale="large"
-              onPress={() => router.push(`/runs/${run.id}`)}
-            >
-              <Card className="flex-row items-center gap-3 p-3.5">
-                <StatusDot tone={runTone(run.status)} label={null} />
-                <View className="flex-1">
-                  <Text numberOfLines={1} className="text-sm text-foreground">
-                    {run.name ?? 'Workflow run'}
-                  </Text>
-                  <Text className="text-xs text-muted-foreground">
-                    {relativeTime(run.updatedAt)}
-                  </Text>
-                </View>
-                <Badge label={statusLabel(run.status)} tone={runTone(run.status)} />
-              </Card>
-            </Touchable>
-          ))}
-        </View>
-      )}
+        {runs.isLoading ? (
+          <SkeletonList rows={3} />
+        ) : sortedRuns.length === 0 ? (
+          <EmptyState
+            title="Never run"
+            message={runControl.available ? 'Start the first run below.' : 'Runs appear here once it has run.'}
+            icon={<Play size={22} color={colors['muted-foreground']} />}
+          />
+        ) : (
+          <FlatRows>
+            {visibleRuns.map((run) => (
+<RunRow key={run.id} run={run} />
+            ))}
+          </FlatRows>
+        )}
 
-      <Text className="px-1 pt-2 text-xs leading-relaxed text-muted-foreground">
-        Workflows are edited on the desktop or web app — a node graph is not usable at this width.
-      </Text>
-    </PlainScroll>
+        <View style={{ height: STICKY_BAR_SPACE }} />
+      </PlainScroll>
+
+      <StickyActionBar>
+        {runControl.available ? (
+          <Button
+            label={inputs.length > 0 ? 'Run…' : 'Run workflow'}
+            size="lg"
+            full
+            haptic="commit"
+            icon={<Play size={18} color={colors['primary-foreground']} />}
+            onPress={() => setSheet(true)}
+            accessibilityHint="Choose inputs and start a new run"
+          />
+        ) : (
+          <View className="flex-row items-center gap-3">
+            <Lock size={16} color={colors['muted-foreground']} />
+            <Text className="flex-1 text-sm text-muted-foreground">
+              Starting runs needs workflow permission on this device.
+            </Text>
+            <Button label="Request access" variant="secondary" size="sm" onPress={runControl.requestAccess} />
+          </View>
+        )}
+      </StickyActionBar>
+
+      <StartRunSheet
+        visible={sheet}
+        onClose={() => setSheet(false)}
+        workflow={{
+          id: workflowId,
+          name: workflow.data.name,
+          projectId: workflow.data.projectId ?? null,
+          variables: detail?.variables,
+          orchestratorConfig: detail?.['orchestratorConfig'],
+          stageNames,
+        }}
+      />
+
+      <ActionSheet
+        visible={menu}
+        onClose={() => setMenu(false)}
+        title={workflow.data.name}
+        actions={
+          workflowEdit.available
+            ? ([
+                {
+                  label: 'Delete workflow',
+                  destructive: true,
+                  icon: <Trash2 size={18} color={colors.danger} />,
+                  onPress: () => {
+                    haptics.warn();
+                    setConfirmDelete(true);
+                  },
+                },
+              ] satisfies MenuAction[])
+            : [
+                {
+                  label: 'Request access',
+                  detail: 'Deleting workflows needs workflow-edit permission on this device.',
+                  icon: <Lock size={18} color={colors['muted-foreground']} />,
+                  onPress: workflowEdit.requestAccess,
+                },
+              ]
+        }
+      />
+      <ConfirmSheet
+        visible={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title="Delete this workflow?"
+        message={
+          sortedRuns.length > 0
+            ? `The definition, its stages and its ${sortedRuns.length} run${sortedRuns.length === 1 ? '' : 's'} are removed for good. This cannot be undone.`
+            : 'The definition and its stages are removed for good. This cannot be undone.'
+        }
+        confirmLabel="Delete workflow"
+        onConfirm={() => remove.mutate()}
+      />
+    </View>
   );
 }

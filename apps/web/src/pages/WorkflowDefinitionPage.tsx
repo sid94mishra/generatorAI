@@ -47,6 +47,7 @@ import {
 import { EntityListRow } from '@/components/data/index.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import type { WorkflowRun, CreateWorkflowRunParams } from '@generatorai/shared';
+import { encodeStageOverrides } from '@generatorai/client-core';
 
 /** How many runs the sidebar shows before "Show more". */
 const RUNS_PAGE_SIZE = 5;
@@ -144,15 +145,10 @@ export function WorkflowDefinitionPage() {
                 : definition.orchestratorConfig?.gitRepositories?.map(r => r.alias) ?? [];
           }
 
-          // Pass stage overrides if any are active
-          if (stageOverrides && stageOverrides.length > 0) {
-            orchParams['stageOverrides'] = stageOverrides.map((o) => ({
-              stageName: o.stageName,
-              stageIndex: o.stageIndex,
-              skip: o.skip || undefined,
-              variables: Object.keys(o.variables).length > 0 ? o.variables : undefined,
-            }));
-          }
+          // Pass stage overrides if any are active (shared encoding: a
+          // top-level array on the orchestrated route).
+          const encoded = encodeStageOverrides(variables, stageOverrides, { orchestrated: true });
+          if (encoded.stageOverrides) orchParams['stageOverrides'] = encoded.stageOverrides;
 
           const context = await startOrchestratedRun.mutateAsync(orchParams as any);
 
@@ -167,20 +163,9 @@ export function WorkflowDefinitionPage() {
           // ignored every one of them. `WorkflowRunService.findStageOverride`
           // reads them from the run's own `__stageOverrides` variable, which
           // is also how the script-run route passes them through.
-          const activeOverrides = (stageOverrides ?? [])
-            .filter((o) => o.skip || Object.keys(o.variables).length > 0)
-            .map((o) => ({
-              stageName: o.stageName,
-              stageIndex: o.stageIndex,
-              ...(o.skip ? { skip: true } : {}),
-              ...(Object.keys(o.variables).length > 0 ? { variables: o.variables } : {}),
-            }));
-
           const params: CreateWorkflowRunParams = {
             workflowDefinitionId: id,
-            variables: activeOverrides.length > 0
-              ? { ...variables, __stageOverrides: activeOverrides }
-              : variables,
+            variables: encodeStageOverrides(variables, stageOverrides, { orchestrated: false }).variables,
           };
           const run = await createRun.mutateAsync(params);
 

@@ -91,7 +91,39 @@ export function SkeletonRow(): React.ReactElement {
   );
 }
 
-export function SkeletonList({ rows = 5 }: { rows?: number }): React.ReactElement {
+/** Matches a flat `ListItem` (64pt, 16pt gutter, 64pt-inset hairline). */
+export function SkeletonListItem(): React.ReactElement {
+  return (
+    <View>
+      <View className="min-h-16 flex-row items-center gap-3 px-4 py-2.5">
+        <Skeleton width={36} height={36} radius={12} />
+        <View className="flex-1 gap-2">
+          <Skeleton width="55%" height={14} />
+          <Skeleton width="80%" height={12} />
+        </View>
+      </View>
+      <View className="ml-16 h-px bg-border-muted" />
+    </View>
+  );
+}
+
+export function SkeletonList({
+  rows = 5,
+  variant = 'grouped',
+}: {
+  rows?: number;
+  /** `flat` matches the tab lists' `ListItem`; `grouped` a `ListGroup` card. */
+  variant?: 'grouped' | 'flat';
+}): React.ReactElement {
+  if (variant === 'flat') {
+    return (
+      <View accessible accessibilityLabel="Loading" accessibilityRole="progressbar">
+        {Array.from({ length: rows }, (_, i) => (
+          <SkeletonListItem key={i} />
+        ))}
+      </View>
+    );
+  }
   return (
     <View
       accessible

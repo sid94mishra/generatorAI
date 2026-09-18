@@ -17,11 +17,14 @@
 export type MobileFeature =
   | 'terminal'
   | 'browser'
+  | 'computer'
   | 'voice'
   | 'fileUpload'
   | 'runControl'
   | 'workflowEdit'
   | 'projectEdit'
+  | 'codebaseLinkLocal'
+  | 'capabilityAdmin'
   | 'deviceAdmin';
 
 export interface FeatureRequirement {
@@ -50,6 +53,16 @@ export const FEATURE_REQUIREMENTS: Record<MobileFeature, FeatureRequirement> = {
       'Browser control lets this device drive the agent’s browser. It is withheld until you grant it explicitly from a trusted device.',
     grantable: true,
   },
+  computer: {
+    // `/workspaces/:id/computer` reads AND writes are `exec:computer` in the
+    // route policy — kept apart from `exec:agent` so answering an agent's
+    // question never implies access to the desktop. Not an `admin:*` scope,
+    // so a device may request it (DeviceService.requestScopes).
+    scopes: ['exec:computer'],
+    reason:
+      'Watching and approving computer use lets this device see and act on your desktop. It is withheld until you grant it explicitly from a trusted device.',
+    grantable: true,
+  },
   voice: {
     // Speech-to-text posts audio to the chat pipeline, so it rides on the
     // same scope as sending a message.
@@ -63,7 +76,10 @@ export const FEATURE_REQUIREMENTS: Record<MobileFeature, FeatureRequirement> = {
     grantable: true,
   },
   runControl: {
-    scopes: ['write:workflows'],
+    // The route policy for `/workflow-runs` and `/automations` writes is
+    // `write:workflows` AND `exec:agent` (packages/auth/src/routePolicy.ts).
+    // Gating on the first alone rendered buttons that could still 403.
+    scopes: ['write:workflows', 'exec:agent'],
     reason:
       'Starting, pausing and cancelling runs needs workflow-edit permission. Approving a blocked stage does not — you can still do that here.',
     grantable: true,
@@ -74,11 +90,27 @@ export const FEATURE_REQUIREMENTS: Record<MobileFeature, FeatureRequirement> = {
     grantable: true,
   },
   projectEdit: {
+    // Create / rename / archive projects, add a codebase by git URL, change
+    // project settings and project artifacts. Everything here is typed on
+    // the phone and resolved on the host, so the scope is the only barrier.
     scopes: ['write:projects'],
     reason:
-      'Linking a codebase points at a folder on the machine running GeneratorAI, which this device cannot browse.',
+      'Creating, renaming and archiving projects and adding repositories needs project-edit permission.',
+    grantable: true,
+  },
+  codebaseLinkLocal: {
+    scopes: ['write:projects'],
+    reason:
+      'Linking a local folder points at a path on the machine running GeneratorAI, which this device cannot browse. Add a repository by its git URL instead.',
     // Structural: even with the scope, a phone cannot pick a host path.
     grantable: false,
+  },
+  capabilityAdmin: {
+    // `/system` and `/agents` writes are `admin:settings` in the route policy.
+    scopes: ['admin:settings'],
+    reason:
+      'Turning MCP servers on or off and editing agents changes how the agent behaves for every connected client, so it needs settings-admin permission.',
+    grantable: true,
   },
   deviceAdmin: {
     scopes: ['admin:devices'],
@@ -113,6 +145,36 @@ export function checkFeature(
     grantable: requirement.grantable,
   };
 }
+
+/**
+ * Whether THIS device may ask for `scope` through the scope-request route.
+ *
+ * Mirrors `DeviceService.requestScopes` (packages/auth): an `admin:*` scope
+ * is refused (403 SCOPE_NOT_REQUESTABLE) unless the device already holds
+ * some `admin:*` scope. Such a scope is still grantable — by an admin from a
+ * trusted device (Settings › Security) — it just cannot be requested here.
+ */
+export function isScopeRequestable(scope: string, grantedScopes: readonly string[]): boolean {
+  if (!scope.startsWith('admin:')) return true;
+  return grantedScopes.some((held) => held.startsWith('admin:'));
+}
+
+/**
+ * Whether "Request access" can work for a feature: it is grantable and every
+ * scope it is missing may be requested from this device.
+ */
+export function canRequestFeature(feature: MobileFeature, grantedScopes: readonly string[]): boolean {
+  const check = checkFeature(feature, grantedScopes);
+  return (
+    !check.available &&
+    check.grantable &&
+    check.missing.every((scope) => isScopeRequestable(scope, grantedScopes))
+  );
+}
+
+/** Shown in place of "Request access" when the scope must be granted by an admin instead. */
+export const GRANT_FROM_TRUSTED_DEVICE =
+  'An admin can grant it from a trusted device in Settings › Security.';
 
 export function isFeatureAvailable(
   feature: MobileFeature,

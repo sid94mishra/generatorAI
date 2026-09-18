@@ -95,6 +95,7 @@ export function ScmResultRow({ block }: { block: ScmResultBlock }): React.ReactE
   if (result.status === 'conflicts' && conflicts) {
     return (
       <RowFrame
+        card
         icon={<GitMerge size={16} color={colors.warning} />}
         title={`Merge conflicts in ${conflicts.files.length} ${conflicts.files.length === 1 ? 'file' : 'files'}`}
         detail={`Merging ${conflicts.base} into ${conflicts.head}. Nothing was pushed.`}
@@ -149,6 +150,7 @@ export function ScmResultRow({ block }: { block: ScmResultBlock }): React.ReactE
   if (result.status === 'blocked' || result.status === 'failed') {
     return (
       <RowFrame
+        card
         icon={<TriangleAlert size={16} color={result.status === 'failed' ? colors.danger : colors.warning} />}
         title={result.status === 'failed' ? 'Could not commit' : 'Nothing was committed'}
         detail={mobileReason(blockedReason(result), result.readiness)}
@@ -159,6 +161,7 @@ export function ScmResultRow({ block }: { block: ScmResultBlock }): React.ReactE
 
   return (
     <RowFrame
+      card
       icon={<GitCommitHorizontal size={16} color={colors.success} />}
       title={summarizeFlow(result)}
       {...(result.branch ? { subtitle: result.branch } : {})}

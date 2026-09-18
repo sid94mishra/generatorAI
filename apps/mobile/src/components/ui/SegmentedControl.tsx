@@ -25,6 +25,7 @@ import { Touchable } from './Touchable';
 import { useReducedMotionPreset } from './motion';
 import { MAX_SCALE, useFontScale } from './accessibility';
 import { haptics } from './haptics';
+import { useTheme } from '../../theme/ThemeProvider';
 
 export interface Segment<T extends string> {
   value: T;
@@ -80,6 +81,14 @@ export function SegmentedControl<T extends string>({
   const offset = useSharedValue(0);
   const fontScale = useFontScale();
   const presets = useReducedMotionPreset();
+  const { appearance, colors } = useTheme();
+  // The selected pill must be LIGHTER than the track. `bg-card` on the
+  // `subtle` track is lighter in the light palette but darker in the dark
+  // one, so in dark mode the selected segment read as the recessed one.
+  const indicatorColors =
+    appearance === 'dark'
+      ? { backgroundColor: colors.emphasis, borderColor: colors.input ?? colors.border }
+      : { backgroundColor: colors.card, borderColor: colors.border };
 
   const index = Math.max(
     0,
@@ -96,10 +105,12 @@ export function SegmentedControl<T extends string>({
     setWidth(e.nativeEvent.layout.width);
   }, []);
 
+  // Width is plain layout (it changes only when the control is measured), so
+  // it lives in the regular style below. Inside the animated style it stayed
+  // at its first value, 0, on native — the pill rendered as a 2px sliver.
   const indicatorStyle = useAnimatedStyle(
     () => ({
       transform: [{ translateX: progress ? progress.value * slot : offset.value }],
-      width: slot,
     }),
     [slot, progress],
   );
@@ -128,8 +139,8 @@ export function SegmentedControl<T extends string>({
         {slot > 0 ? (
           <Animated.View
             pointerEvents="none"
-            className="absolute bottom-0 top-0 rounded-full bg-card"
-            style={indicatorStyle}
+            className="absolute bottom-0 top-0 rounded-full"
+            style={[indicatorStyle, { ...indicatorColors, borderWidth: 1, width: slot }]}
           />
         ) : null}
 

@@ -43,6 +43,9 @@ import {
   stepHistory,
 } from './promptHistory';
 import { buildSlashItems, rankMentionItems, rankSlashItems } from './slashSource';
+import { captureToAttachment, insertCaptureIntoDraft, type CaptureInput } from './captures';
+import type { ComposerCaptureActions } from './captureContext';
+import { useCaptures } from './useCaptures';
 import type {
   AttachmentSource,
   ComposerAttachment,
@@ -70,6 +73,11 @@ export interface UseComposerControllerOptions {
    * system-originated rows are filtered here, as web does.
    */
   messages?: readonly ChatMessage[];
+  /**
+   * A terminal / browser capture landed in the composer. The chat screen
+   * brings the Chat page forward so the chip (or the inserted text) is seen.
+   */
+  onCaptured?: () => void;
 }
 
 export interface ComposerController {
@@ -99,6 +107,11 @@ export interface ComposerController {
     select(item: SlashItem): void;
   };
   history: { open(): void };
+  /**
+   * Terminal output / browser captures. The chat screen provides these to
+   * the panes through `ComposerCaptureContext` ("Send to chat").
+   */
+  captures: ComposerCaptureActions;
   /** Programmatic send — what the gate banner's "Cancel and send" calls. */
   send(mode?: AgentMode): Promise<void>;
   /** The draft, for screens that need to seed or inspect it. */
@@ -130,7 +143,7 @@ function serverHistoryFrom(messages: readonly ChatMessage[] | undefined): Prompt
 }
 
 export function useComposerController(opts: UseComposerControllerOptions): ComposerController {
-  const { chatId, scopes, workspaceId, projectId, onSend, disabled = false, onOpenPane } = opts;
+  const { chatId, scopes, workspaceId, projectId, onSend, disabled = false, onOpenPane, onCaptured } = opts;
   const api = useApi();
   const { fetch: authedFetch } = useAuth();
   const toast = useToast();
@@ -291,6 +304,48 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
     },
     [upload.available, upload.reason, toast],
   );
+
+  // ── Captures (terminal output, browser) ───────────────────────
+  const attachCapture = useCallback(
+    (input: CaptureInput): boolean => {
+      const candidate = captureToAttachment(input);
+      const verdict = validateAttachment(candidate, attachmentsRef.current);
+      if (!verdict.ok) {
+        toast({ message: verdict.reason, variant: 'warning', duration: 5000 });
+        return false;
+      }
+      haptics.success();
+      // The ref is advanced now so two captures in one tick both count.
+      attachmentsRef.current = [...attachmentsRef.current, candidate];
+      setAttachments((prev) => [...prev, candidate]);
+      announce(`${input.label} attached`);
+      return true;
+    },
+    [toast],
+  );
+
+  const insertCaptureText = useCallback(
+    (label: string, text: string) => {
+      const next = insertCaptureIntoDraft(draftRef.current, { label, text });
+      haptics.success();
+      setDraft(next.text);
+      setCaret(next.caret);
+      setPendingSelection(next.caret);
+    },
+    [setDraft, setCaret],
+  );
+
+  const captures = useCaptures({
+    workspaceId,
+    authedFetch,
+    uploadAvailable: upload.available,
+    uploadReason: upload.reason,
+    attach: attachCapture,
+    insertText: insertCaptureText,
+    setBusy: setAttachPending,
+    toast,
+    onCaptured,
+  });
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
@@ -654,7 +709,9 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
     attachGrantable: upload.grantable,
     onAttachFrom: (source) => void addAttachment(source),
     attachPending,
-    captureScopes: { browser: browserScope, terminal: terminalScope },
+    captureScopes: { browser: browserScope && Boolean(workspaceId), terminal: terminalScope && Boolean(workspaceId) },
+    captureActions: captures,
+    captureWorkspaceId: workspaceId ?? null,
 
     historyEntries: historyForSheet(history),
     historyVisible,
@@ -689,6 +746,7 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
       select: selectSuggestion,
     },
     history: { open: () => setHistoryVisible(true) },
+    captures,
     send,
     draft,
     setDraft,

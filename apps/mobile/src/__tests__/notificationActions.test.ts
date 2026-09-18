@@ -47,6 +47,9 @@ describe('approval category', () => {
     expect(APPROVAL_ACTIONS.map((a) => a.identifier)).toEqual(['approve', 'deny']);
     for (const action of APPROVAL_ACTIONS) {
       expect(action.options.opensAppToForeground).toBe(false);
+      // A lock-screen Allow must not be pressable by whoever holds the
+      // phone, and the credential is unreadable until the device unlocks.
+      expect(action.options.isAuthenticationRequired).toBe(true);
     }
     expect(APPROVAL_ACTIONS[1].options.isDestructive).toBe(true);
   });

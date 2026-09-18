@@ -24,6 +24,7 @@ import {
   Code2,
   Copy,
   Eye,
+  Clock,
   File,
   FileDiff,
   Folder,
@@ -50,6 +51,13 @@ import { useApi } from '../../../api/useApi';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { Toolbar, formatBytes, languageForPath, splitPath } from '../../changes';
 import { crumbsFor, isMarkdownPath, levelEntries, parentPrefix, prefixOf, searchEntries, type TreeEntry } from './fileTree';
+import { readRecentFiles, recordRecentFile, visibleRecentFiles, type RecentFile, type StringStorage } from './recentFiles';
+import { prefs } from '../../../storage/prefs';
+
+const recentStorage: StringStorage = {
+  getString: (key) => prefs.getString(key),
+  setString: (key, value) => prefs.setString(key, value),
+};
 
 export interface FilesSectionProps {
   workspaceId: string;
@@ -79,6 +87,10 @@ export function FilesSection({
   const [query, setQuery] = useState('');
   const [aliasFilter, setAliasFilter] = useState<string | null>(null);
   const [ownDetail, setOwnDetail] = useState<{ path: string; alias: string } | null>(null);
+  const [recent, setRecent] = useState<RecentFile[]>(() => readRecentFiles(recentStorage, workspaceId));
+  useEffect(() => {
+    setRecent(readRecentFiles(recentStorage, workspaceId));
+  }, [workspaceId]);
 
   const tree = useQuery({
     queryKey: queryKeys.workspaceTree(workspaceId),
@@ -95,10 +107,11 @@ export function FilesSection({
 
   const openFile = useCallback(
     (path: string, alias: string) => {
+      setRecent(recordRecentFile(recentStorage, workspaceId, { path, alias, at: Date.now() }));
       if (onOpenFile) onOpenFile(path, alias);
       else setOwnDetail({ path, alias });
     },
-    [onOpenFile],
+    [onOpenFile, workspaceId],
   );
 
   useEffect(() => {
@@ -112,6 +125,14 @@ export function FilesSection({
   const entries = useMemo<TreeEntry[]>(
     () => (query.trim() ? searchEntries(paths, query) : levelEntries(paths, prefix)),
     [paths, prefix, query],
+  );
+
+  // Only at the repo root with no search: inside a folder or a search the
+  // list already IS the narrowed view, and recents above it would push it
+  // down for no reason.
+  const recentHere = useMemo(
+    () => (prefix || query.trim() ? [] : visibleRecentFiles(recent, repo?.alias, paths)),
+    [recent, repo?.alias, paths, prefix, query],
   );
 
   const detail = controlledDetail
@@ -235,6 +256,40 @@ export function FilesSection({
           estimatedItemSize={48}
           recycleItems
           contentContainerStyle={{ paddingBottom: 32 }}
+          ListHeaderComponent={
+            recentHere.length > 0 ? (
+              <View className="border-b border-border-muted pb-1">
+                <Text accessibilityRole="header" className="px-4 pb-1 pt-3 text-sm font-semibold text-muted-foreground">
+                  Recent
+                </Text>
+                {recentHere.map((r) => {
+                  const { name, dir } = splitPath(r.path);
+                  return (
+                    <Touchable
+                      key={`recent:${r.alias}:${r.path}`}
+                      accessibilityLabel={`Recent file ${r.path}`}
+                      haptic="tap"
+                      scale="large"
+                      onPress={() => openFile(r.path, r.alias)}
+                      className="min-h-12 flex-row items-center gap-3 px-4 py-2"
+                    >
+                      <Clock size={16} color={colors['muted-foreground']} />
+                      <View className="flex-1">
+                        <Text numberOfLines={1} className="text-sm text-foreground">
+                          {name}
+                        </Text>
+                        {dir ? (
+                          <Text numberOfLines={1} ellipsizeMode="head" className="text-sm text-muted-foreground">
+                            {dir}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </Touchable>
+                  );
+                })}
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => (
             <Touchable
               accessibilityLabel={item.name === '..' ? 'Up one level' : item.name}

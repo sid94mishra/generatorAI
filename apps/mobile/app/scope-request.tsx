@@ -47,6 +47,9 @@ const FEATURE_LABELS: Record<MobileFeature, string> = {
   runControl: 'start, pause and cancel runs',
   workflowEdit: 'edit workflows',
   projectEdit: 'link codebases',
+  codebaseLinkLocal: 'link a local folder',
+  capabilityAdmin: 'manage MCP servers, agents and extensions',
+  computer: 'watch and approve computer use',
   deviceAdmin: 'manage other devices',
 };
 
@@ -82,7 +85,14 @@ export default function ScopeRequestScreen(): React.ReactElement {
   const request = scopeRequestBody([...selected], reason);
 
   const send = useCallback(async () => {
-    if (!request || busy) return;
+    if (busy) return;
+    if (!request) {
+      // The button stays readable instead of sitting at 40% opacity with an
+      // instruction for a label; pressing it explains what is missing.
+      haptics.warn();
+      toast({ message: 'Pick at least one permission above.', tone: 'info' });
+      return;
+    }
     setBusy(true);
     try {
       await create.mutateAsync(request);
@@ -123,6 +133,24 @@ export default function ScopeRequestScreen(): React.ReactElement {
       title="Request access"
       subtitle="Permissions this device does not have yet"
       fallback="/settings/security"
+      // Pinned: at the sheet's 0.6 detent a button after the list and the
+      // reason field started below the fold.
+      footer={
+        missing.length === 0 ? undefined : (
+          <Button
+            label={
+              selected.size === 0
+                ? 'Request access'
+                : `Request ${selected.size} permission${selected.size === 1 ? '' : 's'}`
+            }
+            full
+            size="lg"
+            loading={busy}
+            disabled={unsupported}
+            onPress={() => void send()}
+          />
+        )
+      }
     >
       {missing.length === 0 ? (
         <EmptyState
@@ -151,9 +179,8 @@ export default function ScopeRequestScreen(): React.ReactElement {
             })}
           </ListGroup>
 
-          <SectionHeader title="Why" />
           <Field
-            label="Reason (optional)"
+            label="Why do you need it? (optional)"
             hint="Shown to the admin who approves the request."
             multiline
             value={reason}
@@ -182,20 +209,7 @@ export default function ScopeRequestScreen(): React.ReactElement {
             </Card>
           ) : null}
 
-          <Button
-            label={
-              selected.size === 0
-                ? 'Pick a permission'
-                : `Request ${selected.size} permission${selected.size === 1 ? '' : 's'}`
-            }
-            full
-            size="lg"
-            loading={busy}
-            disabled={!request || unsupported}
-            onPress={() => void send()}
-          />
-
-          <Text className="px-1 text-xs leading-relaxed text-muted-foreground">
+          <Text className="text-sm leading-relaxed text-muted-foreground">
             Sensitive permissions let this phone act on the machine running GeneratorAI. An admin
             approves each request on a trusted device; nothing changes until they do.
           </Text>

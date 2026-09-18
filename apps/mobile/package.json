@@ -52,6 +52,7 @@
     "lucide-react-native": "^0.460.0",
     "marked": "^15.0.7",
     "nativewind": "^4.2.1",
+    "qrcode": "^1.5.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.2",

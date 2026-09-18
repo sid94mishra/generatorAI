@@ -18,7 +18,13 @@
 //     ended is `pending` (neutral), not running forever;
 //   • `warning` system blocks keep their tone (D6); `error` ones are danger;
 //   • a pending gate appends a "waiting for you" row; a cancelled turn
-//     appends a "stopped" row; hook invocations and usage trail the turn.
+//     appends a "stopped" row; hook invocations and usage trail the turn;
+//   • with `collapseSettled`, a SETTLED turn's consecutive activity rows
+//     (steps, groups, reasoning, neutral notes) fold into one "work" row —
+//     "Worked · 7 steps · 42s" — once they hold two or more steps. Warnings,
+//     errors, widgets, prose and source-control results stay visible;
+//   • the last prose row of a settled turn is marked `final`, which is where
+//     the turn's actions (copy, read aloud, fork) are offered.
 //
 // Pure — no React, no store — so the whole taxonomy is unit-testable.
 // ────────────────────────────────────────────────────────────────
@@ -90,7 +96,14 @@ export type SystemTone = 'neutral' | 'info' | 'warning' | 'danger';
 
 export type TimelineRow =
   | { kind: 'thinking'; id: string; block: Extract<StreamBlock, { type: 'thinking' }>; live: boolean }
-  | { kind: 'text'; id: string; block: Extract<StreamBlock, { type: 'text' }>; live: boolean }
+  | {
+      kind: 'text';
+      id: string;
+      block: Extract<StreamBlock, { type: 'text' }>;
+      live: boolean;
+      /** The last prose of a settled turn — the row that carries the turn's actions. */
+      final?: boolean;
+    }
   | { kind: 'tool'; id: string; step: ToolStep }
   | { kind: 'group'; id: string; group: StepGroup }
   | { kind: 'system'; id: string; block: Extract<StreamBlock, { type: 'system' }>; tone: SystemTone }
@@ -100,7 +113,20 @@ export type TimelineRow =
   | { kind: 'hook'; id: string; hook: StreamHookInvocation }
   | { kind: 'usage'; id: string; usage: StreamUsage }
   // Emitted by `chat.scm.result` (agent-native commits); see `scmResultBlock.ts`.
-  | { kind: 'scm_result'; id: string; block: ScmResultBlock };
+  | { kind: 'scm_result'; id: string; block: ScmResultBlock }
+  // A settled turn's folded activity; see `collapseWork`.
+  | { kind: 'work'; id: string; work: WorkSummary };
+
+/** The folded activity of a settled turn: "Worked · 7 steps · 42s". */
+export interface WorkSummary {
+  /** The rows it stands for, in order — rendered when expanded. */
+  rows: TimelineRow[];
+  /** Tool calls, nested sub-agent steps included. */
+  steps: number;
+  failed: number;
+  /** Wall time of the turn, when the caller knows it. */
+  durationMs?: number;
+}
 
 export interface DeriveTimelineOptions {
   /** True while the turn is live — decides whether an open call spins. */
@@ -113,7 +139,17 @@ export interface DeriveTimelineOptions {
   usage?: StreamUsage | null;
   /** The turn was cancelled by the user (live: `cancelRequested`; history: `metadata.partial`). */
   stopped?: boolean;
+  /**
+   * Fold a settled turn's consecutive activity into one "work" row. Ignored
+   * while `active` — a live turn is shown step by step.
+   */
+  collapseSettled?: boolean;
+  /** How long the turn took, for the folded row's label. */
+  durationMs?: number;
 }
+
+/** A folded run needs at least this many tool calls; one step stays a plain row. */
+export const MIN_WORK_STEPS = 2;
 
 /** Runs shorter than this render as plain rows. */
 export const MIN_GROUP = 2;
@@ -540,11 +576,117 @@ export function deriveTimeline(
     }
   }
 
+  if (!opts.active) markFinalText(rows);
+  if (opts.collapseSettled && !opts.active) {
+    const folded = collapseWork(rows, prefix, opts.durationMs);
+    rows.length = 0;
+    rows.push(...folded);
+  }
+
   if (awaiting && gate) rows.push({ kind: 'waiting', id: `${prefix}waiting`, gate });
   if (opts.stopped) rows.push({ kind: 'stopped', id: `${prefix}stopped` });
   for (const hook of opts.hooks ?? []) rows.push({ kind: 'hook', id: `${prefix}hook-${hook.id}`, hook });
   if (opts.usage) rows.push({ kind: 'usage', id: `${prefix}usage`, usage: opts.usage });
   return rows;
+}
+
+/** Mark the last prose row of a settled turn as `final`. */
+function markFinalText(rows: TimelineRow[]): void {
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i]!;
+    if (row.kind === 'text') {
+      rows[i] = { ...row, final: true };
+      return;
+    }
+  }
+}
+
+/** Rows a settled turn folds away: the work, not its outcome. */
+function isFoldable(row: TimelineRow): boolean {
+  switch (row.kind) {
+    case 'tool':
+    case 'group':
+    case 'thinking':
+      return true;
+    case 'system':
+      // Warnings and errors are outcomes the reader must see.
+      return row.tone === 'neutral' || row.tone === 'info';
+    default:
+      return false;
+  }
+}
+
+function stepsIn(row: TimelineRow): { steps: number; failed: number } {
+  if (row.kind === 'tool') {
+    return { steps: 1 + countSteps(row.step.children), failed: row.step.status === 'failed' ? 1 : 0 };
+  }
+  if (row.kind === 'group') {
+    let steps = 0;
+    for (const step of row.group.steps) steps += 1 + countSteps(step.children);
+    return { steps, failed: row.group.failed };
+  }
+  return { steps: 0, failed: 0 };
+}
+
+/**
+ * Fold each run of consecutive foldable rows holding `MIN_WORK_STEPS` or more
+ * tool calls into a `work` row. The duration is the TURN's, so it is only
+ * attached when the turn folds into a single run — two disclosures cannot
+ * both claim "42s".
+ */
+export function collapseWork(rows: readonly TimelineRow[], prefix: string, durationMs?: number): TimelineRow[] {
+  const out: TimelineRow[] = [];
+  const workAt: number[] = [];
+  let run: TimelineRow[] = [];
+  let steps = 0;
+  let failed = 0;
+  const flush = (): void => {
+    if (run.length === 0) return;
+    if (steps >= MIN_WORK_STEPS) {
+      workAt.push(out.length);
+      out.push({ kind: 'work', id: `${prefix}work-${run[0]!.id}`, work: { rows: run, steps, failed } });
+    } else {
+      out.push(...run);
+    }
+    run = [];
+    steps = 0;
+    failed = 0;
+  };
+  for (const row of rows) {
+    if (isFoldable(row)) {
+      run.push(row);
+      const counted = stepsIn(row);
+      steps += counted.steps;
+      failed += counted.failed;
+    } else {
+      flush();
+      out.push(row);
+    }
+  }
+  flush();
+  if (workAt.length === 1 && durationMs !== undefined && durationMs > 0) {
+    const only = out[workAt[0]!]!;
+    if (only.kind === 'work') out[workAt[0]!] = { ...only, work: { ...only.work, durationMs } };
+  }
+  return out;
+}
+
+/** "Worked · 7 steps · 42s" — and "· 1 failed" when something did. */
+export function workLabel(work: WorkSummary): string {
+  const parts = ['Worked', `${work.steps} ${work.steps === 1 ? 'step' : 'steps'}`];
+  if (work.durationMs !== undefined) parts.push(formatWorkDuration(work.durationMs));
+  if (work.failed > 0) parts.push(`${work.failed} failed`);
+  return parts.join(' · ');
+}
+
+export function formatWorkDuration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
 }
 
 /**
@@ -558,8 +700,15 @@ export function rowsEqual(a: TimelineRow, b: TimelineRow): boolean {
   if (a.kind !== b.kind || a.id !== b.id) return false;
   switch (a.kind) {
     case 'thinking':
-    case 'text':
       return a.block === (b as typeof a).block && a.live === (b as typeof a).live;
+    case 'text':
+      return a.block === (b as typeof a).block && a.live === (b as typeof a).live && a.final === (b as typeof a).final;
+    case 'work': {
+      const w = (b as typeof a).work;
+      if (a.work.durationMs !== w.durationMs || a.work.rows.length !== w.rows.length) return false;
+      for (let i = 0; i < w.rows.length; i += 1) if (!rowsEqual(a.work.rows[i]!, w.rows[i]!)) return false;
+      return true;
+    }
     case 'tool':
       return a.step === (b as typeof a).step;
     case 'group': {

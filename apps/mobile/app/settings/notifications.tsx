@@ -166,7 +166,7 @@ export default function NotificationsScreen(): React.ReactElement {
         ))}
       </ListGroup>
 
-      <Text className="px-1 pt-2 text-xs leading-relaxed text-muted-foreground">
+      <Text className="pt-2 text-xs leading-relaxed text-muted-foreground">
         These preferences apply to this device only. While the app is open, a switched-off
         category is not shown. In the background, run outcomes and chat replies are muted on the
         server only when both are off; approvals are always delivered.

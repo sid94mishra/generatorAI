@@ -17,6 +17,19 @@ export const LAST_ROUTE_TTL_MS = 30 * 60 * 1000;
  */
 const NON_RESTORABLE = new Set(['', '/', '/pair', '/revoked', '/(tabs)', '/index']);
 
+/**
+ * Route-addressable sheets (`/approvals`, `/scope-request`, a chat's gate or
+ * plan sheet). Restoring one on a cold start presents a modal with nothing
+ * underneath it, and a gate or plan restored half an hour later has usually
+ * already been answered — so the user lands on a stale decision.
+ */
+export function isSheetRoute(pathname: string): boolean {
+  const path = pathname.split('?')[0] ?? '';
+  if (path === '/approvals' || path.startsWith('/approvals/')) return true;
+  if (path === '/scope-request' || path.startsWith('/scope-request/')) return true;
+  return /^\/chats\/[^/]+\/(gate|plan)\/[^/]+\/?$/.test(path);
+}
+
 export function isRestorableRoute(pathname: string | null | undefined): pathname is string {
   if (!pathname) return false;
   if (!pathname.startsWith('/')) return false;
@@ -24,6 +37,7 @@ export function isRestorableRoute(pathname: string | null | undefined): pathname
   // Settings screens are reached from a tab in one tap; restoring one after a
   // kill puts the user two levels deep in preferences they had finished with.
   if (pathname.startsWith('/settings')) return false;
+  if (isSheetRoute(pathname)) return false;
   return true;
 }
 

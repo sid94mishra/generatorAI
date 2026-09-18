@@ -25,6 +25,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { AppState } from 'react-native';
 import {
   AuthenticatedClientRuntime,
   type AuthState,
@@ -39,6 +40,13 @@ import {
 import { MobileDeviceKeyStore, MobileSessionStore, type KeyBacking } from './stores';
 import { registerAuthenticatedFetch } from './backgroundFetch';
 import { resetStepUp } from './stepUp';
+import {
+  isStorageUnavailableError,
+  nextRestorePhase,
+  shouldRetryRestore,
+  type RestoreEvent,
+  type RestorePhase,
+} from './restoreState';
 import { buildEndpointCandidates } from '../transport/endpointPlan';
 import { PREF_KEYS, prefs } from '../storage/prefs';
 
@@ -58,6 +66,15 @@ export interface AuthContextValue {
    * reason to route.
    */
   initializing: boolean;
+  /**
+   * The stored session exists (or might) but protected storage refused to
+   * read it — the phone is locked, or the Keystore is briefly unavailable.
+   * NOT the same as `unpaired`: the gate shows "Unlock to continue" and the
+   * restore re-runs when the app next becomes active. See `restoreState.ts`.
+   */
+  storageLocked: boolean;
+  /** Re-run a restore that stopped at `storageLocked`. */
+  retryRestore(): void;
   transport: TransportStatus;
   /** Where the private key lives. Surfaced in Settings → Security. */
   keyBacking: KeyBacking;
@@ -114,9 +131,19 @@ async function verifyHostIdentity(endpoint: string, signal?: AbortSignal): Promi
 
 export function AuthProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const [state, setState] = useState<AuthState>({ status: 'unpaired' });
-  // Starts true and is cleared exactly once, when the restore effect settles.
-  // See `AuthContextValue.initializing`.
-  const [initializing, setInitializing] = useState(true);
+  // Starts `restoring`; `initializing` and `storageLocked` are views of it.
+  // See `AuthContextValue.initializing` and `restoreState.ts`.
+  const [restorePhase, setRestorePhase] = useState<RestorePhase>('restoring');
+  const restorePhaseRef = useRef<RestorePhase>('restoring');
+  const dispatchRestore = useCallback((event: RestoreEvent) => {
+    const next = nextRestorePhase(restorePhaseRef.current, event);
+    restorePhaseRef.current = next;
+    setRestorePhase(next);
+  }, []);
+  // Bumped to re-run the restore effect after a locked read.
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
+  const initializing = restorePhase === 'restoring';
+  const storageLocked = restorePhase === 'locked';
   const [transport, setTransport] = useState<TransportStatus>({ state: 'idle' });
   const [keyBacking, setKeyBacking] = useState<KeyBacking>('software');
 
@@ -157,8 +184,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     let cancelled = false;
 
     void (async () => {
+      // Which way the attempt ended; applied in `finally` so every path —
+      // including a throw nobody anticipated — leaves the spinner.
+      let outcome: RestoreEvent = { type: 'settled' };
       try {
-        const session = await sessionStore.load();
+        let session: Awaited<ReturnType<MobileSessionStore['load']>>;
+        try {
+          session = await sessionStore.load();
+        } catch {
+          // A READ failure is not an absent session. Treating it as one sent
+          // every locked-phone launch (notification action, background wake)
+          // to /pair. Any rejection here counts: the item could not be read,
+          // so nothing is known about whether this device is paired.
+          outcome = { type: 'storage-unavailable' };
+          return;
+        }
         if (cancelled) return;
 
         if (!session) {
@@ -186,13 +226,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         runtimeRef.current = runtime;
 
         try {
-          const next = await runtime.initialize();
+          let next = await runtime.initialize();
+          // A cold start races the network: the radio is still waking, or the
+          // JS thread is busy enough that the 4 s identity probe times out.
+          // One quiet retry turns that common first-launch "Can't reach your
+          // server" flash into a normal start; a host that is really down
+          // still lands on the error screen a moment later.
+          if (!cancelled && next.status === 'error') {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            if (!cancelled) next = await runtime.retryInitialize();
+          }
           if (!cancelled) {
             setState(next);
             setKeyBacking(keyStore.backing);
           }
         } catch (err) {
           if (cancelled) return;
+          // The device key (or the session, re-read inside the runtime) sits
+          // in the same protected storage and fails the same way when locked.
+          if (isStorageUnavailableError(err)) {
+            outcome = { type: 'storage-unavailable' };
+            return;
+          }
           if (err instanceof HostIdentityMismatchError) {
             // Surfaced as a blocking screen: this is a security event, not a
             // transient network error, and it must not be retried silently.
@@ -204,14 +259,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       } finally {
         // Must run on every path, including the early `!session` return and
         // any throw — otherwise the app is stuck on the spinner forever.
-        if (!cancelled) setInitializing(false);
+        if (!cancelled) dispatchRestore(outcome);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [buildSupervisor, keyStore, sessionStore]);
+  }, [buildSupervisor, keyStore, sessionStore, dispatchRestore, restoreAttempt]);
+
+  const retryRestore = useCallback(() => {
+    if (restorePhaseRef.current !== 'locked') return;
+    dispatchRestore({ type: 'retry' });
+    setRestoreAttempt((n) => n + 1);
+  }, [dispatchRestore]);
+
+  // Unlocking the phone and opening the app makes it `active`: that is the
+  // moment protected storage becomes readable again.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (shouldRetryRestore(restorePhaseRef.current, next)) retryRestore();
+    });
+    return () => sub.remove();
+  }, [retryRestore]);
 
   const completePairing = useCallback(
     async (consent: PairingConsent, deviceName: string) => {
@@ -262,7 +332,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
 
   const reconnect = useCallback(async () => {
     await supervisorRef.current?.invalidate('manual reconnect');
-    await supervisorRef.current?.connect(3);
+    try {
+      await supervisorRef.current?.connect(3);
+    } catch {
+      // Still unreachable: the retry below reports it through the auth state.
+    }
+    // A launch that failed left auth in `error`; reconnecting the transport
+    // alone never leaves that screen, so re-run initialisation too.
+    const runtime = runtimeRef.current;
+    if (runtime) setState(await runtime.retryInitialize());
   }, []);
 
   const refreshPermissions = useCallback(async () => {
@@ -274,6 +352,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     () => ({
       state,
       initializing,
+      storageLocked,
+      retryRestore,
       transport,
       keyBacking,
       fetch: (path, init) => {
@@ -302,6 +382,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     [
       state,
       initializing,
+      storageLocked,
+      retryRestore,
       transport,
       keyBacking,
       completePairing,

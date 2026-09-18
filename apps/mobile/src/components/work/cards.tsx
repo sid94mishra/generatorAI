@@ -1,22 +1,25 @@
 // ────────────────────────────────────────────────────────────────
-// Work rows — run, workflow, automation and agent cards.
+// Work rows — run, workflow, automation and agent rows.
 //
-// Moved out of the Work screen so the same rows can be rendered by the
-// Home queue, the workflow detail and the Projects › Agents segment
-// without three copies drifting.
+// Flat `ListItem` rows (design spec: lists are rows, not bordered cards).
+// The leading avatar carries state; a trailing badge appears only for a
+// non-default state. Every row takes an optional `accessory` (a trailing
+// control such as an enable switch) and `separator` (hairline under it).
+//
+// The `*Card` names are kept so call sites do not churn.
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Bot, Clock, Play, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
+import { Bot, Clock, Network, Play, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
 import type { AgentSummary, AutomationSummary, WorkflowRunSummary, WorkflowSummary } from '@generatorai/client-core';
 
 import { relativeTime, runElapsed, formatDuration } from '../runs/formatTime';
 import { isActive, needsAttention, statusLabel } from '../runs/statusStyle';
-import { Badge, Card, StatusDot, type Tone } from '../ui/primitives';
-import { Touchable } from '../ui/Touchable';
+import { ListItem, TONE_COLOR_TOKEN } from '../ui/ListItem';
+import type { Tone } from '../ui/primitives';
 import { runRoute } from '../../navigation/routes';
+import { runTitle } from '../runs/runModel';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function runTone(status: string): Tone {
@@ -26,136 +29,162 @@ export function runTone(status: string): Tone {
   return 'neutral';
 }
 
-export function RunCard({ run }: { run: WorkflowRunSummary }): React.ReactElement {
+/** Shared props for every work row. */
+export interface WorkRowProps {
+  /** Trailing control (e.g. an enable switch). Presses in it do not open the row. */
+  accessory?: React.ReactNode;
+  /** Hairline under the row. Default true. */
+  separator?: boolean;
+}
+
+const TRIGGER_LABEL: Record<AutomationSummary['triggerType'], string> = {
+  manual: 'Manual',
+  schedule: 'Scheduled',
+  webhook: 'Webhook',
+};
+
+export function RunCard({ run, accessory, separator }: { run: WorkflowRunSummary } & WorkRowProps): React.ReactElement {
+  const { colors } = useTheme();
   const tone = runTone(run.status);
-  const elapsed = runElapsed(run, isActive(run.status) ? null : run.updatedAt);
+  const active = isActive(run.status);
+  const blocked = needsAttention(run.status) && run.status !== 'failed';
+  const elapsed = runElapsed(run, active ? null : run.updatedAt);
+  const status = statusLabel(run.status);
+
+  // One status signal: live states get the avatar dot and say so in the
+  // subtitle; settled non-success states get a badge; success gets neither.
+  const showBadge = !active && !blocked && tone !== 'success';
+  const subtitle = run.error
+    ? run.error
+    : [active || blocked ? status : null, elapsed !== null ? `ran ${formatDuration(elapsed)}` : null]
+        .filter(Boolean)
+        .join(' · ') || status;
 
   return (
-    <Touchable
-      accessibilityLabel={`${run.name ?? 'Run'}, ${statusLabel(run.status)}`}
-      haptic="tap"
-      scale="large"
+    <ListItem
+      title={runTitle(run.name)}
+      subtitle={subtitle}
+      subtitleTone={run.error ? 'danger' : 'muted'}
+      meta={relativeTime(run.updatedAt)}
+      avatar={{
+        icon: <Play size={17} color={colors[TONE_COLOR_TOKEN[tone]]} />,
+        tone,
+        indicator: active ? 'info' : blocked ? 'warning' : null,
+      }}
+      badge={showBadge ? { label: status, tone } : null}
+      accessory={accessory}
+      separator={separator}
+      accessibilityLabel={`${runTitle(run.name, 'Run')}, ${status}`}
       onPress={() => router.push(runRoute(run.id) as never)}
-    >
-      <Card className={`gap-2 p-3.5 ${needsAttention(run.status) ? 'border-warning' : ''}`}>
-        <View className="flex-row items-center gap-2">
-          <StatusDot tone={tone} label={null} />
-          <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
-            {run.name ?? 'Workflow run'}
-          </Text>
-          <Badge label={statusLabel(run.status)} tone={tone} />
-        </View>
-        <Text numberOfLines={1} className="text-xs text-muted-foreground">
-          {relativeTime(run.updatedAt)}
-          {elapsed !== null ? ` · ran ${formatDuration(elapsed)}` : ''}
-        </Text>
-        {run.error ? (
-          <Text numberOfLines={2} className="text-xs text-danger">
-            {run.error}
-          </Text>
-        ) : null}
-      </Card>
-    </Touchable>
+    />
   );
 }
 
 export function WorkflowCard({
   workflow,
   runs,
+  accessory,
+  separator,
 }: {
   workflow: WorkflowSummary;
   runs: WorkflowRunSummary[];
-}): React.ReactElement {
+} & WorkRowProps): React.ReactElement {
   const { colors } = useTheme();
   const mine = runs.filter((r) => r.workflowDefinitionId === workflow.id);
   const latest = mine[0];
+  const latestTone = latest ? runTone(latest.status) : 'neutral';
+  const latestActive = latest ? isActive(latest.status) : false;
 
+  const runsText = `${mine.length} run${mine.length === 1 ? '' : 's'}`;
   return (
-    <Touchable
-      accessibilityLabel={workflow.name}
-      haptic="tap"
-      scale="large"
+    <ListItem
+      title={workflow.name}
+      subtitle={workflow.description ? `${runsText} · ${workflow.description}` : runsText}
+      meta={latest ? relativeTime(latest.updatedAt) : null}
+      avatar={{
+        icon: <WorkflowIcon size={17} color={colors['muted-foreground']} />,
+        tone: 'neutral',
+        indicator: latestActive ? 'info' : latestTone === 'warning' ? 'warning' : null,
+      }}
+      badge={latestTone === 'danger' ? { label: 'Last run failed', tone: 'danger' } : null}
+      accessory={accessory}
+      separator={separator}
+      accessibilityLabel={
+        latest ? `${workflow.name}, ${runsText}, last run ${statusLabel(latest.status)}` : `${workflow.name}, ${runsText}`
+      }
       onPress={() => router.push(`/workflows/${workflow.id}`)}
-    >
-      <Card className="flex-row items-center gap-3 p-3.5">
-        <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
-          <WorkflowIcon size={16} color={colors['muted-foreground']} />
-        </View>
-        <View className="flex-1 gap-0.5">
-          <Text numberOfLines={1} className="text-md font-medium text-foreground">
-            {workflow.name}
-          </Text>
-          <Text numberOfLines={1} className="text-xs text-muted-foreground">
-            {mine.length} run{mine.length === 1 ? '' : 's'}
-            {latest ? ` · last ${relativeTime(latest.updatedAt)}` : ''}
-          </Text>
-        </View>
-        {latest ? (
-          <StatusDot tone={runTone(latest.status)} label={`Last run ${statusLabel(latest.status)}`} />
-        ) : null}
-      </Card>
-    </Touchable>
+    />
   );
 }
 
-export function AutomationCard({ automation }: { automation: AutomationSummary }): React.ReactElement {
+export function AutomationCard({
+  automation,
+  accessory,
+  separator,
+}: { automation: AutomationSummary } & WorkRowProps): React.ReactElement {
   const { colors } = useTheme();
   const TriggerIcon =
     automation.triggerType === 'schedule' ? Clock : automation.triggerType === 'webhook' ? Webhook : Play;
+  const trigger = TRIGGER_LABEL[automation.triggerType] ?? automation.triggerType;
 
   return (
-    <Touchable
-      accessibilityLabel={automation.name}
-      haptic="tap"
-      scale="large"
+    <ListItem
+      title={automation.name}
+      subtitle={`${trigger} · ${automation.lastRunAt ? `last ran ${relativeTime(automation.lastRunAt)}` : 'never run'}`}
+      avatar={{
+        icon: <TriggerIcon size={17} color={colors['muted-foreground']} />,
+        tone: 'neutral',
+      }}
+      // "On" is the default state and says nothing; only "Off" earns a badge.
+      badge={automation.enabled ? null : { label: 'Off', tone: 'neutral' }}
+      accessory={accessory}
+      separator={separator}
+      accessibilityLabel={`${automation.name}, ${trigger}, ${automation.enabled ? 'on' : 'off'}`}
       onPress={() => router.push(`/automations/${automation.id}`)}
-    >
-      <Card className="flex-row items-center gap-3 p-3.5">
-        <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
-          <TriggerIcon size={16} color={colors['muted-foreground']} />
-        </View>
-        <View className="flex-1 gap-0.5">
-          <Text numberOfLines={1} className="text-md font-medium text-foreground">
-            {automation.name}
-          </Text>
-          <Text numberOfLines={1} className="text-xs text-muted-foreground">
-            {automation.triggerType}
-            {automation.lastRunAt ? ` · last ran ${relativeTime(automation.lastRunAt)}` : ' · never run'}
-          </Text>
-        </View>
-        <Badge label={automation.enabled ? 'On' : 'Off'} tone={automation.enabled ? 'success' : 'neutral'} />
-      </Card>
-    </Touchable>
+    />
   );
 }
 
-export function AgentCard({ agent, onPress }: { agent: AgentSummary; onPress: () => void }): React.ReactElement {
+const SCOPE_LABEL: Record<AgentSummary['scope'], string> = {
+  system: 'Built-in',
+  global: 'Global',
+  project: 'Project',
+};
+
+/** A human label for an agent's scope — also the section label when a list groups by scope. */
+export function agentScopeLabel(scope: AgentSummary['scope']): string {
+  return SCOPE_LABEL[scope] ?? scope;
+}
+
+export function AgentCard({
+  agent,
+  onPress,
+  accessory,
+  separator,
+  showScope = true,
+}: {
+  agent: AgentSummary;
+  onPress: () => void;
+  /** Omit the scope from the subtitle when the list is already grouped by it. */
+  showScope?: boolean;
+} & WorkRowProps): React.ReactElement {
   const { colors } = useTheme();
+  const orchestrator = agent.role === 'orchestrator';
+  const Icon = orchestrator ? Network : Bot;
+  const facts = [showScope ? agentScopeLabel(agent.scope) : null, agent.description || null].filter(Boolean).join(' · ');
+
   return (
-    <Touchable
+    <ListItem
+      title={agent.name}
+      subtitle={facts || agent.slug}
+      titleBadge={orchestrator ? { label: 'Orchestrator' } : null}
+      avatar={{ icon: <Icon size={17} color={colors['muted-foreground']} />, tone: 'neutral' }}
+      badge={agent.enabled ? null : { label: 'Disabled', tone: 'neutral' }}
+      accessory={accessory}
+      separator={separator}
       accessibilityLabel={`${agent.name}, ${agent.scope} ${agent.role}${agent.enabled ? '' : ', disabled'}`}
-      accessibilityHint={agent.description || undefined}
-      haptic="tap"
-      scale="large"
+      {...(agent.description ? { accessibilityHint: agent.description } : {})}
       onPress={onPress}
-    >
-      <Card className="flex-row items-center gap-3 p-3.5">
-        <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
-          <Bot size={16} color={agent.enabled ? colors.primary : colors['muted-foreground']} />
-        </View>
-        <View className="flex-1 gap-0.5">
-          <Text numberOfLines={1} className="text-md font-medium text-foreground">
-            {agent.name}
-          </Text>
-          <Text numberOfLines={2} className="text-xs text-muted-foreground">
-            {agent.description || `${agent.scope} · ${agent.role}`}
-          </Text>
-        </View>
-        <Badge
-          label={agent.role === 'orchestrator' ? 'Orchestrator' : agent.scope}
-          tone={agent.role === 'orchestrator' ? 'primary' : 'neutral'}
-        />
-      </Card>
-    </Touchable>
+    />
   );
 }

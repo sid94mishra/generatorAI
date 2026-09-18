@@ -135,3 +135,42 @@ export function nearestDetent(offset: number, offsets: readonly number[]): numbe
   }
   return best;
 }
+
+/** Gap kept between the sheet's top edge and the status bar. */
+export const SHEET_TOP_GAP = 8;
+
+/**
+ * The sheet card's height while the keyboard is up.
+ *
+ * The sheet is lifted by the keyboard (padding under it), so a card of fixed
+ * height `sheetHeight` pushed its title and grabber off the top of the
+ * screen once `sheetHeight + keyboard` exceeded the space below the status
+ * bar. The card is capped to what is left instead; its scroller absorbs the
+ * difference.
+ */
+export function keyboardCappedHeight(
+  sheetHeight: number,
+  screenHeight: number,
+  statusBarTop: number,
+  keyboard: number,
+): number {
+  'worklet';
+  const available = screenHeight - statusBarTop - SHEET_TOP_GAP - Math.max(0, keyboard);
+  return Math.max(0, Math.min(sheetHeight, available));
+}
+
+/**
+ * translateY to render for a card capped to `renderedHeight`.
+ *
+ * Detent and drag math stay in the uncapped coordinate system (offset 0 =
+ * tallest detent, `sheetHeight` = closed), so snapping is unaffected by the
+ * keyboard. Rendering subtracts the height the cap removed: a detent that
+ * would show more than fits sits at the top of the available space, closed
+ * still means fully off-screen, and an upward rubber-band stays visible.
+ */
+export function renderedOffset(offset: number, sheetHeight: number, renderedHeight: number): number {
+  'worklet';
+  if (offset < 0) return offset;
+  const trimmed = Math.max(0, sheetHeight - renderedHeight);
+  return Math.max(0, offset - trimmed);
+}

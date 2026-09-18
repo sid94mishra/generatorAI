@@ -24,7 +24,9 @@ export function LockedPane({
   scope: string;
 }): React.ReactElement {
   return (
-    <View className="flex-1 justify-center">
+    // Top-aligned like every other pane's empty state, so switching panes
+    // does not move the message half a screen.
+    <View className="flex-1">
       <LockedState
         title={title}
         reason={feature.reason ?? 'This device does not hold the permission this pane needs.'}

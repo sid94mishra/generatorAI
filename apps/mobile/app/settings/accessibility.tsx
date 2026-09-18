@@ -147,7 +147,7 @@ export default function AccessibilityScreen(): React.ReactElement {
           toggle={{ value: haptics && hapticsSupported, onValueChange: setHaptics }}
         />
       </ListGroup>
-      <Text className="px-1 text-xs leading-relaxed text-muted-foreground">
+      <Text className="text-xs leading-relaxed text-muted-foreground">
         The app uses one light vocabulary — select, tap, commit, warn — rather than a strength
         slider, so there is no intensity setting to tune.
       </Text>

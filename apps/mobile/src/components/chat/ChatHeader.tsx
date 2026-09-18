@@ -83,6 +83,8 @@ function TransportChip({ transport }: { transport: TransportBadge }): React.Reac
       ripple={false}
       scale="none"
       onPress={() => router.push('/settings/diagnostics')}
+      // The chip is ~20pt tall; the slop brings the target to 44pt.
+      hitSlop={12}
       className={`shrink-0 flex-row items-center gap-1 rounded-full bg-subtle py-0.5 ${healthy ? 'px-1.5' : 'px-2'}`}
     >
       <StatusDot tone={tone} label={null} />

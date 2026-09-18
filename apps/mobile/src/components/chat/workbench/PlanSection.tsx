@@ -11,8 +11,17 @@ import React, { useState } from 'react';
 
 import { PlanBody, usePlanDocument } from '../../review';
 
-export function PlanSection({ chatId, active = true }: { chatId: string; active?: boolean }): React.ReactElement {
-  const [planId, setPlanId] = useState<string | null>(null);
+export function PlanSection({
+  chatId,
+  active = true,
+  initialPlanId = null,
+}: {
+  chatId: string;
+  active?: boolean;
+  /** Open on this plan rather than the latest (a plan card's "Open plan"). */
+  initialPlanId?: string | null;
+}): React.ReactElement {
+  const [planId, setPlanId] = useState<string | null>(initialPlanId);
   const plan = usePlanDocument(chatId, { active, planId });
   return <PlanBody chatId={chatId} plan={plan} onSelectPlan={setPlanId} />;
 }

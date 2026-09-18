@@ -34,6 +34,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import { useMuxStream } from '../../stream/MuxStreamProvider';
 import { describeNotice, useStreamHealth, type NoticeTone } from '../../stream/streamHealth';
 import { Touchable } from '../ui/Touchable';
+import { WindowInsetsProvider } from '../ui/windowInsets';
 import { MAX_SCALE, announce, useReduceMotion } from '../ui/accessibility';
 import { haptics } from '../ui/haptics';
 import { TIMING } from '../ui/motion';
@@ -140,7 +141,7 @@ export function ConnectionStrip(): React.ReactElement | null {
           accessibilityRole="text"
           numberOfLines={1}
           maxFontSizeMultiplier={MAX_SCALE.chrome}
-          className="flex-1 text-xs font-medium text-foreground"
+          className="flex-1 text-sm font-medium text-foreground"
         >
           {shown.message}
         </Text>
@@ -158,7 +159,7 @@ export function ConnectionStrip(): React.ReactElement | null {
           >
             <Text
               maxFontSizeMultiplier={MAX_SCALE.chrome}
-              className="text-xs font-semibold text-primary"
+              className="text-sm font-semibold text-primary"
             >
               {busy ? 'Checking…' : 'Retry'}
             </Text>
@@ -175,15 +176,29 @@ export function ConnectionStrip(): React.ReactElement | null {
  * Everything inside reads a top inset of 0: the band has already been paid
  * for here, and paying it twice is the ~90pt of dead space `Screen`'s header
  * comment warns about.
+ *
+ * Left/right are paid here too, once, for landscape: the notch / Dynamic
+ * Island sits on a side edge there and would otherwise clip every header,
+ * row and the tab bar. The subtree reads 0 for both. The bottom inset is NOT
+ * consumed — the tab bar, composer and scrollers each pay it where their
+ * content actually meets the home indicator.
+ *
+ * Surfaces that escape this box and span the whole window (`Sheet`, iOS form
+ * sheets) read the real values through `useWindowInsets`.
  */
 export function ConnectionStripHost({ children }: { children: React.ReactNode }): React.ReactElement {
   const insets = useSafeAreaInsets();
-  const consumed = useMemo(() => ({ ...insets, top: 0 }), [insets]);
+  const consumed = useMemo(() => ({ ...insets, top: 0, left: 0, right: 0 }), [insets]);
 
   return (
-    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+    <View
+      className="flex-1 bg-background"
+      style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+    >
       <ConnectionStrip />
-      <SafeAreaInsetsContext.Provider value={consumed}>{children}</SafeAreaInsetsContext.Provider>
+      <WindowInsetsProvider insets={insets}>
+        <SafeAreaInsetsContext.Provider value={consumed}>{children}</SafeAreaInsetsContext.Provider>
+      </WindowInsetsProvider>
     </View>
   );
 }

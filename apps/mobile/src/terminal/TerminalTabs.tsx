@@ -26,7 +26,9 @@ import { haptics } from '../components/ui/haptics';
 import { useAuth } from '../auth/AuthProvider';
 import { useApi } from '../api/useApi';
 import { useTheme } from '../theme/ThemeProvider';
+import { KeyboardSticky } from '../components/ui/KeyboardSticky';
 import { TerminalView } from './TerminalView';
+import { forgetTerminal } from './terminalFocus';
 
 /** Same cap as the web's RightPane. */
 export const MAX_TERMINAL_TABS = 4;
@@ -139,6 +141,7 @@ export function TerminalTabs({
       const tab = tabs[index]!;
       // DELETE /api/workspaces/:id/terminals/:sid — idempotent server-side.
       void api.terminals.kill(workspaceId, tab.sessionId).catch(() => undefined);
+      forgetTerminal(workspaceId, tab.sessionId);
       const next = tabs.filter((t) => t.key !== key);
       setTabs(next);
       if (activeKey === key) setActiveKey(next[Math.min(index, next.length - 1)]?.key ?? null);
@@ -207,7 +210,12 @@ export function TerminalTabs({
   }
 
   return (
-    <View className="flex-1" style={{ backgroundColor: colors.background }}>
+    // Padding mode, not translate: the renderer and the key bar must both
+    // SHRINK above the keyboard so xterm refits and the bottom rows (the
+    // prompt being typed at) stay visible. Neither the chat's Terminal pane
+    // nor the full-screen route is otherwise lifted — iOS never resizes the
+    // window, and Android edge-to-edge no longer does either.
+    <KeyboardSticky mode="padding" className="flex-1" style={{ backgroundColor: colors.background }}>
       <View className="flex-row items-center border-b border-border bg-card">
         <ScrollView
           horizontal
@@ -251,6 +259,6 @@ export function TerminalTabs({
           <Text className="text-xs text-muted-foreground">Pick a shell above.</Text>
         </View>
       ) : null}
-    </View>
+    </KeyboardSticky>
   );
 }

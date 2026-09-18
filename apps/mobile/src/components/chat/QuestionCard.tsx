@@ -18,10 +18,10 @@ import { Check, CircleHelp } from 'lucide-react-native';
 import type { StreamBlock } from '@generatorai/client-core';
 
 import { Button } from '../ui/Button';
-import { Badge } from '../ui/primitives';
 import { Touchable } from '../ui/Touchable';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useCardEntering } from '../common/enterMotion';
+import { GateScroll } from './GateScroll';
 
 type QuestionBlock = Extract<StreamBlock, { type: 'question' }>;
 
@@ -69,68 +69,69 @@ export function QuestionCard({
   return (
     <Animated.View
       entering={entering}
-      className="mx-3 mb-2 gap-3 rounded-3xl border border-info bg-card p-3.5"
+      className="mx-3 mt-2 gap-3 rounded-3xl border border-warning bg-card p-3.5"
     >
       <View className="flex-row items-center gap-2.5">
-        <View className="h-8 w-8 items-center justify-center rounded-2xl bg-info-muted">
-          <CircleHelp size={16} color={colors.info} />
+        <View className="h-8 w-8 items-center justify-center rounded-2xl bg-warning-muted">
+          <CircleHelp size={16} color={colors.warning} />
         </View>
         <Text className="flex-1 text-md font-semibold text-foreground">The agent has a question</Text>
-        <Badge label="Answer" tone="info" />
       </View>
 
-      {block.questions.map((question) => {
-        const picked = answers[question.id] ?? [];
-        return (
-          <View key={question.id} className="gap-2">
-            <Text className="text-sm font-medium text-foreground">{question.question}</Text>
-            <View className="gap-1.5">
-              {question.options.map((option) => {
-                const selected = picked.includes(option.label);
-                return (
-                  <Touchable
-                    key={option.label}
-                    accessibilityLabel={option.label}
-                    accessibilityState={{ selected }}
-                    haptic="select"
-                    scale="large"
-                    onPress={() => toggle(question.id, option.label, question.multiSelect)}
-                    className={`min-h-11 flex-row items-center gap-2.5 rounded-2xl border px-3 py-2.5 ${
-                      selected ? 'border-primary bg-accent' : 'border-border bg-raised'
-                    }`}
-                  >
-                    <View
-                      className={`h-5 w-5 items-center justify-center border ${
-                        question.multiSelect ? 'rounded-md' : 'rounded-full'
-                      } ${selected ? 'border-primary bg-primary' : 'border-border'}`}
+      <GateScroll>
+        {block.questions.map((question) => {
+          const picked = answers[question.id] ?? [];
+          return (
+            <View key={question.id} className="gap-2">
+              <Text className="text-sm font-medium text-foreground">{question.question}</Text>
+              <View className="gap-1.5">
+                {question.options.map((option) => {
+                  const selected = picked.includes(option.label);
+                  return (
+                    <Touchable
+                      key={option.label}
+                      accessibilityLabel={option.label}
+                      accessibilityState={{ selected }}
+                      haptic="select"
+                      scale="large"
+                      onPress={() => toggle(question.id, option.label, question.multiSelect)}
+                      className={`min-h-11 flex-row items-center gap-2.5 rounded-2xl border px-3 py-2.5 ${
+                        selected ? 'border-primary bg-accent' : 'border-border bg-raised'
+                      }`}
                     >
-                      {selected ? <Check size={12} color={colors['primary-foreground']} /> : null}
-                    </View>
-                    <View className="flex-1">
-                      <Text className="text-sm text-foreground">{option.label}</Text>
-                      {option.description ? (
-                        <Text className="text-xs text-muted-foreground">{option.description}</Text>
-                      ) : null}
-                    </View>
-                  </Touchable>
-                );
-              })}
+                      <View
+                        className={`h-5 w-5 items-center justify-center border ${
+                          question.multiSelect ? 'rounded-md' : 'rounded-full'
+                        } ${selected ? 'border-primary bg-primary' : 'border-border'}`}
+                      >
+                        {selected ? <Check size={12} color={colors['primary-foreground']} /> : null}
+                      </View>
+                      <View className="flex-1">
+                        <Text className="text-sm text-foreground">{option.label}</Text>
+                        {option.description ? (
+                          <Text className="text-xs text-muted-foreground">{option.description}</Text>
+                        ) : null}
+                      </View>
+                    </Touchable>
+                  );
+                })}
+              </View>
             </View>
-          </View>
-        );
-      })}
+          );
+        })}
 
-      {allowsFreeform ? (
-        <TextInput
-          accessibilityLabel="Your answer"
-          multiline
-          value={freeform}
-          onChangeText={setFreeform}
-          placeholder="Add anything else…"
-          placeholderTextColor={colors['muted-foreground']}
-          className="max-h-28 min-h-11 rounded-2xl border border-border bg-raised px-3 py-2.5 text-sm text-foreground"
-        />
-      ) : null}
+        {allowsFreeform ? (
+          <TextInput
+            accessibilityLabel="Your answer"
+            multiline
+            value={freeform}
+            onChangeText={setFreeform}
+            placeholder="Add anything else…"
+            placeholderTextColor={colors['muted-foreground']}
+            className="max-h-28 min-h-11 rounded-2xl border border-border bg-raised px-3 py-2.5 text-sm text-foreground"
+          />
+        ) : null}
+      </GateScroll>
 
       <Button
         label="Send answer"

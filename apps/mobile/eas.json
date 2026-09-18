@@ -7,16 +7,19 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "env": { "APS_ENVIRONMENT": "development" },
       "android": { "buildType": "apk" },
       "ios": { "simulator": true }
     },
     "preview": {
       "distribution": "internal",
+      "env": { "APS_ENVIRONMENT": "production" },
       "android": { "buildType": "apk" },
       "channel": "preview"
     },
     "production": {
       "autoIncrement": true,
+      "env": { "APS_ENVIRONMENT": "production" },
       "channel": "production"
     }
   },

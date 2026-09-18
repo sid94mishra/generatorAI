@@ -48,6 +48,7 @@ import { Button, Spinner } from '@/components/ui/index.js';
 import { useResizable } from '@/hooks/useResizable.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import type { StageDefinition, VariableDefinition, CreateWorkflowRunParams, GitRepositoryConfig } from '@generatorai/shared';
+import { encodeStageOverrides } from '@generatorai/client-core';
 
 /**
  * The stage payload sent to the server, from the builder's own stage object.
@@ -501,20 +502,9 @@ export function WorkflowBuilderPage() {
           setVariableModalOpen(false);
           navigate(`/workflows/${store.definitionId}/runs/${context.workflowRunId}`);
         } else {
-          const activeOverrides = (stageOverrides ?? [])
-            .filter((o) => o.skip || Object.keys(o.variables).length > 0)
-            .map((o) => ({
-              stageName: o.stageName,
-              stageIndex: o.stageIndex,
-              ...(o.skip ? { skip: true } : {}),
-              ...(Object.keys(o.variables).length > 0 ? { variables: o.variables } : {}),
-            }));
-
           const params: CreateWorkflowRunParams = {
             workflowDefinitionId: store.definitionId,
-            variables: activeOverrides.length > 0
-              ? { ...variables, __stageOverrides: activeOverrides }
-              : variables,
+            variables: encodeStageOverrides(variables, stageOverrides, { orchestrated: false }).variables,
           };
           const run = await createRun.mutateAsync(params);
 

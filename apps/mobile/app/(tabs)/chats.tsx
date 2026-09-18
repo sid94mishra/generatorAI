@@ -15,12 +15,11 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Activity,
   Archive,
   ArchiveRestore,
   BellRing,
@@ -37,15 +36,19 @@ import { useModels } from '../../src/api/useModels';
 import { NewChatSheet, type NewChatValues } from '../../src/components/chat/NewChatSheet';
 import { RenameSheet } from '../../src/components/chat/RenameSheet';
 import { relativeTime } from '../../src/components/runs/formatTime';
-import { Card, StatusDot } from '../../src/components/ui/primitives';
+import { ModelVendorIcon, vendorForModel } from '../../src/components/brand/VendorIcons';
+import { displayChatName, parseChatName } from '../../src/components/common/chatName';
+import { sectionRows, type SectionRow } from '../../src/components/common/groupByDay';
+import { ListItem, ListSectionHeader } from '../../src/components/ui/ListItem';
+import { usePullToRefresh } from '../../src/components/ui/usePullToRefresh';
 import { SegmentedControl } from '../../src/components/ui/SegmentedControl';
-import { Touchable } from '../../src/components/ui/Touchable';
 import { Fab } from '../../src/components/ui/Button';
 import { SearchField } from '../../src/components/ui/Form';
 import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { Screen } from '../../src/components/ui/Screen';
-import { SettingsButton } from '../../src/components/ui/SettingsButton';
+import { TabHeaderActions } from '../../src/navigation/TabHeaderActions';
+import { useTabShell } from '../../src/navigation/tabShell';
 import { SwipeableRow, closeSwipedRow } from '../../src/components/ui/SwipeableRow';
 import { ActionSheet, ConfirmSheet } from '../../src/components/ui/ActionSheet';
 import { useToast } from '../../src/components/ui/Toast';
@@ -61,6 +64,7 @@ export default function ChatsScreen(): React.ReactElement {
   const toast = useToast();
   const params = useLocalSearchParams<{ new?: string }>();
   const listRef = useRef<never>(null);
+  const shell = useTabShell();
 
   useScrollToTop('chats', scrollerToTop(listRef));
 
@@ -154,7 +158,7 @@ export default function ChatsScreen(): React.ReactElement {
       // Undo is what makes a swipe safe: the gesture is easy to trigger by
       // accident, so the recovery has to be one tap and immediate.
       toast({
-        message: `Archived “${chat.name}”`,
+        message: `Archived “${displayChatName(chat.name)}”`,
         tone: 'success',
         action: {
           label: 'Undo',
@@ -168,7 +172,7 @@ export default function ChatsScreen(): React.ReactElement {
   const unarchiveChat = useCallback(
     (chat: ChatSummary) => {
       setStatus.mutate({ id: chat.id, status: 'active' });
-      toast({ message: `Restored “${chat.name}”`, tone: 'success' });
+      toast({ message: `Restored “${displayChatName(chat.name)}”`, tone: 'success' });
     },
     [setStatus, toast],
   );
@@ -179,91 +183,116 @@ export default function ChatsScreen(): React.ReactElement {
     return (
       list
         .filter((chat) => (scope === 'archived' ? isArchived(chat) : !isArchived(chat)))
-        .filter((chat) => !q || chat.name.toLowerCase().includes(q))
+        // Name AND the last line: "the chat where it said the tests pass" is
+        // how people remember a conversation.
+        .filter(
+          (chat) =>
+            !q ||
+            displayChatName(chat.name).toLowerCase().includes(q) ||
+            (chat.preview ?? '').toLowerCase().includes(q),
+        )
         // `updatedAt` arrives as an ISO string; subtracting them directly is NaN
         // and leaves the list in whatever order the server returned.
         .sort((a, b) => epochOr(b.updatedAt) - epochOr(a.updatedAt))
     );
   }, [chats.data, query, scope]);
 
+  // Today / Yesterday / This week / Older. Search results stay one flat list:
+  // a match's date is not what the user is scanning for.
+  const rows = useMemo<SectionRow<ChatSummary>[]>(
+    () =>
+      query.trim()
+        ? visible.map((chat) => ({ type: 'item' as const, key: chat.id, item: chat }))
+        : sectionRows(visible, { keyOf: (chat) => chat.id, timeOf: (chat) => epochOr(chat.updatedAt) }),
+    [visible, query],
+  );
+
   const activeCount = (chats.data ?? []).filter((c) => !isArchived(c)).length;
   const archivedCount = (chats.data ?? []).filter(isArchived).length;
 
+  const pull = usePullToRefresh(() => chats.refetch(), chats.isFetching);
+
+  const header = (
+    // Same order on every tab: scope first, then search within it.
+    <View className="gap-3 px-4 pb-1">
+      <SegmentedControl
+        segments={[
+          { value: 'active', label: 'Active', count: activeCount },
+          { value: 'archived', label: 'Archived', count: archivedCount },
+        ]}
+        value={scope}
+        onChange={(next) => {
+          closeSwipedRow();
+          setScope(next);
+        }}
+        accessibilityLabel="Active or archived chats"
+      />
+      <SearchField value={query} onChangeText={setQuery} placeholder="Search chats" />
+    </View>
+  );
+
+  const empty = chats.isLoading ? (
+    <SkeletonList rows={6} variant="flat" />
+  ) : chats.isError ? (
+    <ErrorState message="Could not load chats." onRetry={() => void chats.refetch()} />
+  ) : (
+    <EmptyState
+      title={query ? 'No matches' : scope === 'archived' ? 'No archived chats' : 'No chats yet'}
+      message={
+        query
+          ? 'Nothing matches that search.'
+          : scope === 'archived'
+            ? 'Chats you archive are kept here.'
+            : 'Start one and it appears here.'
+      }
+      icon={<MessagesSquare size={22} color={colors['muted-foreground']} />}
+      {...(scope === 'active' && !query
+        ? { action: { label: 'New chat', onPress: () => setCreating(true) } }
+        : {})}
+    />
+  );
+
   return (
     <View className="flex-1 bg-background">
-      <Screen title="Chats" trailing={<SettingsButton />} scroll={false}>
-        <View className="gap-3 px-4 pb-3">
-          <SearchField value={query} onChangeText={setQuery} placeholder="Search chats" />
-          <SegmentedControl
-            segments={[
-              { value: 'active', label: 'Active', count: activeCount },
-              { value: 'archived', label: 'Archived', count: archivedCount },
-            ]}
-            value={scope}
-            onChange={(next) => {
-              closeSwipedRow();
-              setScope(next);
-            }}
-          />
-        </View>
-
-        {chats.isLoading ? (
-          <View className="px-4">
-            <SkeletonList rows={6} />
-          </View>
-        ) : chats.isError ? (
-          <ErrorState message="Could not load chats." onRetry={() => void chats.refetch()} />
-        ) : visible.length === 0 ? (
-          <EmptyState
-            title={scope === 'archived' ? 'No archived chats' : 'No chats yet'}
-            message={
-              query
-                ? 'Nothing matches that search.'
-                : scope === 'archived'
-                  ? 'Chats you archive are kept here.'
-                  : 'Start one and it appears here.'
-            }
-            icon={<MessagesSquare size={22} color={colors['muted-foreground']} />}
-            {...(scope === 'active' && !query
-              ? { action: { label: 'New chat', onPress: () => setCreating(true) } }
-              : {})}
-          />
-        ) : (
-          <LegendList
-            ref={listRef as never}
-            data={visible}
-            keyExtractor={(chat: ChatSummary) => chat.id}
-            estimatedItemSize={66}
-            recycleItems
-            // The gutter is on the row, not here: LegendList positions every
-            // container absolutely, so contentContainerStyle padding never
-            // reaches the rows.
-            contentContainerStyle={{ paddingBottom: 140, gap: 10 }}
-            refreshing={chats.isFetching}
-            onRefresh={() => void chats.refetch()}
-            renderItem={({ item }: { item: ChatSummary }) => (
-              <View className="px-4">
-                <ChatRow
-                  chat={item}
-                  live={running.has(item.id)}
-                  waiting={waiting.has(item.id)}
-                  archived={scope === 'archived'}
-                  onArchive={() => archiveChat(item)}
-                  onUnarchive={() => unarchiveChat(item)}
-                  onDelete={() => setDeleting(item)}
-                  onMenu={() => setMenuFor(item)}
-                />
-              </View>
-            )}
-          />
-        )}
+      <Screen title="Chats" variant="compact" trailing={<TabHeaderActions />} scroll={false}>
+        <LegendList
+          ref={listRef as never}
+          data={rows}
+          keyExtractor={(row: SectionRow<ChatSummary>) => row.key}
+          getItemType={(row: SectionRow<ChatSummary>) => row.type}
+          estimatedItemSize={64}
+          recycleItems
+          // The gutter is on the rows, not here: LegendList positions every
+          // container absolutely, so contentContainerStyle padding never
+          // reaches the rows.
+          contentContainerStyle={{ paddingBottom: shell?.listBottom(true) ?? 140 }}
+          ListHeaderComponent={header}
+          ListEmptyComponent={empty}
+          refreshing={pull.refreshing}
+          onRefresh={pull.onRefresh}
+          renderItem={({ item: row }: { item: SectionRow<ChatSummary> }) =>
+            row.type === 'header' ? (
+              <ListSectionHeader label={row.label} />
+            ) : (
+              <ChatRow
+                chat={row.item}
+                live={running.has(row.item.id)}
+                waiting={waiting.has(row.item.id)}
+                archived={scope === 'archived'}
+                onArchive={() => archiveChat(row.item)}
+                onUnarchive={() => unarchiveChat(row.item)}
+                onDelete={() => setDeleting(row.item)}
+                onMenu={() => setMenuFor(row.item)}
+              />
+            )
+          }
+        />
       </Screen>
 
       <Fab
         accessibilityLabel="New chat"
         icon={<Plus size={22} color={colors['primary-foreground']} />}
         onPress={() => setCreating(true)}
-        offset={64}
       />
 
       <NewChatSheet
@@ -280,7 +309,7 @@ export default function ChatsScreen(): React.ReactElement {
       <ActionSheet
         visible={menuFor !== null}
         onClose={() => setMenuFor(null)}
-        title={menuFor?.name}
+        title={menuFor ? displayChatName(menuFor.name) : undefined}
         message={menuFor ? `Updated ${relativeTime(menuFor.updatedAt)}` : undefined}
         actions={
           menuFor
@@ -326,7 +355,7 @@ export default function ChatsScreen(): React.ReactElement {
       <ConfirmSheet
         visible={deleting !== null}
         onClose={() => setDeleting(null)}
-        title={`Delete “${deleting?.name ?? ''}”?`}
+        title={`Delete “${deleting ? displayChatName(deleting.name) : ''}”?`}
         message="The transcript and everything the agent produced in it are removed. This cannot be undone."
         confirmLabel="Delete chat"
         onConfirm={() => {
@@ -341,9 +370,10 @@ export default function ChatsScreen(): React.ReactElement {
  * One catalogue row.
  *
  * Three facts, in the order they are wanted: what state the chat is in, what
- * it is called, and what was last said in it. The state is carried by a
- * leading marker AND by the row's left edge, so "waiting on you" is legible
- * in a glance down the list rather than after reading four labels.
+ * it is called, and what was last said in it. State lives in the avatar (tint
+ * + corner dot) and is spelled out at the start of the subtitle; a settled
+ * chat shows the model vendor's mark instead, so rows are not all one glyph.
+ * Orchestrator workers drop the server's "⚙" marker for a Sub-agent badge.
  */
 function ChatRow({
   chat,
@@ -400,10 +430,10 @@ function ChatRow({
     [archived, colors, onArchive, onUnarchive, onDelete],
   );
 
+  const name = parseChatName(chat.name);
   const state = waiting ? 'waiting' : live ? 'running' : 'idle';
-  const stateLabel = waiting ? 'Waiting on you' : live ? 'Running' : relativeTime(chat.updatedAt);
-  const markerColor =
-    state === 'waiting' ? colors.warning : state === 'running' ? colors.info : colors['muted-foreground'];
+  const stateLabel = waiting ? 'Waiting on you' : live ? 'Running' : null;
+  const tone = state === 'waiting' ? 'warning' : state === 'running' ? 'info' : 'neutral';
 
   // "You: …" for your own last line reads as a conversation; an unlabelled
   // excerpt of your own prompt reads as the agent repeating you back.
@@ -412,75 +442,35 @@ function ChatRow({
       ? `You: ${chat.preview}`
       : chat.preview
     : null;
+  // `default` is not a model anyone chose; it says nothing.
+  const model = chat.model && chat.model !== 'default' ? chat.model : null;
+  const subtitle = stateLabel ? [stateLabel, preview].filter(Boolean).join(' · ') : (preview ?? model);
 
   return (
-    <View className="overflow-hidden rounded-3xl">
-      <SwipeableRow actions={actions}>
-        <Touchable
-          accessibilityLabel={`${chat.name}. ${stateLabel}.${preview ? ` ${preview}` : ''}`}
-          accessibilityHint="Double tap and hold for more actions"
-          haptic="tap"
-          scale="large"
-          onPress={() => router.push(`/chats/${chat.id}`)}
-          onLongPress={onMenu}
-        >
-          <Card
-            className="flex-row gap-3 p-3.5"
-            // Inline rather than a utility: NativeWind has no reliable
-            // directional border-colour class, and the whole point of the
-            // marker is that it is unambiguous.
-            style={state === 'waiting' ? { borderLeftWidth: 3, borderLeftColor: colors.warning } : undefined}
-          >
-            <View
-              className={`h-9 w-9 items-center justify-center rounded-2xl ${
-                state === 'waiting' ? 'bg-warning-muted' : 'bg-subtle'
-              }`}
-            >
-              {state === 'waiting' ? (
-                <BellRing size={16} color={colors.warning} />
-              ) : state === 'running' ? (
-                <Activity size={16} color={colors.info} />
-              ) : (
-                <MessagesSquare size={16} color={colors['muted-foreground']} />
-              )}
-            </View>
-
-            <View className="flex-1 gap-0.5">
-              <View className="flex-row items-baseline gap-2">
-                <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
-                  {chat.name}
-                </Text>
-                <Text className="text-xs text-muted-foreground">{relativeTime(chat.updatedAt)}</Text>
-              </View>
-
-              {preview ? (
-                <Text numberOfLines={1} className="text-sm text-muted-foreground">
-                  {preview}
-                </Text>
-              ) : null}
-
-              {state !== 'idle' || chat.model ? (
-                <View className="flex-row items-center gap-1.5 pt-0.5">
-                  {state !== 'idle' ? (
-                    <>
-                      <StatusDot tone={state === 'waiting' ? 'warning' : 'info'} label={null} />
-                      <Text numberOfLines={1} className="text-xs font-medium" style={{ color: markerColor }}>
-                        {stateLabel}
-                      </Text>
-                    </>
-                  ) : null}
-                  {chat.model ? (
-                    <Text numberOfLines={1} className="flex-1 text-xs text-muted-foreground">
-                      {state !== 'idle' ? '· ' : ''}
-                      {chat.model}
-                    </Text>
-                  ) : null}
-                </View>
-              ) : null}
-            </View>
-          </Card>
-        </Touchable>
-      </SwipeableRow>
-    </View>
+    <SwipeableRow actions={actions}>
+      <ListItem
+        title={name.title}
+        titleBadge={name.subAgent ? { label: 'Sub-agent' } : null}
+        subtitle={subtitle}
+        subtitleTone={state === 'waiting' ? 'warning' : 'muted'}
+        meta={relativeTime(chat.updatedAt)}
+        avatar={{
+          icon:
+            model && state === 'idle' && vendorForModel(model) !== 'copilot' ? (
+              <ModelVendorIcon modelId={model} size={17} color={colors['muted-foreground']} />
+            ) : state === 'waiting' ? (
+              <BellRing size={17} color={colors.warning} />
+            ) : (
+              <MessagesSquare size={17} color={colors[state === 'running' ? 'info' : 'muted-foreground']} />
+            ),
+          tone,
+          indicator: state === 'waiting' ? 'warning' : state === 'running' ? 'info' : null,
+        }}
+        accessibilityLabel={`${name.title}.${name.subAgent ? ' Sub-agent.' : ''} ${stateLabel ?? relativeTime(chat.updatedAt)}.${preview ? ` ${preview}` : ''}`}
+        accessibilityHint="Double tap and hold for more actions"
+        onPress={() => router.push(`/chats/${chat.id}`)}
+        onLongPress={onMenu}
+      />
+    </SwipeableRow>
   );
 }

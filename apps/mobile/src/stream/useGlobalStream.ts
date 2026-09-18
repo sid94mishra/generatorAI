@@ -27,10 +27,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { MuxStreamEvent } from '@generatorai/client-core';
 
 import { useMuxStream } from './MuxStreamProvider';
+import { useAuth } from '../auth/AuthProvider';
 import {
   GLOBAL_SCOPE_FILTER,
   GLOBAL_SCOPE_ID,
   invalidateListKeys,
+  isOwnScopeApproval,
   listKeysForEvent,
 } from './muxTransport';
 import {
@@ -52,6 +54,11 @@ export function useGlobalStream(): void {
   const queryClient = useQueryClient();
   const stream = useMuxStream();
   const pendingRef = useRef(new Set<string>());
+  const { state, refreshPermissions } = useAuth();
+  const deviceIdRef = useRef<string | null>(null);
+  deviceIdRef.current = state.status === 'authenticated' ? state.deviceId : null;
+  const refreshRef = useRef(refreshPermissions);
+  refreshRef.current = refreshPermissions;
   // D0/S7 — a phone paired before `read:activity` existed does not hold it,
   // and the server now rejects THIS scope alone rather than the whole
   // connection. The client drops the scope after the rejection, so the only
@@ -84,6 +91,9 @@ export function useGlobalStream(): void {
       (event: MuxStreamEvent) => {
         for (const key of listKeysForEvent(event.kind)) {
           pendingRef.current.add(JSON.stringify(key));
+        }
+        if (isOwnScopeApproval(event, deviceIdRef.current)) {
+          void refreshRef.current().catch(() => undefined);
         }
       },
       {

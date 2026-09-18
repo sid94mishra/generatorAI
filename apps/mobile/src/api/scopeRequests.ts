@@ -18,15 +18,13 @@
 // with the third; an admin phone drives the last three.
 // ────────────────────────────────────────────────────────────────
 
-import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  createAdminApi,
   queryKeys,
   type DeviceScopeRequest,
 } from '@generatorai/client-core';
 
-import { useAuth } from '../auth/AuthProvider';
+import { useAdminApi } from './useAdminApi';
 import { useApi } from './useApi';
 
 export type { DeviceScopeRequest };
@@ -86,11 +84,6 @@ export function useCancelScopeRequest() {
 }
 
 // ── Other devices (admin:devices) ───────────────────────────────
-
-function useAdminApi() {
-  const { fetch } = useAuth();
-  return useMemo(() => createAdminApi(fetch), [fetch]);
-}
 
 /** Pass `enabled: false` unless the device holds `admin:devices` — a 403 is not a bug to render. */
 export function usePendingScopeRequests(enabled: boolean) {

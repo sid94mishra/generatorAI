@@ -27,6 +27,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Bot,
   ChevronLeft,
+  ChevronDown,
   ChevronRight,
   Cpu,
   Eye,
@@ -191,7 +192,9 @@ export function NewChatSheet({
   const sourcesAllowed = scopes ? scopes.includes('write:workspaces') : true;
   const sourcesReason =
     'Mounting a codebase creates a workspace on your machine, which needs workspace-write permission.';
-  const projectEdit = scopes ? checkFeature('projectEdit', scopes) : null;
+  // Folder sources name a path on the host, which a phone cannot browse —
+  // structurally unavailable, whatever the device's scopes.
+  const projectEdit = scopes ? checkFeature('codebaseLinkLocal', scopes) : null;
 
   const groups = useModelGroups(models);
   const selectedModel = useMemo(() => models?.find((m) => m.id === model), [models, model]);
@@ -599,7 +602,6 @@ export function NewChatSheet({
             placeholder={defaultChatName()}
             value={name}
             onChangeText={setName}
-            autoFocus
             accessibilityLabel="Chat name, optional"
           />
 
@@ -610,14 +612,14 @@ export function NewChatSheet({
               value={selectedModel?.name ?? 'Server default'}
               onPress={() => setPage('model')}
             />
-            <View className="ml-4 h-px bg-border-muted" />
+            <View className="ml-[46px] h-px bg-border-muted" />
             <PickerRow
               icon={<FolderGit2 size={18} color={colors['muted-foreground']} />}
               label="Project"
               value={selectedProject?.name ?? 'None'}
               onPress={() => setPage('project')}
             />
-            <View className="ml-4 h-px bg-border-muted" />
+            <View className="ml-[46px] h-px bg-border-muted" />
             <PickerRow
               icon={<Bot size={18} color={colors['muted-foreground']} />}
               label="Agent"
@@ -630,7 +632,7 @@ export function NewChatSheet({
               }
               onPress={() => setPage('agent')}
             />
-            <View className="ml-4 h-px bg-border-muted" />
+            <View className="ml-[46px] h-px bg-border-muted" />
             <PickerRow
               icon={
                 sourcesAllowed ? (
@@ -659,15 +661,29 @@ export function NewChatSheet({
             </View>
           ) : null}
 
+          {/* A full-width 44pt row that says what it hides — the bare text link
+              was a 20pt target that gave no hint of what was behind it. */}
           <Touchable
             accessibilityLabel={expanded ? 'Hide more options' : 'Show more options'}
+            accessibilityState={{ expanded }}
             haptic="select"
+            scale="none"
             onPress={() => setExpanded((v) => !v)}
-            className="self-start"
+            className="-my-1 min-h-11 flex-row items-center gap-2"
           >
-            <Text className="text-sm font-medium text-primary">
-              {expanded ? 'Fewer options' : 'More options'}
-            </Text>
+            <View className="flex-1">
+              <Text className="text-md font-medium text-primary">{expanded ? 'Fewer options' : 'More options'}</Text>
+              {expanded ? null : (
+                <Text numberOfLines={1} className="text-sm text-muted-foreground">
+                  Plan first, permissions, orchestrator, tags, browser
+                </Text>
+              )}
+            </View>
+            {expanded ? (
+              <ChevronDown size={18} color={colors.primary} />
+            ) : (
+              <ChevronRight size={18} color={colors.primary} />
+            )}
           </Touchable>
 
           {expanded ? (
@@ -689,7 +705,7 @@ export function NewChatSheet({
                   value={agentMode === 'plan'}
                   onChange={(on) => setAgentMode(on ? 'plan' : 'auto')}
                 />
-                <View className="ml-4 h-px bg-border-muted" />
+                <View className="ml-[46px] h-px bg-border-muted" />
                 <PickerRow
                   icon={<ShieldCheck size={18} color={colors['muted-foreground']} />}
                   label="Permissions"
@@ -698,7 +714,7 @@ export function NewChatSheet({
                   }
                   onPress={() => setPage('permission')}
                 />
-                <View className="ml-4 h-px bg-border-muted" />
+                <View className="ml-[46px] h-px bg-border-muted" />
                 <ToggleRow
                   icon={<Cpu size={18} color={colors['muted-foreground']} />}
                   label="Orchestrator mode"
@@ -706,21 +722,21 @@ export function NewChatSheet({
                   value={orchestrator}
                   onChange={setOrchestrator}
                 />
-                <View className="ml-4 h-px bg-border-muted" />
+                <View className="ml-[46px] h-px bg-border-muted" />
                 <PickerRow
                   icon={<Tag size={18} color={colors['muted-foreground']} />}
                   label="Tags"
                   value={tags.length ? `${tags.length}` : 'None'}
                   onPress={() => setPage('tags')}
                 />
-                <View className="ml-4 h-px bg-border-muted" />
+                <View className="ml-[46px] h-px bg-border-muted" />
                 <PickerRow
                   icon={<Eye size={18} color={colors['muted-foreground']} />}
                   label="Browser"
                   value={browserSummary(browser)}
                   onPress={() => setPage('browser')}
                 />
-                <View className="ml-4 h-px bg-border-muted" />
+                <View className="ml-[46px] h-px bg-border-muted" />
                 <PickerRow
                   icon={<GitPullRequest size={18} color={colors['muted-foreground']} />}
                   label="Source control"
@@ -1204,7 +1220,7 @@ function SourceControlPage({
             )
           }
         />
-        <View className="ml-4 h-px bg-border-muted" />
+        <View className="ml-[46px] h-px bg-border-muted" />
         <ToggleRow
           icon={<GitBranch size={18} color={colors['muted-foreground']} />}
           label="Push"
@@ -1218,7 +1234,7 @@ function SourceControlPage({
             )
           }
         />
-        <View className="ml-4 h-px bg-border-muted" />
+        <View className="ml-[46px] h-px bg-border-muted" />
         <ToggleRow
           icon={<GitPullRequest size={18} color={colors['muted-foreground']} />}
           label="Open pull request"

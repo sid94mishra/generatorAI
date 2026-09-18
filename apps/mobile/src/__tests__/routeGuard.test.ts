@@ -13,6 +13,10 @@ describe('notification route guard — accepts real routes', () => {
     '/settings/security',
     '/workflows/wf-1',
     '/terminal/ws-1',
+    '/approvals',
+    '/scope-request?scope=exec%3Aterminal',
+    '/chats/c1/gate/i1',
+    '/chats/c1/plan/p1',
   ])('allows %s', (route) => {
     expect(isSafeNotificationRoute(route)).toBe(true);
     expect(safeRoute(route)).toBe(route);
@@ -70,6 +74,8 @@ describe('notification route guard — rejects navigation escapes', () => {
     // Near-misses of the newly allowed roots must not ride in on a prefix.
     expect(isSafeNotificationRoute('/workflow/wf-1')).toBe(false);
     expect(isSafeNotificationRoute('/terminals/ws-1')).toBe(false);
+    expect(isSafeNotificationRoute('/approval')).toBe(false);
+    expect(isSafeNotificationRoute('/scope-requests')).toBe(false);
   });
 
   it('rejects non-strings and empties', () => {

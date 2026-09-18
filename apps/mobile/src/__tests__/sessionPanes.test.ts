@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { availablePanes, COMPUTER_PANE_IMPLEMENTED, routeSection } from '../components/chat/panes/paneModel';
+import { availablePanes, COMPUTER_PANE_IMPLEMENTED, computerFeature, routeSection } from '../components/chat/panes/paneModel';
 import { describeSessionTransport } from '../components/chat/sessionTransport';
 import { planCardActions } from '../components/chat/gateActions';
 
@@ -17,17 +17,52 @@ describe('availablePanes', () => {
     expect(without[1]).toEqual({ id: 'changes', label: 'Changes' });
   });
 
-  it('withholds Computer while the pane has no implementation, scope or not', () => {
-    expect(COMPUTER_PANE_IMPLEMENTED).toBe(false);
-    const withScope = availablePanes({ workspaceId: 'ws', scopes: ['exec:computer'], changesCount: 2 });
-    expect(withScope.map((p) => p.id)).not.toContain('computer');
-    expect(withScope[1]).toEqual({ id: 'changes', label: 'Changes', count: 2 });
+  it('offers Computer once computer use is enabled, scope or not (the pane locks itself)', () => {
+    expect(COMPUTER_PANE_IMPLEMENTED).toBe(true);
+    const off = availablePanes({ workspaceId: 'ws', scopes: ['exec:computer'], changesCount: 2 });
+    expect(off.map((p) => p.id)).not.toContain('computer');
+    expect(off[1]).toEqual({ id: 'changes', label: 'Changes', count: 2 });
+
+    const on = availablePanes({ workspaceId: 'ws', scopes: [], changesCount: 0, computerUseEnabled: true });
+    expect(on.map((p) => p.id)).toEqual(['chat', 'changes', 'terminal', 'browser', 'computer']);
+    expect(on.at(-1)).toEqual({ id: 'computer', label: 'Computer' });
+
+    const waiting = availablePanes({ workspaceId: 'ws', scopes: ['exec:computer'], changesCount: 0, computerUseEnabled: true, computerNeedsAnswer: true });
+    expect(waiting.at(-1)).toEqual({ id: 'computer', label: 'Computer', live: true });
+
+    // Needs a workspace like the other execution panes.
+    expect(availablePanes({ workspaceId: null, scopes: ['exec:computer'], changesCount: 0, computerUseEnabled: true }).map((p) => p.id)).toEqual(['chat']);
+  });
+
+  it('describes exec:computer as a grantable, lockable feature', () => {
+    expect(computerFeature(['exec:computer'])).toEqual({ available: true, missing: [], reason: null, grantable: true });
+    const locked = computerFeature(['exec:terminal']);
+    expect(locked).toMatchObject({ available: false, missing: ['exec:computer'], grantable: true });
+    expect(locked.reason).toBeTruthy();
   });
 
   it('routes composer sections to a pane or the More sheet', () => {
     expect(routeSection('changes')).toEqual({ pane: 'changes' });
     expect(routeSection('plan')).toEqual({ more: 'plan' });
+    expect(routeSection('tasks')).toEqual({ more: 'tasks' });
     expect(routeSection('widgets')).toBeNull();
+  });
+
+  it('offers Tasks to an orchestrator or a chat with tasks, with the running count', () => {
+    const none = availablePanes({ workspaceId: 'ws', scopes: [], changesCount: 0, tasks: { orchestrator: false, total: 0, running: 0 } });
+    expect(none.map((p) => p.id)).toEqual(['chat', 'changes', 'terminal', 'browser']);
+
+    const orchestrator = availablePanes({ workspaceId: 'ws', scopes: [], changesCount: 1, tasks: { orchestrator: true, total: 0, running: 0 } });
+    expect(orchestrator.map((p) => p.id)).toEqual(['chat', 'changes', 'tasks', 'terminal', 'browser']);
+    expect(orchestrator[2]).toEqual({ id: 'tasks', label: 'Tasks' });
+
+    const running = availablePanes({ workspaceId: 'ws', scopes: [], changesCount: 0, tasks: { orchestrator: false, total: 3, running: 2 } });
+    expect(running[2]).toEqual({ id: 'tasks', label: 'Tasks', count: 2 });
+
+    // No workspace yet: workers still have a pane.
+    const early = availablePanes({ workspaceId: null, scopes: [], changesCount: 0, tasks: { orchestrator: true, total: 1, running: 1 } });
+    expect(early.map((p) => p.id)).toEqual(['chat', 'tasks']);
+    expect(routeSection('tasks', early)).toEqual({ pane: 'tasks' });
   });
 });
 

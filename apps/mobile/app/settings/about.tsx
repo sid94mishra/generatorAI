@@ -92,7 +92,7 @@ export default function AboutScreen(): React.ReactElement {
         ))}
       </Card>
 
-      <Text className="px-1 pt-2 text-xs leading-relaxed text-muted-foreground">
+      <Text className="pt-2 text-xs leading-relaxed text-muted-foreground">
         Anything marked unavailable is a deliberate decision, not a missing feature — either because
         a phone cannot do it safely, or because the interaction would be worse than useless at this
         size.

@@ -33,22 +33,30 @@ import {
   type NativeSyntheticEvent,
   type TextInputKeyPressEventData,
 } from 'react-native';
-import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import {
   ArrowUp,
+  Brain,
   Camera,
+  ChevronDown,
+  ClipboardList,
   ClipboardPaste,
+  FileText,
   FolderOpen,
   Globe,
   History,
   Image as ImageIcon,
+  Maximize2,
   Mic,
   Plus,
+  ShieldCheck,
+  ShieldOff,
   SlidersHorizontal,
   Square,
-  Terminal,
+  TerminalSquare,
+  TextSelect,
   Wand2,
 } from 'lucide-react-native';
 import type { AgentMode, ContextUsageSnapshot, ModelInfo } from '@generatorai/client-core';
@@ -83,7 +91,11 @@ import {
   type GateBannerProps,
   type WorkspacePrepProps,
 } from './composer/ComposerBanners';
-import { MODE_OPTIONS, turnChipLabel } from './composer/turnOptions';
+import { MODE_OPTIONS, turnChipLabel, turnChipParts } from './composer/turnOptions';
+import { TERMINAL_CAPTURE_LINES } from './composer/captures';
+import type { ComposerCaptureActions } from './composer/captureContext';
+import { currentTerminalSelection } from '../../terminal/terminalFocus';
+import { useChatMotion } from './chatMotion';
 import type {
   AttachmentSource,
   PromptHistoryEntry,
@@ -172,6 +184,10 @@ export interface ComposerControlledProps {
   attachPending?: boolean | undefined;
   /** Which capture sources this device may use (browser / terminal panes). */
   captureScopes?: { browser: boolean; terminal: boolean } | undefined;
+  /** Fetch-and-attach for the capture items (terminal output, browser). */
+  captureActions?: ComposerCaptureActions | undefined;
+  /** For the terminal-selection item: which workspace's selection counts. */
+  captureWorkspaceId?: string | null | undefined;
 
   historyEntries?: readonly PromptHistoryEntry[] | undefined;
   historyVisible?: boolean | undefined;
@@ -220,6 +236,13 @@ export interface ComposerTurnProps {
   gate?: Omit<GateBannerProps, 'hasDraft'> | null | undefined;
   /** Where "Request access" goes. Defaults to the scope-request route. */
   onRequestScope?: (() => void) | undefined;
+  /**
+   * The dock's top: the changes strip and a pinned decision card. Rendered
+   * under the composer's single divider, so everything that belongs to "what
+   * happens next" reads as one surface rather than cards floating over the
+   * transcript.
+   */
+  dock?: React.ReactNode;
 
   // ── v1 compatibility ──────────────────────────────────────────
   /** v1: paths for @-mentions when no `suggestions` are supplied. */
@@ -244,10 +267,13 @@ export function Composer(props: ComposerProps): React.ReactElement {
   const { colors } = useTheme();
   const router = useRouter();
   const fontScale = useFontScale();
-  const [sheet, setSheet] = useState<'none' | 'model' | 'options' | 'gauge' | 'mode' | 'attach'>('none');
+  const [sheet, setSheet] = useState<
+    'none' | 'model' | 'options' | 'gauge' | 'mode' | 'attach' | 'captureTerminal' | 'captureBrowser'
+  >('none');
   const [internalCaret, setInternalCaret] = useState(0);
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<TextInput | null>(null);
+  const motion = useChatMotion();
 
   const caret = props.caret ?? internalCaret;
   const { onCaretChange } = props;
@@ -350,13 +376,15 @@ export function Composer(props: ComposerProps): React.ReactElement {
   const fieldEditable = !disabled || hasGate;
   const hasContent = draft.trim().length > 0 || attachments.length > 0 || Boolean(props.activeCommand);
   const canSend = hasContent && !disabled && !props.sending;
-  const turnLabel = turnChipLabel({
+  const turnInput = {
     model,
     mode: props.mode,
     effort: props.effort,
     permissionMode: props.permissionMode,
     contextTier: props.contextTier,
-  });
+  };
+  const turnLabel = turnChipLabel(turnInput);
+  const turnParts = turnChipParts(turnInput);
 
   // ── Swipe up on the field → history ───────────────────────────
   const touchStart = useRef<{ x: number; y: number; t: number } | null>(null);
@@ -393,8 +421,14 @@ export function Composer(props: ComposerProps): React.ReactElement {
     else router.push(SCOPE_REQUEST_ROUTE);
   }, [props, router]);
 
+  const canCaptureTerminal = Boolean(props.captureActions && props.captureScopes?.terminal);
+  const canCaptureBrowser = Boolean(props.captureActions && props.captureScopes?.browser);
+  const canCapture = canCaptureTerminal || canCaptureBrowser;
+
   const onAttachPress = useCallback(() => {
-    if (!props.attachAvailable) {
+    // With a capture source on offer the menu still opens: terminal and page
+    // TEXT can go into the draft even when uploads are withheld.
+    if (!props.attachAvailable && !canCapture) {
       const reason =
         props.attachDisabledReason ?? 'This device was not granted permission to upload files.';
       Alert.alert(
@@ -414,39 +448,47 @@ export function Composer(props: ComposerProps): React.ReactElement {
       return;
     }
     setSheet('attach');
-  }, [props, requestScope]);
+  }, [props, requestScope, canCapture]);
 
   const attachActions = useMemo<MenuAction[]>(() => {
     const pick = (source: AttachmentSource) => () => {
       setSheet('none');
       props.onAttachFrom?.(source);
     };
-    const muted = colors['muted-foreground'];
-    const scopes = props.captureScopes ?? { browser: false, terminal: false };
+    const uploadOff = !props.attachAvailable;
+    const offDetail = uploadOff ? (props.attachDisabledReason ?? 'Attachments are not permitted on this device.') : undefined;
+    const pickerIcon = uploadOff ? colors['muted-foreground'] : colors.foreground;
     const items: MenuAction[] = [
-      { label: 'Photo library', icon: <ImageIcon size={18} color={colors.foreground} />, onPress: pick('photo') },
-      { label: 'Camera', icon: <Camera size={18} color={colors.foreground} />, onPress: pick('camera') },
-      { label: 'Files', icon: <FolderOpen size={18} color={colors.foreground} />, onPress: pick('file') },
-      { label: 'Paste image', icon: <ClipboardPaste size={18} color={colors.foreground} />, onPress: pick('clipboard') },
-      {
-        label: 'Browser capture',
-        icon: <Globe size={18} color={muted} />,
-        disabled: true,
-        detail: scopes.browser
-          ? 'Capture from the Browser pane; it lands here as a chip.'
-          : 'Needs browser access, which this device was not granted.',
-        onPress: () => {},
-      },
-      {
-        label: 'Terminal capture',
-        icon: <Terminal size={18} color={muted} />,
-        disabled: true,
-        detail: scopes.terminal
-          ? 'Select output in the Terminal pane and attach it.'
-          : 'Needs terminal access, which this device was not granted.',
-        onPress: () => {},
-      },
+      { label: 'Photo library', icon: <ImageIcon size={18} color={pickerIcon} />, onPress: pick('photo'), disabled: uploadOff, detail: offDetail },
+      { label: 'Camera', icon: <Camera size={18} color={pickerIcon} />, onPress: pick('camera'), disabled: uploadOff, detail: offDetail },
+      { label: 'Files', icon: <FolderOpen size={18} color={pickerIcon} />, onPress: pick('file'), disabled: uploadOff, detail: offDetail },
+      { label: 'Paste image', icon: <ClipboardPaste size={18} color={pickerIcon} />, onPress: pick('clipboard'), disabled: uploadOff, detail: offDetail },
     ];
+    // ActionSheet closes itself before running an action, so these simply
+    // name the next sheet — the same hand-off TurnOptions → Model uses.
+    if (canCaptureTerminal) {
+      items.push({
+        label: 'Terminal output',
+        icon: <TerminalSquare size={18} color={colors.foreground} />,
+        detail: uploadOff ? 'Added to your message as text' : undefined,
+        onPress: () => setSheet('captureTerminal'),
+      });
+    }
+    if (canCaptureBrowser) {
+      items.push({
+        label: 'Browser',
+        icon: <Globe size={18} color={colors.foreground} />,
+        detail: 'Screenshot or page text',
+        onPress: () => setSheet('captureBrowser'),
+      });
+    }
+    if (uploadOff && props.attachGrantable !== false) {
+      items.push({
+        label: 'Request file access',
+        icon: <ShieldCheck size={18} color={colors.foreground} />,
+        onPress: requestScope,
+      });
+    }
     if (props.onOpenHistory) {
       items.push({
         label: 'Recent prompts',
@@ -458,7 +500,51 @@ export function Composer(props: ComposerProps): React.ReactElement {
       });
     }
     return items;
-  }, [props, colors]);
+  }, [props, colors, canCaptureTerminal, canCaptureBrowser, requestScope]);
+
+  const captureTerminalActions = useMemo<MenuAction[]>(() => {
+    if (sheet !== 'captureTerminal' || !props.captureActions) return [];
+    const actions = props.captureActions;
+    const selection = props.captureWorkspaceId ? currentTerminalSelection(props.captureWorkspaceId) : null;
+    const items: MenuAction[] = TERMINAL_CAPTURE_LINES.map((n) => ({
+      label: `Last ${n} lines`,
+      icon: <TerminalSquare size={18} color={colors.foreground} />,
+      onPress: () => void actions.captureTerminalOutput(n),
+    }));
+    items.push({
+      label: 'Current selection',
+      icon: <TextSelect size={18} color={selection ? colors.foreground : colors['muted-foreground']} />,
+      disabled: !selection,
+      detail: selection
+        ? `${selection.length.toLocaleString()} characters`
+        : 'Long-press text in the Terminal pane to select it first.',
+      onPress: () => actions.captureTerminalSelection(selection ?? ''),
+    });
+    return items;
+  }, [sheet, props.captureActions, props.captureWorkspaceId, colors]);
+
+  const captureBrowserActions = useMemo<MenuAction[]>(() => {
+    if (sheet !== 'captureBrowser' || !props.captureActions) return [];
+    const actions = props.captureActions;
+    const uploadOff = !props.attachAvailable;
+    return [
+      {
+        label: 'Screenshot',
+        icon: <Camera size={18} color={uploadOff ? colors['muted-foreground'] : colors.foreground} />,
+        disabled: uploadOff,
+        detail: uploadOff
+          ? (props.attachDisabledReason ?? 'Screenshots need permission to attach files.')
+          : 'The whole visible page, as an image',
+        onPress: () => void actions.captureBrowserScreenshot(),
+      },
+      {
+        label: 'Page text',
+        icon: <FileText size={18} color={colors.foreground} />,
+        detail: uploadOff ? 'Added to your message as text' : 'The page’s structure and text, for the agent to read',
+        onPress: () => void actions.captureBrowserPageText(),
+      },
+    ];
+  }, [sheet, props.captureActions, props.attachAvailable, props.attachDisabledReason, colors]);
 
   const maxFieldHeight = Math.round(LINE_HEIGHT * MAX_LINES * Math.min(fontScale, MAX_SCALE.chrome) + 8);
 
@@ -468,9 +554,13 @@ export function Composer(props: ComposerProps): React.ReactElement {
 
   return (
     <View className="border-t border-border bg-background">
-      {disabledReason ? (
-        <Animated.View entering={FadeIn} exiting={FadeOut} className="px-4 pt-2">
-          <Text className="text-xs text-warning">{disabledReason}</Text>
+      {props.dock}
+
+      {/* With a gate open, the card above and the gate banner already say
+          what is blocking; a third line saying it again is noise. */}
+      {disabledReason && !hasGate ? (
+        <Animated.View entering={motion.fadeIn()} exiting={motion.fadeOut()} className="px-4 pt-2">
+          <Text className="text-sm text-warning">{disabledReason}</Text>
         </Animated.View>
       ) : null}
 
@@ -488,9 +578,13 @@ export function Composer(props: ComposerProps): React.ReactElement {
         />
       ) : null}
 
+      {/* No layout transition on the card: when a chip or banner entered
+          above it, Reanimated's LinearTransition left the card stranded at
+          its pre-layout offset on Android — pushed half off the screen under
+          the gesture bar (seen with the bound-agent chip). It also re-ran on
+          every new line while typing. */}
       <Animated.View
-        layout={LinearTransition.duration(160)}
-        className={`m-3 rounded-3xl border bg-card ${focused || voiceLive ? 'border-primary' : 'border-border'}`}
+        className={`mx-3 mb-2 mt-2 rounded-3xl border bg-card ${focused || voiceLive ? 'border-primary' : 'border-border'}`}
       >
         {props.activeCommand ? (
           <View className="flex-row px-3 pt-2.5">
@@ -613,26 +707,19 @@ export function Composer(props: ComposerProps): React.ReactElement {
                 separate chips that could not fit the strip; they are all in
                 the sheet this opens, and the label says what is currently
                 set so nothing is hidden. */}
-            <Chip
-              accessibilityLabel={`Turn setup: ${turnLabel}`}
-              accessibilityHint="Model, mode, effort and permissions for this turn"
-              label={turnLabel}
-              icon={<SlidersHorizontal size={13} color={colors['muted-foreground']} />}
-              active={props.mode === 'plan' || props.permissionMode !== 'default'}
-              onPress={() => setSheet('options')}
-              showChevron
-              maxWidth={210}
-            />
+            <TurnChip label={turnLabel} parts={turnParts} onPress={() => setSheet('options')} />
           </ScrollView>
 
           <View className="shrink-0 flex-row items-center gap-1.5">
-            {limit || props.contextUsage ? (
+            {/* Only once something is in the window: an empty ring at 0% read
+                as a control that had failed to load. */}
+            {ratio >= 0.01 ? (
               <Touchable
                 accessibilityLabel={`Context usage ${Math.round(ratio * 100)} percent`}
                 accessibilityHint="Shows where the context is going"
                 haptic="tap"
                 onPress={() => setSheet('gauge')}
-                className="px-1"
+                className="min-h-11 min-w-11 items-center justify-center"
               >
                 <ProgressRing ratio={ratio} />
               </Touchable>
@@ -707,6 +794,21 @@ export function Composer(props: ComposerProps): React.ReactElement {
         actions={attachActions}
       />
 
+      <ActionSheet
+        visible={sheet === 'captureTerminal'}
+        onClose={() => setSheet('none')}
+        title="Terminal output"
+        message="From the shell you last viewed in this workspace."
+        actions={captureTerminalActions}
+      />
+
+      <ActionSheet
+        visible={sheet === 'captureBrowser'}
+        onClose={() => setSheet('none')}
+        title="Browser"
+        actions={captureBrowserActions}
+      />
+
       {props.historyEntries ? (
         <HistorySheet
           visible={Boolean(props.historyVisible)}
@@ -750,7 +852,7 @@ function MicButton({
         disabled={busy}
         onPressIn={onStart}
         onPressOut={onAccept}
-        className="h-10 w-10 items-center justify-center rounded-full"
+        className="h-11 w-11 items-center justify-center rounded-full"
       >
         {busy ? <Spinner /> : <Mic size={18} color={colors['muted-foreground']} />}
       </Touchable>
@@ -786,6 +888,7 @@ function SendButton({
   stopState?: StopState;
 }): React.ReactElement {
   const { colors } = useTheme();
+  const motion = useChatMotion();
   // W30-b — during the 400 ms arming window the control is genuinely
   // unpressable, not merely dimmed: a disabled-looking button that still fires
   // its handler is not an arming window, and Stop is the control people
@@ -809,11 +912,11 @@ function SendButton({
           : undefined
       }
       delayLongPress={350}
-      className={`h-10 w-10 items-center justify-center rounded-full ${
+      className={`h-11 w-11 items-center justify-center rounded-full ${
         streaming ? 'bg-danger' : active ? 'bg-primary' : 'bg-emphasis'
       }`}
     >
-      <Animated.View key={streaming ? 'stop' : sending ? 'sending' : 'send'} entering={FadeIn.duration(120)}>
+      <Animated.View key={streaming ? 'stop' : sending ? 'sending' : 'send'} entering={motion.fadeIn(120)}>
         {streaming ? (
           <Square
             size={13}
@@ -829,6 +932,61 @@ function SendButton({
           />
         )}
       </Animated.View>
+    </Touchable>
+  );
+}
+
+/**
+ * The turn-setup chip: the model name as its only text, and one small glyph
+ * per non-default setting (plan first, permissions, effort, long context).
+ * The joined sentence was truncated to "Sonnet 5 · Medium · Full …" in the
+ * strip; the glyphs fit, and the accessibility label still reads it whole.
+ */
+function TurnChip({
+  label,
+  parts,
+  onPress,
+}: {
+  label: string;
+  parts: ReturnType<typeof turnChipParts>;
+  onPress: () => void;
+}): React.ReactElement {
+  const { colors } = useTheme();
+  const overridden = parts.plan || parts.permission !== null;
+  const tint = overridden ? colors.primary : colors['muted-foreground'];
+  const glyph = 13;
+  return (
+    <Touchable
+      accessibilityLabel={`Turn setup: ${label}`}
+      accessibilityHint="Model, mode, effort and permissions for this turn"
+      haptic="tap"
+      onPress={onPress}
+      className="min-h-11 justify-center"
+    >
+      <View
+        className={`h-8 flex-row items-center gap-1.5 rounded-full border px-2.5 ${
+          overridden ? 'border-primary bg-accent' : 'border-border bg-raised'
+        }`}
+      >
+        <SlidersHorizontal size={glyph} color={colors['muted-foreground']} />
+        <Text
+          numberOfLines={1}
+          maxFontSizeMultiplier={MAX_SCALE.chrome}
+          style={{ maxWidth: 140 }}
+          className={`text-sm font-medium ${overridden ? 'text-primary' : 'text-foreground'}`}
+        >
+          {parts.model}
+        </Text>
+        {parts.plan ? <ClipboardList size={glyph} color={tint} /> : null}
+        {parts.permission === 'bypassPermissions' ? (
+          <ShieldOff size={glyph} color={colors.warning} />
+        ) : parts.permission === 'acceptEdits' ? (
+          <ShieldCheck size={glyph} color={tint} />
+        ) : null}
+        {parts.effortOverride ? <Brain size={glyph} color={colors['muted-foreground']} /> : null}
+        {parts.longContext ? <Maximize2 size={glyph} color={colors['muted-foreground']} /> : null}
+        <ChevronDown size={12} color={colors['muted-foreground']} />
+      </View>
     </Touchable>
   );
 }

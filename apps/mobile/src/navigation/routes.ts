@@ -10,6 +10,7 @@
 
 export const APPROVALS_ROUTE = '/approvals' as const;
 export const SCOPE_REQUEST_ROUTE = '/scope-request' as const;
+export const SEARCH_ROUTE = '/search' as const;
 
 export function chatRoute(chatId: string): string {
   return `/chats/${encodeURIComponent(chatId)}`;

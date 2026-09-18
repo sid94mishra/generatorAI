@@ -41,6 +41,7 @@ import {
   ChevronUp,
   Eraser,
   Keyboard as KeyboardIcon,
+  MessageSquarePlus,
   MoreHorizontal,
   Search,
   TerminalSquare,
@@ -60,6 +61,9 @@ import { useApi } from '../api/useApi';
 import { prefs } from '../storage/prefs';
 import { base64ToString, bytesToBase64 } from '../lib/base64';
 import { useTheme } from '../theme/ThemeProvider';
+import { useComposerCapture } from '../components/chat/composer/captureContext';
+import { TERMINAL_CAPTURE_LINES } from '../components/chat/composer/captures';
+import { noteActiveTerminal, noteTerminalSelection } from './terminalFocus';
 import {
   OutputBatcher,
   isOpenableLink,
@@ -210,6 +214,9 @@ export function TerminalView({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFound, setSearchFound] = useState<boolean | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  // Present only inside a chat: "Send to chat" pushes into its composer.
+  const capture = useComposerCapture();
 
   // `react-native-webview` ships no web implementation, so on the browser
   // preview it renders its own "not supported" string in place of xterm. Say
@@ -474,6 +481,12 @@ export function TerminalView({
 
   // ── Active / inactive ──────────────────────────────────────────
 
+  // The composer's "Terminal output" capture reads the shell last on screen.
+  useEffect(() => {
+    const sid = sidRef.current ?? sessionId;
+    if (active && sid) noteActiveTerminal(workspaceId, sid);
+  }, [active, workspaceId, sessionId, descriptor?.id]);
+
   useEffect(() => {
     if (active) {
       setWebMounted(true);
@@ -591,9 +604,12 @@ export function TerminalView({
           dimsRef.current = { cols: message.cols, rows: message.rows };
           send({ t: 'resize', cols: message.cols, rows: message.rows });
           break;
-        case 'selection':
+        case 'selection': {
           selectionRef.current = message.text;
+          const sid = sidRef.current;
+          if (sid) noteTerminalSelection(workspaceId, sid, message.text);
           break;
+        }
         case 'title':
           onTitle?.(message.title);
           break;
@@ -625,7 +641,7 @@ export function TerminalView({
           break;
       }
     },
-    [attach, onTitle, send, sendInput, toast],
+    [attach, onTitle, send, sendInput, toast, workspaceId],
   );
 
   const onKey = useCallback(
@@ -777,8 +793,29 @@ export function TerminalView({
         onPress: kill,
       },
     ],
-    [kill, phase.state, post, restart, toast],
+    // `menuOpen`: the selection lives in a ref, so the disabled states are
+    // re-read each time the sheet opens rather than frozen at first render.
+    [kill, phase.state, post, restart, toast, menuOpen],
   );
+
+  const sendActions = useMemo<MenuAction[]>(() => {
+    if (!capture || !sendOpen) return [];
+    const hasSelection = selectionRef.current.trim().length > 0;
+    return [
+      {
+        label: 'Selection',
+        disabled: !hasSelection,
+        detail: hasSelection
+          ? `${selectionRef.current.length.toLocaleString()} characters`
+          : 'Long-press text in the terminal first.',
+        onPress: () => capture.captureTerminalSelection(selectionRef.current),
+      },
+      ...TERMINAL_CAPTURE_LINES.map((n) => ({
+        label: `Last ${n} lines`,
+        onPress: () => void capture.captureTerminalOutput(n, sidRef.current ?? undefined),
+      })),
+    ];
+  }, [capture, sendOpen]);
 
   // ── Render ─────────────────────────────────────────────────────
 
@@ -834,6 +871,14 @@ export function TerminalView({
           icon={<Eraser size={16} color={colors['muted-foreground']} />}
           onPress={() => post({ type: 'clear' })}
         />
+        {capture ? (
+          <IconButton
+            accessibilityLabel="Send terminal output to chat"
+            compact
+            icon={<MessageSquarePlus size={16} color={colors['muted-foreground']} />}
+            onPress={() => setSendOpen(true)}
+          />
+        ) : null}
         <IconButton
           accessibilityLabel="More terminal actions"
           compact
@@ -993,6 +1038,18 @@ export function TerminalView({
           </View>
         </ScrollView>
       ) : null}
+
+      <ActionSheet
+        visible={sendOpen}
+        onClose={() => setSendOpen(false)}
+        title="Send to chat"
+        message={
+          capture?.attachAvailable
+            ? 'Attached to your next message in this chat.'
+            : 'Added to your message as text — this device may not attach files.'
+        }
+        actions={sendActions}
+      />
 
       <ActionSheet
         visible={menuOpen}

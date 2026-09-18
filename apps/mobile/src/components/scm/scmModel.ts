@@ -24,7 +24,7 @@ import type {
 export type ScmAction = 'commit' | 'push' | 'pullRequest';
 
 /** What a phone can honestly tell someone whose host is not connected. */
-export const CONNECT_ON_DESKTOP = 'Connect GitHub from the desktop or web app.';
+export const CONNECT_ON_DESKTOP = 'Connect it in Settings › Source control.';
 
 /** Toast/badge variants shared with the UI kit. */
 export type ScmTone = 'info' | 'success' | 'warning' | 'danger';

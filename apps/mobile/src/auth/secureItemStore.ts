@@ -23,6 +23,22 @@ export const KEYCHAIN_OPTIONS: SecureItemOptions = {
   //     user's server from the lock screen.
   //   * THIS_DEVICE_ONLY — the credential must not ride an iCloud backup onto
   //     a different handset, which would silently clone an authorized device.
+  //
+  // Trade-off, decided deliberately (and why it differs from the Secure
+  // Enclave key, which is AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY — see
+  // modules/generatorai-device-key): the hardware key is useless without
+  // this session item (it holds the resume secret), so the SESSION's class is
+  // what actually gates "can this phone talk to the server". Keeping it
+  // WHEN_UNLOCKED means nothing can act on the user's machine while the phone
+  // is locked. The cost is that iOS may launch the app locked (a background
+  // wake, a notification action) and the read then rejects. That is handled,
+  // not avoided:
+  //   * `AuthProvider` maps a failed read to a distinct `storageLocked`
+  //     state (never `unpaired`) and retries when the app becomes active;
+  //   * approval notification actions require device authentication
+  //     (`notificationCategories.ts`), so they only ever run unlocked.
+  // Loosening this to AFTER_FIRST_UNLOCK would allow background refresh
+  // while locked, which nothing in the app needs.
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   keychainService: 'dev.generatorai.app',
 };

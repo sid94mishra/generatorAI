@@ -12,6 +12,17 @@
 // controls you actually reach for when the agent has parked on the wrong
 // page and you want to put it back on the right one.
 //
+// Also here, because neither needs aim: "Share with agent" (POST
+// /browser/attach | /detach — web's Share toggle; the server re-attaches on
+// the next prompt anyway) and "Send to chat" (a screenshot or the page's
+// text, into this chat's composer — web's `onCapture`).
+//
+// Tabs: web's Browser tab can be opened up to five times, but each instance
+// is a separate Electron WebContentsView keyed by tab id on the DESKTOP
+// shell. The server's REST surface (routes/browser.ts) has exactly one
+// session per workspace and no tab parameter, so over it every "tab" would
+// be the same page. Mobile therefore shows the one session, honestly.
+//
 // Frames are polled rather than streamed: RN's `Image` cannot consume the
 // multipart MJPEG response, and a poll stops the moment the sheet closes,
 // which a socket would not.
@@ -20,10 +31,25 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight, Globe, Play, RotateCw, Square } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Camera,
+  FileText,
+  Globe,
+  Link2Off,
+  MessageSquarePlus,
+  Play,
+  RotateCw,
+  Share2,
+  Square,
+} from 'lucide-react-native';
 import { describeErrorBody } from '@generatorai/client-core';
 
 import { IconButton } from '../../ui/Button';
+import { ActionSheet, type MenuAction } from '../../ui/ActionSheet';
+import { Chip } from '../../ui/Chip';
+import { useComposerCapture } from '../composer/captureContext';
 import { EmptyState, LoadingState, Spinner } from '../../ui/States';
 import { Field } from '../../ui/Form';
 import { useToast } from '../../ui/Toast';
@@ -47,6 +73,8 @@ interface Descriptor {
   canGoBack?: boolean;
   canGoForward?: boolean;
   viewport?: { width: number; height: number };
+  /** "Share with agent" — false once detached. Absent on older servers → shared. */
+  attachedToChat?: boolean;
 }
 
 /** How often a frame is refreshed while the section is on screen. */
@@ -61,19 +89,22 @@ const FRAME_INTERVAL_MS = 2_000;
 export function BrowserSection({
   workspaceId,
   active = true,
+  agentBusy = false,
 }: {
   workspaceId: string;
   /** Whether the pane is the visible page; gates the step-up prompt. */
   active?: boolean;
+  /** A turn is streaming — sharing cannot be toggled mid-turn (web parity). */
+  agentBusy?: boolean;
 }): React.ReactElement {
   return (
     <StepUpGate reason="Confirm opening the browser" active={active}>
-      <BrowserPanel workspaceId={workspaceId} />
+      <BrowserPanel workspaceId={workspaceId} agentBusy={agentBusy} />
     </StepUpGate>
   );
 }
 
-function BrowserPanel({ workspaceId }: { workspaceId: string }): React.ReactElement {
+function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBusy: boolean }): React.ReactElement {
   const { fetch: authFetch } = useAuth();
   const { colors } = useTheme();
   const queryClient = useQueryClient();
@@ -82,6 +113,8 @@ function BrowserPanel({ workspaceId }: { workspaceId: string }): React.ReactElem
   const [address, setAddress] = useState('');
   const [dirty, setDirty] = useState(false);
   const inFlight = useRef(false);
+  const capture = useComposerCapture();
+  const [sendOpen, setSendOpen] = useState(false);
 
   const key = ['workspaces', workspaceId, 'browser', 'descriptor'] as const;
 
@@ -171,6 +204,44 @@ function BrowserPanel({ workspaceId }: { workspaceId: string }): React.ReactElem
     onError: (err) =>
       toast({ message: err instanceof Error ? err.message : 'Navigation failed', tone: 'error' }),
   });
+
+  const attachedToChat = descriptor.data?.attachedToChat !== false;
+  const share = useMutation({
+    mutationFn: async (next: boolean) => {
+      const response = await post(next ? 'attach' : 'detach');
+      return (await response.json()) as { attachedToChat?: boolean };
+    },
+    onSuccess: (out) => {
+      queryClient.setQueryData<Descriptor>(key, (prev) =>
+        prev ? { ...prev, attachedToChat: out.attachedToChat !== false } : prev,
+      );
+      invalidate();
+    },
+    onError: (err) =>
+      toast({ message: err instanceof Error ? err.message : 'Could not change sharing', tone: 'error' }),
+  });
+
+  const sendActions: MenuAction[] = capture
+    ? [
+        {
+          label: 'Screenshot',
+          icon: <Camera size={18} color={capture.attachAvailable ? colors.foreground : colors['muted-foreground']} />,
+          disabled: !capture.attachAvailable,
+          detail: capture.attachAvailable
+            ? 'The whole visible page, attached to your next message'
+            : 'Screenshots need permission to attach files.',
+          onPress: () => void capture.captureBrowserScreenshot(),
+        },
+        {
+          label: 'Page text',
+          icon: <FileText size={18} color={colors.foreground} />,
+          detail: capture.attachAvailable
+            ? 'The page’s structure and text, attached to your next message'
+            : 'Added to your message as text',
+          onPress: () => void capture.captureBrowserPageText(),
+        },
+      ]
+    : [];
 
   /**
    * Pull one JPEG and turn it into a data URI.
@@ -328,12 +399,53 @@ function BrowserPanel({ workspaceId }: { workspaceId: string }): React.ReactElem
       )}
 
       {live ? (
-        <View className="border-t border-border-muted px-3 py-2">
+        <View className="gap-1 border-t border-border-muted px-3 py-1.5">
+          <View className="min-h-11 flex-row items-center gap-2">
+            <Chip
+              label={attachedToChat ? 'Sharing with agent' : 'Not shared'}
+              icon={
+                attachedToChat ? (
+                  <Share2 size={13} color={colors.primary} />
+                ) : (
+                  <Link2Off size={13} color={colors['muted-foreground']} />
+                )
+              }
+              selected={attachedToChat}
+              tone={attachedToChat ? 'accent' : 'neutral'}
+              disabled={share.isPending || agentBusy}
+              accessibilityLabel={attachedToChat ? 'Stop sharing the browser with the agent' : 'Share the browser with the agent'}
+              accessibilityHint={
+                agentBusy
+                  ? 'Unavailable while the agent is working'
+                  : attachedToChat
+                    ? 'The agent loses browser access until your next message'
+                    : 'Lets the agent use this browser again'
+              }
+              onPress={() => share.mutate(!attachedToChat)}
+            />
+            <View className="flex-1" />
+            {capture ? (
+              <Chip
+                label="Send to chat"
+                icon={<MessageSquarePlus size={13} color={colors['muted-foreground']} />}
+                accessibilityHint="Attach a screenshot or the page text to your next message"
+                onPress={() => setSendOpen(true)}
+              />
+            ) : null}
+          </View>
           <Text className="text-xs text-muted-foreground">
             View only — the page is sized for a desktop window, so taps are not forwarded.
           </Text>
         </View>
       ) : null}
+
+      <ActionSheet
+        visible={sendOpen}
+        onClose={() => setSendOpen(false)}
+        title="Send to chat"
+        message={url || undefined}
+        actions={sendActions}
+      />
     </View>
   );
 }

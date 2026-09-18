@@ -56,10 +56,10 @@ export function HealthCard({ health }: { health: HealthSnapshot | undefined }): 
               {headline}
             </Text>
           </View>
-          <Text numberOfLines={1} className="text-xs text-muted-foreground">
+          <Text numberOfLines={1} className="text-sm text-muted-foreground">
             {detail}
           </Text>
-          <Text numberOfLines={1} className="text-xs text-muted-foreground">
+          <Text numberOfLines={1} className="text-sm text-muted-foreground">
             {live}
           </Text>
         </View>

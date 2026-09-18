@@ -15,6 +15,8 @@ import Animated from 'react-native-reanimated';
 import { CircleHelp, ClipboardList, MessagesSquare, ShieldAlert, Workflow } from 'lucide-react-native';
 
 import type { Operation } from '../../api/activityRanking';
+import { displayChatName } from '../common/chatName';
+import { runTitle } from '../runs/runModel';
 import { relativeTime } from '../runs/formatTime';
 import { statusLabel } from '../runs/statusStyle';
 import { Button } from '../ui/Button';
@@ -81,6 +83,7 @@ export function DecisionCard({
           : colors.warning;
   const waiting = `since ${relativeTime(operation.updatedAt)}`;
   const where = operation.kind === 'run' ? 'Run' : 'Chat';
+  const name = operation.kind === 'chat' ? displayChatName(operation.name) : runTitle(operation.name);
 
   const decide = async (behavior: 'allow' | 'deny'): Promise<void> => {
     if (!onPermission || pending) return;
@@ -105,7 +108,7 @@ export function DecisionCard({
     <Animated.View entering={animate ? entering : undefined}>
       <Card className={`gap-3 p-3.5 ${borderClass}`}>
         <Touchable
-          accessibilityLabel={`${title}. ${where}: ${operation.name}, waiting ${waiting}`}
+          accessibilityLabel={`${title}. ${where}: ${name}, waiting ${waiting}`}
           accessibilityHint="Opens it"
           haptic="tap"
           scale="large"
@@ -121,13 +124,13 @@ export function DecisionCard({
               <Text numberOfLines={2} className="text-md font-semibold text-foreground">
                 {title}
               </Text>
-              <Text numberOfLines={1} className="text-xs text-muted-foreground">
-                {where} · {operation.name}
+              <Text numberOfLines={1} className="text-sm text-muted-foreground">
+                {where} · {name}
               </Text>
             </View>
             <Badge label={badge} tone={tone} />
           </View>
-          <Text className="text-xs text-muted-foreground">Waiting {waiting}</Text>
+          <Text className="text-sm text-muted-foreground">Waiting {waiting}</Text>
         </Touchable>
 
         {/* Each button sits in its own flex-1 cell: `full` alone makes both

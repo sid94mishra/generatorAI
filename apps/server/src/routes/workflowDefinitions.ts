@@ -95,6 +95,15 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
     try {
       const id = String(req.params['id']);
       const force = String(req.query['force'] ?? '').toLowerCase() === 'true';
+      // `force` also deletes the definition's runs. Deleting a run directly
+      // needs `exec:agent` on top of `write:workflows`, so the cascade must
+      // not be a way around that.
+      if (force && req.principal && !req.principal.scopes.includes('exec:agent')) {
+        res.status(403).json({
+          error: { code: 'INSUFFICIENT_SCOPE', message: 'Deleting a workflow together with its runs requires exec:agent.' },
+        });
+        return;
+      }
       await workflowDefinitionService.deleteDefinition(id, { force });
       logger.info(`[WorkflowDefRoutes] Deleted definition ${id}`, {
         requestId: req.requestId,

@@ -27,7 +27,7 @@ try {
     return page.url();
   });
   await step('Turn options → Ask me', async () => {
-    await vis(/^turn options$/i).click();
+    await vis(/^turn setup/i).click();
     await sleep(1000);
     await vis(/^ask me$/i).click();
     await sleep(800);

@@ -11,7 +11,7 @@
 
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { ChevronDown, Coins, TriangleAlert, Zap } from 'lucide-react-native';
 import type { StreamUsage } from '@generatorai/client-core';
 
@@ -19,6 +19,7 @@ import { Touchable } from '../ui/Touchable';
 import { formatDuration } from './toolPresentation';
 import { cacheMissHint, compactTokens as compact } from './timeline/deriveTimeline';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useChatMotion } from './chatMotion';
 
 export function UsageFooter({
   usage,
@@ -28,6 +29,7 @@ export function UsageFooter({
   /** The chat's previous turn usage, for the cache-miss rule. */
   previous?: StreamUsage | null;
 }): React.ReactElement {
+  const motion = useChatMotion();
   const { colors } = useTheme();
   const [expanded, setExpanded] = useState(false);
 
@@ -64,7 +66,7 @@ export function UsageFooter({
       </View>
 
       {expanded ? (
-        <Animated.View entering={FadeIn.duration(120)} className="mt-2 gap-0.5">
+        <Animated.View entering={motion.fadeIn(120)} className="mt-2 gap-0.5">
           <Detail label="Sent" value={compact(usage.inputTokens)} />
           <Detail label="Received" value={compact(usage.outputTokens)} />
           {duration ? <Detail label="Took" value={duration} /> : null}

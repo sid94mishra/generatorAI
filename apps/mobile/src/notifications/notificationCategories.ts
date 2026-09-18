@@ -34,17 +34,28 @@ export const APPROVAL_ACTION = {
  * Category actions, in the shape `Notifications.setNotificationCategoryAsync`
  * takes. `opensAppToForeground: false` is the whole point: the decision is
  * sent from the notification shade, and the app stays wherever it was.
+ *
+ * `isAuthenticationRequired: true` (iOS; ignored elsewhere) on BOTH buttons:
+ *   * Allow grants an agent a tool call on the user's machine. Anyone holding
+ *     a locked phone could otherwise press it from the lock screen.
+ *   * The signed request needs the device credential, which lives in
+ *     "when unlocked" protected storage (`secureItemStore.ts`). An action
+ *     handled while the phone is still locked cannot read it, so a Deny
+ *     without authentication would fail and fall back to opening the app —
+ *     a decision the user believes they made, silently not sent.
+ * iOS asks for Face ID / passcode first, then delivers the action to an
+ * unlocked process.
  */
 export const APPROVAL_ACTIONS = [
   {
     identifier: APPROVAL_ACTION.approve,
     buttonTitle: 'Allow',
-    options: { opensAppToForeground: false },
+    options: { opensAppToForeground: false, isAuthenticationRequired: true },
   },
   {
     identifier: APPROVAL_ACTION.deny,
     buttonTitle: 'Deny',
-    options: { opensAppToForeground: false, isDestructive: true },
+    options: { opensAppToForeground: false, isDestructive: true, isAuthenticationRequired: true },
   },
 ] as const;
 

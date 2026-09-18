@@ -17,8 +17,12 @@
 //   • a badge on Home when something is blocked waiting for a decision —
 //     HIG reserves badges for exactly this,
 //   • re-tapping the active tab scrolls its content back to the top,
-//   • a "needs you" accessory pill above the bar (plan §6.2) — tap opens
-//     the approvals sheet,
+//   • an inbox bell in every tab's compact header (count badge → the
+//     approvals sheet). It replaced the floating "N waiting" pill above the
+//     bar, which only existed while the count was non-zero and sat in the
+//     same strip of screen as the FAB,
+//   • a `TabShellProvider` that hands every scene the bar-aware FAB and
+//     list-end insets plus the attention count, computed once here,
 //   • a bar sized from its contents (`tabBarMetrics`): 49pt + inset on iOS
 //     with a translucent tint of the sidebar surface, Material 3's 80dp on
 //     Android with the active-icon pill. The web preview used to clip the
@@ -37,10 +41,16 @@ import { FolderGit2, House, MessagesSquare, Workflow, type LucideIcon } from 'lu
 
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { useActivity, needsYouCount } from '../../src/api/useActivity';
-import { haptics, useFontScale } from '../../src/components/ui';
-import { NeedsYouStrip } from '../../src/components/home/NeedsYouStrip';
+import { haptics, useFontScale, useReduceMotion } from '../../src/components/ui';
 import { scrollActiveToTop } from '../../src/navigation/scrollToTop';
-import { USE_NATIVE_TABS, tabBarMetrics, withAlpha } from '../../src/navigation/tabsImplementation';
+import { TabShellProvider, type TabShellValue } from '../../src/navigation/tabShell';
+import {
+  USE_NATIVE_TABS,
+  tabBarMetrics,
+  tabContentInsets,
+  withAlpha,
+  type TabPlatform,
+} from '../../src/navigation/tabsImplementation';
 
 /**
  * The icon slot. On Android the focused icon sits in a Material 3 active
@@ -85,9 +95,16 @@ export default function TabsLayout(): React.ReactElement {
   const { operations } = useActivity();
   const attention = needsYouCount(operations);
 
+  const reduceMotion = useReduceMotion();
+
   const metrics = useMemo(
-    () => tabBarMetrics(Platform.OS as Parameters<typeof tabBarMetrics>[0], insets.bottom, fontScale),
+    () => tabBarMetrics(Platform.OS as TabPlatform, insets.bottom, fontScale),
     [insets.bottom, fontScale],
+  );
+
+  const shell = useMemo<TabShellValue>(
+    () => ({ ...tabContentInsets(Platform.OS as TabPlatform, metrics), attention }),
+    [metrics, attention],
   );
 
   // Tab presses are the one place a haptic is unconditionally right: the
@@ -123,10 +140,13 @@ export default function TabsLayout(): React.ReactElement {
   const ios = Platform.OS === 'ios';
 
   return (
-    <View style={{ flex: 1 }}>
+    <TabShellProvider value={shell}>
       <Tabs
         screenOptions={{
           headerShown: false,
+          // A short cross-slide between peer tabs; a hard cut read as the app
+          // reloading. Reduce Motion (OS or app preference) keeps the cut.
+          animation: reduceMotion ? 'none' : 'shift',
           // The navigator paints its OWN scene background, and it defaults to
           // React Navigation's light theme (#F2F2F2). That rectangle covered the
           // themed shell underneath, so in dark mode every tab rendered dark
@@ -226,11 +246,6 @@ export default function TabsLayout(): React.ReactElement {
           })}
         />
       </Tabs>
-
-      {/* Plan §6.2 — the accessory strip. A sibling of the navigator rather
-          than a child of any tab, so it survives tab changes and never
-          re-mounts with the screen underneath it. */}
-      <NeedsYouStrip count={attention} offset={metrics.height} />
-    </View>
+    </TabShellProvider>
   );
 }

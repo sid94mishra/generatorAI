@@ -29,10 +29,18 @@
 //     scrolling (`scrollable={false}`) drags from its left/right 20pt edges.
 //   • Snapping is velocity-aware (`sheetMath.snapDetent`): a flick reaches
 //     the next detent in its direction even when "nearest" is behind it.
-//   • Keyboard lift uses RN `Keyboard` events. RN's Android `Modal` already
-//     resizes its window for the IME, so the lift is iOS-only by design.
+//   • Keyboard lift uses RN `Keyboard` events through `useKeyboardHeight`
+//     (the keyboard's overlap with the window; see keyboard.ts for Android).
 //   • Reduce Motion (OS switch OR app preference) jumps between positions
 //     instead of springing.
+//
+// v3 (iOS readiness):
+//   • With the keyboard up the card's HEIGHT is capped on the UI thread
+//     (`sheetMath.keyboardCappedHeight`) instead of the whole fixed-height
+//     card being pushed up past the status bar; detent math is unchanged
+//     and only the rendered offset is adjusted (`renderedOffset`).
+//   • Real window insets (`useWindowInsets`) for the status bar clamp, the
+//     home indicator and landscape side insets; width capped on iPad.
 // ──────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -57,7 +65,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useWindowInsets, READABLE_MAX_WIDTH } from './windowInsets';
 import { Check, X } from 'lucide-react-native';
 
 import { IconButton } from './Button';
@@ -66,7 +74,14 @@ import { useReducedMotionPreset } from './motion';
 import { MAX_SCALE } from './accessibility';
 import { haptics } from './haptics';
 import { useKeyboardHeight } from './keyboard';
-import { detentOffsets, rubberBand, snapDetent } from './sheetMath';
+import {
+  SHEET_TOP_GAP,
+  detentOffsets,
+  keyboardCappedHeight,
+  renderedOffset,
+  rubberBand,
+  snapDetent,
+} from './sheetMath';
 import { useTheme } from '../../theme/ThemeProvider';
 
 /**
@@ -143,7 +158,9 @@ export function Sheet({
 }: SheetProps): React.ReactElement | null {
   const { colors, style: themeVars } = useTheme();
   const { height: screenHeight } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+  // The Modal spans the whole window, outside `ConnectionStripHost`, so it
+  // needs the REAL insets rather than the consumed ones the tree carries.
+  const insets = useWindowInsets();
   const presets = useReducedMotionPreset();
   const keyboard = useKeyboardHeight();
   const [contentHeight, setContentHeight] = useState(0);
@@ -163,7 +180,12 @@ export function Sheet({
   const stops = useMemo(() => stopsKey.split(',').map(Number), [stopsKey]);
   const tallest = stops[stops.length - 1] ?? 0.92;
 
-  const maxHeight = screenHeight * tallest;
+  // Never taller than the space below the status bar. The Modal is
+  // `statusBarTranslucent`, so a 0.92 detent slid its title under the clock
+  // on Android when the consumed (0) top inset was used. `useWindowInsets`
+  // carries the live value, correct after rotation.
+  const statusBarTop = insets.top;
+  const maxHeight = Math.min(screenHeight * tallest, screenHeight - statusBarTop - SHEET_TOP_GAP);
   const sheetHeight = fitContent
     ? Math.min(maxHeight, contentHeight > 0 ? contentHeight + headerHeight + insets.bottom + 24 : maxHeight)
     : maxHeight;
@@ -336,9 +358,20 @@ export function Sheet({
     translateY.value = withSpring(offsets[next] ?? 0, presets.springSheet);
   }, [stops.length, offsets, translateY, fitContent, presets, rememberStop]);
 
-  const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
-  }));
+  // Keyboard handling, all on the UI thread. The container is padded by the
+  // keyboard (see `liftStyle`), so the card is capped to the space left
+  // below the status bar — a fixed height pushed a tall sheet's title and
+  // grabber off the top of the screen. The home-indicator padding is dropped
+  // while the keyboard is up: the keyboard already covers that strip.
+  const sheetStyle = useAnimatedStyle(() => {
+    const kb = keyboardAware ? keyboard.value : 0;
+    const height = keyboardCappedHeight(sheetHeight, screenHeight, statusBarTop, kb);
+    return {
+      height,
+      paddingBottom: kb > 0 ? 0 : insets.bottom,
+      transform: [{ translateY: renderedOffset(translateY.value, sheetHeight, height) }],
+    };
+  }, [keyboardAware, sheetHeight, screenHeight, statusBarTop, insets.bottom]);
 
   const scrimStyle = useAnimatedStyle(() => ({
     opacity: interpolate(translateY.value, [closedOffset, 0], [0, 0.5], 'clamp'),
@@ -367,7 +400,14 @@ export function Sheet({
           and the whole sheet paints transparent. `zIndex` is explicit because
           react-native-web lands the modal host at z-index 0. */}
       <Animated.View
-        style={[StyleSheet.absoluteFill, themeVars, liftStyle, { justifyContent: 'flex-end', zIndex: 50 }]}
+        style={[
+          StyleSheet.absoluteFill,
+          themeVars,
+          liftStyle,
+          // Landscape: keep the card clear of the notch / Dynamic Island. The
+          // scrim is absolutely positioned, so it still covers the edges.
+          { justifyContent: 'flex-end', zIndex: 50, paddingLeft: insets.left, paddingRight: insets.right },
+        ]}
       >
         <Touchable
           a11yRole="none"
@@ -390,16 +430,19 @@ export function Sheet({
           onAccessibilityEscape={close}
           className="overflow-hidden rounded-t-4xl border-t border-border bg-card"
           style={[
-            sheetStyle,
             {
-              height: sheetHeight,
-              paddingBottom: insets.bottom,
+              // iPad / landscape: a centred column instead of a 1200pt-wide
+              // card; phones in portrait are narrower than the cap.
+              width: '100%',
+              maxWidth: READABLE_MAX_WIDTH,
+              alignSelf: 'center',
               shadowColor: 'rgb(0,0,0)',
               shadowOpacity: 0.3,
               shadowRadius: 24,
               shadowOffset: { width: 0, height: -4 },
               elevation: 24,
             },
+            sheetStyle,
           ]}
         >
           {/* The whole header block drags, not just the grabber. Every native
@@ -549,7 +592,9 @@ export function SheetRow({
  */
 export function SheetSection({ title, right }: { title: string; right?: React.ReactNode }): React.ReactElement {
   return (
-    <View className="flex-row items-center justify-between bg-background px-4 py-2">
+    // No band of its own: a `bg-background` strip on the `bg-card` sheet read
+    // as a stripe between sections. Spacing, not colour, separates them.
+    <View className="flex-row items-center justify-between px-4 pb-2 pt-4">
       <Text
         accessibilityRole="header"
         maxFontSizeMultiplier={MAX_SCALE.chrome}

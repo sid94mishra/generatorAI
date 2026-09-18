@@ -15,8 +15,11 @@
 //              every frame of the keyboard animation, but everything above
 //              reflows correctly with no extra wiring.
 //
-// On Android the window already resizes (`softwareKeyboardLayoutMode:
-// 'resize'`), so `useKeyboardHeight` reports 0 and this is a plain wrapper.
+// Android lifts too: under SDK 57's enforced edge-to-edge the window does not
+// resize for the IME (see `KeyboardOptions.androidResizes` in keyboard.ts).
+//
+// `padding` mode owns the container's `paddingBottom`; put any resting bottom
+// padding on a child view, or it is overwritten.
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';

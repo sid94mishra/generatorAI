@@ -43,6 +43,16 @@ import { SearchField } from './Form';
 import { MAX_SCALE } from './accessibility';
 import { useTheme } from '../../theme/ThemeProvider';
 import { usePreferences } from '../../prefs/preferences';
+import { usePullToRefresh } from './usePullToRefresh';
+import { READABLE_MAX_WIDTH } from './windowInsets';
+
+/**
+ * iPad / landscape: header and content share one centred column. Phones in
+ * portrait are narrower than the cap, so this is a no-op there.
+ */
+const COLUMN = { width: '100%', maxWidth: READABLE_MAX_WIDTH, alignSelf: 'center' } as const;
+
+const noop = (): void => undefined;
 
 /** Scroll distance over which the large title shrinks into the nav bar. */
 const COLLAPSE_RANGE = 48;
@@ -77,6 +87,7 @@ export function ScreenHeader({
   trailing,
   below,
   belowPinned = false,
+  variant = 'large',
 }: {
   title: string;
   subtitle?: string;
@@ -88,6 +99,13 @@ export function ScreenHeader({
   below?: React.ReactNode;
   /** Keep `below` visible regardless of scroll — while search has focus. */
   belowPinned?: boolean;
+  /**
+   * `large` (default): nav row + a 30pt title that collapses into it.
+   * `compact`: ONE ~52pt row with a bold 22pt title and the trailing actions
+   * — the tab-root header. A large title on a tab root cost ~110pt of every
+   * first screen and, because tab lists own their scroller, never collapsed.
+   */
+  variant?: 'large' | 'compact';
 }): React.ReactElement {
   const fallback = useSharedValue(0);
   // Settings → Accessibility → "Large titles collapse". Off, the header
@@ -95,11 +113,19 @@ export function ScreenHeader({
   // below holds at its resting value and the large title simply stays.
   const { largeTitleCollapse } = usePreferences();
   const y = largeTitleCollapse && scrollY ? scrollY : fallback;
+  // The large block's natural height, measured from an unconstrained inner
+  // view. Collapsing used to animate opacity only, so the title faded but
+  // its ~48pt stayed reserved and scrolling reclaimed no space at all.
+  const largeHeight = useSharedValue(0);
 
-  const largeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(y.value, [0, COLLAPSE_RANGE], [1, 0], 'clamp'),
-    transform: [{ translateY: interpolate(y.value, [0, COLLAPSE_RANGE], [0, -8], 'clamp') }],
-  }));
+  const largeStyle = useAnimatedStyle(() => {
+    const h = largeHeight.value;
+    return {
+      opacity: interpolate(y.value, [0, COLLAPSE_RANGE], [1, 0], 'clamp'),
+      transform: [{ translateY: interpolate(y.value, [0, COLLAPSE_RANGE], [0, -8], 'clamp') }],
+      ...(h > 0 ? { height: interpolate(y.value, [0, COLLAPSE_RANGE], [h, 0], 'clamp') } : {}),
+    };
+  });
 
   const compactStyle = useAnimatedStyle(() => ({
     opacity: interpolate(y.value, [COLLAPSE_RANGE * 0.6, COLLAPSE_RANGE], [0, 1], 'clamp'),
@@ -118,6 +144,27 @@ export function ScreenHeader({
     }),
     [belowPinned],
   );
+
+  if (variant === 'compact') {
+    return (
+      <View className="bg-background px-4 pb-1">
+        <View className="flex-row items-center gap-2" style={{ minHeight: 52 }}>
+          {leading}
+          <Text
+            accessibilityRole="header"
+            numberOfLines={1}
+            maxFontSizeMultiplier={MAX_SCALE.control}
+            className="flex-1 font-bold text-foreground"
+            style={{ fontSize: 22, lineHeight: 28 }}
+          >
+            {title}
+          </Text>
+          {trailing}
+        </View>
+        {below ? <View className="pb-1 pt-1">{below}</View> : null}
+      </View>
+    );
+  }
 
   return (
     <View className="bg-background px-4 pb-2 pt-1">
@@ -146,20 +193,27 @@ export function ScreenHeader({
 
       {/* The large title sits below the nav row rather than replacing it, so
           the back button never moves as the title collapses. */}
-      <Animated.View style={largeStyle}>
-        <Text
-          accessibilityRole="header"
-          numberOfLines={2}
-          maxFontSizeMultiplier={MAX_SCALE.control}
-          className="text-3xl font-bold text-foreground"
+      <Animated.View style={[largeStyle, { overflow: 'hidden' }]}>
+        <View
+          onLayout={(event) => {
+            const next = event.nativeEvent.layout.height;
+            if (next > 0 && Math.abs(next - largeHeight.value) > 0.5) largeHeight.value = next;
+          }}
         >
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text numberOfLines={2} className="mt-0.5 text-sm text-muted-foreground">
-            {subtitle}
+          <Text
+            accessibilityRole="header"
+            numberOfLines={2}
+            maxFontSizeMultiplier={MAX_SCALE.control}
+            className="text-3xl font-bold text-foreground"
+          >
+            {title}
           </Text>
-        ) : null}
+          {subtitle ? (
+            <Text numberOfLines={2} className="mt-0.5 text-sm text-muted-foreground">
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
       </Animated.View>
 
       {below ? (
@@ -190,6 +244,7 @@ export function Screen({
   /** Extra bottom clearance. Tab screens pass the FAB's height. */
   bottomInset = 0,
   scrollY: externalScrollY,
+  variant = 'large',
 }: {
   title?: string;
   subtitle?: string;
@@ -208,7 +263,12 @@ export function Screen({
   backFallback?: Parameters<typeof router.replace>[0];
   /** Replace the default pop; for a sheet-like screen that confirms first. */
   onBack?: () => void;
-  onRefresh?: () => void;
+  /** May return a promise; the spinner then ends when it settles. */
+  onRefresh?: () => unknown;
+  /**
+   * Whether the data is fetching. The spinner only shows for a USER pull —
+   * a background poll that flips this does not drop a spinner over the page.
+   */
   refreshing?: boolean;
   /** Renders a search field under the title that collapses with it. */
   search?: ScreenSearch;
@@ -221,6 +281,8 @@ export function Screen({
    * value its `useAnimatedScrollHandler` writes so the title still collapses.
    */
   scrollY?: SharedValue<number>;
+  /** Header style. Tab roots pass `compact`; see `ScreenHeader`. */
+  variant?: 'large' | 'compact';
 }): React.ReactElement {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
@@ -228,6 +290,7 @@ export function Screen({
   const scrollY = externalScrollY ?? internalScrollY;
   const scroller = useRef<Animated.ScrollView>(null);
   const [searchFocused, setSearchFocused] = useState(false);
+  const pull = usePullToRefresh(onRefresh ?? noop, refreshing);
 
   const onScroll = useAnimatedScrollHandler((event) => {
     scrollY.value = event.contentOffset.y;
@@ -272,20 +335,23 @@ export function Screen({
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      {title ? (
-        <ScreenHeader
-          title={title}
-          {...(subtitle ? { subtitle } : {})}
-          scrollY={scrollY}
-          leading={leadingSlot}
-          trailing={trailingSlot}
-          below={searchNode}
-          belowPinned={searchFocused}
-        />
-      ) : searchNode ? (
-        // No title to collapse under: the field simply sits at the top.
-        <View className="px-4 pb-2 pt-1">{searchNode}</View>
-      ) : null}
+      <View style={COLUMN}>
+        {title ? (
+          <ScreenHeader
+            title={title}
+            {...(subtitle ? { subtitle } : {})}
+            scrollY={scrollY}
+            leading={leadingSlot}
+            trailing={trailingSlot}
+            below={searchNode}
+            belowPinned={searchFocused}
+            variant={variant}
+          />
+        ) : searchNode ? (
+          // No title to collapse under: the field simply sits at the top.
+          <View className="px-4 pb-2 pt-1">{searchNode}</View>
+        ) : null}
+      </View>
 
       {scroll ? (
         <Animated.ScrollView
@@ -297,16 +363,19 @@ export function Screen({
           // on any screen with a field near the top.
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{
-            padding: 16,
-            paddingBottom: insets.bottom + 24 + bottomInset,
-            gap: 12,
-          }}
+          contentContainerStyle={[
+            COLUMN,
+            {
+              padding: 16,
+              paddingBottom: insets.bottom + 24 + bottomInset,
+              gap: 12,
+            },
+          ]}
           refreshControl={
             onRefresh ? (
               <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
+                refreshing={pull.refreshing}
+                onRefresh={pull.onRefresh}
                 tintColor={colors['muted-foreground']}
                 colors={[colors.primary ?? '']}
               />
@@ -316,7 +385,9 @@ export function Screen({
           {children}
         </Animated.ScrollView>
       ) : (
-        <View className={`flex-1 ${contentClassName}`}>{children}</View>
+        <View className={`flex-1 ${contentClassName}`} style={COLUMN}>
+          {children}
+        </View>
       )}
     </View>
   );
@@ -329,10 +400,12 @@ export function PlainScroll({
   refreshing = false,
 }: {
   children: React.ReactNode;
-  onRefresh?: () => void;
+  onRefresh?: () => unknown;
+  /** Whether data is fetching; the spinner shows only for a user pull. */
   refreshing?: boolean;
 }): React.ReactElement {
   const { colors } = useTheme();
+  const pull = usePullToRefresh(onRefresh ?? noop, refreshing);
   return (
     <ScrollView
       keyboardDismissMode="interactive"
@@ -340,7 +413,7 @@ export function PlainScroll({
       contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 12 }}
       refreshControl={
         onRefresh ? (
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors['muted-foreground']} />
+          <RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} tintColor={colors['muted-foreground']} />
         ) : undefined
       }
     >

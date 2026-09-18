@@ -9,7 +9,7 @@
 // showing a button that fails.
 // ────────────────────────────────────────────────────────────────
 
-import { FEATURE_REQUIREMENTS, grantableFeatures, type MobileFeature } from './featureGate';
+import { FEATURE_REQUIREMENTS, grantableFeatures, isScopeRequestable, type MobileFeature } from './featureGate';
 
 export interface MissingScope {
   scope: string;
@@ -28,6 +28,9 @@ export function missingGrantableScopes(grantedScopes: readonly string[]): Missin
   for (const feature of grantableFeatures(grantedScopes)) {
     for (const scope of FEATURE_REQUIREMENTS[feature].scopes) {
       if (granted.has(scope)) continue;
+      // The server refuses admin:* requests from a device holding no admin
+      // scope (403 SCOPE_NOT_REQUESTABLE); offering them only produced errors.
+      if (!isScopeRequestable(scope, grantedScopes)) continue;
       const list = byScope.get(scope) ?? [];
       list.push(feature);
       byScope.set(scope, list);

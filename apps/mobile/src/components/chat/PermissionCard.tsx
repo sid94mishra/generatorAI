@@ -17,14 +17,15 @@
 
 import React, { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { ShieldAlert } from 'lucide-react-native';
 import type { StreamBlock } from '@generatorai/client-core';
 
 import { Button } from '../ui/Button';
-import { Badge } from '../ui/primitives';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useCardEntering } from '../common/enterMotion';
+import { GateScroll } from './GateScroll';
+import { useChatMotion } from './chatMotion';
 
 type PermissionBlock = Extract<StreamBlock, { type: 'permission' }>;
 
@@ -37,6 +38,7 @@ export function PermissionCard({
 }): React.ReactElement {
   const { colors } = useTheme();
   const entering = useCardEntering();
+  const motion = useChatMotion();
   // A single in-flight flag rather than per-button, so a tap on Allow while
   // Deny is still resolving (or vice versa) cannot double-submit either one.
   const [pending, setPending] = useState<'allow' | 'deny' | null>(null);
@@ -57,11 +59,11 @@ export function PermissionCard({
   return (
     <Animated.View
       entering={entering}
-      className="mx-3 mb-2 gap-3 rounded-3xl border border-danger bg-card p-3.5"
+      className="mx-3 mt-2 gap-3 rounded-3xl border border-warning bg-card p-3.5"
     >
       <View className="flex-row items-center gap-2.5">
-        <View className="h-8 w-8 items-center justify-center rounded-2xl bg-danger-muted">
-          <ShieldAlert size={16} color={colors.danger} />
+        <View className="h-8 w-8 items-center justify-center rounded-2xl bg-warning-muted">
+          <ShieldAlert size={16} color={colors.warning} />
         </View>
         <View className="flex-1 gap-0.5">
           <Text className="text-md font-semibold text-foreground">Permission needed</Text>
@@ -69,23 +71,24 @@ export function PermissionCard({
             {block.toolName}
           </Text>
         </View>
-        <Badge label="Permission" tone="danger" />
       </View>
 
-      <Text className="text-sm leading-relaxed text-foreground">{block.description}</Text>
+      <GateScroll>
+        <Text className="text-sm leading-relaxed text-foreground">{block.description}</Text>
 
-      <View className="gap-1">
-        <Text className="text-xs uppercase tracking-wide text-muted-foreground">Input</Text>
-        <View className="rounded-xl bg-canvas-bg p-2.5">
-          {/* Already bounded and secret-redacted by the server — render verbatim. */}
-          <Text className="font-mono text-xs leading-code text-muted-foreground">
-            {block.inputSummary}
-          </Text>
+        <View className="gap-1">
+          <Text className="text-xs uppercase tracking-wide text-muted-foreground">Input</Text>
+          <View className="rounded-xl bg-canvas-bg p-2.5">
+            {/* Already bounded and secret-redacted by the server — render verbatim. */}
+            <Text selectable className="font-mono text-xs leading-code text-muted-foreground">
+              {block.inputSummary}
+            </Text>
+          </View>
         </View>
-      </View>
+      </GateScroll>
 
       {denying ? (
-        <Animated.View entering={FadeIn.duration(120)} className="gap-2">
+        <Animated.View entering={motion.fadeIn(120)} className="gap-2">
           <TextInput
             accessibilityLabel="Reason for denying (optional)"
             multiline

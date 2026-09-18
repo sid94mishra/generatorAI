@@ -171,3 +171,20 @@ describe('global scope → list invalidation', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['chats'] });
   });
 });
+
+describe('scope request events', () => {
+  it('subscribes to scope-request lifecycle on the global scope', () => {
+    expect(GLOBAL_SCOPE_FILTER).toContain('device.scope_request');
+    expect(listKeysForEvent('device.scope_request_resolved').length).toBe(2);
+  });
+
+  it('refreshes permissions only for this device’s approvals', async () => {
+    const { isOwnScopeApproval } = await import('../stream/muxTransport');
+    const approved = { kind: 'device.scope_request_resolved', data: { deviceId: 'me', status: 'approved' } };
+    expect(isOwnScopeApproval(approved, 'me')).toBe(true);
+    expect(isOwnScopeApproval(approved, 'other')).toBe(false);
+    expect(isOwnScopeApproval({ ...approved, data: { deviceId: 'me', status: 'denied' } }, 'me')).toBe(false);
+    expect(isOwnScopeApproval({ kind: 'device.scope_requested', data: { deviceId: 'me' } }, 'me')).toBe(false);
+    expect(isOwnScopeApproval(approved, null)).toBe(false);
+  });
+});

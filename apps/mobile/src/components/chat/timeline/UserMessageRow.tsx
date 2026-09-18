@@ -8,27 +8,22 @@
 //
 // A user bubble is also the anchor for REWIND: "go back to just before I
 // sent this" is a thing you say about a prompt, which is exactly why Claude
-// Code's `/rewind` lists user prompts and nothing else. That action is
-// reachable two ways on purpose:
-//
-//   • long-press, the gesture the row already taught, and
-//   • an explicit "⋯" button under the bubble.
-//
-// The button is not redundant. A long-press is undiscoverable — nothing on
-// screen says a message has actions — and it is unavailable to a switch- or
-// screen-reader user, who gets it through the actions rotor instead. Both
-// routes open the SAME menu, built once here.
+// Code's `/rewind` lists user prompts and nothing else. It is reached by
+// long-press — the convention every messaging app teaches for a bubble — and
+// by a screen- or switch-reader user through the actions rotor, which
+// `ContextMenu` exposes. The "⋯" that used to sit under every bubble is gone:
+// repeated under each message it was the noisiest thing in the transcript.
+// Rewind is also offered from the header menu's history section.
 // ────────────────────────────────────────────────────────────────
 
-import React, { memo, useMemo } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { Platform, Share, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { Copy, Ellipsis, FileImage, History, Paperclip, Share2 } from 'lucide-react-native';
+import { Copy, FileImage, History, Paperclip, Share2 } from 'lucide-react-native';
 import type { ChatMessage } from '@generatorai/client-core';
 
 import { StaticChip } from '../../ui/Chip';
-import { IconButton } from '../../ui/Button';
-import { ContextMenu, useContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
+import { ContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
 import { useToast } from '../../ui/Toast';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { messageAttachments } from './chatMessageToBlocks';
@@ -39,7 +34,6 @@ const MENU_TITLE = 'Your message';
 export const UserMessageRow = memo(function UserMessageRow({ message }: { message: ChatMessage }): React.ReactElement {
   const toast = useToast();
   const { colors } = useTheme();
-  const { open } = useContextMenu();
   const { onRewind } = useTimelineActions();
   const attachments = useMemo(() => messageAttachments(message), [message]);
 
@@ -86,8 +80,6 @@ export const UserMessageRow = memo(function UserMessageRow({ message }: { messag
     [message.content, colors.foreground, toast, onRewind, turnId],
   );
 
-  const hasMenu = Boolean(message.content) && items.length > 0;
-
   return (
     <ContextMenu
       items={message.content ? items : []}
@@ -114,25 +106,46 @@ export const UserMessageRow = memo(function UserMessageRow({ message }: { messag
             ))}
           </View>
         ) : null}
-        {message.content ? (
-          <View className="rounded-3xl bg-accent px-3.5 py-2.5">
-            <Text selectable className="text-md leading-relaxed text-foreground">
-              {message.content}
-            </Text>
-          </View>
-        ) : null}
-        {hasMenu ? (
-          <IconButton
-            testID="user-message-actions"
-            accessibilityLabel="Message actions"
-            accessibilityHint="Copy, rewind to here, or share"
-            variant="ghost"
-            compact
-            icon={<Ellipsis size={16} color={colors['muted-foreground']} />}
-            onPress={() => open(items, { title: MENU_TITLE })}
-          />
-        ) : null}
+        {message.content ? <UserBubbleText text={message.content} /> : null}
       </View>
     </ContextMenu>
   );
 });
+
+/** Past this many characters a prompt collapses to its first lines. */
+export const USER_BUBBLE_COLLAPSE_CHARS = 600;
+const COLLAPSED_LINES = 8;
+
+/**
+ * Long prompts (pasted logs, a workflow stage's injected instructions) filled
+ * the whole screen with one bubble on a phone. They open collapsed with a
+ * "Show more" toggle; the full text stays selectable once expanded and is
+ * always available to screen readers.
+ */
+function UserBubbleText({ text }: { text: string }): React.ReactElement {
+  const long = text.length > USER_BUBBLE_COLLAPSE_CHARS || text.split('\n').length > COLLAPSED_LINES + 4;
+  const [expanded, setExpanded] = useState(false);
+  const collapsed = long && !expanded;
+  return (
+    <View className="rounded-3xl bg-accent px-3.5 py-2.5">
+      <Text
+        selectable={!collapsed}
+        accessibilityLabel={text}
+        {...(collapsed ? { numberOfLines: COLLAPSED_LINES } : {})}
+        className="text-md leading-relaxed text-foreground"
+      >
+        {text}
+      </Text>
+      {long ? (
+        <Text
+          accessibilityRole="button"
+          onPress={() => setExpanded((v) => !v)}
+          suppressHighlighting
+          className="min-h-11 pt-2 text-sm font-semibold text-primary"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </Text>
+      ) : null}
+    </View>
+  );
+}

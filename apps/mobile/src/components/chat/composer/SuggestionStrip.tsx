@@ -9,7 +9,7 @@
 
 import React from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import {
   Bot,
   FileText,
@@ -25,6 +25,7 @@ import { Spinner } from '../../ui/States';
 import { MAX_SCALE } from '../../ui/accessibility';
 import { useTheme } from '../../../theme/ThemeProvider';
 import type { SlashItem } from './types';
+import { useChatMotion } from '../chatMotion';
 
 function KindIcon({
   item,
@@ -61,11 +62,12 @@ export function SuggestionStrip({
   emptyHint?: string | null;
   onSelect: (item: SlashItem) => void;
 }): React.ReactElement | null {
+  const motion = useChatMotion();
   const { colors } = useTheme();
   if (items.length === 0 && !loading && !emptyHint) return null;
 
   return (
-    <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(120)}>
+    <Animated.View entering={motion.fadeIn(120)} exiting={motion.fadeOut(120)}>
       <ScrollView
         horizontal
         keyboardShouldPersistTaps="always"

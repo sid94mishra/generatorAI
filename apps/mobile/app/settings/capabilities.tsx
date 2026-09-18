@@ -2,19 +2,37 @@
 // Settings › Capabilities.
 //
 // Skills, prompts, agents and MCP servers — what the agent can reach for.
-// Read-only: enabling or disabling one changes the behaviour of every client
-// against this machine, which is not a decision to make from a lock screen.
-// Reading what a skill actually does, though, is exactly the sort of thing
-// you want to check while away.
+//
+// Reading what each one does is open to every device. Turning an MCP server
+// on or off changes the behaviour of every client against this machine, so
+// the switches appear only when the device holds `admin:settings`
+// (`capabilityAdmin`); otherwise the list is read-only and says how to get
+// access. Bundled servers flip through `PUT /system/mcp-servers/system/:id`,
+// custom ones through the full-replacement `PUT …/custom/:id`
+// (`globalMcpToggle`). Built-in skills have no server-side switch — web's
+// skill toggle is a per-browser picker preference — so they stay read-only.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Boxes, Server, Sparkles } from 'lucide-react-native';
 import type { SystemArtifact } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
+import { GRANT_FROM_TRUSTED_DEVICE, canRequestFeature } from '../../src/auth/featureGate';
+import { messageOf } from '../../src/components/projects/ProjectActions';
+import {
+  globalMcpToggle,
+  mcpNeedsConfiguration,
+  mcpSubtitle,
+  mcpSwitchValue,
+  type McpEntryLike,
+} from '../../src/components/projects/projectEditModel';
+import { useProjectsApi } from '../../src/components/projects/useProjectsApi';
+import { useFeature } from '../../src/components/runs/useFeature';
+import { Button } from '../../src/components/ui/Button';
+import { useToast } from '../../src/components/ui/Toast';
 import { Markdown } from '../../src/components/markdown/Markdown';
 import { Badge, SectionHeader } from '../../src/components/ui/primitives';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
@@ -39,6 +57,11 @@ export default function CapabilitiesScreen(): React.ReactElement {
   const { colors } = useTheme();
   const [tab, setTab] = useState<Tab>('skill');
   const [preview, setPreview] = useState<SystemArtifact | null>(null);
+  const projectsApi = useProjectsApi();
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const admin = useFeature('capabilityAdmin');
+  const requestable = canRequestFeature('capabilityAdmin', admin.scopes);
 
   const artifacts = useQuery({
     queryKey: ['system', 'artifacts'],
@@ -56,6 +79,27 @@ export default function CapabilitiesScreen(): React.ReactElement {
     queryKey: ['system', 'artifacts', preview?.id ?? ''],
     queryFn: () => api.system.artifactContent(preview!.id),
     enabled: Boolean(preview?.id),
+  });
+
+  const toggleMcp = useMutation({
+    mutationFn: async (vars: { server: McpEntryLike; enabled: boolean }) => {
+      const call = globalMcpToggle(vars.server, vars.enabled);
+      if (!call) throw new Error('This server cannot be switched from here.');
+      await projectsApi.putJson(call.path, call.body);
+    },
+    onMutate: async ({ server, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: ['system', 'mcp-servers'] });
+      const before = queryClient.getQueryData<McpEntryLike[]>(['system', 'mcp-servers']);
+      queryClient.setQueryData<McpEntryLike[]>(['system', 'mcp-servers'], (list) =>
+        list?.map((s) => (s.id === server.id ? { ...s, userEnabled: enabled } : s)),
+      );
+      return { before };
+    },
+    onError: (err, _vars, context) => {
+      if (context?.before) queryClient.setQueryData(['system', 'mcp-servers'], context.before);
+      toast({ message: messageOf(err, 'Could not change the server.'), variant: 'danger' });
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['system', 'mcp-servers'] }),
   });
 
   const byType = (type: Tab): SystemArtifact[] =>
@@ -97,15 +141,34 @@ export default function CapabilitiesScreen(): React.ReactElement {
           />
         ) : (
           <ListGroup>
-            {(mcp.data ?? []).map((server, i) => (
-              <ListRow
-                key={server.id ?? `${server.name}-${i}`}
-                title={server.name}
-                subtitle={server.description ?? server.command ?? server.url ?? null}
-                icon={<Server size={18} color={colors['muted-foreground']} />}
-                chevron={false}
-              />
-            ))}
+            {((mcp.data ?? []) as McpEntryLike[]).map((server, i) => {
+              const on = mcpSwitchValue(server);
+              const switchable = admin.available && globalMcpToggle(server, !on) !== null;
+              const setup = mcpNeedsConfiguration(server);
+              return (
+                <ListRow
+                  key={server.id ?? `${server.name}-${i}`}
+                  title={server.name}
+                  subtitle={mcpSubtitle(server)}
+                  icon={<Server size={18} color={colors['muted-foreground']} />}
+                  chevron={false}
+                  {...(switchable
+                    ? {
+                        toggle: {
+                          value: on,
+                          onValueChange: (enabled: boolean) => toggleMcp.mutate({ server, enabled }),
+                        },
+                      }
+                    : {})}
+                  {...(setup
+                    ? { trailing: <Badge label="Needs setup" tone="warning" /> }
+                    : !switchable && !on
+                      ? { trailing: <Badge label="Off" /> }
+                      : {})}
+                  {...(setup && switchable ? { accessibilityHint: 'Finish its setup on the desktop or web app' } : {})}
+                />
+              );
+            })}
           </ListGroup>
         )
       ) : byType(tab).length === 0 ? (
@@ -125,11 +188,24 @@ export default function CapabilitiesScreen(): React.ReactElement {
       )}
 
       <SectionHeader title="Changing these" />
-      <Text className="px-1 text-xs leading-relaxed text-muted-foreground">
-        Enabling or disabling a capability changes how the agent behaves for every client connected
-        to this machine, so it is done on the desktop or web app. This device can read what each one
-        does.
-      </Text>
+      {admin.available ? (
+        <Text className="text-sm leading-relaxed text-muted-foreground">
+          Switching an MCP server changes how the agent behaves for every client connected to this
+          machine. Adding servers, filling in their credentials and installing skills is done on the
+          desktop or web app.
+        </Text>
+      ) : (
+        <View className="gap-2">
+          <Text className="text-sm leading-relaxed text-muted-foreground">
+            {admin.reason} {requestable ? '' : GRANT_FROM_TRUSTED_DEVICE}
+          </Text>
+          {requestable ? (
+            <View className="self-start">
+              <Button label="Request access" variant="secondary" size="sm" haptic="tap" onPress={admin.requestAccess} />
+            </View>
+          ) : null}
+        </View>
+      )}
 
       <Sheet
         visible={preview !== null}

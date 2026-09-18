@@ -243,10 +243,12 @@ const FileRow = React.memo(function FileRow({
               ) : null}
               {name}
             </Text>
-            <Text numberOfLines={1} className="text-xs text-muted-foreground">
-              {multiMount && row.alias !== '.' ? `${row.alias}/` : ''}
-              {dir || '·'}
-            </Text>
+            {dir || (multiMount && row.alias !== '.') ? (
+              <Text numberOfLines={1} className="text-xs text-muted-foreground">
+                {multiMount && row.alias !== '.' ? `${row.alias}/` : ''}
+                {dir}
+              </Text>
+            ) : null}
           </View>
           {openThreads > 0 ? (
             <View className="rounded-full bg-accent px-1.5 py-0.5">

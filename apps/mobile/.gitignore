@@ -8,3 +8,9 @@ expo-env.d.ts
 # Local bundle exports produced by `pnpm bundle:analyze`
 .expo-export/
 
+
+# Continuous Native Generation: `expo prebuild` output is never committed (see README).
+/android/
+/ios/
+/modules/*/android/build/
+/.expo/

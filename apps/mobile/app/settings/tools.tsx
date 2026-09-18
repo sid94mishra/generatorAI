@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// Settings › Browser and terminal.
+// Settings › Phone access.
 //
 // A capability matrix for THIS device. Every row states whether the feature
 // is available, and when it is not, exactly which permission is missing and
@@ -9,6 +9,7 @@
 
 import React from 'react';
 import { Text, View } from 'react-native';
+import { router } from 'expo-router';
 import {
   FileUp,
   Globe,
@@ -21,7 +22,9 @@ import {
 import { useAuth } from '../../src/auth/AuthProvider';
 import { checkFeature, type MobileFeature } from '../../src/auth/featureGate';
 import { describeScope } from '../../src/auth/scopeLabels';
+import { Button } from '../../src/components/ui/Button';
 import { Badge, Card, SectionHeader } from '../../src/components/ui/primitives';
+import { SCOPE_REQUEST_ROUTE } from '../../src/navigation/routes';
 import { Screen } from '../../src/components/ui/Screen';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
@@ -44,8 +47,8 @@ export default function ToolsScreen(): React.ReactElement {
   const scopes = state.status === 'authenticated' ? state.scopes : [];
 
   return (
-    <Screen title="Permissions" back>
-      <Text className="px-1 text-sm leading-relaxed text-muted-foreground">
+    <Screen title="Phone access" back>
+      <Text className="text-sm leading-relaxed text-muted-foreground">
         What this phone is allowed to do. Permissions are granted when the device is paired and can
         be changed from a trusted device.
       </Text>
@@ -66,7 +69,7 @@ export default function ToolsScreen(): React.ReactElement {
             </View>
 
             {check.reason ? (
-              <Text className="text-xs leading-relaxed text-muted-foreground">{check.reason}</Text>
+              <Text className="text-sm leading-relaxed text-muted-foreground">{check.reason}</Text>
             ) : null}
 
             {check.missing.length > 0 ? (
@@ -76,12 +79,29 @@ export default function ToolsScreen(): React.ReactElement {
                 ))}
               </View>
             ) : null}
+
+            {/* "Not granted" used to be a dead end on this screen; the
+                request sheet already accepts the scopes to preselect. */}
+            {!check.available && check.grantable && check.missing.length > 0 ? (
+              <Button
+                label="Request access"
+                variant="secondary"
+                size="sm"
+                haptic="tap"
+                accessibilityLabel={`Request access to ${title}`}
+                onPress={() =>
+                  router.push(
+                    `${SCOPE_REQUEST_ROUTE}?scope=${encodeURIComponent(check.missing.join(','))}` as never,
+                  )
+                }
+              />
+            ) : null}
           </Card>
         );
       })}
 
       <SectionHeader title="Browser preview" />
-      <Text className="px-1 text-xs leading-relaxed text-muted-foreground">
+      <Text className="text-xs leading-relaxed text-muted-foreground">
         Even with permission, the browser here is view-only. The page the agent is driving is laid
         out for a desktop window, so forwarding phone touches to it would land clicks nowhere near
         where you aimed. You see what it sees; you drive it from the desktop.

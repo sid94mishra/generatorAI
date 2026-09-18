@@ -38,6 +38,22 @@ $env:EAS_PROJECT_ID = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   # local shell
 eas secret:create --scope project --name EAS_PROJECT_ID --value <id>  # EAS builds
 ```
 
+`eas.json` cannot carry comments, so the rule lives here: **never commit the id into `eas.json`
+`env`** — it is per Expo account; use the EAS secret above.
+
+### `APS_ENVIRONMENT` — which APNs gateway the build registers with
+
+`expo-notifications` writes the `aps-environment` entitlement from `app.config.ts`. Anything signed
+for distribution (App Store, TestFlight, the ad-hoc `preview` profile) must be `production`, or
+tokens register against the sandbox gateway and pushes are silently dropped. `eas.json` sets
+`APS_ENVIRONMENT` per profile (`development` → `development`, `preview`/`production` →
+`production`); when it is unset, `EAS_BUILD_PROFILE` decides, and a local `expo prebuild` keeps
+`development` so dev clients keep working. Check with:
+
+```bash
+APS_ENVIRONMENT=production npx expo config --type introspect | grep aps-environment
+```
+
 ## Android cleartext (LAN pairing in release builds)
 
 The pairing offer for a server on the same network is `http://<lan-ip>:<port>`. Android 9+
@@ -90,6 +106,100 @@ pnpm --filter @generatorai/mobile terminal:bundle  # regenerate src/terminal/xte
 (pair, chat, live gate, Changes, Stop, scope request, admin approve). See `e2e/README.md`.
 It complements, not replaces, a device build: WebView, biometrics, push actions and native gestures
 still need `eas build`.
+
+## Native testing on an Android emulator
+
+The web preview cannot catch native-only defects. Every one of these reproduced only on a
+device build:
+
+- NativeWind dropping `className` on Reanimated components.
+- The native header double-paying the status bar.
+- Predictive back swallowing every back press.
+- The keyboard covering the composer under edge-to-edge.
+- `AbortSignal.throwIfAborted` missing in Hermes.
+
+Run a real build before calling UI work done.
+
+```bash
+# One-time: JDK 17, Android SDK (platform 36, build-tools 36, NDK 27.1, cmake 3.22), an arm64 AVD
+npx expo prebuild --platform android --no-install
+cd android && ./gradlew assembleRelease           # Hermes bytecode, starts in seconds; JS-only rebuilds ~1 min
+adb install -r app/build/outputs/apk/release/app-release.apk
+adb reverse tcp:3100 tcp:3100                     # the phone reaches the host's loopback server
+adb shell am start -a android.intent.action.VIEW -d "'<pairingUrl>'" dev.generatorai.app   # opens consent
+```
+
+- **Pairing.** Mint the link with `POST /api/auth/pair` (`platform: "web"` while the server only
+  advertises loopback). Opening it deep-links into the pairing consent screen.
+- **Loopback server.** `adb reverse` connects to `localhost`, which resolves to `::1` first. A
+  server bound only to `127.0.0.1` needs an IPv6 listener or forwarder on `[::1]:3100`.
+- **Debug build.** A debug build through Metro works for hot reload, but it is slow on an 8 GB
+  machine. Use the release build for walking through flows.
+
+## iOS
+
+There is no Xcode in CI; `expo config --type introspect` and `expo export --platform ios` are the
+static checks. **Run introspect on a clean checkout** (or after `expo prebuild --clean`): a stale,
+gitignored `android/` or `ios/` from an earlier prebuild is read back in and shows permissions that
+the current config no longer produces.
+
+What the config guarantees, and why:
+
+- **Info.plist strings.** Camera, microphone and Face ID strings are single constants in
+  `app.config.ts`, handed to *every* plugin that writes the same key. Mods run last-plugin-first
+  and a plugin with no string writes Expo's generic “Allow $(PRODUCT_NAME) to access your
+  microphone”. Never set `microphonePermission: false`: `expo-image-picker` turns it into
+  `tools:node="remove"` on `RECORD_AUDIO`, which breaks dictation on Android.
+- **`UIBackgroundModes` is `remote-notification` only.** No `processing` (no registered
+  BGTask) and no `audio` (`expo-audio` has `enableBackgroundPlayback: false`; read-aloud stops in
+  the background).
+- **Icon.** `ios.icon` is `assets/icon-ios.png`: `assets/icon.png` flattened onto `#0d1117` at
+  1024×1024 with no alpha channel (App Store Connect rejects transparency). Regenerate it the same
+  way if the mark changes, e.g. with sharp: `sharp('assets/icon.png').flatten({ background:
+  '#0d1117' }).removeAlpha().png().toFile('assets/icon-ios.png')`.
+- **Locked launch.** The session item is `WHEN_UNLOCKED_THIS_DEVICE_ONLY` (trade-off documented in
+  `src/auth/secureItemStore.ts`). A launch while locked reaches a “Unlock to continue” state
+  (`src/auth/restoreState.ts`) and retries when the app becomes active — it never routes to
+  `/pair`. Lock-screen Allow/Deny require device authentication.
+- **Orientation.** All orientations on phone and iPad. `ConnectionStripHost` pays the left/right
+  safe-area insets once; full-window surfaces (`Sheet`, iOS form sheets) read the real insets via
+  `useWindowInsets`. Screens and sheets centre their content at 720pt on wide windows.
+- **Form sheets** (`/approvals`, gate, plan, `/scope-request`) open at the 0.6 detent: put the
+  primary action in `RouteSheet`'s `footer`, which is pinned outside the scroller.
+
+### Manual test checklist (device build)
+
+Run on a physical iPhone with a Dynamic Island and on an iPad before a release:
+
+- [ ] **Fresh-install LAN pairing.** Delete the app, install, scan a LAN QR. The Local Network
+      prompt appears; allow it. Pairing completes on its own (one automatic retry) or shows “allow
+      local network access, then try again” with a working **Try again** — never a raw
+      “Network request failed”.
+- [ ] **Secure Enclave backing.** Settings › Security shows the key as Secure Enclave, not
+      software.
+- [ ] **Locked-phone approval push.** Lock the phone, trigger a tool-permission gate, press
+      **Allow** on the lock screen: Face ID / passcode is required, the decision lands, and opening
+      the app afterwards does not show `/pair`. Repeat by cold-launching from a notification while
+      locked: the app shows “Unlock to continue”, then restores after unlock.
+- [ ] **Composer & keyboard.** Composer stays glued to the keyboard on a Dynamic Island iPhone;
+      on iPad with the floating and the split/undocked keyboard it does not float above an empty
+      gap; with a hardware keyboard only the shortcut bar is accounted for.
+- [ ] **Tall sheets with the keyboard.** Open a 0.92 sheet with a text field and focus it: the
+      grabber and title stay below the status bar and the body scrolls.
+- [ ] **Form-sheet primary buttons at 0.6.** `/scope-request` (and gate/plan once they adopt the
+      footer) show their primary button without expanding the sheet.
+- [ ] **Dictation then read-aloud with the silent switch on.** Dictate, stop, then read a message
+      aloud: audible on the loudspeaker, music ducks rather than stops.
+- [ ] **Terminal key bar** stays above the keyboard and does not overlap the last terminal row.
+- [ ] **Swipe-back on panes** (chat → sub-panes, detail screens) follows the finger and cancels
+      cleanly.
+- [ ] **Landscape / notch & iPad Split View.** Rotate on a notched iPhone: headers, rows, tab bar
+      and sheets clear the notch on both sides. On iPad use Split View at 1/3, 1/2, 2/3 and Slide
+      Over; content centres at 720pt when wide.
+- [ ] **Dark / light.** Status bar contrast, splash (no white flash in dark), home-screen icon has
+      no black corners or transparency artefacts.
+- [ ] **App-lock privacy overlay** covers content in the app switcher and re-locks after the grace
+      period.
 
 ## Tests
 

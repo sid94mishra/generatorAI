@@ -16,8 +16,8 @@
 // the cache, so a pane the user swiped away from is free while hidden.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler, Text, View } from 'react-native';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronLeft,
@@ -75,6 +75,12 @@ export interface ChangesSectionProps {
   active?: boolean;
   /** Open this file's diff on mount (deep link from a tool row or the tray). */
   focusPath?: string | null;
+  /**
+   * Bumped by the caller to ask for the SAME `focusPath` again (tapping one
+   * tray file twice). A focus request is consumed once: the list polling in
+   * the background must never re-open a file the user already backed out of.
+   */
+  focusNonce?: number;
   /** Hand a file to the Files pane. Omitted → the menu item is not shown. */
   onOpenInFiles?: (path: string, alias?: string) => void;
   /**
@@ -96,6 +102,7 @@ export function ChangesSection({
   chatId = null,
   active = true,
   focusPath = null,
+  focusNonce = 0,
   onOpenInFiles,
   detail: controlledDetail,
   onOpenFile,
@@ -132,12 +139,31 @@ export function ChangesSection({
     [onOpenFile],
   );
 
-  // Deep link: open the named file once its row exists.
+  // Deep link: open the named file once its row exists — ONCE per request.
+  // Keyed on path + nonce, because `changes.files` changes on every poll and
+  // re-opening on each would trap the user on the diff they just closed.
+  const consumedFocus = useRef<string | null>(null);
   useEffect(() => {
     if (!focusPath) return;
+    const key = `${focusPath}#${focusNonce}`;
+    if (consumedFocus.current === key) return;
     const row = changes.files.find((f) => f.path === focusPath);
-    if (row) openDetail(row.path, row.alias);
-  }, [focusPath, changes.files, openDetail]);
+    if (!row) return;
+    consumedFocus.current = key;
+    openDetail(row.path, row.alias);
+  }, [focusPath, focusNonce, changes.files, openDetail]);
+
+  // Hardware back (Android) closes an in-pane diff before anything else
+  // handles it. Registered only while a diff is open and the pane is on
+  // screen; BackHandler runs the newest subscription first.
+  useEffect(() => {
+    if (!active || !ownDetail || controlledDetail) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setOwnDetail(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [active, ownDetail, controlledDetail]);
 
   const multiMount = useMemo(
     () => new Set(changes.files.map((f) => f.alias)).size > 1,
@@ -248,7 +274,7 @@ export function ChangesSection({
             accessibilityLabel="Back to the file list"
             haptic="tap"
             onPress={() => setOwnDetail(null)}
-            className="h-9 flex-row items-center gap-1 px-2"
+            className="min-h-11 flex-row items-center gap-1 px-4"
           >
             <ChevronLeft size={18} color={colors.primary} />
             <Text className="text-sm text-primary">All changes</Text>
