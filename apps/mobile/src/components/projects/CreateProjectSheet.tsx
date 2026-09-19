@@ -91,7 +91,25 @@ export function CreateProjectSheet({
     setRepos((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="New project" detents={[0.7, 0.95]}>
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      title="New project"
+      detents={[0.95]}
+      footer={
+        <Button
+          label="Create project"
+          full
+          size="lg"
+          loading={create.isPending}
+          disabled={blocked || create.isPending}
+          onPress={() => {
+            setTouched(true);
+            if (!blocked) create.mutate();
+          }}
+        />
+      }
+    >
       <View className="gap-4 px-4 pb-6 pt-2">
         <Field
           label="Name"
@@ -182,17 +200,6 @@ export function CreateProjectSheet({
           )}
         </View>
 
-        <Button
-          label="Create project"
-          full
-          size="lg"
-          loading={create.isPending}
-          disabled={blocked || create.isPending}
-          onPress={() => {
-            setTouched(true);
-            if (!blocked) create.mutate();
-          }}
-        />
       </View>
     </Sheet>
   );

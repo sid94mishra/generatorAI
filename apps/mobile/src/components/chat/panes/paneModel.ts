@@ -8,7 +8,7 @@
 
 import { checkFeature, type FeatureAvailability } from '../../../auth/featureGate';
 
-export type PaneId = 'chat' | 'changes' | 'tasks' | 'terminal' | 'browser' | 'computer';
+export type PaneId = 'chat' | 'changes' | 'files' | 'tasks' | 'terminal' | 'browser' | 'computer';
 
 export interface PaneDescriptor {
   id: PaneId;
@@ -74,6 +74,7 @@ export function availablePanes(input: {
     return out;
   }
   out.push({ id: 'changes', label: 'Changes', ...(input.changesCount > 0 ? { count: input.changesCount } : {}) });
+  out.push({ id: 'files', label: 'Files' });
   if (tasksPane) out.push(tasksPane);
   out.push({ id: 'terminal', label: 'Terminal' });
   out.push({ id: 'browser', label: 'Browser', ...(input.browserLive ? { live: true } : {}) });
@@ -100,6 +101,7 @@ export function routeSection(
     case 'tasks':
       return panes.some((p) => p.id === 'tasks') ? { pane: 'tasks' } : { more: 'tasks' };
     case 'files':
+      return panes.some((p) => p.id === 'files') ? { pane: 'files' } : { more: 'files' };
     case 'plan':
       return { more: section };
     default:

@@ -22,6 +22,10 @@ const routes = [
   ['settings-providers', '/settings/providers'],
   ['settings-diagnostics', '/settings/diagnostics'],
   ['settings-about', '/settings/about'],
+  ['settings-tools', '/settings/tools'],
+  ['settings-extensions', '/settings/extensions'],
+  ['settings-source-control', '/settings/source-control'],
+  ['search', '/search'],
 ];
 const perRoute = {};
 try {
@@ -31,6 +35,7 @@ try {
       await page.goto(APP_URL + route, { waitUntil: 'domcontentloaded' });
       await sleep(3500);
       const text = (await page.locator('body').innerText()).replace(/\s+/g, ' ').slice(0, 160);
+      if (/Something went wrong|Unmatched Route|Can’t reach your server/.test(text)) throw new Error(text);
       await shot(page, name);
       perRoute[name] = consoleLog.slice(before).filter((l) => l.startsWith('[error]') || l.startsWith('[pageerror]'));
       return text;
@@ -39,6 +44,6 @@ try {
 } finally {
   console.log('\nerrors per route:');
   for (const [k, v] of Object.entries(perRoute)) if (v.length) console.log(`  ${k}:\n    ${v.slice(0, 6).join('\n    ')}`);
-  summary();
+  if (!summary() || Object.values(perRoute).some((errors) => errors.length)) process.exitCode = 1;
   await ctx.close();
 }

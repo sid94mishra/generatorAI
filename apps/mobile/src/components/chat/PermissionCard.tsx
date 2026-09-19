@@ -73,7 +73,11 @@ export function PermissionCard({
         </View>
       </View>
 
-      <GateScroll>
+      {denying ? (
+        // The user has already inspected the command. Prioritise their
+        // reason and decision above the keyboard; Back restores full input.
+        <Text numberOfLines={3} className="text-sm leading-relaxed text-foreground">{block.description}</Text>
+      ) : <GateScroll>
         <Text className="text-sm leading-relaxed text-foreground">{block.description}</Text>
 
         <View className="gap-1">
@@ -85,7 +89,7 @@ export function PermissionCard({
             </Text>
           </View>
         </View>
-      </GateScroll>
+      </GateScroll>}
 
       {denying ? (
         <Animated.View entering={motion.fadeIn(120)} className="gap-2">

@@ -55,6 +55,8 @@ export function Touchable({
   a11yRole = 'button',
   ripple = true,
   onPress,
+  onPressIn,
+  onPressOut,
   disabled,
   children,
   style,
@@ -107,11 +109,13 @@ export function Touchable({
           ? { color: 'rgba(127,127,127,0.18)', foreground: true }
           : null
       }
-      onPressIn={() => {
+      onPressIn={(event) => {
         pressed.value = reduceMotion ? withTiming(1, TIMING_FAST) : withSpring(1, SPRING_PRESS);
+        onPressIn?.(event);
       }}
-      onPressOut={() => {
+      onPressOut={(event) => {
         pressed.value = reduceMotion ? withTiming(0, TIMING_FAST) : withSpring(0, SPRING_PRESS);
+        onPressOut?.(event);
       }}
       onPress={handlePress}
       style={[animatedStyle, style]}

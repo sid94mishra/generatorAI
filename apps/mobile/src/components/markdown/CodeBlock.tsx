@@ -116,6 +116,8 @@ export const CodeBlock = memo(function CodeBlock({
         )}
         <Touchable
           accessibilityLabel={wrap ? 'Scroll long lines' : 'Wrap long lines'}
+          className="min-h-12 min-w-12 items-center justify-center"
+          hitSlop={0}
           accessibilityState={{ selected: wrap }}
           haptic="select"
           ripple={false}
@@ -125,6 +127,8 @@ export const CodeBlock = memo(function CodeBlock({
         </Touchable>
         <Touchable
           accessibilityLabel={copied ? 'Copied' : 'Copy code'}
+          className="min-h-12 min-w-12 items-center justify-center"
+          hitSlop={0}
           haptic="none"
           ripple={false}
           onPress={() => void onCopy()}

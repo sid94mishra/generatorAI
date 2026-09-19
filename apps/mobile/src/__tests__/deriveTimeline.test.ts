@@ -310,6 +310,17 @@ describe('blocksSignature / selectChatView', () => {
     expect(activityLabelFor({ ...view, lastBlock: 'thinking-live' })).toBeNull();
     expect(activityLabelFor(selectChatView(undefined))).toBeNull();
   });
+
+  it.each(['complete', 'error', 'idle'] as const)('does not pin a missed permission resolution after a %s turn', (status) => {
+    const stale: StreamBlock = {
+      type: 'permission', blockId: 9, interactionId: 'answered-elsewhere',
+      toolName: 'shell', permissionType: 'shell_exec', description: '',
+      inputSummary: '', permissionMode: 'plan', status: 'pending',
+    };
+    const view = selectChatView({ ...DEFAULT_STREAM, status, blocks: [stale] });
+    expect(view.gate).toBeNull();
+    expect(view.gateBlock).toBeNull();
+  });
 });
 
 describe('cacheMissHint', () => {

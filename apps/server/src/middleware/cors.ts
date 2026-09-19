@@ -102,6 +102,9 @@ export function createCorsMiddleware(config?: CorsConfig): RequestHandler {
       'DPoP',
       'x-request-id',
       'Last-Event-ID',
+      // Manual automation triggers carry a replay-deduplication key.
+      'Idempotency-Key',
+      'X-Idempotency-Key',
     ],
     // P0#5 — expose pagination metadata so the chat UI can drive "load older"
     // without a second round-trip.

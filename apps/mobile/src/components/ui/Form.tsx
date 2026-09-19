@@ -15,7 +15,7 @@ import { Switch as RNSwitch, Text, TextInput, View, type TextInputProps } from '
 import { Search, X } from 'lucide-react-native';
 
 import { Touchable } from './Touchable';
-import { MAX_SCALE } from './accessibility';
+import { MAX_SCALE, MIN_TARGET } from './accessibility';
 import { haptics } from './haptics';
 import { useTheme } from '../../theme/ThemeProvider';
 
@@ -71,7 +71,8 @@ export function Field({
         </Text>
       ) : null}
       <TextInput
-        {...(label ? { accessibilityLabelledBy: labelId } : {})}
+        {...(label ? { accessibilityLabelledBy: labelId, accessibilityLabel: label } : {})}
+        style={{ minHeight: MIN_TARGET }}
         accessibilityState={{ disabled: rest.editable === false }}
         placeholderTextColor={colors['muted-foreground']}
         className={`min-h-11 rounded-2xl border bg-raised px-3 py-2.5 text-md text-foreground ${

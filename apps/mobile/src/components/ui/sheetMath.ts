@@ -174,3 +174,9 @@ export function renderedOffset(offset: number, sheetHeight: number, renderedHeig
   const trimmed = Math.max(0, sheetHeight - renderedHeight);
   return Math.max(0, offset - trimmed);
 }
+
+/** Exclude the translated-offscreen region from the body's layout viewport. */
+export function sheetBottomPadding(offset: number, bottomInset: number): number {
+  'worklet';
+  return Math.max(0, offset) + bottomInset;
+}

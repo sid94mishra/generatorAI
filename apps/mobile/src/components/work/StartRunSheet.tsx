@@ -253,7 +253,17 @@ export function StartRunSheet({
     .join(' · ');
 
   return (
-    <Sheet visible={visible} onClose={onClose} title={`Run ${workflow.name}`} detents={defs.length > 2 ? [0.7, 0.95] : [0.5, 0.95]}>
+    <Sheet visible={visible} onClose={onClose} title={`Run ${workflow.name}`} detents={[0.92]} footer={
+        <Button
+          label="Start run"
+          size="lg"
+          full
+          haptic="commit"
+          loading={start.isPending}
+          disabled={start.isPending}
+          onPress={submit}
+        />
+    }>
       <View className="gap-4 px-4 pb-6 pt-2">
         {defs.length === 0 ? (
           <Text className="text-sm text-muted-foreground">This workflow takes no inputs.</Text>
@@ -422,15 +432,7 @@ export function StartRunSheet({
           </Text>
         ) : null}
 
-        <Button
-          label="Start run"
-          size="lg"
-          full
-          haptic="commit"
-          loading={start.isPending}
-          disabled={start.isPending}
-          onPress={submit}
-        />
+
       </View>
     </Sheet>
   );

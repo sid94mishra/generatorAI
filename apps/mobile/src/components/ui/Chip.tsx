@@ -17,7 +17,7 @@ import { Text, View } from 'react-native';
 import { ChevronDown, X } from 'lucide-react-native';
 
 import { Touchable } from './Touchable';
-import { MAX_SCALE } from './accessibility';
+import { MAX_SCALE, MIN_TARGET } from './accessibility';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export type ChipTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
@@ -149,6 +149,7 @@ export function Chip({
           ripple={false}
           scale="none"
           onPress={onPress}
+          style={{ minHeight: MIN_TARGET, minWidth: onPress ? MIN_TARGET : undefined }}
           className={`flex-1 flex-row items-center ${SIZE_CONTAINER[size]} pr-0`}
         >
           {body}
@@ -160,6 +161,7 @@ export function Chip({
           ripple={false}
           scale="none"
           onPress={onRemove}
+          style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET }}
           className={`items-center justify-center ${size === 'sm' ? 'px-1.5' : 'px-2'} self-stretch`}
         >
           <X size={size === 'sm' ? 12 : 14} color={iconColor} />
@@ -179,7 +181,7 @@ export function Chip({
       haptic="select"
       onPress={onPress}
       className={`flex-row items-center rounded-full border ${SIZE_CONTAINER[size]} ${iconOnly ? 'justify-center px-2' : ''} ${container}`}
-      style={maxWidth ? { maxWidth } : undefined}
+      style={{ ...(maxWidth ? { maxWidth } : {}), ...(onPress ? { minHeight: MIN_TARGET, minWidth: MIN_TARGET } : {}) }}
     >
       {body}
     </Touchable>

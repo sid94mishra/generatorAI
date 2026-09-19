@@ -78,6 +78,7 @@ import {
   SHEET_TOP_GAP,
   detentOffsets,
   keyboardCappedHeight,
+  sheetBottomPadding,
   renderedOffset,
   rubberBand,
   snapDetent,
@@ -138,6 +139,8 @@ export interface SheetProps {
   keyboardAware?: boolean;
   /** Fires after the sheet settles on a detent the user dragged it to. */
   onDetentChange?: (index: number) => void;
+  /** Pinned primary action. Use a single detent for forms with a footer. */
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -155,6 +158,7 @@ export function Sheet({
   keyboardAware = true,
   onDetentChange,
   children,
+  footer,
 }: SheetProps): React.ReactElement | null {
   const { colors, style: themeVars } = useTheme();
   const { height: screenHeight } = useWindowDimensions();
@@ -169,6 +173,7 @@ export function Sheet({
   // header height, pushing its primary button below the screen edge (the
   // Rename sheet's Save in the Sept 7 run).
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [footerHeight, setFooterHeight] = useState(0);
 
   // Callers pass `detents={[0.28, 0.6, 0.92]}` inline, so the prop is a NEW
   // array on every render. Keying on its CONTENTS is what stops the settle
@@ -187,7 +192,7 @@ export function Sheet({
   const statusBarTop = insets.top;
   const maxHeight = Math.min(screenHeight * tallest, screenHeight - statusBarTop - SHEET_TOP_GAP);
   const sheetHeight = fitContent
-    ? Math.min(maxHeight, contentHeight > 0 ? contentHeight + headerHeight + insets.bottom + 24 : maxHeight)
+    ? Math.min(maxHeight, contentHeight > 0 ? contentHeight + headerHeight + (footer ? footerHeight : 0) + insets.bottom + 24 : maxHeight)
     : maxHeight;
 
   /** translateY of each detent, index-aligned with `stops`. */
@@ -366,10 +371,13 @@ export function Sheet({
   const sheetStyle = useAnimatedStyle(() => {
     const kb = keyboardAware ? keyboard.value : 0;
     const height = keyboardCappedHeight(sheetHeight, screenHeight, statusBarTop, kb);
+    const offset = renderedOffset(translateY.value, sheetHeight, height);
     return {
       height,
-      paddingBottom: kb > 0 ? 0 : insets.bottom,
-      transform: [{ translateY: renderedOffset(translateY.value, sheetHeight, height) }],
+      // At a shorter detent the card extends below the window. Exclude that
+      // region from layout so nested scroll views and footers remain usable.
+      paddingBottom: sheetBottomPadding(offset, kb > 0 ? 0 : insets.bottom),
+      transform: [{ translateY: offset }],
     };
   }, [keyboardAware, sheetHeight, screenHeight, statusBarTop, insets.bottom]);
 
@@ -522,6 +530,11 @@ export function Sheet({
               )}
             </View>
           </GestureDetector>
+          {footer ? (
+            <View onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)} className="border-t border-border-muted bg-card px-4 py-3">
+              {footer}
+            </View>
+          ) : null}
         </Animated.View>
       </Animated.View>
     </Modal>

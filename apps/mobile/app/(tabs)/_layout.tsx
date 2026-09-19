@@ -28,9 +28,8 @@
 //     Android with the active-icon pill. The web preview used to clip the
 //     labels because the height ignored the label's line-height.
 //
-// Native Tabs (`expo-router/unstable-native-tabs`) sit behind
-// `USE_NATIVE_TABS` in `src/navigation/tabsImplementation.ts`; only the JS
-// bar is implemented here until they are verified on device.
+// The JS navigator uses native UIKit material on supported iOS builds
+// through GlassSurface, with accessible opaque fallbacks elsewhere.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useMemo } from 'react';
@@ -43,12 +42,11 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 import { useActivity, needsYouCount } from '../../src/api/useActivity';
 import { haptics, useFontScale, useReduceMotion } from '../../src/components/ui';
 import { scrollActiveToTop } from '../../src/navigation/scrollToTop';
+import { GlassSurface } from '../../src/components/ui/GlassSurface';
 import { TabShellProvider, type TabShellValue } from '../../src/navigation/tabShell';
 import {
-  USE_NATIVE_TABS,
   tabBarMetrics,
   tabContentInsets,
-  withAlpha,
   type TabPlatform,
 } from '../../src/navigation/tabsImplementation';
 
@@ -133,10 +131,6 @@ export default function TabsLayout(): React.ReactElement {
     [metrics.iconSize, metrics.activePill, colors],
   );
 
-  // Native Tabs are not wired yet — see `tabsImplementation.ts` for the
-  // exact steps. The JS bar below is the only implementation for now.
-  void USE_NATIVE_TABS;
-
   const ios = Platform.OS === 'ios';
 
   return (
@@ -152,13 +146,11 @@ export default function TabsLayout(): React.ReactElement {
           // themed shell underneath, so in dark mode every tab rendered dark
           // cards and light chrome on a near-white page.
           sceneStyle: { backgroundColor: colors.background },
+          tabBarBackground: () => <GlassSurface style={{ flex: 1 }} />,
           tabBarStyle: {
-            // iOS: a translucent tint of the sidebar surface, content scrolling
-            // under it. Without expo-blur (no new native modules) this is the
-            // closest honest reading of the system bar. Every tab list already
-            // pads its bottom past the bar height for the FAB.
+            // UIKit Liquid Glass on iOS 26+, opaque Material surface elsewhere.
             ...(ios ? { position: 'absolute' as const } : {}),
-            backgroundColor: ios ? withAlpha(colors.sidebar ?? '#000000', 0.94) : colors.sidebar,
+            backgroundColor: 'transparent',
             borderTopColor: colors['sidebar-border'],
             borderTopWidth: 1,
             height: metrics.height,
@@ -169,8 +161,7 @@ export default function TabsLayout(): React.ReactElement {
           tabBarItemStyle: {
             paddingVertical: 0,
           },
-          // Labels are dropped rather than truncated past ~1.4×: "Projects"
-          // wrapping to two lines pushes the icon out of the bar entirely.
+          // Keep every destination named at accessibility text sizes.
           tabBarShowLabel: metrics.showLabel,
           tabBarLabelStyle: {
             fontSize: metrics.labelFontSize,

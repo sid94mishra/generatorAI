@@ -16,6 +16,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { GitBranch, Lock, MoreHorizontal, Play, Trash2, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
 import { epochOr, queryKeys } from '@generatorai/client-core';
 
+import { incomingStages, type WorkflowEdge } from '../../src/components/work/workflowGraph';
+import { Sheet, SheetSection } from '../../src/components/ui/Sheet';
+import { Touchable } from '../../src/components/ui/Touchable';
 import { useApi } from '../../src/api/useApi';
 import { useAdminApi } from '../../src/api/useAdminApi';
 import { parseWorkflowHooks } from '../../src/components/work/workflowHooks';
@@ -44,16 +47,13 @@ interface StageNode {
   type?: string;
   description?: string;
   dependsOn?: string[];
+  prompts?: { label?: string; text?: string }[];
+  harnessConfigOverrides?: { model?: string; reasoningEffort?: string };
+  approvalRequired?: boolean;
+  agentRef?: string;
 }
 
-interface EdgeNode {
-  from?: string;
-  to?: string;
-  source?: string;
-  target?: string;
-  sourceStageId?: string;
-  targetStageId?: string;
-}
+type EdgeNode = WorkflowEdge;
 
 const RECENT_RUNS = 5;
 
@@ -71,6 +71,7 @@ export default function WorkflowScreen(): React.ReactElement {
   const [menu, setMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAllRuns, setShowAllRuns] = useState(false);
+  const [selectedStage, setSelectedStage] = useState<StageNode | null>(null);
 
   const workflow = useQuery({
     queryKey: [...queryKeys.workflows(), 'detail', workflowId],
@@ -127,16 +128,7 @@ export default function WorkflowScreen(): React.ReactElement {
     [stages],
   );
 
-  const incoming = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const edge of edges) {
-      const from = edge.from ?? edge.source ?? edge.sourceStageId;
-      const to = edge.to ?? edge.target ?? edge.targetStageId;
-      if (!from || !to) continue;
-      map.set(to, [...(map.get(to) ?? []), from]);
-    }
-    return map;
-  }, [edges]);
+  const incoming = useMemo(() => incomingStages(edges), [edges]);
 
   const nameOf = useMemo(() => {
     const map = new Map<string, string>();
@@ -197,8 +189,12 @@ export default function WorkflowScreen(): React.ReactElement {
             {stages.map((stage, index) => {
               const deps = (stage.id ? incoming.get(stage.id) : undefined) ?? stage.dependsOn ?? [];
               return (
-                <View
+                <Touchable
                   key={stage.id ?? `${index}`}
+                  accessibilityLabel={`Inspect ${stage.name ?? `Stage ${index + 1}`}`}
+                  accessibilityHint="Shows instructions, model and review requirements"
+                  onPress={() => setSelectedStage(stage)}
+                  scale="none"
                   className={`flex-row gap-3 py-3 ${index > 0 ? 'border-t border-border-muted' : ''}`}
                 >
                   <View className="h-7 w-7 items-center justify-center rounded-full bg-emphasis">
@@ -225,7 +221,7 @@ export default function WorkflowScreen(): React.ReactElement {
                       </View>
                     ) : null}
                   </View>
-                </View>
+                </Touchable>
               );
             })}
           </Card>
@@ -344,6 +340,26 @@ export default function WorkflowScreen(): React.ReactElement {
               ]
         }
       />
+      <Sheet visible={selectedStage !== null} onClose={() => setSelectedStage(null)} title={selectedStage?.name ?? 'Stage'} detents={[0.6, 0.92]}>
+        <View className="gap-3 px-5 pb-6">
+          <Text className="text-sm text-muted-foreground">{selectedStage?.description ?? 'Workflow stage'}</Text>
+          <SheetSection title="Execution" />
+          <Text className="text-md text-foreground">
+            {selectedStage?.harnessConfigOverrides?.model ?? 'Workflow default model'}
+            {selectedStage?.harnessConfigOverrides?.reasoningEffort ? ` · ${selectedStage.harnessConfigOverrides.reasoningEffort}` : ''}
+          </Text>
+          {selectedStage?.agentRef ? <Text className="text-sm text-foreground">Agent: {selectedStage.agentRef}</Text> : null}
+          <Text className="text-sm text-muted-foreground">{selectedStage?.approvalRequired ? 'Pauses for your review before continuing.' : 'Continues when the stage finishes.'}</Text>
+          <SheetSection title="Instructions" />
+          {(selectedStage?.prompts ?? []).map((prompt, i) => (
+            <View key={i} className="gap-1 rounded-2xl bg-subtle p-3">
+              <Text className="text-sm font-semibold text-foreground">{prompt.label ?? `Prompt ${i + 1}`}</Text>
+              <Text selectable className="text-md leading-relaxed text-foreground">{prompt.text ?? 'File-based prompt'}</Text>
+            </View>
+          ))}
+          {selectedStage && !selectedStage.prompts?.length ? <Text className="text-sm text-muted-foreground">No inline instructions.</Text> : null}
+        </View>
+      </Sheet>
       <ConfirmSheet
         visible={confirmDelete}
         onClose={() => setConfirmDelete(false)}

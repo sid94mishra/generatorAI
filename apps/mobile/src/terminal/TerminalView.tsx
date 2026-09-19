@@ -1006,7 +1006,7 @@ export function TerminalView({
           horizontal
           keyboardShouldPersistTaps="always"
           showsHorizontalScrollIndicator={false}
-          className="max-h-14 border-t border-border bg-card"
+          className="max-h-16 border-t border-border bg-card"
           style={{ flexGrow: 0, flexShrink: 0 }}
           contentContainerStyle={{ gap: 6, paddingHorizontal: 8, paddingVertical: 8 }}
         >
@@ -1020,7 +1020,7 @@ export function TerminalView({
                 accessibilityState={armed ? { selected: true } : undefined}
                 haptic="select"
                 onPress={() => onKey(key)}
-                className={`min-h-9 min-w-11 items-center justify-center rounded-xl px-2 ${
+                className={`min-h-12 min-w-12 items-center justify-center rounded-xl px-2 ${
                   armed ? 'border border-primary bg-accent' : 'bg-subtle'
                 }`}
               >

@@ -94,7 +94,7 @@ function ThemedShell({ children }: { children: React.ReactNode }): React.ReactEl
  */
 const PUBLIC_ROUTES = new Set(['/pair', '/revoked']);
 
-function AuthGate({ children }: { children: React.ReactNode }): React.ReactElement {
+function AuthLifecycle({ children }: { children: React.ReactNode }): React.ReactElement {
   const { state, initializing, storageLocked } = useAuth();
   const pathname = usePathname();
 
@@ -131,7 +131,16 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
     setTimeout(() => router.push(target as Parameters<typeof router.push>[0]), 0);
   }, [initializing, storageLocked, state.status, pathname]);
 
-  const isPublic = PUBLIC_ROUTES.has(pathname);
+  return <>{children}</>;
+}
+
+/** The navigator stays mounted while a protected screen waits for auth.
+ * Replacing the navigator with an error made its "Pair" action a dead end
+ * on native, and prevented incoming pairing links from being handled.
+ */
+function AuthGate({ children, routeName }: { children: React.ReactNode; routeName: string }): React.ReactElement {
+  const { state, initializing, storageLocked } = useAuth();
+  const isPublic = PUBLIC_ROUTES.has(`/${routeName}`);
 
   // Never route on the first frame: `AuthState` starts at `unpaired`, which is
   // indistinguishable from "checked, and there is no session".
@@ -147,7 +156,7 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
   // `unpaired` — routing to /pair here is what stranded paired users.
   if (storageLocked) return <StorageLocked />;
 
-  if (state.status === 'revoked' && pathname !== '/revoked') {
+  if (state.status === 'revoked' && routeName !== 'revoked' && !isPublic) {
     return <Redirect href="/revoked" />;
   }
 
@@ -281,6 +290,7 @@ function RootStack(): React.ReactElement {
 
   return (
     <Stack
+      screenLayout={({ children, route }) => <AuthGate routeName={route.name}>{children}</AuthGate>}
       screenOptions={{
         // JS header: the native Android one double-pays the status-bar inset
         // (see StackHeader). Same component on every platform.
@@ -478,11 +488,11 @@ export default function RootLayout(): React.ReactElement {
                           `ContextMenu`/`useContextMenu` no-op without it. */}
                       <ContextMenuProvider>
                         {/* app-lock-gate: the biometric <AppLockGate> wraps
-                            <AuthGate> here — outside the auth gate so a locked
+                            <AuthLifecycle> here — outside the auth gate so a locked
                             app never renders a screen, inside the providers so
                             the gate can read preferences and theme. */}
                         <AppLockGate>
-                          <AuthGate>
+                          <AuthLifecycle>
                           {/* D0/S7 — the one line that says the socket is
                               down, retrying, or refused a scope this phone
                               does not hold. In flow above the navigator so
@@ -494,7 +504,7 @@ export default function RootLayout(): React.ReactElement {
                               <RootStack />
                             </ErrorBoundary>
                           </ConnectionStripHost>
-                          </AuthGate>
+                          </AuthLifecycle>
                         </AppLockGate>
                         {/* /app-lock-gate */}
                       </ContextMenuProvider>

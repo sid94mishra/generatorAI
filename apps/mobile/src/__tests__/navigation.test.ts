@@ -80,9 +80,9 @@ describe('tabBarMetrics', () => {
     }
   });
 
-  it('drops the label past the cap instead of wrapping it', () => {
+  it('keeps destination labels visible past the type cap', () => {
     const m = tabBarMetrics('ios', 0, LABEL_MAX_SCALE + 0.1);
-    expect(m.showLabel).toBe(false);
+    expect(m.showLabel).toBe(true);
   });
 
   it('draws the active pill only on Android', () => {

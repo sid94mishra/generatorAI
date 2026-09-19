@@ -348,6 +348,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     if (next) setState(next);
   }, []);
 
+  // These operations read the current runtime through a ref. Keep their
+  // identities stable across transport/credential status updates: consumers
+  // such as TerminalView must not tear down a live socket on every update.
+  const authenticatedFetch = useCallback<AuthContextValue['fetch']>((path, init) => {
+    const runtime = runtimeRef.current;
+    if (!runtime) throw new Error('Not paired');
+    return runtime.fetch(path, init);
+  }, []);
+  const streamUrl = useCallback<AuthContextValue['streamUrl']>((scope, id) => {
+    const runtime = runtimeRef.current;
+    if (!runtime) throw new Error('Not paired');
+    return runtime.buildStreamUrl(scope, id);
+  }, []);
+  const socketUrl = useCallback<AuthContextValue['socketUrl']>((path, scope, id) => {
+    const runtime = runtimeRef.current;
+    if (!runtime) throw new Error('Not paired');
+    return runtime.buildSocketUrl(path, scope, id);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       state,
@@ -356,24 +375,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       retryRestore,
       transport,
       keyBacking,
-      fetch: (path, init) => {
-        const runtime = runtimeRef.current;
-        if (!runtime) throw new Error('Not paired');
-        return runtime.fetch(path, init);
-      },
+      fetch: authenticatedFetch,
       // Recomputed whenever `state` changes, which is the only time the
       // runtime is built or replaced — pairing, restore, unpair, revoke.
       endpoint: runtimeRef.current?.endpoint ?? null,
-      streamUrl: (scope, id) => {
-        const runtime = runtimeRef.current;
-        if (!runtime) throw new Error('Not paired');
-        return runtime.buildStreamUrl(scope, id);
-      },
-      socketUrl: (path, scope, id) => {
-        const runtime = runtimeRef.current;
-        if (!runtime) throw new Error('Not paired');
-        return runtime.buildSocketUrl(path, scope, id);
-      },
+      streamUrl,
+      socketUrl,
       completePairing,
       unpair,
       reconnect,
@@ -390,6 +397,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       unpair,
       reconnect,
       refreshPermissions,
+      authenticatedFetch,
+      streamUrl,
+      socketUrl,
     ],
   );
 

@@ -218,7 +218,7 @@ export function PlanBody({
     return (
       <EmptyState
         title="No plan yet"
-        message="Switch the composer to “Plan first” and the agent will write one before it changes anything."
+        message="Use “Plan first” to request a plan. Providers with plan-review support publish it here; other providers, including Codex, present it in chat."
         icon={<ScrollText size={22} color={colors['muted-foreground']} />}
       />
     );

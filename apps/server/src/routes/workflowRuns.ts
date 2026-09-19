@@ -9,6 +9,7 @@
 // see STR-07's 30s auto-clear gotcha).
 // ────────────────────────────────────────────────────────────────
 
+import { orderStageRuns } from './workflowRunOrder.js';
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
 import { validate } from '../middleware/validate.js';
@@ -82,7 +83,7 @@ export function createWorkflowRunRoutes(container: Container): Router {
       const runId = String(req.params['id']);
       const run = await workflowRunRepo.getById(runId);
       const stageRuns = await stageRunRepo.getByRunId(runId);
-      res.json({ ...run, stageRuns });
+      res.json({ ...run, stageRuns: orderStageRuns(stageRuns, run.definitionSnapshot?.stages) });
     } catch (err) {
       next(err);
     }

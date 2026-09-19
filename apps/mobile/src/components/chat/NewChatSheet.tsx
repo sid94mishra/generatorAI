@@ -332,6 +332,16 @@ export function NewChatSheet({
       visible={visible}
       onClose={close}
       title={PAGE_TITLES[page]}
+      footer={page === 'main' ? (
+        <Button
+          label="Create chat"
+          full
+          size="lg"
+          loading={creating}
+          disabled={!canCreate}
+          onPress={submit}
+        />
+      ) : undefined}
       // Sized to its content, capped at 0.92. The fixed detent left roughly
       // 300pt of empty sheet under "Create chat" on the first page, and the
       // sheet grows on its own when "More options" or a sub-page opens.
@@ -701,7 +711,7 @@ export function NewChatSheet({
                 <ToggleRow
                   icon={<Wand2 size={18} color={colors['muted-foreground']} />}
                   label="Plan before acting"
-                  help="The agent writes a plan and waits for approval."
+                  help="Ask for a plan before editing. Plan review controls depend on the provider; Codex uses command approvals."
                   value={agentMode === 'plan'}
                   onChange={(on) => setAgentMode(on ? 'plan' : 'auto')}
                 />
@@ -749,15 +759,6 @@ export function NewChatSheet({
 
           {sourceError ? <Text className="text-sm text-danger">{sourceError}</Text> : null}
           {error ? <Text className="text-sm text-danger">{error}</Text> : null}
-
-          <Button
-            label="Create chat"
-            full
-            size="lg"
-            loading={creating}
-            disabled={!canCreate}
-            onPress={submit}
-          />
         </View>
       )}
     </Sheet>

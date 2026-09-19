@@ -13,7 +13,7 @@ describe('availablePanes', () => {
 
   it('lists Terminal and Browser without their scope (they render locked pages)', () => {
     const without = availablePanes({ workspaceId: 'ws', scopes: [], changesCount: 0 });
-    expect(without.map((p) => p.id)).toEqual(['chat', 'changes', 'terminal', 'browser']);
+    expect(without.map((p) => p.id)).toEqual(['chat', 'changes', 'files', 'terminal', 'browser']);
     expect(without[1]).toEqual({ id: 'changes', label: 'Changes' });
   });
 
@@ -24,7 +24,7 @@ describe('availablePanes', () => {
     expect(off[1]).toEqual({ id: 'changes', label: 'Changes', count: 2 });
 
     const on = availablePanes({ workspaceId: 'ws', scopes: [], changesCount: 0, computerUseEnabled: true });
-    expect(on.map((p) => p.id)).toEqual(['chat', 'changes', 'terminal', 'browser', 'computer']);
+    expect(on.map((p) => p.id)).toEqual(['chat', 'changes', 'files', 'terminal', 'browser', 'computer']);
     expect(on.at(-1)).toEqual({ id: 'computer', label: 'Computer' });
 
     const waiting = availablePanes({ workspaceId: 'ws', scopes: ['exec:computer'], changesCount: 0, computerUseEnabled: true, computerNeedsAnswer: true });
@@ -50,14 +50,14 @@ describe('availablePanes', () => {
 
   it('offers Tasks to an orchestrator or a chat with tasks, with the running count', () => {
     const none = availablePanes({ workspaceId: 'ws', scopes: [], changesCount: 0, tasks: { orchestrator: false, total: 0, running: 0 } });
-    expect(none.map((p) => p.id)).toEqual(['chat', 'changes', 'terminal', 'browser']);
+    expect(none.map((p) => p.id)).toEqual(['chat', 'changes', 'files', 'terminal', 'browser']);
 
     const orchestrator = availablePanes({ workspaceId: 'ws', scopes: [], changesCount: 1, tasks: { orchestrator: true, total: 0, running: 0 } });
-    expect(orchestrator.map((p) => p.id)).toEqual(['chat', 'changes', 'tasks', 'terminal', 'browser']);
-    expect(orchestrator[2]).toEqual({ id: 'tasks', label: 'Tasks' });
+    expect(orchestrator.map((p) => p.id)).toEqual(['chat', 'changes', 'files', 'tasks', 'terminal', 'browser']);
+    expect(orchestrator[3]).toEqual({ id: 'tasks', label: 'Tasks' });
 
     const running = availablePanes({ workspaceId: 'ws', scopes: [], changesCount: 0, tasks: { orchestrator: false, total: 3, running: 2 } });
-    expect(running[2]).toEqual({ id: 'tasks', label: 'Tasks', count: 2 });
+    expect(running[3]).toEqual({ id: 'tasks', label: 'Tasks', count: 2 });
 
     // No workspace yet: workers still have a pane.
     const early = availablePanes({ workspaceId: null, scopes: [], changesCount: 0, tasks: { orchestrator: true, total: 1, running: 1 } });

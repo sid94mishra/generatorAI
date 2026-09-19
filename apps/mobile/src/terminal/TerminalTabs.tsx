@@ -14,12 +14,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Plus, TerminalSquare, X } from 'lucide-react-native';
 import type { TerminalDescriptor } from '@generatorai/client-core';
 
 import { Chip } from '../components/ui/Chip';
 import { IconButton } from '../components/ui/Button';
-import { Touchable } from '../components/ui/Touchable';
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/States';
 import { useToast } from '../components/ui/Toast';
 import { haptics } from '../components/ui/haptics';
@@ -52,6 +52,7 @@ export function TerminalTabs({
   initialInput?: string;
 }): React.ReactElement {
   const api = useApi();
+  const insets = useSafeAreaInsets();
   const { fetch: authedFetch } = useAuth();
   const { colors } = useTheme();
   const toast = useToast();
@@ -60,7 +61,9 @@ export function TerminalTabs({
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [closingKey, setClosingKey] = useState<string | null>(null);
   const keySeq = useRef(0);
+  const stripRef = useRef<ScrollView>(null);
   const initialInputRef = useRef(initialInput);
 
   const nextKey = useCallback(() => {
@@ -134,20 +137,28 @@ export function TerminalTabs({
   }, [workspaceId]);
 
   const closeTab = useCallback(
-    (key: string) => {
-      if (!tabs) return;
+    async (key: string): Promise<void> => {
+      if (!tabs || closingKey !== null) return;
       const index = tabs.findIndex((t) => t.key === key);
       if (index === -1) return;
       const tab = tabs[index]!;
-      // DELETE /api/workspaces/:id/terminals/:sid — idempotent server-side.
-      void api.terminals.kill(workspaceId, tab.sessionId).catch(() => undefined);
-      forgetTerminal(workspaceId, tab.sessionId);
-      const next = tabs.filter((t) => t.key !== key);
-      setTabs(next);
-      if (activeKey === key) setActiveKey(next[Math.min(index, next.length - 1)]?.key ?? null);
-      haptics.warn();
+      setClosingKey(key);
+      try {
+        // Keep the tab until the host confirms termination. Hiding a failed
+        // deletion silently orphaned a running shell during disconnection.
+        await api.terminals.kill(workspaceId, tab.sessionId);
+        forgetTerminal(workspaceId, tab.sessionId);
+        const next = tabs.filter((t) => t.key !== key);
+        setTabs((current) => current?.filter((t) => t.key !== key) ?? current);
+        setActiveKey((current) => current === key ? next[Math.min(index, next.length - 1)]?.key ?? null : current);
+        haptics.warn();
+      } catch (err) {
+        toast({ message: `Could not close terminal: ${err instanceof Error ? err.message : String(err)}`, tone: 'error' });
+      } finally {
+        setClosingKey(null);
+      }
     },
-    [activeKey, api, tabs, workspaceId],
+    [api, closingKey, tabs, toast, workspaceId],
   );
 
   const updateTab = useCallback((key: string, patch: Partial<Tab>) => {
@@ -160,7 +171,10 @@ export function TerminalTabs({
     () =>
       tabs?.map((tab, index) => {
         const active = tab.key === activeKey;
-        const label = tab.title?.trim() || `Shell ${index + 1}`;
+        // Shells commonly publish identical user@host:/cwd titles. Keep a
+        // visible ordinal so two sessions in the same folder are distinct.
+        const detail = tab.title?.trim().replace(/^.*[\\/]/, '');
+        const label = `Shell ${index + 1}${detail ? ` · ${detail}` : ''}`;
         return (
           <View key={tab.key} className="flex-row items-center">
             <Chip
@@ -177,19 +191,19 @@ export function TerminalTabs({
               }
             />
             {active ? (
-              <Touchable
+              <IconButton
                 accessibilityLabel={`Close ${label}`}
                 haptic="none"
-                onPress={() => closeTab(tab.key)}
-                className="ml-0.5 h-7 w-7 items-center justify-center rounded-full"
-              >
-                <X size={14} color={colors['muted-foreground']} />
-              </Touchable>
+                compact
+                disabled={closingKey !== null}
+                onPress={() => void closeTab(tab.key)}
+                icon={<X size={14} color={colors['muted-foreground']} />}
+              />
             ) : null}
           </View>
         );
       }),
-    [activeKey, closeTab, colors, tabs],
+    [activeKey, closeTab, closingKey, colors, tabs],
   );
 
   if (error) {
@@ -215,10 +229,15 @@ export function TerminalTabs({
     // prompt being typed at) stay visible. Neither the chat's Terminal pane
     // nor the full-screen route is otherwise lifted — iOS never resizes the
     // window, and Android edge-to-edge no longer does either.
-    <KeyboardSticky mode="padding" className="flex-1" style={{ backgroundColor: colors.background }}>
+    <View style={{ flex: 1, paddingBottom: insets.bottom, backgroundColor: colors.background }}>
+    <KeyboardSticky mode="padding" offset={insets.bottom} className="flex-1">
       <View className="flex-row items-center border-b border-border bg-card">
         <ScrollView
+          ref={stripRef}
           horizontal
+          onContentSizeChange={() => {
+            if (activeKey === tabs[tabs.length - 1]?.key) stripRef.current?.scrollToEnd({ animated: false });
+          }}
           showsHorizontalScrollIndicator={false}
           keyboardShouldPersistTaps="always"
           contentContainerStyle={{ gap: 6, paddingHorizontal: 8, paddingVertical: 6 }}
@@ -230,7 +249,7 @@ export function TerminalTabs({
           <IconButton
             accessibilityLabel={atCap ? `At most ${MAX_TERMINAL_TABS} terminals` : 'New terminal'}
             compact
-            disabled={atCap || creating}
+            disabled={atCap || creating || closingKey !== null}
             icon={<Plus size={16} color={colors['muted-foreground']} />}
             onPress={() => void createTab()}
           />
@@ -260,5 +279,6 @@ export function TerminalTabs({
         </View>
       ) : null}
     </KeyboardSticky>
+    </View>
   );
 }

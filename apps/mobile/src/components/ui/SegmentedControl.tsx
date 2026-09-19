@@ -17,14 +17,15 @@
 // hand it `progress` and let the indicator track the pages 1:1.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { Text, View, type LayoutChangeEvent } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ScrollView, Text, View, type LayoutChangeEvent } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, type SharedValue } from 'react-native-reanimated';
 
 import { Touchable } from './Touchable';
 import { useReducedMotionPreset } from './motion';
-import { MAX_SCALE, useFontScale } from './accessibility';
+import { MAX_SCALE, MIN_TARGET, useFontScale, useReduceMotion } from './accessibility';
 import { haptics } from './haptics';
+import { segmentLayout } from './segmentLayout';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export interface Segment<T extends string> {
@@ -79,6 +80,8 @@ export function SegmentedControl<T extends string>({
 }): React.ReactElement {
   const [width, setWidth] = useState(0);
   const offset = useSharedValue(0);
+  const scroller = useRef<ScrollView>(null);
+  const reduceMotion = useReduceMotion();
   const fontScale = useFontScale();
   const presets = useReducedMotionPreset();
   const { appearance, colors } = useTheme();
@@ -94,7 +97,13 @@ export function SegmentedControl<T extends string>({
     0,
     segments.findIndex((s) => s.value === value),
   );
-  const slot = width > 0 ? width / segments.length : 0;
+  const { slot, contentWidth, scrollable } = segmentLayout(segments, width, fontScale);
+  useEffect(() => {
+    scroller.current?.scrollTo({
+      x: Math.max(0, Math.min(index * slot - (width - slot) / 2, contentWidth - width)),
+      animated: !reduceMotion,
+    });
+  }, [index, slot, width, contentWidth, reduceMotion]);
 
   useEffect(() => {
     if (slot === 0 || progress) return;
@@ -115,13 +124,6 @@ export function SegmentedControl<T extends string>({
     [slot, progress],
   );
 
-  // Past ~1.3× the labels stop fitting three-across. Dropping to icons is
-  // worse than dropping the counts, so the counts go first. Five segments
-  // (the chat's pane strip) are dense at any scale: the count collapses to a
-  // dot and the type steps down one size, so "Changes" is never truncated
-  // to "Chan…" beside its badge (seen in the Sept 7 phone-viewport run).
-  const dense = segments.length >= 5;
-  const showCounts = fontScale <= 1.3 && !dense;
 
   return (
     <View
@@ -135,7 +137,17 @@ export function SegmentedControl<T extends string>({
       {/* The measured box must be the CONTENT box, not the padded one: sizing
           the indicator from the outer width made the last slot overhang the
           container by exactly the horizontal padding. */}
-      <View onLayout={onLayout} className="flex-row">
+      <ScrollView
+        ref={scroller}
+        horizontal
+        style={{ flexGrow: 0 }}
+        onLayout={onLayout}
+        scrollEnabled={scrollable}
+        showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ width: contentWidth }}
+      >
+      <View style={{ width: contentWidth, flexDirection: 'row' }}>
         {slot > 0 ? (
           <Animated.View
             pointerEvents="none"
@@ -163,23 +175,22 @@ export function SegmentedControl<T extends string>({
               ripple={false}
               scale="none"
               onPress={() => onChange(segment.value)}
-              className={`min-h-9 flex-1 flex-row items-center justify-center ${dense ? 'gap-1 px-0.5' : 'gap-1.5'} rounded-full py-1`}
+              hitSlop={0}
+              style={{ width: slot, minHeight: MIN_TARGET }}
+              className="flex-row items-center justify-center gap-1.5 rounded-full px-3 py-1"
             >
               {segment.icon}
               <Text
                 numberOfLines={1}
                 maxFontSizeMultiplier={MAX_SCALE.chrome}
-                className={`${dense ? 'text-xs' : 'text-sm'} font-semibold ${selected ? 'text-foreground' : 'text-muted-foreground'}`}
+                className={`text-sm font-semibold ${selected ? 'text-foreground' : 'text-muted-foreground'}`}
               >
                 {segment.label}
               </Text>
               {segment.live ? (
                 <View accessible={false} className="h-1.5 w-1.5 rounded-full bg-success" />
               ) : null}
-              {dense && count !== undefined && count > 0 ? (
-                <View accessible={false} className="h-1.5 w-1.5 rounded-full bg-primary" />
-              ) : null}
-              {showCounts && count !== undefined && count > 0 ? (
+              {count !== undefined && count > 0 ? (
                 <View className="min-w-5 items-center rounded-full bg-emphasis px-1">
                   <Text
                     maxFontSizeMultiplier={MAX_SCALE.chrome}
@@ -193,6 +204,7 @@ export function SegmentedControl<T extends string>({
           );
         })}
       </View>
+      </ScrollView>
     </View>
   );
 }

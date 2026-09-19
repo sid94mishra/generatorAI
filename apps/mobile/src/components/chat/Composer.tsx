@@ -62,6 +62,7 @@ import {
 import type { AgentMode, ContextUsageSnapshot, ModelInfo } from '@generatorai/client-core';
 
 import { Chip } from '../ui/Chip';
+import { GlassSurface } from '../ui/GlassSurface';
 import { IconButton } from '../ui/Button';
 import { ProgressRing } from '../ui/ProgressRing';
 import { Spinner } from '../ui/States';
@@ -583,8 +584,9 @@ export function Composer(props: ComposerProps): React.ReactElement {
           its pre-layout offset on Android — pushed half off the screen under
           the gesture bar (seen with the bound-agent chip). It also re-ran on
           every new line while typing. */}
-      <Animated.View
-        className={`mx-3 mb-2 mt-2 rounded-3xl border bg-card ${focused || voiceLive ? 'border-primary' : 'border-border'}`}
+      <GlassSurface
+        style={{ marginHorizontal: 12, marginBottom: 8, marginTop: 8, borderRadius: 24,
+          borderWidth: 1, borderColor: focused || voiceLive ? colors.primary : colors.border }}
       >
         {props.activeCommand ? (
           <View className="flex-row px-3 pt-2.5">
@@ -736,7 +738,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
             />
           </View>
         </View>
-      </Animated.View>
+      </GlassSurface>
 
       <ModelSheet
         visible={sheet === 'model'}

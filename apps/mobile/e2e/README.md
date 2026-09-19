@@ -75,3 +75,22 @@ it bypasses the connection catalog.
 - The claude-agent harness takes 10–20 s to reach a tool call and holds one agent slot per
   running chat; stale pending gates ("Waiting for a free agent slot") block new turns — run
   `clear.mjs` first.
+
+## September 2026 audit additions
+
+`E2E_HOME` now defaults to a temporary `generatorai-mobile-e2e` directory on the host OS.
+`E2E_CHROME` is optional; set it to an installed Chrome executable or install Playwright's browser.
+Run only one script at a time against a persistent profile. Cold Metro navigation has a 90-second budget.
+
+- `audit-scenarios.mjs workflow|panes|automation` uses `AUDIT_FIXTURES`, a JSON file containing
+  `workflow.id`, `automation.id`, and `chatId` from an isolated server. It inspects dependencies/prompts,
+  starts a workflow, visits chat tools, or triggers a manual automation and checks the response/history.
+  Workflow definitions and any associated test project must be created separately.
+- `native-audit.mjs inspect NAME` captures the installed Android application's screenshot and
+  accessibility hierarchy. `tap LABEL`, `route /path`, `text VALUE`, and `back` perform native actions.
+  Set `ANDROID_HOME` or `ADB` and `E2E_OUT`. It never installs an APK or pairs implicitly.
+  A screenshot must be inspected for the expected destination; absence of an error is not proof of navigation.
+
+The audit report and selected native/web evidence are in `docs/mobile-audit/`. Pairing files and browser
+profiles contain credentials and must stay outside the repository. Native iOS execution needs Xcode;
+web phone viewports and an iOS bundle export are not an iOS simulator pass.

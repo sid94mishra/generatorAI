@@ -30,6 +30,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -50,7 +51,7 @@ import { IconButton } from '../../ui/Button';
 import { ActionSheet, type MenuAction } from '../../ui/ActionSheet';
 import { Chip } from '../../ui/Chip';
 import { useComposerCapture } from '../composer/captureContext';
-import { EmptyState, LoadingState, Spinner } from '../../ui/States';
+import { EmptyState, ErrorState, LoadingState, Spinner } from '../../ui/States';
 import { Field } from '../../ui/Form';
 import { useToast } from '../../ui/Toast';
 import { useAuth } from '../../../auth/AuthProvider';
@@ -105,6 +106,7 @@ export function BrowserSection({
 }
 
 function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBusy: boolean }): React.ReactElement {
+  const insets = useSafeAreaInsets();
   const { fetch: authFetch } = useAuth();
   const { colors } = useTheme();
   const queryClient = useQueryClient();
@@ -179,11 +181,15 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
   }, [address]);
 
   const startStop = useMutation({
-    // `/start` takes the first URL too, so typing an address and pressing run
-    // is ONE call — otherwise the session comes up on about:blank and the
-    // address the user typed is silently dropped.
-    mutationFn: (next: 'start' | 'stop') =>
-      next === 'start' ? post('start', targetUrl() ? { url: targetUrl() } : undefined) : post('stop'),
+    // Await navigation separately: /start navigates in the background and
+    // otherwise reports success even when the host blocks the requested URL.
+    mutationFn: async (next: 'start' | 'stop') => {
+      if (next === 'stop') return post('stop');
+      const response = await post('start');
+      const url = targetUrl();
+      if (url) await post('actions', { kind: 'navigate', url });
+      return response;
+    },
     onSuccess: () => {
       setDirty(false);
       invalidate();
@@ -195,6 +201,7 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
   // The body is a Zod discriminated union on `kind` (see routes/browser.ts).
   // Sending `action` instead made every navigation fail 400 VALIDATION.
   const act = useMutation({
+    onMutate: () => startStop.reset(),
     mutationFn: (action: BrowserAction) => post('actions', action),
     onSuccess: () => {
       setDirty(false);
@@ -296,7 +303,7 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
   };
 
   return (
-    <View className="flex-1">
+    <View className="flex-1" style={{ paddingBottom: insets.bottom }}>
       {/* One row, the way every mobile browser arranges it: navigation left,
           the address filling the middle, run/stop right. Compact icons —
           three 44pt buttons left barely a third of a phone for the URL. */}
@@ -368,6 +375,13 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
         />
       </View>
 
+      {live && (act.isError || startStop.isError) ? (
+        <View accessibilityRole="alert" className="border-b border-border-muted bg-card px-3 py-2">
+          <Text className="text-sm text-danger">
+            {(act.error ?? startStop.error)?.message ?? 'Browser action failed. Check the address and try again.'}
+          </Text>
+        </View>
+      ) : null}
       {live ? (
         <View className="flex-1 items-center justify-center bg-canvas-bg p-3">
           {frame ? (
@@ -385,6 +399,12 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
         // Chromium takes several seconds to come up. Without this the panel
         // still said "not running" the whole time, so Start looked ignored.
         <LoadingState label="Starting the browser…" />
+      ) : startStop.isError ? (
+        <ErrorState
+          title="Could not start the browser"
+          message={startStop.error instanceof Error ? startStop.error.message : 'Check the host browser setup and try again.'}
+          onRetry={() => startStop.mutate('start')}
+        />
       ) : (
         // The action is IN the empty state. The copy used to name a control
         // ("press Start") that was an unlabelled ▶ at the far end of the
@@ -434,7 +454,7 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
             ) : null}
           </View>
           <Text className="text-xs text-muted-foreground">
-            View only — the page is sized for a desktop window, so taps are not forwarded.
+            Preview only. Send a capture to your agent to work with this page.
           </Text>
         </View>
       ) : null}

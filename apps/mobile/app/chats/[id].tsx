@@ -94,6 +94,7 @@ import {
   type ComposerController,
 } from '../../src/components/chat/composer/useComposerController';
 import { readAllAttachmentBytes } from '../../src/components/chat/composer/attachmentPickers';
+import { sendChatPrompt } from '../../src/api/sendChatPrompt';
 import type { ComposerSendPayload, WorkspacePrepState } from '../../src/components/chat/composer/types';
 import type { BoundAgentProps } from '../../src/components/chat/composer/ComposerBanners';
 import { bytesToBase64 } from '../../src/lib/base64';
@@ -445,9 +446,10 @@ export default function ChatScreen(): React.ReactElement {
       applyEffects([{ op: 'startPending', key: streamKey, userMessage: text }]);
       try {
         const files = await readAllAttachmentBytes(payload.attachments);
-        await api.chats.sendWithAttachments(chatId!, { message: text, mode: payload.mode ?? mode }, files);
+        await sendChatPrompt(auth.fetch, chatId!, { message: text, mode: payload.mode ?? mode }, files);
         void queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId!) });
       } catch (err) {
+        applyEffects([{ op: 'errorStream', key: streamKey }]);
         const gated = err instanceof ApiError && err.status === 409;
         toast({
           message: gated
@@ -458,7 +460,7 @@ export default function ChatScreen(): React.ReactElement {
         throw err;
       }
     },
-    [api, chatId, mode, streamKey, applyEffects, queryClient, toast],
+    [auth.fetch, chatId, mode, streamKey, applyEffects, queryClient, toast],
   );
 
   // Worktrees and branch checkouts finish after the chat exists; while they
@@ -677,7 +679,8 @@ export default function ChatScreen(): React.ReactElement {
         answers,
         ...(freeformResponse ? { freeformResponse } : {}),
       }),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      useStreamStore.getState().applyEffects([{ op: 'answerQuestion', key: streamKey, ...variables }]);
       void queryClient.invalidateQueries({ queryKey: queryKeys.chatInteractions(chatId!) });
     },
   });
@@ -696,12 +699,18 @@ export default function ChatScreen(): React.ReactElement {
         behavior,
         ...(message ? { message } : {}),
       }),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      // The HTTP response confirms the decision even if navigation causes
+      // this screen to miss the corresponding stream event.
+      useStreamStore.getState().applyEffects([{ op: 'resolvePermission', key: streamKey, ...variables }]);
       void queryClient.invalidateQueries({ queryKey: queryKeys.chatInteractions(chatId!) });
     },
     onError: (error) => {
       // 409: another device already answered — the stream settles the card.
-      if (error instanceof ApiError && error.status === 409) return;
+      if (error instanceof ApiError && error.status === 409) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.chatInteractions(chatId!) });
+        return;
+      }
       haptics.error();
       toast({ message: 'Could not send that decision. Try again.', tone: 'error' });
     },
@@ -1097,8 +1106,8 @@ export default function ChatScreen(): React.ReactElement {
     () => ({
       // iOS: the keyboard height animates, and the home-indicator inset is
       // folded into it rather than switched off first (which hopped 34pt).
-      // Android resizes the window, so the reported height stays 0 and the
-      // inset is simply dropped while the keyboard is up.
+      // Android edge-to-edge uses the IME overlap including its system bar;
+      // the safe-area inset is already part of that overlap while typing.
       paddingBottom: keyboard.value > 0 ? Math.max(keyboard.value, insets.bottom) : keyboardShown ? 0 : insets.bottom,
     }),
     [keyboardShown, insets.bottom],
@@ -1146,7 +1155,7 @@ export default function ChatScreen(): React.ReactElement {
           <View accessibilityLiveRegion="polite" className="flex-row items-center gap-2 bg-subtle px-4 py-2">
             <Archive size={14} color={colors['muted-foreground']} />
             <Text className="flex-1 text-sm font-medium text-muted-foreground">
-              This chat is archived. Unarchive it from the chat list to continue.
+              This chat is archived. Choose Move to active in the chat menu to continue.
             </Text>
           </View>
         ) : null}
@@ -1186,6 +1195,7 @@ export default function ChatScreen(): React.ReactElement {
               renderItem={renderRow}
               // Chat semantics without inverting the list.
               alignItemsAtEnd
+              initialScrollAtEnd
               maintainScrollAtEnd
               maintainVisibleContentPosition
               recycleItems={false}
@@ -1334,7 +1344,7 @@ export default function ChatScreen(): React.ReactElement {
       {
         title: 'Workbench',
         items: [
-          { label: 'Files', icon: icon(FolderTree), onPress: () => openWorkbench('files') },
+          { label: 'Files', icon: icon(FolderTree), onPress: () => (workspaceId ? setPane('files') : openWorkbench('files')) },
           { label: 'Plan', icon: icon(ScrollText), onPress: () => openWorkbench('plan') },
           {
             label: 'Tasks',
@@ -1410,7 +1420,7 @@ export default function ChatScreen(): React.ReactElement {
     ];
   }, [
     colors.foreground, messages.data, openWorkbench, tasksSummary, lastPrompt, archived, isStreaming,
-    title, toast, runCopyTranscript, fork.isPending, runFork, archive,
+    title, toast, runCopyTranscript, fork.isPending, runFork, archive, workspaceId,
   ]);
 
   if (messages.isError) {
@@ -1430,7 +1440,7 @@ export default function ChatScreen(): React.ReactElement {
           <SessionPanes
             workspaceId={workspaceId}
             chatId={chatId!}
-            orchestrator={boundAgent?.role === 'orchestrator'}
+            orchestrator={chat.data?.orchestratorMode === true || boundAgent?.role === 'orchestrator'}
             tasksSummary={tasksSummary}
             scopes={scopes}
             changesCount={changes.data?.stats.files ?? 0}

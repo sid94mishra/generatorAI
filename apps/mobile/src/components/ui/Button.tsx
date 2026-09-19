@@ -100,6 +100,7 @@ export function Button({
       disabled={disabled || loading}
       haptic={haptic}
       onPress={onPress}
+      style={{ minHeight: MIN_TARGET }}
       className={`flex-row items-center justify-center gap-2 ${SIZE_CONTAINER[size]} ${VARIANT_CONTAINER[variant]} ${grow ? 'flex-1' : full ? 'w-full' : 'self-start'}`}
     >
       {loading ? <ActivityIndicator size="small" color={spinnerColor} /> : icon}
@@ -132,8 +133,8 @@ export function IconButton({
   accessibilityHint?: string;
   variant?: ButtonVariant;
   /**
-   * Shrinks the drawn box for dense toolbars. The TAP target stays at the
-   * 44pt minimum via hitSlop — only the ink gets smaller.
+   * Shrinks the visual surface, while reserving a full platform-sized
+   * layout target so adjacent controls never share overlapping hitSlop.
    */
   compact?: boolean;
   disabled?: boolean;
@@ -145,9 +146,6 @@ export function IconButton({
   /** For E2E: an icon-only control has no text for a test to find. */
   testID?: string;
 }): React.ReactElement {
-  const box = compact ? 32 : MIN_TARGET;
-  const slop = Math.max(0, Math.round((MIN_TARGET - box) / 2));
-
   return (
     <Touchable
       accessibilityLabel={accessibilityLabel}
@@ -157,14 +155,19 @@ export function IconButton({
       disabled={disabled}
       haptic={haptic}
       onPress={onPress}
-      {...(slop > 0 ? { hitSlop: { top: slop, bottom: slop, left: slop, right: slop } } : {})}
-      style={{ width: box, height: box }}
-      className={`items-center justify-center rounded-full ${VARIANT_CONTAINER[variant]}`}
+      style={{ width: MIN_TARGET, height: MIN_TARGET }}
+      className="items-center justify-center rounded-full"
     >
-      {icon}
-      {badge ? (
-        <View className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-background bg-primary" />
-      ) : null}
+      <View
+        pointerEvents="none"
+        style={{ width: compact ? 32 : MIN_TARGET, height: compact ? 32 : MIN_TARGET }}
+        className={`items-center justify-center rounded-full ${VARIANT_CONTAINER[variant]}`}
+      >
+        {icon}
+        {badge ? (
+          <View className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-background bg-primary" />
+        ) : null}
+      </View>
     </Touchable>
   );
 }

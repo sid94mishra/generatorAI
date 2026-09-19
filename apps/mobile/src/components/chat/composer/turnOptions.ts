@@ -23,7 +23,7 @@ export const MODE_OPTIONS: readonly OptionModel<AgentMode>[] = [
   {
     value: 'plan',
     title: 'Plan first',
-    help: 'The agent writes a plan and waits for your approval before making any change.',
+    help: 'Ask the agent to plan before editing. Plan review controls depend on the provider; Codex uses command approvals.',
   },
 ];
 

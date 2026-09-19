@@ -1,10 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
-import { SHEET_TOP_GAP, detentOffsets, keyboardCappedHeight, renderedOffset } from '../components/ui/sheetMath';
+import { SHEET_TOP_GAP, detentOffsets, keyboardCappedHeight, renderedOffset, sheetBottomPadding } from '../components/ui/sheetMath';
 
 const SCREEN = 874;
 const TOP = 62; // Dynamic Island status bar
 const TALL = Math.min(SCREEN * 0.92, SCREEN - TOP - SHEET_TOP_GAP);
+
+describe('visible sheet viewport', () => {
+  it.each([0, 336])('keeps a pinned footer above the keyboard/safe area at every detent (keyboard %i)', (keyboard) => {
+    const height = keyboardCappedHeight(TALL, SCREEN, TOP, keyboard);
+    const inset = keyboard ? 0 : 34;
+    for (const logical of detentOffsets([0.4, 0.6, 0.92], SCREEN, TALL)) {
+      const offset = renderedOffset(logical, TALL, height);
+      const cardTop = SCREEN - keyboard - height + offset;
+      const contentBottom = cardTop + height - sheetBottomPadding(offset, inset);
+      expect(contentBottom).toBeCloseTo(SCREEN - keyboard - inset);
+    }
+  });
+
+  it('preserves safe-area padding while rubber-banding upward', () => {
+    expect(sheetBottomPadding(-12, 34)).toBe(34);
+  });
+});
 
 describe('keyboardCappedHeight', () => {
   it('leaves the sheet alone with no keyboard', () => {

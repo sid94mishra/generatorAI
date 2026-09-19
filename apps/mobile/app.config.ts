@@ -223,6 +223,7 @@ const config: ExpoConfig = {
     // app makes goes to a paired endpoint. SDK 57 dropped the
     // `android.usesCleartextTraffic` config key, hence a plugin.
     './plugins/withCleartextTraffic',
+    './plugins/withShadowNodeRaceFix',
   ],
 
   experiments: {

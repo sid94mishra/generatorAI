@@ -1,11 +1,11 @@
 // ────────────────────────────────────────────────────────────────
 // SessionPanes — the chat session's swipeable pages.
 //
-//   Chat · Changes 3 · Tasks 2 · Terminal · Browser
+//   Chat · Changes 3 · Files · Tasks 2 · Terminal · Browser
 //
 // The heavy surfaces (Changes, Tasks, Terminal, Browser) are PAGES beside the
 // transcript rather than a sheet over it, because each needs full height and
-// its own gestures (plan §6.4). Files, Plan and Session info live in the
+// its own gestures (plan §6.4). Plan and Session info live in the
 // Workbench sheet, reached from the header's single "⋯" menu — the strip no
 // longer carries a second overflow button of its own.
 //
@@ -21,15 +21,15 @@
 //
 // Pages mount lazily (`Pager` preloads one neighbour) and receive `active`,
 // so a pane can pause its polling or WebView off-screen. The pager leaves
-// the left 24pt to the platform back gesture and only activates on a clearly
+// the platform back edges and only activates on a clearly
 // horizontal drag, so it never steals the transcript's vertical scroll. On
 // Terminal and Browser the swipe is OFF: both are WebViews whose own
 // horizontal drags (selection, page scroll) must not flip the page — the
 // strip is the way out of them.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Keyboard, View } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 
@@ -37,6 +37,7 @@ import { Pager, type PagerHandle } from '../../ui/Pager';
 import { SegmentedControl, type Segment } from '../../ui/SegmentedControl';
 import { checkFeature } from '../../../auth/featureGate';
 import { useAuth } from '../../../auth/AuthProvider';
+import { FilesSection } from '../workbench/FilesSection';
 import { ChangesSection } from '../workbench/ChangesSection';
 import { TasksSection } from '../workbench/TasksSection';
 import { TerminalSection } from '../workbench/TerminalSection';
@@ -54,7 +55,7 @@ const TerminalPane = TerminalSection as WithActive<React.ComponentProps<typeof T
 const BrowserPane = BrowserSection as WithActive<React.ComponentProps<typeof BrowserSection>>;
 
 /** Panes whose content owns horizontal drags; the pager swipe is off there. */
-const NO_SWIPE: ReadonlySet<PaneId> = new Set<PaneId>(['terminal', 'browser']);
+const NO_SWIPE: ReadonlySet<PaneId> = new Set<PaneId>(['terminal', 'browser', 'computer', 'files']);
 
 /** A request to open one file in the Changes pane. `nonce` re-asks for the same file. */
 export interface ChangesFocus {
@@ -213,6 +214,8 @@ export function SessionPanes({
               active={active}
             />
           );
+        case 'files':
+          return <FilesSection workspaceId={workspaceId!} active={active} />;
         case 'tasks':
           return <TasksSection chatId={chatId} active={active} />;
         case 'terminal':
@@ -250,6 +253,7 @@ export function SessionPanes({
             segments={segments}
             value={panes[index]?.id ?? 'chat'}
             onChange={(next) => {
+              Keyboard.dismiss();
               const i = panes.findIndex((p) => p.id === next);
               if (i >= 0) pagerRef.current?.goTo(i);
               onPaneChange(next);

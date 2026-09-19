@@ -26,10 +26,11 @@
 
 import { useEffect, useState } from 'react';
 import { Dimensions, Keyboard, Platform, type KeyboardEvent } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Easing, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 
 import { DURATION } from './motion';
-import { keyboardOverlap } from './keyboardMath';
+import { androidKeyboardOverlap, keyboardOverlap } from './keyboardMath';
 
 /**
  * A close fit for UIKit's keyboard curve. Apple does not publish it; this is
@@ -52,11 +53,10 @@ export interface KeyboardOptions {
 const DEFAULTS: Required<KeyboardOptions> = { androidResizes: false };
 
 /** How much of the window the keyboard in `event` covers. */
-function reportedOverlap(event: KeyboardEvent | null, options: Required<KeyboardOptions>): number {
+function reportedOverlap(event: KeyboardEvent | null, options: Required<KeyboardOptions>, bottomInset = 0): number {
   if (!event) return 0;
   if (Platform.OS === 'android') {
-    if (options.androidResizes) return 0;
-    return Math.max(0, event.endCoordinates?.height ?? 0);
+    return androidKeyboardOverlap(event.endCoordinates?.height ?? 0, bottomInset, options.androidResizes);
   }
   return keyboardOverlap(event.endCoordinates, Dimensions.get('window').height);
 }
@@ -89,13 +89,14 @@ function subscribeKeyboard(listener: (event: KeyboardEvent | null, hiding: boole
  * Read it in a `useAnimatedStyle`; never on the JS thread per frame.
  */
 export function useKeyboardHeight(options?: KeyboardOptions): SharedValue<number> {
+  const { bottom } = useSafeAreaInsets();
   const height = useSharedValue(0);
   const androidResizes = options?.androidResizes ?? DEFAULTS.androidResizes;
 
   useEffect(() => {
     const resolved = { androidResizes };
     return subscribeKeyboard((event, hiding) => {
-      const next = hiding ? 0 : reportedOverlap(event, resolved);
+      const next = hiding ? 0 : reportedOverlap(event, resolved, bottom);
       if (Platform.OS === 'ios') {
         const duration = event && event.duration > 0 ? event.duration : DURATION.slow;
         height.value = withTiming(next, { duration, easing: IOS_KEYBOARD_EASING });
@@ -103,7 +104,7 @@ export function useKeyboardHeight(options?: KeyboardOptions): SharedValue<number
         height.value = next;
       }
     });
-  }, [height, androidResizes]);
+  }, [height, androidResizes, bottom]);
 
   return height;
 }

@@ -23,6 +23,12 @@ export interface KeyboardFrame {
 /** A floating keyboard whose bottom sits more than this above the window's bottom is undocked. */
 const DOCKED_TOLERANCE = 1;
 
+/** RN Android reports IME height minus the bottom system bar, even edge-to-edge. */
+export function androidKeyboardOverlap(height: number, bottomInset: number, resizes: boolean): number {
+  if (resizes || !Number.isFinite(height) || height <= 0) return 0;
+  return height + (Number.isFinite(bottomInset) ? Math.max(0, bottomInset) : 0);
+}
+
 /**
  * How much of the window's bottom the keyboard covers, in points.
  *
