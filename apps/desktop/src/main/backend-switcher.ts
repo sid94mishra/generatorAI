@@ -11,9 +11,10 @@
 // switcher rendered by server A disappears with A, and if A is unreachable the
 // page never renders at all.
 
-import { app } from 'electron';
+import { app, dialog } from 'electron';
 import { loadSettings, saveSettings } from './config';
 import { log } from './logger';
+import { showPrompt } from './prompt-window';
 import { getServerManager } from './server-manager';
 import { getWindowManager } from './window-manager';
 import {
@@ -117,37 +118,39 @@ export function currentBackendLabel(): string {
 /**
  * Asks for a server address and switches to it.
  *
- * Electron has no native text-input dialog, so the prompt is rendered inside
- * the current page. That is acceptable here and nowhere else in this module:
- * adding a server is the one action you can only take while already looking at
- * a working one.
+ * Electron has no native text-input dialog, so this opens a small modal window
+ * of our own (`prompt-window.ts`). A mistyped address must not cost the user
+ * the page they were on, so it is reported and re-asked, never escalated to
+ * the shell's full-window error screen.
  */
 export async function promptForRemoteServer(): Promise<void> {
   const win = getWindowManager().getMainWindow();
   if (!win || win.isDestroyed()) return;
 
-  let entered: unknown;
-  try {
-    entered = await win.webContents.executeJavaScript(
-      `window.prompt(${JSON.stringify(
-        'Address of the server to connect to\n\ne.g. 192.168.0.50:3100 or https://studio.example',
-      )}, '')`,
-      true,
-    );
-  } catch (err) {
-    log.warn('Could not prompt for a server address', err);
-    return;
-  }
-  if (typeof entered !== 'string' || !entered.trim()) return;
+  // NOT `window.prompt`: Electron does not implement it, so the old injected
+  // call threw, was swallowed, and this menu item did nothing at all.
+  const entered = await showPrompt({
+    title: 'Connect to a server',
+    message: 'Address of the server to connect to\n\ne.g. 192.168.0.50:3100 or https://studio.example',
+    placeholder: '192.168.0.50:3100',
+    confirmLabel: 'Connect',
+    parent: win,
+  });
+  if (!entered) return;
 
   let connection: RemoteServerConnection;
   try {
     connection = addRemoteConnection({ url: entered });
   } catch {
-    getWindowManager().showError(
-      `"${entered}" is not a valid server address.\n\n` +
-        'Use a host and port (192.168.0.50:3100) or a full URL (https://studio.example).',
-    );
+    // Replacing the whole window with the error screen for a typo left the
+    // user staring at a dead page with no way back to the app they were using.
+    await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['OK'],
+      title: 'That address did not work',
+      message: `"${entered}" is not a valid server address.`,
+      detail: 'Use a host and port (192.168.0.50:3100) or a full URL (https://studio.example).',
+    });
     return;
   }
   await switchToRemote(connection.id);

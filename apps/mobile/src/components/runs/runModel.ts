@@ -114,16 +114,10 @@ export function pollIntervalFor(status: string | undefined, streamConnected: boo
 }
 
 /**
- * The display title of a run.
- *
- * Server-generated names are `<Workflow> - Run <epoch ms>`; the epoch is noise
- * on a phone. Strip it and let the caller show the relative time instead.
+ * The display title of a run — one implementation, shared with the web client
+ * so the two never disagree about what a run is called.
  */
-export function runTitle(name: string | null | undefined, fallback = 'Workflow run'): string {
-  if (!name) return fallback;
-  const stripped = name.replace(/\s*[-–—]\s*Run\s+\d{10,}\s*$/i, '').trim();
-  return stripped.length > 0 ? stripped : name;
-}
+export { runTitle } from '@generatorai/client-core';
 
 /**
  * The status to SHOW for a stage. The server can report a stage `completed`

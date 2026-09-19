@@ -7,6 +7,7 @@ export default defineConfig({
   entry: {
     'main/index': 'src/main/index.ts',
     'preload/index': 'src/preload/index.ts',
+    'preload/prompt': 'src/preload/prompt.ts',
   },
   outDir: 'dist',
   format: ['cjs'],

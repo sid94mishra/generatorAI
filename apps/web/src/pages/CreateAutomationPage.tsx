@@ -282,13 +282,16 @@ export function CreateAutomationPage() {
 
   return (
     <PageContainer variant="narrow" className="max-w-3xl">
-      <button
+      {/* Same primitive and styling as the other create pages' back link. */}
+      <Button
+        type="button"
+        variant="ghost"
         onClick={() => navigate('/automations')}
-        className="mb-6 flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="mb-6 flex h-auto items-center gap-1.5 rounded-none p-0 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />
         Back to Automations
-      </button>
+      </Button>
 
       <PageHeader className="mb-8" title="Create Automation" />
 
@@ -338,6 +341,9 @@ export function CreateAutomationPage() {
                 key={type}
                 type="button"
                 onClick={() => setTriggerType(type)}
+                // Selection cards: without this they all announce identically
+                // and nothing says which one is chosen.
+                aria-pressed={triggerType === type}
                 className={cn(
                   'flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
                   triggerType === type
@@ -407,9 +413,16 @@ export function CreateAutomationPage() {
                   <div key={wid} className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2">
                     <span className="text-xs font-medium text-muted-foreground">{i + 1}.</span>
                     <span className="flex-1 text-sm text-foreground">{wf?.name ?? wid.slice(0, 8)}</span>
-                    <button type="button" onClick={() => handleRemoveWorkflow(wid)} className="text-muted-foreground hover:text-danger">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => handleRemoveWorkflow(wid)}
+                      aria-label={`Remove ${wf?.name ?? 'workflow'} from this automation`}
+                      className="h-6 w-6 text-muted-foreground hover:bg-danger-muted hover:text-danger"
+                    >
                       <X className="h-3.5 w-3.5" />
-                    </button>
+                    </Button>
                   </div>
                 );
               })}
@@ -438,6 +451,7 @@ export function CreateAutomationPage() {
             <button
               type="button"
               onClick={() => handleInputModeChange('single')}
+              aria-pressed={inputMode === 'single'}
               className={cn(
                 'flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
                 inputMode === 'single'
@@ -452,6 +466,7 @@ export function CreateAutomationPage() {
             <button
               type="button"
               onClick={() => handleInputModeChange('loop')}
+              aria-pressed={inputMode === 'loop'}
               className={cn(
                 'flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
                 inputMode === 'loop'
@@ -466,6 +481,7 @@ export function CreateAutomationPage() {
             <button
               type="button"
               onClick={() => handleInputModeChange('batch')}
+              aria-pressed={inputMode === 'batch'}
               className={cn(
                 'flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
                 inputMode === 'batch'
@@ -480,6 +496,7 @@ export function CreateAutomationPage() {
             <button
               type="button"
               onClick={() => handleInputModeChange('script')}
+              aria-pressed={inputMode === 'script'}
               className={cn(
                 'flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
                 inputMode === 'script'

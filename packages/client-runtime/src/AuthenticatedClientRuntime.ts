@@ -225,6 +225,20 @@ export class AuthenticatedClientRuntime {
     return this.initPromise;
   }
 
+  /**
+   * Re-runs initialisation after it ended in `error` (host unreachable at
+   * launch). `initialize()` memoises its result, so without this a "Try again"
+   * button could reconnect the transport yet leave the app on the error screen
+   * forever. Any other state is returned unchanged.
+   */
+  retryInitialize(): Promise<AuthState> {
+    if (this.state.status === 'error') {
+      this.initPromise = null;
+      this.identityCheck = null;
+    }
+    return this.initialize();
+  }
+
   private async doInitialize(): Promise<AuthState> {
     if (this.options.legacyApiKey) {
       this.setState({ status: 'authenticated', deviceId: 'legacy', scopes: [], expiresAt: 0 });
@@ -522,12 +536,21 @@ export class AuthenticatedClientRuntime {
    */
   private verifyPinnedIdentity(session: StoredSession): Promise<void> {
     if (!session.serverId) return Promise.resolve();
-    this.identityCheck ??= (async () => {
-      await this.resolvePinnedEndpoint(
-        session.serverId,
-        normalizeEndpointList(session.endpoint, session.endpoints),
-      );
-    })();
+    if (!this.identityCheck) {
+      const check = (async () => {
+        await this.resolvePinnedEndpoint(
+          session.serverId,
+          normalizeEndpointList(session.endpoint, session.endpoints),
+        );
+      })();
+      this.identityCheck = check;
+      // Only a SUCCESS is memoised. A failed probe (phone briefly offline, host
+      // asleep, Wi-Fi switching) must be retried on the next request; caching
+      // the rejection would fail every request "unreachable" until restart.
+      check.catch(() => {
+        if (this.identityCheck === check) this.identityCheck = null;
+      });
+    }
     return this.identityCheck;
   }
 

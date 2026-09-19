@@ -330,7 +330,8 @@ export function scriptCommands(): CommandSpec[] {
       async handler(ctx, { args, flags }) {
         const target = await find(ctx, args.script);
         return record(
-          await ctx.api.scripts.materialize(target.id, compact({ profile: flags.profile })),
+          await ctx.api.scripts.materialize(target.id, // The route reads `profileName`; `profile` was silently ignored.
+          compact({ profileName: flags.profile })),
         );
       },
     }),

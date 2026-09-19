@@ -48,13 +48,26 @@ export interface MenuActions {
 let menuState: MenuState = {
   sidebarOpen: true,
   rightPaneOpen: false,
-  canGoBack: false,
-  canGoForward: false,
   theme: 'system',
   recent: [],
 };
 
 let cachedActions: MenuActions | null = null;
+
+/**
+ * Whether Back/Forward can move, asked of the thing that actually knows.
+ *
+ * The renderer used to report this: `canGoBack` guessed from
+ * `window.history.length` and `canGoForward` hard-coded to `false`, which left
+ * `View ▸ Forward` permanently greyed out even with somewhere to go. Chromium
+ * tracks `pushState` entries, so its own history is the answer on every route
+ * change, in both directions.
+ */
+function navHistory(): { back: boolean; forward: boolean } {
+  const wc = getWindowManager().getMainWindow()?.webContents;
+  if (!wc) return { back: false, forward: false };
+  return { back: wc.navigationHistory.canGoBack(), forward: wc.navigationHistory.canGoForward() };
+}
 
 function nav(route: string): void {
   getWindowManager().navigateTo(route);
@@ -205,8 +218,16 @@ export function buildMenu(actions: MenuActions): void {
         : ([{ role: 'delete' }] as MenuItemConstructorOptions[])),
       { role: 'selectAll' },
       { type: 'separator' },
-      { label: 'Find', accelerator: 'CmdOrCtrl+F', click: () => wm.sendCommand('focus-search') },
+      // Find means find IN THIS PAGE, as it does in every other desktop app.
+      // It used to open the command palette — which already has its own
+      // shortcut — and `Find Next` dispatched an event nothing listened to.
+      { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => wm.sendCommand('find-in-page') },
       { label: 'Find Next', accelerator: 'CmdOrCtrl+G', click: () => wm.sendCommand('find-next') },
+      {
+        label: 'Find Previous',
+        accelerator: 'Shift+CmdOrCtrl+G',
+        click: () => wm.sendCommand('find-previous'),
+      },
       // Speech is a macOS system service, not something we provide.
       ...(isMac
         ? ([
@@ -236,7 +257,7 @@ export function buildMenu(actions: MenuActions): void {
       {
         label: 'Back',
         accelerator: isMac ? 'Cmd+[' : 'Alt+Left',
-        enabled: menuState.canGoBack,
+        enabled: navHistory().back,
         click: () => {
           const wc = wm.getMainWindow()?.webContents;
           if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
@@ -245,7 +266,7 @@ export function buildMenu(actions: MenuActions): void {
       {
         label: 'Forward',
         accelerator: isMac ? 'Cmd+]' : 'Alt+Right',
-        enabled: menuState.canGoForward,
+        enabled: navHistory().forward,
         click: () => {
           const wc = wm.getMainWindow()?.webContents;
           if (wc?.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
@@ -360,6 +381,11 @@ function setTheme(theme: ThemePreference): void {
   nativeTheme.themeSource = theme;
   saveSettings({ theme });
   updateMenuState({ theme });
+  // The renderer keeps its own light/dark/system preference and only follows
+  // the OS while that preference is "system". Without telling it which
+  // appearance was CHOSEN, picking Light here moved the native theme and left
+  // the app itself dark.
+  getWindowManager().sendThemePreference(theme);
 }
 
 /** Re-reads persisted theme into the menu. Called once at startup. */

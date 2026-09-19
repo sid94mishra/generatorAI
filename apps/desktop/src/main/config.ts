@@ -26,6 +26,18 @@ export interface DesktopSettings {
   window: WindowState;
   /** Fixed server port. 0 (default) means "pick a free port each launch". */
   serverPort: number;
+  /**
+   * The port the embedded server last bound to, remembered so the next launch
+   * asks for it first.
+   *
+   * This is not a convenience: the window's URL — and therefore the app's
+   * ORIGIN — contains the port, and every per-origin store goes with it. A
+   * fresh port each launch silently emptied localStorage and IndexedDB, so the
+   * app forgot its paired credential, its theme and its terminal preferences,
+   * and enrolled a brand-new full-access device on every start (31 of them had
+   * piled up in Settings ▸ Security by the time this was found).
+   */
+  lastServerPort?: number;
   /** Harness provider passed to the embedded server (HARNESS_TYPE). */
   harnessType: 'copilot' | 'claude-agent' | 'anthropic';
   /** Minimise to tray instead of quitting on window close. */

@@ -46,6 +46,8 @@ import {
 import { cn } from '@/lib/utils.js';
 import { Button, Spinner } from '@/components/ui/index.js';
 import { useResizable } from '@/hooks/useResizable.js';
+import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
+import { usePageTitle } from '@/hooks/usePageTitle.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import type { StageDefinition, VariableDefinition, CreateWorkflowRunParams, GitRepositoryConfig } from '@generatorai/shared';
 import { encodeStageOverrides } from '@generatorai/client-core';
@@ -200,6 +202,15 @@ export function WorkflowBuilderPage() {
       actions.loadDefinition(definition);
     }
   }, [definition, actions]);
+
+  usePageTitle(name || 'Untitled Workflow');
+
+  // The shell's close/quit guard needs the same answer the route blocker gives.
+  const setDirtyForShell = useUnsavedWorkStore((s) => s.setDirty);
+  useEffect(() => {
+    setDirtyForShell('workflow-builder', isDirty);
+    return () => setDirtyForShell('workflow-builder', false);
+  }, [isDirty, setDirtyForShell]);
 
   // ── Unsaved changes blocker ──
   // Read isDirty directly from Zustand getState() to avoid stale closure

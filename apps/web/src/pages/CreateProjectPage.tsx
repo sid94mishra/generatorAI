@@ -6,12 +6,13 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FolderKanban, Plus, Trash2, GitBranch } from 'lucide-react';
+import { ArrowLeft, FolderKanban, FolderOpen, Plus, Trash2, GitBranch } from 'lucide-react';
 import { useCreateProject, useLinkCodebase } from '@/hooks/projectQueries.js';
 import { toast } from '@/components/Toast.js';
 import { Select, Button, Input, Textarea, PageHeader } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { cn } from '@/lib/utils.js';
+import { DirectoryBrowser } from '@/components/chat/sources/DirectoryBrowser.js';
 import type { ProjectSettings, CodebaseType } from '@generatorai/shared';
 
 interface RepoDraft {
@@ -38,6 +39,8 @@ export function CreateProjectPage() {
   const linkCodebase = useLinkCodebase();
 
   const [name, setName] = useState('');
+  /** Repo row whose folder picker is open, or null. */
+  const [browsingRepoId, setBrowsingRepoId] = useState<string | null>(null);
   const [description, setDescription] = useState('');
   const [worktreeRetention, setWorktreeRetention] = useState<'immediate' | 'hours-24' | 'hours-72' | 'manual'>('hours-24');
   const [maxCodebases, setMaxCodebases] = useState(10);
@@ -248,12 +251,26 @@ export function CreateProjectPage() {
                   ) : (
                     <div className="mt-3">
                       <label className="block text-[10px] text-muted-foreground">Local Path*</label>
-                      <Input
-                        value={r.localPath}
-                        onChange={(e) => updateRepo(r.id, { localPath: e.target.value })}
-                        className="mt-0.5 font-mono text-xs"
-                        placeholder="/path/to/repo"
-                      />
+                      {/* Browse, not just type: the path is on the SERVER host,
+                          so the OS file picker would answer for the wrong
+                          machine whenever the two differ. */}
+                      <div className="mt-0.5 flex items-center gap-2">
+                        <Input
+                          value={r.localPath}
+                          onChange={(e) => updateRepo(r.id, { localPath: e.target.value })}
+                          className="font-mono text-xs"
+                          placeholder="/path/to/repo"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          leftIcon={<FolderOpen className="h-3.5 w-3.5" />}
+                          onClick={() => setBrowsingRepoId(r.id)}
+                        >
+                          Browse
+                        </Button>
+                      </div>
                     </div>
                   )}
                   <div className="mt-3">
@@ -286,6 +303,16 @@ export function CreateProjectPage() {
           </Button>
         </div>
       </form>
+
+      <DirectoryBrowser
+        open={browsingRepoId !== null}
+        onClose={() => setBrowsingRepoId(null)}
+        onPick={(picked) => {
+          if (browsingRepoId) updateRepo(browsingRepoId, { localPath: picked });
+          setBrowsingRepoId(null);
+        }}
+        initialPath={repos.find((r) => r.id === browsingRepoId)?.localPath || undefined}
+      />
     </PageContainer>
   );
 }

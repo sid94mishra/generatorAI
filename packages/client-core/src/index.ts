@@ -12,3 +12,4 @@
 export * from './stream/index.js';
 export * from './api/index.js';
 export * from './diff/parseUnifiedDiff.js';
+export * from './runTitle.js';

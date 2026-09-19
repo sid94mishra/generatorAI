@@ -4,7 +4,7 @@
 // state persistence, and safe navigation helpers.
 // ────────────────────────────────────────────────────────────────
 
-import { BrowserWindow, shell, nativeTheme, screen } from 'electron';
+import { BrowserWindow, dialog, shell, nativeTheme, screen, type MessageBoxOptions } from 'electron';
 import * as path from 'node:path';
 import { log } from './logger';
 import { loadSettings, saveSettings } from './config';
@@ -18,7 +18,8 @@ import {
 } from './platform';
 import type { DesktopCommand } from '../shared/ipc';
 import { IPC_EVENT } from '../shared/ipc';
-import { isAppOrigin } from './navigation-guard';
+import { isAppOrigin, isExternalUrlAllowed } from './navigation-guard';
+import { hasUnsavedWork } from './unsaved-work';
 import { appWindowPermissionPolicy, installCspFloor, installPermissionPolicy } from './session-hardening';
 
 const RESOURCES = path.join(__dirname, '..', '..', 'resources');
@@ -43,6 +44,9 @@ export class WindowManager {
   private splashWindow: BrowserWindow | null = null;
   private appUrl: string | null = null;
   private quitting = false;
+  /** Set once the user has agreed to lose unsaved work, so the retried close
+   *  does not ask again. */
+  private discardConfirmed = false;
 
   getMainWindow(): BrowserWindow | null {
     return this.mainWindow;
@@ -179,7 +183,17 @@ export class WindowManager {
       if (shouldHideOnClose({ minimizeToTray: loadSettings().minimizeToTray, quitting: this.quitting })) {
         event.preventDefault();
         win.hide();
+        return;
       }
+      // Closing for real. The renderer's in-app navigation guard cannot see
+      // this, so unsaved edits used to disappear without a word.
+      if (this.discardConfirmed || !hasUnsavedWork()) return;
+      event.preventDefault();
+      void this.confirmDiscard(win).then((discard) => {
+        if (!discard) return;
+        this.discardConfirmed = true;
+        win.close();
+      });
     });
 
     win.on('closed', () => {
@@ -188,6 +202,15 @@ export class WindowManager {
 
     // Security: open external links in the OS browser, never new Electron windows.
     win.webContents.setWindowOpenHandler(({ url }) => {
+      // An app-origin popup is a link the user asked to open in a "new tab" —
+      // a Cmd/middle click, or `window.open` on an in-app route. Handing it to
+      // `shell.openExternal` launched the user's *browser* on the loopback
+      // server: the same app, outside the shell, without the desktop bridge.
+      // There is one window, so open it here instead.
+      if (isAppOrigin(url, this.appUrl)) {
+        win.webContents.loadURL(url).catch((e) => log.warn('In-app popup navigation failed', e));
+        return { action: 'deny' };
+      }
       this.openExternalSafely(url);
       return { action: 'deny' };
     });
@@ -200,6 +223,15 @@ export class WindowManager {
         event.preventDefault();
         this.openExternalSafely(url);
       }
+    });
+
+    // Chromium reports match counts asynchronously; the find bar needs them to
+    // show "3 of 12" and to grey out its arrows.
+    win.webContents.on('found-in-page', (_e, result) => {
+      win.webContents.send(IPC_EVENT.foundInPage, {
+        activeMatchOrdinal: result.activeMatchOrdinal,
+        matches: result.matches,
+      });
     });
 
     win.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
@@ -395,15 +427,38 @@ export class WindowManager {
     else wc.openDevTools({ mode: 'detach' });
   }
 
+  /**
+   * Asks before throwing away unsaved work. Shared by the window's close
+   * button and the quit path, and answered once — a second close after the
+   * user said "Discard" must not re-ask.
+   */
+  async confirmDiscard(win?: BrowserWindow): Promise<boolean> {
+    if (this.discardConfirmed || !hasUnsavedWork()) return true;
+    const target = win ?? this.mainWindow ?? undefined;
+    const opts: MessageBoxOptions = {
+      type: 'warning',
+      buttons: ['Discard changes', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Unsaved changes',
+      message: 'You have unsaved changes',
+      detail: 'Closing now discards them. Save first to keep your work.',
+    };
+    const { response } = target
+      ? await dialog.showMessageBox(target, opts)
+      : await dialog.showMessageBox(opts);
+    if (response === 0) this.discardConfirmed = true;
+    return response === 0;
+  }
+
+  /** Tells the renderer which appearance the user picked natively. */
+  sendThemePreference(theme: 'light' | 'dark' | 'system'): void {
+    const win = this.mainWindow;
+    if (win && !win.isDestroyed()) win.webContents.send(IPC_EVENT.themePreferenceChanged, theme);
+  }
+
   openExternalSafely(url: string): void {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === 'https:' || parsed.protocol === 'http:' || parsed.protocol === 'mailto:') {
-        void shell.openExternal(url);
-      }
-    } catch {
-      /* ignore malformed URLs */
-    }
+    if (isExternalUrlAllowed(url)) void shell.openExternal(url);
   }
 
   private iconPath(): string | undefined {

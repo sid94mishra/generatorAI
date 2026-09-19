@@ -12,6 +12,7 @@ import {
 import { cn } from '@/lib/utils.js';
 import { Button, Spinner } from '@/components/ui/index.js';
 import type { RunView } from './types.js';
+import { runTitle } from '@generatorai/client-core';
 
 interface RunHeaderBarProps {
   run: RunView;
@@ -87,7 +88,7 @@ export function RunHeaderBar({
       {/* Status + name */}
       <StatusPill status={run.status} />
       <h1 className="min-w-0 truncate text-sm font-semibold text-[var(--color-foreground)]">
-        {run.name}
+        {runTitle(run.name)}
       </h1>
 
       {/* Progress cluster */}

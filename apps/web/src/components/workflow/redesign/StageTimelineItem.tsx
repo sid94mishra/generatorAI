@@ -34,6 +34,12 @@ interface StageTimelineItemProps {
   stage: StageView;
   focused: boolean;
   defaultOpen?: boolean;
+  /** Collapse this stage by itself when it completes. Off once the run has
+   *  finished — there is no next stage to make room for. Defaults to true. */
+  autoCollapse?: boolean;
+  /** Open this stage once the run is over: it holds the result the user came
+   *  for. Set on the last stage only. */
+  openWhenFinished?: boolean;
   /** When true, draws the connector line down to the next stage's dot.
    *  False for the final stage so the timeline doesn't dangle past it. */
   showConnector?: boolean;
@@ -80,7 +86,7 @@ function formatCountdown(ms: number): string {
 }
 
 export const StageTimelineItem = React.memo(function StageTimelineItem({
-  stage, focused, defaultOpen, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onRetry, onWake, onSelectFiles, onSelectOutput, onOpenInspector,
+  stage, focused, defaultOpen, autoCollapse = true, openWhenFinished = false, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onRetry, onWake, onSelectFiles, onSelectOutput, onOpenInspector,
 }: StageTimelineItemProps) {
   const v = statusVisual(stage.status);
   const isActive = stage.status === 'running' || stage.status === 'awaiting_input';
@@ -98,11 +104,20 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
   // Auto-open the moment a pending stage flips to active; auto-close when it
   // transitions from active → terminal (completed) — unless the user has
   // explicitly toggled the section themselves.
+  //
+  // `autoCollapse` is what stops that from emptying the page at the end of a
+  // run: collapsing a finished stage makes room for the NEXT one, but when
+  // nothing follows it the user was left staring at a blank page, one
+  // unlabelled row away from the output they had just been reading.
   useEffect(() => {
     if (userToggled) return;
     if (isActive) setOpen(true);
-    else if (stage.status === 'completed') setOpen(false);
-  }, [isActive, stage.status, userToggled]);
+    else if (stage.status === 'completed' && autoCollapse) setOpen(false);
+    // Re-open when the run ends. The final stage collapses on the same tick it
+    // completes — the run is still "active" for another beat — so opening it
+    // only at mount left a finished run showing nothing at all.
+    else if (openWhenFinished && !autoCollapse) setOpen(true);
+  }, [isActive, stage.status, userToggled, autoCollapse, openWhenFinished]);
 
   const toggle = () => {
     setUserToggled(true);
@@ -229,7 +244,12 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
             onClick={(e) => e.stopPropagation()}
             variant="ghost"
             size="icon-sm"
-            className="h-auto w-auto rounded-md p-0.5 text-[var(--color-muted-foreground)]/60 hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
+            className={cn(
+              'h-auto w-auto rounded-md p-0.5 text-[var(--color-muted-foreground)]/60 hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]',
+              // 12px icon + 2px padding is a 16px target; the pseudo-element
+              // brings the clickable area up to 24px without changing the row.
+              'relative before:absolute before:-inset-1 before:content-[""]',
+            )}
             aria-label="Stage actions"
           >
             <MoreHorizontal className="h-3 w-3" />

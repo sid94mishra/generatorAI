@@ -43,6 +43,17 @@ function coerceDefault(raw: string, type: VariableDefinition['type']): unknown {
   return raw;
 }
 
+/**
+ * True when the label is still the one `addVariable` generated for this name
+ * (`variable3` → "Variable 3"), or simply a copy of the name.
+ */
+export function isAutoLabel(label: string | undefined, name: string): boolean {
+  if (!label) return true;
+  if (label === name) return true;
+  const generated = /^variable(\d+)$/.exec(name);
+  return generated !== null && label === `Variable ${generated[1]}`;
+}
+
 export function VariablesTab() {
   const variables = useWorkflowBuilderStore((s) => s.variables);
   const setVariables = useWorkflowBuilderStore((s) => s.setVariables);
@@ -65,7 +76,19 @@ export function VariablesTab() {
 
   const updateVariable = useCallback(
     (index: number, updates: Partial<VariableDefinition>) => {
-      const updated = variables.map((v, i) => (i === index ? { ...v, ...updates } : v));
+      const updated = variables.map((v, i) => {
+        if (i !== index) return v;
+        const next = { ...v, ...updates };
+        // The label is what the run form asks the user for. Renaming
+        // `variable1` to `module` while the label still read "Variable 1" left
+        // every run prompting for "Variable 1" — a name that means nothing to
+        // whoever is starting the run. A label the user has actually written
+        // is never touched.
+        if (updates.name !== undefined && isAutoLabel(v.label, v.name)) {
+          next.label = updates.name;
+        }
+        return next;
+      });
       setVariables(updated);
     },
     [variables, setVariables],

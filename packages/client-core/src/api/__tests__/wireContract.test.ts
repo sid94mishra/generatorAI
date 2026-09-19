@@ -588,3 +588,20 @@ describe('browser semantic inspector wire contract', () => {
     expect(captured[0]).toBe('/api/workspaces/ws-1/browser/files/browser/shots/a%20b.png');
   });
 });
+
+describe('orchestrator run uploads wire contract', () => {
+  it('posts multipart `category` + `files`, which is what the multer route reads', async () => {
+    const { calls, fetchImpl } = capture();
+    await createAdminApi(fetchImpl).orchestrator.uploadRunFiles('r1', 'skills', [
+      { name: 'skill.md', data: new TextEncoder().encode('# hi'), mimeType: 'text/markdown' },
+    ]);
+
+    expect(calls[0]?.path).toBe('/api/orchestrator/runs/r1/uploads');
+    expect(calls[0]?.method).toBe('POST');
+    const form = calls[0]?.body as unknown as FormData;
+    expect(form.get('category')).toBe('skills');
+    const files = form.getAll('files') as File[];
+    expect(files).toHaveLength(1);
+    expect(files[0]?.name).toBe('skill.md');
+  });
+});

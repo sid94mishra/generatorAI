@@ -649,7 +649,10 @@ export function RightPane({
             ref={tabListRef}
             role="tablist"
             aria-label="Right pane tabs"
-            className="gai-no-scrollbar flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
+            className={cn(
+              'gai-no-scrollbar flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto',
+              overflowIds.length > 0 && 'gai-edge-fade',
+            )}
           >
             {state.tabs.map((t) => {
               const def = tabs[t.type];

@@ -15,6 +15,10 @@ const Switch = React.forwardRef<
     ref={ref}
     className={cn(
       'peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors',
+      // The track is 20px tall, which is under the 24px minimum target. The
+      // pseudo-element takes the clickable area to 24px without changing the
+      // control's size, so every settings row keeps its spacing.
+      'relative before:absolute before:-inset-y-0.5 before:inset-x-0 before:content-[""]',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
       'disabled:cursor-not-allowed disabled:opacity-50',
       'data-[state=checked]:bg-primary-emphasis data-[state=unchecked]:bg-emphasis',

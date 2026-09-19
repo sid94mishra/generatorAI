@@ -163,6 +163,11 @@ function RowAction({
       data-testid={testId}
       className={cn(
         'rounded p-0.5 text-[var(--color-muted-foreground)]/60 hover:bg-[var(--color-subtle)] hover:text-[var(--color-primary)]',
+        // A 12px icon with 2px of padding is a 16px target — too small to hit
+        // reliably, and under the 24px minimum. The pseudo-element extends the
+        // clickable area to 24px without taking any extra room in this very
+        // dense row.
+        'relative before:absolute before:-inset-1 before:content-[""]',
         className,
       )}
       onClick={(e) => {

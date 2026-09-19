@@ -39,6 +39,38 @@ export function isAppOrigin(url: string | null | undefined, appUrl: string | nul
 }
 
 /**
+ * Schemes the shell may hand to the OS.
+ *
+ * http/https/mailto are the web's own. The editor schemes are the documented
+ * fallback the server returns when it cannot spawn the editor binary itself
+ * (`/api/editor/open` → `fallbackUrl`); without them "Open in VS Code" did
+ * nothing at all in the desktop app, because the web path — letting the
+ * browser hand the URL to the OS — has no equivalent here.
+ *
+ * Everything else stays refused: `file:` would open arbitrary local paths,
+ * `javascript:` would execute, and any other registered handler is an
+ * application on the user's machine we have no reason to start.
+ */
+const EXTERNAL_PROTOCOLS = new Set([
+  'https:',
+  'http:',
+  'mailto:',
+  'vscode:',
+  'vscode-insiders:',
+  'cursor:',
+  'windsurf:',
+]);
+
+/** True when `url` is safe to hand to `shell.openExternal`. */
+export function isExternalUrlAllowed(url: string): boolean {
+  try {
+    return EXTERNAL_PROTOCOLS.has(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Permission-handler variant: an empty origin is the app's own frame (Electron
  * gives no securityOrigin for internal frames); everything else is strict.
  */

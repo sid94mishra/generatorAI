@@ -54,3 +54,18 @@ describe('PairingOfferSchema endpoint versions', () => {
     ]);
   });
 });
+describe('PairingOfferSchema expiry', () => {
+  const minted = 1_000_000;
+  const offer = { v: 1 as const, ...base, pairingExpiresAt: minted + 10 * 60_000 };
+
+  it('accepts a fresh 10-minute grant on a device whose clock runs behind the server', () => {
+    expect(createPairingOfferSchema(() => minted - 90_000).safeParse(offer).success).toBe(true);
+  });
+
+  it('still rejects expired grants and offers that live far longer than the TTL', () => {
+    expect(createPairingOfferSchema(() => minted + 11 * 60_000).safeParse(offer).success).toBe(false);
+    expect(
+      createPairingOfferSchema(() => minted).safeParse({ ...offer, pairingExpiresAt: minted + 60 * 60_000 }).success,
+    ).toBe(false);
+  });
+});

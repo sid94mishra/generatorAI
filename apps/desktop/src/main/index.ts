@@ -11,7 +11,7 @@ import { app, dialog, nativeTheme, BrowserWindow, Menu, session } from 'electron
 import { randomUUID } from 'node:crypto';
 import { log } from './logger';
 import { loadSettings } from './config';
-import { getServerManager } from './server-manager';
+import { getServerManager, VAULT_UNREADABLE_MESSAGE } from './server-manager';
 import { resolveTarget } from './serverConnections';
 import { getWindowManager } from './window-manager';
 import { nativeBrowserEnabled } from './browser-host';
@@ -124,6 +124,9 @@ function main(): void {
   app.on('before-quit', async (event) => {
     if (quitHandled) return;
     event.preventDefault();
+    // Ask before discarding unsaved edits — Cmd+Q and the Dock's Quit reach
+    // here without the window's close handler ever running.
+    if (!(await getWindowManager().confirmDiscard())) return;
     quitHandled = true;
     isQuitting = true;
     // Let the minimise-to-tray `close` interception stand aside.
@@ -220,6 +223,13 @@ async function onReady(): Promise<void> {
   // and every request died until the user quit; now a ready status on a new
   // origin repoints it. Only while the shell is showing the embedded server —
   // a remote backend is unaffected by the local one restarting.
+  // A vault that stops opening mid-session leaves the server dead and every
+  // request failing; the same recovery is offered as at startup.
+  sm.on('vault-unreadable', () => {
+    if (isQuitting) return;
+    void offerVaultReset(sm);
+  });
+
   sm.on('status', (status) => {
     refreshTrayMenu();
     if (mode === 'dev') return;
@@ -257,10 +267,21 @@ async function onReady(): Promise<void> {
         return;
       }
       log.error('Embedded server failed to start', err);
-      wm.showError(
-        `The GeneratorAI server failed to start.\n\n${err instanceof Error ? err.message : String(err)}`,
-      );
-      return;
+      if (sm.isVaultUnreadable()) {
+        // Recoverable, but only by discarding the vault — so it is the user's
+        // call, not ours. Without this the app restart-looped and then sat on
+        // an error screen quoting a decryption stack trace, with no way out.
+        if (await offerVaultReset(sm)) {
+          appUrl = sm.url;
+        } else {
+          return;
+        }
+      } else {
+        wm.showError(
+          `The GeneratorAI server failed to start.\n\n${err instanceof Error ? err.message : String(err)}`,
+        );
+        return;
+      }
     }
   }
 
@@ -300,6 +321,60 @@ async function onReady(): Promise<void> {
  * dialog), the Dock menu, and the Windows JumpList. Each is a no-op on the
  * platforms that do not have that affordance.
  */
+/**
+ * The credential vault cannot be opened with the key this machine still has.
+ * That is unrecoverable for the stored credentials, but perfectly recoverable
+ * for the app — so ask, rather than leaving the user on an error screen.
+ *
+ * Returns true when the server is running again.
+ */
+let vaultPromptOpen = false;
+
+async function offerVaultReset(sm: ReturnType<typeof getServerManager>): Promise<boolean> {
+  // Both the startup failure and the runtime 'vault-unreadable' event lead
+  // here, and a single failure can raise both. One prompt, not two.
+  if (vaultPromptOpen) return false;
+  vaultPromptOpen = true;
+  try {
+    return await promptVaultReset(sm);
+  } finally {
+    vaultPromptOpen = false;
+  }
+}
+
+async function promptVaultReset(sm: ReturnType<typeof getServerManager>): Promise<boolean> {
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['Reset saved credentials', 'Quit'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Saved credentials could not be unlocked',
+    message: 'Saved credentials could not be unlocked',
+    detail:
+      `${VAULT_UNREADABLE_MESSAGE}\n\n` +
+      'Resetting keeps your chats, projects and settings. It clears stored ' +
+      'credentials only — provider API keys and connected accounts have to be ' +
+      'entered again, and paired devices have to be paired again. The old ' +
+      'vault file is kept next to it in case the keystore entry can be restored.',
+  });
+  if (response !== 0) {
+    isQuitting = true;
+    app.quit();
+    return false;
+  }
+  sm.resetVault();
+  try {
+    await sm.restart();
+    return true;
+  } catch (err) {
+    log.error('Server still failed to start after a vault reset', err);
+    getWindowManager().showError(
+      `The GeneratorAI server failed to start.\n\n${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
 function registerNativeShortcuts(): void {
   app.setAboutPanelOptions({
     applicationName: 'GeneratorAI',

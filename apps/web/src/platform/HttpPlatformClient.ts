@@ -370,6 +370,12 @@ export interface SystemHealth {
   db: boolean;
   uptime: number;
   timestamp: string;
+  /**
+   * `process.platform` of the SERVER host. That is where terminals, editors
+   * and the agent run — not necessarily this machine, so nothing may infer it
+   * from the user agent.
+   */
+  platform?: string;
   activeChats: number;
   activeWorkflowRuns: number;
   /** IDs of chats currently streaming a response (in-flight turn). */

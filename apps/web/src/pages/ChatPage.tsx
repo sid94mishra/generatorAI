@@ -57,6 +57,7 @@ import {
   defaultRightPaneTab,
 } from '@/platform/surfaceCapabilities.js';
 import { cn } from '@/lib/utils.js';
+import { usePageTitle } from '@/hooks/usePageTitle.js';
 
 // Right-pane-only surfaces, code-split out of the chat route chunk. They pull
 // in the two heaviest dependency trees in the app (xterm + its WebGL addon;
@@ -210,6 +211,8 @@ export function ChatPage() {
   const platform = usePlatform();
 
   const { data: chat, isLoading: chatLoading, error: chatError } = useChat(chatId);
+
+  usePageTitle(chat?.name);
   // The empty-state used to name Copilot unconditionally, which is simply
   // wrong for a self-hosted install running HARNESS_TYPE=claude-agent — it
   // told the user they were talking to a provider they had not configured.

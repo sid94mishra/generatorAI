@@ -953,9 +953,27 @@ function WorktreeQuickCd({
 
 // ── Helpers ──────────────────────────────────────────────
 
-function shortenPath(p: string): string {
+/**
+ * The tail of a path, within a character budget.
+ *
+ * Counting SEGMENTS rather than characters put the workspace's execution id —
+ * a 36-character UUID — inside the label, and the CSS ellipsis then cut the
+ * end off it: the header read "…/d9e3d585-5b7e-4b89-b261-99c861196c…" and the
+ * part that says where you actually are ("source/shop") was the part dropped.
+ * The last segment always survives; earlier ones are added while they fit.
+ */
+export function shortenPath(p: string, budget = 34): string {
   if (!p) return '';
   const parts = p.replace(/\\/g, '/').split('/').filter(Boolean);
-  if (parts.length <= 3) return p;
-  return '…/' + parts.slice(-3).join('/');
+  if (parts.length === 0) return p;
+  const kept: string[] = [parts[parts.length - 1] as string];
+  let length = kept[0]!.length;
+  for (let i = parts.length - 2; i >= 0; i -= 1) {
+    const next = parts[i] as string;
+    if (length + next.length + 1 > budget) break;
+    kept.unshift(next);
+    length += next.length + 1;
+  }
+  if (kept.length === parts.length) return p;
+  return '…/' + kept.join('/');
 }

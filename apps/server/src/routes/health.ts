@@ -67,6 +67,11 @@ export function createHealthRoutes(container: Container): Router {
       db: dbOk,
       uptime,
       timestamp: new Date().toISOString(),
+      // The OS the agent, terminal and editors actually run on. Clients cannot
+      // infer it: a browser (or a desktop shell in remote mode) reports its own
+      // machine, which is a different one, and the answer drives real UI —
+      // which shell defaults apply, which options are worth showing at all.
+      platform: process.platform,
       // v2 metrics
       activeChats: activeChatCount,
       activeWorkflowRuns: activeRunCount,

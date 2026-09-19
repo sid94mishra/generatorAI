@@ -436,6 +436,8 @@ export type RunStatus =
 export interface WorkflowRunSummary {
   id: string;
   workflowDefinitionId: string;
+  /** Run inputs. A run started for a project carries it as `__projectId`. */
+  variables?: Record<string, unknown>;
   name?: string;
   status: RunStatus;
   createdAt: Timestamp;
@@ -469,13 +471,37 @@ export interface StageRunSummary {
   completedAt?: Timestamp | null;
   error?: string | null;
   retryCount?: number;
+  currentStep?: number;
+  totalSteps?: number;
+  /** Harness-produced summary of what the stage did. */
+  summary?: string | null;
+  /** Full raw output of the stage's main prompt(s). */
+  outputText?: string | null;
+  outputData?: Record<string, unknown> | null;
+  artifactManifest?: Array<{ path: string; language: string; action: string; sizeBytes: number }> | null;
+  /** The parked payload while `awaiting_input` — shape varies by gate kind. */
+  interruptData?: unknown;
+  wakeAt?: Timestamp | null;
 }
 
+/**
+ * One entry of `GET /workflow-runs/:id/pending-interrupts`.
+ *
+ * The server returns the parked STAGE RUN rows themselves
+ * (`HitlService.listPending` → `StageRun[]`), so `id` is the stage-run id —
+ * the id the approve/interrupt routes take — and the prompt, when there is
+ * one, lives inside `interruptData`. This previously declared a
+ * `{ stageId, prompt }` shape the server never sent, which is how a client
+ * ended up matching on a field that was always undefined.
+ */
 export interface PendingInterrupt {
   id: string;
-  stageId: string;
-  prompt?: string;
-  interruptData?: Record<string, unknown>;
+  workflowRunId: string;
+  stageDefinitionId: string;
+  name?: string;
+  status: StageRunStatus;
+  sessionId?: string | null;
+  interruptData?: unknown;
 }
 
 /** Outcomes the HITL approve endpoint accepts. */
@@ -490,6 +516,10 @@ export interface AutomationSummary {
   enabled: boolean;
   triggerType: 'manual' | 'schedule' | 'webhook';
   workflowDefinitionId: string;
+  workflowIds?: string[];
+  cronExpression?: string;
+  timezone?: string;
+  nextRunAt?: Timestamp | null;
   lastRunAt?: Timestamp | null;
   createdAt: Timestamp;
 }
@@ -498,9 +528,15 @@ export interface AutomationExecutionSummary {
   id: string;
   automationId: string;
   status: string;
+  /** @deprecated The server sends the `*Iterations` counts below; kept for older callers. */
   totalRuns?: number;
   completedRuns?: number;
   failedRuns?: number;
+  totalIterations?: number;
+  completedIterations?: number;
+  failedIterations?: number;
+  triggeredBy?: string;
+  error?: string | null;
   startedAt?: Timestamp | null;
   completedAt?: Timestamp | null;
 }
@@ -786,6 +822,8 @@ export interface HealthSnapshot {
   db: boolean;
   uptime: number;
   timestamp: string;
+  /** `process.platform` of the SERVER host — where terminals and editors run. */
+  platform?: NodeJS.Platform;
   activeChats: number;
   activeWorkflowRuns: number;
   runningChatIds: string[];
@@ -865,10 +903,35 @@ export const queryKeys = {
   pendingScopeRequests: () => ['auth', 'scope-requests', 'pending'] as const,
   posture: () => ['security', 'posture'] as const,
   workflows: () => ['workflows'] as const,
-  runs: (workflowId?: string) => (workflowId ? (['runs', workflowId] as const) : (['runs'] as const)),
-  run: (runId: string) => ['runs', runId] as const,
-  runStages: (runId: string) => ['runs', runId, 'stages'] as const,
-  runInterrupts: (runId: string) => ['runs', runId, 'interrupts'] as const,
+  /**
+   * Runs. Every key shares the `['runs']` root so a lifecycle event that
+   * invalidates the list also refreshes an open run — but the per-workflow
+   * list and a single run live under DIFFERENT second segments. They used to
+   * both be `['runs', <id>]`, distinguished only by which kind of id happened
+   * to be in the slot.
+   */
+  runs: (workflowId?: string) =>
+    workflowId ? (['runs', 'by-workflow', workflowId] as const) : (['runs'] as const),
+  run: (runId: string) => ['runs', 'detail', runId] as const,
+  runStages: (runId: string) => ['runs', 'detail', runId, 'stages'] as const,
+  runInterrupts: (runId: string) => ['runs', 'detail', runId, 'interrupts'] as const,
+  runScratchpad: (runId: string) => ['runs', 'detail', runId, 'scratchpad'] as const,
+  /** One stage session's persisted transcript. */
+  stageTranscript: (runId: string, stageRunId: string) =>
+    ['runs', 'detail', runId, 'stage', stageRunId, 'transcript'] as const,
+  automationExecution: (id: string, execId: string) =>
+    ['automations', id, 'executions', execId] as const,
+  agent: (id: string) => ['agents', 'detail', id] as const,
+  agentUsage: (id: string) => ['agents', 'detail', id, 'usage'] as const,
+  projectChats: (projectId: string) => ['chats', 'by-project', projectId] as const,
+  projectWorkflows: (projectId: string) => ['workflows', 'by-project', projectId] as const,
+  projectAutomations: (projectId: string) => ['automations', 'by-project', projectId] as const,
+  codebaseStatus: (projectId: string, cid: string) =>
+    ['projects', projectId, 'codebases', cid, 'status'] as const,
+  codebaseReadiness: (projectId: string, cid: string) =>
+    ['projects', projectId, 'codebases', cid, 'readiness'] as const,
+  codebaseBranches: (projectId: string, cid: string) =>
+    ['projects', projectId, 'codebases', cid, 'branches'] as const,
   automations: () => ['automations'] as const,
   automation: (id: string) => ['automations', id] as const,
   automationExecutions: (id: string) => ['automations', id, 'executions'] as const,
@@ -930,9 +993,10 @@ export function createApiClient(fetchImpl: ApiFetch) {
       // the mobile Chats tab rendered "No chats yet" against a server holding
       // 128 chats. Verified against the live API; keep these in step with
       // `apps/server/src/routes/chats.ts`, which does `res.json(chats)`.
-      list: (params?: { archived?: boolean; limit?: number }) => {
+      list: (params?: { archived?: boolean; limit?: number; projectId?: string }) => {
         const q = new URLSearchParams();
         if (params?.archived !== undefined) q.set('archived', String(params.archived));
+        if (params?.projectId) q.set('projectId', params.projectId);
         if (params?.limit !== undefined) q.set('limit', String(params.limit));
         const suffix = q.toString() ? `?${q}` : '';
         return request<ChatSummary[]>(fetchImpl, `/api/chats${suffix}`);

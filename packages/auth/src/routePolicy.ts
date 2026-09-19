@@ -112,6 +112,16 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
     write: ['exec:agent'],
   },
   { prefix: '/workflow-runs', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
+  // Running a script materialises a definition AND starts a run — agents
+  // execute, exactly like `POST /workflow-runs/:id/start`. Authoring scripts
+  // (validate, reload, materialize) stays a design-time write, but running
+  // one must carry `exec:agent` too or `write:workflows` alone would launch
+  // agents that the `/workflow-runs` policy deliberately withholds.
+  {
+    prefix: '/workflow-scripts/:id/run',
+    read: ['read:workflows'],
+    write: ['write:workflows', 'exec:agent'],
+  },
   { prefix: '/workflow-scripts', read: ['read:workflows'], write: ['write:workflows'] },
   // Webhook deliveries are the whole point of this trigger type: GitHub,
   // Stripe, a cron pinger — none of them hold `write:workflows` / `exec:agent`,

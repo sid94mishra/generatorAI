@@ -1892,7 +1892,10 @@ export function ChatInput({
 
       {/* ── Separate row below the input: project / codebase context ── */}
       {(projectId || showGitConnector) && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
+        // No horizontal padding: this row's first control lines up with the
+        // composer card directly above it. `px-1` left it 4px to the right,
+        // which reads as a ragged edge under the card.
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <Button
             variant="ghost"
             onClick={() => setShowCodebasePanel((p) => !p)}

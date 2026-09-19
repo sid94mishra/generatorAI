@@ -18,6 +18,7 @@ import {
   isDesktop,
   onDesktopCommand,
   onDesktopNavigate,
+  onDesktopThemePreference,
   onWindowStateChanged,
   pushMenuState,
   readWindowChrome,
@@ -27,6 +28,8 @@ import {
 import { useUiStore } from '@/stores/uiStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
+import { usePageTitleStore } from '@/stores/pageTitleStore.js';
+import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
 
 const ROUTE_LABELS: Array<[prefix: string, label: string]> = [
   ['/chats', 'Chats'],
@@ -56,6 +59,10 @@ export function useDesktopIntegration(): DesktopWindowChrome {
 
   // Visited routes, newest first — feeds the native `File ▸ Open Recent`.
   const recentRef = useRef<Array<{ label: string; route: string }>>([]);
+  // The document's own name, once the page has loaded it. Without this every
+  // recent entry read as its section, so three chats were three "Chats".
+  const pageTitle = usePageTitleStore((s) => s.title);
+  const hasUnsavedWork = useUnsavedWorkStore((s) => s.dirtyKeys.size > 0);
 
   // ── 1. Publish window chrome ──
   useEffect(() => {
@@ -107,10 +114,6 @@ export function useDesktopIntegration(): DesktopWindowChrome {
           // The palette doubles as the app's search surface.
           ui.setCommandPaletteOpen(true);
           break;
-        case 'find-next':
-          // Delegated to whichever panel owns an active find session.
-          window.dispatchEvent(new CustomEvent('generatorai:find-next'));
-          break;
         case 'show-shortcuts':
           window.dispatchEvent(new CustomEvent('generatorai:show-shortcuts'));
           break;
@@ -146,7 +149,7 @@ export function useDesktopIntegration(): DesktopWindowChrome {
   // ── 3. Mirror renderer state into the native menu ──
   useEffect(() => {
     if (!isDesktop) return;
-    const label = routeLabel(location.pathname);
+    const label = pageTitle ?? routeLabel(location.pathname);
     const next = [
       { label, route: location.pathname },
       ...recentRef.current.filter((r) => r.route !== location.pathname),
@@ -156,14 +159,19 @@ export function useDesktopIntegration(): DesktopWindowChrome {
     pushMenuState({
       sidebarOpen,
       rightPaneOpen,
-      // react-router v6 exposes no reliable canGoBack, so approximate from
-      // the session history depth: index 0 means nothing to go back to.
-      canGoBack: window.history.length > 1,
-      canGoForward: false,
       theme: mode,
       recent: next,
+      hasUnsavedWork,
     });
-  }, [location.pathname, sidebarOpen, rightPaneOpen, mode]);
+  }, [location.pathname, sidebarOpen, rightPaneOpen, mode, pageTitle, hasUnsavedWork]);
+
+  // The native View ▸ Appearance radio group is a user choice of MODE, so it
+  // sets the app's own preference. Reporting only the resolved colour meant
+  // picking "Light" did nothing whenever the in-app preference was pinned.
+  useEffect(() => {
+    if (!isDesktop) return undefined;
+    return onDesktopThemePreference((next) => setMode(next));
+  }, [setMode]);
 
   // The native View ▸ Appearance radio group writes to the shell's settings;
   // reflect that back into the SPA theme provider.

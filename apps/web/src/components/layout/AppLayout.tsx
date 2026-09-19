@@ -15,6 +15,7 @@ import { Sidebar } from './Sidebar.js';
 import { Header } from './Header.js';
 import { TitleBar } from './TitleBar.js';
 import { CommandPalette } from './CommandPalette.js';
+import { FindBar } from './FindBar.js';
 import { Drawer } from '@/components/ui/Drawer.js';
 import { useUiStore } from '@/stores/uiStore.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
@@ -136,6 +137,7 @@ export function AppLayout() {
 
       {/* Global ⌘K command palette */}
       <CommandPalette />
+      <FindBar />
 
     </div>
   );

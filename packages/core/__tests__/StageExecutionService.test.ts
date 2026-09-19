@@ -188,6 +188,81 @@ describe('StageExecutionService', () => {
       // Restore
       copilot.sendPromptAndWait = origMethod;
     });
+
+    // ── Race: a stage settled elsewhere while this turn was finishing ──
+    // (liveness monitor fails/aborts a stale stage; the aborted turn then
+    // returns normally). The final completion write must re-check the row
+    // and skip resurrecting it if it already landed on a terminal status.
+
+    it('should not resurrect a stage already failed elsewhere before the final completed write', async () => {
+      const sDef = makeStageDef('sd-race-1', [
+        { label: 'P1', text: 'Do work', waitForCompletion: true },
+      ]);
+      await stageDefRepo.create(sDef);
+      const sr = makeStageRun('sr-race-1', 'sd-race-1');
+      await stageRunRepo.create(sr);
+
+      // The mid-loop pause/cancel check (before the prompt runs) must still
+      // see 'running' so the stage actually executes; only the final settled
+      // check — read right before the completed write — should observe that
+      // the liveness monitor has since failed the row.
+      let getByIdCalls = 0;
+      const originalGetById = stageRunRepo.getById.bind(stageRunRepo);
+      vi.spyOn(stageRunRepo, 'getById').mockImplementation(async (id: string) => {
+        getByIdCalls += 1;
+        const real = await originalGetById(id);
+        if (getByIdCalls > 1) {
+          return { ...real, status: 'failed' as const, error: 'stale heartbeat' };
+        }
+        return real;
+      });
+
+      const updateSpy = vi.spyOn(stageRunRepo, 'update');
+      const emitSpy = vi.spyOn(eventBus, 'emit');
+
+      await service.executeStage(sr, 'run-1', 'per-stage');
+
+      expect(updateSpy).not.toHaveBeenCalledWith(
+        'sr-race-1',
+        expect.objectContaining({ status: 'completed' }),
+      );
+      expect(emitSpy).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ kind: 'stage_run.completed' }),
+      );
+    });
+
+    it('should still mark the stage completed when it is still running at the final check (control)', async () => {
+      const sDef = makeStageDef('sd-race-2', [
+        { label: 'P1', text: 'Do work', waitForCompletion: true },
+      ]);
+      await stageDefRepo.create(sDef);
+      const sr = makeStageRun('sr-race-2', 'sd-race-2');
+      await stageRunRepo.create(sr);
+
+      // Same plumbing as above, but the row is still 'running' at the final
+      // settled check — completion must proceed as before.
+      const originalGetById = stageRunRepo.getById.bind(stageRunRepo);
+      vi.spyOn(stageRunRepo, 'getById').mockImplementation(async (id: string) => {
+        return originalGetById(id);
+      });
+
+      const updateSpy = vi.spyOn(stageRunRepo, 'update');
+      const emitSpy = vi.spyOn(eventBus, 'emit');
+
+      await service.executeStage(sr, 'run-1', 'per-stage');
+
+      const updated = await originalGetById('sr-race-2');
+      expect(updated.status).toBe('completed');
+      expect(updateSpy).toHaveBeenCalledWith(
+        'sr-race-2',
+        expect.objectContaining({ status: 'completed' }),
+      );
+      expect(emitSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ kind: 'stage_run.completed' }),
+      );
+    });
   });
 
   // ── pauseStage ──

@@ -57,6 +57,7 @@ import { RightPane, useRightPaneOpen } from '@/components/layout/RightPane.js';
 import { clearBrowserTabUrl } from '@/lib/browserTabUrls.js';
 import { openMultiplexedStream } from '@/platform/muxStream.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
+import { runTitle } from '@generatorai/client-core';
 
 export function WorkflowRunPageV2() {
   const { id: definitionId, runId } = useParams<{ id: string; runId: string }>();
@@ -193,7 +194,7 @@ export function WorkflowRunPageV2() {
   const { data: runWorkspaceInfo } = useWorkspaceInfo(runWorkspaceId);
   useEditorTarget(
     runWorkspaceInfo?.workingDirectory ?? runWorkspaceInfo?.rootPath,
-    runData?.name ?? 'Workflow run',
+    runTitle(runData?.name),
   );
   useEffect(() => {
     if (!runWorkspaceId) return;
@@ -282,6 +283,22 @@ export function WorkflowRunPageV2() {
       permissionMode,
     });
   }, [storeRun, definition?.stages, definition?.edges, elapsedMs, streams, permissionMode]);
+
+  // Breadcrumb label for this run. Once the epoch suffix is stripped a run is
+  // usually named exactly like its definition, which would render the trail as
+  // "… › Desktop audit flow › Desktop audit flow". When the two match, the
+  // start time is the thing that actually identifies this run among its
+  // siblings.
+  const runCrumb = useMemo(() => {
+    const title = runTitle(runView?.name);
+    if (definition?.name && title === definition.name) {
+      const started = runView?.startedAt;
+      return started
+        ? `Run · ${new Date(started).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}`
+        : 'Run';
+    }
+    return title;
+  }, [runView?.name, runView?.startedAt, definition?.name]);
 
   // Focused stage — auto-select awaiting > running > first
   useEffect(() => {
@@ -472,7 +489,7 @@ export function WorkflowRunPageV2() {
           items={[
             { label: 'Workflows', href: '/workflows' },
             { label: definition?.name ?? 'Workflow', href: definitionId ? `/workflows/${definitionId}` : undefined },
-            { label: runView.name },
+            { label: runCrumb },
           ]}
         />
       </div>
@@ -532,6 +549,10 @@ export function WorkflowRunPageV2() {
                 key={s.id}
                 stage={s}
                 focused={focusedStageId === s.id}
+                // A finished run keeps its last stage open: that is the result
+                // the user came for, and collapsing it left the page blank.
+                autoCollapse={runIsActive}
+                openWhenFinished={i === runView.stages.length - 1}
                 showConnector={i < runView.stages.length - 1}
                 onFocus={selectStage}
                 onApproveHitl={handleApproveHitl}

@@ -143,8 +143,7 @@ interface GeneratorAIDesktopWindowChrome {
 interface GeneratorAIDesktopMenuState {
   sidebarOpen: boolean;
   rightPaneOpen: boolean;
-  canGoBack: boolean;
-  canGoForward: boolean;
+  hasUnsavedWork: boolean;
   theme: 'system' | 'light' | 'dark';
   recent: Array<{ label: string; route: string }>;
 }
@@ -162,7 +161,9 @@ type GeneratorAIDesktopCommand =
   | 'new-automation'
   | 'command-palette'
   | 'focus-search'
+  | 'find-in-page'
   | 'find-next'
+  | 'find-previous'
   | 'toggle-sidebar'
   | 'toggle-right-pane'
   | 'show-shortcuts'
@@ -193,6 +194,19 @@ interface GeneratorAIDesktopBridge {
   ) => () => void;
   onCommand?: (cb: (command: GeneratorAIDesktopCommand) => void) => () => void;
   onNavigate?: (cb: (path: string) => void) => () => void;
+  /** Appearance chosen in the native View ▸ Appearance menu. */
+  onThemePreferenceChanged?: (cb: (mode: 'light' | 'dark' | 'system') => void) => () => void;
+
+  // ── OS file manager ──
+  /** Reveals a path in Finder / File Explorer. False when it is not on this machine. */
+  showItemInFolder?: (fullPath: string) => Promise<boolean>;
+
+  // ── Find in page (Chromium does the searching) ──
+  findInPage?: (text: string, opts?: { forward?: boolean; findNext?: boolean }) => Promise<void>;
+  stopFindInPage?: () => Promise<void>;
+  onFoundInPage?: (
+    cb: (result: { activeMatchOrdinal: number; matches: number }) => void,
+  ) => () => void;
 
   // Additional bridge methods (getAppInfo, selectDirectory, …) exist at
   // runtime but are not surfaced here because the SPA already accesses

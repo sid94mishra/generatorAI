@@ -246,6 +246,21 @@ export function ChangesSurface({
   // that renders changes gets rewind for free. `onOpenCheckpoints` still wins
   // when a host wants to present it somewhere else.
   const [showCheckpoints, setShowCheckpoints] = useState(false);
+  // Width of this surface, so the checkpoint timeline can pick a layout. The
+  // surface is used at very different widths — a ~640px side pane and a
+  // full-width run page — and the viewport says nothing about either.
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const [checkpointsOverlay, setCheckpointsOverlay] = useState(false);
+  useEffect(() => {
+    const el = surfaceRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(([entry]) => {
+      // 288px of timeline plus a diff still worth reading.
+      setCheckpointsOverlay((entry?.contentRect.width ?? 0) < 760);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   /** File id awaiting discard confirmation, and the last discard failure. */
   const [confirmRevert, setConfirmRevert] = useState<string | null>(null);
   const [revertError, setRevertError] = useState<string | null>(null);
@@ -1252,6 +1267,7 @@ export function ChangesSurface({
     // background — two near-blacks a few percent apart, with a visible seam
     // down the middle of the panel.
     <div
+      ref={surfaceRef}
       className={cn(
         'flex h-full min-h-0 flex-col bg-background',
         !embedded && 'rounded-lg border',
@@ -1608,7 +1624,7 @@ export function ChangesSurface({
         discarding the result banner and its skipped-path warnings at exactly
         the moment the user needs to read them.
       */}
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1">
           {summaryQuery.isLoading ? (
             <div className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -1727,7 +1743,18 @@ export function ChangesSurface({
         </div>
 
         {showCheckpoints && workspaceId && (
-          <div className="w-72 shrink-0">
+          // Beside the diff when there is room, over it when there is not.
+          // As a fixed 288px column it took nearly half of the right pane and
+          // squeezed the diff to a few words per line, with the file header
+          // truncated to a single character.
+          <div
+            className={cn(
+              'shrink-0',
+              checkpointsOverlay
+                ? 'absolute inset-y-0 right-0 z-20 w-full border-l bg-background shadow-xl'
+                : 'w-72',
+            )}
+          >
             <CheckpointTimeline
               workspaceId={workspaceId}
               onClose={() => setShowCheckpoints(false)}

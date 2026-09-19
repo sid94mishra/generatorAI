@@ -67,7 +67,7 @@ export interface EndpointSupervisorOptions {
 const defaultSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(new DOMException('Aborted', 'AbortError'));
+      reject(abortError());
       return;
     }
     const timer = setTimeout(resolve, ms);
@@ -75,7 +75,7 @@ const defaultSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
       'abort',
       () => {
         clearTimeout(timer);
-        reject(new DOMException('Aborted', 'AbortError'));
+        reject(abortError());
       },
       { once: true },
     );
@@ -139,7 +139,7 @@ export class EndpointSupervisor {
 
     for (let round = 0; round < maxRounds; round += 1) {
       for (const candidate of ordered) {
-        signal?.throwIfAborted();
+        throwIfAborted(signal);
 
         this.setStatus({
           state: 'connecting',
@@ -247,4 +247,23 @@ function isAbort(err: unknown): boolean {
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * `AbortSignal.prototype.throwIfAborted` is missing from React Native's
+ * AbortSignal (Hermes), so calling it on a phone threw "undefined is not a
+ * function" on every connection attempt — which surfaced as "unreachable"
+ * and made pairing impossible on iOS and Android while browsers worked.
+ */
+export function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  const reason: unknown = (signal as { reason?: unknown }).reason;
+  throw reason !== undefined ? reason : abortError();
+}
+
+/** `DOMException` is not a global in React Native either. */
+function abortError(): Error {
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
 }

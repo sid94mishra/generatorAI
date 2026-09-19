@@ -14,7 +14,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { ChevronDown, Code2, Copy } from 'lucide-react';
+import { ChevronDown, Code2, Copy, FolderOpen } from 'lucide-react';
 import {
   Button,
   DropdownMenu,
@@ -29,6 +29,15 @@ import { toast } from '@/components/Toast.js';
 import { cn } from '@/lib/utils.js';
 import { useEditors, useOpenInEditor, useSourceControlSettings } from '@/hooks/queries.js';
 import { useEditorTargetStore } from '@/stores/editorTargetStore.js';
+import { isDesktop } from '@/lib/desktop.js';
+
+/** What the OS calls the thing this opens. */
+const FILE_MANAGER =
+  typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac OS X')
+    ? 'Finder'
+    : typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
+      ? 'File Explorer'
+      : 'the file manager';
 import type { EditorId, EditorInfo } from '@generatorai/shared';
 
 /** Copy to the clipboard with a `document.execCommand` fallback. */
@@ -102,6 +111,23 @@ export function OpenInEditorButton({ className }: { className?: string }) {
     );
   }, [target]);
 
+  // Desktop only, and honest about remote servers: the shell reports back
+  // whether the path exists on THIS machine, which it does not when the server
+  // runs somewhere else.
+  const revealInFileManager = useCallback(async () => {
+    if (!target) return;
+    const reveal = window.generatoraiDesktop?.showItemInFolder;
+    if (!reveal) return;
+    const shown = await reveal(target.path).catch(() => false);
+    if (!shown) {
+      toast({
+        variant: 'error',
+        title: `Could not show it in ${FILE_MANAGER}`,
+        description: 'That folder is on the server, not on this machine.',
+      });
+    }
+  }, [target]);
+
   // No target → no button. A page that has not resolved a path (or has none)
   // must not show a control that would do nothing.
   if (!target) return null;
@@ -157,6 +183,12 @@ export function OpenInEditorButton({ className }: { className?: string }) {
             <Copy className="h-3.5 w-3.5" />
             Copy path
           </DropdownMenuItem>
+          {isDesktop && (
+            <DropdownMenuItem onSelect={() => void revealInFileManager()}>
+              <FolderOpen className="h-3.5 w-3.5" />
+              Show in {FILE_MANAGER}
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

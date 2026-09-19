@@ -104,3 +104,17 @@ describe('sanitizeSettings (loadSettings path)', () => {
     }
   });
 });
+
+describe('lastServerPort survives a round trip', () => {
+  it('is kept, because the window origin (and its storage) depends on it', () => {
+    // Dropping this on load sent the server to a new port every launch, which
+    // changed the app's origin and emptied every per-origin store with it.
+    const out = sanitizeSettings({ lastServerPort: 51904 }, DEFAULTS);
+    expect(out.lastServerPort).toBe(51904);
+  });
+
+  it('is discarded when it is not a usable port', () => {
+    expect(sanitizeSettings({ lastServerPort: 70_000 }, DEFAULTS).lastServerPort).toBeUndefined();
+    expect(sanitizeSettings({ lastServerPort: 'abc' }, DEFAULTS).lastServerPort).toBeUndefined();
+  });
+});

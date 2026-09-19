@@ -13,16 +13,31 @@ export function registerDownloadHandler(session: Session): void {
   session.on('will-download', (_event, item) => {
     const suggested = item.getFilename() || 'download';
     const defaultPath = path.join(app.getPath('downloads'), suggested);
-    const win = BrowserWindow.getFocusedWindow() ?? undefined;
+    const win = BrowserWindow.getFocusedWindow();
 
-    const target = dialog.showSaveDialogSync(win!, { defaultPath });
-    if (!target) {
+    // `setSaveDialogOptions` + the ASYNCHRONOUS dialog. The synchronous one
+    // blocked the whole main process while the sheet was open: every window
+    // froze, IPC stopped, the tray and menus stopped responding, and the
+    // embedded server lost its supervisor for as long as the user took to
+    // pick a folder. Electron keeps the item alive until a save path is set,
+    // so answering later is fine.
+    const pick = win
+      ? dialog.showSaveDialog(win, { defaultPath })
+      : dialog.showSaveDialog({ defaultPath });
+
+    void pick.then(({ canceled, filePath }) => {
+      if (canceled || !filePath) {
+        item.cancel();
+        return;
+      }
+      item.setSavePath(filePath);
+    }).catch((err: unknown) => {
+      log.error('Save dialog failed', err);
       item.cancel();
-      return;
-    }
-    item.setSavePath(target);
+    });
 
     item.once('done', (_e, state) => {
+      const target = item.getSavePath();
       if (state === 'completed') {
         log.info('Download saved', { target });
         // Reveal in the OS file manager for quick access.

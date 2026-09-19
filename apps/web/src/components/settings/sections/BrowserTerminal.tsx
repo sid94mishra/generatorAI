@@ -9,6 +9,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getWebBrowserInteractivity, setWebBrowserInteractivity } from '@/components/chat/BrowserPanel.js';
 import { Input, ToggleSwitch } from '@/components/ui/index.js';
 import { SectionHeader, SettingsCard } from '../shared.js';
+import { useHealth } from '@/hooks/queries.js';
 
 const TERMINAL_SHELL_KEY = 'generatorai:terminal:shell';
 const TERMINAL_ALLOW_SECRETS_KEY = 'generatorai:terminal:allowSecrets';
@@ -47,7 +48,11 @@ export function BrowserTerminalSection() {
   const [allowSecrets, setAllowSecrets] = useState<boolean>(() => readLs(TERMINAL_ALLOW_SECRETS_KEY) === '1');
   const [loadPwshProfile, setLoadPwshProfile] = useState<boolean>(() => readLs(TERMINAL_LOAD_PWSH_PROFILE_KEY) === '1');
 
-  const isWindows = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
+  // The terminal runs on the SERVER host, not in this browser — in remote mode
+  // they are different machines, and reading `navigator.userAgent` described
+  // the wrong one. Until health answers, assume nothing platform-specific.
+  const { data: health } = useHealth();
+  const isWindows = health?.platform === 'win32';
 
   return (
     <div>
@@ -91,12 +96,16 @@ export function BrowserTerminalSection() {
             />
           </div>
           <div className="space-y-3">
-            <ToggleSwitch
-              checked={loadPwshProfile}
-              onChange={(next) => { setLoadPwshProfile(next); writeLs(TERMINAL_LOAD_PWSH_PROFILE_KEY, next ? '1' : '0'); }}
-              label="Load PowerShell profile"
-              description="When on, pwsh runs $PROFILE at startup. Off speeds up spawn by ~1–2 seconds."
-            />
+            {/* PowerShell is the default shell only on Windows; elsewhere this
+                row is a setting for a shell that will never be spawned. */}
+            {isWindows && (
+              <ToggleSwitch
+                checked={loadPwshProfile}
+                onChange={(next) => { setLoadPwshProfile(next); writeLs(TERMINAL_LOAD_PWSH_PROFILE_KEY, next ? '1' : '0'); }}
+                label="Load PowerShell profile"
+                description="When on, pwsh runs $PROFILE at startup. Off speeds up spawn by ~1–2 seconds."
+              />
+            )}
             <ToggleSwitch
               checked={allowSecrets}
               onChange={(next) => { setAllowSecrets(next); writeLs(TERMINAL_ALLOW_SECRETS_KEY, next ? '1' : '0'); }}

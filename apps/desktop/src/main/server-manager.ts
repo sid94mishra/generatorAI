@@ -21,17 +21,36 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import * as http from 'node:http';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { log } from './logger';
 import { resolvePaths, ensureDataDirs, fileExists, type ResolvedPaths } from './paths';
 import { findFreePort, preferredPort } from './ports';
-import { loadSettings } from './config';
+import { loadSettings, saveSettings } from './config';
 import { loadOrCreateSecretKey } from './secret-protection';
 import type { ServerStatus, ServerState } from '../shared/ipc';
 
 const HEALTH_TIMEOUT_MS = 60_000;
 const HEALTH_POLL_INTERVAL_MS = 400;
 const MAX_AUTO_RESTARTS = 5;
+
+/**
+ * Recognises the one server failure that no restart can fix: a vault secret
+ * that will not decrypt under the key-encryption key we supplied. Matched on
+ * the message `EncryptedFileSecretStore` throws (`SecretStoreError` with code
+ * `INTEGRITY`), which reaches the shell only as the child's stderr text.
+ */
+export function isVaultIntegrityFailure(serverOutput: string): boolean {
+  return serverOutput.includes('failed integrity verification');
+}
+
+/** Shown verbatim to the user, so it explains the situation, not the stack. */
+export const VAULT_UNREADABLE_MESSAGE =
+  'The saved credentials could not be unlocked.\n\n' +
+  'GeneratorAI protects stored credentials with a key held in your operating ' +
+  'system keystore. That key is no longer available, so the existing ' +
+  'credential vault cannot be read.';
 
 export class ServerManager extends EventEmitter {
   private child: ChildProcess | null = null;
@@ -63,6 +82,40 @@ export class ServerManager extends EventEmitter {
    */
   private electronIpcToken: string | null = null;
   private nativeBrowserEnabled = false;
+  /**
+   * Set when the embedded server reported that the credential vault cannot be
+   * decrypted with the key we handed it. Retrying is pointless — the key is
+   * gone, not flaky — so the restart loop stops and the shell offers the one
+   * recovery that exists (reset the vault). See `vaultUnreadable`.
+   */
+  private vaultUnreadable = false;
+
+  /** True when the last server exit was a vault the current key cannot open. */
+  isVaultUnreadable(): boolean {
+    return this.vaultUnreadable;
+  }
+
+  /**
+   * Moves the unreadable vault aside so the next start creates a fresh one.
+   * Destructive by nature: every stored credential inside it is unrecoverable
+   * once the key that encrypted it is gone, so this is only ever called after
+   * the user has confirmed. The old file is kept, not deleted, in case the OS
+   * keystore entry can be restored from a backup later.
+   */
+  resetVault(): string | null {
+    this.vaultUnreadable = false;
+    const dir = path.join(this.paths.dataDir, 'secrets');
+    if (!fileExists(dir)) return null;
+    const moved = `${dir}.unreadable-${Date.now()}`;
+    try {
+      fs.renameSync(dir, moved);
+      log.warn('Credential vault reset by the user', { moved });
+      return moved;
+    } catch (err) {
+      log.error('Could not move the unreadable vault aside', err);
+      return null;
+    }
+  }
 
   /**
    * Which OS backend protected the vault key for the current child process.
@@ -185,7 +238,12 @@ export class ServerManager extends EventEmitter {
     // the window's URL stays valid; `findFreePort` still falls back to a
     // random one if something grabbed it meanwhile — index.ts then repoints
     // the window from the `status` event.
-    this.port = await findFreePort(preferredPort(settings.serverPort, this.port));
+    this.port = await findFreePort(
+      preferredPort(settings.serverPort, this.port ?? settings.lastServerPort ?? null),
+    );
+    // Remember it: the window's origin is built from this port, and every
+    // per-origin store (the paired credential above all) lives or dies with it.
+    if (settings.lastServerPort !== this.port) saveSettings({ lastServerPort: this.port });
     // Acquire a separate free port for the isolated widget-asset origin.
     this.widgetPort = await findFreePort(0);
     ensureDataDirs(this.paths);
@@ -225,8 +283,16 @@ export class ServerManager extends EventEmitter {
         return;
       }
       // Unexpected exit → attempt bounded auto-restart.
-      this.setState('crashed', `Server exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
-      if (this.restarts < MAX_AUTO_RESTARTS) {
+      this.setState(
+        'crashed',
+        this.vaultUnreadable
+          ? VAULT_UNREADABLE_MESSAGE
+          : `Server exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`,
+      );
+      if (this.vaultUnreadable) {
+        log.error('Server cannot open the credential vault; not restarting');
+        this.emit('vault-unreadable');
+      } else if (this.restarts < MAX_AUTO_RESTARTS) {
         this.restarts += 1;
         const delay = Math.min(1000 * 2 ** (this.restarts - 1), 8000);
         log.info(`Restarting server in ${delay}ms (attempt ${this.restarts})`);
@@ -243,6 +309,7 @@ export class ServerManager extends EventEmitter {
 
   /** Restart the server (used after settings changes or from the UI). */
   async restart(): Promise<void> {
+    this.vaultUnreadable = false;
     this.setState('restarting');
     await this.stop();
     this.restarts = 0;
@@ -465,6 +532,11 @@ export class ServerManager extends EventEmitter {
   private pipeServerLog(level: 'info' | 'warn', buf: Buffer): void {
     const text = buf.toString('utf8').trimEnd();
     if (!text) return;
+    // The server prints this and exits when a secret cannot be decrypted with
+    // the key-encryption key it was given — i.e. the OS keystore entry that
+    // protected the vault was lost or replaced. No number of restarts fixes
+    // that, so record it and let the exit handler surface a real choice.
+    if (isVaultIntegrityFailure(text)) this.vaultUnreadable = true;
     for (const line of text.split(/\r?\n/)) {
       log[level](`[server] ${line}`);
     }
@@ -473,6 +545,11 @@ export class ServerManager extends EventEmitter {
   private async waitForHealth(): Promise<void> {
     const deadline = Date.now() + HEALTH_TIMEOUT_MS;
     while (Date.now() < deadline) {
+      // Checked before the child, and on every pass: an auto-restart can put a
+      // new child in place while this loop is still waiting, and without this
+      // the wait then ran its full minute before reporting a failure that was
+      // already known one second in.
+      if (this.vaultUnreadable) throw new Error(VAULT_UNREADABLE_MESSAGE);
       if (!this.child) {
         throw new Error(this.lastError ?? 'Server process exited before becoming healthy');
       }

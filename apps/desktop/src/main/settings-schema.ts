@@ -32,6 +32,7 @@ const windowSchema = z.object({
 export const SETTING_SCHEMAS = {
   theme: z.enum(['light', 'dark', 'system']),
   serverPort: port,
+  lastServerPort: port,
   harnessType: z.enum(HARNESS_TYPES),
   minimizeToTray: z.boolean(),
   // An SPA route, never a full URL: `navigateTo` pushes it into history.
@@ -85,6 +86,15 @@ export function sanitizeSettings(
     const v = validateSettingValue(key, input[key]);
     if (v.ok) (out as unknown as Record<string, unknown>)[key] = v.value;
     else report.repaired.push({ key, error: v.error });
+  }
+
+  // Remembered, not user-set: the port the server bound to last time, so the
+  // window keeps the same origin — and therefore the same localStorage and
+  // paired credential — across launches.
+  if ('lastServerPort' in input && input['lastServerPort'] !== undefined) {
+    const v = validateSettingValue('lastServerPort', input['lastServerPort']);
+    if (v.ok) out.lastServerPort = v.value;
+    else report.repaired.push({ key: 'lastServerPort', error: v.error });
   }
 
   if ('lastRoute' in input && input['lastRoute'] !== undefined) {

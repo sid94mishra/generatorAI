@@ -244,8 +244,14 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       update: (id: string, body: Record<string, unknown>) =>
         req<WorkflowDefinition>(`/api/workflow-definitions/${id}`, jsonWith('PATCH', body)),
 
-      remove: (id: string) =>
-        req<void>(`/api/workflow-definitions/${id}`, { method: 'DELETE' }),
+      /**
+       * 409 when runs still reference the definition, unless `force` — which
+       * deletes those runs too.
+       */
+      remove: (id: string, force?: boolean) =>
+        req<void>(`/api/workflow-definitions/${id}${qs({ force: force ? 'true' : undefined })}`, {
+          method: 'DELETE',
+        }),
 
       // 422 is this route's way of saying "not valid", with the findings in
       // the body — not a transport failure. Plain `request` threw it away
@@ -330,6 +336,9 @@ export function createAdminApi(fetchImpl: ApiFetch) {
           req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/pause`, json({})),
         resume: (runId: string, stageId: string) =>
           req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/resume`, json({})),
+        /** Wake a `sleeping` stage early. 409 when it is not parked. */
+        wake: (runId: string, stageId: string) =>
+          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/wake`, json({})),
         retry: (runId: string, stageId: string) =>
           req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/retry`, json({})),
         cancel: (runId: string, stageId: string) =>
@@ -822,6 +831,35 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         req<Record<string, unknown>>(`/api/orchestrator/runs/${runId}/context`),
       cancel: (runId: string) =>
         req<void>(`/api/orchestrator/runs/${runId}/cancel`, json({})),
+      /**
+       * `POST /orchestrator/runs/:id/uploads` — custom prompts, skills or
+       * agent definitions for one run (multipart, field `files`, max 20).
+       * The server checks extensions and rejects path-like names itself.
+       */
+      uploadRunFiles: (
+        runId: string,
+        category: 'prompts' | 'skills' | 'agents',
+        files: Array<{ name: string; data: Uint8Array; mimeType?: string }>,
+      ) => {
+        const form = new FormData();
+        form.set('category', category);
+        for (const file of files) {
+          form.append(
+            'files',
+            // Same harmless `Uint8Array<ArrayBufferLike>` typings mismatch as
+            // `chats.sendWithAttachments`.
+            new Blob([file.data as unknown as ArrayBuffer], {
+              type: file.mimeType || 'application/octet-stream',
+            }),
+            file.name,
+          );
+        }
+        // No content-type: fetch sets the multipart boundary from the body.
+        return req<{ files?: Array<{ name: string; path: string }> }>(
+          `/api/orchestrator/runs/${runId}/uploads`,
+          { method: 'POST', body: form },
+        );
+      },
       runWorkspace: (runId: string) =>
         req<Record<string, unknown>>(`/api/orchestrator/runs/${runId}/workspace`),
       runWorkspaceContent: (runId: string, path: string, source?: string) =>
@@ -1024,8 +1062,9 @@ export function createAdminApi(fetchImpl: ApiFetch) {
     healthConfig: () => req<Record<string, unknown>>('/api/health/config'),
 
     sessions: {
-      chat: (sessionId: string) =>
-        req<Array<Record<string, unknown>>>(`/api/sessions/${sessionId}/chat`),
+      /** Pass `stageRunId` to narrow a shared session to one stage run's turns. */
+      chat: (sessionId: string, stageRunId?: string) =>
+        req<Array<Record<string, unknown>>>(`/api/sessions/${sessionId}/chat${qs({ stageRunId })}`),
     },
 
     // ── stream.ts ───────────────────────────────────────────────

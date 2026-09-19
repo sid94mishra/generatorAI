@@ -5313,6 +5313,13 @@ select:focus-visible {
 .gai-no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .gai-no-scrollbar::-webkit-scrollbar { width: 0; height: 0; }
 
+/* Applied only while such a strip actually overflows. Without it a scrolled
+   tab is cut through the middle of its label against a hard edge, which reads
+   as a rendering fault rather than "there is more this way". */
+.gai-edge-fade {
+  mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+}
+
 /* == Code Blocks == */
 pre code {
   font-family: var(--font-mono);

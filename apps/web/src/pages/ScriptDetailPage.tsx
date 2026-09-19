@@ -19,11 +19,14 @@ import { CardGridSkeleton } from '@/components/Skeleton.js';
 import { Button, Badge, PageHeader } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { cn } from '@/lib/utils.js';
+import { usePageTitle } from '@/hooks/usePageTitle.js';
 
 export function ScriptDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: script, isLoading, error } = useScript(id);
+
+  usePageTitle(script?.metadata?.name ?? script?.id);
   const { data: profiles } = useScriptProfiles(id);
   const materialize = useMaterializeScript();
   const runScript = useRunScript();

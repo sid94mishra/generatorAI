@@ -48,6 +48,8 @@ import { EntityListRow } from '@/components/data/index.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import type { WorkflowRun, CreateWorkflowRunParams } from '@generatorai/shared';
 import { encodeStageOverrides } from '@generatorai/client-core';
+import { usePageTitle } from '@/hooks/usePageTitle.js';
+import { runTitle } from '@generatorai/client-core';
 
 /** How many runs the sidebar shows before "Show more". */
 const RUNS_PAGE_SIZE = 5;
@@ -57,6 +59,8 @@ export function WorkflowDefinitionPage() {
   const navigate = useNavigate();
 
   const { data: definition, isLoading, error } = useWorkflowDefinition(id);
+
+  usePageTitle(definition?.name);
   const { data: runs } = useWorkflowRunsByDefinition(id);
   const deleteDefinition = useDeleteWorkflowDefinition();
   const createRun = useCreateWorkflowRun();
@@ -438,7 +442,7 @@ function RunRow({ run }: { run: WorkflowRun }) {
       size="sm"
       href={`/workflows/${run.workflowDefinitionId}/runs/${run.id}`}
       leading={<StatusBadge status={run.status} size="sm" />}
-      title={<span className="truncate">{run.name}</span>}
+      title={<span className="truncate">{runTitle(run.name)}</span>}
       description={
         run.startedAt
           ? `Started ${new Date(run.startedAt).toLocaleString()}`

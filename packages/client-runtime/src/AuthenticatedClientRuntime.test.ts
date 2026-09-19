@@ -45,6 +45,33 @@ describe('AuthenticatedClientRuntime endpoint trust', () => {
     expect(requests).toEqual(['http://192.168.1.20:3100/api/auth/server-info']);
   });
 
+  it('retries the identity probe after a failed attempt instead of caching the failure', async () => {
+    let online = false;
+    const runtime = new AuthenticatedClientRuntime({
+      endpoint: 'http://192.168.1.20:3100',
+      keyStore: new MemoryDeviceKeyStore(),
+      sessionStore: new MemorySessionStore(),
+      fetchImpl: vi.fn(async (input) => {
+        const url = String(input);
+        if (!online) throw new Error('network unavailable');
+        if (url.endsWith('/api/auth/server-info')) return Response.json({ serverId: SERVER_ID });
+        if (url.endsWith('/api/auth/pair/complete')) return sessionResponse();
+        return new Response(null, { status: 404 });
+      }),
+    });
+    const pairing = {
+      endpoint: 'http://192.168.1.20:3100',
+      serverId: SERVER_ID,
+      pairingToken: 'pairing-secret',
+      deviceName: 'Phone',
+      platform: 'mobile' as const,
+    };
+
+    await expect(runtime.completePairing(pairing)).rejects.toThrow('Could not verify the paired server identity');
+    online = true;
+    await expect(runtime.completePairing(pairing)).resolves.toBeTruthy();
+  });
+
   it('falls back to the next matching endpoint and uses it for HTTP and stream URLs', async () => {
     const requests: string[] = [];
     const runtime = new AuthenticatedClientRuntime({
@@ -237,5 +264,39 @@ describe('AuthenticatedClientRuntime endpoint trust', () => {
     for (let i = 0; i < 3; i++) statuses.push((await runtime.fetch('/api/chats')).status);
     expect(statuses).toEqual([200, 200, 200]);
     expect([...spent]).toEqual(['nonce-1']);
+  });
+});
+
+describe('AuthenticatedClientRuntime launch retry', () => {
+  it('leaves the error state on retryInitialize once the host is reachable again', async () => {
+    let online = true;
+    const keyStore = new MemoryDeviceKeyStore();
+    const sessionStore = new MemorySessionStore();
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!online) throw new Error('network unavailable');
+      if (url.endsWith('/api/auth/server-info')) return Response.json({ serverId: SERVER_ID });
+      if (url.endsWith('/api/auth/pair/complete') || url.endsWith('/api/auth/token/refresh')) {
+        return sessionResponse();
+      }
+      return Response.json({ ok: true });
+    });
+    const pairing = new AuthenticatedClientRuntime({ endpoint: 'http://127.0.0.1:3100', keyStore, sessionStore, fetchImpl });
+    await pairing.completePairing({
+      endpoint: 'http://127.0.0.1:3100',
+      serverId: SERVER_ID,
+      pairingToken: 'pairing-secret',
+      deviceName: 'Phone',
+      platform: 'mobile',
+    });
+
+    // App relaunch while the host is unreachable.
+    online = false;
+    const relaunched = new AuthenticatedClientRuntime({ endpoint: 'http://127.0.0.1:3100', keyStore, sessionStore, fetchImpl });
+    expect((await relaunched.initialize()).status).toBe('error');
+    // Memoised: a plain initialize() keeps reporting the launch failure.
+    online = true;
+    expect((await relaunched.initialize()).status).toBe('error');
+    expect((await relaunched.retryInitialize()).status).toBe('authenticated');
   });
 });

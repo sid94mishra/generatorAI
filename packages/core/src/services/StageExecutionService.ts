@@ -2543,6 +2543,22 @@ export class StageExecutionService {
         );
       }
 
+      // A stage settled elsewhere while this turn was finishing must not be
+      // resurrected. The liveness monitor fails a stage whose heartbeat went
+      // stale and aborts it; when the aborted turn then returns normally, an
+      // unconditional write here flipped the row back to `completed` inside a
+      // `failed` run — and a later Retry skipped it as done, "completing" in
+      // 0s without doing the work. Mirrors the catch path's paused/cancelled
+      // guard below.
+      const settled = await this.stageRunRepo.getById(stageRun.id).catch(() => null);
+      if (settled && (settled.status === 'failed' || settled.status === 'cancelled')) {
+        console.warn(
+          `[StageExecution] Stage ${stageRun.id} finished after it was already ${settled.status}; keeping ${settled.status}`,
+        );
+        if (durable) durable.releaseJournal(durableCtx);
+        return;
+      }
+
       // Mark complete — set currentStep to totalSteps so progress shows 100%
       await this.stageRunRepo.update(stageRun.id, {
         status: 'completed',

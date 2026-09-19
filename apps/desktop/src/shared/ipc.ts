@@ -79,11 +79,21 @@ export interface WindowChrome {
 export interface MenuState {
   sidebarOpen: boolean;
   rightPaneOpen: boolean;
-  canGoBack: boolean;
-  canGoForward: boolean;
   theme: ThemePreference;
   /** Most recently visited routes, newest first. */
   recent: { label: string; route: string }[];
+}
+
+/**
+ * Everything the renderer mirrors into the native shell.
+ *
+ * Back/Forward are deliberately absent: Chromium's own navigation history is
+ * the authority for those (see `menu.ts`), and the renderer's guess left
+ * `View ▸ Forward` permanently disabled.
+ */
+export interface ShellState extends MenuState {
+  /** True while the renderer holds edits that closing would discard. */
+  hasUnsavedWork: boolean;
 }
 
 // Renderer → main (invoke/handle)
@@ -102,6 +112,13 @@ export const IPC = {
   reload: 'desktop:reload',
   toggleDevtools: 'desktop:toggleDevtools',
   showItemInFolder: 'desktop:showItemInFolder',
+  /**
+   * Find-in-page. Chromium owns the search — it is the only thing that can see
+   * text inside canvas-rendered panes, virtualised lists and cross-origin
+   * frames — so the renderer draws the bar and delegates the searching.
+   */
+  findInPage: 'desktop:findInPage',
+  stopFindInPage: 'desktop:stopFindInPage',
   /**
    * Asks the shell for a single-use pairing code so the renderer can enrol
    * itself as a device. Returns null when the server is not running.
@@ -124,6 +141,15 @@ export interface DesktopPairingCode {
 }
 
 // Main → renderer (send/on)
+/**
+ * The text-prompt window's only channel. Electron does not implement
+ * `window.prompt`, so asking the user for one line — a server address, say —
+ * needs a real window of our own.
+ */
+export const PROMPT_IPC = {
+  result: 'desktop-prompt:result',
+} as const;
+
 export const IPC_EVENT = {
   navigate: 'desktop:navigate',
   serverStatus: 'desktop:server-status',
@@ -131,6 +157,15 @@ export const IPC_EVENT = {
   themeChanged: 'desktop:theme-changed',
   /** Window maximize/unmaximize/fullscreen, so a custom bar can restyle. */
   windowStateChanged: 'desktop:window-state-changed',
+  /** Match count for the current find-in-page query. */
+  foundInPage: 'desktop:found-in-page',
+  /**
+   * The user picked an appearance in the native View ▸ Appearance menu.
+   * Distinct from `themeChanged`, which reports the RESOLVED colour after an
+   * OS change: this one carries the preference itself, so the renderer adopts
+   * light/dark/system rather than a colour it may be pinned against.
+   */
+  themePreferenceChanged: 'desktop:theme-preference-changed',
 } as const;
 
 /** Payload of {@link IPC_EVENT.windowStateChanged}. */
@@ -138,6 +173,12 @@ export interface WindowStateChange {
   maximized: boolean;
   fullScreen: boolean;
   focused: boolean;
+}
+
+/** Result of one find-in-page pass, as Chromium reports it. */
+export interface FindInPageResult {
+  activeMatchOrdinal: number;
+  matches: number;
 }
 
 /** High-level commands dispatched from native menus / shortcuts to the renderer. */
@@ -148,7 +189,10 @@ export type DesktopCommand =
   | 'new-automation'
   | 'command-palette'
   | 'focus-search'
+  /** Open the find bar (Edit ▸ Find). */
+  | 'find-in-page'
   | 'find-next'
+  | 'find-previous'
   | 'toggle-sidebar'
   | 'toggle-right-pane'
   | 'show-shortcuts'

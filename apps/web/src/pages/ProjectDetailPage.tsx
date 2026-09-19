@@ -36,6 +36,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { toast } from '@/components/Toast.js';
+import { DirectoryBrowser } from '@/components/chat/sources/DirectoryBrowser.js';
 
 import {
   useProject,
@@ -68,6 +69,7 @@ import { SectionListHeader, CatalogAccordionRow } from '@/components/settings/sh
 import { useProjectCatalogPrefsStore } from '@/stores/projectCatalogPrefsStore.js';
 import { cn } from '@/lib/utils.js';
 import type { CodebaseType, ConfigType, ArtifactWithSource, McpServerEntry } from '@generatorai/shared';
+import { usePageTitle } from '@/hooks/usePageTitle.js';
 
 type Tab = 'codebases' | 'artifacts' | 'pull-requests' | 'settings';
 type ArtifactCategory = 'skill' | 'prompt' | 'agent' | 'mcp';
@@ -185,6 +187,8 @@ export function ProjectDetailPage() {
   const navigate = useNavigate();
 
   const { data: project, isLoading, error } = useProject(id);
+
+  usePageTitle(project?.name);
   const [hasInProgressClone, setHasInProgressClone] = useState(false);
   const { data: codebases } = useProjectCodebases(id, {
     refetchInterval: hasInProgressClone ? 3000 : false,
@@ -270,6 +274,7 @@ export function ProjectDetailPage() {
   const [cbUrl, setCbUrl] = useState('');
   const [cbLocalPath, setCbLocalPath] = useState('');
   const [cbBranch, setCbBranch] = useState('');
+  const [browsingLocalPath, setBrowsingLocalPath] = useState(false);
 
   // ── Config upload (per-section) ──
   const configFileRef = useRef<HTMLInputElement>(null);
@@ -527,13 +532,26 @@ export function ProjectDetailPage() {
               ) : (
                 <div>
                   <label className="block text-[10px] text-muted-foreground">Local Path*</label>
-                  <Input
-                    type="text"
-                    value={cbLocalPath}
-                    onChange={(e) => setCbLocalPath(e.target.value)}
-                    className="mt-0.5 text-xs font-mono"
-                    placeholder="/path/to/repo"
-                  />
+                  {/* Browses the SERVER's filesystem — the only machine whose
+                      paths this field can mean. */}
+                  <div className="mt-0.5 flex items-center gap-2">
+                    <Input
+                      type="text"
+                      value={cbLocalPath}
+                      onChange={(e) => setCbLocalPath(e.target.value)}
+                      className="text-xs font-mono"
+                      placeholder="/path/to/repo"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      leftIcon={<FolderOpen className="h-3.5 w-3.5" />}
+                      onClick={() => setBrowsingLocalPath(true)}
+                    >
+                      Browse
+                    </Button>
+                  </div>
                 </div>
               )}
               <div>
@@ -557,6 +575,15 @@ export function ProjectDetailPage() {
                   Add Repository
                 </Button>
               </div>
+              <DirectoryBrowser
+                open={browsingLocalPath}
+                onClose={() => setBrowsingLocalPath(false)}
+                onPick={(picked) => {
+                  setCbLocalPath(picked);
+                  setBrowsingLocalPath(false);
+                }}
+                initialPath={cbLocalPath || undefined}
+              />
             </div>
           )}
 

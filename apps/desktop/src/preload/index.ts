@@ -15,7 +15,8 @@ import {
   type SaveFileOptions,
   type DesktopCommand,
   type DesktopPairingCode,
-  type MenuState,
+  type ShellState,
+  type FindInPageResult,
   type WindowChrome,
   type WindowStateChange,
 } from '../shared/ipc';
@@ -49,7 +50,25 @@ const api = {
     ipcRenderer.invoke(IPC.selectFile, filters),
   saveFile: (opts: SaveFileOptions): Promise<string | null> =>
     ipcRenderer.invoke(IPC.saveFile, opts),
-  showItemInFolder: (fullPath: string): Promise<void> =>
+  /** Resolves false when the path does not exist on this machine. */
+  findInPage: (text: string, opts?: { forward?: boolean; findNext?: boolean }): Promise<void> =>
+    ipcRenderer.invoke(IPC.findInPage, { text, ...opts }),
+
+  stopFindInPage: (): Promise<void> => ipcRenderer.invoke(IPC.stopFindInPage),
+
+  onFoundInPage: (cb: (r: FindInPageResult) => void): (() => void) => {
+    const handler = (_e: unknown, r: FindInPageResult) => cb(r);
+    ipcRenderer.on(IPC_EVENT.foundInPage, handler);
+    return () => ipcRenderer.removeListener(IPC_EVENT.foundInPage, handler);
+  },
+
+  onThemePreferenceChanged: (cb: (theme: ThemePreference) => void): (() => void) => {
+    const handler = (_e: unknown, t: ThemePreference) => cb(t);
+    ipcRenderer.on(IPC_EVENT.themePreferenceChanged, handler);
+    return () => ipcRenderer.removeListener(IPC_EVENT.themePreferenceChanged, handler);
+  },
+
+  showItemInFolder: (fullPath: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.showItemInFolder, fullPath),
 
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.openExternal, url),
@@ -81,7 +100,7 @@ const api = {
    * Mirrors renderer UI state into the native menu, so `View ▸ Toggle
    * Sidebar` shows a real checkmark and `Back` greys out when it would no-op.
    */
-  setMenuState: (state: Partial<MenuState>): Promise<void> =>
+  setMenuState: (state: Partial<ShellState>): Promise<void> =>
     ipcRenderer.invoke(IPC.setMenuState, state),
 
   // Subscriptions (main → renderer)

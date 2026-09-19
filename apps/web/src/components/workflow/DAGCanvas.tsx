@@ -300,7 +300,7 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
                 Start building your workflow
               </h3>
               <p className="mt-1.5 text-xs text-[var(--color-muted-foreground)] max-w-[240px]">
-                Click "Add Stage" below to create your first workflow stage, or drag from the sidebar
+                Click "Add Stage" below to create your first workflow stage
               </p>
               {onAddStage && (
                 <Button

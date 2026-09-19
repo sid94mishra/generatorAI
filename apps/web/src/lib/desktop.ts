@@ -70,6 +70,13 @@ export function onDesktopNavigate(cb: (path: string) => void): () => void {
   return api(cb);
 }
 
+/** Subscribe to the appearance the user picks in the native menu. */
+export function onDesktopThemePreference(cb: (mode: 'light' | 'dark' | 'system') => void): () => void {
+  const api = bridge()?.onThemePreferenceChanged;
+  if (!api) return () => undefined;
+  return api(cb);
+}
+
 /** Subscribe to maximise/fullscreen/focus changes. */
 export function onWindowStateChanged(cb: (state: DesktopWindowState) => void): () => void {
   const api = bridge()?.onWindowStateChanged;

@@ -3,7 +3,7 @@
 // comparison and, above all, the fail-CLOSED behaviour on garbage input.
 
 import { describe, expect, it } from 'vitest';
-import { isAppOrigin, isAppOriginForPermission } from '../navigation-guard';
+import { isAppOrigin, isAppOriginForPermission, isExternalUrlAllowed } from '../navigation-guard';
 
 const APP = 'http://127.0.0.1:3100';
 
@@ -61,5 +61,36 @@ describe('isAppOriginForPermission (media handler)', () => {
 
   it('grants nothing when no app URL is known', () => {
     expect(isAppOriginForPermission('', null)).toBe(false);
+  });
+});
+
+describe('isExternalUrlAllowed', () => {
+  it('allows the web schemes', () => {
+    expect(isExternalUrlAllowed('https://github.com/x')).toBe(true);
+    expect(isExternalUrlAllowed('http://example.com')).toBe(true);
+    expect(isExternalUrlAllowed('mailto:a@b.c')).toBe(true);
+  });
+
+  it('allows the editor fallback schemes the server hands back', () => {
+    // `/api/editor/open` answers `{ ok: false, fallbackUrl }` when it cannot
+    // spawn the binary; refusing these made "Open in VS Code" silently do
+    // nothing in the desktop app.
+    for (const url of [
+      'vscode://file/Users/me/repo',
+      'vscode-insiders://file/Users/me/repo',
+      'cursor://file/Users/me/repo',
+      'windsurf://file/Users/me/repo',
+    ]) {
+      expect(isExternalUrlAllowed(url)).toBe(true);
+    }
+  });
+
+  it('refuses everything else', () => {
+    expect(isExternalUrlAllowed('file:///etc/passwd')).toBe(false);
+    expect(isExternalUrlAllowed('javascript:alert(1)')).toBe(false);
+    expect(isExternalUrlAllowed('data:text/html,<script>')).toBe(false);
+    expect(isExternalUrlAllowed('zoommtg://start')).toBe(false);
+    expect(isExternalUrlAllowed('not a url')).toBe(false);
+    expect(isExternalUrlAllowed('')).toBe(false);
   });
 });

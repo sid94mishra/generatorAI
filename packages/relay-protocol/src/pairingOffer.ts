@@ -20,6 +20,14 @@ export const PAIRING_OFFER_VERSION = 2;
 export const PAIRING_CODE_MAX_CHARACTERS = 8 * 1024;
 export const PAIRING_ENDPOINT_MAX_CHARACTERS = 2048;
 export const MAX_PAIRING_TTL_MS = 10 * 60 * 1000;
+/**
+ * The expiry is minted on the SERVER's clock and checked on the joining
+ * device's clock. A phone even one second behind would otherwise see a fresh
+ * 10-minute grant as "more than 10 minutes away" and reject it. The server
+ * enforces the real expiry when the grant is redeemed, so this bound only has
+ * to reject offers that are absurdly long-lived, not police the exact TTL.
+ */
+export const PAIRING_CLOCK_SKEW_MS = 5 * 60 * 1000;
 export const PAIRING_URL_SCHEME = 'generatorai://pair';
 
 const BASE64URL_43 = /^[A-Za-z0-9_-]{43}$/;
@@ -92,7 +100,7 @@ export function createPairingOfferSchema(now: () => number = () => Date.now()) {
         .int()
         .refine((value) => {
           const current = now();
-          return value > current && value <= current + MAX_PAIRING_TTL_MS;
+          return value > current && value <= current + MAX_PAIRING_TTL_MS + PAIRING_CLOCK_SKEW_MS;
         }, 'Relay invite must expire within 10 minutes'),
       e2eeFraming: z.literal(1),
     })
@@ -122,7 +130,7 @@ export function createPairingOfferSchema(now: () => number = () => Date.now()) {
         .int()
         .refine((value) => {
           const current = now();
-          return value > current && value <= current + MAX_PAIRING_TTL_MS;
+          return value > current && value <= current + MAX_PAIRING_TTL_MS + PAIRING_CLOCK_SKEW_MS;
         }, 'Pairing grant must expire within 10 minutes'),
       requestedScopes: z.array(ScopeString).min(1).max(40),
       transportCapabilities: z.array(z.enum(['loopback', 'lan', 'ssh', 'relay'])).min(1).max(4),

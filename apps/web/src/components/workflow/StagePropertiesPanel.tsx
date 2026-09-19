@@ -4,7 +4,7 @@
 // MCP server selector, tabbed header
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { X, Settings2, FileText, Layers, Cpu, Zap, Variable, Shield, Bot, Server, Paperclip, Wand2, Webhook, Link2, Plus, Trash2, Brain, CheckCircle2 } from 'lucide-react';
 import type {
   StageDefinition,
@@ -794,6 +794,85 @@ function ValidationRuleEditor({
 
 // ── Inline Variable Editor ──
 
+/**
+ * One `key = value` row.
+ *
+ * The name is edited against a local draft rather than straight into the
+ * variables map: a half-typed name is not a valid identifier, and committing
+ * only valid ones meant the field silently refused every intermediate state.
+ * The draft shows what was typed, the map only ever receives a usable name,
+ * and an abandoned invalid draft snaps back on blur.
+ */
+function VariableRow({
+  name,
+  value,
+  isTaken,
+  onRename,
+  onValueChange,
+  onRemove,
+}: {
+  name: string;
+  value: string;
+  isTaken: (candidate: string) => boolean;
+  onRename: (next: string) => void;
+  onValueChange: (next: string) => void;
+  onRemove: () => void;
+}) {
+  const [draft, setDraft] = useState(name);
+  // Follow renames that came from anywhere else (undo, a loaded definition).
+  useEffect(() => setDraft(name), [name]);
+
+  const valid = VARIABLE_NAME.test(draft) && !isTaken(draft);
+
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        type="text"
+        value={draft}
+        onChange={(e) => {
+          const next = e.target.value;
+          setDraft(next);
+          if (VARIABLE_NAME.test(next) && !isTaken(next)) onRename(next);
+        }}
+        onBlur={() => setDraft(name)}
+        aria-invalid={!valid || undefined}
+        title={
+          valid
+            ? undefined
+            : isTaken(draft)
+              ? 'Another variable already uses this name'
+              : 'Letters, digits and underscores; cannot start with a digit'
+        }
+        className={cn(
+          'w-1/3 h-auto rounded-lg px-2 py-1.5 text-xs font-mono',
+          !valid && 'border-danger text-danger',
+        )}
+        placeholder="Key"
+      />
+      <Input
+        type="text"
+        value={value}
+        onChange={(e) => onValueChange(e.target.value)}
+        className="flex-1 h-auto rounded-lg px-2 py-1.5 text-xs"
+        placeholder="Value"
+      />
+      <Button
+        type="button"
+        onClick={onRemove}
+        variant="ghost"
+        size="icon-sm"
+        aria-label={`Remove variable ${name}`}
+        className="rounded-lg p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger transition-colors"
+      >
+        <X className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+/** A usable `{{placeholder}}` name: an identifier, as the interpolator reads it. */
+const VARIABLE_NAME = /^[a-zA-Z_]\w*$/;
+
 function VariableEditor({
   variables,
   onChange,
@@ -810,7 +889,7 @@ function VariableEditor({
 
   const updateKey = (oldKey: string, newKey: string) => {
     if (newKey === oldKey) return;
-    if (!/^[a-zA-Z_]\w*$/.test(newKey)) return;
+    if (!VARIABLE_NAME.test(newKey)) return;
     if (newKey in variables && newKey !== oldKey) return;
     const newVars: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(variables)) {
@@ -833,33 +912,20 @@ function VariableEditor({
       {entries.length === 0 && (
         <p className="text-xs text-muted-foreground italic">No variables defined</p>
       )}
-      {entries.map(([key, value]) => (
-        <div key={key} className="flex items-center gap-2">
-          <Input
-            type="text"
-            value={key}
-            onChange={(e) => updateKey(key, e.target.value)}
-            className="w-1/3 h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
-            placeholder="Key"
-          />
-          <Input
-            type="text"
-            value={String(value ?? '')}
-            onChange={(e) => updateValue(key, e.target.value)}
-            className="flex-1 h-auto rounded-lg px-2 py-1.5 text-xs"
-            placeholder="Value"
-          />
-          <Button
-            type="button"
-            onClick={() => removeVariable(key)}
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Remove variable ${key}`}
-            className="rounded-lg p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger transition-colors"
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+      {entries.map(([key, value], index) => (
+        <VariableRow
+          // Position, not the name. Keying by the name made React throw the
+          // row away and build a new one on every keystroke of a rename, so
+          // the field lost focus after a single character and the name could
+          // not be typed at all.
+          key={index}
+          name={key}
+          value={String(value ?? '')}
+          isTaken={(candidate) => candidate !== key && candidate in variables}
+          onRename={(next) => updateKey(key, next)}
+          onValueChange={(next) => updateValue(key, next)}
+          onRemove={() => removeVariable(key)}
+        />
       ))}
       <Button
         type="button"

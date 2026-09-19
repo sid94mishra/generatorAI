@@ -11,6 +11,7 @@ import {
   type AppInfo,
   type DesktopPairingCode,
   type MenuState,
+  type ShellState,
   type SaveFileOptions,
   type ThemePreference,
   type WindowChrome,
@@ -24,6 +25,7 @@ import { resolvePaths } from './paths';
 import { loadSettings, saveSettings } from './config';
 import { windowChrome } from './platform';
 import { updateMenuState } from './menu';
+import { setUnsavedWork } from './unsaved-work';
 import { log } from './logger';
 import { createIpcGuard, defaultFromWebContents } from './ipc-guard';
 import { admitPairingRequest, PairingGate } from './pairing-gate';
@@ -140,8 +142,37 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     return res.filePath;
   });
 
-  guardedHandle(IPC.showItemInFolder, (_e, fullPath: string) => {
-    if (typeof fullPath === 'string' && fullPath) shell.showItemInFolder(fullPath);
+  // Returns whether anything was revealed. A path that exists only on a remote
+  // server means nothing on this machine, and `shell.showItemInFolder` fails
+  // silently there — the caller needs to be able to say so.
+  // ── Find in page ───────────────────────────────────────────────
+  //
+  // Chromium does the searching: it is the only thing that can match text the
+  // DOM cannot be walked for (virtualised rows, canvas-rendered terminal
+  // output, nested frames), and it owns the highlight rendering. The renderer
+  // draws the bar and reports the query here.
+  guardedHandle(IPC.findInPage, (e, arg: unknown): void => {
+    const a = (arg ?? {}) as { text?: unknown; forward?: unknown; findNext?: unknown };
+    if (typeof a.text !== 'string' || a.text.length === 0) return;
+    // `findNext` is OMITTED rather than set to false for a new search.
+    // Electron 42 answers a request carrying an explicit `findNext: false`
+    // without ever emitting `found-in-page`, so the bar showed no match count
+    // at all; leaving the key out takes the same code path as the documented
+    // default and reports normally.
+    const options: Electron.FindInPageOptions = { forward: a.forward !== false };
+    if (a.findNext === true) options.findNext = true;
+    e.sender.findInPage(a.text, options);
+  });
+
+  guardedHandle(IPC.stopFindInPage, (e): void => {
+    e.sender.stopFindInPage('clearSelection');
+  });
+
+  guardedHandle(IPC.showItemInFolder, (_e, fullPath: string): boolean => {
+    if (typeof fullPath !== 'string' || !fullPath) return false;
+    if (!fs.existsSync(fullPath)) return false;
+    shell.showItemInFolder(fullPath);
+    return true;
   });
 
   // The renderer pairs itself as a normal device. In dev mode the server is
@@ -183,12 +214,12 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   // checkmark, `Back` greys out, and `Open Recent` lists real routes.
   guardedHandle(IPC.setMenuState, (_e, patch: unknown) => {
     if (!patch || typeof patch !== 'object') return;
-    const p = patch as Partial<MenuState>;
+    const p = patch as Partial<ShellState>;
     const safe: Partial<MenuState> = {};
     if (typeof p.sidebarOpen === 'boolean') safe.sidebarOpen = p.sidebarOpen;
     if (typeof p.rightPaneOpen === 'boolean') safe.rightPaneOpen = p.rightPaneOpen;
-    if (typeof p.canGoBack === 'boolean') safe.canGoBack = p.canGoBack;
-    if (typeof p.canGoForward === 'boolean') safe.canGoForward = p.canGoForward;
+    // Not menu state — the shell's close/quit guard reads it (unsaved-work.ts).
+    if (typeof p.hasUnsavedWork === 'boolean') setUnsavedWork(p.hasUnsavedWork);
     if (p.theme === 'light' || p.theme === 'dark' || p.theme === 'system') safe.theme = p.theme;
     if (Array.isArray(p.recent)) {
       // Bound and sanitise: this list is rendered into a native menu, and an

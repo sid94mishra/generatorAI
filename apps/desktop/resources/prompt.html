@@ -1,0 +1,59 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>GeneratorAI</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px 18px 14px;
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    background: #0d1117; color: #e6edf3;
+  }
+  h1 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; }
+  p { margin: 0 0 12px; font-size: 12px; color: #8b949e; white-space: pre-line; }
+  input {
+    width: 100%; height: 30px; padding: 0 9px;
+    border: 1px solid #30363d; border-radius: 6px;
+    background: #010409; color: inherit; font: inherit; outline: none;
+  }
+  input:focus { border-color: #1f6feb; }
+  .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  button {
+    height: 28px; padding: 0 14px; border-radius: 6px; font: inherit; font-weight: 500;
+    border: 1px solid #30363d; background: transparent; color: inherit; cursor: pointer;
+  }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+</style>
+<h1 id="title"></h1>
+<p id="message"></p>
+<input id="value" autofocus />
+<div class="row">
+  <button id="cancel">Cancel</button>
+  <button id="ok" class="primary">Connect</button>
+</div>
+<script>
+  (() => {
+    const params = new URLSearchParams(location.search);
+    document.getElementById('title').textContent = params.get('title') || '';
+    document.getElementById('message').textContent = params.get('message') || '';
+    const input = document.getElementById('value');
+    const ok = document.getElementById('ok');
+    input.placeholder = params.get('placeholder') || '';
+    input.value = params.get('value') || '';
+    if (params.get('confirm')) ok.textContent = params.get('confirm');
+
+    const sync = () => { ok.disabled = input.value.trim().length === 0; };
+    const submit = () => { if (!ok.disabled) window.generatoraiPrompt.submit(input.value.trim()); };
+
+    input.addEventListener('input', sync);
+    ok.addEventListener('click', submit);
+    document.getElementById('cancel').addEventListener('click', () => window.generatoraiPrompt.cancel());
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submit();
+      if (e.key === 'Escape') window.generatoraiPrompt.cancel();
+    });
+    sync();
+    input.focus();
+  })();
+</script>

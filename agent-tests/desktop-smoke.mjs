@@ -76,9 +76,11 @@ try {
 
 // 3. Create a workflow from a template via the UI → exercises POST + DB write.
 try {
-  await navigate(page, '/templates');
+  // Templates live in Settings; `/templates` has not been a route for a while
+  // and this step was quietly 404ing, which failed the three checks after it.
+  await navigate(page, '/settings/templates');
   await page.waitForTimeout(1500);
-  const useBtn = page.getByRole('button', { name: /use template|use|create/i }).first();
+  const useBtn = page.getByRole('button', { name: /^use$/i }).first();
   await useBtn.click({ timeout: 8000 });
   await page.waitForTimeout(3000);
   record('create workflow from template', true, 'clicked Use Template; url=' + (await page.evaluate(() => location.pathname)));
@@ -134,7 +136,7 @@ try {
   );
   log('chat page buttons:', JSON.stringify(buttons));
   const inputsBefore = await page.evaluate(() => document.querySelectorAll('input,textarea,select').length);
-  const newChat = page.getByRole('button', { name: /new chat|new conversation|create chat|new/i }).first();
+  const newChat = page.getByRole('button', { name: /^new chat$/i }).first();
   await newChat.click({ timeout: 8000 });
   await page.waitForTimeout(1800);
   const surface = await page.evaluate((before) => {
@@ -166,11 +168,13 @@ try {
 
 await finish();
 
+// A real load, not `history.pushState`. Pushing state behind React Router's
+// back leaves its history stack out of sync — it warns "you are trying to use
+// a blocker on a POP navigation to a location that was not created by
+// @remix-run/router", and later route guards silently stop working.
 async function navigate(p, route) {
-  await p.evaluate((r) => {
-    window.history.pushState({}, '', r);
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  }, route);
+  await p.goto(new URL(route, p.url()).toString());
+  await p.waitForLoadState('domcontentloaded').catch(() => {});
 }
 
 async function finish() {

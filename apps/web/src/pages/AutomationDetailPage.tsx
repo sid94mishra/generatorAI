@@ -39,6 +39,7 @@ import { useAutomationExecutionStream } from '@/hooks/useAutomationExecutionStre
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
 import type { AutomationExecution, AutomationExecutionWithRuns } from '@generatorai/shared';
+import { usePageTitle } from '@/hooks/usePageTitle.js';
 
 function formatDate(date: Date | string | undefined): string {
   if (!date) return '—';
@@ -52,6 +53,8 @@ export function AutomationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: automation, isLoading } = useAutomation(id);
+
+  usePageTitle(automation?.name);
   const { data: executions } = useAutomationExecutions(id);
   const triggerMutation = useTriggerAutomation();
   const enableMutation = useEnableAutomation();

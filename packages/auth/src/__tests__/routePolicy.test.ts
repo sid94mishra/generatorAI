@@ -231,6 +231,21 @@ describe('route policy — other principals keep their authority', () => {
     expect(allowed(DEFAULT_DEVICE_SCOPES, '/workspaces/w1/terminals', 'POST')).toBe(false);
   });
 
+  it('running a workflow script needs exec:agent, not just write:workflows', () => {
+    // POST /workflow-scripts/:id/run materialises a definition and STARTS a
+    // run, so it must match `/workflow-runs` (write:workflows + exec:agent).
+    const designOnly = ['read:workflows', 'write:workflows'];
+    expect(allowed(designOnly, '/workflow-scripts/s1/run', 'POST')).toBe(false);
+    expect(allowed([...designOnly, 'exec:agent'], '/workflow-scripts/s1/run', 'POST')).toBe(true);
+    expect(resolveRoutePolicy('/workflow-scripts/s1/run').write).toEqual(['write:workflows', 'exec:agent']);
+
+    // Authoring and reading scripts are unchanged.
+    expect(allowed(designOnly, '/workflow-scripts/s1/materialize', 'POST')).toBe(true);
+    expect(allowed(designOnly, '/workflow-scripts/reload', 'POST')).toBe(true);
+    expect(allowed(['read:workflows'], '/workflow-scripts/s1/profiles', 'GET')).toBe(true);
+    expect(allowed(['read:workflows'], '/workflow-scripts', 'GET')).toBe(true);
+  });
+
   it('the HITL narrowing did not widen anything for a read-only principal', () => {
     const readOnly = ['read:workflows'];
     expect(allowed(readOnly, '/workflow-runs/r1/stages/s1/approve', 'POST')).toBe(false);

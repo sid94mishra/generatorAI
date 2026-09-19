@@ -370,3 +370,29 @@ describe('Backoff', () => {
     expect(b.next()).toBe(100);
   });
 });
+
+describe('EndpointSupervisor — React Native AbortSignal', () => {
+  // Hermes' AbortSignal has `aborted`/`reason` but no `throwIfAborted`.
+  const rnSignal = (aborted: boolean): AbortSignal =>
+    ({ aborted, addEventListener() {}, removeEventListener() {} }) as unknown as AbortSignal;
+
+  it('connects with a signal that lacks throwIfAborted', async () => {
+    const sup = new EndpointSupervisor({
+      pinnedServerId: PINNED,
+      candidates: [candidate('lan', 'http://lan', 1)],
+      verifyHost: async () => PINNED,
+      sleep: instantSleep,
+    });
+    expect((await sup.connect(1, rnSignal(false))).kind).toBe('lan');
+  });
+
+  it('rejects with an AbortError when such a signal is already aborted', async () => {
+    const sup = new EndpointSupervisor({
+      pinnedServerId: PINNED,
+      candidates: [candidate('lan', 'http://lan', 1)],
+      verifyHost: async () => PINNED,
+      sleep: instantSleep,
+    });
+    await expect(sup.connect(1, rnSignal(true))).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});

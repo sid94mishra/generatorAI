@@ -129,7 +129,7 @@ describe('ipc.ts registers every channel through the guard', () => {
     const src = readFileSync(join(__dirname, '..', 'ipc.ts'), 'utf8');
     expect(src).not.toMatch(/ipcMain\.(handle|on)\(/);
     const guarded = src.match(/guardedHandle\(/g) ?? [];
-    // All 43 bridge channels (IPC.* + BROWSER_IPC.*) from the preload contract.
-    expect(guarded.length).toBe(43);
+    // All 45 bridge channels (IPC.* + BROWSER_IPC.*) from the preload contract.
+    expect(guarded.length).toBe(45);
   });
 });

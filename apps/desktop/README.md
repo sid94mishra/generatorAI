@@ -101,9 +101,14 @@ The embedded server is launched with `HARNESS_TYPE` (default `copilot`) from set
 - **Application menu** — File / Edit / Go / View / Server / Window / Help. Every page is reachable (`Cmd/Ctrl+1..8`), plus New Chat/Workflow/Project/Automation, Reload Scripts, Back/Forward, Restart Server, Open Data Folder, View Logs, Health, API Docs.
 - **System tray** — open, quick navigation, live server state, restart, quit.
 - **Deep links** — `generatorai://chats/<id>`, `generatorai://workflows`, etc.
-- **Native downloads** — in‑app downloads route through a native Save‑As dialog and reveal in the file manager.
-- **Native folder picker** — the web's `showDirectoryPicker` is transparently backed by the OS dialog.
-- **OS theme sync** — follows the system light/dark setting (`nativeTheme`); the in‑app Settings → Appearance toggle still works.
+- **Native downloads** — in‑app downloads route through a native Save‑As dialog (asynchronous: a dialog must never block the main process) and reveal in the file manager.
+- **Native folder picker** — the web's `showDirectoryPicker` is transparently backed by the OS dialog. Paths that belong to the *server* (project repositories) use the in‑app directory browser instead, because in remote mode the two machines differ.
+- **Find in page** — `Edit ▸ Find…` (`Cmd/Ctrl+F`), Find Next/Previous, Esc to dismiss. Chromium performs the search (`webContents.findInPage`), so it matches text the DOM cannot be walked for, such as the canvas‑rendered terminal.
+- **Text prompts** — Electron does not implement `window.prompt`, so "Add Server…" opens a small modal window of the shell's own (`prompt-window.ts`).
+- **OS theme sync** — follows the system light/dark setting (`nativeTheme`); `View ▸ Appearance` sets the app's own light/dark/system preference, and the in‑app Settings → Appearance toggle stays in sync with it.
+- **Stable origin** — the embedded server's port is remembered in `settings.json` and reused on the next launch. The window's origin contains that port, so a new one each start would empty every per‑origin store: the paired device credential, the theme, the terminal preferences.
+- **Unsaved work** — the window's close button and Quit ask before discarding edits the renderer reports as unsaved.
+- **Credential recovery** — if the OS keystore loses the key that protects the credential vault, the app offers to reset the vault instead of restart‑looping on an unreadable one.
 - **Window state** persisted across launches; **single‑instance** lock; **splash** screen during boot; **error** screen on failure with auto‑restart.
 
 ## Testing
