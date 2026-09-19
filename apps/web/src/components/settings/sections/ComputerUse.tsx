@@ -24,9 +24,9 @@ const RUNTIME_LABEL: Record<ComputerRuntime['state'], string> = {
 };
 
 const RUNTIME_TONE: Record<ComputerRuntime['state'], string> = {
-  ready: 'text-emerald-600 dark:text-emerald-400',
+  ready: 'text-success',
   stopped: 'text-muted-foreground',
-  degraded: 'text-amber-600 dark:text-amber-400',
+  degraded: 'text-warning',
   unavailable: 'text-destructive',
 };
 

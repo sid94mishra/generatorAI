@@ -145,14 +145,17 @@ export class VoiceService {
   private activeSpeechCount = 0;
 
   constructor(
-    private readonly sttEngine: ISpeechToTextEngine,
+    // NOT readonly: `reconfigure()` swaps these when the user changes the
+    // engine in Settings > Audio, or downloads the Nemotron weights. See that
+    // method for why the swap has to be here rather than a container rebuild.
+    private sttEngine: ISpeechToTextEngine,
     private readonly eventBus: EventBus,
     private readonly logger: ILogger,
     config?: VoiceServiceConfig,
     /** Phase 2 — optional cleanup pass applied to every segment/final transcript. */
-    private readonly textFormatter?: ITextFormatter,
+    private textFormatter?: ITextFormatter,
     /** Phase 3 — optional; `speak()` throws if this isn't configured. */
-    private readonly ttsEngine?: ITextToSpeechEngine,
+    private ttsEngine?: ITextToSpeechEngine,
     /**
      * Builds the segmentation detector for each new session. A detector holds
      * per-utterance state (and, for the neural one, per-stream model state),
@@ -249,6 +252,77 @@ export class VoiceService {
     (this.idleTimer as any).unref?.();
   }
 
+  /**
+   * Swap the engines/formatter this service builds new sessions from.
+   *
+   * WHY THIS EXISTS
+   * ---------------
+   * The engines were chosen once, while the container was being wired, and
+   * never again. Every control on Settings > Audio therefore did nothing
+   * until the server was restarted — including the "Download model" button,
+   * which is the single most consequential one: after a 754MB download the
+   * screen said "Installed", the page said "Changes apply to the next
+   * dictation session; no restart is needed", and dictation carried on using
+   * Moonshine. A user has no way to tell that from the model not working.
+   *
+   * IN-FLIGHT SESSIONS KEEP THE ENGINE THEY STARTED ON. Their runner already
+   * holds a reference, and disposing a model out from under a half-spoken
+   * sentence would lose it. So the OLD engine is retired instead: it is
+   * disposed once the last session using it ends (`drainRetired()`), or
+   * immediately when there are none, which is the usual case since nobody
+   * changes a setting mid-sentence.
+   */
+  reconfigure(next: {
+    sttEngine?: ISpeechToTextEngine;
+    ttsEngine?: ITextToSpeechEngine | undefined;
+    textFormatter?: ITextFormatter | undefined;
+    /** Pass `true` for `ttsEngine`/`textFormatter` keys that are deliberately being cleared. */
+    clearTts?: boolean;
+    clearFormatter?: boolean;
+  }): void {
+    if (next.sttEngine && next.sttEngine !== this.sttEngine) {
+      this.retire(this.sttEngine);
+      this.sttEngine = next.sttEngine;
+      this.logger.info?.(`[VoiceService] STT engine switched to ${next.sttEngine.name}`);
+      void this.sttEngine.load().catch((err: unknown) => {
+        this.logger.warn?.(`[VoiceService] STT engine warm-up failed: ${(err as Error).message}`);
+      });
+    }
+    if (next.ttsEngine !== undefined || next.clearTts) {
+      const replacement = next.clearTts ? undefined : next.ttsEngine;
+      if (replacement !== this.ttsEngine) {
+        if (this.ttsEngine) this.retire(this.ttsEngine);
+        this.ttsEngine = replacement;
+        void this.ttsEngine?.load().catch((err: unknown) => {
+          this.logger.warn?.(`[VoiceService] TTS engine warm-up failed: ${(err as Error).message}`);
+        });
+      }
+    }
+    if (next.textFormatter !== undefined || next.clearFormatter) {
+      this.textFormatter = next.clearFormatter ? undefined : next.textFormatter;
+    }
+    this.drainRetired();
+  }
+
+  /** Engines replaced by `reconfigure()`, awaiting the last session that uses them. */
+  private retired: (ISpeechToTextEngine | ITextToSpeechEngine)[] = [];
+
+  private retire(engine: ISpeechToTextEngine | ITextToSpeechEngine): void {
+    this.retired.push(engine);
+  }
+
+  /** Dispose retired engines once nothing is using them. */
+  private drainRetired(): void {
+    if (this.sessions.size > 0 || this.speechSessions.size > 0) return;
+    const pending = this.retired;
+    this.retired = [];
+    for (const engine of pending) {
+      void engine.dispose().catch((err: unknown) => {
+        this.logger.warn?.(`[VoiceService] disposing replaced engine failed: ${(err as Error).message}`);
+      });
+    }
+  }
+
   /** Cancel everything + stop the reaper + dispose the engine. Called from container.shutdown. */
   async shutdown(): Promise<void> {
     if (this.idleTimer) {
@@ -272,6 +346,9 @@ export class VoiceService {
     }
     await this.sttEngine.dispose().catch(() => undefined);
     await this.ttsEngine?.dispose().catch(() => undefined);
+    for (const engine of this.retired.splice(0)) {
+      await engine.dispose().catch(() => undefined);
+    }
   }
 
   // ── STT half ──────────────────────────────────────────────────
@@ -425,6 +502,7 @@ export class VoiceService {
     this.speechSessions.delete(rec.id);
     this.activeSpeechCount = Math.max(0, this.activeSpeechCount - 1);
     void this.emit(rec.id, { kind: 'voice.tts_session_ended', data: { workspaceId: rec.workspaceId, sessionId: rec.id } });
+    this.drainRetired();
   }
 
   // ── Internal ──────────────────────────────────────────────────
@@ -437,6 +515,9 @@ export class VoiceService {
       kind: 'voice.stt_session_ended',
       data: { workspaceId: rec.workspaceId, sessionId, reason },
     });
+    // An engine replaced mid-session is disposed here, once the session that
+    // was still using it has finished. See `reconfigure()`.
+    this.drainRetired();
   }
 
   private reapIdle(): void {
@@ -467,5 +548,14 @@ export class VoiceService {
  * reporting whichever candidate actually won.
  */
 function sttEngineKindOf(engine: ISpeechToTextEngine): SttEngineKind {
-  return engine.name.includes('parakeet') ? 'parakeet' : 'whisper';
+  const name = engine.name;
+  // Ordered by specificity, and Whisper is LAST rather than the catch-all it
+  // used to be: `cascading:moonshine:...|whisper:...` contains both names, and
+  // a bare `? 'parakeet' : 'whisper'` reported every Moonshine and every
+  // Nemotron session as Whisper.
+  if (name.includes('disabled')) return 'disabled';
+  if (name.includes('nemotron')) return 'nemotron';
+  if (name.includes('parakeet')) return 'parakeet';
+  if (name.includes('moonshine')) return 'moonshine';
+  return 'whisper';
 }

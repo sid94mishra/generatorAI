@@ -50,6 +50,13 @@ interface VoiceRecorderProps {
   onResume: () => void;
   onStop: () => void;
   onCancel: () => void;
+  /**
+   * Name of the microphone this will record from, when it is not simply the
+   * system default. Shown in the button's tooltip so the choice made in
+   * Settings is verifiable from where dictation actually starts, rather than
+   * being a setting the user has to go back and re-read to confirm.
+   */
+  deviceLabel?: string;
 }
 
 export function VoiceRecorder({
@@ -62,6 +69,7 @@ export function VoiceRecorder({
   onResume,
   onStop,
   onCancel,
+  deviceLabel,
 }: VoiceRecorderProps) {
   // Rolling waveform levels — newest on the right, scrolls like the image.
   const [levels, setLevels] = useState<number[]>(() => new Array(BAR_COUNT).fill(0.05));
@@ -184,7 +192,7 @@ export function VoiceRecorder({
         'h-8 w-8 rounded-full hover:bg-[var(--color-accent)]',
         status === 'error' && 'text-[var(--color-destructive,#ef4444)] hover:text-[var(--color-destructive,#ef4444)]',
       )}
-      title={error ?? 'Voice input'}
+      title={error ?? (deviceLabel ? `Voice input — ${deviceLabel}` : 'Voice input')}
       aria-label="Start voice input"
     >
       <Mic className="h-4 w-4" />

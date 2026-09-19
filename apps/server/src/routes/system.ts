@@ -207,18 +207,31 @@ export function createSystemRoutes(container: Container): Router {
   }
   let modelDownload: ModelDownload | null = null;
 
+  /**
+   * The audio resource as clients consume it: the stored preferences plus the
+   * choices and bounds the UI needs to render them.
+   *
+   * Shared by GET and PUT deliberately. PUT used to answer with the bare
+   * preferences, so the moment any audio setting was saved the client's copy
+   * lost `engines`/`formatters` — and the Settings screen's engine dropdown,
+   * whose options come from that list, fell back to a single entry, could no
+   * longer match the value it had just saved, and rendered its placeholder
+   * ("Select…") as though nothing were configured. Same resource, same shape.
+   */
+  const audioPayload = async () => ({
+    ...(await readAudioPreferences(dataDir)),
+    engines: STT_ENGINE_CHOICES,
+    formatters: TEXT_FORMATTER_CHOICES,
+    minEndpointMs: MIN_ENDPOINT_MS,
+    maxEndpointMs: MAX_ENDPOINT_MS,
+    // An operator override beats the UI, so say when one is in force
+    // rather than showing a control that silently does nothing.
+    engineLockedByEnv: process.env['GENERATORAI_STT_ENGINE'] ?? null,
+  });
+
   router.get('/audio', async (_req, res, next) => {
     try {
-      res.json({
-        ...(await readAudioPreferences(dataDir)),
-        engines: STT_ENGINE_CHOICES,
-        formatters: TEXT_FORMATTER_CHOICES,
-        minEndpointMs: MIN_ENDPOINT_MS,
-        maxEndpointMs: MAX_ENDPOINT_MS,
-        // An operator override beats the UI, so say when one is in force
-        // rather than showing a control that silently does nothing.
-        engineLockedByEnv: process.env['GENERATORAI_STT_ENGINE'] ?? null,
-      });
+      res.json(await audioPayload());
     } catch (err) {
       next(err);
     }
@@ -231,7 +244,12 @@ export function createSystemRoutes(container: Container): Router {
       return;
     }
     try {
-      res.json(await writeAudioPreferences(dataDir, parsed.data));
+      await writeAudioPreferences(dataDir, parsed.data);
+      // Apply it now. Without this every control on Settings > Audio was a
+      // preference the server recorded and never acted on until its next
+      // restart, while the screen said "no restart is needed".
+      await container.reloadVoiceConfig();
+      res.json(await audioPayload());
     } catch (err) {
       next(err);
     }
@@ -280,8 +298,12 @@ export function createSystemRoutes(container: Container): Router {
           entry.progress = p.progress;
         },
       })
-        .then(() => {
+        .then(async () => {
           container.logger.info('[SystemRoutes] Nemotron model download complete');
+          // The weights being on disk is what makes `auto` prefer Nemotron,
+          // and that decision was previously frozen at boot — so the model
+          // downloaded here did nothing at all until the server restarted.
+          await container.reloadVoiceConfig();
         })
         .catch((err: unknown) => {
           entry.error = err instanceof Error ? err.message : String(err);
@@ -305,6 +327,9 @@ export function createSystemRoutes(container: Container): Router {
       modelDownload?.controller.abort();
       modelDownload = null;
       await deleteNemotronModel();
+      // Symmetrically: an engine still pointed at weights that no longer
+      // exist would fail on the next dictation instead of falling back.
+      await container.reloadVoiceConfig();
       res.json(await nemotronModelStatus());
     } catch (err) {
       next(err);

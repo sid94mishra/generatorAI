@@ -155,7 +155,11 @@ export async function createSileroVadFactory(
   pool: VoiceWorkerPool,
   opts: SileroVadOptions = {},
   logger?: ILogger,
-): Promise<() => VoiceActivityDetector> {
+  // The returned factory takes per-session overrides so a setting the user
+  // can change at runtime (Settings > Audio's "Pause before committing")
+  // reaches the NEXT dictation session without rebuilding the detector — the
+  // model load and its 2MB fetch happen once, here.
+): Promise<(override?: SileroVadOptions) => VoiceActivityDetector> {
   const modelPath = opts.modelPath ?? cachedModelPath();
   if (!existsSync(modelPath)) {
     let lastErr: Error | undefined;
@@ -181,7 +185,7 @@ export async function createSileroVadFactory(
   logger?.info?.(`[stt] Silero VAD ready (${modelPath})`);
 
   let nextSid = 1;
-  return () => new SileroVad(pool, nextSid++, opts, logger);
+  return (override: SileroVadOptions = {}) => new SileroVad(pool, nextSid++, { ...opts, ...override }, logger);
 }
 
 export class SileroVad implements VoiceActivityDetector {

@@ -38,6 +38,10 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+// A real, same-origin asset rather than a `blob:` URL built at runtime — see
+// the file's own header for why that distinction decided whether dictation
+// worked at all outside the dev server.
+import pcmWorkletUrl from '../audio/pcm-worklet.js?url';
 import { buildAuthenticatedSocketUrl } from '../platform/authTransport.js';
 
 // Phase 1 adds 'paused' — a genuinely new state (VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md
@@ -73,6 +77,22 @@ export interface UseSpeechToTextOptions {
    * words the user is waiting for, to render a preview nothing displays.
    */
   interim?: boolean;
+  /**
+   * Which microphone to record from — a `MediaDeviceInfo.deviceId`, or
+   * `null`/omitted for whatever the operating system calls the default input.
+   *
+   * Dictation used to pass no constraint at all, which meant the OS default
+   * and nothing else: someone wearing a headset while the machine's default
+   * was still the built-in microphone had no way to record from the headset
+   * except changing it system-wide. The choice is resolved and stored by
+   * `micPrefsStore`; this hook only consumes it.
+   *
+   * Requested with `ideal`, not `exact`, on purpose. `exact` makes
+   * `getUserMedia` reject outright when the device has just been unplugged,
+   * which turns a missing headset into no dictation at all; `ideal` records
+   * from the default instead, which is what the user wants in the moment.
+   */
+  deviceId?: string | null;
 }
 
 export interface UseSpeechToText {
@@ -118,29 +138,6 @@ const ONSET_RMS = 0.015;
 const ONSET_WINDOW = 4;
 const ONSET_HITS = 2;
 
-/** The AudioWorklet processor, inlined so no separate build asset is needed. */
-const WORKLET_SRC = `
-class PCMWorklet extends AudioWorkletProcessor {
-  constructor() { super(); this._chunks = []; this._len = 0; this._target = ${FRAME_SAMPLES}; }
-  process(inputs) {
-    const ch = inputs[0] && inputs[0][0];
-    if (ch) {
-      this._chunks.push(ch.slice(0));
-      this._len += ch.length;
-      if (this._len >= this._target) {
-        const out = new Float32Array(this._len);
-        let o = 0;
-        for (const c of this._chunks) { out.set(c, o); o += c.length; }
-        this.port.postMessage(out, [out.buffer]);
-        this._chunks = []; this._len = 0;
-      }
-    }
-    return true;
-  }
-}
-registerProcessor('pcm-worklet', PCMWorklet);
-`;
-
 function sttWebSocketUrl(): Promise<string> {
   // Pass a PATH, not an absolute URL. `buildSocketUrl` prepends the runtime's
   // own endpoint, so handing it `http://host:3100/api/...` produced
@@ -166,7 +163,7 @@ function frameRms(pcm: Float32Array): number {
 }
 
 export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeechToText {
-  const { onInterim, onSegment, onFinal, onError, language, interim } = options;
+  const { onInterim, onSegment, onFinal, onError, language, interim, deviceId } = options;
   const wantInterim = interim ?? onInterim != null;
 
   const isSupported =
@@ -274,7 +271,12 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          channelCount: 1,
+          ...(deviceId ? { deviceId: { ideal: deviceId } } : {}),
+        },
       });
     } catch (err) {
       const name = (err as DOMException)?.name;
@@ -299,13 +301,14 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     ctxRef.current = ctx;
 
     try {
-      const blob = new Blob([WORKLET_SRC], { type: 'application/javascript' });
-      const url = URL.createObjectURL(blob);
-      await ctx.audioWorklet.addModule(url);
-      URL.revokeObjectURL(url);
+      await ctx.audioWorklet.addModule(pcmWorkletUrl);
     } catch (err) {
       fullTeardown();
-      const msg = `Failed to initialise audio: ${(err as Error).message}`;
+      // Worth naming the likely cause: every failure here reads the same
+      // ("Unable to load a worklet's module") whatever went wrong, and the
+      // one that actually happened in production was a Content-Security-
+      // Policy refusal, which no part of that sentence hints at.
+      const msg = `Failed to initialise audio (${(err as Error).message}). The audio processor at ${pcmWorkletUrl} could not be loaded.`;
       setError(msg);
       setStatus('error');
       cbRef.current.onError?.(msg);
@@ -313,7 +316,9 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     }
 
     const source = ctx.createMediaStreamSource(stream);
-    const worklet = new AudioWorkletNode(ctx, 'pcm-worklet');
+    const worklet = new AudioWorkletNode(ctx, 'pcm-worklet', {
+      processorOptions: { frameSamples: FRAME_SAMPLES },
+    });
     workletRef.current = worklet;
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
@@ -368,6 +373,28 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       for (const v of recent) if (v >= ONSET_RMS) loud += 1;
       if (loud >= ONSET_HITS) resumeNow(ws);
     };
+
+    // A USB headset unplugged mid-sentence ends its track, and nothing was
+    // watching for it: the socket stayed open, no audio arrived, the waveform
+    // froze at whatever it last drew, and the user was left looking at a
+    // "recording" pill attached to a microphone that no longer existed. Flush
+    // instead of dropping — whatever was said before the cable came out is
+    // still worth keeping — and say what happened.
+    const micTrack = stream.getAudioTracks()[0];
+    micTrack?.addEventListener('ended', () => {
+      if (streamRef.current !== stream) return; // already torn down normally
+      teardownAudio();
+      if (ws.readyState === ws.OPEN) {
+        setStatus('transcribing');
+        try { ws.send(JSON.stringify({ t: 'stop' })); } catch { /* ignore */ }
+      } else {
+        closeWs();
+        setStatus('idle');
+      }
+      cbRef.current.onError?.(
+        'The microphone was disconnected. Dictation stopped — anything already captured has been inserted.',
+      );
+    });
 
     ws.onopen = () => {
       const lang = language ?? navigator.language?.split('-')[0] ?? 'en';
@@ -441,7 +468,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
-  }, [isSupported, status, language, wantInterim, fullTeardown, teardownAudio, resumeNow]);
+  }, [isSupported, status, language, wantInterim, deviceId, fullTeardown, teardownAudio, closeWs, resumeNow]);
 
   const stop = useCallback(() => {
     const ws = wsRef.current;

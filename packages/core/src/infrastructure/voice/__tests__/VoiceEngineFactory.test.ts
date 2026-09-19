@@ -135,6 +135,21 @@ describe('VoiceEngineFactory — STT construction', () => {
     expect(defaultPreferredSttEngine()).toBe('moonshine');
   });
 
+  it('degrades rather than dies when "nemotron" is chosen with nothing to run it', () => {
+    // An explicit engine choice normally means "that engine, no fallback".
+    // This one case is different: the weights are an optional 754MB download
+    // controlled from the SAME settings screen as the engine picker, so the
+    // ordinary way to reach this state is to choose Nemotron before pressing
+    // Download — and the old behaviour was a hard failure on the next click
+    // of the microphone, with nothing on screen connecting the two.
+    const logger = fakeLogger();
+    const engine = createSttEngine('nemotron', { logger });
+    expect(engine.name).toContain('cascading');
+    expect(engine.name).toContain('moonshine');
+    expect(engine.name).toContain('whisper');
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Settings'));
+  });
+
   it('does NOT default to an engine that cannot punctuate', () => {
     // The regression this pins: `auto` used to prefer parakeet, which emits
     // no capitals and no punctuation at all, so dictated text arrived as one

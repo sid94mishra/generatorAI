@@ -2073,7 +2073,16 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // to the RMS detector rather than losing dictation. Segmentation degrading
   // is survivable; not segmenting at all is not.
   const vadMode = process.env['GENERATORAI_STT_VAD'] ?? 'silero';
-  let createVad: (() => VoiceActivityDetector) | undefined;
+  let createVad: ((override?: { silenceHangoverMs?: number }) => VoiceActivityDetector) | undefined;
+  /**
+   * Silence that ends an utterance — Settings > Audio's "Pause before
+   * committing". Mutable, read per session.
+   *
+   * It used to reach only the Nemotron adapter, so on every other engine the
+   * control was inert: the detectors took their own 700ms default no matter
+   * what the user set, and the number on screen described nothing.
+   */
+  let endpointSilenceMs = audioPrefs.endpointSilenceMs;
   if (vadMode === 'silero' && !sttDisabled && voiceWorkerPool) {
     void createSileroVadFactory(voiceWorkerPool, {}, logger)
       .then((factory) => {
@@ -2096,9 +2105,64 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Read through a closure, not captured by value: the neural detector
     // becomes available a moment after boot, and sessions started before then
     // simply use the fallback.
-    () => createVad?.() ?? new EnergyVad(),
+    () =>
+      createVad?.({ silenceHangoverMs: endpointSilenceMs }) ??
+      new EnergyVad({ silenceHangoverMs: endpointSilenceMs }),
   );
   voiceService.start();
+
+  /**
+   * Re-read Settings > Audio and rebuild the voice engines from it.
+   *
+   * The engines above are chosen exactly once, here, from the preferences as
+   * they were at boot. That made every control on Settings > Audio inert
+   * until the next restart — most damagingly the Nemotron download: the
+   * screen said "Installed", and dictation carried on running Moonshine with
+   * nothing to indicate why. `VoiceService.reconfigure()` swaps them for new
+   * sessions while letting any in-flight dictation finish on the engine it
+   * started with.
+   *
+   * The environment still wins, exactly as it does at boot: an operator who
+   * pinned GENERATORAI_STT_ENGINE for a deployment must not be overridden by
+   * a click in a UI.
+   */
+  const reloadVoiceConfig = async (): Promise<void> => {
+    if (sttDisabled) return;
+    const prefs = await readAudioPreferences(path.dirname(resolve(config.dbPath)));
+    const nextEngineId = resolveSttEngineId(
+      process.env['GENERATORAI_STT_ENGINE'] ?? prefs.sttEngine,
+      logger,
+    );
+    const nextStt = createSttEngine(nextEngineId, {
+      ...voiceEngineOpts,
+      endpointSilenceMs: prefs.endpointSilenceMs,
+      ...(preferred === 'nemotron' || preferred === 'parakeet' || preferred === 'moonshine' || preferred === 'whisper'
+        ? { preferred }
+        : {}),
+    });
+    endpointSilenceMs = prefs.endpointSilenceMs;
+    const nextFormatterMode = process.env['GENERATORAI_VOICE_TEXT_FORMATTER'] ?? prefs.textFormatter;
+    const nextFormatter =
+      nextFormatterMode === 'none'
+        ? undefined
+        : nextFormatterMode === 'llm'
+          ? new LlmTextFormatter(security.secretStore, {
+              logger,
+              ...(formatterBaseUrl ? { baseUrl: formatterBaseUrl } : {}),
+              ...(formatterModel ? { model: formatterModel } : {}),
+            })
+          : new RuleBasedTextFormatter();
+    const nextTts = createTtsEngine(
+      process.env['GENERATORAI_TTS'] === '0' || !prefs.ttsEnabled ? 'disabled' : 'kokoro',
+      { ...voiceEngineOpts, defaultVoice: prefs.ttsVoice, defaultSpeed: prefs.ttsSpeed },
+    );
+    voiceService.reconfigure({
+      sttEngine: nextStt,
+      ...(nextTts ? { ttsEngine: nextTts } : { clearTts: true }),
+      ...(nextFormatter ? { textFormatter: nextFormatter } : { clearFormatter: true }),
+    });
+    logger.info(`[Container] Voice reloaded from settings: ${nextEngineId} (${nextStt.name})`);
+  };
 
   // ── Workflow Script Loader ──
   const scriptDirs = [
@@ -2264,6 +2328,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
     // Voice Module (Phase 0 — STT half)
     voiceService,
+    reloadVoiceConfig,
 
     // v2 Repositories (exposed for route-level queries)
     workflowRepo,
@@ -2732,6 +2797,11 @@ export interface Container {
 
   /** Voice Module service — ephemeral STT (+ TTS from Phase 3) sessions. */
   voiceService: VoiceService;
+  /**
+   * Re-read Settings > Audio and rebuild the voice engines from it, without a
+   * restart. Called by the audio settings and speech-model routes.
+   */
+  reloadVoiceConfig: () => Promise<void>;
 
   // v2 repositories (for route-level queries)
   workflowRepo: InstanceType<typeof DrizzleWorkflowRepository>;

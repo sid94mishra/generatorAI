@@ -22,8 +22,17 @@
 // Zero external imports — this file lives in @generatorai/shared.
 // ────────────────────────────────────────────────────────────────
 
-/** Which STT engine produced a transcript. Surfaced for telemetry/debug only. */
-export type SttEngineKind = 'whisper' | 'parakeet';
+/**
+ * Which STT engine produced a transcript. Surfaced for telemetry/debug only.
+ *
+ * Every engine the factory can build has to appear here. It listed only the
+ * original two for a while after Moonshine and Nemotron were added, and
+ * because the classifier falls back to `'whisper'` for anything it does not
+ * recognise, every session on the actual default engine was reported as
+ * Whisper — which made the one signal that says which engine is really
+ * serving dictation say the opposite of the truth.
+ */
+export type SttEngineKind = 'whisper' | 'parakeet' | 'moonshine' | 'nemotron' | 'disabled';
 
 /** Lifecycle state of one STT dictation session (client + server keep this in lockstep). */
 export type SttSessionStatus = 'listening' | 'paused' | 'finalizing';

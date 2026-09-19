@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // Settings → Audio.
 //
-// The best speech model is a 790MB download that this app deliberately does
+// The best speech model is a ~754MB download that this app deliberately does
 // NOT fetch on its own, so the first job of this screen is to be honest about
 // that: say what is missing, what it costs, what you lose without it, and let
 // the user decide. Dictation still works meanwhile on the fallback engine —
@@ -14,11 +14,13 @@
 // nothing is exposed here that the server does not actually read.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, Mic, Trash2, Volume2 } from 'lucide-react';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { Button, Select, Spinner, ToggleSwitch } from '@/components/ui/index.js';
 import type { AudioSettings, SpeechModelStatus } from '@/platform/HttpPlatformClient.js';
+import { useAudioInputDevices } from '@/hooks/useAudioInputDevices.js';
+import { resolveMicDeviceId, useMicPrefsStore } from '@/stores/micPrefsStore.js';
 import { SectionHeader, SettingsCard, SettingRow } from '../shared.js';
 
 const ENGINE_LABEL: Record<string, string> = {
@@ -28,6 +30,9 @@ const ENGINE_LABEL: Record<string, string> = {
   parakeet: 'Parakeet CTC — no punctuation',
   whisper: 'Whisper base.en — slowest, most forgiving',
 };
+
+/** Where the system's own default input is represented in the picker. */
+const SYSTEM_DEFAULT_MIC = '';
 
 const FORMATTER_LABEL: Record<string, string> = {
   'rule-based': 'On — spoken punctuation and filler cleanup',
@@ -44,6 +49,21 @@ export function AudioSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Microphone ──
+  // Device-local, so it is NOT part of the server-side audio preferences: a
+  // deviceId means nothing on another machine, and the desktop app and a
+  // phone signed into the same server must each keep their own.
+  const mics = useAudioInputDevices();
+  const micDeviceId = useMicPrefsStore((st) => st.deviceId);
+  const micDeviceLabel = useMicPrefsStore((st) => st.deviceLabel);
+  const setMicDevice = useMicPrefsStore((st) => st.setDevice);
+  const resolvedMic = useMemo(
+    () => resolveMicDeviceId(mics.devices, { deviceId: micDeviceId, deviceLabel: micDeviceLabel }),
+    [mics.devices, micDeviceId, micDeviceLabel],
+  );
+  /** The chosen device is stored but not currently attached. */
+  const micMissing = micDeviceId !== '' && resolvedMic === null;
 
   const refreshModel = useCallback(async () => {
     try {
@@ -69,7 +89,8 @@ export function AudioSection() {
   }, [platform]);
 
   // Poll only while a download is actually running — the server does the work
-  // in the background because 790MB outlives any sensible request timeout.
+  // in the background because three quarters of a gigabyte outlives any
+  // sensible request timeout.
   useEffect(() => {
     if (!model?.downloading) {
       if (pollRef.current) {
@@ -158,7 +179,7 @@ export function AudioSection() {
         >
           {model?.present ? (
             <div className="space-y-3">
-              <p className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+              <p className="flex items-center gap-2 text-sm text-success">
                 <Mic className="h-4 w-4" /> Installed — {mb(model.bytesOnDisk)}
               </p>
               <p className="break-all text-xs text-muted-foreground">{model.dir}</p>
@@ -195,7 +216,7 @@ export function AudioSection() {
             </div>
           ) : (
             <div className="space-y-3">
-              <p className="flex items-start gap-2 text-sm text-amber-600 dark:text-amber-400">
+              <p className="flex items-start gap-2 text-sm text-warning">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
                   Not downloaded. Dictation still works, but it falls back to{' '}
@@ -229,6 +250,77 @@ export function AudioSection() {
           )}
         </SettingsCard>
 
+        {/* ── Microphone ── */}
+        <SettingsCard
+          title="Microphone"
+          description="Which input dictation records from on this device. Stored here, not on the server — a headset plugged into this machine is not the one plugged into your phone."
+        >
+          <SettingRow
+            label="Input device"
+            description={
+              mics.labelsVisible
+                ? 'Following the system default means dictation moves with whatever you pick in the operating system.'
+                : 'Device names are hidden until the microphone has been used once. Reveal them to choose a specific input.'
+            }
+            control={
+              <Select
+                value={micDeviceId}
+                disabled={!mics.labelsVisible && mics.devices.length === 0}
+                onChange={(v) =>
+                  setMicDevice(v, mics.devices.find((d) => d.deviceId === v)?.label ?? '')
+                }
+                aria-label="Microphone input device"
+                className="w-64"
+                options={[
+                  { value: SYSTEM_DEFAULT_MIC, label: 'System default' },
+                  ...mics.devices.map((d, i) => ({
+                    value: d.deviceId,
+                    // An unnamed device is still selectable — it is a real
+                    // input, we are simply not allowed to say which one yet.
+                    label: d.label || `Microphone ${i + 1}`,
+                  })),
+                  // Keep a stored-but-absent device in the list so the picker
+                  // shows what is actually configured instead of silently
+                  // snapping back to "System default" and losing the choice.
+                  ...(micMissing
+                    ? [
+                        {
+                          value: micDeviceId,
+                          label: `${micDeviceLabel || 'Saved microphone'} (not connected)`,
+                          description: 'Recording falls back to the system default until it is plugged back in.',
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            }
+          />
+          {!mics.labelsVisible && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => void mics.requestLabels()}
+              leftIcon={<Mic className="h-3.5 w-3.5" />}
+            >
+              Show device names
+            </Button>
+          )}
+          {micMissing && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-warning">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {micDeviceLabel || 'The selected microphone'} is not connected right now. Dictation
+              will use the system default until it is back.
+            </p>
+          )}
+          {mics.error && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-destructive">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {mics.error}
+            </p>
+          )}
+        </SettingsCard>
+
         {/* ── Speech to text ── */}
         <SettingsCard title="Speech to text" description="How dictation behaves.">
           <SettingRow
@@ -236,7 +328,13 @@ export function AudioSection() {
             description={
               engineLocked
                 ? `Pinned to "${settings?.engineLockedByEnv}" by GENERATORAI_STT_ENGINE in this server's environment.`
-                : 'Automatic prefers Nemotron when its model is installed, and falls back to Moonshine, then Whisper.'
+                : settings?.sttEngine === 'nemotron' && !model?.present
+                  ? // Selected but unrunnable. The server degrades to Moonshine
+                    // rather than failing, which is right — but a screen that
+                    // shows "Nemotron" while Moonshine is doing the work is
+                    // telling the user something untrue.
+                    'Nemotron is selected, but its model is not downloaded — dictation is running on Moonshine until you download it above.'
+                  : 'Automatic prefers Nemotron when its model is installed, and falls back to Moonshine, then Whisper.'
             }
             control={
               <Select
@@ -248,6 +346,16 @@ export function AudioSection() {
                 options={(settings?.engines ?? ['auto']).map((id) => ({
                   value: id,
                   label: ENGINE_LABEL[id] ?? id,
+                  // Nemotron cannot run until its weights are on disk. It used
+                  // to be selectable anyway, and picking it simply made the
+                  // mic button fail — with the control that fixes it sitting
+                  // unread at the top of the same screen.
+                  ...(id === 'nemotron' && !model?.present
+                    ? {
+                        disabled: true,
+                        description: 'Download the model above to use this engine.',
+                      }
+                    : {}),
                 }))}
               />
             }

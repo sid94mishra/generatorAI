@@ -130,6 +130,14 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    // The AudioWorklet module must stay a real FILE. Vite inlines any `?url`
+    // asset under 4KB as a `data:` URI, and the app's own CSP is
+    // `script-src 'self'` — so an inlined worklet is refused by the browser
+    // exactly like the `blob:` URL it replaced, and dictation fails with
+    // "Unable to load a worklet's module". Everything else keeps the default
+    // inlining, which is a genuine win for small icons.
+    assetsInlineLimit: (filePath: string) =>
+      filePath.endsWith('pcm-worklet.js') ? false : undefined,
     // W28: Hidden source maps — generated but NOT shipped to browsers.
     // Source maps are emitted as separate `.js.map` files, meaning a user's
     // browser never downloads them (the DevTools sourceMappingURL comment that

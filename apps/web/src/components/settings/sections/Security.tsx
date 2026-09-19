@@ -1315,6 +1315,12 @@ export function SecuritySection() {
                               onClick={() => void toggleCapability(d, cap.scope, !held)}
                               className={cn(
                                 'h-auto gap-1 rounded-full border px-2 py-0.5 text-[11px] font-normal',
+                                // 22.5px tall as drawn, under the 24px target
+                                // floor — and these grant a device real
+                                // authority, so a near-miss click is the worst
+                                // kind. The pseudo-element widens the pointer
+                                // target without moving a pixel of the pill.
+                                'relative before:absolute before:-inset-y-1 before:inset-x-0 before:content-[""]',
                                 held
                                   ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/10'
                                   : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',

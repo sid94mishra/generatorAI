@@ -118,7 +118,12 @@ function ThemeCard({
       aria-checked={selected}
       onClick={onSelect}
       className={cn(
-        'h-auto group flex flex-col gap-2 rounded-lg border p-2.5 text-left transition-colors',
+        // `Button` is an inline-flex, vertically-centred, NON-WRAPPING row by
+        // default — correct for a button, wrong for a card. All three have to
+        // be undone here or the card's own description renders as one endless
+        // line that escapes the card and paints across its neighbours (it did:
+        // the Theme grid overlapped itself horizontally on this very screen).
+        'h-auto group flex w-full flex-col items-stretch gap-2 whitespace-normal rounded-lg border p-2.5 text-left transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selected ? 'border-primary bg-primary/5' : 'border-border hover:bg-subtle',
       )}

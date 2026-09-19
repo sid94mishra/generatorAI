@@ -22,6 +22,16 @@ import { useResizablePane } from '@/hooks/useResizablePane.js';
 import { useIsNarrowViewport } from '@/hooks/useMediaQuery.js';
 
 /**
+ * Invisible pointer-target expansion for the pane's 22x22 header icons.
+ *
+ * They are deliberately drawn small so the tab strip stays dense; WCAG 2.5.8
+ * asks for 24x24 of TARGET, which is not the same thing as 24x24 of ink. A
+ * pseudo-element takes the hit area past the floor while the header looks
+ * exactly as it did.
+ */
+const HIT_AREA = 'relative before:absolute before:-inset-1 before:content-[""]';
+
+/**
  * What the pane tells a panel about the tab instance it is rendering.
  *
  * `id` is the stable per-tab id assigned by the RightPane (e.g.
@@ -782,6 +792,10 @@ export function RightPane({
               title={availableAdds.length === 0 ? 'All available tabs are already open' : 'Add tab'}
               className={cn(
                 'rounded-md p-1 text-[var(--color-muted-foreground)] transition-colors',
+                // 22x22 as drawn — under the 24px target floor. The
+                // pseudo-element widens the pointer target without changing
+                // the header's dense spacing.
+                HIT_AREA,
                 availableAdds.length === 0
                   ? 'cursor-not-allowed opacity-40'
                   : 'hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]',
@@ -798,6 +812,7 @@ export function RightPane({
                 onClick={() => setFullscreen((v) => !v)}
                 className={cn(
                   'rounded-md p-1 transition-colors',
+                  HIT_AREA,
                   fullscreen
                     ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                     : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]',
@@ -812,7 +827,10 @@ export function RightPane({
               aria-label="Close right pane"
               data-testid="right-pane-close"
               onClick={() => onOpenChange(false)}
-              className="rounded-md p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
+              className={cn(
+                'rounded-md p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]',
+                HIT_AREA,
+              )}
               title="Close side pane"
             >
               <X className="h-3.5 w-3.5" />

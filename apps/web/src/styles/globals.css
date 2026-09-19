@@ -5673,6 +5673,32 @@ button, a, input, select, textarea, [role="button"] {
 /* == Cursor pointer == */
 button, a, [role="button"], [role="tab"], [role="option"], select, .cursor-pointer { cursor: pointer; }
 
+/* == Native checkboxes and radios ==
+   Two dozen call sites render a bare `<input type="checkbox">`. Left alone the
+   browser draws them at 13x13 in the PLATFORM's accent colour — so the one
+   control on screen that ignored the theme entirely was the one the user had
+   just ticked, and it sat well under the 24px target floor everything else in
+   this app is held to. Setting it here fixes every call site at once, with no
+   JSX churn and no new component for existing code to migrate to.
+   `accent-color` is the standards-track property for exactly this; it leaves
+   the native control (and its full keyboard and assistive-technology
+   behaviour) intact rather than re-implementing it out of divs. */
+input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--color-primary);
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+/* The control is 16px but the TARGET is the whole label, and these label rows
+   came out 20px tall — 4px under the floor. The control itself stays 16px on
+   purpose (a 24px box next to 14px text reads as a mistake); the row it sits
+   in is what grows. */
+label:has(> input[type="checkbox"]),
+label:has(> input[type="radio"]) {
+  min-height: 1.5rem;
+}
+
 /* == Reduced motion == */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

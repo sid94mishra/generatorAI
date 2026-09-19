@@ -228,7 +228,7 @@ export function createSttEngine(
   switch (id) {
     case 'disabled':
       return new DisabledSttEngine();
-    case 'nemotron':
+    case 'nemotron': {
       // ONE id, TWO adapters. Which one runs depends on what the machine
       // actually has, because the difference is an implementation detail to
       // everyone upstream: same model, same weights, same transcripts.
@@ -238,13 +238,29 @@ export function createSttEngine(
       // to supervise. NeMo-Speech.cpp is used when someone has deliberately
       // installed it (GENERATORAI_NEMO_SPEECH_BIN), which is also the only
       // way to get GPU execution.
-      return nemotronWeightsPresent() && !process.env['GENERATORAI_NEMO_SPEECH_BIN']
-        ? new NemotronOnnxSttEngine(nemotronOpts)
-        : // Out-of-process by necessity — see NemotronSttEngine.ts. It takes
-          // no `workerPool`: it does not use transformers.js or
-          // onnxruntime-node at all, so handing it the shared ONNX worker
-          // would be meaningless.
-          new NemotronSttEngine({ ...(logger ? { logger } : {}) });
+      const nemoBin = process.env['GENERATORAI_NEMO_SPEECH_BIN'];
+      if (nemotronWeightsPresent() && !nemoBin) return new NemotronOnnxSttEngine(nemotronOpts);
+      // Out-of-process by necessity — see NemotronSttEngine.ts. It takes no
+      // `workerPool`: it does not use transformers.js or onnxruntime-node at
+      // all, so handing it the shared ONNX worker would be meaningless.
+      const viaNemoCpp = new NemotronSttEngine({ ...(logger ? { logger } : {}) });
+      if (nemoBin) return viaNemoCpp;
+      // Neither route can actually serve: no weights on disk AND no native
+      // runtime installed. Picking "Nemotron" in Settings then meant the mic
+      // button produced an error instead of text, with nothing on screen
+      // connecting the two — the model download is a separate control on the
+      // same page, and a user who has not pressed it has no reason to read
+      // "Nemotron" as "unavailable". An explicit engine choice normally means
+      // "that engine, no fallback"; this one case degrades instead, loudly,
+      // because the alternative is dictation that simply does not work.
+      logger?.warn?.(
+        '[voice] engine "nemotron" was selected but its weights are not downloaded and GENERATORAI_NEMO_SPEECH_BIN is unset. Falling back to Moonshine, then Whisper. Download the model in Settings > Audio to use Nemotron.',
+      );
+      return new CascadingSttEngine(
+        [viaNemoCpp, new MoonshineSttEngine(engineOpts), new WhisperSttEngine(engineOpts)],
+        logger,
+      );
+    }
     case 'parakeet':
       return new ParakeetSttEngine(engineOpts);
     case 'moonshine':

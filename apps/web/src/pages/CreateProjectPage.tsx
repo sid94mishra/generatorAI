@@ -102,7 +102,7 @@ export function CreateProjectPage() {
         type="button"
         variant="ghost"
         onClick={() => navigate('/projects')}
-        className="flex h-auto items-center gap-1.5 rounded-none p-0 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
+        className="flex h-auto items-center gap-1.5 rounded-none px-0 py-0.5 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />
         Back to Projects

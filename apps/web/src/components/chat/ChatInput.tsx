@@ -38,6 +38,8 @@ import { Button, Textarea, Spinner } from '@/components/ui/index.js';
 import { resolveModelLimit } from '@generatorai/client-core';
 import { VoiceRecorder } from './VoiceRecorder.js';
 import { useSpeechToText } from '@/hooks/useSpeechToText.js';
+import { useAudioInputDevices } from '@/hooks/useAudioInputDevices.js';
+import { resolveMicDeviceId, useMicPrefsStore } from '@/stores/micPrefsStore.js';
 import { composerAffordances } from '@/platform/surfaceCapabilities.js';
 import { toast } from '@/components/Toast.js';
 import { ImageHoverPreview, useObjectUrl, isPreviewableImage } from '@/components/shared/ImageHoverPreview.js';
@@ -528,9 +530,34 @@ export function ChatInput({
     [activeCommand, workspaceId],
   );
 
+  /**
+   * The composer's text at the moment dictation started, and whether the user
+   * has actually changed the field since — the two things Cancel needs to be
+   * honest.
+   *
+   * Cancel (✕) and Accept (✓) sat next to each other doing the SAME thing:
+   * partials are written straight into the composer as they are spoken, so by
+   * the time either button is pressed the words are already in the field, and
+   * ✕ merely stopped the microphone. Pressing the one labelled "Cancel voice
+   * input" and watching every dictated word stay put is not a subtle defect.
+   *
+   * The snapshot is only safe to restore while dictation is the ONLY thing
+   * that has changed the field. Typing during dictation is explicitly
+   * supported (it pauses the mic — Part C.3), and throwing that away to undo
+   * the speech would be a worse bug than the one being fixed, so a real edit
+   * downgrades Cancel to "stop, and drop the words not yet committed".
+   *
+   * Set from the textarea's own change event, not from the keydown that
+   * pauses dictation: pressing Escape, an arrow key or a modifier pauses but
+   * changes nothing, and must not cost the user the ability to undo.
+   */
+  const preDictationTextRef = useRef<string | null>(null);
+  const editedDuringDictationRef = useRef(false);
+
   const handleTextChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const value = e.target.value;
+      if (preDictationTextRef.current !== null) editedDuringDictationRef.current = true;
       setText(value);
       // Editing a recalled prompt makes it the user's own draft again.
       if (historyIdx !== null) setHistoryIdx(null);
@@ -1014,6 +1041,17 @@ export function ChatInput({
 
   useEffect(() => () => { const r = revealRef.current; if (r.timer) clearInterval(r.timer); }, []);
 
+  // Which microphone dictation records from. Chosen in Settings > Audio and
+  // resolved against what is plugged in RIGHT NOW, so a headset that was
+  // unplugged since falls back to the system default instead of failing.
+  const micDevices = useAudioInputDevices();
+  const micDeviceId = useMicPrefsStore((st) => st.deviceId);
+  const micDeviceLabel = useMicPrefsStore((st) => st.deviceLabel);
+  const resolvedMicId = useMemo(
+    () => resolveMicDeviceId(micDevices.devices, { deviceId: micDeviceId, deviceLabel: micDeviceLabel }),
+    [micDevices.devices, micDeviceId, micDeviceLabel],
+  );
+
   const {
     isSupported: voiceSupported,
     status: voiceStatus,
@@ -1081,6 +1119,7 @@ export function ChatInput({
     },
     onFinal: (t) => {
       stopReveal();
+      preDictationTextRef.current = null;
       clearDictationRegion();
       lastCommittedRef.current = null;
       detachedRef.current = null;
@@ -1089,13 +1128,39 @@ export function ChatInput({
       if (t) insertAtCaret(t);
     },
     onError: (message) => toast({ variant: 'error', title: 'Voice input', description: message }),
+    deviceId: resolvedMicId,
   });
 
   const handleVoiceStart = useCallback(() => {
     stopReveal();
     clearDictationRegion();
+    preDictationTextRef.current = textRef.current;
+    editedDuringDictationRef.current = false;
     void startVoice();
   }, [startVoice, clearDictationRegion, stopReveal]);
+
+  /** ✕ — stop dictating and take back what this session put in the composer. */
+  const handleVoiceCancel = useCallback(() => {
+    stopReveal();
+    const snapshot = preDictationTextRef.current;
+    const region = dictationRef.current;
+    if (snapshot != null && !editedDuringDictationRef.current) {
+      textRef.current = snapshot;
+      setText(snapshot);
+    } else if (region) {
+      // Typed-during-dictation: only the open, uncommitted utterance goes.
+      const restored = `${region.before}${region.after}`;
+      textRef.current = restored;
+      setText(restored);
+    }
+    clearDictationRegion();
+    lastCommittedRef.current = null;
+    detachedRef.current = null;
+    utteranceShownRef.current = false;
+    shownTextRef.current = '';
+    preDictationTextRef.current = null;
+    cancelVoice();
+  }, [cancelVoice, clearDictationRegion, stopReveal]);
 
   // Part C.3: EDITING the composer while dictation is live pauses it, so a
   // manual correction and an incoming segment can't fight over the caret.
@@ -1829,7 +1894,8 @@ export function ChatInput({
               onStart={handleVoiceStart}
               onResume={resumeVoice}
               onStop={stopVoice}
-              onCancel={cancelVoice}
+              onCancel={handleVoiceCancel}
+              deviceLabel={resolvedMicId ? micDeviceLabel : undefined}
             />
 
             {/* Stop — W30-b's two-phase control.

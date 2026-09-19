@@ -159,6 +159,72 @@ describe('VoiceService', () => {
     expect(svc.describe(handle.sessionId)?.engine).toBe('parakeet');
   });
 
+  it('classifies every engine the factory can build, not just the original two', () => {
+    // Whisper used to be the catch-all, so a session on Moonshine (the
+    // default) or Nemotron was reported as Whisper — the one signal that says
+    // which engine is serving dictation said the opposite of the truth.
+    const kindOf = (name: string) => {
+      const svc = new VoiceService(fakeEngine({ name }), fakeEventBus(), logger);
+      return svc.describe(svc.startSttSession(null, noopCallbacks).sessionId)?.engine;
+    };
+    expect(kindOf('moonshine:onnx-community/moonshine-base-ONNX')).toBe('moonshine');
+    expect(kindOf('nemotron-onnx:nvidia/nemotron-3.5-asr-streaming-0.6b')).toBe('nemotron');
+    expect(kindOf('whisper:Xenova/whisper-base.en')).toBe('whisper');
+    // A cascade reports its winner; before one has loaded it names them all,
+    // and the most specific candidate is the honest answer.
+    expect(kindOf('cascading:nemotron-onnx:x|moonshine:y|whisper:z')).toBe('nemotron');
+    expect(kindOf('cascading:moonshine:y|whisper:z')).toBe('moonshine');
+  });
+
+  it('reconfigure() swaps the engine for NEW sessions and leaves live ones alone', async () => {
+    // Downloading the speech model, or changing the engine in Settings, has to
+    // take effect without a restart — but never by pulling the model out from
+    // under a half-spoken sentence.
+    const first = fakeEngine({ name: 'moonshine:a' });
+    const second = fakeEngine({ name: 'nemotron-onnx:b' });
+    const svc = new VoiceService(first, fakeEventBus(), logger);
+    const live = svc.startSttSession(null, noopCallbacks);
+
+    svc.reconfigure({ sttEngine: second });
+
+    // The in-flight session keeps its engine, which is therefore NOT disposed.
+    expect(first.dispose).not.toHaveBeenCalled();
+    expect(svc.describe(live.sessionId)?.engine).toBe('moonshine');
+    // A session started now gets the new one.
+    expect(svc.describe(svc.startSttSession(null, noopCallbacks).sessionId)?.engine).toBe('nemotron');
+    expect(second.load).toHaveBeenCalled();
+  });
+
+  it('disposes the replaced engine once the last session using it has ended', async () => {
+    const first = fakeEngine({ name: 'moonshine:a' });
+    const second = fakeEngine({ name: 'whisper:b' });
+    const svc = new VoiceService(first, fakeEventBus(), logger);
+    const live = svc.startSttSession(null, noopCallbacks);
+    svc.reconfigure({ sttEngine: second });
+    expect(first.dispose).not.toHaveBeenCalled();
+
+    live.cancel();
+    await Promise.resolve();
+
+    expect(first.dispose).toHaveBeenCalledTimes(1);
+    expect(second.dispose).not.toHaveBeenCalled();
+  });
+
+  it('reconfigure() with no sessions open disposes the old engine immediately', async () => {
+    const first = fakeEngine({ name: 'moonshine:a' });
+    const svc = new VoiceService(first, fakeEventBus(), logger);
+    svc.reconfigure({ sttEngine: fakeEngine({ name: 'whisper:b' }) });
+    await Promise.resolve();
+    expect(first.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconfigure() ignores a no-op swap to the same engine instance', () => {
+    const only = fakeEngine({ name: 'moonshine:a' });
+    const svc = new VoiceService(only, fakeEventBus(), logger);
+    svc.reconfigure({ sttEngine: only });
+    expect(only.dispose).not.toHaveBeenCalled();
+  });
+
   it('cancel() removes the session and emits voice.stt_session_ended with reason cancelled', () => {
     const bus = fakeEventBus();
     const svc = new VoiceService(fakeEngine(), bus, logger);

@@ -30,7 +30,7 @@
 //
 // NOTHING IS DOWNLOADED WITHOUT BEING ASKED
 // -----------------------------------------
-// 792MB is not a decision to make on a user's behalf on their first click of
+// 754MB is not a decision to make on a user's behalf on their first click of
 // a microphone button, and it may be metered bandwidth. `download()` runs
 // only when something calls it — which, in the product, means the user
 // pressed the button in Settings → Audio. Until then voice input reports that
@@ -73,8 +73,51 @@ export const NEMOTRON_FILES: readonly string[] = [
   'joint.onnx.data',
 ];
 
-/** Approximate total download, for the UI to show before the user commits. */
-export const NEMOTRON_APPROX_BYTES = 792 * 1024 * 1024;
+/**
+ * Fallback total download size, used only until the real one is known.
+ *
+ * 754 MiB is the sum of the ten files' `content-length` headers as published
+ * today. The previous value (792 MiB) was an estimate, and because it is the
+ * DENOMINATOR of the progress bar, the download stalled at 95% and then jumped
+ * to "Installed" — the one moment a progress bar exists for. The real total is
+ * measured at download time (see {@link nemotronRemoteTotalBytes}); this is
+ * what the screen shows before the first byte and if that measurement fails.
+ */
+export const NEMOTRON_APPROX_BYTES = 754 * 1024 * 1024;
+
+/**
+ * The exact total, measured once from the repo and then remembered.
+ *
+ * `null` until a download or a status read has asked, so nothing pays for ten
+ * HEAD requests just by rendering Settings.
+ */
+let measuredTotalBytes: number | null = null;
+
+/**
+ * Sum of the ten files' sizes as the server reports them.
+ *
+ * Returns the fallback constant if anything about the probe fails — offline,
+ * a proxy that strips `content-length`, a 404 after a repo re-export. A wrong
+ * denominator makes the progress bar lie; a failed probe must not make the
+ * download itself impossible.
+ */
+export async function nemotronRemoteTotalBytes(signal?: AbortSignal): Promise<number> {
+  if (measuredTotalBytes != null) return measuredTotalBytes;
+  try {
+    let total = 0;
+    for (const name of NEMOTRON_FILES) {
+      const url = `https://huggingface.co/${NEMOTRON_REPO}/resolve/${NEMOTRON_REVISION}/${name}`;
+      const res = await fetch(url, { method: 'HEAD', redirect: 'follow', ...(signal ? { signal } : {}) });
+      const len = Number(res.headers.get('content-length'));
+      if (!res.ok || !Number.isFinite(len) || len <= 0) return NEMOTRON_APPROX_BYTES;
+      total += len;
+    }
+    measuredTotalBytes = total;
+    return total;
+  } catch {
+    return NEMOTRON_APPROX_BYTES;
+  }
+}
 
 export interface NemotronModelStatus {
   present: boolean;
@@ -142,13 +185,23 @@ export function isNemotronModelPresentSync(dir = nemotronModelDir()): boolean {
 
 export async function nemotronModelStatus(dir = nemotronModelDir()): Promise<NemotronModelStatus> {
   let bytes = 0;
-  for (const f of NEMOTRON_FILES) bytes += await fileSize(join(dir, f));
+  // `.part` counts too. A file only gets its real name once it has finished
+  // (see `downloadNemotronModel`), so counting only final names made the
+  // screen read "3 MB of about 754 MB" next to a progress bar showing 2%
+  // while 19 MB was actually on disk — the two halves of the same sentence
+  // disagreeing, because they were measuring different things.
+  for (const f of NEMOTRON_FILES) {
+    bytes += (await fileSize(join(dir, f))) || (await fileSize(join(dir, `${f}.part`)));
+  }
   return {
     present: await isNemotronModelPresent(dir),
     dir,
     repo: NEMOTRON_REPO,
     bytesOnDisk: bytes,
-    approxTotalBytes: NEMOTRON_APPROX_BYTES,
+    // The measured total once a download has established it; the estimate
+    // before that. Never a smaller number than what is already on disk, so a
+    // repo that grew cannot make the bar read over 100%.
+    approxTotalBytes: Math.max(measuredTotalBytes ?? NEMOTRON_APPROX_BYTES, bytes),
   };
 }
 
@@ -170,7 +223,7 @@ export async function deleteNemotronModel(dir = nemotronModelDir()): Promise<voi
  * and a partial file that never gets a real name cannot cause it.
  *
  * Already-complete files are skipped, so a retry after a failure resumes at
- * file granularity rather than starting the 792MB again.
+ * file granularity rather than starting the 754MB again.
  */
 export async function downloadNemotronModel(opts: {
   dir?: string;
@@ -182,6 +235,11 @@ export async function downloadNemotronModel(opts: {
   await fs.mkdir(dir, { recursive: true });
   const started = Date.now();
   let bytesDone = 0;
+
+  // Ask the repo how big this actually is before reporting any progress
+  // against it. Ten HEAD requests, once per process — cheap next to 754MB,
+  // and the difference between a bar that finishes and one that stops at 95%.
+  const totalBytes = await nemotronRemoteTotalBytes(opts.signal);
 
   // Count what is already there so progress does not restart from zero on a
   // resumed download.
@@ -211,8 +269,8 @@ export async function downloadNemotronModel(opts: {
           fileIndex: index,
           fileCount: NEMOTRON_FILES.length,
           bytesDone,
-          approxTotalBytes: NEMOTRON_APPROX_BYTES,
-          progress: Math.min(0.999, bytesDone / NEMOTRON_APPROX_BYTES),
+          approxTotalBytes: totalBytes,
+          progress: Math.min(0.999, bytesDone / totalBytes),
         });
         controller.enqueue(chunk);
       },
@@ -233,6 +291,20 @@ export async function downloadNemotronModel(opts: {
       await fs.rm(partial, { force: true });
       throw new Error(`Downloading ${name} failed: empty response`);
     }
+    // A body that ends EARLY is the failure this whole `.part`-then-rename
+    // dance exists to prevent, and until now the dance did not actually catch
+    // it: a connection dropped mid-stream can end the stream cleanly, and a
+    // short file then gets its real name and is treated as complete for ever
+    // after (onnxruntime's error for that is an unreadable complaint about
+    // file lengths — this codebase has already paid for it once with
+    // Parakeet). The server told us the length; hold it to that.
+    const declared = Number(res.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > 0 && fileBytes !== declared) {
+      await fs.rm(partial, { force: true });
+      throw new Error(
+        `Downloading ${name} failed: got ${fileBytes} bytes of ${declared}. The download was interrupted; press Download again to resume.`,
+      );
+    }
     await fs.rename(partial, target);
   }
 
@@ -241,7 +313,7 @@ export async function downloadNemotronModel(opts: {
     fileIndex: NEMOTRON_FILES.length,
     fileCount: NEMOTRON_FILES.length,
     bytesDone,
-    approxTotalBytes: NEMOTRON_APPROX_BYTES,
+    approxTotalBytes: totalBytes,
     progress: 1,
   });
   opts.logger?.info?.(
