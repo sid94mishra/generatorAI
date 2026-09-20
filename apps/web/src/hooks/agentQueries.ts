@@ -1,3 +1,4 @@
+import type { HarnessProviderId } from '@generatorai/shared';
 // ────────────────────────────────────────────────────────────────
 // TanStack Query hooks — first-class Agents
 //
@@ -149,7 +150,7 @@ export function useResolveAgentPreview() {
       agentRef?: string;
       overrides?: AgentOverrides;
       projectId?: string;
-      harnessType?: 'copilot' | 'claude-agent';
+      harnessType?: HarnessProviderId;
       scope: 'chat' | 'stage' | 'worker';
       draft?: Record<string, unknown>;
     }

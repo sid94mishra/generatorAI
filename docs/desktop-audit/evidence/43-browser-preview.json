@@ -1,0 +1,38 @@
+{
+  "url": "/chats/466b7da8-9a33-412d-a3e7-ca746a2143af",
+  "viewport": {
+    "w": 1440,
+    "h": 870
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "flex-1 overflow-y-auto px-4 py-4",
+      "h": 557,
+      "scroll": 2090,
+      "rect": {
+        "x": 240,
+        "y": 80,
+        "w": 1200
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "",
+      "h": 643,
+      "scroll": 3524,
+      "rect": {
+        "x": 464,
+        "y": 227,
+        "w": 976
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

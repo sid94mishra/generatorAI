@@ -136,6 +136,14 @@ describe('workflowBuilderStore', () => {
     expect(state.nodes).toHaveLength(2);
     expect(state.nodes[1]!.data.stage.name).toBe('Original (copy)');
     expect(state.nodes[1]!.id).not.toBe('s1');
+    expect(state.selectedNodeId).toBe(state.nodes[1]!.id);
+    expect(state.nodes[1]!.selected).toBe(true);
+    expect(state.nodes[0]!.selected).toBe(false);
+    expect(state.nodes[1]!.position.x).toBeGreaterThan(state.nodes[0]!.position.x + 320);
+    // Typing immediately after duplication must edit the copy.
+    state.updateStage(state.selectedNodeId!, { name: 'Edited copy' });
+    expect(useWorkflowBuilderStore.getState().nodes[0]!.data.stage.name).toBe('Original');
+    expect(useWorkflowBuilderStore.getState().nodes[1]!.data.stage.name).toBe('Edited copy');
   });
 
   // ── Edge CRUD ──

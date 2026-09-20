@@ -1,0 +1,7 @@
+{
+  "name": "Team docs",
+  "serverType": "http",
+  "url": "https://mcp.example.com/mcp",
+  "timeoutMs": 30000,
+  "enabled": true
+}

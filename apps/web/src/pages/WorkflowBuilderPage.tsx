@@ -501,14 +501,14 @@ export function WorkflowBuilderPage() {
 
       try {
         if (isOrchestrated) {
+          const encoded = encodeStageOverrides(variables, stageOverrides, { orchestrated: true });
           const context = await startOrchestratedRun.mutateAsync({
             workflowDefinitionId: store.definitionId,
-            variables,
+            ...encoded,
+            uploads,
             projectId: store.projectId ?? undefined,
             selectedCodebases: store.selectedCodebases.length > 0 ? store.selectedCodebases : undefined,
           });
-
-          await uploadAllFiles(context.workflowRunId);
 
           setVariableModalOpen(false);
           navigate(`/workflows/${store.definitionId}/runs/${context.workflowRunId}`);

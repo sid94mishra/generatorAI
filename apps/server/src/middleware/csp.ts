@@ -54,7 +54,27 @@ import type { NextFunction, Request, Response } from 'express';
  */
 export const THEME_SCRIPT_CSP_HASH = 'sha256-eMFruOxq9rBnZocnEAOZp+Z+m20i9sL8vOW+Ch9Xk9U=';
 
-export function createCspMiddleware() {
+export function createCspMiddleware(widgetOrigin?: string) {
+  // Only the isolated widget server may be embedded. Parse the configured
+  // origin instead of interpolating arbitrary configuration into a CSP.
+  let frameSource = "'self'";
+  if (widgetOrigin) {
+    const url = new URL(widgetOrigin);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+      throw new Error('Widget origin must be an HTTP(S) origin without credentials');
+    }
+    const origins = new Set([url.origin]);
+    // WidgetFrame aligns the loopback spelling with its embedding page.
+    // Preserve the isolated port while supporting localhost and IPv6 hosts.
+    if (['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) {
+      for (const hostname of ['127.0.0.1', 'localhost', '[::1]']) {
+        const alias = new URL(url.origin);
+        alias.hostname = hostname;
+        origins.add(alias.origin);
+      }
+    }
+    frameSource += ` ${[...origins].join(' ')}`;
+  }
   const header = [
     "default-src 'self'",
     `script-src 'self' '${THEME_SCRIPT_CSP_HASH}'`,
@@ -62,6 +82,7 @@ export function createCspMiddleware() {
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob:",
     "connect-src 'self'",
+    `frame-src ${frameSource}`,
     "frame-ancestors 'none'",
   ].join('; ');
 

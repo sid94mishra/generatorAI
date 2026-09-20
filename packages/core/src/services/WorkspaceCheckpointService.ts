@@ -65,12 +65,26 @@ export interface RestoreTurnResult {
   skipped: number;
 }
 
+/** What `onRestore` listeners are told. Paths are repo-relative. */
+export interface WorkspaceRestoreNotice {
+  workspaceId: string;
+  repoAlias: string;
+  restoredPaths: string[];
+  deletedPaths: string[];
+  /** The chat that owns the workspace, when one does. */
+  chatId?: string;
+}
+
 export class WorkspaceCheckpointService {
   /**
    * Debounce state for rolling `live` captures, keyed by workspace. Prevents
    * a write-heavy agent turn from producing hundreds of snapshots.
    */
   private readonly liveTimers = new Map<string, NodeJS.Timeout>();
+  /** When the oldest still-unserved live-capture request for a workspace arrived. */
+  private readonly liveWaitingSince = new Map<string, number>();
+  /** Longest a live capture may be put off by further activity. */
+  static readonly LIVE_MAX_WAIT_MS = 6_000;
   static readonly LIVE_DEBOUNCE_MS = 2_000;
 
   /**
@@ -281,10 +295,25 @@ export class WorkspaceCheckpointService {
     const existing = this.liveTimers.get(workspaceId);
     if (existing) clearTimeout(existing);
 
+    // A pure trailing debounce never fires while the agent keeps working — a
+    // tool call every second holds it off until the turn is over, which is
+    // exactly when a live diff stops being useful. So the wait is capped.
+    const now = Date.now();
+    const since = this.liveWaitingSince.get(workspaceId) ?? now;
+    this.liveWaitingSince.set(workspaceId, since);
+    const delay = Math.max(
+      0,
+      Math.min(
+        WorkspaceCheckpointService.LIVE_DEBOUNCE_MS,
+        since + WorkspaceCheckpointService.LIVE_MAX_WAIT_MS - now,
+      ),
+    );
+
     const timer = setTimeout(() => {
       this.liveTimers.delete(workspaceId);
+      this.liveWaitingSince.delete(workspaceId);
       void this.capture({ workspaceId, kind: 'live', ...provenance });
-    }, WorkspaceCheckpointService.LIVE_DEBOUNCE_MS);
+    }, delay);
 
     // Never hold the process open for a rolling snapshot.
     timer.unref?.();
@@ -298,6 +327,7 @@ export class WorkspaceCheckpointService {
       clearTimeout(existing);
       this.liveTimers.delete(workspaceId);
     }
+    this.liveWaitingSince.delete(workspaceId);
   }
 
   /**
@@ -347,6 +377,18 @@ export class WorkspaceCheckpointService {
   async forget(workspaceId: string): Promise<void> {
     this.cancelLiveCapture(workspaceId);
     await this.checkpoints.deleteWorkspace(workspaceId);
+  }
+
+  private readonly restoreListeners = new Set<(notice: WorkspaceRestoreNotice) => void>();
+
+  /**
+   * Be told whenever the user moves files back in time — a rewind, a
+   * checkpoint restore, "Undo" on a changed file. Every one of those paths
+   * ends in `announceRestore`, so this is the one place to listen.
+   */
+  onRestore(listener: (notice: WorkspaceRestoreNotice) => void): () => void {
+    this.restoreListeners.add(listener);
+    return () => { this.restoreListeners.delete(listener); };
   }
 
   /**
@@ -400,6 +442,25 @@ export class WorkspaceCheckpointService {
       },
       scope.sessionId,
     );
+    if (this.restoreListeners.size > 0 && result.restoredPaths.length + result.deletedPaths.length > 0) {
+      let chatId = scope.chatId;
+      if (!chatId) {
+        try {
+          const workspace = await this.workspaceRepo.findById(workspaceId);
+          if (workspace?.ownerType === 'chat' && workspace.ownerId) chatId = workspace.ownerId;
+        } catch { /* a notice is best effort */ }
+      }
+      const notice: WorkspaceRestoreNotice = {
+        workspaceId,
+        repoAlias,
+        restoredPaths: result.restoredPaths,
+        deletedPaths: result.deletedPaths,
+        ...(chatId ? { chatId } : {}),
+      };
+      for (const listener of this.restoreListeners) {
+        try { listener(notice); } catch { /* a listener must not break a restore */ }
+      }
+    }
   }
 
   // ── Events ──────────────────────────────────────────────────

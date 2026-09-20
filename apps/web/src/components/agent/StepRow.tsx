@@ -142,8 +142,8 @@ function RowShell({
   );
 }
 
-/** Icon-button inside a row. A <span role=button>, not a <button>: the row
- *  is already a <button>, and nested buttons are invalid HTML that browsers
+/** Icon-button inside a row. A <span role=button>, not a <Button variant="unstyled">: the row
+ *  is already a <Button variant="unstyled">, and nested buttons are invalid HTML that browsers
  *  may silently re-parent. */
 function RowAction({
   title, onActivate, children, className, testId,
@@ -352,26 +352,26 @@ export const StepRow = React.memo(function StepRow({ step, nested }: StepRowProp
               truncated={diff.truncated}
               truncatedAction={
                 step.fileOp && actions.onOpenChanges ? (
-                  <button
+                  <Button variant="unstyled"
                     type="button"
                     className="font-medium text-[var(--color-primary)] hover:underline"
                     onClick={() => actions.onOpenChanges?.(step.fileOp?.filePath)}
                   >
                     Open full diff
-                  </button>
+                  </Button>
                 ) : undefined
               }
             />
           )}
           {diff && step.detail && (
-            <button
+            <Button variant="unstyled"
               type="button"
               onClick={() => setShowRaw((v) => !v)}
               aria-expanded={showRaw}
               className="mt-1.5 text-[10.5px] text-[var(--color-muted-foreground)]/80 hover:text-[var(--color-foreground)]"
             >
               {showRaw ? 'Hide raw tool call' : 'Show raw tool call'}
-            </button>
+            </Button>
           )}
           {detailText && (
             <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-[var(--color-muted-foreground)]/90">

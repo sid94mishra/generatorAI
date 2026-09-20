@@ -3,7 +3,8 @@
 //                 filter, quick create, and bulk select/delete.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useState, useMemo, useLayoutEffect, useRef } from 'react';
+import React, { useState, useMemo, useLayoutEffect, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChats, useBulkDeleteChats } from '@/hooks/queries.js';
 import { CreateChatDialog } from '@/components/chat/CreateChatDialog.js';
@@ -35,6 +36,14 @@ const CHAT_ROW_ESTIMATE = 76;
 
 export function ChatsListPage() {
   const [createChatOpen, setCreateChatOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return;
+    setCreateChatOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('new');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 

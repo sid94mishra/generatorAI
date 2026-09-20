@@ -283,11 +283,23 @@ export function createWorkspaceRoutes(container: Container): Router {
    * a run or an automation simply has none, and a repository hiccup must not
    * fail the flow over a naming nicety.
    */
-  async function flowContext(info: WorkspaceInfo): Promise<{ context?: { chatName: string } }> {
+  async function flowContext(
+    info: WorkspaceInfo,
+  ): Promise<{ context?: { chatName?: string; model?: string; provider?: string } }> {
     if (info.ownerType !== 'chat' || !info.ownerId) return {};
     try {
       const chat = await chatEntityRepo.getById(info.ownerId);
-      return chat?.name ? { context: { chatName: chat.name } } : {};
+      if (!chat) return {};
+      // The chat's model doubles as the writer of commit / PR text when
+      // Settings → Source Control names none (see `ScmTextGenerator`).
+      const provider = chat.harnessConfig?.harnessType;
+      return {
+        context: {
+          ...(chat.name ? { chatName: chat.name } : {}),
+          ...(chat.model ? { model: chat.model } : {}),
+          ...(provider ? { provider } : {}),
+        },
+      };
     } catch {
       return {};
     }

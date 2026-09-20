@@ -1,0 +1,7 @@
+{
+  "action": "validate",
+  "payload": {
+    "section": "acceptance"
+  },
+  "from": "user"
+}

@@ -39,6 +39,8 @@ import type { AgentInteractionService } from './AgentInteractionService.js';
 import type { PlanService } from './PlanService.js';
 import {
   AUTO_MODE_PLAN_INSTRUCTIONS,
+  PLAN_MODE_TURN_PREFIX,
+  providerHasNativePlanGate,
   PLAN_MODE_INSTRUCTIONS,
   resolveModeDescriptor,
   resolveTurnPermissionMode,
@@ -331,6 +333,65 @@ export class ChatManagementService {
     private eventBus: EventBus,
     private extensions: ChatManagementServiceExtensions = {},
   ) {}
+
+  // ══════════════════════════════════════════════════════════════
+  // Files the user moved back in time since the agent last looked
+  // ══════════════════════════════════════════════════════════════
+  //
+  // Rewind, a checkpoint restore and "Undo" on a changed file all rewrite the
+  // working tree without the agent knowing. Its conversation still says it
+  // made those edits, so the next time it touches the area it finds them
+  // missing and — reasonably, from where it stands — puts them back. Observed
+  // live: a user rewound a review round, asked for an unrelated change, and
+  // the agent reported "the working tree had been rolled back… I reapplied
+  // both". The rewind was undone by the very next turn.
+  //
+  // So the agent is told, once, in front of the next prompt. Not stored in the
+  // transcript: it is context for the model, not something the user said.
+
+  private readonly pendingRestores = new Map<string, Map<string, Set<string>>>();
+
+  /** Wired to `WorkspaceCheckpointService.onRestore` by the composition root. */
+  noteUserRestore(
+    chatId: string,
+    notice: { repoAlias: string; restoredPaths: string[]; deletedPaths: string[] },
+  ): void {
+    let byMount = this.pendingRestores.get(chatId);
+    if (!byMount) {
+      byMount = new Map();
+      this.pendingRestores.set(chatId, byMount);
+    }
+    let paths = byMount.get(notice.repoAlias);
+    if (!paths) {
+      paths = new Set();
+      byMount.set(notice.repoAlias, paths);
+    }
+    for (const p of notice.restoredPaths) paths.add(p);
+    for (const p of notice.deletedPaths) paths.add(p);
+  }
+
+  /** The notice for `chatId`, consumed. Empty string when there is none. */
+  private drainRestoreNotice(chatId: string): string {
+    const byMount = this.pendingRestores.get(chatId);
+    if (!byMount) return '';
+    this.pendingRestores.delete(chatId);
+    const MAX_LISTED = 12;
+    const lines: string[] = [];
+    for (const [alias, paths] of byMount) {
+      const all = [...paths].sort();
+      if (all.length === 0) continue;
+      const shown = all.slice(0, MAX_LISTED).join(', ');
+      const more = all.length > MAX_LISTED ? ` (+${all.length - MAX_LISTED} more)` : '';
+      lines.push(`  - ${alias}: ${shown}${more}`);
+    }
+    if (lines.length === 0) return '';
+    return (
+      '[Workspace notice — since your last turn the user rewound or undid changes to these files, on purpose]\n' +
+      lines.join('\n') +
+      '\nWhat is on disk now is what the user wants. Re-read a file before editing it, and do NOT ' +
+      're-apply the reverted changes unless the user asks for them.\n\n'
+    );
+  }
 
   // ══════════════════════════════════════════════════════════════
   // PLN-01 — plan mode
@@ -800,8 +861,20 @@ export class ChatManagementService {
     const ctx = this.turnContexts.get(chatId);
     if (!planService || !ctx) return null;
 
-    // Guard against a plan-mode turn using the non-blocking path to sneak past
-    // its own approval gate.
+    // In PLAN MODE the same call is the approval gate.
+    //
+    // Claude and Copilot submit a plan through a tool of their own
+    // (ExitPlanMode / exit_plan_mode). Codex, OpenCode and ACP agents have
+    // nothing of the kind, so for them Plan mode used to be a label: nothing
+    // told the model it was planning, and a `record_plan` call here was
+    // refused with "Plan could not be recorded. Continue with the
+    // implementation anyway" — an instruction to do exactly what plan mode
+    // forbids. Observed live: Codex filed its plan, was told that, and went
+    // straight to `apply_patch`. Now the plan goes to the user and the call
+    // does not return until they have decided.
+    if (resolveModeDescriptor(ctx.agentMode).planGate === 'blocking') {
+      return this.reviewRecordedPlan(chatId, args, ctx);
+    }
     if (resolveModeDescriptor(ctx.agentMode).planGate !== 'non_blocking') return null;
 
     try {
@@ -845,6 +918,44 @@ export class ChatManagementService {
         err instanceof Error ? err.message : String(err),
       );
       return null;
+    }
+  }
+
+  /** `record_plan` in plan mode: the blocking review, through the same gate the native tools use. */
+  private async reviewRecordedPlan(
+    chatId: string,
+    args: RecordPlanArgs,
+    ctx: TurnContext,
+  ): Promise<RecordPlanResult | null> {
+    try {
+      const decision = await this.buildPlanReviewHandler(chatId)({
+        summary: args.title,
+        planContent: args.content,
+        actions: ['implement_interactive', 'exit_only'],
+        recommendedAction: 'implement_interactive',
+      });
+      const planId = ctx.planIds[ctx.planIds.length - 1] ?? '';
+      const feedback = decision.feedback?.trim();
+      if (!decision.approved) {
+        return { planId, fileName: '', review: { decision: 'changes_requested', ...(feedback ? { feedback } : {}) } };
+      }
+      if (decision.action === 'exit_only') {
+        return { planId, fileName: '', review: { decision: 'dismissed' } };
+      }
+      // Approved: the rest of THIS turn is implementation, so it is judged as
+      // an ordinary turn from here — otherwise every write the user has just
+      // signed off on would stop at its own permission card.
+      const chat = await this.chatRepo.getById(chatId).catch(() => null);
+      ctx.agentMode = 'auto';
+      ctx.permissionMode = resolveTurnPermissionMode('auto', chat?.permissionMode);
+      return { planId, fileName: '', review: { decision: 'approved', ...(feedback ? { feedback } : {}) } };
+    } catch (err) {
+      console.warn(
+        `[ChatManagement] plan review via record_plan failed for chat ${chatId}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+      // Fail CLOSED: an unreviewed plan must not turn into an implementation.
+      return { planId: '', fileName: '', review: { decision: 'dismissed' } };
     }
   }
 
@@ -2980,6 +3091,19 @@ export class ChatManagementService {
             break;
           }
           case 'harness.tool_complete': {
+            // Any finished tool may have changed files — an edit tool, but just
+            // as often a shell command. Ask for a (debounced) live snapshot so
+            // the Changes tab follows the turn. `scheduleLiveCapture` had been
+            // written for exactly this and was never called from anywhere: the
+            // tab sat on "0 changes" for the whole of a two-minute turn and
+            // jumped to "6 changes" when it ended.
+            if (chat.workspaceId) {
+              this.extensions.workspaceCheckpointService?.scheduleLiveCapture?.(chat.workspaceId, {
+                chatId,
+                sessionId: chat.sessionId,
+                turnId,
+              });
+            }
             const matchKey = (data?.['callId'] as string) ?? (data?.['tool'] as string);
             const tc = turnMetadata.toolCalls!.find(
               (t) => t.status === 'running' && (t.id === matchKey || t.tool === matchKey),
@@ -3129,6 +3253,20 @@ export class ChatManagementService {
           `\n\n` +
           prompt;
       }
+      // Plan mode for a provider that has none of its own: say so here, in
+      // front of the prompt, or nothing does (see `PLAN_MODE_TURN_PREFIX`).
+      // The provider that OWNS this conversation answers for itself; the chat
+      // record often has no `harnessType` at all (the model picked it).
+      const nativePlanGate =
+        this.harness.capabilitiesFor?.(session.conversationId!)?.planMode ??
+        providerHasNativePlanGate(chat.harnessConfig?.harnessType);
+      if (agentMode === 'plan' && !nativePlanGate) {
+        promptForHarness = PLAN_MODE_TURN_PREFIX + promptForHarness;
+      }
+
+      const restoreNotice = this.drainRestoreNotice(chatId);
+      if (restoreNotice) promptForHarness = restoreNotice + promptForHarness;
+
       // A synthetic rewind/fork (provider without native branching) left the
       // digest of the surviving conversation on the chat. It goes in front of
       // this prompt exactly once — the provider session is fresh and has no
@@ -3371,6 +3509,9 @@ export class ChatManagementService {
 
       await this.messageRepo.deleteByIds(dropped.map((m) => m.id));
       this.turnContexts.delete(chatId);
+      // The conversation went back with the files, so the agent no longer
+      // remembers the work that was undone — there is nothing to warn it off.
+      this.pendingRestores.delete(chatId);
 
       // Workers still running were spawned by a turn that no longer exists
       // (a rewind requires an idle chat, so a running worker cannot belong to
@@ -3490,9 +3631,12 @@ export class ChatManagementService {
   /**
    * Branch a chat after `turnId` (default: its last turn) into a new chat.
    *
-   * The fork is a CONVERSATION branch, in the sense of Claude Code's
-   * `/branch`: it shares the parent's workspace, so the files are whatever
-   * they are now, and its transcript is the parent's through the chosen turn.
+   * The fork gets a WORKSPACE OF ITS OWN that starts as a copy of the parent's
+   * files as they are now (see `MountService.sourcesForFork` / `seedFrom`),
+   * and a transcript that is the parent's through the chosen turn. From there
+   * the two chats diverge freely: undo, rewind, commit or delete either one
+   * without touching the other. They used to share one workspace, which made
+   * every one of those operations in the fork an operation on the parent.
    * Provider-side the history is copied natively when the provider can
    * (`forkSession` / `thread/fork`), else the new session is seeded with a
    * digest of the copied turns.
@@ -3541,13 +3685,18 @@ export class ChatManagementService {
     let mode: 'native' | 'synthetic' = native ? 'native' : 'synthetic';
 
     const name = options.name?.trim() || `${source.name} (fork)`;
+    const mountService = this.extensions.mountService;
+    const forkSources =
+      source.sources && source.workspaceId && mountService
+        ? await mountService.sourcesForFork(source.workspaceId, source.sources).catch(() => source.sources)
+        : source.sources;
     const base: CreateChatParams & InternalCreateChatExtras = {
       name,
       ...(source.description ? { description: source.description } : {}),
       ...(source.model ? { model: source.model } : {}),
       ...(source.harnessConfig ? { harnessConfig: source.harnessConfig } : {}),
       ...(source.projectId ? { projectId: source.projectId } : {}),
-      ...(source.sources ? { sources: source.sources } : {}),
+      ...(forkSources ? { sources: forkSources } : {}),
       ...(source.primarySource ? { primary: source.primarySource } : {}),
       tags: [...(source.tags ?? [])],
       ...(source.browserConfig ? { browserConfig: source.browserConfig } : {}),
@@ -3555,7 +3704,6 @@ export class ChatManagementService {
       ...(source.permissionMode ? { permissionMode: source.permissionMode } : {}),
       ...(source.agentRef ? { agentRef: source.agentRef } : {}),
       ...(source.agentOverrides ? { agentOverrides: source.agentOverrides } : {}),
-      ...(source.workspaceId ? { workspaceId: source.workspaceId } : {}),
       forkedFromChatId: chatId,
       ...(cutTurnId ? { forkedAtTurnId: cutTurnId } : {}),
     };
@@ -3597,6 +3745,22 @@ export class ChatManagementService {
         ...base,
         ...(keptHasReplies ? { conversationSeed: buildConversationSeed(kept) } : {}),
       });
+    }
+
+    // Bring the parent's working tree across BEFORE anyone can prompt the
+    // fork. A failure here leaves a usable fork on a clean branch, so it is
+    // reported rather than thrown.
+    if (mountService && source.workspaceId && created.workspaceId && created.workspaceId !== source.workspaceId) {
+      try {
+        await mountService.ready(created.workspaceId);
+        await mountService.seedFrom(source.workspaceId, created.workspaceId);
+        await mountService.refreshStatus(created.workspaceId).catch(() => undefined);
+      } catch (err) {
+        console.warn(
+          `[ChatManagement] fork ${created.id}: could not copy the working tree from ${chatId}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
 
     // Copy the transcript rows into the fork. Anchors are re-keyed when the

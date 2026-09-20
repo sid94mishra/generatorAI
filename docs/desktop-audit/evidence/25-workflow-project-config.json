@@ -1,0 +1,55 @@
+{
+  "url": "/workflows/new",
+  "viewport": {
+    "w": 1440,
+    "h": 870
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Design risk policy",
+    "Dialog",
+    "Settings",
+    "Project & Codebases"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "flex-1 overflow-y-auto",
+      "h": 644,
+      "scroll": 1185,
+      "rect": {
+        "x": 1127,
+        "y": 226.5,
+        "w": 313
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "TEXTAREA",
+      "classes": "w-full rounded-md border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground transition-all duration-150 hover:border-[color-mix(in_srgb,var(--primary)_50%,var(--border))] focus:border-[var(--primary)] focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 leading-relaxed resize-y p-3 font-mono",
+      "h": 138,
+      "scroll": 343,
+      "rect": {
+        "x": 1156,
+        "y": 696.828125,
+        "w": 244
+      },
+      "parentScrollers": 1
+    },
+    {
+      "tag": "DIV",
+      "classes": "space-y-1 max-h-48 overflow-y-auto",
+      "h": 192,
+      "scroll": 407,
+      "rect": {
+        "x": 1143,
+        "y": 973.078125,
+        "w": 270
+      },
+      "parentScrollers": 1
+    }
+  ]
+}

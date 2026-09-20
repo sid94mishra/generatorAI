@@ -135,13 +135,13 @@ function SkillPreview({ artifact, onBack }: { artifact: ArtifactWithSource; onBa
   const { data: content, isLoading } = useArtifactContent(undefined, artifact.id, 'system');
   return (
     <div>
-      <button
+      <Button variant="unstyled"
         type="button"
         onClick={onBack}
         className="mb-4 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" /> Back to skills
-      </button>
+      </Button>
 
       <div className="mb-4 flex items-start gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-subtle text-primary">
@@ -524,13 +524,13 @@ function McpAddForm({ onDone }: { onDone: () => void }) {
 
   return (
     <div>
-      <button
+      <Button variant="unstyled"
         type="button"
         onClick={onDone}
         className="mb-4 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" /> Back to MCP servers
-      </button>
+      </Button>
 
       <SectionHeader title="Add server" description="Configure a Model Context Protocol server to extend agents with external tools." />
 
@@ -542,7 +542,7 @@ function McpAddForm({ onDone }: { onDone: () => void }) {
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="my-server" className="flex-1" />
               <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-subtle p-0.5">
                 {TRANSPORTS.map((t) => (
-                  <button
+                  <Button variant="unstyled"
                     key={t.id}
                     type="button"
                     onClick={() => setTransport(t.id)}
@@ -552,7 +552,7 @@ function McpAddForm({ onDone }: { onDone: () => void }) {
                     )}
                   >
                     {t.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>

@@ -1,0 +1,18 @@
+{
+  "id": "check-node-runtime",
+  "name": "Check Node runtime",
+  "phase": "pre_prompt",
+  "type": "script",
+  "enabled": true,
+  "priority": 0,
+  "failurePolicy": "abort",
+  "timeoutMs": 10000,
+  "retries": 0,
+  "config": {
+    "type": "script",
+    "command": "node",
+    "args": [
+      "--version"
+    ]
+  }
+}

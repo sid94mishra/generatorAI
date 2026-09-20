@@ -1,0 +1,190 @@
+{
+  "viewport": {
+    "width": 1280,
+    "height": 800,
+    "dpr": 2
+  },
+  "samples": [
+    {
+      "round": 0,
+      "label": "Dashboard",
+      "ms": 109
+    },
+    {
+      "round": 0,
+      "label": "Projects",
+      "ms": 85
+    },
+    {
+      "round": 0,
+      "label": "Chats",
+      "ms": 58
+    },
+    {
+      "round": 0,
+      "label": "Agents",
+      "ms": 123
+    },
+    {
+      "round": 0,
+      "label": "Workflows",
+      "ms": 62
+    },
+    {
+      "round": 0,
+      "label": "Scripts",
+      "ms": 119
+    },
+    {
+      "round": 0,
+      "label": "Automations",
+      "ms": 64
+    },
+    {
+      "round": 1,
+      "label": "Dashboard",
+      "ms": 65
+    },
+    {
+      "round": 1,
+      "label": "Projects",
+      "ms": 66
+    },
+    {
+      "round": 1,
+      "label": "Chats",
+      "ms": 63
+    },
+    {
+      "round": 1,
+      "label": "Agents",
+      "ms": 71
+    },
+    {
+      "round": 1,
+      "label": "Workflows",
+      "ms": 63
+    },
+    {
+      "round": 1,
+      "label": "Scripts",
+      "ms": 65
+    },
+    {
+      "round": 1,
+      "label": "Automations",
+      "ms": 51
+    },
+    {
+      "round": 2,
+      "label": "Dashboard",
+      "ms": 75
+    },
+    {
+      "round": 2,
+      "label": "Projects",
+      "ms": 63
+    },
+    {
+      "round": 2,
+      "label": "Chats",
+      "ms": 62
+    },
+    {
+      "round": 2,
+      "label": "Agents",
+      "ms": 80
+    },
+    {
+      "round": 2,
+      "label": "Workflows",
+      "ms": 71
+    },
+    {
+      "round": 2,
+      "label": "Scripts",
+      "ms": 67
+    },
+    {
+      "round": 2,
+      "label": "Automations",
+      "ms": 66
+    }
+  ],
+  "longTasks": [],
+  "processes": [
+    {
+      "type": "Browser",
+      "cpu": {
+        "cumulativeCPUUsage": 7.972774,
+        "percentCPUUsage": 0,
+        "idleWakeupsPerSecond": 0
+      },
+      "memory": {
+        "workingSetSize": 95040,
+        "peakWorkingSetSize": 137104
+      }
+    },
+    {
+      "type": "GPU",
+      "cpu": {
+        "cumulativeCPUUsage": 7.617322,
+        "percentCPUUsage": 0,
+        "idleWakeupsPerSecond": 0
+      },
+      "memory": {
+        "workingSetSize": 62016,
+        "peakWorkingSetSize": 104624
+      }
+    },
+    {
+      "type": "Utility",
+      "cpu": {
+        "cumulativeCPUUsage": 1.707129,
+        "percentCPUUsage": 0,
+        "idleWakeupsPerSecond": 0
+      },
+      "memory": {
+        "workingSetSize": 23776,
+        "peakWorkingSetSize": 39856
+      }
+    },
+    {
+      "type": "Tab",
+      "cpu": {
+        "cumulativeCPUUsage": 16.425229,
+        "percentCPUUsage": 0,
+        "idleWakeupsPerSecond": 0
+      },
+      "memory": {
+        "workingSetSize": 161360,
+        "peakWorkingSetSize": 193776
+      }
+    },
+    {
+      "type": "Utility",
+      "cpu": {
+        "cumulativeCPUUsage": 0.217552,
+        "percentCPUUsage": 0,
+        "idleWakeupsPerSecond": 0
+      },
+      "memory": {
+        "workingSetSize": 12336,
+        "peakWorkingSetSize": 37456
+      }
+    },
+    {
+      "type": "Utility",
+      "cpu": {
+        "cumulativeCPUUsage": 0.424935,
+        "percentCPUUsage": 0,
+        "idleWakeupsPerSecond": 0
+      },
+      "memory": {
+        "workingSetSize": 16208,
+        "peakWorkingSetSize": 50928
+      }
+    }
+  ],
+  "errors": []
+}

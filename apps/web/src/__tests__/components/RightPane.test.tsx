@@ -9,7 +9,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { RightPane, type RightPaneTabDef } from '@/components/layout/RightPane.js';
 
@@ -158,5 +158,44 @@ describe('RightPane — P2-54 / N7 instance cap', () => {
       fireEvent.click(screen.getByTestId('right-pane-add-terminal'));
     }
     expect(screen.getAllByTestId('right-pane-tab-terminal')).toHaveLength(6);
+  });
+});
+
+
+describe('RightPane — constrained desktop layout', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('uses an escapable sheet when the sidebar leaves too little room for two columns', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(620);
+    const close = vi.fn();
+    render(<div><RightPane open onOpenChange={close} storageKey="narrow-host"
+      tabs={makeTabs(() => {})} defaultTabType="changes" addableTabTypes={['terminal']} /></div>);
+    await waitFor(() => expect(screen.getByTestId('right-pane').getAttribute('data-fullscreen')).toBe('true'));
+    expect(screen.queryByRole('separator')).toBeNull();
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    const input = document.createElement('textarea');
+    dialog.append(input);
+    document.body.append(dialog);
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(close).not.toHaveBeenCalled();
+    dialog.remove();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(close).toHaveBeenCalledWith(false);
+  });
+
+  it('caps persisted width to preserve reading space and supports keyboard resizing', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+    window.localStorage.setItem('keyboard-pane:width', '900');
+    renderPane(() => {}, 'keyboard-pane');
+    await waitFor(() => expect(screen.getByRole('separator').getAttribute('aria-valuenow')).toBe('580'));
+    const divider = screen.getByRole('separator');
+    expect(divider.tabIndex).toBe(0);
+    fireEvent.keyDown(divider, { key: 'Home' });
+    expect(divider.getAttribute('aria-valuenow')).toBe('320');
+    fireEvent.keyDown(divider, { key: 'ArrowLeft' });
+    expect(divider.getAttribute('aria-valuenow')).toBe('336');
+    fireEvent.keyDown(divider, { key: 'End' });
+    expect(divider.getAttribute('aria-valuenow')).toBe('580');
   });
 });

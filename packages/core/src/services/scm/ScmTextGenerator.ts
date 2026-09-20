@@ -34,8 +34,18 @@ export interface PullRequestTextResult {
   source: 'model' | 'heuristic';
 }
 
+/**
+ * The model to write with when Settings → Source Control names none — in
+ * practice the model of the chat the user pressed "Generate" in.
+ */
+export interface GenerationFallback {
+  provider?: string | null;
+  model?: string | null;
+}
+
 export interface CommitPromptInput {
   repoDir: string;
+  fallbackGeneration?: GenerationFallback;
   hint?: string;
   files: string[];
   diffExcerpt: string;
@@ -43,6 +53,7 @@ export interface CommitPromptInput {
 
 export interface PullRequestPromptInput {
   repoDir: string;
+  fallbackGeneration?: GenerationFallback;
   base: string;
   hint?: string;
   commits: string[];
@@ -324,8 +335,24 @@ export function heuristicPullRequestText(
 export class ScmTextGenerator {
   constructor(private readonly deps: ScmTextGeneratorDeps) {}
 
+  /**
+   * Settings win. With nothing configured there, the caller's fallback — the
+   * chat's own model — writes the text.
+   *
+   * Without the fallback an unconfigured install answered every "Generate"
+   * with the heuristic: the chat's NAME as the subject and a bullet list of
+   * file paths. A button with a sparkle on it, in a chat that is already
+   * talking to a model, produced "Shopkit — Claude Opus" as a commit message.
+   */
+  private resolveGeneration(fallback?: GenerationFallback): { provider: string | null; model: string | null } {
+    const configured = this.deps.generation();
+    if (configured.model) return configured;
+    if (fallback?.model) return { provider: fallback.provider ?? configured.provider ?? null, model: fallback.model };
+    return configured;
+  }
+
   async generateCommitMessage(input: CommitPromptInput): Promise<CommitTextResult> {
-    const gen = this.deps.generation();
+    const gen = this.resolveGeneration(input.fallbackGeneration);
     if (!gen.model) {
       return { message: heuristicCommitMessage(input.files, input.hint), source: 'heuristic' };
     }
@@ -343,7 +370,7 @@ export class ScmTextGenerator {
   }
 
   async generatePullRequestText(input: PullRequestPromptInput): Promise<PullRequestTextResult> {
-    const gen = this.deps.generation();
+    const gen = this.resolveGeneration(input.fallbackGeneration);
     if (!gen.model) {
       const fallback = heuristicPullRequestText(input.files, input.commits, input.hint, input.template);
       return { ...fallback, source: 'heuristic' };

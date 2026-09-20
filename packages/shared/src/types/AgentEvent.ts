@@ -81,7 +81,24 @@ export type AgentEvent =
   /** W13 / X-4 — semantic cancellation outcome. Not an error: the user pressed Stop. */
   | { kind: 'harness.cancelled'; data: { reason: 'user_abort' | 'timeout' | 'budget_exceeded'; provider?: string } }
   | { kind: 'harness.session_start'; data: { provider?: string } }
-  | { kind: 'harness.usage'; data: { model: string; inputTokens: number; outputTokens: number; cost?: number; durationMs?: number; provider?: string } }
+  /**
+   * What a turn spent. `inputTokens` is UNCACHED input; prompt-cache traffic
+   * is reported apart in `cacheReadTokens` / `cacheWriteTokens` (every
+   * provider sends them — the type simply never said so).
+   */
+  | {
+      kind: 'harness.usage';
+      data: {
+        model: string;
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens?: number;
+        cacheWriteTokens?: number;
+        cost?: number;
+        durationMs?: number;
+        provider?: string;
+      };
+    }
   /**
    * Provider-neutral snapshot of how full the model's context window is.
    *

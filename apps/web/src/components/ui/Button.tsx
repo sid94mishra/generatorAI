@@ -8,7 +8,7 @@ import React, { forwardRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'subtle';
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'subtle' | 'unstyled';
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'icon' | 'icon-sm';
 
 const VARIANTS: Record<ButtonVariant, string> = {
@@ -27,6 +27,8 @@ const VARIANTS: Record<ButtonVariant, string> = {
   // Filled subtle surface
   subtle:
     'bg-subtle text-foreground hover:bg-emphasis disabled:opacity-50',
+  // The shared BEHAVIOUR with none of the look — see `unstyled` below.
+  unstyled: '',
 };
 
 const SIZES: Record<ButtonSize, string> = {
@@ -49,20 +51,33 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = 'secondary', size = 'md', loading = false, leftIcon, rightIcon, disabled, className, children, ...props },
+  { variant = 'secondary', size = 'md', loading = false, leftIcon, rightIcon, disabled, className, children, type, ...props },
   ref,
 ) {
+  // `unstyled`: for a control that is a button but does not LOOK like one — a
+  // tab pill, a selectable card, a row that is one big click target. It gets
+  // what every button must share (the focus ring, the disabled cursor, the
+  // loading state, `type="button"`) and nothing that decides layout: no
+  // inline-flex, no nowrap, no height, no padding. Forcing a chrome variant
+  // onto such controls and undoing it with overrides is what made the Theme
+  // cards overflow (nowrap) and squeezed the Discard-plan icon to a dot
+  // (padding) — so bespoke controls stayed raw `<button>`s and lost the shared
+  // behaviour instead. This is the way to have both.
+  const unstyled = variant === 'unstyled';
   return (
     <button
       ref={ref}
+      // A bare <button> inside a <form> submits it. Nothing here wants that by accident.
+      type={type ?? 'button'}
       disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center whitespace-nowrap font-medium',
-        'transition-all duration-150',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+        !unstyled && 'inline-flex items-center whitespace-nowrap font-medium',
+        !unstyled && 'transition-all duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        !unstyled && 'focus-visible:ring-offset-2 focus-visible:ring-offset-background',
         'disabled:cursor-not-allowed',
         VARIANTS[variant],
-        SIZES[size],
+        !unstyled && SIZES[size],
         className,
       )}
       {...props}

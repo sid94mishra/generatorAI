@@ -9,6 +9,7 @@ import { useAvailableArtifacts } from '@/hooks/projectQueries.js';
 import { cn } from '@/lib/utils.js';
 import { Badge, Button } from '@/components/ui/index.js';
 import type { PromptDefinition } from '@generatorai/shared';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 interface PromptFilePickerProps {
   prompts: PromptDefinition[];
@@ -137,11 +138,10 @@ export function PromptFilePicker({ prompts, onChange }: PromptFilePickerProps) {
                   : 'border border-transparent hover:bg-subtle',
               )}
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={isAttached}
-                onChange={() => toggleFile(artifact.filePath, artifact.name)}
-                className="h-3.5 w-3.5 rounded"
+                onCheckedChange={() => toggleFile(artifact.filePath, artifact.name)}
+                className="h-3.5 w-3.5"
               />
               <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <div className="flex-1 min-w-0">

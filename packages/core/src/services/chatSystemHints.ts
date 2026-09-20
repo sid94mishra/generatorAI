@@ -270,7 +270,13 @@ export function buildWorkspaceHint(input: WorkspaceHintInput): string {
     '- Anything that is not a deliverable — plans, notes, experiment scripts, downloads, ' +
       'screenshots, temporary files — goes under the scratch directory, never inside a mounted repository.',
   );
-  lines.push('- Do not run git checkout/switch/stash/reset in a mount; the user controls branches.');
+  // "checkout" alone read as "don't switch branches", and an agent then ran
+  // `git checkout -- <file>` to throw away a file's changes — which can be the
+  // user's uncommitted work just as easily as its own.
+  lines.push(
+    '- Do not switch branches, stash, reset or discard changes with git (checkout, switch, stash, reset, ' +
+      'restore, clean) in a mount; the user controls branches and the Changes tab handles undo.',
+  );
   lines.push(`- Do not create files in ${input.rootPath} outside scratch/ and plans/.`);
   return lines.join('\n');
 }

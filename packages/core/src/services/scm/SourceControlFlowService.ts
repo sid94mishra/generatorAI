@@ -32,7 +32,7 @@ import type { IGitClient } from '@generatorai/git';
 import { parseRepoSlug, type SourceControlRegistry } from '@generatorai/source-control';
 import type { RepoReadinessService } from './RepoReadinessService.js';
 import { notConnectedReason, REASON_NOTHING_TO_COMMIT } from './RepoReadinessService.js';
-import type { ScmTextGenerator } from './ScmTextGenerator.js';
+import type { GenerationFallback, ScmTextGenerator } from './ScmTextGenerator.js';
 import {
   capDiffExcerpt,
   heuristicCommitMessage,
@@ -94,7 +94,7 @@ export class SourceControlFlowService {
     repoDir: string;
     alias: string;
     request: ScmFlowRequest;
-    context?: { chatName?: string; hint?: string };
+    context?: { chatName?: string; hint?: string; model?: string; provider?: string };
   }): Promise<ScmFlowResult> {
     const { repoDir, alias, request, context } = input;
     const git = this.deps.git;
@@ -176,6 +176,7 @@ export class SourceControlFlowService {
           if (!message) {
             if (request.commit.generate !== false) {
               const generated = await this.deps.text.generateCommitMessage({
+                ...this.generationFallback(context),
                 repoDir,
                 ...(hint ? { hint } : {}),
                 files,
@@ -259,6 +260,7 @@ export class SourceControlFlowService {
       stepId = 'pull_request';
       if (wantPr) {
         const pr = await this.openPullRequest({
+          ...this.generationFallback(context),
           repoDir,
           readiness,
           head: branchNow ?? '',
@@ -295,7 +297,7 @@ export class SourceControlFlowService {
     repoDir: string;
     alias: string;
     request: ScmGenerateRequest;
-    context?: { chatName?: string };
+    context?: { chatName?: string; model?: string; provider?: string };
   }): Promise<ScmGenerateResult> {
     const { repoDir, request } = input;
     const git = this.deps.git;
@@ -304,6 +306,7 @@ export class SourceControlFlowService {
     if (request.kind === 'commit') {
       const changed = await git.changedFilesSummary(repoDir);
       const result = await this.deps.text.generateCommitMessage({
+                ...this.generationFallback(input.context),
         repoDir,
         ...(hint ? { hint } : {}),
         files: changed.map((c) => c.path),
@@ -325,6 +328,7 @@ export class SourceControlFlowService {
     const { commits, files, diffExcerpt } = await this.branchContext(repoDir, base);
     const template = await readPullRequestTemplate(repoDir);
     const result = await this.deps.text.generatePullRequestText({
+                ...this.generationFallback(input.context),
       repoDir,
       base,
       ...(hint ? { hint } : {}),
@@ -481,7 +485,17 @@ export class SourceControlFlowService {
     return null;
   }
 
+  /** The chat's own model, offered to the text generator as a last resort. */
+  private generationFallback(
+    context?: { model?: string; provider?: string },
+  ): { fallbackGeneration?: GenerationFallback } {
+    return context?.model
+      ? { fallbackGeneration: { model: context.model, provider: context.provider ?? null } }
+      : {};
+  }
+
   private async openPullRequest(args: {
+    fallbackGeneration?: GenerationFallback;
     repoDir: string;
     readiness: RepoReadiness;
     head: string;
@@ -525,6 +539,7 @@ export class SourceControlFlowService {
       if (request.pullRequest?.generate !== false) {
         const template = await readPullRequestTemplate(repoDir);
         const generated = await this.deps.text.generatePullRequestText({
+                ...(args.fallbackGeneration ? { fallbackGeneration: args.fallbackGeneration } : {}),
           repoDir,
           base,
           ...(hint ? { hint } : {}),

@@ -24,6 +24,7 @@ import {
   Textarea,
 } from '@/components/ui/index.js';
 import { toast } from '@/components/Toast.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { cn } from '@/lib/utils.js';
 import {
   useGenerateScmText,
@@ -127,12 +128,16 @@ export function SourceControlPanel({
 
   const composeRequest = useCallback((): ScmFlowRequest => {
     const trimmed = message.trim();
-    const wantsPush = push || openPr;
+    // What this mount cannot do is never asked for, whatever the toggles were
+    // left at — `push` defaults to on, and a repo with no remote must still be
+    // able to commit.
+    const wantsPr = openPr && (selected?.can.pullRequest ?? false);
+    const wantsPush = (push || wantsPr) && (selected?.can.push ?? false);
     return {
       ...(selected ? { alias: selected.alias } : {}),
       commit: trimmed ? { message: trimmed } : { generate: true },
       push: wantsPush,
-      ...(openPr
+      ...(wantsPr
         ? {
             pullRequest: {
               ...(prTitle.trim() ? { title: prTitle.trim() } : { generate: true }),
@@ -181,17 +186,30 @@ export function SourceControlPanel({
   }
   if (repos.length === 0) return null;
 
+  // Blocked means NOTHING here can work — and the server is the judge of that
+  // (`can`), one capability at a time.
+  //
+  // This used to be decided locally from `hasRemote` / `connected`, and it hid
+  // the whole form — commit message, Generate, Commit — behind "Remote host is
+  // not connected" for any repo whose remote was not a signed-in forge: a
+  // local bare remote, a company git server, or no remote at all. None of
+  // that has anything to do with committing, and the server said so
+  // (`can.commit: true, can.push: true`). The user could not commit their own
+  // work from the app. A missing remote or account now costs only the toggle
+  // it actually affects.
   const blockedReason = selected
     ? !selected.isRepo
       ? 'Not a git repository'
-      : !selected.hasRemote
-        ? (selected.reasons.push ?? 'No git remote configured')
-        : !selected.connected
-          ? (selected.reasons.pullRequest ?? 'This remote host is not connected')
-          : null
+      : !selected.can.commit && !selected.can.push && !selected.can.pullRequest
+        ? (selected.reasons.commit ?? selected.reasons.push ?? selected.reasons.pullRequest ?? 'Source control is unavailable here')
+        : null
     : null;
-  // Only a missing ACCOUNT is fixable from Settings; "not a repo" is not.
-  const needsConnect = !!selected && selected.isRepo && selected.hasRemote && !selected.connected;
+  // "Connect GitHub" only helps when the remote is a hosted forge. For a local
+  // path or a bare `host:path` there is no account to connect.
+  const remoteIsHosted = !!selected?.remoteUrl && /^(https?:\/\/|ssh:\/\/|git@)/i.test(selected.remoteUrl);
+  const needsConnect = !!selected && selected.isRepo && selected.hasRemote && !selected.connected && remoteIsHosted;
+  const canPush = selected?.can.push ?? false;
+  const canOpenPr = selected?.can.pullRequest ?? false;
   // A merge someone started (Resolve manually / Ask the agent, or a git
   // merge outside the app) has to be finished or abandoned before anything
   // else makes sense — the commit form would only be refused by the server.
@@ -297,37 +315,48 @@ export function SourceControlPanel({
           {/* Toggles */}
           <div className="flex flex-wrap items-center gap-3 text-[11px]">
             <label className="inline-flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={push || openPr}
-                disabled={openPr}
-                onChange={(e) => setPush(e.target.checked)}
+              <Checkbox
+                checked={canPush && (push || openPr)}
+                disabled={openPr || !canPush}
+                onCheckedChange={(v) => setPush(v === true)}
                 data-testid="scm-toggle-push"
-                className="h-3 w-3 accent-[var(--color-primary)]"
+                className="h-3.5 w-3.5"
               />
               Push
             </label>
-            <label className="inline-flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={openPr}
-                onChange={(e) => {
-                  setOpenPr(e.target.checked);
+            <label
+              className={cn('inline-flex items-center gap-1.5', !canOpenPr && 'text-muted-foreground')}
+              title={!canOpenPr ? selected?.reasons.pullRequest : undefined}
+            >
+              <Checkbox
+                checked={canOpenPr && openPr}
+                disabled={!canOpenPr}
+                onCheckedChange={(v) => {
+                  setOpenPr(v === true);
                   // A PR needs a pushed branch; saying so by forcing the
                   // toggle is clearer than failing at step 5.
-                  if (e.target.checked) setPush(true);
+                  if (v === true) setPush(true);
                 }}
                 data-testid="scm-toggle-pr"
-                className="h-3 w-3 accent-[var(--color-primary)]"
+                className="h-3.5 w-3.5"
               />
               Open pull request
             </label>
-            {selected && !selected.can.push && push && (
-              <span className="text-warning">{selected.reasons.push}</span>
+            {selected && !canPush && selected.reasons.push && (
+              <span className="text-muted-foreground">{selected.reasons.push}</span>
+            )}
+            {needsConnect && !canOpenPr && (
+              <Link
+                to="/settings/source-control"
+                data-testid="scm-connect-github"
+                className="ml-auto inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border bg-card px-2 text-[10.5px] font-medium text-foreground hover:bg-subtle"
+              >
+                <Github className="h-3 w-3" /> Connect to open pull requests
+              </Link>
             )}
           </div>
 
-          {openPr && (
+          {openPr && canOpenPr && (
             <div className="space-y-1.5 rounded-md border border-border p-1.5" data-testid="scm-pr-form">
               <div className="relative">
                 <Input
@@ -370,12 +399,11 @@ export function SourceControlPanel({
                   className="h-7 w-40 px-2 text-xs"
                 />
                 <label className="inline-flex items-center gap-1.5 text-[11px]">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={draft}
-                    onChange={(e) => setDraft(e.target.checked)}
+                    onCheckedChange={(v) => setDraft(v === true)}
                     data-testid="scm-pr-draft"
-                    className="h-3 w-3 accent-[var(--color-primary)]"
+                    className="h-3.5 w-3.5"
                   />
                   Draft
                 </label>
@@ -389,11 +417,11 @@ export function SourceControlPanel({
             size="sm"
             onClick={() => void runFlow()}
             loading={flow.isPending}
-            disabled={!selected?.can.commit && !selected?.dirty && !push && !openPr}
-            leftIcon={openPr ? <GitPullRequest className="h-3 w-3" /> : <GitCommit className="h-3 w-3" />}
+            disabled={!selected?.can.commit && !selected?.dirty && !(push && canPush) && !(openPr && canOpenPr)}
+            leftIcon={openPr && canOpenPr ? <GitPullRequest className="h-3 w-3" /> : <GitCommit className="h-3 w-3" />}
             data-testid="scm-run-flow"
           >
-            {openPr ? 'Commit & open pull request' : push ? 'Commit & push' : 'Commit'}
+            {openPr && canOpenPr ? 'Commit & open pull request' : push && canPush ? 'Commit & push' : 'Commit'}
           </Button>
         </div>
       )}

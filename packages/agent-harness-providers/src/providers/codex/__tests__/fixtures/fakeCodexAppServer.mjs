@@ -369,11 +369,12 @@ async function runTurn(threadId, turnId, prompt, turnStartParams) {
     return;
   }
 
-  if (prompt.includes('CLOSE_DEMO')) {
+  if (prompt.includes('CLOSE_DEMO') || prompt.includes('THREAD_CLOSED_DEMO')) {
     const msg = nextItemId();
     notify('item/agentMessage/delta', { threadId, turnId, itemId: msg, delta: 'starting ' });
     notify('item/started', { threadId, turnId, startedAtMs: 0, item: commandItem('call_doomed', 'inProgress', null, null) });
-    notify('thread/status/changed', { threadId, status: { type: 'systemError' } });
+    if (prompt.includes('THREAD_CLOSED_DEMO')) notify('thread/closed', { threadId });
+    else notify('thread/status/changed', { threadId, status: { type: 'systemError' } });
     return; // the thread is gone; nothing else will ever arrive
   }
 

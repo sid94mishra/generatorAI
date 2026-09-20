@@ -50,6 +50,7 @@ import { queryClient } from '../providers/QueryProvider.js';
 import { backgroundTasksKeys, queryKeys } from '../hooks/queries.js';
 import { workflowKeys } from '../hooks/workflowQueries.js';
 import { replayEventsIntoStore } from '../utils/replayEvents.js';
+import { hydrateWidgetsForChat } from '../utils/hydrateWidgets.js';
 import { widgetBridge } from '../lib/widgetBridge.js';
 import { countFallback } from '../lib/clientMetrics.js';
 import type { PersistedEvent } from '@generatorai/shared';
@@ -1054,6 +1055,13 @@ function openConnection(
     }
     conn.draining = false;
     useConnectionStore.getState().setConnectionState(primarySessionId, 'connected');
+    // Replay contains the asset port from the original render event. Desktop
+    // chooses a new isolated port on every launch; current REST metadata must
+    // win after replay, or persisted widgets keep loading a dead origin.
+    // This optional refresh must not block live tokens or context telemetry.
+    if (scope === 'chat' && conn.refCount > 0) {
+      void hydrateWidgetsForChat(scopeId, primarySessionId);
+    }
   })();
 
   conn.hydrateFallback = setTimeout(hydrate, HYDRATE_FALLBACK_MS);
@@ -1202,25 +1210,40 @@ function openConnection(
       }
     } finally {
       conn.gapFilling = false;
-      // Last resort. Replay is authoritative, so several stall windows that
-      // surface nothing new mean the turn really is over and its terminal
-      // event is unrecoverable — settle the stream rather than spin forever.
+      // Repeated empty replays justify checking server liveness, but cannot
+      // themselves establish completion: tools and reasoning can be silent.
       if (applied > 0) {
         countFallback('streamGapFilledEvents', applied);
         conn.emptyGapFills = 0;
       } else if (++conn.emptyGapFills >= 3 && connHasActiveStream()) {
         conn.emptyGapFills = 0;
+        // Silence is normal during a long tool call or model reasoning. Only
+        // settle when the server confirms this chat no longer owns a turn.
+        // An unreachable server is unknown, not evidence of completion.
+        let stopped = false;
+        const checkedTurnId = useStreamStore.getState().getStream(primarySessionId).turnId;
+        const checkedLastEventAt = conn.lastEventAt;
+        if (scope === 'chat') {
+          try {
+            const health = await platform.getHealth();
+            stopped = Array.isArray(health.runningChatIds) && !health.runningChatIds.includes(scopeId);
+          } catch { /* retry reconciliation on the next stall window */ }
+        }
         // Say WHY the stream is settling: this path fires when a turn died
         // without its terminal event (server crash mid-turn, killed provider
         // process). Silently completing left the user staring at a response
         // that just... stopped, with no indication anything went wrong.
         const store = useStreamStore.getState();
-        store.addSystemMessage(
-          primarySessionId,
-          'The stream went quiet and its completion could not be recovered — the turn may have been interrupted. The transcript above is everything that was received.',
-          'error',
-        );
-        store.completeStream(primarySessionId);
+        if (stopped && conn.refCount > 0 && connHasActiveStream()
+          && store.getStream(primarySessionId).turnId === checkedTurnId
+          && conn.lastEventAt === checkedLastEventAt) {
+          store.addSystemMessage(
+            primarySessionId,
+            'The stream went quiet and its completion could not be recovered — the turn may have been interrupted. The transcript above is everything that was received.',
+            'error',
+          );
+          store.errorStream(primarySessionId);
+        }
       }
       // Push the clock forward so we re-poll at most once per STALL window
       // even if the turn is genuinely still running (no new events found).

@@ -3,6 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import { HARNESS_PROVIDER_IDS, REASONING_EFFORTS } from '../types/ProviderConfig.js';
 import { HookDefinitionSchema, WorkflowHookDefinitionSchema, HooksFileConfigSchema } from './WorkflowTemplate.js';
 import { BrowserConfigSchema } from './BrowserConfigSchema.js';
 import { McpServerConfigSchema, AgentOverridesSchema } from './AgentSchemas.js';
@@ -71,7 +72,7 @@ const HarnessConfigSchema = z.object({
    * server's primary provider. Lets stage 1 run on Claude and stage 2 on
    * Copilot within the same run.
    */
-  harnessType: z.enum(['copilot', 'claude-agent']).optional(),
+  harnessType: z.enum(HARNESS_PROVIDER_IDS).optional(),
   systemMessage: z.object({
     mode: z.enum(['append', 'replace']).default('append'),
     content: z.string(),
@@ -97,7 +98,7 @@ const HarnessConfigSchema = z.object({
     model: z.string().optional(),
   }).optional(),
   configDir: z.string().optional(),
-  reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
+  reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
   contextTier: z.enum(['default', 'long_context']).optional(),
   maxTurns: z.number().int().min(1).optional(),
   permissionMode: z.enum(['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk']).optional(),

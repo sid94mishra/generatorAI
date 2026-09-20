@@ -8,6 +8,7 @@ import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useProjects, useProjectCodebases } from '@/hooks/projectQueries.js';
 import { Badge, Select, Spinner } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 const MAX_CODEBASES = 3;
 
@@ -125,12 +126,11 @@ export function ProjectCodebasesTab() {
                             : 'border-border hover:border-primary/50 cursor-pointer',
                     )}
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={isSelected}
                       disabled={isDisabled || notReady}
-                      onChange={() => toggleCodebase(codebase.alias)}
-                      className="mt-0.5 h-4 w-4 rounded text-primary"
+                      onCheckedChange={() => toggleCodebase(codebase.alias)}
+                      className="mt-0.5 h-4 w-4"
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -166,12 +166,11 @@ export function ProjectCodebasesTab() {
           </label>
           <div className="space-y-2">
             <label className="flex items-center gap-3 rounded-lg border border-border p-3 cursor-pointer transition-all hover:border-primary/50">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={autoCommit}
-                onChange={(e) => setAutoCommit(e.target.checked)}
+                onCheckedChange={(v) => setAutoCommit(v === true)}
                 data-testid="workflow-auto-commit"
-                className="h-4 w-4 rounded text-primary"
+                className="h-4 w-4"
               />
               <div>
                 <div className="text-sm font-medium text-foreground">
@@ -183,13 +182,12 @@ export function ProjectCodebasesTab() {
               </div>
             </label>
             <label className="flex items-center gap-3 rounded-lg border border-border p-3 cursor-pointer transition-all hover:border-primary/50">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={autoPush}
                 disabled={!autoCommit}
-                onChange={(e) => setAutoPush(e.target.checked)}
+                onCheckedChange={(v) => setAutoPush(v === true)}
                 data-testid="workflow-auto-push"
-                className="h-4 w-4 rounded text-primary"
+                className="h-4 w-4"
               />
               <div>
                 <div className="text-sm font-medium text-foreground">
@@ -201,13 +199,12 @@ export function ProjectCodebasesTab() {
               </div>
             </label>
             <label className="flex items-center gap-3 rounded-lg border border-border p-3 cursor-pointer transition-all hover:border-primary/50">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={autoCreatePR}
                 disabled={!autoCommit}
-                onChange={(e) => setAutoCreatePR(e.target.checked)}
+                onCheckedChange={(v) => setAutoCreatePR(v === true)}
                 data-testid="workflow-auto-create-pr"
-                className="h-4 w-4 rounded text-primary"
+                className="h-4 w-4"
               />
               <div>
                 <div className="text-sm font-medium text-foreground">

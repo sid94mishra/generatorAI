@@ -179,6 +179,21 @@ describe('stream reducer — invariant 5: usage survives a clear', () => {
     expect(r.getStream(s, SID).contextUsage).toMatchObject({ used: 120, at: 1_000 });
   });
 
+  it('keeps the context figure across the start of the next turn', () => {
+    // Pressing Send does not empty the window. The gauge used to blank to
+    // "—%" for the whole turn and only come back when the turn ended.
+    const s = run(
+      (x) => r.appendToken(x, SID, 'hi'),
+      (x) => r.setUsage(x, SID, { model: 'm', inputTokens: 100, outputTokens: 20 }),
+      (x) => r.setContextUsage(x, SID, { used: 120, limit: 1000 }, 1_000),
+      (x) => r.startPending(x, SID, 'next prompt'),
+    );
+    expect(r.getStream(s, SID).status).toBe('pending');
+    expect(r.getStream(s, SID).contextUsage).toMatchObject({ used: 120, at: 1_000 });
+    // Spend is per turn: the new turn has spent nothing yet.
+    expect(r.getStream(s, SID).usage).toBeNull();
+  });
+
   it('records usage on an idle stream but not for an unknown session', () => {
     const usage = { model: 'm', inputTokens: 1, outputTokens: 1 };
     // Replay applies usage after clearStream leaves the stream idle.
@@ -187,6 +202,35 @@ describe('stream reducer — invariant 5: usage survives a clear', () => {
 
     // But an unknown session must not conjure a ghost entry.
     expect(r.setUsage({}, SID, usage)).toEqual({});
+  });
+
+  it('keeps what the provider said about the window when a short turn only estimates', () => {
+    const s = run(
+      (x) => r.appendToken(x, SID, 'hi'),
+      (x) => r.setContextUsage(x, SID, {
+        source: 'provider', model: 'opus', currentTokens: 57_000, promptTokenLimit: 1_000_000,
+        breakdown: { system: 4_932 },
+      }, 1),
+      (x) => r.setContextUsage(x, SID, {
+        source: 'derived', model: 'opus', currentTokens: 58_200, promptTokenLimit: 936_000,
+      }, 2),
+    );
+    expect(r.getStream(s, SID).contextUsage).toMatchObject({
+      currentTokens: 58_200, // the new total…
+      promptTokenLimit: 1_000_000, // …against the same window as a moment ago
+      breakdown: { system: 4_932 },
+      source: 'derived', // still labelled as the estimate it is
+      at: 2,
+    });
+  });
+
+  it('does not carry one model\'s window over to another', () => {
+    const s = run(
+      (x) => r.appendToken(x, SID, 'hi'),
+      (x) => r.setContextUsage(x, SID, { source: 'provider', model: 'opus', currentTokens: 1, promptTokenLimit: 1_000_000 }, 1),
+      (x) => r.setContextUsage(x, SID, { source: 'derived', model: 'haiku', currentTokens: 2, promptTokenLimit: 136_000 }, 2),
+    );
+    expect(r.getStream(s, SID).contextUsage).toMatchObject({ source: 'derived', promptTokenLimit: 136_000 });
   });
 
   it('lets context usage go down after compaction', () => {

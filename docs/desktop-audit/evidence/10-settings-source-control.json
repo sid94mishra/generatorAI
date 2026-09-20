@@ -1,0 +1,31 @@
+{
+  "url": "/settings/source-control",
+  "viewport": {
+    "w": 1440,
+    "h": 870
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Settings",
+    "Source Control",
+    "Accounts",
+    "Defaults"
+  ],
+  "scrollers": [
+    {
+      "tag": "NAV",
+      "classes": "hidden w-60 shrink-0 flex-col gap-5 overflow-y-auto border-r border-border bg-subtle/40 px-3 py-4 sm:flex",
+      "h": 734,
+      "scroll": 778,
+      "rect": {
+        "x": 240,
+        "y": 136,
+        "w": 240
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

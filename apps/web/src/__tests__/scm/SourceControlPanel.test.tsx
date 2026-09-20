@@ -148,18 +148,74 @@ describe('SourceControlPanel', () => {
     expect(screen.queryByTestId('scm-connect-github')).toBeNull();
   });
 
-  it('links to Settings when the fix is connecting an account', async () => {
+  it('still lets you commit and push when only pull requests need an account', async () => {
+    // The whole form used to disappear behind "Remote host is not connected".
+    // Committing has nothing to do with a forge account, and the server said
+    // so (`can.commit`, `can.push`) — the user just could not get at it.
+    const platform = makePlatform([
+      repo({
+        connected: false,
+        remoteUrl: 'https://github.com/acme/shop.git',
+        can: { commit: true, push: true, pullRequest: false },
+        reasons: { pullRequest: 'Remote host github.com is not connected — connect it in Settings → Source Control' },
+      }),
+    ]);
+    renderPanel(platform);
+
+    expect(await screen.findByTestId('scm-commit-message')).toBeInTheDocument();
+    expect(screen.queryByTestId('scm-blocked')).not.toBeInTheDocument();
+    expect(screen.getByTestId('scm-toggle-pr')).toBeDisabled();
+    // The one fixable thing is still one click away.
+    expect(screen.getByTestId('scm-connect-github')).toHaveAttribute('href', '/settings/source-control');
+
+    fireEvent.click(screen.getByTestId('scm-run-flow'));
+    await waitFor(() =>
+      expect(platform.runWorkspaceScmFlow).toHaveBeenCalledWith('w1', {
+        alias: '.',
+        commit: { generate: true },
+        push: true,
+      }),
+    );
+  });
+
+  it('does not offer "Connect GitHub" for a remote that is a local path', async () => {
     renderPanel(
       makePlatform([
         repo({
           connected: false,
+          remoteUrl: '../origin.git',
           can: { commit: true, push: true, pullRequest: false },
-          reasons: { pullRequest: 'Remote host github.com is not connected — connect it in Settings → Source Control' },
+          reasons: { pullRequest: 'Remote host unknown is not connected — connect it in Settings → Source Control' },
         }),
       ]),
     );
-    expect(await screen.findByTestId('scm-blocked')).toHaveTextContent('is not connected');
-    expect(screen.getByTestId('scm-connect-github')).toHaveAttribute('href', '/settings/source-control');
+    expect(await screen.findByTestId('scm-commit-message')).toBeInTheDocument();
+    expect(screen.queryByTestId('scm-connect-github')).not.toBeInTheDocument();
+  });
+
+  it('commits locally, and asks for no push, when the repo has no remote', async () => {
+    const platform = makePlatform([
+      repo({
+        hasRemote: false,
+        connected: false,
+        hasUpstream: false,
+        can: { commit: true, push: false, pullRequest: false },
+        reasons: { push: 'No git remote configured', pullRequest: 'No git remote configured' },
+      }),
+    ]);
+    renderPanel(platform);
+
+    const run = await screen.findByTestId('scm-run-flow');
+    expect(run).toHaveTextContent(/^Commit$/);
+    expect(screen.getByTestId('scm-toggle-push')).toBeDisabled();
+    fireEvent.click(run);
+    await waitFor(() =>
+      expect(platform.runWorkspaceScmFlow).toHaveBeenCalledWith('w1', {
+        alias: '.',
+        commit: { generate: true },
+        push: false,
+      }),
+    );
   });
 
   it('asks the server to generate a commit message', async () => {

@@ -1,0 +1,133 @@
+{
+  "defaultTheme": "github",
+  "themes": [
+    {
+      "id": "github",
+      "label": "GitHub",
+      "group": "product",
+      "description": "Primer — the calibrated, low-chroma default. Neutral surfaces, colour only where it means something."
+    },
+    {
+      "id": "graphite",
+      "label": "Graphite",
+      "group": "product",
+      "description": "Near-monochrome instrument panel. Achromatic surfaces, one saturated colour at a time — colour means status, nothing else."
+    },
+    {
+      "id": "carbon",
+      "label": "Carbon",
+      "group": "product",
+      "description": "Near-black with warm neutrals and a single signal green. The register of the current agent desktop apps."
+    },
+    {
+      "id": "clay",
+      "label": "Clay",
+      "group": "product",
+      "description": "Warm ceramic neutrals and terracotta. Paper in the light, ink in the dark — the least screen-like of the set."
+    },
+    {
+      "id": "one",
+      "label": "One",
+      "group": "editor",
+      "description": "The Atom lineage — balanced slate blues with warm syntax. The most widely installed dark theme there is."
+    },
+    {
+      "id": "dracula",
+      "label": "Dracula",
+      "group": "editor",
+      "description": "Bright pastels on deep violet-grey. The loudest theme here, and the most recognisable."
+    },
+    {
+      "id": "tokyo-night",
+      "label": "Tokyo Night",
+      "group": "editor",
+      "description": "Deep indigo night with neon signage. Cool surfaces, saturated accents, strong separation between chrome and content."
+    },
+    {
+      "id": "catppuccin",
+      "label": "Catppuccin",
+      "group": "editor",
+      "description": "Soothing pastels on deep violet-grey. Low chroma contrast, high hue variety — easy on long sessions."
+    },
+    {
+      "id": "ayu",
+      "label": "Ayu",
+      "group": "editor",
+      "description": "Gold on near-black. High-chroma accents over a very dark, very neutral ground."
+    },
+    {
+      "id": "night-owl",
+      "label": "Night Owl",
+      "group": "editor",
+      "description": "Deep navy tuned for low light, with hues separated by luminance as well as by colour."
+    },
+    {
+      "id": "rose-pine",
+      "label": "Rosé Pine",
+      "group": "editor",
+      "description": "Muted plum and dusk rose. Warm, low-saturation and quiet — the least \"terminal-looking\" of the set."
+    },
+    {
+      "id": "nord",
+      "label": "Nord",
+      "group": "reading",
+      "description": "Arctic, blue-shifted and deliberately desaturated. The quietest of the six — built for long, low-glare sessions."
+    },
+    {
+      "id": "everforest",
+      "label": "Everforest",
+      "group": "reading",
+      "description": "Desaturated forest green with soft warm accents. The only green-grounded palette here, and the easiest on tired eyes."
+    },
+    {
+      "id": "gruvbox",
+      "label": "Gruvbox",
+      "group": "reading",
+      "description": "Retro groove — warm earth tones on tinted paper or brown-grey. The most forgiving light variant in the set."
+    },
+    {
+      "id": "solarized",
+      "label": "Solarized",
+      "group": "reading",
+      "description": "The original precision palette — one set of hues, two symmetric backgrounds. Light and dark are genuinely the same theme."
+    },
+    {
+      "id": "flexoki",
+      "label": "Flexoki",
+      "group": "reading",
+      "description": "Analog printing inks on warm paper. Built for reading — the calmest option for long transcripts."
+    },
+    {
+      "id": "contrast",
+      "label": "High Contrast",
+      "group": "reading",
+      "description": "Targets WCAG AAA, not AA — 7:1 body text and full-strength borders. For low vision, glare, or a failing monitor."
+    }
+  ],
+  "accents": [
+    {
+      "id": "blue",
+      "label": "Blue"
+    },
+    {
+      "id": "violet",
+      "label": "Violet"
+    },
+    {
+      "id": "green",
+      "label": "Green"
+    },
+    {
+      "id": "orange",
+      "label": "Orange"
+    },
+    {
+      "id": "rose",
+      "label": "Rose"
+    },
+    {
+      "id": "teal",
+      "label": "Teal"
+    }
+  ]
+}

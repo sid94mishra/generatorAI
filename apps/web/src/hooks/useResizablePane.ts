@@ -22,9 +22,14 @@ export interface ResizablePane {
   handleProps: {
     onMouseDown: (e: React.MouseEvent) => void;
     onDoubleClick: () => void;
+    onKeyDown: (e: React.KeyboardEvent) => void;
+    tabIndex: number;
     role: 'separator';
     'aria-orientation': 'vertical';
     'aria-valuenow': number;
+    'aria-valuemin': number;
+    'aria-valuemax': number;
+    'aria-valuetext': string;
   };
   /** Reset to the default ratio (e.g. bound to a "reset" menu action). */
   reset: () => void;
@@ -39,6 +44,8 @@ interface UseResizablePaneOptions {
   minPx?: number;
   /** Absolute ceiling as a fraction of host width. Defaults to 0.8. */
   maxRatio?: number;
+  /** Keep the transcript/editor usable alongside the pane. */
+  minRemainingPx?: number;
 }
 
 function readStored(key: string): number | null {
@@ -61,7 +68,10 @@ function writeStored(key: string, value: number) {
 }
 
 export function useResizablePane(opts: UseResizablePaneOptions): ResizablePane {
-  const { storageKey, defaultRatio, minPx = 240, maxRatio = 0.8 } = opts;
+  const { storageKey, defaultRatio, minPx = 240, maxRatio = 0.8, minRemainingPx = 0 } = opts;
+  const ceiling = useCallback((hostWidth: number) =>
+    Math.max(minPx, Math.min(hostWidth * maxRatio, hostWidth - minRemainingPx)),
+  [minPx, maxRatio, minRemainingPx]);
 
   // Lazy initial width — try stored, else 0 (means "not yet computed;
   // fall back to ratio × host width when host is measured").
@@ -84,7 +94,7 @@ export function useResizablePane(opts: UseResizablePaneOptions): ResizablePane {
     const applyClamp = () => {
       const hostWidth = hostNode.clientWidth;
       if (hostWidth <= 0) return;
-      const maxPx = Math.max(minPx, hostWidth * maxRatio);
+      const maxPx = ceiling(hostWidth);
       setWidth((prev) => {
         const base = prev > 0 ? prev : Math.round(hostWidth * defaultRatio);
         return Math.max(minPx, Math.min(maxPx, base));
@@ -99,7 +109,7 @@ export function useResizablePane(opts: UseResizablePaneOptions): ResizablePane {
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, [hostNode, defaultRatio, minPx, maxRatio]);
+  }, [hostNode, defaultRatio, minPx, ceiling]);
 
   // Persist changes
   useEffect(() => {
@@ -120,7 +130,7 @@ export function useResizablePane(opts: UseResizablePaneOptions): ResizablePane {
   useEffect(() => {
     if (!dragging || !hostNode) return;
     const hostWidth = hostNode.clientWidth;
-    const maxPx = Math.max(minPx, hostWidth * maxRatio);
+    const maxPx = ceiling(hostWidth);
 
     const handleMove = (e: MouseEvent) => {
       // Handle sits at the left edge of the *right* pane, so dragging left
@@ -142,14 +152,14 @@ export function useResizablePane(opts: UseResizablePaneOptions): ResizablePane {
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
     };
-  }, [dragging, hostNode, minPx, maxRatio]);
+  }, [dragging, hostNode, minPx, ceiling]);
 
   const reset = useCallback(() => {
     if (!hostNode) return;
     const hostWidth = hostNode.clientWidth;
-    const maxPx = Math.max(minPx, hostWidth * maxRatio);
+    const maxPx = ceiling(hostWidth);
     setWidth(Math.max(minPx, Math.min(maxPx, Math.round(hostWidth * defaultRatio))));
-  }, [hostNode, defaultRatio, minPx, maxRatio]);
+  }, [hostNode, defaultRatio, minPx, ceiling]);
 
   return {
     width: width > 0 ? width : minPx,
@@ -158,9 +168,20 @@ export function useResizablePane(opts: UseResizablePaneOptions): ResizablePane {
     handleProps: {
       onMouseDown,
       onDoubleClick: reset,
+      tabIndex: 0,
+      onKeyDown: (e) => {
+        if (!hostNode || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+        e.preventDefault();
+        const maxPx = ceiling(hostNode.clientWidth);
+        setWidth((current) => e.key === 'Home' ? minPx : e.key === 'End' ? maxPx
+          : Math.max(minPx, Math.min(maxPx, current + (e.key === 'ArrowLeft' ? 16 : -16))));
+      },
       role: 'separator',
       'aria-orientation': 'vertical',
-      'aria-valuenow': width,
+      'aria-valuenow': width > 0 ? width : minPx,
+      'aria-valuemin': minPx,
+      'aria-valuemax': hostNode ? ceiling(hostNode.clientWidth) : minPx,
+      'aria-valuetext': `${Math.round(width > 0 ? width : minPx)} pixels wide`,
     },
     reset,
   };

@@ -119,7 +119,30 @@ interface Session {
   lastBounds: BrowserBounds | null;
   /** Last favicon as a data URL, so a remounted renderer can show it again. */
   favicon: string | null;
+  /**
+   * Set when the app document that placed this view was replaced (reload,
+   * full navigation, renderer crash) without releasing it. An orphan is
+   * hidden and stays hidden until a document claims it again through
+   * `create()`; one nobody claims is destroyed by the reaper.
+   */
+  orphaned: boolean;
+  /**
+   * Settles when the view's first load — the `about:blank#gai-…` discovery
+   * page `create()` starts — has finished, whichever way it went. Every later
+   * navigation waits on it; see `navigate()`.
+   */
+  ready: Promise<void>;
 }
+
+/**
+ * How long a view whose document went away waits to be claimed again.
+ *
+ * Long enough for the app to boot after a reload and remount the chat that
+ * owns the tab — which keeps the page, its history and any agent connection
+ * alive across Cmd+R — and short enough that a tab nobody is coming back for
+ * does not hold a renderer process open for the rest of the session.
+ */
+export const ORPHAN_GRACE_MS = 30_000;
 
 // ────────────────────────────────────────────────────────────────
 // ANNOTATE_SCRIPT — idempotent, theme-aware in-page annotation overlay
@@ -236,6 +259,8 @@ export class NativeBrowserHost extends EventEmitter {
    *  `ensureActiveProxy()`. Replaces the old app-wide `--remote-debugging-
    *  port` switch: each proxy exposes exactly one tab's webContents. */
   private cdpProxies = new Map<string, ScopedCdpProxy>();
+  /** Pending sweep of views orphaned by the last document change. */
+  private orphanReaper: ReturnType<typeof setTimeout> | null = null;
 
   isEnabled(): boolean {
     return nativeBrowserEnabled();
@@ -253,6 +278,60 @@ export class NativeBrowserHost extends EventEmitter {
       this.disposeAll();
       this.ownerWindow = null;
     });
+
+    // THE VIEWS BELONG TO A DOCUMENT, NOT TO THE WINDOW.
+    //
+    // A view is placed, shown, hidden and destroyed by the page: React mounts
+    // a placeholder, mirrors its rect here, and releases the view in an effect
+    // cleanup. That contract only holds while the page gets to run its
+    // cleanups, and replacing the document skips every one of them. Reload, a
+    // Cmd/Ctrl/middle-click on an in-app link (the window-open handler turns
+    // that into `loadURL`), the error boundary's "Back to home", a backend
+    // switch, the crash page — after any of these the view was still a child
+    // of the window, still visible, at the rectangle of a pane that no longer
+    // existed, painting a web page over whatever screen the user had gone to.
+    // Nothing in the new document knew it was there, so nothing could ever
+    // hide it; it stayed until the window closed.
+    //
+    // `did-navigate` rather than `did-start-navigation`: it fires once a new
+    // main-frame document has COMMITTED. A navigation that never commits — a
+    // download, a 204, one the user cancels — leaves the old page and its
+    // browser pane exactly where they were, and must leave the view alone.
+    // Same-document route changes (`pushState`) report as
+    // `did-navigate-in-page` and are the page's own business.
+    const wc = win.webContents;
+    wc.on('did-navigate', () => this.orphanAll('the app document was replaced'));
+    wc.on('render-process-gone', () => this.orphanAll('the app renderer exited'));
+  }
+
+  /**
+   * Take every view away from a document that can no longer manage it.
+   *
+   * Hidden at once — that is the visible bug — but not destroyed: after a
+   * reload the same chat normally remounts within a second or two and asks for
+   * the same `tabId`, and handing it the live view back keeps the page state
+   * and the agent's CDP connection. What is not claimed within
+   * `ORPHAN_GRACE_MS` is destroyed.
+   */
+  private orphanAll(reason: string): void {
+    if (this.sessions.size === 0) return;
+    for (const sess of this.sessions.values()) {
+      sess.orphaned = true;
+      sess.visible = false;
+      try { sess.view.setVisible(false); } catch { /* view already gone */ }
+    }
+    log.info(`[NativeBrowserHost] hid ${this.sessions.size} view(s): ${reason}`);
+    if (this.orphanReaper) clearTimeout(this.orphanReaper);
+    this.orphanReaper = setTimeout(() => {
+      this.orphanReaper = null;
+      for (const sess of Array.from(this.sessions.values())) {
+        if (!sess.orphaned) continue;
+        log.info(`[NativeBrowserHost] reaping unclaimed tab=${sess.tabId}`);
+        this.destroy(sess.tabId);
+      }
+    }, ORPHAN_GRACE_MS);
+    // Never the reason the app cannot quit.
+    this.orphanReaper.unref?.();
   }
 
   create(tabId: string, workspaceId: string, active = false): NativeBrowserDescriptor {
@@ -260,6 +339,9 @@ export class NativeBrowserHost extends EventEmitter {
     if (!this.ownerWindow) throw new Error('[NativeBrowserHost] Owner window not attached yet');
     let sess = this.sessions.get(tabId);
     if (sess) {
+      // Claimed again by the document that replaced the one it was placed by.
+      // It stays hidden until that document positions and shows it.
+      sess.orphaned = false;
       // Tab reuse (e.g. Start pressed again after a server-side stop).
       // Re-assert the discovery marker (active tab carries the durable
       // `gai-<workspaceId>` marker so the server adapter can find it).
@@ -368,7 +450,7 @@ export class NativeBrowserHost extends EventEmitter {
     view.setVisible(false);
     view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
 
-    sess = { tabId, workspaceId, view, visible: false, lastBounds: null, favicon: null };
+    sess = { tabId, workspaceId, view, visible: false, lastBounds: null, favicon: null, orphaned: false, ready: Promise.resolve() };
     this.sessions.set(tabId, sess);
     // First tab of a workspace (or an explicit `active`) becomes the active
     // tab and inherits the workspace discovery marker.
@@ -381,7 +463,7 @@ export class NativeBrowserHost extends EventEmitter {
     // per-tab fragment so they are never mistaken for the workspace target.
     const isActive = this.activeTab.get(workspaceId) === tabId;
     const frag = isActive ? `#gai-${workspaceId}` : `#gai-tab-${tabId}`;
-    void wc.loadURL(`about:blank${frag}`).catch(() => undefined);
+    sess.ready = wc.loadURL(`about:blank${frag}`).then(() => undefined, () => undefined);
 
     log.info(`[NativeBrowserHost] created tab=${tabId} workspace=${workspaceId} active=${isActive} partition=${partition}`);
     void this.ensureActiveProxy(workspaceId);
@@ -559,6 +641,10 @@ export class NativeBrowserHost extends EventEmitter {
   setVisible(tabId: string, visible: boolean): void {
     const sess = this.sessions.get(tabId);
     if (!sess) return;
+    // Only `create()` hands an orphan to a new owner. A "show" that was already
+    // in flight from the document that just went away must not put the view
+    // back on screen with nobody left to hide it.
+    if (sess.orphaned && visible) return;
     sess.visible = visible;
     // A real hide. "Hiding" by collapsing the view to a 0×0 rect at the window
     // origin still left it painting there — the browser page appeared over the
@@ -576,6 +662,16 @@ export class NativeBrowserHost extends EventEmitter {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       throw new Error(`Unsupported protocol: ${parsed.protocol}`);
+    }
+    // Two navigations started a few milliseconds apart do not resolve in the
+    // order they were asked for. A remounted tab restores its page the instant
+    // `create()` returns, while the discovery page `create()` itself started
+    // is still in flight — and more often than not the blank page committed
+    // LAST, silently dropping the restore. The tab came back empty two times
+    // out of three. Let the first load land, then navigate.
+    await sess.ready;
+    if (!this.sessions.has(tabId) || sess.view.webContents.isDestroyed()) {
+      throw new Error(`No browser tab ${tabId}`);
     }
     await sess.view.webContents.loadURL(url).catch((err: unknown) => {
       log.warn('[NativeBrowserHost] loadURL failed', err);
@@ -613,9 +709,18 @@ export class NativeBrowserHost extends EventEmitter {
   async screenshot(tabId: string): Promise<string | null> {
     const sess = this.sessions.get(tabId);
     if (!sess) return null;
+    // A hidden view has no surface to capture: Chromium answers
+    // `UnknownVizError`, after doing the work of trying. Every mounted browser
+    // tab asks once a second, so each hidden one cost a failed capture and a
+    // warning in the log per second, forever.
+    if (!sess.visible || sess.orphaned) return null;
     try {
       const image = await sess.view.webContents.capturePage();
-      return image.toDataURL();
+      if (image.isEmpty()) return null;
+      // JPEG, not PNG: this is a throwaway placeholder painted behind the live
+      // view. A PNG of a full pane is several hundred KB, base64'd and pushed
+      // over IPC every tick; the JPEG is a tenth of that.
+      return `data:image/jpeg;base64,${image.toJPEG(70).toString('base64')}`;
     } catch (err) {
       log.warn('[NativeBrowserHost] capturePage failed', err);
       return null;
@@ -985,6 +1090,7 @@ export class NativeBrowserHost extends EventEmitter {
   }
 
   disposeAll(): void {
+    if (this.orphanReaper) { clearTimeout(this.orphanReaper); this.orphanReaper = null; }
     for (const wid of Array.from(this.sessions.keys())) {
       this.destroy(wid);
     }

@@ -297,26 +297,56 @@ ${PLANS_FOLDER_RULE}`;
  * conversation while the mode is chosen per turn. The wording is therefore
  * explicitly scoped to "when you are NOT in plan mode" so it stays correct if
  * the user switches to Plan without the conversation being rebuilt.
+ *
+ * Kept SHORT on purpose: this rides along on every request of every chat. It
+ * used to inline the whole plan template (~150 tokens) that the \`record_plan\`
+ * tool description already spells out, and named an "exit-plan-mode tool" that
+ * only one provider has.
  */
 export const AUTO_MODE_PLAN_INSTRUCTIONS = `PLAN RECORDING (applies when you are NOT in plan mode)
 
-When you are working autonomously, never wait for approval and never ask the
-user to confirm before acting.
+Work autonomously: do not wait for approval or ask the user to confirm before
+acting.
 
-If the user asks you to plan something — or the task is large enough that you
-would naturally write a plan first — call the \`record_plan\` tool ONCE with
-the full plan before you start editing. Use this structure for the content:
+If the user asks for a plan — or the task is large enough that you would
+naturally write one first — call \`record_plan\` ONCE, before you start
+editing, with the full plan as markdown: a short imperative title, then Goal,
+Approach, Changes (file → edit), Risks & edge cases, Verification. It returns
+immediately and does NOT pause you: carry straight on and implement. Skip it
+for trivial single-file edits.
 
-${PLAN_TEMPLATE}
-
-\`record_plan\` returns immediately and does NOT pause you. After calling it,
-carry straight on and implement the plan. Do not call it for trivial
-single-file edits, and do not call it more than once per turn.
-
-If you ARE in plan mode, ignore this section and use your exit-plan-mode tool
-instead — that is the path that asks the user for approval.
+In plan mode this section does not apply — follow your plan-mode instructions,
+which end in a submission the user has to approve.
 
 ${PLANS_FOLDER_RULE}`;
+
+/**
+ * Providers whose runtime has a plan mode of its own: it tells the model it is
+ * planning and gives it a tool that submits the plan for approval.
+ */
+const NATIVE_PLAN_GATE_PROVIDERS: ReadonlySet<string> = new Set(['claude-agent', 'copilot']);
+
+export function providerHasNativePlanGate(harnessType: string | undefined): boolean {
+  return NATIVE_PLAN_GATE_PROVIDERS.has(harnessType ?? 'copilot');
+}
+
+/**
+ * Plan mode for a provider with no plan mode (Codex, OpenCode, ACP).
+ *
+ * Sent in front of the user's prompt on a plan turn, because for these
+ * providers nothing else says "you are planning": their system message is
+ * fixed for the life of the conversation and the mode is chosen per turn.
+ * Submission goes through `record_plan`, which in plan mode blocks until the
+ * user has decided (see `ChatManagementService.recordPlan`).
+ */
+export const PLAN_MODE_TURN_PREFIX =
+  PLAN_MODE_INSTRUCTIONS.replace(
+    /4\. SUBMIT[\s\S]*?gets captured as the plan document\./,
+    `4. SUBMIT — call \`record_plan\` with the title and the FULL plan. In plan mode
+   that call WAITS for the user's decision and its result tells you what they
+   chose: approved (then, and only then, implement), changes requested (revise
+   and submit again), or dismissed (stop).`,
+  ) + '\n\n--- The user\'s request follows ---\n\n';
 
 /** The instruction block for a mode, or `undefined` when it needs none. */
 export function instructionsForMode(mode: AgentMode | undefined): string | undefined {

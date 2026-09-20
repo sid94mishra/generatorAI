@@ -1,0 +1,30 @@
+{
+  "url": "/automations/052edff4-afb0-4a47-b1ab-5a735d23d8bf",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Gap audit — Scheduled batch",
+    "Execution History"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "mx-auto px-6 py-8 h-full overflow-y-auto max-w-5xl",
+      "h": 720,
+      "scroll": 754,
+      "rect": {
+        "x": 248,
+        "y": 80,
+        "w": 1024
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

@@ -610,3 +610,88 @@ describe('GitClient.gitVersion', () => {
     expect(runner.calls.length).toBe(after);
   });
 });
+
+// ────────────────────────────────────────────────────────────────
+// A remote configured as a RELATIVE path, used from a linked worktree.
+//
+// Git resolves `../origin.git` against the working directory of the command,
+// not against the repository that declared it. The app works in a worktree
+// under its own data directory, so every push / fetch / default-branch lookup
+// for such a repository failed with "'../origin.git' does not appear to be a
+// git repository" — observed live on the first Commit & push of a chat.
+// ────────────────────────────────────────────────────────────────
+describe('a relative remote, from a worktree somewhere else', () => {
+  let root: string;
+  let main: string;
+  let worktree: string;
+  let client: GitClient;
+
+  beforeEach(async () => {
+    root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'gai-relremote-')));
+    main = path.join(root, 'projects', 'shop');
+    const origin = path.join(root, 'projects', 'origin.git');
+    // Deliberately NOT a sibling of `projects/`, so `../origin.git` is wrong from here.
+    worktree = path.join(root, 'appdata', 'deep', 'wt');
+    await fs.mkdir(main, { recursive: true });
+    await fs.mkdir(path.dirname(worktree), { recursive: true });
+    await runGit(root, ['init', '-q', '--bare', '-b', 'main', origin]);
+    await runGit(main, ['init', '-q', '-b', 'main']);
+    await writeFile(main, 'a.txt', 'one\n');
+    await runGit(main, ['add', '-A']);
+    await runGit(main, ['commit', '-qm', 'init']);
+    await runGit(main, ['remote', 'add', 'origin', '../origin.git']);
+    await runGit(main, ['push', '-q', '-u', 'origin', 'main']);
+    await runGit(main, ['worktree', 'add', '-q', '-b', 'work', worktree]);
+    client = makeClient(root);
+  });
+  afterEach(async () => { await removeDirWithRetry(root); });
+
+  it('pushes the work branch to the repository the path was written for', async () => {
+    await writeFile(worktree, 'b.txt', 'two\n');
+    await runGit(worktree, ['add', '-A']);
+    await runGit(worktree, ['commit', '-qm', 'work']);
+
+    await client.pushSetUpstream(worktree, 'origin', 'work');
+
+    const branches = await runGit(path.join(root, 'projects', 'origin.git'), ['branch', '--list']);
+    expect(branches).toContain('work');
+    // The repository's own config is untouched — the fix is per command.
+    expect((await runGit(main, ['remote', 'get-url', 'origin'])).trim()).toBe('../origin.git');
+  });
+
+  it('fetches and resolves the default branch through the same remote', async () => {
+    await expect(client.fetch(worktree, 'origin')).resolves.toBeUndefined();
+    expect(await client.defaultBranch(worktree, 'origin')).toBe('main');
+  });
+
+  it('leaves an ordinary URL remote alone', async () => {
+    const counting = new CountingRunner(new NodeGitRunner());
+    const c = makeClient(root, counting);
+    await runGit(main, ['remote', 'set-url', 'origin', path.join(root, 'projects', 'origin.git')]);
+    await c.fetch(worktree, 'origin');
+    expect(counting.calls.some((call) => call.includes('.insteadOf='))).toBe(false);
+  });
+});
+
+describe('snapshots that share an index file', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'gai-snapq-')));
+    await runGit(root, ['init', '-q', '-b', 'main']);
+    for (let i = 0; i < 40; i++) await writeFile(root, `src/f${i}.txt`, `file ${i}\n`.repeat(50));
+  });
+  afterEach(async () => { await removeDirWithRetry(root); });
+
+  it('all succeed when fired at once, instead of losing the race for index.lock', async () => {
+    // Checkpoints, the Changes summary and the live capture snapshot the same
+    // tree through one throwaway index. Overlapping, the loser used to return
+    // null ("Unable to create index.lock") and the UI showed "0 changes".
+    const client = makeClient(root);
+    const index = path.join(root, '.git', 'gai-shadow', 'index');
+    const trees = await Promise.all(
+      Array.from({ length: 8 }, () => client.writeTreeFromWorktree(root, index)),
+    );
+    expect(trees.every((t) => typeof t === 'string' && t.length >= 40)).toBe(true);
+    expect(new Set(trees).size).toBe(1);
+  });
+});

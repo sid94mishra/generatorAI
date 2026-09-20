@@ -129,7 +129,7 @@ export class ArtifactCatalog {
           id: c.id,
           name: c.name,
           ...(c.description ? { description: c.description } : {}),
-          filePath: c.filePath,
+          filePath: this.options.resolveProjectConfigPath?.(c) ?? c.filePath,
           source: 'project',
         });
       }

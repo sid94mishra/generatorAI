@@ -1,0 +1,49 @@
+{
+  "name": "Review queued fixes",
+  "triggerType": "manual",
+  "workflowIds": [
+    "11111111-1111-4111-8111-111111111111"
+  ],
+  "inputMode": "single",
+  "maxConcurrency": 1,
+  "onError": "stop",
+  "dataSchema": {
+    "version": 1,
+    "format": "json_array",
+    "primaryKey": "issueId",
+    "fields": [
+      {
+        "name": "issueId",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "feature",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "priority",
+        "type": "number",
+        "required": true
+      }
+    ]
+  },
+  "iterationMode": {
+    "kind": "each_row"
+  },
+  "defaultDataset": {
+    "format": "json_array",
+    "data": "[{\"issueId\":\"ISSUE-101\",\"feature\":\"Fix bookmarked priority filter\",\"priority\":1},{\"issueId\":\"ISSUE-102\",\"feature\":\"Improve empty-state instructions\",\"priority\":2}]"
+  },
+  "retryPolicy": {
+    "maxAttempts": 2,
+    "initialBackoffMs": 1000,
+    "backoffMultiplier": 2,
+    "maxBackoffMs": 10000,
+    "retryOn": [
+      "network",
+      "timeout"
+    ]
+  }
+}

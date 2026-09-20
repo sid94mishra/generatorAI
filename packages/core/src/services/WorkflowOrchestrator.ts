@@ -305,7 +305,10 @@ export class WorkflowOrchestrator {
    *  5. Validate results
    *  6. Cleanup
    */
-  async startOrchestratedRun(params: OrchestratedRunParams): Promise<OrchestratorContext> {
+  async startOrchestratedRun(
+    params: OrchestratedRunParams,
+    initializeUploads?: (runId: string) => Promise<void>,
+  ): Promise<OrchestratorContext> {
     const definition = await this.definitionService.getDefinition(params.workflowDefinitionId);
     const orchestratorConfig = definition.orchestratorConfig;
 
@@ -363,7 +366,7 @@ export class WorkflowOrchestrator {
 
     // Execute orchestration asynchronously
     const effectiveProjectId = params.projectId ?? definition.projectId;
-    this.executeOrchestration(run, definition, gitRepos, context, effectiveProjectId, params.selectedCodebases)
+    this.executeOrchestration(run, definition, gitRepos, context, effectiveProjectId, params.selectedCodebases, initializeUploads)
       .catch((error) => {
         const errorMsg = error instanceof Error ? error.message : String(error);
         this.logger.error(`[Orchestrator] Run ${run.id} failed: ${errorMsg}`);
@@ -422,6 +425,7 @@ export class WorkflowOrchestrator {
     context: OrchestratorContext,
     projectId?: string,
     selectedCodebases?: string[],
+    initializeUploads?: (runId: string) => Promise<void>,
   ): Promise<void> {
     const orchestratorConfig = definition.orchestratorConfig;
 
@@ -458,6 +462,10 @@ export class WorkflowOrchestrator {
       this.setSystemVariable(context, '__workflowRunId', run.id);
       this.setSystemVariable(context, '__artifactsDirectory', runArtifactsDir);
       this.logger.info(`[Orchestrator] Created per-run workspace: ${runWorkspaceDir}`);
+
+      // Run-specific files must arrive in the final workspace before hooks,
+      // project defaults, or skill discovery can consume them.
+      await initializeUploads?.(run.id);
 
       // ── Workflow Hook: on_run_start ──
       const hookCtx = this.buildWorkflowHookContext(run.id, definition.id, context);

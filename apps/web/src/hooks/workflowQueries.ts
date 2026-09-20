@@ -477,6 +477,7 @@ export function useStartOrchestratedRun() {
       variables?: Record<string, unknown>;
       projectId?: string;
       selectedCodebases?: string[];
+      uploads?: { prompts: File[]; skills: File[]; agents: File[] };
       stageOverrides?: Array<{ stageName?: string; stageIndex?: number; agentName?: string; contextFilter?: string; timeoutMs?: number; variables?: Record<string, unknown>; skip?: boolean }>;
     }) => platform.startOrchestratedRun(params),
     onSuccess: () => {

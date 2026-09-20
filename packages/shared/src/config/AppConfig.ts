@@ -3,6 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import { HARNESS_PROVIDER_IDS, REASONING_EFFORTS } from '../types/ProviderConfig.js';
 
 // Single source of truth for the consent TTL — the zod default is derived from
 // it below rather than repeating `120` in a second unit.
@@ -76,14 +77,14 @@ export const AppConfigSchema = z.object({
   // Additional provider values will land as their adapter packages ship.
   harness: z
     .object({
-      type: z.enum(['copilot', 'claude-agent', 'codex']).default('copilot'),
+      type: z.enum(HARNESS_PROVIDER_IDS).default('copilot'),
       /** Copilot-specific harness options. These supplement the top-level
        *  `copilot` section (which covers CLI transport concerns) with
        *  adapter-level overrides that are SDK-version-specific. */
       copilot: z
         .object({
           defaultModel: z.string().optional(),
-          reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
+          reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
           maxTurns: z.number().int().min(1).optional(),
         })
         .default({}),

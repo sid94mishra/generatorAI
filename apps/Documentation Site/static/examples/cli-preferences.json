@@ -1,0 +1,24 @@
+{
+  "configVersion": 2,
+  "server": {
+    "url": "http://localhost:3100",
+    "timeoutMs": 120000
+  },
+  "cli": {
+    "output": "json",
+    "color": "auto",
+    "unicode": true,
+    "assumeYes": false,
+    "pageSize": 50
+  },
+  "tui": {
+    "theme": "github",
+    "appearance": "dark",
+    "accent": "blue",
+    "maxFps": 30,
+    "mouse": false,
+    "incrementalRendering": false,
+    "showThinking": true,
+    "collapseTools": true
+  }
+}

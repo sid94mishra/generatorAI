@@ -10,6 +10,7 @@ import { useProjects } from '@/hooks/projectQueries.js';
 import { ArrowLeft, Plus, X, Clock, Webhook, Hand, Repeat, AlertCircle, Table2, FileSpreadsheet, Terminal, Play, FolderGit2 } from 'lucide-react';
 import { Select, Button, Input, Textarea, Spinner, PageHeader } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { cn } from '@/lib/utils.js';
 import type { CreateAutomationParams, AutomationTriggerType, AutomationInputMode, BatchDataFormat, DataSourceConfig, DataSourceOutputFormat } from '@generatorai/shared';
 import { parseBatchData } from '@generatorai/shared';
@@ -308,8 +309,8 @@ export function CreateAutomationPage() {
           <h2 className="mb-4 text-sm font-semibold text-foreground">Basic Info</h2>
           <div className="space-y-4">
             <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Name *</label>
-              <Input
+              <label htmlFor="automation-name" className="mb-1.5 block text-xs font-medium text-muted-foreground">Name *</label>
+              <Input id="automation-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -317,8 +318,8 @@ export function CreateAutomationPage() {
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Description</label>
-              <Textarea
+              <label htmlFor="automation-description" className="mb-1.5 block text-xs font-medium text-muted-foreground">Description</label>
+              <Textarea id="automation-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={2}
@@ -337,7 +338,7 @@ export function CreateAutomationPage() {
               { type: 'schedule' as const, icon: Clock, label: 'Schedule', desc: 'Run on a cron schedule' },
               { type: 'webhook' as const, icon: Webhook, label: 'Webhook', desc: 'Trigger via HTTP POST' },
             ]).map(({ type, icon: Icon, label, desc }) => (
-              <button
+              <Button variant="ghost"
                 key={type}
                 type="button"
                 onClick={() => setTriggerType(type)}
@@ -345,7 +346,7 @@ export function CreateAutomationPage() {
                 // and nothing says which one is chosen.
                 aria-pressed={triggerType === type}
                 className={cn(
-                  'flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
+                  'h-auto whitespace-normal flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
                   triggerType === type
                     ? 'border-primary bg-primary/5'
                     : 'border-border hover:border-muted-foreground',
@@ -354,14 +355,14 @@ export function CreateAutomationPage() {
                 <Icon className={cn('h-5 w-5', triggerType === type ? 'text-primary' : 'text-muted-foreground')} />
                 <span className="text-sm font-medium text-foreground">{label}</span>
                 <span className="text-[11px] text-muted-foreground">{desc}</span>
-              </button>
+              </Button>
             ))}
           </div>
 
           {triggerType === 'schedule' && (
             <div className="mt-4">
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Cron Expression *</label>
-              <Input
+              <label htmlFor="automation-cron-expression" className="mb-1.5 block text-xs font-medium text-muted-foreground">Cron Expression *</label>
+              <Input id="automation-cron-expression"
                 type="text"
                 value={cronExpression}
                 onChange={(e) => setCronExpression(e.target.value)}
@@ -385,6 +386,7 @@ export function CreateAutomationPage() {
             Select a project to scope the automation. Only workflows from this project will be available.
           </p>
           <Select
+            aria-label="Project scope"
             value={selectedProjectId}
             onChange={(v) => {
               setSelectedProjectId(v);
@@ -436,6 +438,7 @@ export function CreateAutomationPage() {
             <Select
               value=""
               onChange={(v) => { if (v) handleAddWorkflow(v); }}
+              aria-label="Add a workflow"
               placeholder="+ Add a workflow…"
               options={(filteredWorkflows ?? [])
                 .filter((w) => !selectedWorkflowIds.includes(w.id))
@@ -448,12 +451,12 @@ export function CreateAutomationPage() {
         <div className="rounded-lg border border-border bg-card p-6">
           <h2 className="mb-4 text-sm font-semibold text-foreground">Input Mode</h2>
           <div className="grid grid-cols-4 gap-3">
-            <button
+            <Button variant="ghost"
               type="button"
               onClick={() => handleInputModeChange('single')}
               aria-pressed={inputMode === 'single'}
               className={cn(
-                'flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
+                'h-auto whitespace-normal flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
                 inputMode === 'single'
                   ? 'border-primary bg-primary/5'
                   : 'border-border hover:border-muted-foreground',
@@ -462,13 +465,13 @@ export function CreateAutomationPage() {
               <Hand className={cn('h-5 w-5', inputMode === 'single' ? 'text-primary' : 'text-muted-foreground')} />
               <span className="text-sm font-medium text-foreground">Single</span>
               <span className="text-[11px] text-muted-foreground">Run once with base variables</span>
-            </button>
-            <button
+            </Button>
+            <Button variant="ghost"
               type="button"
               onClick={() => handleInputModeChange('loop')}
               aria-pressed={inputMode === 'loop'}
               className={cn(
-                'flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
+                'h-auto whitespace-normal flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
                 inputMode === 'loop'
                   ? 'border-primary bg-primary/5'
                   : 'border-border hover:border-muted-foreground',
@@ -477,13 +480,13 @@ export function CreateAutomationPage() {
               <Repeat className={cn('h-5 w-5', inputMode === 'loop' ? 'text-primary' : 'text-muted-foreground')} />
               <span className="text-sm font-medium text-foreground">Loop</span>
               <span className="text-[11px] text-muted-foreground">Iterate with single variable</span>
-            </button>
-            <button
+            </Button>
+            <Button variant="ghost"
               type="button"
               onClick={() => handleInputModeChange('batch')}
               aria-pressed={inputMode === 'batch'}
               className={cn(
-                'flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
+                'h-auto whitespace-normal flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
                 inputMode === 'batch'
                   ? 'border-primary bg-primary/5'
                   : 'border-border hover:border-muted-foreground',
@@ -492,13 +495,13 @@ export function CreateAutomationPage() {
               <FileSpreadsheet className={cn('h-5 w-5', inputMode === 'batch' ? 'text-primary' : 'text-muted-foreground')} />
               <span className="text-sm font-medium text-foreground">Batch</span>
               <span className="text-[11px] text-muted-foreground">Spreadsheet of tasks, multi-var</span>
-            </button>
-            <button
+            </Button>
+            <Button variant="ghost"
               type="button"
               onClick={() => handleInputModeChange('script')}
               aria-pressed={inputMode === 'script'}
               className={cn(
-                'flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
+                'h-auto whitespace-normal flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
                 inputMode === 'script'
                   ? 'border-primary bg-primary/5'
                   : 'border-border hover:border-muted-foreground',
@@ -507,14 +510,14 @@ export function CreateAutomationPage() {
               <Terminal className={cn('h-5 w-5', (inputMode as string) === 'script' ? 'text-primary' : 'text-muted-foreground')} />
               <span className="text-sm font-medium text-foreground">Script</span>
               <span className="text-[11px] text-muted-foreground">Dynamic data from script</span>
-            </button>
+            </Button>
           </div>
 
           {inputMode === 'loop' && (
             <div className="mt-4 space-y-4">
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Loop Variable Name *</label>
-                <Input
+                <label htmlFor="automation-loop-variable-name" className="mb-1.5 block text-xs font-medium text-muted-foreground">Loop Variable Name *</label>
+                <Input id="automation-loop-variable-name"
                   type="text"
                   value={loopVariable}
                   onChange={(e) => setLoopVariable(e.target.value)}
@@ -525,8 +528,8 @@ export function CreateAutomationPage() {
                 </p>
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Loop Items (JSON Array)</label>
-                <Textarea
+                <label htmlFor="automation-loop-items-json-array" className="mb-1.5 block text-xs font-medium text-muted-foreground">Loop Items (JSON Array)</label>
+                <Textarea id="automation-loop-items-json-array"
                   value={loopItemsText}
                   onChange={(e) => setLoopItemsText(e.target.value)}
                   rows={4}
@@ -536,8 +539,8 @@ export function CreateAutomationPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Max Concurrency</label>
-                  <Input
+                  <label htmlFor="automation-max-concurrency" className="mb-1.5 block text-xs font-medium text-muted-foreground">Max Concurrency</label>
+                  <Input id="automation-max-concurrency"
                     type="number"
                     min={1}
                     max={10}
@@ -546,8 +549,8 @@ export function CreateAutomationPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">On Error</label>
-                  <Select
+                  <label htmlFor="automation-on-error" className="mb-1.5 block text-xs font-medium text-muted-foreground">On Error</label>
+                  <Select id="automation-on-error"
                     value={onError}
                     onChange={(v) => setOnError(v as 'continue' | 'stop')}
                     options={[
@@ -571,12 +574,13 @@ export function CreateAutomationPage() {
                     { fmt: 'json' as const, label: 'JSON Array', desc: 'Array of objects' },
                     { fmt: 'jsonl' as const, label: 'JSONL', desc: 'One JSON object per line' },
                   ]).map(({ fmt, label, desc }) => (
-                    <button
+                    <Button variant="ghost"
                       key={fmt}
                       type="button"
                       onClick={() => setBatchDataFormat(fmt)}
+                      aria-pressed={batchDataFormat === fmt}
                       className={cn(
-                        'rounded-lg border p-2.5 text-left transition-colors',
+                        'h-auto flex-col items-stretch whitespace-normal rounded-lg border p-2.5 text-left transition-colors',
                         batchDataFormat === fmt
                           ? 'border-primary bg-primary/5'
                           : 'border-border hover:border-muted-foreground',
@@ -584,15 +588,15 @@ export function CreateAutomationPage() {
                     >
                       <span className="block text-xs font-medium text-foreground">{label}</span>
                       <span className="block text-[10px] text-muted-foreground">{desc}</span>
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
 
               {/* Batch data input */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Batch Data *</label>
-                <Textarea
+                <label htmlFor="automation-batch-data" className="mb-1.5 block text-xs font-medium text-muted-foreground">Batch Data *</label>
+                <Textarea id="automation-batch-data"
                   value={batchDataText}
                   onChange={(e) => setBatchDataText(e.target.value)}
                   rows={8}
@@ -683,6 +687,7 @@ export function CreateAutomationPage() {
                             setBatchColumnMapping(newMapping);
                           }}
                           className="flex-1 font-mono text-xs"
+                          aria-label={`Workflow variable for ${col}`}
                           placeholder={col}
                         />
                       </div>
@@ -694,8 +699,8 @@ export function CreateAutomationPage() {
               {/* Concurrency & Error Policy */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Max Concurrency</label>
-                  <Input
+                  <label htmlFor="automation-max-concurrency" className="mb-1.5 block text-xs font-medium text-muted-foreground">Max Concurrency</label>
+                  <Input id="automation-max-concurrency"
                     type="number"
                     min={1}
                     max={10}
@@ -704,8 +709,8 @@ export function CreateAutomationPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">On Error</label>
-                  <Select
+                  <label htmlFor="automation-on-error" className="mb-1.5 block text-xs font-medium text-muted-foreground">On Error</label>
+                  <Select id="automation-on-error"
                     value={onError}
                     onChange={(v) => setOnError(v as 'continue' | 'stop')}
                     options={[
@@ -722,8 +727,8 @@ export function CreateAutomationPage() {
             <div className="mt-4 space-y-4">
               {/* Script Command */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Script Command *</label>
-                <Textarea
+                <label htmlFor="automation-script-command" className="mb-1.5 block text-xs font-medium text-muted-foreground">Script Command *</label>
+                <Textarea id="automation-script-command"
                   value={scriptCommand}
                   onChange={(e) => { setScriptCommand(e.target.value); setScriptTestResult(null); }}
                   rows={3}
@@ -738,8 +743,8 @@ export function CreateAutomationPage() {
               {/* Output Format & Timeout */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Output Format</label>
-                  <Select
+                  <label htmlFor="automation-output-format" className="mb-1.5 block text-xs font-medium text-muted-foreground">Output Format</label>
+                  <Select id="automation-output-format"
                     value={scriptOutputFormat}
                     onChange={(v) => setScriptOutputFormat(v as DataSourceOutputFormat)}
                     options={[
@@ -750,8 +755,8 @@ export function CreateAutomationPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Timeout (ms)</label>
-                  <Input
+                  <label htmlFor="automation-timeout-ms" className="mb-1.5 block text-xs font-medium text-muted-foreground">Timeout (ms)</label>
+                  <Input id="automation-timeout-ms"
                     type="number"
                     min={1000}
                     max={300000}
@@ -764,8 +769,8 @@ export function CreateAutomationPage() {
 
               {/* Environment Variables */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Environment Variables (JSON)</label>
-                <Textarea
+                <label htmlFor="automation-environment-variables-json" className="mb-1.5 block text-xs font-medium text-muted-foreground">Environment Variables (JSON)</label>
+                <Textarea id="automation-environment-variables-json"
                   value={scriptEnvText}
                   onChange={(e) => setScriptEnvText(e.target.value)}
                   rows={3}
@@ -846,8 +851,8 @@ export function CreateAutomationPage() {
               {/* Concurrency & Error Policy */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Max Concurrency</label>
-                  <Input
+                  <label htmlFor="automation-max-concurrency" className="mb-1.5 block text-xs font-medium text-muted-foreground">Max Concurrency</label>
+                  <Input id="automation-max-concurrency"
                     type="number"
                     min={1}
                     max={10}
@@ -856,8 +861,8 @@ export function CreateAutomationPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">On Error</label>
-                  <Select
+                  <label htmlFor="automation-on-error" className="mb-1.5 block text-xs font-medium text-muted-foreground">On Error</label>
+                  <Select id="automation-on-error"
                     value={onError}
                     onChange={(v) => setOnError(v as 'continue' | 'stop')}
                     options={[
@@ -878,6 +883,7 @@ export function CreateAutomationPage() {
             JSON object of variables merged into every workflow run
           </p>
           <Textarea
+            aria-label="Base variables (JSON)"
             value={variablesText}
             onChange={(e) => setVariablesText(e.target.value)}
             rows={4}
@@ -889,10 +895,9 @@ export function CreateAutomationPage() {
         {/* Track C — Schema-driven data (advanced) */}
         <div className="rounded-lg border border-border bg-card p-6">
           <label className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={schemaEnabled}
-              onChange={(e) => setSchemaEnabled(e.target.checked)}
+              onCheckedChange={(checked) => setSchemaEnabled(checked === true)}
             />
             Schema-driven data (advanced)
           </label>
@@ -904,8 +909,8 @@ export function CreateAutomationPage() {
           {schemaEnabled && (
             <div className="space-y-4">
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Data schema (JSON)</label>
-                <Textarea
+                <label htmlFor="automation-data-schema-json" className="mb-1.5 block text-xs font-medium text-muted-foreground">Data schema (JSON)</label>
+                <Textarea id="automation-data-schema-json"
                   value={dataSchemaText}
                   onChange={(e) => setDataSchemaText(e.target.value)}
                   rows={10}
@@ -916,37 +921,38 @@ export function CreateAutomationPage() {
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Iteration mode</label>
                 <div className="grid grid-cols-3 gap-2">
                   {(['each_row', 'group_by', 'single'] as const).map((mode) => (
-                    <button
+                    <Button variant="ghost"
                       type="button"
                       key={mode}
+                      aria-pressed={iterationModeKind === mode}
                       onClick={() => setIterationModeKind(mode)}
                       className={cn(
-                        'rounded-md border px-3 py-2 text-xs',
+                        'h-auto whitespace-normal rounded-md border px-3 py-2 text-xs',
                         iterationModeKind === mode ? 'border-primary bg-primary/10' : 'border-border',
                       )}
                     >
                       {mode.replace('_', ' ')}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
               {iterationModeKind === 'group_by' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                    <label htmlFor="automation-fields-comma-separated" className="mb-1.5 block text-xs font-medium text-muted-foreground">
                       Fields (comma-separated)
                     </label>
-                    <Input
+                    <Input id="automation-fields-comma-separated"
                       value={groupByFieldsText}
                       onChange={(e) => setGroupByFieldsText(e.target.value)}
                       placeholder="priority,team"
                     />
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                    <label htmlFor="automation-group-variable" className="mb-1.5 block text-xs font-medium text-muted-foreground">
                       Group variable
                     </label>
-                    <Input
+                    <Input id="automation-group-variable"
                       value={groupVariable}
                       onChange={(e) => setGroupVariable(e.target.value)}
                       placeholder="items"
@@ -956,10 +962,10 @@ export function CreateAutomationPage() {
               )}
               {iterationModeKind === 'single' && (
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  <label htmlFor="automation-dataset-variable" className="mb-1.5 block text-xs font-medium text-muted-foreground">
                     Dataset variable
                   </label>
-                  <Input
+                  <Input id="automation-dataset-variable"
                     value={groupVariable}
                     onChange={(e) => setGroupVariable(e.target.value)}
                     placeholder="items"
@@ -972,9 +978,10 @@ export function CreateAutomationPage() {
                 </label>
                 <div className="mb-1 flex gap-2 text-xs">
                   {(['json_array', 'csv', 'jsonl'] as const).map((f) => (
-                    <button
+                    <Button variant="ghost"
                       type="button"
                       key={f}
+                      aria-pressed={defaultDatasetFormat === f}
                       onClick={() => setDefaultDatasetFormat(f)}
                       className={cn(
                         'rounded-md border px-2 py-0.5',
@@ -982,10 +989,11 @@ export function CreateAutomationPage() {
                       )}
                     >
                       {f}
-                    </button>
+                    </Button>
                   ))}
                 </div>
                 <Textarea
+                  aria-label="Default dataset"
                   value={defaultDatasetText}
                   onChange={(e) => setDefaultDatasetText(e.target.value)}
                   rows={6}
@@ -1000,10 +1008,9 @@ export function CreateAutomationPage() {
         {/* Track A — Retry policy (advanced) */}
         <div className="rounded-lg border border-border bg-card p-6">
           <label className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={retryEnabled}
-              onChange={(e) => setRetryEnabled(e.target.checked)}
+              onCheckedChange={(checked) => setRetryEnabled(checked === true)}
             />
             Retry policy (advanced)
           </label>
@@ -1014,8 +1021,8 @@ export function CreateAutomationPage() {
           {retryEnabled && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Max attempts</label>
-                <Input
+                <label htmlFor="automation-max-attempts" className="mb-1.5 block text-xs font-medium text-muted-foreground">Max attempts</label>
+                <Input id="automation-max-attempts"
                   type="number"
                   min={2}
                   max={10}
@@ -1025,8 +1032,8 @@ export function CreateAutomationPage() {
                 <p className="mt-1 text-[10px] text-muted-foreground">Must be ≥2. Retry only applies when enabled.</p>
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Initial backoff (ms)</label>
-                <Input
+                <label htmlFor="automation-initial-backoff-ms" className="mb-1.5 block text-xs font-medium text-muted-foreground">Initial backoff (ms)</label>
+                <Input id="automation-initial-backoff-ms"
                   type="number"
                   min={100}
                   value={retryInitialBackoffMs}
@@ -1034,8 +1041,8 @@ export function CreateAutomationPage() {
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Backoff multiplier</label>
-                <Input
+                <label htmlFor="automation-backoff-multiplier" className="mb-1.5 block text-xs font-medium text-muted-foreground">Backoff multiplier</label>
+                <Input id="automation-backoff-multiplier"
                   type="number"
                   min={1}
                   step={0.5}
@@ -1044,8 +1051,8 @@ export function CreateAutomationPage() {
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Max backoff (ms)</label>
-                <Input
+                <label htmlFor="automation-max-backoff-ms" className="mb-1.5 block text-xs font-medium text-muted-foreground">Max backoff (ms)</label>
+                <Input id="automation-max-backoff-ms"
                   type="number"
                   min={1000}
                   value={retryMaxBackoffMs}
@@ -1056,24 +1063,21 @@ export function CreateAutomationPage() {
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Retry on</label>
                 <div className="flex gap-3 text-xs">
                   <label className="flex items-center gap-1">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={retryOnFailed}
-                      onChange={(e) => setRetryOnFailed(e.target.checked)}
+                      onCheckedChange={(checked) => setRetryOnFailed(checked === true)}
                     /> workflow_failed
                   </label>
                   <label className="flex items-center gap-1">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={retryOnTimeout}
-                      onChange={(e) => setRetryOnTimeout(e.target.checked)}
+                      onCheckedChange={(checked) => setRetryOnTimeout(checked === true)}
                     /> timeout
                   </label>
                   <label className="flex items-center gap-1">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={retryOnNetwork}
-                      onChange={(e) => setRetryOnNetwork(e.target.checked)}
+                      onCheckedChange={(checked) => setRetryOnNetwork(checked === true)}
                     /> network
                   </label>
                 </div>

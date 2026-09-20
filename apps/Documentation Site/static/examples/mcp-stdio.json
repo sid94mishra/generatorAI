@@ -1,0 +1,10 @@
+{
+  "name": "Local review tools",
+  "serverType": "stdio",
+  "command": "node",
+  "args": [
+    "/path/to/trusted-mcp-server/index.js"
+  ],
+  "timeoutMs": 30000,
+  "enabled": true
+}

@@ -477,10 +477,17 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       order: state.nodes.length,
     };
     const newNode = stageToNode(newStage, {
-      x: sourceNode.position.x + 40,
-      y: sourceNode.position.y + 40,
+      x: sourceNode.position.x + (sourceNode.measured?.width ?? 320) + 40,
+      y: sourceNode.position.y,
     });
-    set((s) => ({ nodes: [...s.nodes, newNode], isDirty: true }));
+    // A duplicate is the next editing target. Keeping the original selected
+    // made edits silently change it, while the overlapping copy was obscured.
+    set((s) => ({
+      nodes: [...s.nodes.map((node) => ({ ...node, selected: false })), { ...newNode, selected: true }],
+      selectedNodeId: newId,
+      selectedEdgeId: null,
+      isDirty: true,
+    }));
     get().pushHistory();
   },
 

@@ -90,7 +90,7 @@ async function connect(browserService: ReturnType<typeof fakeBrowserService>): P
   const server = http.createServer();
   servers.push(server);
   attachBrowserWebSocket(server, fakeContainer(browserService));
-  await new Promise<void>((resolve) => server.listen(0, resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
   const ws = new WebSocket(`ws://127.0.0.1:${port}/api/workspaces/${WORKSPACE_ID}/browser/stream`);

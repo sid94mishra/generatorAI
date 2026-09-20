@@ -121,10 +121,11 @@ export function CreateProjectPage() {
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Name */}
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">
+          <label htmlFor="project-name" className="mb-1.5 block text-sm font-medium text-foreground">
             Project Name<span className="text-danger">*</span>
           </label>
           <Input
+            id="project-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -135,8 +136,9 @@ export function CreateProjectPage() {
 
         {/* Description */}
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">Description</label>
+          <label htmlFor="project-description" className="mb-1.5 block text-sm font-medium text-foreground">Description</label>
           <Textarea
+            id="project-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}

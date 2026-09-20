@@ -39,6 +39,7 @@ import { isRestorableBrowserUrl, readBrowserTabUrl, writeBrowserTabUrl } from '@
 import { useTheme } from '@/providers/ThemeProvider.js';
 import { buildAuthenticatedSocketUrl } from '@/platform/authTransport.js';
 import { openMultiplexedStream } from '@/platform/muxStream.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { NativeBrowserView } from './NativeBrowserView.js';
 import {
   DropdownMenu,
@@ -1920,13 +1921,13 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
           </label>
 
           <label className="flex items-center gap-1" title="Emulate touch / mobile user-agent metrics">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={emuMobile}
               disabled={emuPreset === 'responsive'}
-              onChange={(e) => {
-                setEmuMobile(e.target.checked);
-                applyEmulation({ on: true, preset: emuPreset, width: emuWidth, height: emuHeight, dpr: emuDpr, mobile: e.target.checked, zoom: emuZoom });
+              onCheckedChange={(v) => {
+                const mobile = v === true;
+                setEmuMobile(mobile);
+                applyEmulation({ on: true, preset: emuPreset, width: emuWidth, height: emuHeight, dpr: emuDpr, mobile, zoom: emuZoom });
               }}
             />
             <span>Mobile</span>

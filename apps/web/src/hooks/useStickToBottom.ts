@@ -63,6 +63,13 @@ export function useStickToBottom(dep: unknown): StickToBottom {
     };
     const ro = new ResizeObserver(follow);
     if (el.firstElementChild) ro.observe(el.firstElementChild);
+    // The VIEWPORT changes height too, and that hides the latest content just
+    // as surely as new content does: when the agent stops to ask a question,
+    // the "1 tool running" and "waiting for your answer" strips appear under
+    // the transcript and take ~50px from it. Nothing inside grew, so nothing
+    // followed — the question card's Submit button (and a plan's Approve bar)
+    // sat clipped below the fold of a list that believed it was at the bottom.
+    ro.observe(el);
     if (pinnedRef.current) el.scrollTop = el.scrollHeight; // initial pin, synchronous
 
     return () => {

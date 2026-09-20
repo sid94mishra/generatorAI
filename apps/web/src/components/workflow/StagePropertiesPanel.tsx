@@ -197,6 +197,7 @@ function PropertiesTab({
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Template</label>
           <StyledSelect
+            aria-label="Template"
             value={stage.templateId ?? ''}
             onChange={(v) => onUpdate({ templateId: v || undefined })}
             options={templateOptions}
@@ -230,6 +231,7 @@ function PropertiesTab({
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Reasoning Effort</label>
           <StyledSelect
+            aria-label="Reasoning Effort"
             value={stage.harnessConfigOverrides?.reasoningEffort ?? ''}
             onChange={(v) => {
               const effort = v || undefined;
@@ -343,6 +345,7 @@ function ExecutionTab({
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Run Condition</label>
           <StyledSelect
+            aria-label="Run Condition"
             value={stage.condition?.type ?? 'always'}
             onChange={(v) => {
               const type = v as StageCondition['type'];
@@ -382,6 +385,7 @@ function ExecutionTab({
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Context from Predecessors</label>
           <StyledSelect
+            aria-label="Context from Predecessors"
             value={stage.contextFilter ?? 'summary-only'}
             onChange={(v) => onUpdate({ contextFilter: (v || 'summary-only') as ContextFilter })}
             options={[

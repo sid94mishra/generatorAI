@@ -351,7 +351,7 @@ function PrFileRow({
 
   return (
     <li>
-      <button
+      <Button variant="unstyled"
         type="button"
         onClick={onToggle}
         aria-expanded={open}
@@ -373,7 +373,7 @@ function PrFileRow({
           <span className="text-success">+{file.additions}</span>{' '}
           <span className="text-danger">−{file.deletions}</span>
         </span>
-      </button>
+      </Button>
       {open && (
         <div className="px-3 pb-3">
           {parsed && parsed.hunks.length > 0 ? (

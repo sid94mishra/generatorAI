@@ -50,7 +50,7 @@ export function SourceControlSection() {
   const updateSettings = useUpdateSourceControlSettings();
   const addAccount = useAddSourceControlAccount();
   const removeAccount = useRemoveSourceControlAccount();
-  const { confirm, dialog: confirmDialog } = useConfirm();
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirm();
 
   const [activeMethod, setActiveMethod] = useState<SourceControlAuthMethod | null>(null);
   const [defaultBase, setDefaultBase] = useState('');
@@ -112,7 +112,7 @@ export function SourceControlSection() {
 
   const handleDisconnect = useCallback(
     async (account: SourceControlAccount) => {
-      const ok = await confirm({
+      const ok = await confirmAction({
         title: 'Disconnect account?',
         description: `${account.label} will no longer be used for pull requests or pushes. The stored token is deleted.`,
         confirmLabel: 'Disconnect',
@@ -130,7 +130,7 @@ export function SourceControlSection() {
         });
       }
     },
-    [confirm, removeAccount],
+    [confirmAction, removeAccount],
   );
 
   const saveDefaultBase = useCallback(() => {

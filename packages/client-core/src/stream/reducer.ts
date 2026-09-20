@@ -596,6 +596,13 @@ export function startPending(
     _nextBlockId: existing?._nextBlockId ?? 0,
     turnId: (existing?.turnId ?? 0) + 1,
     blocks: priorWidgets,
+    // Invariant 5 applies here too. How full the window is does not change
+    // because the user pressed Send: the previous turn's figure is still the
+    // truth until this turn reports its own. Resetting it blanked the gauge
+    // to "—%" for the whole of every turn — minutes, on a long one — and it
+    // only came back when the turn ended. (`usage` is per-turn spend and is
+    // deliberately NOT carried: a new turn has spent nothing yet.)
+    contextUsage: existing?.contextUsage ?? null,
   });
 }
 
@@ -884,9 +891,36 @@ export function setContextUsage(
   // so the accurate one ends up on top; if the provider call fails we fall
   // back to the estimate rather than freezing on a stale snapshot. It also
   // lets the value go DOWN after compaction, which a max() would prevent.
+  //
+  // One exception to "replace wholesale". A short turn ends before the
+  // provider's breakdown can be sampled, so it reports only the derived
+  // estimate — the exact total, but with the completion reserve subtracted
+  // from the window and no breakdown. Replacing a provider snapshot with that
+  // made the gauge's denominator flip between turns ("57k / 1.00M", then
+  // "57k / 936k", then back) and the breakdown blink in and out. What the
+  // provider said about THIS model's window is still true a turn later, so a
+  // derived snapshot inherits it and contributes what it is authoritative
+  // for: the token count.
+  const prior = existing.contextUsage;
+  const inherits =
+    snapshot.source === 'derived' &&
+    prior?.source === 'provider' &&
+    (snapshot.model === undefined || prior.model === undefined || snapshot.model === prior.model);
+  const merged: ContextUsageSnapshot = inherits
+    ? {
+        ...snapshot,
+        ...(prior.promptTokenLimit != null ? { promptTokenLimit: prior.promptTokenLimit } : {}),
+        ...(prior.totalContextWindow != null ? { totalContextWindow: prior.totalContextWindow } : {}),
+        ...(prior.compactionThreshold != null ? { compactionThreshold: prior.compactionThreshold } : {}),
+        ...(prior.breakdown ? { breakdown: prior.breakdown } : {}),
+        // `source` stays 'derived': the COUNT is an estimate this turn, and the
+        // popover says so. Only what the provider said about the window is
+        // carried forward.
+      }
+    : snapshot;
   return put(streams, sessionId, {
     ...existing,
-    contextUsage: { ...snapshot, at: now },
+    contextUsage: { ...merged, at: now },
   });
 }
 

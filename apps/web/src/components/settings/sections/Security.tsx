@@ -26,6 +26,7 @@ import {
   switchConnection,
 } from '@/platform/authRuntime.js';
 import { cn } from '@/lib/utils.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 /** Compact coloured label used throughout this section. */
 function StatusPill({
@@ -42,7 +43,7 @@ function StatusPill({
     neutral: 'bg-subtle text-muted-foreground',
   } as const;
   return (
-    <span className={cn('inline-block max-w-full break-all rounded px-1.5 py-0.5 text-right font-mono text-[10px] uppercase leading-tight', TONE[tone])}>
+    <span className={cn('inline-block max-w-full shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-right font-mono text-[10px] uppercase leading-tight', TONE[tone])}>
       {label}
     </span>
   );
@@ -1087,10 +1088,9 @@ export function SecuritySection() {
             </label>
             {posture?.relay.enabled && posture.relay.clientAvailable && (
               <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={includeRelay}
-                  onChange={(e) => setIncludeRelay(e.target.checked)}
+                  onCheckedChange={(v) => setIncludeRelay(v === true)}
                   className="h-3.5 w-3.5"
                 />
                 <span>
@@ -1183,12 +1183,11 @@ export function SecuritySection() {
                               )}
                               title={scope}
                             >
-                              <input
-                                type="checkbox"
-                                className="h-3 w-3 accent-primary"
+                              <Checkbox
+                                className="h-3 w-3"
                                 checked={on}
                                 disabled={busy}
-                                onChange={() => toggleRequestScope(req.requestId, scope)}
+                                onCheckedChange={() => toggleRequestScope(req.requestId, scope)}
                               />
                               {scopeLabel(scope)}
                               {(scope.startsWith('exec:') || scope.startsWith('admin:')) && (

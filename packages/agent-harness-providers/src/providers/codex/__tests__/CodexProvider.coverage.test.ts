@@ -233,16 +233,21 @@ describe('CodexProvider — provider notices', () => {
 // ── Gap: a thread that died mid-turn hung until the RPC deadline ──
 
 describe('CodexProvider — thread lifecycle settles an in-flight turn', () => {
-  it('ends the turn with harness.error + harness.idle when the thread system-errors', async () => {
+  it.each([
+    ['CLOSE_DEMO', 'system error state'],
+    ['THREAD_CLOSED_DEMO', 'closed before the turn finished'],
+  ])('rejects %s while preserving partial output and failing open tools', async (prompt, error) => {
     const p = await started({ rpcTimeoutMs: 30_000 });
     await p.createConversation(CONV('dead'));
     const { events, stop } = collect(p, 'dead');
     // The fixture sends nothing after the status change, so anything but an
     // explicit settle would sit here for the whole RPC deadline.
-    const res = await p.sendPromptAndWait('dead', 'CLOSE_DEMO');
+    await expect(p.sendPromptAndWait('dead', prompt)).rejects.toThrow(error);
     stop();
 
-    expect(res.content).toBe('starting ');
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'harness.token', data: expect.objectContaining({ text: 'starting ' }),
+    }));
     const kinds = events.map((e) => e.kind);
     expect(kinds).toContain('harness.error');
     expect(kinds[kinds.length - 1]).toBe('harness.idle');

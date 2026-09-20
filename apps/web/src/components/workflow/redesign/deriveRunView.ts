@@ -265,9 +265,8 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
     const stream = streams[`stageRun:${sr.id}`];
     const status = STAGE_STATUS_MAP[sr.status] ?? 'pending';
     const isTerminal = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'skipped';
-    const isActive = status === 'running' || status === 'awaiting_input';
 
-    const steps = deriveTimeline(stream?.blocks, { active: !isTerminal });
+    const steps = deriveTimeline(stream?.blocks, { active: status === 'running' });
     const stepsDone = steps.filter((s) => s.status === 'done' || s.status === 'failed').length;
     const stepsTotal = Math.max(sr.totalSteps ?? 0, steps.length);
 
@@ -278,12 +277,14 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
     // through Details → Inspector → Output. Fall back to the persisted output
     // once the stage is terminal so a finished run replays inline.
     //
-    // Deliberately NOT applied while the stage is still active: there the live
-    // blocks are the source of truth, and `outputText` is not written until
-    // the stage settles.
+    // Approval gates persist the completed output before parking. A route
+    // revisit may have only the first few stream blocks, so prefer that
+    // persisted result for both completed and approval-waiting stages.
+    // Partial ordered segments must not hide the final answer in StreamPanel.
     const streamedAnswer = deriveAnswer(stream?.blocks);
-    const answer = streamedAnswer || (isTerminal ? (sr.outputText ?? '') : '');
-    const segments = deriveSegments(stream?.blocks, { active: !isTerminal });
+    const persistedAnswer = (isTerminal || status === 'awaiting_input') ? sr.outputText?.trim() : undefined;
+    const answer = persistedAnswer || streamedAnswer;
+    const segments = persistedAnswer ? [] : deriveSegments(stream?.blocks, { active: status === 'running' });
     const parallelIds = parallelPeers.get(sr.id) ?? [];
 
     // Interrupt data → InlineHitlControls props
@@ -336,7 +337,8 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
 
     return {
       id: sr.id,
-      order: def?.order ?? idx + 1,
+      // Definition order is a zero-based sorting key, not a user-facing number.
+      order: idx + 1,
       depth: depths.get(sr.stageDefinitionId) ?? 0,
       dependsOn: dependsOnByDefId.get(sr.stageDefinitionId) ?? [],
       name: sr.name,

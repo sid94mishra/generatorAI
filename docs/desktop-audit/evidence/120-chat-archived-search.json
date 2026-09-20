@@ -1,0 +1,16 @@
+{
+  "url": "/chats",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Chats"
+  ],
+  "scrollers": []
+}

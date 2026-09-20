@@ -1,3 +1,4 @@
+import type { HarnessProviderId } from '@generatorai/shared';
 // ────────────────────────────────────────────────────────────────
 // AgentResolver — the ONE place capability sets are combined.
 //
@@ -45,7 +46,7 @@ export interface ResolveAgentInput {
   baseHarnessConfig?: Partial<HarnessConfig> | undefined;
   runtimeOverrides?: Partial<HarnessConfig> | undefined;
   projectId?: string | undefined;
-  harnessType?: 'copilot' | 'claude-agent' | undefined;
+  harnessType?: HarnessProviderId | undefined;
   scope: 'chat' | 'stage' | 'worker';
   /**
    * Resolve this in-memory agent instead of loading one. Used by the editor's

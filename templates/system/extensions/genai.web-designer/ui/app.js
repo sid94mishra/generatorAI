@@ -93,9 +93,10 @@
   function render() {
     const hasDesign = !!state.current;
     document.getElementById('headerActions').style.display = hasDesign ? 'flex' : 'none';
-    document.getElementById('historyPane').style.display = hasDesign ? 'flex' : 'none';
-    document.getElementById('chatPane').style.display = hasDesign ? 'flex' : 'none';
-    document.getElementById('bodyGrid').style.gridTemplateColumns = hasDesign ? '220px 1fr 300px' : '1fr';
+    document.getElementById('historyPane').hidden = !hasDesign;
+    document.getElementById('chatPane').hidden = !hasDesign;
+    document.getElementById('compactTabs').hidden = !hasDesign;
+    document.getElementById('bodyGrid').dataset.hasDesign = String(hasDesign);
 
     const col = document.getElementById('canvasCol');
     if (!hasDesign) {
@@ -117,7 +118,7 @@
       <div class="hero-icon">${iconSpark()}</div>
       <h1>What do you want to design?</h1>
       <p class="sub">Describe a web app or page in plain language — the agent will design a real, working mock and you'll see it live here.</p>
-      <textarea id="reqInput" placeholder="e.g. A pricing page for a SaaS product with 3 tiers, light and modern"></textarea>
+      <textarea id="reqInput" aria-label="Design brief" placeholder="e.g. A pricing page for a SaaS product with 3 tiers, light and modern"></textarea>
       <div class="hero-actions">
         <button class="btn primary" id="designBtn">${iconSpark()} Design it</button>
       </div>
@@ -183,10 +184,10 @@
     const list = document.getElementById('historyList');
     if (!state.history.length) { list.innerHTML = `<div class="version-empty">No versions yet.</div>`; return; }
     const items = state.history.slice().reverse();
-    list.innerHTML = items.map((v) => `<div class="version-item${v.id === state.current.id ? ' active' : ''}" data-version-id="${v.id}">
+    list.innerHTML = items.map((v) => `<button type="button" class="version-item${v.id === state.current.id ? ' active' : ''}" data-version-id="${v.id}">
         <div class="v-title">${escapeHtml(v.summary)}</div>
         <div class="v-time">${formatTime(v.ts)}</div>
-      </div>`).join('');
+      </button>`).join('');
   }
 
   function renderActivity() {
@@ -207,6 +208,14 @@
   }
 
   // ───────────────────────── header controls ─────────────────────────
+  document.getElementById('compactTabs').addEventListener('click', (e) => {
+    const button = e.target.closest('button[data-pane]');
+    if (!button) return;
+    document.getElementById('bodyGrid').dataset.activePane = button.dataset.pane;
+    document.querySelectorAll('#compactTabs button').forEach((item) => {
+      item.setAttribute('aria-pressed', String(item === button));
+    });
+  });
   document.getElementById('viewSeg').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-view]');
     if (!b) return;

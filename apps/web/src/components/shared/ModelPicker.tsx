@@ -18,7 +18,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
-import { ChevronDown, Check, Search, X, Lock, Info, Cpu, Eye, Globe, Gauge, ArrowUp, RefreshCw } from 'lucide-react';
+import { ChevronDown, Check, Search, X, Lock, Info, Cpu, Eye, Globe, Gauge, ArrowUp, RefreshCw, AlertTriangle } from 'lucide-react';
 
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/index.js';
@@ -83,7 +83,22 @@ export function getModelShortName(modelId: string): string {
     'gpt-4.1-mini': 'GPT-4.1 Mini',
     'o3-mini': 'o3-mini',
   };
-  return map[modelId] || modelId;
+  if (map[modelId]) return map[modelId];
+  // An id nobody catalogued still has to read like a name, not like a key:
+  // `opus[1m]` → "Opus (1M)", `gpt-5.6-sol` stays as it is.
+  const m = /^([a-z]+)(\[1m\])?$/i.exec(modelId);
+  if (m) return `${m[1]!.charAt(0).toUpperCase()}${m[1]!.slice(1)}${m[2] ? ' (1M)' : ''}`;
+  return modelId.replace(/\[1m\]$/i, ' (1M)');
+}
+
+/**
+ * Which provider an uncatalogued model id most plausibly belongs to — for the
+ * trigger's ICON only. `null` when the id says nothing.
+ */
+export function guessProviderOfModel(modelId: string): string | null {
+  if (/^(default|opus|sonnet|haiku|claude|fable|mythos)/i.test(modelId)) return 'claude-agent';
+  if (/^(gpt-|o\d|codex)/i.test(modelId)) return 'codex';
+  return null;
 }
 
 /** A single label/value row in the model details panel. */
@@ -174,8 +189,20 @@ export function ModelPicker({
     [allModels, value],
   );
 
-  /** Provider that owns the current selection, so the trigger icon is right. */
-  const selectedProvider = selectedModel?.provider ?? primaryProvider;
+  /**
+   * Provider that owns the current selection, so the trigger icon is right.
+   *
+   * The selection can be absent from the catalog — its provider failed to
+   * load, was signed out, or is mid re-probe. That used to fall back to the
+   * PRIMARY provider's brand, so a Claude chat whose provider was down wore
+   * the GitHub Copilot mark next to a raw id (`opus[1m]`): the wrong vendor,
+   * stated with confidence. An absent model now says it is unavailable.
+   */
+  const selectionUnavailable = Boolean(value) && !selectedModel && !providersLoading && providerInfos.length > 0;
+  const selectedProvider = selectedModel?.provider ?? guessProviderOfModel(value ?? '') ?? primaryProvider;
+  const unavailableProviderLabel = selectionUnavailable
+    ? (providerInfos.find((p) => p.type === selectedProvider)?.label ?? 'its provider')
+    : null;
 
   const providers = useMemo(
     () => providerInfos.map((p) => ({
@@ -295,6 +322,12 @@ export function ModelPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
+        title={
+          selectionUnavailable
+            ? `${triggerLabel} is not available right now — ${unavailableProviderLabel} is not ready. Open to pick another model, or check Settings → Providers.`
+            : undefined
+        }
+        data-unavailable={selectionUnavailable || undefined}
         className={cn(
           'flex h-auto items-center transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-60',
           variant === 'field'
@@ -314,7 +347,10 @@ export function ModelPicker({
         )}
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          {hasValue && (
+          {hasValue && selectionUnavailable && (
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />
+          )}
+          {hasValue && !selectionUnavailable && (
             <ProviderIcon
               provider={selectedProvider}
               className={cn('shrink-0', variant === 'field' ? 'h-3.5 w-3.5 text-[var(--color-muted-foreground)]' : 'h-3.5 w-3.5')}

@@ -31,7 +31,7 @@ describe('DESKTOP_CSP mirrors the server CSP', () => {
     const hash = /THEME_SCRIPT_CSP_HASH = '([^']+)'/.exec(serverSrc)?.[1];
     expect(hash).toBeTruthy();
     const directives = [...serverSrc.matchAll(/^\s+[`"]([a-z-]+ [^`"]+)[`"],?$/gm)]
-      .map((m) => m[1]!.replace('${THEME_SCRIPT_CSP_HASH}', hash!));
+      .map((m) => m[1]!.replace('${THEME_SCRIPT_CSP_HASH}', hash!).replace('${frameSource}', "'self'"));
     expect(directives.length).toBeGreaterThanOrEqual(7);
     for (const d of directives) expect(DESKTOP_CSP).toContain(d);
   });

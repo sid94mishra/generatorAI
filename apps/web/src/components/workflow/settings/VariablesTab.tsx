@@ -8,6 +8,7 @@ import type { VariableDefinition } from '@generatorai/shared';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { Button, Input, Select } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 const TYPE_LABELS: Record<string, { label: string; color: string }> = {
   string: { label: 'String', color: 'bg-info-muted text-info' },
@@ -251,11 +252,10 @@ export function VariablesTab() {
                       </div>
                       <div className="flex items-end pb-1">
                         <label className="flex items-center gap-1.5 text-xs text-foreground">
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={variable.required}
-                            onChange={(e) => updateVariable(index, { required: e.target.checked })}
-                            className="h-3.5 w-3.5 rounded border-border"
+                            onCheckedChange={(v) => updateVariable(index, { required: v === true })}
+                            className="h-3.5 w-3.5"
                           />
                           Required
                         </label>

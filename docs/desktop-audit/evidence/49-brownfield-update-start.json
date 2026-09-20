@@ -1,0 +1,59 @@
+{
+  "url": "/chats/466b7da8-9a33-412d-a3e7-ca746a2143af",
+  "viewport": {
+    "w": 1280,
+    "h": 800
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Build Atlas Release Console",
+    "Build Atlas Release Console",
+    "Goal",
+    "Approach",
+    "Changes",
+    "Risks & edge cases",
+    "Verification",
+    "Desktop audit follow-up"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "flex-1 overflow-y-auto px-4 py-4",
+      "h": 454,
+      "scroll": 3004,
+      "rect": {
+        "x": 240,
+        "y": 113,
+        "w": 554
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "",
+      "h": 543,
+      "scroll": 3524,
+      "rect": {
+        "x": 1025,
+        "y": 257,
+        "w": 255
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "min-h-0 flex-1 overflow-y-auto",
+      "h": 601,
+      "scroll": 1584,
+      "rect": {
+        "x": 801,
+        "y": 199,
+        "w": 479
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

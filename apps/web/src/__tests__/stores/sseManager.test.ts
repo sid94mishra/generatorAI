@@ -15,6 +15,9 @@ import {
 } from '@/stores/sseManager.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useConnectionStore } from '@/stores/connectionStore.js';
+import { hydrateWidgetsForChat } from '@/utils/hydrateWidgets.js';
+
+vi.mock('@/utils/hydrateWidgets.js', () => ({ hydrateWidgetsForChat: vi.fn(async () => {}) }));
 
 // ── EventSource mock ──
 class MockEventSource {
@@ -84,6 +87,41 @@ describe('sseManager (STR-04 per-scope EventSource)', () => {
     expect(_getConnectionCount()).toBe(1);
     expect(_getRefCount('chat', 'chat-1')).toBe(1);
   });
+
+  it('refreshes current widget metadata after history replay', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(hydrateWidgetsForChat).mockClear();
+      const platform = createMockPlatform();
+      connectChatSession('chat-widget', 'session-widget', platform);
+      await vi.advanceTimersByTimeAsync(1_100);
+      expect(hydrateWidgetsForChat).toHaveBeenCalledWith('chat-widget', 'session-widget');
+      expect(vi.mocked(platform.streamReplay).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(hydrateWidgetsForChat).mock.invocationCallOrder[0]!,
+      );
+    } finally { disconnectAll(); vi.useRealTimers(); }
+  });
+
+  it.each(['running', 'unreachable', 'stopped'] as const)(
+    'only settles a quiet chat after authoritative completion: %s', async (state) => {
+      vi.useFakeTimers();
+      try {
+        const platform = createMockPlatform();
+        platform.getHealth = vi.fn().mockImplementation(async () => {
+          if (state === 'unreachable') throw new Error('offline');
+          return { runningChatIds: state === 'running' ? ['chat-quiet'] : [] };
+        });
+        connectChatSession('chat-quiet', 'session-quiet', platform);
+        await vi.advanceTimersByTimeAsync(1_100);
+        useStreamStore.getState().startPending('session-quiet', 'Long tool call');
+        await vi.advanceTimersByTimeAsync(70_000);
+        expect(platform.getHealth).toHaveBeenCalled();
+        expect(useStreamStore.getState().getStream('session-quiet').status).toBe(
+          state === 'stopped' ? 'error' : 'pending',
+        );
+      } finally { disconnectAll(); vi.useRealTimers(); }
+    },
+  );
 
   it('refcounts duplicate chat connections without re-opening EventSource', () => {
     const platform = createMockPlatform();

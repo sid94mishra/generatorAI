@@ -20,6 +20,7 @@ import { Plus, X, Maximize2, Minimize2, MoreHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { useResizablePane } from '@/hooks/useResizablePane.js';
 import { useIsNarrowViewport } from '@/hooks/useMediaQuery.js';
+import { Button } from '@/components/ui/index.js';
 
 /**
  * Invisible pointer-target expansion for the pane's 22x22 header icons.
@@ -292,7 +293,20 @@ export function RightPane({
   // a full-width sheet over the content instead, the same treatment the
   // sidebar already gets in AppLayout. The user's own fullscreen toggle is
   // meaningless there, so it is hidden and the resize handle with it.
-  const isNarrow = useIsNarrowViewport();
+  const narrowViewport = useIsNarrowViewport();
+  const [hostNode, setHostNode] = useState<HTMLElement | null>(null);
+  const [hostWidth, setHostWidth] = useState(0);
+  useEffect(() => {
+    if (!hostNode) return;
+    const measure = () => setHostWidth(hostNode.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(hostNode);
+    return () => observer.disconnect();
+  }, [hostNode]);
+  // A desktop sidebar can leave less room than the viewport breakpoint
+  // suggests. Use a sheet when two readable columns no longer fit.
+  const isNarrow = narrowViewport || (hostWidth > 0 && hostWidth < 760);
   const effectiveFullscreen = fullscreen || isNarrow;
   // N7 — a cap that refuses in silence reads as a bug. Both cap paths (the
   // "+" menu and an imperative focus request) route through `capNotice`, so
@@ -582,6 +596,7 @@ export function RightPane({
     defaultRatio: 0.4,
     minPx: 320,
     maxRatio: 0.75,
+    minRemainingPx: 420,
   });
 
   // The pane sits as the last child of a horizontal flex container. Bind
@@ -590,8 +605,9 @@ export function RightPane({
   const paneRef = useRef<HTMLElement | null>(null);
   const setPaneRef = useCallback((el: HTMLElement | null) => {
     paneRef.current = el;
+    setHostNode(el?.parentElement ?? null);
     resize.hostRef(el?.parentElement ?? null);
-  }, [resize]);
+  }, [resize.hostRef]);
 
   // Exit fullscreen whenever the pane is closed so it re-opens at normal
   // width next time.
@@ -604,7 +620,12 @@ export function RightPane({
   useEffect(() => {
     if (!effectiveFullscreen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // The topmost review popover/dialog owns Escape. Its portal is outside
+      // the pane, and dismissal may detach it before this listener runs, so
+      // inspect the original event path rather than the current DOM tree.
+      if (e.composedPath().some((node) => node instanceof Element
+        && ['dialog', 'alertdialog'].includes(node.getAttribute('role') ?? ''))) return;
       if (isNarrow) onOpenChange(false);
       else setFullscreen(false);
     };
@@ -623,11 +644,12 @@ export function RightPane({
         <div
           {...resize.handleProps}
           aria-label="Resize right pane"
-          title="Drag to resize · double-click to reset"
+          title="Drag or use arrow keys to resize · double-click to reset"
           className={cn(
             'group relative flex shrink-0 cursor-col-resize items-center justify-center',
             'w-1.5 border-l border-r border-[var(--color-border)] bg-[var(--color-border)]/40',
             'transition-colors hover:bg-[var(--color-primary)]/40',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
             resize.dragging && 'bg-[var(--color-primary)]/60',
           )}
         >
@@ -680,18 +702,21 @@ export function RightPane({
                     else tabElsRef.current.delete(t.id);
                   }}
                   className={cn(
-                    'group flex min-w-0 shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[11.5px] font-medium transition-colors',
+                    'group relative flex min-w-0 shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[11.5px] font-medium transition-colors',
                     isActive
                       ? 'border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 text-[var(--color-foreground)]'
                       : 'border-transparent text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]',
                   )}
                 >
-                  <button
+                  <Button variant="unstyled"
                     role="tab"
                     aria-selected={isActive}
                     data-testid={`right-pane-tab-${t.type}`}
                     onClick={() => selectTab(t.id)}
-                    className="flex min-w-0 items-center gap-1.5"
+                    // The pill is the tab, so the pill is the target. The
+                    // button used to be only as big as its text — 17px tall —
+                    // and a click on the padding around it selected nothing.
+                    className="flex min-w-0 items-center gap-1.5 after:absolute after:inset-0 after:content-['']"
                     title={label}
                   >
                     <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">{icon}</span>
@@ -699,19 +724,23 @@ export function RightPane({
                         it the label's intrinsic width wins over `max-w`, so a
                         long filename stretches the tab instead of ellipsing. */}
                     <span className="min-w-0 max-w-[120px] truncate">{label}</span>
-                  </button>
+                  </Button>
                   {!isDefault && (
-                    <button
+                    <Button variant="unstyled"
                       type="button"
                       aria-label={`Close ${label} tab`}
                       onClick={(e) => {
                         e.stopPropagation();
                         closeTab(t.id);
                       }}
-                      className="ml-0.5 rounded p-0.5 text-[var(--color-muted-foreground)] opacity-60 hover:bg-[var(--color-subtle)] hover:opacity-100"
+                      className={cn(
+                        // Above the tab's stretched target, with a hit area of its own.
+                        'z-10 ml-0.5 rounded p-0.5 text-[var(--color-muted-foreground)] opacity-60 hover:bg-[var(--color-subtle)] hover:opacity-100',
+                        HIT_AREA,
+                      )}
                     >
                       <X className="h-3 w-3" />
-                    </button>
+                    </Button>
                   )}
                 </div>
               );
@@ -729,7 +758,7 @@ export function RightPane({
           <div ref={addMenuRef} className="relative flex shrink-0 items-center gap-0.5">
             {overflowIds.length > 0 && (
               <div ref={overflowMenuRef} className="relative flex items-center">
-                <button
+                <Button variant="unstyled"
                   type="button"
                   aria-haspopup="menu"
                   aria-expanded={overflowMenuOpen}
@@ -741,7 +770,7 @@ export function RightPane({
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
                   <span className="text-[10px] font-semibold tabular-nums">{overflowIds.length}</span>
-                </button>
+                </Button>
                 {overflowMenuOpen && (
                   <div
                     role="menu"
@@ -759,7 +788,7 @@ export function RightPane({
                       const icon = def.getTabIcon ? def.getTabIcon({ id: t.id, index }) : def.icon;
                       const isActive = t.id === state.active;
                       return (
-                        <button
+                        <Button variant="unstyled"
                           key={id}
                           role="menuitem"
                           onClick={() => selectTabFromOverflow(id)}
@@ -774,14 +803,14 @@ export function RightPane({
                             {icon}
                           </span>
                           <span className="min-w-0 flex-1 truncate">{label}</span>
-                        </button>
+                        </Button>
                       );
                     })}
                   </div>
                 )}
               </div>
             )}
-            <button
+            <Button variant="unstyled"
               type="button"
               aria-haspopup="menu"
               aria-expanded={addMenuOpen}
@@ -802,9 +831,9 @@ export function RightPane({
               )}
             >
               <Plus className="h-3.5 w-3.5" />
-            </button>
+            </Button>
             {!isNarrow && (
-              <button
+              <Button variant="unstyled"
                 type="button"
                 aria-label={fullscreen ? 'Exit full screen' : 'Expand to full screen'}
                 aria-pressed={fullscreen}
@@ -820,9 +849,9 @@ export function RightPane({
                 title={fullscreen ? 'Exit full screen' : 'Expand to full screen'}
               >
                 {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-              </button>
+              </Button>
             )}
-            <button
+            <Button variant="unstyled"
               type="button"
               aria-label="Close right pane"
               data-testid="right-pane-close"
@@ -834,7 +863,7 @@ export function RightPane({
               title="Close side pane"
             >
               <X className="h-3.5 w-3.5" />
-            </button>
+            </Button>
             {addMenuOpen && availableAdds.length > 0 && (
               <div
                 role="menu"
@@ -844,7 +873,7 @@ export function RightPane({
                   Add tab
                 </div>
                 {availableAdds.map(({ type, def }) => (
-                  <button
+                  <Button variant="unstyled"
                     key={type}
                     role="menuitem"
                     disabled={def.disabled}
@@ -869,7 +898,7 @@ export function RightPane({
                         </div>
                       )}
                     </div>
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}

@@ -13,8 +13,9 @@
 // preformatted text, never re-processed (no markdown, no JSON re-parsing).
 // ────────────────────────────────────────────────────────────────
 
+import { Input, Spinner, Button } from '@/components/ui/index.js';
 import { useState } from 'react';
-import { Check, Loader2, ShieldAlert, ShieldCheck, ShieldX } from 'lucide-react';
+import { Check, ShieldAlert, ShieldCheck, ShieldX } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import type { PermissionBlock } from '@/stores/streamStore.js';
 
@@ -101,7 +102,7 @@ export function PermissionCard({ permission, onAnswer, busy }: PermissionCardPro
 
         {isAnswerable && !denying && (
           <div className="flex items-center justify-end gap-2 pt-1">
-            <button
+            <Button variant="unstyled"
               type="button"
               aria-label={`Deny ${permission.toolName}`}
               disabled={busy}
@@ -109,8 +110,8 @@ export function PermissionCard({ permission, onAnswer, busy }: PermissionCardPro
               className="rounded-md border border-[var(--color-danger)]/40 px-3 py-1.5 text-xs font-medium text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger)]/10 disabled:opacity-50"
             >
               Deny
-            </button>
-            <button
+            </Button>
+            <Button variant="unstyled"
               type="button"
               aria-label={`Allow ${permission.toolName}`}
               disabled={busy}
@@ -118,12 +119,12 @@ export function PermissionCard({ permission, onAnswer, busy }: PermissionCardPro
               className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {busy ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Spinner size="xs" />
               ) : (
                 <ShieldCheck className="h-3 w-3" />
               )}
               Allow
-            </button>
+            </Button>
           </div>
         )}
 
@@ -135,7 +136,7 @@ export function PermissionCard({ permission, onAnswer, busy }: PermissionCardPro
             >
               Reason for denying (optional)
             </label>
-            <input
+            <Input
               id={`deny-reason-${permission.interactionId}`}
               type="text"
               autoFocus
@@ -145,24 +146,24 @@ export function PermissionCard({ permission, onAnswer, busy }: PermissionCardPro
               className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-xs text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)]/40"
             />
             <div className="flex items-center justify-end gap-2">
-              <button
+              <Button variant="unstyled"
                 type="button"
                 disabled={busy}
                 onClick={handleDenyCancel}
                 className="rounded-md px-2 py-1.5 text-[11px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-50"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button variant="unstyled"
                 type="button"
                 aria-label={`Confirm deny ${permission.toolName}`}
                 disabled={busy}
                 onClick={handleDenyConfirm}
                 className="flex items-center gap-1.5 rounded-md bg-[var(--color-danger)] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
-                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldX className="h-3 w-3" />}
+                {busy ? <Spinner size="xs" /> : <ShieldX className="h-3 w-3" />}
                 Confirm deny
-              </button>
+              </Button>
             </div>
           </div>
         )}

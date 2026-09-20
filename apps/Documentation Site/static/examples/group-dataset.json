@@ -1,0 +1,29 @@
+{
+  "dataSchema": {
+    "version": 1,
+    "format": "json_array",
+    "fields": [
+      {
+        "name": "team",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "issueId",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  "iterationMode": {
+    "kind": "group_by",
+    "fields": [
+      "team"
+    ],
+    "groupVariable": "teamIssues"
+  },
+  "dataset": {
+    "format": "json_array",
+    "data": "[{\"team\":\"web\",\"issueId\":\"101\"},{\"team\":\"web\",\"issueId\":\"102\"},{\"team\":\"mobile\",\"issueId\":\"103\"}]"
+  }
+}

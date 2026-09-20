@@ -1,0 +1,79 @@
+{
+  "url": "/chats/466b7da8-9a33-412d-a3e7-ca746a2143af",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Add safe concurrent release mutations",
+    "Add safe concurrent release mutations",
+    "Goal",
+    "Approach",
+    "Changes",
+    "Risks & edge cases",
+    "Verification",
+    "Atlas Release Console",
+    "Run",
+    "Test",
+    "Architecture",
+    "REST API",
+    "Concurrency and compatibility",
+    "409 conflict fields",
+    "Workflow"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "flex-1 overflow-y-auto px-4 py-4",
+      "h": 487,
+      "scroll": 7039,
+      "rect": {
+        "x": 240,
+        "y": 80,
+        "w": 566
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "",
+      "h": 514,
+      "scroll": 2174,
+      "rect": {
+        "x": 813,
+        "y": 286.5,
+        "w": 467
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "min-h-0 flex-1 overflow-y-auto",
+      "h": 628,
+      "scroll": 1430,
+      "rect": {
+        "x": 813,
+        "y": 172,
+        "w": 467
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "min-h-0 flex-1 overflow-auto px-5 py-4",
+      "h": 643,
+      "scroll": 3714,
+      "rect": {
+        "x": 813,
+        "y": 157,
+        "w": 467
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

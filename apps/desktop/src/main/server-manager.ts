@@ -30,6 +30,7 @@ import { findFreePort, preferredPort } from './ports';
 import { loadSettings, saveSettings } from './config';
 import { loadOrCreateSecretKey } from './secret-protection';
 import type { ServerStatus, ServerState } from '../shared/ipc';
+import { repairProcessPath } from './login-shell-path';
 
 const HEALTH_TIMEOUT_MS = 60_000;
 const HEALTH_POLL_INTERVAL_MS = 400;
@@ -247,6 +248,11 @@ export class ServerManager extends EventEmitter {
     // Acquire a separate free port for the isolated widget-asset origin.
     this.widgetPort = await findFreePort(0);
     ensureDataDirs(this.paths);
+
+    // Before anything is spawned: a Finder / Dock / launcher start gets a bare
+    // PATH, and the server — with every agent CLI and shell command under it —
+    // inherits whatever this process has. See `login-shell-path.ts`.
+    await repairProcessPath();
 
     const { command, args, cwd } = this.resolveLaunch();
     const env = this.buildEnv();

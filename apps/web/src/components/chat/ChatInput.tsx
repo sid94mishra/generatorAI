@@ -34,7 +34,7 @@ import {
 import { cn } from '@/lib/utils.js';
 import { ModelPicker, ProviderIcon, formatTokens, DetailRow } from '@/components/shared/ModelPicker.js';
 import { ContextUsageGauge } from '@/components/shared/ContextUsageGauge.js';
-import { Button, Textarea, Spinner } from '@/components/ui/index.js';
+import { Button, Input, Textarea, Spinner } from '@/components/ui/index.js';
 import { resolveModelLimit } from '@generatorai/client-core';
 import { VoiceRecorder } from './VoiceRecorder.js';
 import { useSpeechToText } from '@/hooks/useSpeechToText.js';
@@ -308,8 +308,14 @@ export function ChatInput({
   const blockedByInteraction = !!pendingInteractionLabel;
   // Mounts still being created: the prompt would have nowhere to run.
   const blockedByWorkspacePrep = isPreparing(workspacePrep?.status);
+  // Attachments are a message too. A browser comment arrives as attachments
+  // with the composer empty — the note was typed in the page — and the send
+  // arrow stayed grey until the user invented something to type here.
   const canSend =
-    (text.trim().length > 0 || activeCommand !== null) &&
+    (text.trim().length > 0 ||
+      activeCommand !== null ||
+      attachments.length > 0 ||
+      (pendingCaptures?.length ?? 0) > 0) &&
     !disabled &&
     !isLoading &&
     !blockedByInteraction &&
@@ -383,11 +389,21 @@ export function ChatInput({
     if (!activeModel?.supportsLongContext || !standard || !long || standard >= long) {
       return [] as Array<{ tier: 'default' | 'long_context'; tokens: number }>;
     }
+    // ONE number per window. The catalog's figure is derived (window minus
+    // the completion reserve: 936K); the running session reports its own
+    // (1.00M), and that is what the gauge divides by. Side by side in the same
+    // toolbar they read as two different windows. When the session's figure
+    // is plainly the same tier measured differently — within 15% — it wins,
+    // so the chip and the gauge beside it always agree.
+    const live = contextUsage?.promptTokenLimit;
+    const agree = (catalog: number): number =>
+      typeof live === 'number' && live > 0 && Math.abs(live - catalog) / catalog < 0.15 ? live : catalog;
+    const active = (contextTier as 'default' | 'long_context' | undefined) ?? 'default';
     return [
-      { tier: 'default' as const, tokens: standard },
-      { tier: 'long_context' as const, tokens: long },
+      { tier: 'default' as const, tokens: active === 'default' ? agree(standard) : standard },
+      { tier: 'long_context' as const, tokens: active === 'long_context' ? agree(long) : long },
     ];
-  }, [activeModel]);
+  }, [activeModel, contextUsage?.promptTokenLimit, contextTier]);
   const effectiveTier = (contextTier as 'default' | 'long_context' | undefined) ?? 'default';
   const activeTierTokens = contextTiers.find((t) => t.tier === effectiveTier)?.tokens
     ?? resolveModelLimit(activeModel, effectiveTier);
@@ -747,7 +763,21 @@ export function ChatInput({
         prompt = cmd.format(rawInput, template);
       }
 
-      if (!prompt.trim() && currentAttachments.length === 0) {
+      // Captures (browser comments, terminal selections) live with the page and
+      // are merged into the message by `customSendFn`; they count here too.
+      const captureFiles = (pendingCaptures ?? []).map((c) => c.file);
+      if (!prompt.trim() && currentAttachments.length + captureFiles.length > 0) {
+        // The server needs words. Say what the attachments are for rather than
+        // making the user type a sentence that adds nothing.
+        const fromBrowser = [...currentAttachments.map((a) => a.file), ...captureFiles].some((f) =>
+          /^(element|region)-/.test(f.name),
+        );
+        prompt = fromBrowser
+          ? 'Please address the attached browser comment(s). Each .md file has my note and the element it is about; the .png shows it.'
+          : 'Please take a look at the attached file(s).';
+      }
+
+      if (!prompt.trim() && currentAttachments.length + captureFiles.length === 0) {
         // Nothing to send after formatting — restore and bail.
         setText(rawInput);
         setActiveCommand(cmd);
@@ -803,6 +833,7 @@ export function ChatInput({
     customSendFn,
     onBuiltinCommand,
     activeAgentMode,
+    pendingCaptures,
   ]);
 
   // ── Voice input (Phase 1 rewrite — VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part C) ──
@@ -1044,8 +1075,11 @@ export function ChatInput({
   // Which microphone dictation records from. Chosen in Settings > Audio and
   // resolved against what is plugged in RIGHT NOW, so a headset that was
   // unplugged since falls back to the system default instead of failing.
-  const micDevices = useAudioInputDevices();
   const micDeviceId = useMicPrefsStore((st) => st.deviceId);
+  // Only a user who CHOSE a microphone needs the device list here (to map the
+  // saved choice onto what is plugged in). Everyone else records from the
+  // system default, which needs no enumeration at all.
+  const micDevices = useAudioInputDevices({ enabled: micDeviceId !== '' });
   const micDeviceLabel = useMicPrefsStore((st) => st.deviceLabel);
   const resolvedMicId = useMemo(
     () => resolveMicDeviceId(micDevices.devices, { deviceId: micDeviceId, deviceLabel: micDeviceLabel }),
@@ -1284,11 +1318,11 @@ export function ChatInput({
   }, []);
 
   const handleFilesChanged = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length) {
       setAttachments((prev) => [
         ...prev,
-        ...Array.from(files).map((file, i) => ({
+        ...files.map((file, i) => ({
           id: `file:${Date.now()}:${i}:${file.name}`,
           file,
           source: 'file' as CaptureSource,
@@ -1308,11 +1342,11 @@ export function ChatInput({
     // must do nothing, not silently attach. `preventDefault` still runs so
     // the browser does not navigate away to the dropped file.
     if (!COMPOSER.attachments) return;
-    const files = e.dataTransfer.files;
+    const files = Array.from(e.dataTransfer.files);
     if (files.length) {
       setAttachments((prev) => [
         ...prev,
-        ...Array.from(files).map((file, i) => ({
+        ...files.map((file, i) => ({
           id: `file:${Date.now()}:${i}:${file.name}`,
           file,
           source: 'file' as CaptureSource,
@@ -1985,7 +2019,7 @@ export function ChatInput({
         </div>
       )}
 
-      <input
+      <Input
         ref={fileInputRef}
         type="file"
         multiple
@@ -2001,6 +2035,14 @@ export function ChatInput({
  * One attachment chip above the textarea. Images get a thumbnail glyph and a
  * hover preview of the actual picture (object URL, revoked on unmount).
  */
+/** `report.final.md` → `{ stem: 'report.final', ext: '.md' }`; no dot, no ext. */
+function splitExtension(name: string): { stem: string; ext: string } {
+  const dot = name.lastIndexOf('.');
+  // A leading dot is a dotfile, and an "extension" longer than 8 is a sentence.
+  if (dot <= 0 || name.length - dot > 9 || /[\s/]/.test(name.slice(dot))) return { stem: name, ext: '' };
+  return { stem: name.slice(0, dot), ext: name.slice(dot) };
+}
+
 function ComposerChip({
   file, label, title, icon, muted, onRemove,
 }: {
@@ -2025,7 +2067,14 @@ function ComposerChip({
       title={title ?? label}
     >
       {icon ?? (image ? <ImageIcon className="h-3 w-3" /> : <Paperclip className="h-3 w-3" />)}
-      <span className="max-w-[140px] truncate">{label}</span>
+      {/* The END of a file name is the part that tells two attachments apart:
+          a browser comment arrives as `element-buy-<stamp>.md` plus
+          `element-buy-<stamp>.png`, and end-truncation rendered both as
+          "element-buy-1789…". The stem gives way; the extension never does. */}
+      <span className="flex min-w-0 max-w-[160px]">
+        <span className="truncate">{splitExtension(label).stem}</span>
+        <span className="shrink-0">{splitExtension(label).ext}</span>
+      </span>
       {onRemove && (
         <Button
           variant="ghost"

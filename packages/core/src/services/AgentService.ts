@@ -1,3 +1,4 @@
+import type { HarnessProviderId } from '@generatorai/shared';
 // ────────────────────────────────────────────────────────────────
 // AgentService — CRUD, validation, import/export and system sync for the
 // first-class Agent entity.
@@ -329,7 +330,7 @@ export class AgentService {
     draft: Record<string, unknown>,
     opts: {
       projectId?: string;
-      harnessType: 'copilot' | 'claude-agent';
+      harnessType: HarnessProviderId;
       scope: 'chat' | 'stage' | 'worker';
       overrides?: Record<string, unknown>;
     },

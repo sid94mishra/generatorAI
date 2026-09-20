@@ -89,19 +89,17 @@ export function useFileTabs({
       maxInstances: 4,
       disabled: !workspaceId,
       disabledReason: 'No workspace for this chat',
+      // Titled after what it previews, but always recognisably the BROWSER:
+      // "Files · money.js" under the folder icon. It used to take the file's
+      // bare name and its icon, so double-clicking a file (the first click
+      // previews it, the second opens its own tab) left two identical
+      // "money.js" tabs side by side — one of them secretly the file tree.
       getTabLabel: ({ id, index }) => {
+        const base = index <= 1 ? 'Files' : `Files ${index}`;
         const ref = previewByTab[id];
-        if (ref) return ref.path.split('/').pop() ?? ref.path;
-        return index <= 1 ? 'Files' : `Files ${index}`;
+        return ref ? `${base} · ${ref.path.split('/').pop() ?? ref.path}` : base;
       },
-      getTabIcon: ({ id }) => {
-        const ref = previewByTab[id];
-        return ref ? (
-          <FileTypeIcon name={ref.path.split('/').pop() ?? ref.path} className="h-3.5 w-3.5" />
-        ) : (
-          <FolderTree className="h-3.5 w-3.5" />
-        );
-      },
+      getTabIcon: () => <FolderTree className="h-3.5 w-3.5" />,
       render: (ctx) => (
         <div className="flex h-full min-h-0 flex-col">
           <SourcesPanel

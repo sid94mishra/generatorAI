@@ -19,7 +19,7 @@ import type {
   AgentRuntimePolicy,
   AgentToolPolicy,
 } from '@generatorai/shared';
-import { ValidationError, AGENT_TOOL_GROUPS } from '@generatorai/shared';
+import { ValidationError, AGENT_TOOL_GROUPS, REASONING_EFFORTS, type ReasoningEffort } from '@generatorai/shared';
 
 /** Hard cap. A `.agent.md` is a prompt, not a payload. */
 export const AGENT_MARKDOWN_MAX_BYTES = 256 * 1024;
@@ -134,8 +134,8 @@ export function parseAgentMarkdown(raw: string): ParsedAgentMarkdown {
   const model = asString(fm['model'], 200);
   if (model) runtime.model = model;
   const effort = asString(ext['reasoningEffort'], 20);
-  if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh') {
-    runtime.reasoningEffort = effort;
+  if (REASONING_EFFORTS.includes(effort as ReasoningEffort)) {
+    runtime.reasoningEffort = effort as ReasoningEffort;
   }
   const permissionMode = asString(ext['permissionMode'], 30);
   if (

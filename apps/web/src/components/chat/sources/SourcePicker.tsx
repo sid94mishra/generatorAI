@@ -550,28 +550,35 @@ function SourceRow({
         />
 
         {draft.branchMode === 'new' && (
-          <>
+          // One unit that wraps TOGETHER. As loose siblings of the flex row the
+          // fixed-width name box truncated a default like
+          // `generatorai/shopkit-claude-opus` while the row still had room,
+          // and the word "from" was left dangling at the end of one line with
+          // the base it refers to on the next.
+          <div className="flex min-w-0 flex-1 basis-72 flex-wrap items-center gap-x-2 gap-y-1.5">
             <Input
               value={draft.newBranch}
               disabled={rowDisabled}
               onChange={(e) => onChange({ ...draft, newBranch: e.target.value })}
               placeholder={defaultNewBranch(chatName)}
               aria-label={`New branch name for ${draft.alias}`}
-              className="h-6 w-52 px-2 py-0 font-mono text-[11px]"
+              className="h-6 min-w-[13rem] flex-1 px-2 py-0 font-mono text-[11px]"
             />
-            <span className="text-[11px] text-muted-foreground">from</span>
-            <Select
-              value={draft.baseRef}
-              disabled={rowDisabled}
-              onChange={(v) => onChange({ ...draft, baseRef: v })}
-              aria-label={`Base branch for ${draft.alias}`}
-              className="h-6 w-40 px-2 py-0 text-[11px]"
-              options={[
-                { value: '', label: currentBranch ? `Current (${currentBranch})` : 'Current HEAD' },
-                ...branches.map((b) => ({ value: b, label: b })),
-              ]}
-            />
-          </>
+            <span className="inline-flex shrink-0 items-center gap-2">
+              <span className="text-[11px] text-muted-foreground">from</span>
+              <Select
+                value={draft.baseRef}
+                disabled={rowDisabled}
+                onChange={(v) => onChange({ ...draft, baseRef: v })}
+                aria-label={`Base branch for ${draft.alias}`}
+                className="h-6 w-40 px-2 py-0 text-[11px]"
+                options={[
+                  { value: '', label: currentBranch ? `Current (${currentBranch})` : 'Current HEAD' },
+                  ...branches.map((b) => ({ value: b, label: b })),
+                ]}
+              />
+            </span>
+          </div>
         )}
 
         {draft.branchMode === 'existing' && (

@@ -536,7 +536,7 @@ export function deriveTimeline(
             // carries the whole message list, not just the first block.
             anchors.set(subStep, {
               anchor: subagentBlocks[0] ?? b,
-              key: `${status}|${subagentMessages.join(' ')}`,
+              key: `${status}|${subagentMessages.join('\u0000')}`,
             });
             steps.push(subStep);
             subagentEmitted = true;
@@ -601,7 +601,10 @@ export function deriveTimeline(
             id: `err-${b.blockId}`,
             kind: 'error',
             verb: 'Error',
-            target: b.message,
+            // The stream layer writes these as "Error: <message>" so clients
+            // that print the text bare still label it. This row HAS a label,
+            // and the two together read "Error Error: Could not reach…".
+            target: b.message.replace(/^\s*Error:\s*/i, ''),
             mono: false,
             status: 'failed',
           };

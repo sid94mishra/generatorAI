@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Settings,
   Plus,
+  Bot,
 } from 'lucide-react';
 import {
   CommandDialog,
@@ -32,13 +33,15 @@ const NAV_ITEMS: { label: string; path: string; icon: React.ElementType }[] = [
   { label: 'Dashboard', path: '/', icon: LayoutDashboard },
   { label: 'Projects', path: '/projects', icon: FolderKanban },
   { label: 'Chats', path: '/chats', icon: MessageSquare },
+  { label: 'Agents', path: '/agents', icon: Bot },
   { label: 'Workflows', path: '/workflows', icon: GitBranch },
   { label: 'Scripts', path: '/scripts', icon: FileCode2 },
   { label: 'Automations', path: '/automations', icon: RefreshCw },
 ];
 
 const ACTION_ITEMS: { label: string; path: string }[] = [
-  { label: 'New Chat', path: '/chats' },
+  { label: 'New Chat', path: '/chats?new=1' },
+  { label: 'New Agent', path: '/agents/new' },
   { label: 'New Workflow', path: '/workflows/new' },
   { label: 'New Automation', path: '/automations/new' },
   { label: 'New Project', path: '/projects/new' },

@@ -8,6 +8,7 @@ import { Play, AlertCircle, Upload, FileText, Trash2, FolderGit2, ChevronDown, C
 import type { VariableDefinition } from '@generatorai/shared';
 import { Select, Modal, Button, Input, Textarea, Badge } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 type UploadCategory = 'prompts' | 'skills' | 'agents';
 
@@ -168,11 +169,13 @@ export function VariableInputModal({
   }, []);
 
   const handleFilesSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    // FileList is live: resetting the picker clears it before React may run
+    // the queued state updater. Snapshot it synchronously first.
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
     setUploadedFiles((prev) => ({
       ...prev,
-      [uploadCategory]: [...prev[uploadCategory], ...Array.from(files)],
+      [uploadCategory]: [...prev[uploadCategory], ...files],
     }));
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [uploadCategory]);
@@ -402,11 +405,10 @@ export function VariableInputModal({
               {/* Boolean checkbox */}
               {v.type === 'boolean' && (
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={Boolean(values[v.name])}
-                    onChange={(e) => updateValue(v.name, e.target.checked)}
-                    className="h-4 w-4 rounded border-border text-primary"
+                    onCheckedChange={(next) => updateValue(v.name, next === true)}
+                    className="h-4 w-4"
                   />
                   <span className="text-sm text-foreground">
                     {v.label}
@@ -480,11 +482,11 @@ export function VariableInputModal({
                           : 'border-border bg-background',
                       )}
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={!override.skip}
-                        onChange={() => toggleStageSkip(index)}
-                        className="h-4 w-4 rounded border-border text-primary"
+                        aria-label={`Run stage ${index + 1}: ${override.stageName}`}
+                        onCheckedChange={() => toggleStageSkip(index)}
+                        className="h-4 w-4"
                         title={override.skip ? 'Enable this stage' : 'Skip this stage'}
                       />
                       <span className={cn(

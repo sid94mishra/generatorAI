@@ -46,7 +46,14 @@ export interface UseAudioInputDevices {
 /** Chromium's synthetic aliases for "whatever the OS default is". */
 const ALIAS_IDS = new Set(['default', 'communications']);
 
-export function useAudioInputDevices(): UseAudioInputDevices {
+export function useAudioInputDevices(options: { enabled?: boolean } = {}): UseAudioInputDevices {
+  // `enabled: false` means "do not touch the media stack yet". Enumerating
+  // devices is not free in Chromium: the first call starts the Audio Service
+  // AND the Video Capture service as separate OS processes, and they stay up.
+  // The chat composer mounts this hook on every chat, so every user — almost
+  // none of whom has picked a specific microphone — paid for two idle
+  // processes to resolve a preference they never set.
+  const enabled = options.enabled !== false;
   const [devices, setDevices] = useState<AudioInputDevice[]>([]);
   const [labelsVisible, setLabelsVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,13 +94,14 @@ export function useAudioInputDevices(): UseAudioInputDevices {
   }, [refresh]);
 
   useEffect(() => {
+    if (!enabled) return;
     void refresh();
     const md = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined;
     if (!md?.addEventListener) return;
     const onChange = () => void refresh();
     md.addEventListener('devicechange', onChange);
     return () => md.removeEventListener('devicechange', onChange);
-  }, [refresh]);
+  }, [refresh, enabled]);
 
   return { devices, labelsVisible, error, requestLabels, refresh };
 }

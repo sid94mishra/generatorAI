@@ -28,6 +28,11 @@ export function useReviewThreads(
     queryFn: () => platform.listReviewThreads(workspaceId!, options),
     enabled: !!workspaceId && enabled,
     staleTime: 5_000,
+    // Re-anchoring happens asynchronously after the workspace event. Its
+    // first invalidation can race that work; poll only submitted feedback
+    // until the server reports its updated state.
+    refetchInterval: (query) =>
+      query.state.data?.threads.some((thread) => thread.status === 'submitted') ? 3_000 : false,
   });
 }
 

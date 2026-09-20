@@ -1,0 +1,4 @@
+{
+  "prompt": "Inspect the issue filtering code and tests. Propose a priority filter that preserves saved URLs. Ask about ambiguous requirements and produce an implementation plan. Do not modify files, commit, push, or publish.",
+  "mode": "plan"
+}

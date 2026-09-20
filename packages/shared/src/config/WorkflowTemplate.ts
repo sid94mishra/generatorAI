@@ -4,6 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import { REASONING_EFFORTS } from '../types/ProviderConfig.js';
 
 // ── Hook Definition (shared across templates) ──────────────────
 
@@ -194,7 +195,7 @@ export const TemplateHarnessConfigSchema = z.object({
     })
     .optional(),
   configDir: z.string().optional(),
-  reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
+  reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
   maxTurns: z.number().int().min(1).optional(),
 }).default({});
 

@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "mode": "auto",
+  "visibility": "headless",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "allowedHosts": [
+    "localhost",
+    "127.0.0.1"
+  ],
+  "persistProfile": false,
+  "screencastFps": 8,
+  "screencastQuality": 75,
+  "idlePauseMinutes": 10,
+  "evalAllowed": false,
+  "dialogPolicy": "ask",
+  "recordVideo": false,
+  "allowLocalhostSelfSigned": false
+}

@@ -31,7 +31,6 @@ import { useComputerUseSettings } from '@/hooks/composerQueries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { connectChatSession } from '@/stores/sseManager.js';
 import { AgentConsole } from '@/components/chat/AgentConsole.js';
-import { hydrateWidgetsForChat } from '@/utils/hydrateWidgets.js';
 import { ThinkingPlaceholder } from '@/components/chat/ThinkingPlaceholder.js';
 import { ChatMessageList } from '@/components/chat/ChatMessageList.js';
 import { StreamingMessage } from '@/components/chat/StreamingMessage.js';
@@ -58,6 +57,7 @@ import {
 } from '@/platform/surfaceCapabilities.js';
 import { cn } from '@/lib/utils.js';
 import { usePageTitle } from '@/hooks/usePageTitle.js';
+import { Button } from '@/components/ui/index.js';
 
 // Right-pane-only surfaces, code-split out of the chat route chunk. They pull
 // in the two heaviest dependency trees in the app (xterm + its WebGL addon;
@@ -93,16 +93,16 @@ function ForkProvenanceChip({ parentChatId }: { parentChatId: string }) {
   const { data: parent } = useChat(parentChatId);
   return (
     <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5">
-      <button
+      <Button variant="unstyled"
         type="button"
         data-testid="fork-provenance"
         onClick={() => navigate(`/chats/${parentChatId}`)}
         className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
-        title="Open the chat this one branched from"
+        title="Open the chat this one branched from. The fork has its own copy of the files, on its own branch."
       >
         <GitFork className="h-3 w-3" />
         {parent?.name ? `Forked from ${parent.name}` : 'Forked chat'}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -715,14 +715,6 @@ export function ChatPage() {
       disconnect();
     };
   }, [chatId, sessionId, platform]);
-
-  // Reconstitute widgets from the DB on mount — independent of the SSE
-  // event-replay window, so widgets survive refresh even if their render
-  // event has scrolled out of the replay log.
-  useEffect(() => {
-    if (!chatId || !sessionId) return;
-    void hydrateWidgetsForChat(chatId, sessionId);
-  }, [chatId, sessionId]);
 
   // Register chat entity in chatStore cache (can re-run on data updates)
   useEffect(() => {
@@ -1342,12 +1334,12 @@ export function ChatPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
         <p className="text-sm text-[var(--color-destructive)]">Chat not found</p>
-        <button
+        <Button variant="unstyled"
           onClick={() => navigate('/')}
           className="text-sm text-[var(--color-primary)] underline"
         >
           Go back
-        </button>
+        </Button>
       </div>
     );
   }
@@ -1373,9 +1365,10 @@ export function ChatPage() {
         </div>
       )}
 
-      {/* Where this chat came from. A fork shares its parent's workspace and
-          its history up to the branch point, so the link back is the only way
-          to tell the two conversations apart once they diverge. */}
+      {/* Where this chat came from. A fork starts as a copy of its parent —
+          the history up to the branch point, and the files as they were — in a
+          workspace and on a branch of its own. The link back is how you find
+          the chat it diverged from. */}
       {chat.forkedFromChatId && (
         <ForkProvenanceChip parentChatId={chat.forkedFromChatId} />
       )}
@@ -1403,13 +1396,13 @@ export function ChatPage() {
             page (meaning older messages exist server-side). */}
         {hasMoreMessages && !messagesLoading && (
           <div className="mb-4 flex justify-center">
-            <button
+            <Button variant="unstyled"
               type="button"
               onClick={() => setMsgLimit((prev) => prev + PAGE_SIZE)}
               className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-xs text-[var(--color-muted-foreground)] transition hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]"
             >
               Load earlier messages
-            </button>
+            </Button>
           </div>
         )}
         {displayMessages.length > 0 && (
@@ -1493,12 +1486,12 @@ export function ChatPage() {
         </div>
       </div>
       {showJumpToLatest && (
-        <button
+        <Button variant="unstyled"
           onClick={jumpToLatest}
           className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] shadow-md transition-colors hover:bg-[var(--color-subtle)]"
         >
           <ArrowDown className="h-3.5 w-3.5" /> Jump to latest
-        </button>
+        </Button>
       )}
       </div>
 

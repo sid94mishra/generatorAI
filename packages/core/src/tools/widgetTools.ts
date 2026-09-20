@@ -27,6 +27,15 @@ import type { IWidgetRegistry } from '../domain/ports/IWidgetRegistry.js';
 import { createContext, Script } from 'node:vm';
 import { WIDGET_USAGE_REFERENCE } from '../services/chatSystemHints.js';
 
+// TOOL DESCRIPTIONS HERE ARE KEPT TO A SENTENCE OR TWO, DELIBERATELY.
+//
+// Providers that take tools inline (Codex `dynamicTools`, Copilot) resend every
+// definition with every request, in every chat — and most chats never render a
+// widget. The nine definitions below used to cost ~2,150 tokens per request,
+// most of it the driving contract restated per tool. That contract already
+// arrives, once, in `search_widget`'s result (`WIDGET_USAGE_REFERENCE`), which
+// the model must call before it can do anything else. Detail belongs there.
+
 export interface WidgetToolBinding {
   /** Session id owning the conversation. Required. */
   sessionId: string;
@@ -159,13 +168,8 @@ export function buildRenderWidgetTool(
   return {
     name: 'render_widget',
     description:
-      'Render an interactive widget for the user. Widgets are HTML/JS bundles ' +
-      'contributed by installed extensions and identified by "<extensionId>/<component>". ' +
-      'Call search_widget first if you don\'t know which widgets are available. ' +
-      'The widget appears on the surface you specify (default: the widget\'s ' +
-      'preferredSurface, usually the full-page Widget tab). Returns instanceId (remember ' +
-      'it) and the widget\'s action catalog. Drive complex widgets with widget_action / ' +
-      'widget_exec; drive simple state-only widgets with update_widget.',
+      'Render a widget by descriptor id ("<extensionId>/<component>", from search_widget). ' +
+      'Returns instanceId — keep it — and the widget\'s action catalog. Surface defaults to the widget\'s own preference.',
     parametersSchema: RENDER_WIDGET_SCHEMA,
     handler: renderWidgetHandler(ctx, binding),
     owner: 'system:widgets',
@@ -214,11 +218,8 @@ export function buildUpdateWidgetTool(
   return {
     name: 'update_widget',
     description:
-      'Overwrite the whole state of a previously-rendered widget so the client re-renders. ' +
-      'Best for simple state-only widgets (polls, toggles). For complex widgets with many ' +
-      'verbs, prefer widget_action / widget_exec so you don\'t have to reproduce the entire ' +
-      'state. Provide the instanceId from a prior render_widget call and either a full new ' +
-      'state object or a shallow patch.',
+      'Replace (state) or shallow-merge (patch) a widget\'s state so it re-renders. Best for simple state-only ' +
+      'widgets; for widgets with actions prefer widget_action / widget_exec.',
     parametersSchema: UPDATE_WIDGET_SCHEMA,
     handler: updateWidgetHandler(ctx),
     owner: 'system:widgets',
@@ -306,14 +307,8 @@ export function buildReadWidgetTool(
   return {
     name: 'read_widget',
     description:
-      'Read the CURRENT state of a rendered widget instance. Call this when ' +
-      'the user says they interacted with a widget (voted, clicked, typed, etc.) ' +
-      'and you need to know what they did before responding or calling ' +
-      'update_widget / widget_action. Returns { instanceId, descriptorId, surface, ' +
-      'status, props, state, updatedAt, actions }. The `state` field is the most ' +
-      'recent full state snapshot committed by the widget. Pass `updatedAt` back into ' +
-      'widget_action.expectedUpdatedAt for optimistic concurrency when you want to ' +
-      'avoid clobbering a concurrent user edit.',
+      'Read a widget\'s CURRENT props, state, status, actions and updatedAt. Call it when the user says they ' +
+      'interacted with a widget, before you respond or change it.',
     parametersSchema: READ_WIDGET_SCHEMA,
     handler: readWidgetHandler(ctx),
     owner: 'system:widgets',
@@ -362,10 +357,8 @@ export function buildListWidgetsTool(
   return {
     name: 'list_widgets',
     description:
-      'List every widget instance the user currently has open in this chat, with ' +
-      'each one\'s instanceId, descriptorId, surface, status and latest state. ' +
-      'Useful when the user refers to "the widget" without giving you an id, or ' +
-      'when you need to discover what\'s on the canvas before reading state.',
+      'List the widget instances open in this chat (instanceId, descriptor, surface, status, state) — for when ' +
+      'the user says "the widget" without an id.',
     parametersSchema: LIST_WIDGETS_SCHEMA,
     handler: listWidgetsHandler(ctx, binding),
     owner: 'system:widgets',
@@ -503,11 +496,8 @@ export function buildSearchWidgetTool(
   return {
     name: 'search_widget',
     description:
-      'Search for a widget you can render for the user. Returns a small ranked ' +
-      'list of installed widgets that match the query, including each widget\'s ' +
-      'descriptor id, title, description, and preferred surface. Once you pick ' +
-      'one, call render_widget with its descriptor id. Use this before render_widget ' +
-      'when you don\'t already know the descriptor.',
+      'Find installed widgets matching a query. Returns descriptor ids, descriptions, preferred surfaces AND the ' +
+      'full contract for rendering and driving widgets — call this before any other widget tool.',
     parametersSchema: SEARCH_WIDGET_SCHEMA,
     handler: searchWidgetHandler(ctx),
     owner: 'system:widgets',
@@ -581,11 +571,8 @@ export function buildDescribeWidgetTool(
   return {
     name: 'describe_widget',
     description:
-      'Get the full capability profile of a widget: its title, description, state ' +
-      'schema, and — most importantly — its ACTION CATALOG (the typed verbs you can ' +
-      'invoke with widget_action / widget_exec). Call this on a complex widget before ' +
-      'driving it so you know the exact action names and argument shapes. Pass an ' +
-      'instanceId to also get the current state.',
+      'Get a widget\'s state schema and ACTION CATALOG (names + argument shapes for widget_action / widget_exec). ' +
+      'Pass an instanceId to include current state.',
     parametersSchema: DESCRIBE_WIDGET_SCHEMA,
     handler: describeWidgetHandler(ctx),
     owner: 'system:widgets',
@@ -626,9 +613,7 @@ const WIDGET_ACTION_SCHEMA = {
     expectedUpdatedAt: {
       type: 'string',
       description:
-        'Optional optimistic-concurrency guard — pass the `updatedAt` you last read; ' +
-        'the call is rejected as stale if the widget changed since (e.g. a concurrent ' +
-        'user edit), so you can re-read and retry instead of clobbering.',
+        'Optional: the `updatedAt` you last read. The call is rejected as stale if the widget changed since.',
     },
   },
   required: ['instanceId', 'action'],
@@ -641,14 +626,8 @@ export function buildWidgetActionTool(
   return {
     name: 'widget_action',
     description:
-      'Invoke ONE typed action (verb) on a live widget — e.g. moveCard, addRow, setCell. ' +
-      'This is how you drive a COMPLEX widget without reproducing its entire state: the ' +
-      'widget declares an action catalog (see describe_widget), executes the verb, mutates ' +
-      'its own state, and returns a result. The call round-trips to the mounted widget and ' +
-      'waits for its result. For several verbs in a row, prefer widget_exec. NOTE: this ' +
-      'requires the widget to be MOUNTED in a live browser client. If the result has ' +
-      'notMounted:true, do NOT rewrite the widget (it is fine) — fall back to ' +
-      'update_widget(instanceId, {full state}) or ask the user to open the Widget tab.',
+      'Invoke ONE action from a widget\'s catalog (see describe_widget) on a live instance and wait for its result. ' +
+      'Needs the widget mounted in a client: on notMounted:true fall back to update_widget — do not re-render.',
     parametersSchema: WIDGET_ACTION_SCHEMA,
     handler: widgetActionHandler(ctx),
     owner: 'system:widgets',
@@ -686,11 +665,8 @@ const WIDGET_EXEC_SCHEMA = {
     code: {
       type: 'string',
       description:
-        'Async JavaScript body. You get an async `widget` object whose methods are the ' +
-        'widget\'s actions (each returns a Promise of the action result), a `read()` ' +
-        'helper returning the current state, and `log(...)` to return values. Example: ' +
-        '`const s = await read(); for (const c of s.cards) { await widget.moveCard({ id: c.id, to: "done" }); } log("moved", s.cards.length);`. ' +
-        'No imports, no network, no filesystem — only `widget`, `read`, and `log`.',
+        'Async JS body. Only `widget` (one async method per action), `read()` and `log(...)` exist — no imports, ' +
+        'network or filesystem. E.g. `const s = await read(); for (const c of s.cards) await widget.moveCard({ id: c.id, to: "done" });`',
     },
   },
   required: ['instanceId', 'code'],
@@ -703,14 +679,8 @@ export function buildWidgetExecTool(
   return {
     name: 'widget_exec',
     description:
-      'CODE MODE for complex widgets. Run a short async JavaScript script that calls ' +
-      'several widget actions in sequence (and reads state between them) in ONE tool call, ' +
-      'instead of many round-trips. The script gets a typed `widget` API (one async method ' +
-      'per declared action), a `read()` state getter, and `log()`. Ideal for multi-step ' +
-      'operations like "rebalance the board" or "sort then recolor". Discover the available ' +
-      'methods with describe_widget first. NOTE: like widget_action, this requires the ' +
-      'widget MOUNTED in a live browser client; on notMounted:true fall back to ' +
-      'update_widget with the full declarative state (do NOT rewrite the widget).',
+      'Run a short async JS script that calls several widget actions in ONE call: `widget.<action>(args)`, ' +
+      '`read()`, `log()`. Same mounted requirement and fallback as widget_action.',
     parametersSchema: WIDGET_EXEC_SCHEMA,
     handler: widgetExecHandler(ctx),
     owner: 'system:widgets',

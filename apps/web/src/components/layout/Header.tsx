@@ -9,6 +9,7 @@ import { useChat, useArchiveChat } from '@/hooks/queries.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import { useStreamStore } from '@/stores/streamStore.js';
+import { awaitsUserDecision } from '@/components/agent/deriveTimeline.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { ConnectionStatus } from '@/components/status/ConnectionStatus.js';
 import { OpenInEditorButton } from '@/components/shared/OpenInEditorButton.js';
@@ -64,6 +65,12 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
   // Resolve sessionId for stream store — via chatStore
   const resolvedSessionId = chat?.sessionId;
   const streamStatus = useStreamStore((state) => state.streams[resolvedSessionId ?? '']?.status);
+  // Stopped on a question, a permission or a plan review. The stream is still
+  // "streaming" as far as the provider is concerned — a tool call is open —
+  // but nothing is being generated and nothing will be until the user acts.
+  const awaitingUser = useStreamStore((state) =>
+    awaitsUserDecision(state.streams[resolvedSessionId ?? '']?.blocks),
+  );
 
   // Chat mutations
   const archiveChatMutation = useArchiveChat();
@@ -86,11 +93,11 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
   return (
     <header
       data-testid="app-header"
-      className="flex h-10 items-center justify-between border-b border-border bg-background px-3"
+      className="@container flex h-10 min-w-0 items-center justify-between gap-2 border-b border-border bg-background px-3"
     >
       {/* Left: sidebar toggle (only when collapsed — the open-state toggle
           lives on the sidebar itself) + breadcrumb */}
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         {!sidebarOpen && (
           <Tooltip content="Show sidebar">
             <Button
@@ -105,7 +112,7 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
             </Button>
           </Tooltip>
         )}
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex min-w-0 items-center gap-2 whitespace-nowrap text-sm">
           {isDashboard ? (
             <>
               <span className="font-medium text-[var(--color-foreground)]">Dashboard</span>
@@ -122,8 +129,8 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
               {chat && (
                 <>
                   <span className="text-[var(--color-muted-foreground)]">/</span>
-                  <span className="font-medium text-[var(--color-foreground)]">{chat.name}</span>
-                  <ChatStatusBadge status={chat.status} copilotStatus={streamStatus} />
+                  <span title={chat.name} className="min-w-0 truncate font-medium text-[var(--color-foreground)]">{chat.name}</span>
+                  <ChatStatusBadge status={chat.status} copilotStatus={streamStatus} awaitingUser={awaitingUser} />
                 </>
               )}
             </>
@@ -138,7 +145,7 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
       </div>
 
       {/* Right: actions + connection status + theme toggle */}
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         {/* Live-stream health + the "events are missing" badge (N4). Quietly
             absent while everything is connected and complete; a server restart
             or dropped socket used to be completely invisible (observed live:
@@ -244,14 +251,29 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
  *  (active/archived/deleted) but is overridden by the live copilot stream
  *  state (Generating / Processing) while a turn is in flight. Token-based
  *  via the shared Badge so it matches the design system in light + dark. */
-function ChatStatusBadge({ status, copilotStatus }: { status: string; copilotStatus?: string }) {
-  const isGenerating = copilotStatus === 'streaming' || copilotStatus === 'thinking';
-  const isProcessing = copilotStatus === 'pending';
+function ChatStatusBadge({
+  status,
+  copilotStatus,
+  awaitingUser = false,
+}: {
+  status: string;
+  copilotStatus?: string;
+  awaitingUser?: boolean;
+}) {
+  const live = copilotStatus === 'streaming' || copilotStatus === 'thinking' || copilotStatus === 'pending';
+  const isGenerating = (copilotStatus === 'streaming' || copilotStatus === 'thinking') && !awaitingUser;
+  const isProcessing = copilotStatus === 'pending' && !awaitingUser;
 
   let label = status;
   let tone: BadgeTone = status === 'active' ? 'success' : 'neutral';
 
-  if (isGenerating) {
+  if (live && awaitingUser) {
+    // The banner under the header says "Paused — waiting for your input"; a
+    // pill two lines above it that still said "Generating" sent the opposite
+    // message, and it is the one visible from every other tab of the app.
+    label = 'Needs input';
+    tone = 'warning';
+  } else if (isGenerating) {
     label = 'Generating';
     tone = 'info';
   } else if (isProcessing) {
@@ -260,7 +282,7 @@ function ChatStatusBadge({ status, copilotStatus }: { status: string; copilotSta
   }
 
   return (
-    <Badge tone={tone} size="sm" className="capitalize">
+    <Badge tone={tone} size="sm" className="shrink-0 capitalize">
       {label}
     </Badge>
   );
@@ -289,6 +311,7 @@ function ActionButton({ onClick, loading, disabled, icon, label, variant }: Acti
         variant="ghost"
         size="sm"
         onClick={onClick}
+        aria-label={label}
         disabled={disabled || loading}
         className={cn(
           'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50',
@@ -300,7 +323,7 @@ function ActionButton({ onClick, loading, disabled, icon, label, variant }: Acti
         ) : (
           icon
         )}
-        <span className="hidden sm:inline">{label}</span>
+        <span className="hidden @min-[800px]:inline">{label}</span>
       </Button>
     </Tooltip>
   );

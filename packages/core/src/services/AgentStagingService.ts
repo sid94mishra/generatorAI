@@ -70,6 +70,11 @@ export class AgentStagingService {
       let content: string;
       try {
         content = await readFile(skill.filePath, 'utf-8');
+        // Legacy bundled skills are plain Markdown. Codex and Claude discover
+        // SKILL.md through required name/description frontmatter.
+        if (!/^---\r?\n/.test(content)) {
+          content = `---\nname: ${JSON.stringify(skill.name)}\ndescription: ${JSON.stringify(`Instructions for ${skill.name}`)}\n---\n\n${content}`;
+        }
       } catch {
         warnings.push({ code: 'SKILL_NOT_FOUND', params: { id: skill.id } });
         continue;

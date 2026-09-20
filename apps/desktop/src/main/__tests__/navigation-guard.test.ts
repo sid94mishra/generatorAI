@@ -3,7 +3,7 @@
 // comparison and, above all, the fail-CLOSED behaviour on garbage input.
 
 import { describe, expect, it } from 'vitest';
-import { isAppOrigin, isAppOriginForPermission, isExternalUrlAllowed } from '../navigation-guard';
+import { appRouteOf, isAppOrigin, isAppOriginForPermission, isExternalUrlAllowed } from '../navigation-guard';
 
 const APP = 'http://127.0.0.1:3100';
 
@@ -92,5 +92,29 @@ describe('isExternalUrlAllowed', () => {
     expect(isExternalUrlAllowed('zoommtg://start')).toBe(false);
     expect(isExternalUrlAllowed('not a url')).toBe(false);
     expect(isExternalUrlAllowed('')).toBe(false);
+  });
+});
+
+describe('appRouteOf (in-app popups)', () => {
+  it('returns a client route with its query and hash intact', () => {
+    expect(appRouteOf(`${APP}/chats/abc?focus=1#latest`)).toBe('/chats/abc?focus=1#latest');
+    expect(appRouteOf(`${APP}`)).toBe('/');
+    expect(appRouteOf(`${APP}/settings/appearance`)).toBe('/settings/appearance');
+  });
+
+  it('does not mistake a server resource for a route', () => {
+    expect(appRouteOf(`${APP}/api/files/raw?path=x`)).toBeNull();
+    expect(appRouteOf(`${APP}/api`)).toBeNull();
+    expect(appRouteOf(`${APP}/internal/browser/x`)).toBeNull();
+    expect(appRouteOf(`${APP}/assets/index-abc.js`)).toBeNull();
+    expect(appRouteOf(`${APP}/favicon.ico`)).toBeNull();
+  });
+
+  it('keeps a route that merely starts like a server prefix', () => {
+    expect(appRouteOf(`${APP}/apiary`)).toBe('/apiary');
+  });
+
+  it('returns null for input that does not parse', () => {
+    expect(appRouteOf('not a url')).toBeNull();
   });
 });

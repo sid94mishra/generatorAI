@@ -1,3 +1,4 @@
+import type { HarnessProviderId, ReasoningEffort } from './ProviderConfig.js';
 // ────────────────────────────────────────────────────────────────
 // Agent — first-class, user-authored agent definition.
 //
@@ -81,8 +82,8 @@ export const DEFAULT_AGENT_TOOL_POLICY: AgentToolPolicy = {
 export interface AgentRuntimePolicy {
   /** Omit to inherit from the binding site / workflow / server default. */
   model?: string;
-  harnessType?: 'copilot' | 'claude-agent';
-  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  harnessType?: HarnessProviderId;
+  reasoningEffort?: ReasoningEffort;
   contextTier?: 'default' | 'long_context';
   maxTurns?: number;
   permissionMode?: AgentPermissionMode;
@@ -213,7 +214,7 @@ export interface ResolvedTeamAgent {
   tools?: string[];
   disallowedTools?: string[];
   model?: string;
-  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  reasoningEffort?: ReasoningEffort;
   skills?: string[];
   maxTurns?: number;
   permissionMode?: AgentPermissionMode;

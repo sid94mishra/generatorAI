@@ -1,0 +1,28 @@
+{
+  "url": "/workflows/4969ab11-7d70-494e-be42-ee62ea1cc44d/runs/c89fedba-22f6-47fa-ab65-10c3a17be10a",
+  "viewport": {
+    "w": 1280,
+    "h": 800
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Atlas — Risk Pipeline"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "min-w-0 flex-1 overflow-y-auto",
+      "h": 599,
+      "scroll": 649,
+      "rect": {
+        "x": 240,
+        "y": 201.5,
+        "w": 1040
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

@@ -134,7 +134,7 @@ export function CapabilityToggleList({
         </div>
       )}
 
-      <div className="max-h-56 space-y-1 overflow-y-auto pr-0.5">
+      <div className={cn('space-y-1 pr-0.5', visible.length > 8 && 'max-h-80 overflow-y-auto')}>
         {visible.map((entry) => {
           const isInherited = inherited.has(entry.id);
           const isRemoved = removed.has(entry.id);

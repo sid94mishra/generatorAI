@@ -1,0 +1,31 @@
+{
+  "url": "/workflows/7c0212b2-e541-4af7-b6ea-8bca377b2b7f",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Gap audit — Uploaded input",
+    "Recent Runs",
+    "Start Workflow Run"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "min-h-0 flex-1 overflow-y-auto px-5 py-4",
+      "h": 210,
+      "scroll": 319,
+      "rect": {
+        "x": 417,
+        "y": 304,
+        "w": 446
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

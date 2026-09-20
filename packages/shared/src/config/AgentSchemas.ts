@@ -7,6 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import { HARNESS_PROVIDER_IDS, REASONING_EFFORTS } from '../types/ProviderConfig.js';
 import { AGENT_SLUG_PATTERN, AGENT_INSTRUCTIONS_MAX_BYTES } from '../types/Agent.js';
 
 /** Superset accepted by both harness SDKs. */
@@ -39,8 +40,8 @@ export const AgentToolPolicySchema = z
 export const AgentRuntimePolicySchema = z
   .object({
     model: z.string().max(200),
-    harnessType: z.enum(['copilot', 'claude-agent']),
-    reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']),
+    harnessType: z.enum(HARNESS_PROVIDER_IDS),
+    reasoningEffort: z.enum(REASONING_EFFORTS),
     contextTier: z.enum(['default', 'long_context']),
     maxTurns: z.number().int().min(1).max(1000),
     permissionMode: z.enum(['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk']),
@@ -113,7 +114,7 @@ export const ResolvePreviewSchema = z.object({
   agentRef: z.string().max(128).optional(),
   overrides: AgentOverridesSchema.optional(),
   projectId: z.string().uuid().optional(),
-  harnessType: z.enum(['copilot', 'claude-agent']).optional(),
+  harnessType: z.enum(HARNESS_PROVIDER_IDS).optional(),
   scope: z.enum(['chat', 'stage', 'worker']).default('chat'),
   /**
    * Unsaved draft from the editor — previewed without persisting.

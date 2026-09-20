@@ -75,7 +75,7 @@ export function AgentsSection() {
       ) : (
         <div className="grid min-w-0 gap-2">
           {filtered.map((a) => (
-            <button
+            <Button variant="unstyled"
               key={a.id}
               type="button"
               onClick={() => go(`/agents/${a.id}`)}
@@ -109,7 +109,7 @@ export function AgentsSection() {
                   Disabled
                 </Badge>
               )}
-            </button>
+            </Button>
           ))}
         </div>
       )}
