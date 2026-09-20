@@ -1,3 +1,8 @@
+---
+mdx:
+  format: mdx
+---
+
 import ExampleDownload from "@site/src/components/ExampleDownload";
 
 # Worked configuration examples

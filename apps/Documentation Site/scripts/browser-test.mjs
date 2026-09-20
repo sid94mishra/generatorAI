@@ -51,7 +51,7 @@ await run('Search finds documented workflow content',async()=>{
  await page.screenshot({path:path.join(screenshots,'search-results.png')});
  await input.press('ArrowDown');await input.press('Enter');
  await expect(page).not.toHaveURL(/guide\/quickstart/);
- expect(await page.locator('main').innerText()).toMatch(/checkpoint/i);
+ await expect(page.locator('main')).toContainText(/checkpoint/i);
 });
 await run('Dark theme toggle',async()=>{
  await page.getByRole('button',{name:/Switch between dark and light mode/i}).click();
