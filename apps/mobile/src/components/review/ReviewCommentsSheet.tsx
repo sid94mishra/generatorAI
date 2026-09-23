@@ -14,8 +14,8 @@
 // shape web posts to `POST /workspaces/:id/review/submit`.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Keyboard, ScrollView, Text, View } from 'react-native';
 import { Check, Eye, MessageSquare, Pencil, Send, Trash2 } from 'lucide-react-native';
 import type { ReviewThread } from '@generatorai/client-core';
 
@@ -231,6 +231,8 @@ function ThreadList({
   const [showNote, setShowNote] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const revealPreview = useRef(false);
 
   const threads = useMemo(() => {
     let list = review.threads;
@@ -248,7 +250,17 @@ function ThreadList({
 
   return (
     <View className="flex-1">
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 24 }}>
+      <ScrollView
+        ref={scrollRef}
+        onContentSizeChange={() => {
+          if (revealPreview.current) {
+            revealPreview.current = false;
+            scrollRef.current?.scrollToEnd({ animated: false });
+          }
+        }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 24 }}
+      >
         {threads.length === 0 ? (
           <EmptyState
             title="No comments yet"
@@ -297,7 +309,11 @@ function ThreadList({
                   onPress={() =>
                     review.submit.mutate(
                       { note, preview: true },
-                      { onSuccess: (result) => setPreview(result.prompt) },
+                      { onSuccess: (result) => {
+                        Keyboard.dismiss();
+                        revealPreview.current = true;
+                        setPreview(result.prompt);
+                      } },
                     )
                   }
                 />
@@ -397,7 +413,7 @@ function ThreadCard({
           </View>
           {editing?.id === comment.id ? (
             <View className="gap-2">
-              <Field value={editing.body} onChangeText={(body) => setEditing({ id: comment.id, body })} multiline autoFocus />
+              <Field accessibilityLabel="Edit comment text" value={editing.body} onChangeText={(body) => setEditing({ id: comment.id, body })} multiline autoFocus />
               <View className="flex-row justify-end gap-2">
                 <Button label="Cancel" variant="ghost" size="sm" onPress={() => setEditing(null)} />
                 <Button
@@ -408,7 +424,7 @@ function ThreadCard({
                   onPress={() =>
                     review.edit.mutate(
                       { threadId: thread.id, commentId: comment.id, body: editing.body.trim() },
-                      { onSuccess: () => setEditing(null) },
+                      { onSuccess: () => { Keyboard.dismiss(); setEditing(null); } },
                     )
                   }
                 />

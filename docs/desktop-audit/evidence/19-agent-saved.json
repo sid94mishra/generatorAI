@@ -1,0 +1,59 @@
+{
+  "url": "/agents/7e86e1d7-055a-4a9b-9f6b-a9131de50e3a",
+  "viewport": {
+    "w": 1440,
+    "h": 870
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Atlas Risk Reviewerv1",
+    "Identity",
+    "Instructions*",
+    "Role",
+    "Skills",
+    "MCP servers",
+    "Capabilities",
+    "Runtime"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "mx-auto max-w-6xl px-6 py-8 h-full overflow-y-auto",
+      "h": 790,
+      "scroll": 2751,
+      "rect": {
+        "x": 264,
+        "y": 80,
+        "w": 1152
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "max-h-56 space-y-1 overflow-y-auto pr-0.5",
+      "h": 224,
+      "scroll": 253,
+      "rect": {
+        "x": 305,
+        "y": 1363.625,
+        "w": 1059
+      },
+      "parentScrollers": 1
+    },
+    {
+      "tag": "DIV",
+      "classes": "max-h-56 space-y-1 overflow-y-auto pr-0.5",
+      "h": 224,
+      "scroll": 407,
+      "rect": {
+        "x": 305,
+        "y": 1748.125,
+        "w": 1059
+      },
+      "parentScrollers": 1
+    }
+  ]
+}

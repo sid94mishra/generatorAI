@@ -1,0 +1,13 @@
+node_modules/
+.npm-cache/
+.docusaurus/
+build/
+build-subpath/
+.browser-profile/
+audit/scope-baseline.json
+audit/browser-results.json
+audit/subpath-browser-results.json
+audit/screenshots/
+*.log
+
+.browser-cache/

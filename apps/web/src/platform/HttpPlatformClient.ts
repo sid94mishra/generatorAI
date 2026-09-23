@@ -1,3 +1,4 @@
+import type { HarnessProviderId } from '@generatorai/shared';
 // ────────────────────────────────────────────────────────────────
 // HttpPlatformClient — Web platform IPlatformClient implementation
 // Communicates with the server via REST + SSE
@@ -1282,7 +1283,7 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<ChatModel[]>(`${this.baseUrl}/api/harness/models`);
   }
 
-  /** Active harness/agent provider ('copilot' | 'claude-agent' | …). */
+  /** Active harness/agent provider. */
   async getHarnessConfig(): Promise<{ harness: { type: string } }> {
     return apiFetch<{ harness: { type: string } }>(`${this.baseUrl}/api/health/config`);
   }
@@ -1322,12 +1323,22 @@ export class HttpPlatformClient implements IPlatformClient {
     variables?: Record<string, unknown>;
     projectId?: string;
     selectedCodebases?: string[];
+    uploads?: { prompts: File[]; skills: File[]; agents: File[] };
     stageOverrides?: Array<{ stageName?: string; stageIndex?: number; agentName?: string; contextFilter?: string; timeoutMs?: number; variables?: Record<string, unknown>; skip?: boolean }>;
   }): Promise<OrchestratorContext> {
+    const { uploads, ...config } = params;
+    if (uploads && Object.values(uploads).some((files) => files.length > 0)) {
+      const body = new FormData();
+      body.append('config', JSON.stringify(config));
+      for (const category of ['prompts', 'skills', 'agents'] as const) {
+        for (const file of uploads[category]) body.append(category, file);
+      }
+      return apiFetch<OrchestratorContext>(`${this.baseUrl}/api/orchestrator/runs`, { method: 'POST', body });
+    }
     return apiFetch<OrchestratorContext>(`${this.baseUrl}/api/orchestrator/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify(config),
     });
   }
 
@@ -2370,7 +2381,7 @@ export class HttpPlatformClient implements IPlatformClient {
     agentRef?: string;
     overrides?: AgentOverrides;
     projectId?: string;
-    harnessType?: 'copilot' | 'claude-agent';
+    harnessType?: HarnessProviderId;
     scope: 'chat' | 'stage' | 'worker';
     draft?: Record<string, unknown>;
   }): Promise<ResolvedAgentProjection> {

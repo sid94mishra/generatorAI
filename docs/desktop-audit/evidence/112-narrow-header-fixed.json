@@ -1,0 +1,27 @@
+{
+  "url": "/chats/62685ebd-59ef-4245-8375-d6618dd33d69",
+  "viewport": {
+    "w": 860,
+    "h": 600,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "flex-1 overflow-y-auto px-4 py-4",
+      "h": 329,
+      "scroll": 1359,
+      "rect": {
+        "x": 240,
+        "y": 80,
+        "w": 620
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

@@ -16,9 +16,15 @@ export interface ModelGroup {
   models: ModelInfo[];
 }
 
+// Same names as the server's `harnessTypeLabel` and the desktop picker, so a
+// provider is called the same thing everywhere (a missing entry showed up as
+// its raw id — "codex" — in the mobile model list).
 export const PROVIDER_LABELS: Record<string, string> = {
   copilot: 'GitHub Copilot',
   'claude-agent': 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  acp: 'ACP Agent',
 };
 
 /** Groups a flat catalogue by provider for a sectioned picker. */

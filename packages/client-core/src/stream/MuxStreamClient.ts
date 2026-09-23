@@ -452,6 +452,21 @@ export class MuxStreamClient {
     }
   }
 
+  /**
+   * Resume positions for scopes being added to the open connection: one a
+   * subscriber seeded with `afterSequence`, or one re-added to change its
+   * filter. Without them the server starts each at the live edge.
+   */
+  private cursorsFor(subs: ReadonlyArray<{ scope: string; id: string }>): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const sub of subs) {
+      const key = scopeKey(sub.scope, sub.id);
+      const seq = this.cursors.get(key);
+      if (seq !== undefined) out[key] = seq;
+    }
+    return out;
+  }
+
   private async reconcile(): Promise<void> {
     if (!this.connectionId) return;
     if (this.reconciling) {
@@ -484,7 +499,7 @@ export class MuxStreamClient {
       const res = await this.options.fetch(`/api/stream/connections/${target}/subs`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ add, remove }),
+        body: JSON.stringify({ add, remove, cursors: this.cursorsFor(add) }),
       });
       if (res.status === 403) {
         // The server refuses the WHOLE mutation when one added sub is out of

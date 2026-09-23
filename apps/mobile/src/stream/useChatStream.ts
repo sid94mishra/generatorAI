@@ -86,6 +86,14 @@ export interface UseChatStreamOptions {
   sessionId?: string | null | undefined;
   /** Skip connecting (e.g. the screen is not focused). */
   enabled?: boolean;
+  /**
+   * A turn that was already running as the chat opened (see
+   * `turnCatchUp.ts`): its logged events, fed through the router before the
+   * live ones, and the cursor the subscription resumes after. Read at
+   * subscribe time, so neither re-subscribes.
+   */
+  catchUpEvents?: ReadonlyArray<{ kind: string; data: Record<string, unknown> }> | undefined;
+  afterSequence?: number | undefined;
   onStatusChange?(status: SseStatus): void;
   /**
    * The transcript was rewound — by this device, or by another one.
@@ -101,6 +109,8 @@ export function useChatStream({
   chatId,
   sessionId,
   enabled = true,
+  catchUpEvents,
+  afterSequence,
   onStatusChange,
   onChatRewound,
 }: UseChatStreamOptions): void {
@@ -113,6 +123,8 @@ export function useChatStream({
   // the mux scope per keystroke would drop the resume cursor each time.
   const rewoundRef = useRef(onChatRewound);
   rewoundRef.current = onChatRewound;
+  const catchUpRef = useRef({ events: catchUpEvents, afterSequence });
+  catchUpRef.current = { events: catchUpEvents, afterSequence };
 
   // Refs, not state: these must not trigger a re-render, and the effect must
   // not re-run when a callback identity changes mid-stream.
@@ -238,21 +250,34 @@ export function useChatStream({
       if (timer === null) timer = setInterval(tick, FLUSH_INTERVAL_MS);
     };
 
+    const route = (event: { kind: string; data: Record<string, unknown> }): void => {
+      // One key for every event on this subscription — see `sessionId` above.
+      for (const effect of router.handle(streamKey, { kind: event.kind, data: event.data })) {
+        if (effect.op === 'invalidate') {
+          invalidateRef.current.set(effect.resource, effect.id);
+        } else {
+          pendingRef.current.push(effect);
+        }
+      }
+    };
+
+    // The running turn's history first, through the same router, so the
+    // live events that follow extend it rather than start it.
+    const catchUp = catchUpRef.current;
+    if (catchUp.events?.length) {
+      for (const event of catchUp.events) route(event);
+      ensureTimer();
+    }
+
     const unsubscribe = stream.subscribe(
       'chat',
       chatId,
       (event: MuxStreamEvent) => {
-        // One key for every event on this subscription — see `sessionId` above.
-        for (const effect of router.handle(streamKey, { kind: event.kind, data: event.data })) {
-          if (effect.op === 'invalidate') {
-            invalidateRef.current.set(effect.resource, effect.id);
-          } else {
-            pendingRef.current.push(effect);
-          }
-        }
+        route(event);
         ensureTimer();
       },
       {
+        ...(catchUp.afterSequence !== undefined ? { afterSequence: catchUp.afterSequence } : {}),
         onConnected: () => {
           health.setConnection('connected');
           onStatusChange?.({ state: 'open' });

@@ -155,9 +155,32 @@ export function createOrchestratorRoutes(container: Container): Router {
   // ═══════════════════════════════════════════════════════════
 
   // POST /orchestrator/runs — Start an orchestrated workflow run
-  router.post('/runs', async (req, res, next) => {
+  router.post('/runs', upload.fields([
+    { name: 'skills', maxCount: 20 },
+    { name: 'agents', maxCount: 20 },
+    { name: 'prompts', maxCount: 20 },
+  ]), async (req, res, next) => {
     try {
-      const { workflowDefinitionId, variables, projectId, selectedCodebases, stageOverrides } = req.body as {
+      let config: unknown = req.body;
+      if (req.is('multipart/form-data')) {
+        try { config = JSON.parse(req.body.config); } catch {
+          res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid run configuration' } });
+          return;
+        }
+      }
+      if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid run configuration' } });
+        return;
+      }
+      const files = Object.values((req.files ?? {}) as Record<string, Express.Multer.File[]>).flat();
+      for (const file of files) {
+        if (!ALLOWED_EXTENSIONS.has(path.extname(file.originalname).toLowerCase()) ||
+            path.basename(file.originalname) !== file.originalname || /\.\.|[\\/]/.test(file.originalname)) {
+          res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: `Invalid upload filename: ${file.originalname}` } });
+          return;
+        }
+      }
+      const { workflowDefinitionId, variables, projectId, selectedCodebases, stageOverrides } = config as {
         workflowDefinitionId: string;
         variables?: Record<string, unknown>;
         projectId?: string;
@@ -178,7 +201,19 @@ export function createOrchestratorRoutes(container: Container): Router {
         projectId,
         selectedCodebases,
         stageOverrides,
-      });
+      }, files.length ? async (runId) => {
+        const uploadsDir = await workflowOrchestrator.getRunUploadsDir(runId);
+        for (const file of files) {
+          // Providers discover a skill as <name>/SKILL.md, not a loose .md file.
+          const relative = file.fieldname === 'skills'
+            ? path.join('skills', path.parse(file.originalname).name, 'SKILL.md')
+            : path.join(file.fieldname, file.originalname);
+          const target = await resolveWithinBase(uploadsDir, relative);
+          if (!target || await rejectIfSymlink(target)) throw new Error('Invalid upload destination');
+          await fs.mkdir(path.dirname(target), { recursive: true });
+          await fs.writeFile(target, file.buffer);
+        }
+      } : undefined);
 
       logger.info(`[OrchestratorRoutes] Started orchestrated run ${context.workflowRunId}`, {
         requestId: req.requestId,
@@ -747,4 +782,3 @@ export function createOrchestratorRoutes(container: Container): Router {
 
   return router;
 }
-

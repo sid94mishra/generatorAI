@@ -6,6 +6,7 @@ import { Router } from 'express';
 import type { Response } from 'express';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { changeFileEtag } from './changeFileEtag.js';
 import type { Container } from '../composition-root.js';
 import { resolveWorktreePath, type WorkspaceTreeRepo } from '@generatorai/core';
 import {
@@ -282,11 +283,23 @@ export function createWorkspaceRoutes(container: Container): Router {
    * a run or an automation simply has none, and a repository hiccup must not
    * fail the flow over a naming nicety.
    */
-  async function flowContext(info: WorkspaceInfo): Promise<{ context?: { chatName: string } }> {
+  async function flowContext(
+    info: WorkspaceInfo,
+  ): Promise<{ context?: { chatName?: string; model?: string; provider?: string } }> {
     if (info.ownerType !== 'chat' || !info.ownerId) return {};
     try {
       const chat = await chatEntityRepo.getById(info.ownerId);
-      return chat?.name ? { context: { chatName: chat.name } } : {};
+      if (!chat) return {};
+      // The chat's model doubles as the writer of commit / PR text when
+      // Settings → Source Control names none (see `ScmTextGenerator`).
+      const provider = chat.harnessConfig?.harnessType;
+      return {
+        context: {
+          ...(chat.name ? { chatName: chat.name } : {}),
+          ...(chat.model ? { model: chat.model } : {}),
+          ...(provider ? { provider } : {}),
+        },
+      };
     } catch {
       return {};
     }
@@ -666,8 +679,8 @@ export function createWorkspaceRoutes(container: Container): Router {
   //   form=patch              → unified diff only; used when the bodies
   //     exceed the inline budget.
   //
-  // ETag is `<oldBlob>:<newBlob>`, so an unchanged file is a 304 and the
-  // client's syntax-highlight cache stays warm across refetches.
+  // ETag covers the complete representation; the separate cacheKey remains
+  // the blob pair used by client render caches.
   router.get('/:id/changes/file', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
@@ -727,7 +740,9 @@ export function createWorkspaceRoutes(container: Container): Router {
           ? await changeSummaryService.getFilePatch(common)
           : await changeSummaryService.getFileVersions({ ...common, blobs });
 
-      const etag = `"${result.cacheKey}"`;
+      // Blob identity alone cannot validate the rendered patch/metadata. A
+      // cached empty response must expire when its representation changes.
+      const etag = changeFileEtag(result);
       if (req.headers['if-none-match'] === etag) {
         res.status(304).end();
         return;

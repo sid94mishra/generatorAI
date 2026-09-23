@@ -10,6 +10,7 @@ import { Modal } from '../ui/Modal.js';
 import { Button } from '../ui/Button.js';
 import { usePreviewIterations, useTriggerAutomation } from '@/hooks/automationQueries.js';
 import type { Automation } from '@generatorai/shared';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 interface Props {
   open: boolean;
@@ -112,6 +113,7 @@ export function TriggerAutomationModal({ open, onClose, automation }: Props) {
             <div>
               <label className="block text-sm font-medium mb-1">Dataset format</label>
               <select
+                aria-label="Dataset format"
                 className="w-full rounded-md border bg-background px-2 py-1 text-sm"
                 value={format}
                 onChange={(e) => setFormat(e.target.value as DatasetFormat)}
@@ -127,19 +129,19 @@ export function TriggerAutomationModal({ open, onClose, automation }: Props) {
                 <label className="text-sm font-medium">Dataset</label>
                 <div className="flex gap-2 text-xs">
                   {automation.defaultDataset && (
-                    <button
+                    <Button variant="unstyled"
                       className="text-primary hover:underline"
                       onClick={handleLoadLast}
                     >
                       Load default
-                    </button>
+                    </Button>
                   )}
-                  <button
+                  <Button variant="unstyled"
                     className="text-primary hover:underline"
                     onClick={() => fileInputRef.current?.click()}
                   >
                     Upload file
-                  </button>
+                  </Button>
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -150,6 +152,7 @@ export function TriggerAutomationModal({ open, onClose, automation }: Props) {
                 </div>
               </div>
               <textarea
+                aria-label="Dataset"
                 className="w-full h-40 rounded-md border bg-background p-2 font-mono text-xs"
                 placeholder={format === 'csv'
                   ? 'name,priority\napi-users,high\napi-orders,medium'
@@ -171,10 +174,9 @@ export function TriggerAutomationModal({ open, onClose, automation }: Props) {
                 Preview iterations
               </Button>
               <label className="flex items-center gap-1 text-sm">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={saveAsDefault}
-                  onChange={(e) => setSaveAsDefault(e.target.checked)}
+                  onCheckedChange={(v) => setSaveAsDefault(v === true)}
                 />
                 Save as default
               </label>

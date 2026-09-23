@@ -1,0 +1,87 @@
+{
+  "url": "/chats/19498ef3-f0be-4a6f-b68c-ff126de78c8f",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "flex-1 overflow-y-auto px-4 py-4",
+      "h": 496,
+      "scroll": 1447,
+      "rect": {
+        "x": 240,
+        "y": 113,
+        "w": 610
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "min-h-0 flex-1 space-y-2 overflow-y-auto p-2 font-mono text-[11.5px]",
+      "h": 601,
+      "scroll": 1681,
+      "rect": {
+        "x": 857,
+        "y": 198.875,
+        "w": 423
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "PRE",
+      "classes": "max-h-72 overflow-auto whitespace-pre-wrap break-all border-t border-[var(--color-border)]/50 px-2.5 py-1.5 text-[11px] leading-snug text-[var(--color-foreground)]/75",
+      "h": 287,
+      "scroll": 1025,
+      "rect": {
+        "x": 866,
+        "y": -383.875,
+        "w": 394
+      },
+      "parentScrollers": 1
+    },
+    {
+      "tag": "PRE",
+      "classes": "max-h-72 overflow-auto whitespace-pre-wrap break-all border-t border-[var(--color-border)]/50 px-2.5 py-1.5 text-[11px] leading-snug text-[var(--color-foreground)]/75",
+      "h": 287,
+      "scroll": 299,
+      "rect": {
+        "x": 866,
+        "y": -56.625,
+        "w": 394
+      },
+      "parentScrollers": 1
+    },
+    {
+      "tag": "PRE",
+      "classes": "max-h-72 overflow-auto whitespace-pre-wrap break-all border-t border-[var(--color-border)]/50 px-2.5 py-1.5 text-[11px] leading-snug text-[var(--color-foreground)]/75",
+      "h": 287,
+      "scroll": 375,
+      "rect": {
+        "x": 866,
+        "y": 305.125,
+        "w": 394
+      },
+      "parentScrollers": 1
+    },
+    {
+      "tag": "PRE",
+      "classes": "max-h-72 overflow-auto whitespace-pre-wrap break-all border-t border-[var(--color-border)]/50 px-2.5 py-1.5 text-[11px] leading-snug text-[var(--color-foreground)]/75",
+      "h": 287,
+      "scroll": 7196,
+      "rect": {
+        "x": 866,
+        "y": 796.875,
+        "w": 394
+      },
+      "parentScrollers": 1
+    }
+  ]
+}

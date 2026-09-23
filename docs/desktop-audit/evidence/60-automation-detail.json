@@ -1,0 +1,16 @@
+{
+  "url": "/automations/1b3b79eb-9390-4f1c-81d3-c5157f0a92a8",
+  "viewport": {
+    "w": 1280,
+    "h": 800
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Atlas Manual Regression",
+    "Execution History"
+  ],
+  "scrollers": []
+}

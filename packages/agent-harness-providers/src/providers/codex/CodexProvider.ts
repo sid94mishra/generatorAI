@@ -224,6 +224,15 @@ interface ConversationState {
    * on purpose (a dev server) must survive a Stop on a later turn.
    */
   turnCommandItems: Set<string>;
+  /**
+   * The paths each `fileChange` item touches, by item id. A v2 approval
+   * request names only the item, so without this the card the user is asked to
+   * Allow or Deny said "Apply file changes" and showed `{ "reason": null }` —
+   * consent to an edit with no idea what was being edited.
+   */
+  fileChangePaths: Map<string, Array<{ path: string; kind?: string }>>;
+  /** The last turn ran in the plan-mode read-only sandbox; see `sandboxPolicyForTurn`. */
+  sandboxNarrowedForPlan?: boolean;
 }
 
 /** How many finished turn ids to remember per conversation. */
@@ -517,6 +526,31 @@ function describePermissionProfile(profile: V2RequestPermissionProfile | undefin
   return parts.length ? parts.join('; ') : 'unspecified additional access';
 }
 
+function rememberFileChange(conv: ConversationState, itemId: string | undefined, changes: unknown): void {
+  if (!itemId || !Array.isArray(changes)) return;
+  const entries = changes
+    .map((c) => c as { path?: unknown; kind?: unknown })
+    .filter((c) => typeof c.path === 'string' && c.path)
+    .map((c) => ({
+      path: c.path as string,
+      ...(typeof c.kind === 'string'
+        ? { kind: c.kind }
+        : c.kind && typeof (c.kind as { type?: unknown }).type === 'string'
+          ? { kind: (c.kind as { type: string }).type }
+          : {}),
+    }));
+  if (entries.length) conv.fileChangePaths.set(itemId, entries);
+}
+
+/** A file-change approval carries only an item id; put the files back on it. */
+function withFileChangePaths(conv: ConversationState | undefined, method: string, params: unknown): unknown {
+  if (method !== 'item/fileChange/requestApproval' || !conv) return params;
+  const p = (params ?? {}) as Record<string, unknown>;
+  if (p['changes'] || p['fileChanges']) return params;
+  const known = conv.fileChangePaths.get(String(p['itemId'] ?? ''));
+  return known ? { ...p, changes: known } : params;
+}
+
 /** Map a Codex approval request onto the host's permission request vocabulary. */
 function toPermissionRequest(method: string, params: unknown): PermissionRequest {
   const p = (params ?? {}) as Record<string, unknown>;
@@ -542,9 +576,17 @@ function toPermissionRequest(method: string, params: unknown): PermissionRequest
     };
   }
   if (method === 'item/fileChange/requestApproval' || method === 'applyPatchApproval') {
+    const files = Array.isArray(p['changes'])
+      ? (p['changes'] as Array<{ path?: unknown }>).map((c) => String(c.path ?? '')).filter(Boolean)
+      : p['changes'] && typeof p['changes'] === 'object'
+        ? Object.keys(p['changes'] as object) // legacy shape: { "<path>": change }
+        : [];
+    const shown = files.slice(0, 4).map((f) => f.split(/[\\/]/).slice(-2).join('/'));
     return {
       type: 'file_write',
-      description: 'Apply file changes',
+      description: files.length
+        ? `Edit ${shown.join(', ')}${files.length > shown.length ? ` and ${files.length - shown.length} more` : ''}`
+        : 'Apply file changes',
       details: {
         toolName: 'apply_patch',
         changes: p['changes'] ?? p['fileChanges'],
@@ -1138,6 +1180,7 @@ export class CodexProvider implements IAgentHarness {
       cancelRequested: false,
       retiredTurns: new Set(),
       turnCommandItems: new Set(),
+      fileChangePaths: new Map(),
     });
     await this.syncSkillRoots();
     return params.conversationId;
@@ -1603,6 +1646,7 @@ export class CodexProvider implements IAgentHarness {
       conv.activeTurnId = null;
     }
     conv.turnCommandItems = new Set();
+    conv.fileChangePaths = new Map();
     const turnParams: V2TurnStartParams = {
       threadId: conv.threadId,
       input: this.buildInput(prompt, attachments),
@@ -1613,7 +1657,7 @@ export class CodexProvider implements IAgentHarness {
       ...(this.approvalPolicyForTurn(options)),
       // The chat's extra writable roots. `thread/start` cannot carry them, so
       // every turn re-asserts the policy (see `ConversationState.sandboxPolicy`).
-      ...(conv.sandboxPolicy ? { sandboxPolicy: conv.sandboxPolicy } : {}),
+      ...this.sandboxPolicyForTurn(conv, options),
       // "This turn and subsequent turns" — re-sent each turn so a change made
       // between turns (or a resumed thread) always takes the chat's effort.
       ...(conv.params.reasoningEffort ? { effort: conv.params.reasoningEffort } : {}),
@@ -1632,8 +1676,8 @@ export class CodexProvider implements IAgentHarness {
     /** Turn ids already announced as compacted — the notice must not repeat. */
     const compactedTurns = new Set<string>();
     /** Token usage: thread totals when this turn began, and the latest report. */
-    let usageAtStart: { input: number; output: number } | null = null;
-    let usageLatest: { input: number; output: number } | null = null;
+    let usageAtStart: { input: number; output: number; cached: number } | null = null;
+    let usageLatest: { input: number; output: number; cached: number } | null = null;
     let turnStartedAt = Date.now();
     const model = conv.params.model ?? this.opts.defaultModel ?? '';
     /**
@@ -1705,9 +1749,9 @@ export class CodexProvider implements IAgentHarness {
       /**
        * End the turn because the THREAD died, not because the user stopped it.
        *
-       * Resolves rather than rejects: the partial answer is real and worth
-       * keeping, and `harness.error` has already told the user what happened —
-       * rejecting on top of it would surface the same failure twice.
+       * Preserve streamed partial text, but reject the awaited operation.
+       * Workflow callers use that promise to decide success and retry; an
+       * error event alone would let a dead thread mark its stage completed.
        */
       conv.failTurn = (message: string): void => {
         finish(() => {
@@ -1721,7 +1765,7 @@ export class CodexProvider implements IAgentHarness {
           this.broadcast(conv, { kind: 'harness.error', data: { message, provider: 'codex' } });
           this.broadcast(conv, { kind: 'harness.idle', data: {} });
           reportPartial(assistantText);
-          resolve({ content: assistantText });
+          reject(new Error(message));
         });
       };
 
@@ -1878,6 +1922,7 @@ export class CodexProvider implements IAgentHarness {
           case 'item/fileChange/patchUpdated': {
             const notif = params as V2FileChangePatchUpdatedNotification;
             const paths = (notif.changes ?? []).map((c) => c.path).filter(Boolean);
+            rememberFileChange(conv, notif.itemId, notif.changes);
             if (paths.length === 0) break;
             this.broadcast(conv, {
               kind: 'harness.session_info',
@@ -2008,12 +2053,17 @@ export class CodexProvider implements IAgentHarness {
           case 'thread/tokenUsage/updated': {
             const usage = (params as V2ThreadTokenUsageUpdatedNotification).tokenUsage;
             if (!usage) break;
-            const total = { input: usage.total.inputTokens, output: usage.total.outputTokens };
+            const total = {
+              input: usage.total.inputTokens,
+              output: usage.total.outputTokens,
+              cached: usage.total.cachedInputTokens ?? 0,
+            };
             // The first report of a turn already includes that turn's first
             // request, so its baseline is the total minus `last`.
             usageAtStart ??= {
               input: total.input - usage.last.inputTokens,
               output: total.output - usage.last.outputTokens,
+              cached: total.cached - (usage.last.cachedInputTokens ?? 0),
             };
             usageLatest = total;
             this.broadcast(conv, {
@@ -2025,6 +2075,18 @@ export class CodexProvider implements IAgentHarness {
                 // What the most recent request actually occupied.
                 currentTokens: usage.last.inputTokens + usage.last.outputTokens,
                 ...(usage.modelContextWindow ? { totalContextWindow: usage.modelContextWindow, promptTokenLimit: usage.modelContextWindow } : {}),
+                // The same request the total describes, split the way the
+                // gauge shows it. Codex counts cached tokens INSIDE
+                // `inputTokens` (the OpenAI convention), so the uncached part
+                // is the difference — and input + cache read + output adds up
+                // to the figure above them. Without this the Codex popover had
+                // no token rows at all: a percentage, and nothing behind it.
+                apiUsage: {
+                  input: Math.max(0, usage.last.inputTokens - (usage.last.cachedInputTokens ?? 0)),
+                  cacheRead: usage.last.cachedInputTokens ?? 0,
+                  ...(usage.last.cacheWriteInputTokens ? { cacheWrite: usage.last.cacheWriteInputTokens } : {}),
+                  output: usage.last.outputTokens,
+                },
               },
             });
             break;
@@ -2040,6 +2102,7 @@ export class CodexProvider implements IAgentHarness {
               const { tool, args } = describeToolItem(item);
               pendingToolItems.add(item.id);
               if (item.type === 'commandExecution') conv.turnCommandItems.add(item.id);
+              if (item.type === 'fileChange') rememberFileChange(conv, item.id, (item as unknown as { changes?: unknown }).changes);
               this.broadcast(conv, {
                 kind: 'harness.tool_start',
                 data: { tool, args, callId: item.id },
@@ -2180,7 +2243,15 @@ export class CodexProvider implements IAgentHarness {
                   kind: 'harness.usage',
                   data: {
                     model,
-                    inputTokens: usageLatest.input - usageAtStart.input,
+                    // Uncached input and cache reads apart, as the other
+                    // providers report them: `inputTokens` alone made a turn
+                    // that re-read a 35k cached prefix eight times look like
+                    // 282k tokens of fresh input.
+                    inputTokens: Math.max(
+                      0,
+                      usageLatest.input - usageAtStart.input - (usageLatest.cached - usageAtStart.cached),
+                    ),
+                    cacheReadTokens: usageLatest.cached - usageAtStart.cached,
                     outputTokens: usageLatest.output - usageAtStart.output,
                     durationMs: Date.now() - turnStartedAt,
                     provider: 'codex',
@@ -2239,11 +2310,50 @@ export class CodexProvider implements IAgentHarness {
       case 'default':
         return { approvalPolicy: 'on-request' };
       case 'plan':
-        // Codex has no plan mode; the safest reading of "plan only" is to ask
-        // before anything runs.
-        return { approvalPolicy: 'untrusted' };
+        // Codex has no plan mode. The guarantee a plan turn needs — nothing is
+        // written — comes from the READ-ONLY SANDBOX this turn also gets (see
+        // `sandboxPolicyForTurn`), not from the approval policy. It used to be
+        // `untrusted`, which asks the user before every command that is not on
+        // Codex's short safe list: a plan turn's whole first step is reading
+        // code, and each `nl -ba src/pricing/money.js` stopped at an
+        // Allow / Deny card. With the sandbox holding the line, `on-request`
+        // lets reads run and still routes any attempt to write to the user.
+        return { approvalPolicy: 'on-request' };
       default:
         return {};
+    }
+  }
+
+  /**
+   * The sandbox for this turn.
+   *
+   * A turn's `sandboxPolicy` applies to "this turn and subsequent turns", so a
+   * plan turn's read-only sandbox has to be explicitly UNDONE by the next
+   * ordinary turn — otherwise approving a plan and then asking for anything
+   * else would leave the chat unable to write for the rest of the thread.
+   */
+  private sandboxPolicyForTurn(
+    conv: ConversationState,
+    options: SendPromptOptions | undefined,
+  ): Pick<V2TurnStartParams, 'sandboxPolicy'> {
+    const planning = options?.permissionMode === 'plan' || options?.agentMode === 'plan';
+    if (planning) {
+      conv.sandboxNarrowedForPlan = true;
+      return { sandboxPolicy: { type: 'readOnly' } };
+    }
+    if (conv.sandboxPolicy) {
+      conv.sandboxNarrowedForPlan = false;
+      return { sandboxPolicy: conv.sandboxPolicy };
+    }
+    if (!conv.sandboxNarrowedForPlan) return {};
+    conv.sandboxNarrowedForPlan = false;
+    switch (this.opts.sandboxMode) {
+      case 'danger-full-access':
+        return { sandboxPolicy: { type: 'dangerFullAccess' } };
+      case 'read-only':
+        return { sandboxPolicy: { type: 'readOnly' } };
+      default:
+        return { sandboxPolicy: { type: 'workspaceWrite' } };
     }
   }
 
@@ -2258,7 +2368,14 @@ export class CodexProvider implements IAgentHarness {
       if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(att.path)) {
         input.push({ type: 'localImage', path: att.path });
       } else {
-        input.push({ type: 'mention', name: att.displayName ?? att.path, path: att.path });
+        // `mention` is a resource/connector mention, not a readable file
+        // attachment. Give the model an explicit local-file reference so it
+        // can use its file tools even when the upload lives outside cwd.
+        input.push({
+          type: 'text',
+          text: `User-attached file: ${JSON.stringify({ name: att.displayName ?? att.path, path: att.path })}\nRead this file with your file tools when needed for the user's request.`,
+          text_elements: [],
+        });
       }
     }
     return input;
@@ -2556,7 +2673,7 @@ export class CodexProvider implements IAgentHarness {
       let remember = false;
       const ask = conv?.params.onPermissionRequest;
       if (ask) {
-        const answer = await ask(toPermissionRequest(method, params));
+        const answer = await ask(toPermissionRequest(method, withFileChangePaths(conv, method, params)));
         approved = answer.granted;
         remember = answer.granted && answer.remember === true;
       } else {

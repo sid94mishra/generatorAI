@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // SkillSelector — Enable/disable skills per stage
-// All skills enabled by default; uses disabledSkills in harnessConfigOverrides
+// Explicit stage additions, resolved and staged through AgentResolver.
 // Includes Select All / Deselect All controls
 // ────────────────────────────────────────────────────────────────
 
@@ -11,6 +11,7 @@ import { useAvailableArtifacts } from '@/hooks/projectQueries.js';
 import { cn } from '@/lib/utils.js';
 import { Badge, Button } from '@/components/ui/index.js';
 import type { StageDefinition, HarnessConfig } from '@generatorai/shared';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 interface SkillSelectorProps {
   stage: StageDefinition;
@@ -44,34 +45,36 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
 
   const currentOverrides = stage.harnessConfigOverrides as Partial<HarnessConfig> | undefined;
 
-  // Disabled set — by default empty (all skills on)
-  const disabledSkills = useMemo(
-    () => new Set(currentOverrides?.disabledSkills ?? []),
+  // Stage additions are explicit. Merely listing a catalog entry must not
+  // claim that its files have been staged into the provider's workspace.
+  const selectedIds = useMemo(
+    () => new Set(currentOverrides?.agentOverrides?.addSkillIds ?? []),
     [currentOverrides],
   );
 
-  const updateDisabled = (newSet: Set<string>) => {
-    const arr = [...newSet];
+  const updateSelected = (next: Set<string>) => {
+    const selectedNames = new Set(allSkills.filter((skill) => next.has(skill.id)).map((skill) => skill.name));
     onUpdate({
       harnessConfigOverrides: {
         ...currentOverrides,
-        disabledSkills: arr.length > 0 ? arr : undefined,
-      } as Partial<HarnessConfig>,
+        disabledSkills: currentOverrides?.disabledSkills?.filter((name) => !selectedNames.has(name)),
+        agentOverrides: {
+          ...currentOverrides?.agentOverrides,
+          addSkillIds: [...next],
+          removeSkillIds: currentOverrides?.agentOverrides?.removeSkillIds?.filter((id) => !next.has(id)),
+        },
+      },
     });
   };
 
-  const toggleSkill = (name: string) => {
-    const next = new Set(disabledSkills);
-    if (next.has(name)) {
-      next.delete(name);
-    } else {
-      next.add(name);
-    }
-    updateDisabled(next);
+  const toggleSkill = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    updateSelected(next);
   };
-
-  const selectAll = () => updateDisabled(new Set());
-  const deselectAll = () => updateDisabled(new Set(allSkills.map((s) => s.name)));
+  const selectAll = () => updateSelected(new Set(allSkills.map((skill) => skill.id)));
+  const deselectAll = () => updateSelected(new Set());
 
   if (isLoading) {
     return (
@@ -93,16 +96,17 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
     );
   }
 
-  const enabledCount = allSkills.length - disabledSkills.size;
-  const allEnabled = disabledSkills.size === 0;
-  const noneEnabled = disabledSkills.size === allSkills.length;
+  const enabledCount = allSkills.filter((skill) => selectedIds.has(skill.id)).length;
+  const allEnabled = enabledCount === allSkills.length;
+  const noneEnabled = enabledCount === 0;
 
   return (
     <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">Add skills to this stage. Skills selected by a bound agent are inherited separately.</p>
       {/* Count + Select/Deselect All */}
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
-          {enabledCount}/{allSkills.length} enabled
+          {enabledCount}/{allSkills.length} added
         </span>
         <div className="flex items-center gap-2">
           <Button
@@ -130,9 +134,9 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
       </div>
 
       {/* Skill list */}
-      <div className="space-y-1 max-h-48 overflow-y-auto">
+      <div className={cn('space-y-1', allSkills.length > 8 && 'max-h-80 overflow-y-auto')}>
         {allSkills.map((skill) => {
-          const isEnabled = !disabledSkills.has(skill.name);
+          const isEnabled = selectedIds.has(skill.id);
           return (
             <label
               key={skill.name}
@@ -143,11 +147,10 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
                   : 'border border-transparent hover:bg-subtle opacity-60',
               )}
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={isEnabled}
-                onChange={() => toggleSkill(skill.name)}
-                className="h-3.5 w-3.5 rounded"
+                onCheckedChange={() => toggleSkill(skill.id)}
+                className="h-3.5 w-3.5"
               />
               <Wand2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <div className="flex-1 min-w-0">

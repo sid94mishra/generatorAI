@@ -30,6 +30,8 @@ export interface ModalProps {
   open: boolean;
   onClose: () => void;
   title?: React.ReactNode;
+  /** Accessible name when the caller supplies its own visual header. */
+  ariaLabel?: string;
   description?: React.ReactNode;
   size?: ModalSize;
   /** Hide the default close (X) button in the header */
@@ -46,6 +48,7 @@ export function Modal({
   open,
   onClose,
   title,
+  ariaLabel,
   description,
   size = 'md',
   hideClose = false,
@@ -98,7 +101,7 @@ export function Modal({
             // Radix requires a Title for accessibility; render it
             // visually hidden when the modal has no header.
             <>
-              <DialogPrimitive.Title className="sr-only">Dialog</DialogPrimitive.Title>
+              <DialogPrimitive.Title className="sr-only">{ariaLabel ?? 'Dialog'}</DialogPrimitive.Title>
               {!hideClose && (
                 <div className="absolute right-3 top-3 z-10">
                   <ModalCloseButton onClose={onClose} />

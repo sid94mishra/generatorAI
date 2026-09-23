@@ -38,7 +38,8 @@ const { FakeBrowserWindow, openExternal } = vi.hoisted(() => {
       this.windowOpenHandler = fn;
     }
     send = vi.fn();
-    executeJavaScript = vi.fn(async () => undefined);
+    loadURL = vi.fn(async () => undefined);
+    executeJavaScript = vi.fn(async (_code: string): Promise<unknown> => undefined);
     reload = vi.fn();
     isDevToolsOpened = () => false;
     emit(event: string, ...args: unknown[]) {
@@ -179,6 +180,27 @@ describe('window open handler', () => {
     openExternal.mockReset();
     expect(win.webContents.windowOpenHandler!({ url: 'file:///etc/passwd' })).toEqual({ action: 'deny' });
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('opens an in-app route as a route change, not by reloading the app', () => {
+    // Cmd/Ctrl/middle-click on a sidebar link. `loadURL` got to the same
+    // screen by replacing the document, which skips every React cleanup — a
+    // native browser view open in the side pane was left painted over the
+    // page the user had just opened.
+    const { win } = makeWindow();
+    win.loadURL.mockClear();
+    expect(win.webContents.windowOpenHandler!({ url: `${APP}/projects?tab=all#top` })).toEqual({ action: 'deny' });
+    expect(win.webContents.loadURL).not.toHaveBeenCalled();
+    expect(win.webContents.executeJavaScript).toHaveBeenCalledTimes(1);
+    expect(String(win.webContents.executeJavaScript.mock.calls[0]![0])).toContain('"/projects?tab=all#top"');
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('still loads a server resource, which no client route can render', () => {
+    const { win } = makeWindow();
+    win.webContents.windowOpenHandler!({ url: `${APP}/api/files/raw?path=a.png` });
+    expect(win.webContents.loadURL).toHaveBeenCalledWith(`${APP}/api/files/raw?path=a.png`);
+    expect(win.webContents.executeJavaScript).not.toHaveBeenCalled();
   });
 });
 

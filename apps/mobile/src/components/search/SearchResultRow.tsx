@@ -7,9 +7,10 @@
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { Bot, Clock, FolderGit2, MessagesSquare, Network, Play, Webhook, Workflow } from 'lucide-react-native';
+import { Network } from 'lucide-react-native';
 
 import { displayChatName } from '../common/chatName';
+import { ENTITY_ICON } from '../common/entityIcons';
 import { relativeTime } from '../runs/formatTime';
 import { runTitle } from '../runs/runModel';
 import { isActive, statusLabel } from '../runs/statusStyle';
@@ -39,7 +40,7 @@ export function SearchResultRow({
           title={name}
           subtitle={item.raw.preview ?? null}
           meta={relativeTime(item.raw.updatedAt)}
-          avatar={{ icon: <MessagesSquare size={17} color={muted} />, tone: 'neutral' }}
+          avatar={{ icon: <ENTITY_ICON.chat size={17} color={muted} />, tone: 'neutral' }}
           badge={item.archived ? { label: 'Archived', tone: 'neutral' } : null}
           separator={separator}
           accessibilityLabel={`Chat, ${name}${item.archived ? ', archived' : ''}`}
@@ -58,7 +59,7 @@ export function SearchResultRow({
           subtitleTone={item.raw.error ? 'danger' : 'muted'}
           meta={relativeTime(item.raw.updatedAt)}
           avatar={{
-            icon: <Play size={17} color={colors[TONE_COLOR_TOKEN[tone]]} />,
+            icon: <ENTITY_ICON.workflow size={17} color={colors[TONE_COLOR_TOKEN[tone]]} />,
             tone,
             indicator: active ? 'info' : null,
           }}
@@ -73,7 +74,7 @@ export function SearchResultRow({
         <ListItem
           title={item.raw.name}
           subtitle={item.raw.description ?? 'Workflow'}
-          avatar={{ icon: <Workflow size={17} color={muted} />, tone: 'neutral' }}
+          avatar={{ icon: <ENTITY_ICON.workflow size={17} color={muted} />, tone: 'neutral' }}
           separator={separator}
           accessibilityLabel={`Workflow, ${item.raw.name}`}
           onPress={press}
@@ -84,14 +85,14 @@ export function SearchResultRow({
         <ListItem
           title={item.raw.name}
           subtitle={item.raw.description ?? `Created ${relativeTime(item.raw.createdAt)}`}
-          avatar={{ icon: <FolderGit2 size={17} color={muted} />, tone: 'neutral' }}
+          avatar={{ icon: <ENTITY_ICON.project size={17} color={muted} />, tone: 'neutral' }}
           separator={separator}
           accessibilityLabel={`Project, ${item.raw.name}`}
           onPress={press}
         />
       );
     case 'automation': {
-      const Icon = item.raw.triggerType === 'schedule' ? Clock : item.raw.triggerType === 'webhook' ? Webhook : Play;
+      const Icon = ENTITY_ICON.automation;
       return (
         <ListItem
           title={item.raw.name}
@@ -105,7 +106,7 @@ export function SearchResultRow({
       );
     }
     case 'agent': {
-      const Icon = item.raw.role === 'orchestrator' ? Network : Bot;
+      const Icon = item.raw.role === 'orchestrator' ? Network : ENTITY_ICON.agent;
       return (
         <ListItem
           title={item.raw.name}

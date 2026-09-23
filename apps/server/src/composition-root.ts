@@ -408,7 +408,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     claudeAgent: type === 'claude-agent' ? {
       defaultModel: config.harness?.claudeAgent?.defaultModel ?? 'sonnet',
       defaultCwd: config.artifactsDir,
-      defaultEffort: config.harness?.claudeAgent?.effort ?? 'high',
+      // Unset means "the provider's default" (medium) — the same level the
+      // composer shows for a chat that has not picked one.
+      ...(config.harness?.claudeAgent?.effort ? { defaultEffort: config.harness.claudeAgent.effort } : {}),
       defaultPermissionMode: config.harness?.claudeAgent?.permissionMode ?? 'bypassPermissions',
       defaultMaxTurns: config.harness?.claudeAgent?.maxTurns,
       defaultMaxBudgetUsd: config.harness?.claudeAgent?.maxBudgetUsd,
@@ -1409,7 +1411,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // or edited flips to `addressed`. Runs off the event bus so it never sits
   // in the agent's critical path.
   eventBus.subscribeAll((event) => {
-    if (event.kind !== 'checkpoint.created') return;
+    // Live snapshots emit workspace.changed without checkpoint.created;
+    // those edits must also settle submitted review feedback.
+    if (event.kind !== 'checkpoint.created' && event.kind !== 'workspace.changed') return;
     const data = event.data as {
       workspaceId?: string;
       checkpointId?: string;
@@ -1666,6 +1670,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // panel can answer "what did this message change?" and `/rewind` has an
   // anchor to restore to.
   chatExtensions.workspaceCheckpointService = workspaceCheckpointService;
+  // Tell the agent, in front of its next prompt, which files the user rewound
+  // or undid — otherwise it finds its own work missing and puts it back.
+  workspaceCheckpointService.onRestore((notice) => {
+    if (notice.chatId) chatManagementService.noteUserRestore(notice.chatId, notice);
+  });
   // Give the orchestrator the workspace manager so it can write the shared
   // `orchestrator/state.json` scratchpad into the (shared) workspace.
   orchestratorService.setWorkspaceManager(workspaceManager);
@@ -2860,4 +2869,3 @@ export interface Container {
   initialize(): Promise<void>;
   shutdown(): Promise<void>;
 }
-

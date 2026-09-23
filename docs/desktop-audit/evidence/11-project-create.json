@@ -1,0 +1,30 @@
+{
+  "url": "/projects/new",
+  "viewport": {
+    "w": 1440,
+    "h": 870
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Create Project",
+    "Settings",
+    "Repositories"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "mx-auto px-6 py-8 h-full overflow-y-auto max-w-2xl space-y-6",
+      "h": 790,
+      "scroll": 882,
+      "rect": {
+        "x": 504,
+        "y": 80,
+        "w": 672
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

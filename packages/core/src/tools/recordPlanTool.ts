@@ -31,6 +31,16 @@ export interface RecordPlanArgs {
 export interface RecordPlanResult {
   planId: string;
   fileName: string;
+  /**
+   * Present when the call was made in PLAN MODE and therefore went to the user
+   * for a decision instead of being filed and forgotten. See
+   * `ChatManagementService.recordPlan`.
+   */
+  review?: {
+    decision: 'approved' | 'changes_requested' | 'dismissed';
+    /** The user's notes — what to change, or a remark left with an approval. */
+    feedback?: string;
+  };
 }
 
 /**
@@ -92,6 +102,37 @@ export function createRecordPlanTool(
         return {
           ok: false,
           error: 'Plan could not be recorded. Continue with the implementation anyway.',
+        };
+      }
+
+      if (result.review) {
+        const notes = result.review.feedback?.trim();
+        if (result.review.decision === 'approved') {
+          return {
+            ok: true,
+            planId: result.planId,
+            decision: 'approved',
+            message:
+              'The user APPROVED this plan. You are no longer in plan mode: implement it now, following it exactly. ' +
+              'If you discover the plan is wrong, stop and explain rather than improvising.' +
+              (notes ? ` The user added: ${notes}` : ''),
+          };
+        }
+        if (result.review.decision === 'changes_requested') {
+          return {
+            ok: true,
+            planId: result.planId,
+            decision: 'changes_requested',
+            message:
+              'The user wants changes before anything is implemented. Revise the plan and call record_plan again ' +
+              `with the FULL revised plan. Do not modify any files. Their notes: ${notes || '(none given)'}`,
+          };
+        }
+        return {
+          ok: true,
+          planId: result.planId,
+          decision: 'dismissed',
+          message: 'The user closed the plan without asking for it to be implemented. Do not modify any files; end your turn.',
         };
       }
 

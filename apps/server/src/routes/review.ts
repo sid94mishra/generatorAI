@@ -296,13 +296,23 @@ export function createReviewRoutes(container: Container): Router {
         // the reviewer saw it". Everything the agent does next is measured
         // against it, which is what makes the `addressed` signal meaningful
         // instead of firing on the whole session's history.
-        const latest = await checkpointService.getLatest(workspaceId, '.');
-        await reviewThreadService.markSubmitted(
-          submission.threadIds,
-          submission.reviewRound,
-          undefined,
-          latest?.id,
-        );
+        // Each mount has its own checkpoint history. Managed workspaces use
+        // aliases such as "main", and multi-repository batches cannot share
+        // the root mount's checkpoint.
+        const byAlias = new Map<string, string[]>();
+        for (const id of submission.threadIds) {
+          const thread = await reviewThreadService.getThread(id);
+          if (!thread || thread.workspaceId !== workspaceId) continue;
+          const ids = byAlias.get(thread.repoAlias) ?? [];
+          ids.push(id);
+          byAlias.set(thread.repoAlias, ids);
+        }
+        for (const [alias, ids] of byAlias) {
+          const latest = await checkpointService.getLatest(workspaceId, alias);
+          await reviewThreadService.markSubmitted(
+            ids, submission.reviewRound, undefined, latest?.id,
+          );
+        }
         logger.info(
           `[ReviewRoutes] Submitted ${submission.threadIds.length} review thread(s) for workspace ${workspaceId}`,
           { requestId: req.requestId },

@@ -3,6 +3,10 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { AgentResolver } from '../src/services/AgentResolver.js';
 import { StageExecutionService } from '../src/services/StageExecutionService.js';
 import { MockStageRunRepository, MockStageDefinitionRepository } from './MockRepositories.js';
 import { MockCopilotPort } from './MockAgentHarness.js';
@@ -114,9 +118,70 @@ describe('StageExecutionService', () => {
     );
   });
 
+  it('resolves stage capability additions even without a bound reusable agent', async () => {
+    const stage = makeStageDef('skill-stage', [{ label: 'Review', text: 'Review', waitForCompletion: true }]);
+    stage.harnessConfigOverrides = { agentOverrides: { addSkillIds: ['skill-a'] } };
+    await stageDefRepo.create(stage);
+    const run = makeStageRun('skill-run', stage.id);
+    await stageRunRepo.create(run);
+    const resolve = vi.fn(async () => AgentResolver.empty());
+    service.setAgentServices({ resolve } as unknown as AgentResolver);
+    await service.executeStage(run, 'run-1', 'per-stage');
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeOverrides: expect.objectContaining({ agentOverrides: { addSkillIds: ['skill-a'] } }),
+      scope: 'stage',
+    }));
+  });
+
   // ── executeStage ──
 
   describe('executeStage', () => {
+    it('persists a shorter final answer instead of longer preceding commentary', async () => {
+      await copilot.createConversation({ conversationId: 'conv-1' });
+      const final = 'Verified uploaded marker: PLAIN_UPLOAD_OK. The requested file was read successfully.';
+      vi.spyOn(copilot, 'sendPromptAndWait').mockImplementation(async () => {
+        copilot.simulateConversationEvent('conv-1', {
+          kind: 'harness.message_complete', data: { content: 'I will inspect the uploaded file carefully. '.repeat(12) },
+        });
+        copilot.simulateConversationEvent('conv-1', { kind: 'harness.message_complete', data: { content: final } });
+        copilot.simulateConversationEvent('conv-1', { kind: 'harness.idle', data: {} });
+        return { content: final };
+      });
+      const sDef = makeStageDef('sd-final', [{ label: 'Read', text: 'Read the uploaded marker', waitForCompletion: true }]);
+      await stageDefRepo.create(sDef);
+      const sr = makeStageRun('sr-final', sDef.id);
+      await stageRunRepo.create(sr);
+      await service.executeStage(sr, 'run-1', 'per-stage');
+      const assistantMessages = vi.mocked(messageRepo.create).mock.calls.map(([m]) => m).filter(m => m.role === 'assistant');
+      expect(assistantMessages.length).toBeGreaterThan(0);
+      expect(assistantMessages.every(m => m.content === final)).toBe(true);
+      expect((await stageRunRepo.getById(sr.id)).status).toBe('completed');
+    });
+
+    it('delivers uploaded prompt files to the harness without following symlinks', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'gai-stage-prompts-'));
+      try {
+        const prompts = join(dir, 'prompts');
+        await mkdir(prompts);
+        await writeFile(join(prompts, 'audit.md'), 'FILE_ONLY_MARKER');
+        await writeFile(join(dir, 'outside.txt'), 'not uploaded');
+        await symlink(join(dir, 'outside.txt'), join(prompts, 'linked.txt'));
+        await symlink(prompts, join(dir, 'linked-dir'));
+        const sDef = makeStageDef('sd-upload', [{ label: 'Read', text: 'Read audit.md', waitForCompletion: true }]);
+        await stageDefRepo.create(sDef);
+        const sr = makeStageRun('sr-upload', sDef.id);
+        await stageRunRepo.create(sr);
+        const send = vi.spyOn(copilot, 'sendPromptAndWait');
+        await service.executeStage(sr, 'run-1', 'per-stage', undefined, {
+          __promptDirectories: [prompts, prompts, join(dir, 'missing'), join(dir, 'linked-dir')],
+        });
+        expect(send).toHaveBeenCalledWith('conv-1', expect.stringContaining('Read audit.md'), [
+          { type: 'file', path: join(prompts, 'audit.md'), displayName: 'audit.md' },
+        ], expect.any(AbortSignal), expect.anything());
+        expect((await stageRunRepo.getById(sr.id)).status).toBe('completed');
+      } finally { await rm(dir, { recursive: true, force: true }); }
+    });
+
     it('should run all prompts and mark stage completed', async () => {
       const sDef = makeStageDef('sd-1', [
         { label: 'P1', text: 'First prompt', waitForCompletion: true },
@@ -166,7 +231,8 @@ describe('StageExecutionService', () => {
       );
     });
 
-    it('should mark stage failed on error when no retry policy', async () => {
+    it.each(['SDK error', 'The Codex thread entered a system error state.'])(
+      'marks provider failure as failed without emitting completion: %s', async (message) => {
       const sDef = makeStageDef('sd-4', [
         { label: 'Fail', text: 'crash', waitForCompletion: true },
       ]);
@@ -177,13 +243,16 @@ describe('StageExecutionService', () => {
       // Make sendPromptAndWait throw
       copilot.setCannedResponses([]);
       const origMethod = copilot.sendPromptAndWait.bind(copilot);
-      copilot.sendPromptAndWait = async () => { throw new Error('SDK error'); };
+      copilot.sendPromptAndWait = async () => { throw new Error(message); };
+      const emit = vi.spyOn(eventBus, 'emit');
 
       await service.executeStage(sr, 'run-1', 'per-stage');
 
       const updated = await stageRunRepo.getById('sr-4');
       expect(updated.status).toBe('failed');
-      expect(updated.error).toContain('SDK error');
+      expect(updated.error).toContain(message);
+      expect(emit).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ kind: 'stage_run.failed' }));
+      expect(emit).not.toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ kind: 'stage_run.completed' }));
 
       // Restore
       copilot.sendPromptAndWait = origMethod;
@@ -330,4 +399,3 @@ describe('StageExecutionService', () => {
     });
   });
 });
-

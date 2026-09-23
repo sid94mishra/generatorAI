@@ -12,6 +12,14 @@ export function isMacPlatform(): boolean {
   return /mac/i.test(navigator.platform ?? '') || /mac/i.test(navigator.userAgent);
 }
 
+/**
+ * The "mod+Enter" chord as plain text, for places a `<Kbd>` cannot go — a
+ * placeholder or a `title`. "⌘↵" on macOS, "Ctrl+↵" everywhere else.
+ */
+export function modEnterLabel(): string {
+  return isMacPlatform() ? '⌘↵' : 'Ctrl+↵';
+}
+
 /** "mod" renders as ⌘ on macOS and Ctrl elsewhere. */
 export type KbdKey = 'mod' | 'shift' | 'alt' | 'enter' | 'esc' | (string & {});
 

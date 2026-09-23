@@ -1,0 +1,27 @@
+{
+  "url": "/chats/19498ef3-f0be-4a6f-b68c-ff126de78c8f",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [],
+  "scrollers": [
+    {
+      "tag": "TEXTAREA",
+      "classes": "border-input hover:border-[color-mix(in_srgb,var(--primary)_50%,var(--border))] focus:border-[var(--primary)] focus:ring-primary/20 w-full resize-none border-0 bg-transparent px-0 py-0 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)]/70 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-100 leading-relaxed min-h-[64px] max-h-[200px] outline-none rounded-none transition-[height] duration-150 ease-out",
+      "h": 200,
+      "scroll": 205,
+      "rect": {
+        "x": 273,
+        "y": 499.5,
+        "w": 632
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

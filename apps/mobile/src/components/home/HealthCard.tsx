@@ -46,7 +46,7 @@ export function HealthCard({ health }: { health: HealthSnapshot | undefined }): 
       onPress={() => router.push('/settings/diagnostics')}
     >
       <Card className="flex-row items-center gap-3 p-3.5">
-        <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
+        <View className="h-9 w-9 items-center justify-center">
           <ServerCog size={16} color={tone === 'success' ? colors.success : colors.warning} />
         </View>
         <View className="flex-1 gap-0.5">

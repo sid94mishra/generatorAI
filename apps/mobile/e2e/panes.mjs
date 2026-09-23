@@ -1,10 +1,21 @@
-// Panes + Workbench sheet (via the header's chat menu) + Stop on an existing chat. Usage: MSYS_NO_PATHCONV=1 node panes.mjs /chats/<id>
+// Workbench (header button → tool index → tool sheet) + Stop on an existing chat. Usage: MSYS_NO_PATHCONV=1 node panes.mjs /chats/<id>
 import { launch, step, shot, summary, APP_URL, sleep } from './lib.mjs';
 const { ctx, page, consoleLog } = await launch();
 const body = async () => (await page.locator('body').innerText()).replace(/\s+/g, ' ');
 const vis = (re) => page.getByRole('button', { name: re }).locator('visible=true').first();
 const visibleButtons = async () => [...new Set(await page.locator('[role=button]:visible, button:visible').evaluateAll((els) => els.map((e) => (e.getAttribute('aria-label') || e.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 50)).filter(Boolean)))];
-const seg = async (re) => { await page.getByText(re).locator('visible=true').first().click({ timeout: 8000 }); await sleep(2000); };
+// Open a tool: the header's Workbench button slides the index in from the
+// right; picking a row raises that tool as a sheet. When a tool sheet is
+// already up, its chip strip switches tool in place.
+const tool = async (id, label) => {
+  const chip = page.getByRole('button', { name: new RegExp(`^${label}\\.`) }).locator('visible=true').first();
+  if (await chip.count()) { await chip.click({ timeout: 8000 }); await sleep(2000); return; }
+  await page.getByTestId('workbench-button').locator('visible=true').first().click({ timeout: 8000 });
+  await sleep(900);
+  await page.getByTestId(`workbench-tool-${id}`).locator('visible=true').first().click({ timeout: 8000 });
+  await sleep(2000);
+};
+const closeSheet = async () => { await vis(/^close$/i).click().catch(() => {}); await sleep(800); };
 try {
   await step('open chat', async () => {
     await page.goto(APP_URL + process.argv[2], { waitUntil: 'domcontentloaded' });
@@ -26,34 +37,25 @@ try {
     await shot(page, 'file-diff');
     return (await body()).slice(0, 220);
   });
-  await step('Terminal pane', async () => {
-    await seg(/^Terminal$/);
+  await step('Terminal tool', async () => {
+    await tool('terminal', 'Terminal');
     await sleep(2000);
     await shot(page, 'terminal-pane');
     return (await body()).slice(0, 200) + ' | ' + (await visibleButtons()).slice(0, 12).join(', ');
   });
-  await step('Browser pane', async () => {
-    await seg(/^Browser$/);
+  await step('Browser tool', async () => {
+    await tool('browser', 'Browser');
     await sleep(2000);
     await shot(page, 'browser-pane');
     return (await body()).slice(0, 200);
   });
-  await step('Workbench sheet (header menu): Files / Plan / Tasks / Session', async () => {
-    await seg(/^Chat$/);
-    await vis(/^chat menu$/i).click();
-    await sleep(1200);
-    await shot(page, 'chat-menu');
-    await vis(/^files$/i).click();
-    await sleep(1500);
-    await shot(page, 'more-files');
-    for (const tab of ['Plan', 'Tasks', 'Session']) {
-      await page.getByText(new RegExp(`^${tab}$`)).locator('visible=true').last().click({ timeout: 5000 }).catch(() => {});
-      await sleep(1200);
-      await shot(page, `more-${tab.toLowerCase()}`);
+  await step('Workbench: Files / Plan / Session', async () => {
+    for (const [id, label] of [['files', 'Files'], ['plan', 'Plan'], ['session', 'Session']]) {
+      await tool(id, label).catch(() => {});
+      await shot(page, `tool-${id}`);
     }
     const t = (await body()).slice(-300);
-    await vis(/^close$/i).click().catch(() => {});
-    await sleep(800);
+    await closeSheet();
     return t;
   });
   await step('Stop mid-turn', async () => {

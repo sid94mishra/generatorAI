@@ -65,6 +65,7 @@ export function AutomationDetailPage() {
   const platform = usePlatform() as HttpPlatformClient;
 
   const [expandedExecId, setExpandedExecId] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   // Item A5 — GET /:id no longer returns the raw token (only SECRET_MASK),
   // so there is nothing to display on reload. Rotating mints a fresh
@@ -86,9 +87,9 @@ export function AutomationDetailPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2">
         <h2 className="text-lg font-semibold text-foreground">Automation not found</h2>
-        <button onClick={() => navigate('/automations')} className="text-sm text-primary underline">
+        <Button variant="unstyled" onClick={() => navigate('/automations')} className="text-sm text-primary underline">
           Back to Automations
-        </button>
+        </Button>
       </div>
     );
   }
@@ -134,13 +135,13 @@ export function AutomationDetailPage() {
     <PageContainer className="max-w-5xl">
       {/* Header */}
       <div className="mb-6">
-        <button
+        <Button variant="unstyled"
           onClick={() => navigate('/automations')}
           className="mb-4 flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Automations
-        </button>
+        </Button>
 
         <PageHeader
           title={
@@ -173,7 +174,8 @@ export function AutomationDetailPage() {
               <Button
                 variant="danger"
                 size="icon"
-                onClick={async () => { try { await deleteMutation.mutateAsync(automation.id); navigate('/automations'); } catch { /* error handled by mutation */ } }}
+                aria-label="Delete automation"
+                onClick={() => setDeleteOpen(true)}
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
@@ -407,6 +409,21 @@ export function AutomationDetailPage() {
           </div>
         )}
       </div>
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete automation?"
+        description={`Delete “${automation.name}”? This cannot be undone.`}
+        confirmLabel="Delete automation"
+        variant="destructive"
+        loading={deleteMutation.isPending}
+        onConfirm={async () => {
+          try {
+            await deleteMutation.mutateAsync(automation.id);
+            navigate('/automations');
+          } catch { /* The mutation displays the error; keep the dialog open for retry. */ }
+        }}
+      />
       <TriggerAutomationModal
         // Remount on each open so paste/upload state is fresh.
         key={triggerModalOpen ? 'open' : 'closed'}
@@ -453,8 +470,9 @@ function ExecutionRow({
       <div
         role="button"
         tabIndex={0}
+        aria-expanded={expanded}
         onClick={onToggle}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+        onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onToggle(); } }}
         className="flex w-full cursor-pointer items-center gap-3 p-4 text-left"
       >
         {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
@@ -468,7 +486,7 @@ function ExecutionRow({
         </span>
         <span className="text-xs text-muted-foreground">{formatDate(execution.createdAt)}</span>
         {(execution.status === 'running' || execution.status === 'pending') && (
-          <button
+          <Button variant="unstyled"
             onClick={(e) => {
               e.stopPropagation();
               setConfirmCancel(true);
@@ -477,7 +495,7 @@ function ExecutionRow({
             title="Cancel execution"
           >
             <XCircle className="h-4 w-4" />
-          </button>
+          </Button>
         )}
       </div>
 
@@ -553,20 +571,20 @@ function IterationRow({
             <span className="ml-1 font-mono text-foreground">({run.iterationLabel})</span>
           )}
         </span>
-        <button
+        <Button variant="unstyled"
           onClick={() => setShowChanges((v) => !v)}
           className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
           title="Show the files this iteration changed"
         >
           <FileCode className="h-3 w-3" />
           {showChanges ? 'Hide changes' : 'Changes'}
-        </button>
-        <button
+        </Button>
+        <Button variant="unstyled"
           onClick={() => onViewRun(run.workflowRunId, run.workflowDefinitionId)}
           className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
         >
           Run: {run.workflowRunId.slice(0, 8)}…
-        </button>
+        </Button>
       </div>
 
       {showChanges && (

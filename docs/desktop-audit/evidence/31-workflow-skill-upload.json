@@ -1,0 +1,29 @@
+{
+  "url": "/workflows/4969ab11-7d70-494e-be42-ee62ea1cc44d/edit",
+  "viewport": {
+    "w": 1440,
+    "h": 870
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "No stage selected",
+    "Start Workflow Run"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "min-h-0 flex-1 overflow-y-auto px-5 py-4",
+      "h": 370,
+      "scroll": 517,
+      "rect": {
+        "x": 433,
+        "y": 259,
+        "w": 574
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

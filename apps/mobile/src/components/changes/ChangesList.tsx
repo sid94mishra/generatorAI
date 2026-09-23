@@ -15,13 +15,14 @@ import React, { useCallback, useState } from 'react';
 import { Text, View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
 import * as Clipboard from 'expo-clipboard';
-import { ChevronDown, ChevronRight, Copy, FolderOpen, Maximize2, Undo2 } from 'lucide-react-native';
+import { Check, ChevronDown, ChevronRight, Copy, FolderOpen, Maximize2, RotateCcw, Undo2 } from 'lucide-react-native';
 import type { ReviewThread } from '@generatorai/client-core';
 
 import { useTheme } from '../../theme/ThemeProvider';
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { ConfirmSheet } from '../ui/ActionSheet';
 import { IconButton } from '../ui/Button';
+import { Spinner } from '../ui/States';
 import { useToast } from '../ui/Toast';
 import { FileDiff, type CommentRequest } from './FileDiff';
 import { STATUS_BG, STATUS_LETTER, STATUS_TITLE, STATUS_TONE, splitPath } from './statusStyle';
@@ -42,6 +43,15 @@ export interface ChangesListProps {
   /** Absent when the device cannot restore checkpoints. */
   onDiscard?: (row: ChangeRow) => void;
   discarding?: boolean;
+  /**
+   * Keep = mark reviewed at its current content; the row then leaves this
+   * list for the Kept group. Absent when the device cannot write reviews.
+   */
+  onKeep?: (row: ChangeRow) => void;
+  /** Shown instead of Keep on rows of the Kept group: back to review. */
+  onUnkeep?: (row: ChangeRow) => void;
+  /** Row ids with a keep / discard in flight — their button spins. */
+  busyIds?: ReadonlySet<string>;
   onComment?: (row: ChangeRow, request: CommentRequest) => void;
   onOpenThreads?: (row: ChangeRow, side: DiffSide, line: number) => void;
   commentDisabledReason?: string | null;
@@ -64,6 +74,9 @@ export function ChangesList({
   onOpenInFiles,
   onDiscard,
   discarding = false,
+  onKeep,
+  onUnkeep,
+  busyIds,
   onComment,
   onOpenThreads,
   commentDisabledReason,
@@ -84,7 +97,7 @@ export function ChangesList({
         // Rows close over `expanded` and the thread map, none of which are in
         // `data`. Without this the list keeps the rows it already built and
         // expanding a file does nothing on screen.
-        extraData={`${[...expanded].join()}|${threadsByFile?.size ?? 0}|${discarding}`}
+        extraData={`${[...expanded].join()}|${threadsByFile?.size ?? 0}|${discarding}|${[...(busyIds ?? [])].join()}`}
         contentContainerStyle={{ paddingBottom: 32 }}
         ListHeaderComponent={ListHeaderComponent ?? null}
         ListFooterComponent={ListFooterComponent ?? null}
@@ -101,6 +114,9 @@ export function ChangesList({
             onOpen={onOpenFile}
             onOpenInFiles={onOpenInFiles}
             onAskDiscard={onDiscard ? setConfirmDiscard : undefined}
+            onKeep={onKeep}
+            onUnkeep={onUnkeep}
+            busy={busyIds?.has(item.id) ?? false}
             onComment={onComment}
             onOpenThreads={onOpenThreads}
             commentDisabledReason={commentDisabledReason ?? null}
@@ -133,6 +149,9 @@ const FileRow = React.memo(function FileRow({
   onOpen,
   onOpenInFiles,
   onAskDiscard,
+  onKeep,
+  onUnkeep,
+  busy,
   onComment,
   onOpenThreads,
   commentDisabledReason,
@@ -147,6 +166,9 @@ const FileRow = React.memo(function FileRow({
   onOpen: (row: ChangeRow) => void;
   onOpenInFiles: ((row: ChangeRow) => void) | undefined;
   onAskDiscard: ((row: ChangeRow) => void) | undefined;
+  onKeep: ((row: ChangeRow) => void) | undefined;
+  onUnkeep: ((row: ChangeRow) => void) | undefined;
+  busy: boolean;
   onComment: ((row: ChangeRow, request: CommentRequest) => void) | undefined;
   onOpenThreads: ((row: ChangeRow, side: DiffSide, line: number) => void) | undefined;
   commentDisabledReason: string | null;
@@ -184,6 +206,23 @@ const FileRow = React.memo(function FileRow({
         toast({ message: 'Path copied', tone: 'success' });
       },
     },
+    ...(row.kept && onUnkeep
+      ? [
+          {
+            label: 'Move back to review',
+            icon: <RotateCcw size={18} color={colors.foreground} />,
+            onPress: () => onUnkeep(row),
+          },
+        ]
+      : !row.kept && onKeep
+        ? [
+            {
+              label: 'Keep',
+              icon: <Check size={18} color={colors.success} />,
+              onPress: () => onKeep(row),
+            },
+          ]
+        : []),
     ...(onAskDiscard
       ? [
           {
@@ -266,8 +305,30 @@ const FileRow = React.memo(function FileRow({
             </View>
           )}
         </ContextMenu>
+        {/* Desktop's per-row tick: one tap to say "I have looked at this". */}
+        {row.kept && onUnkeep ? (
+          <IconButton
+            testID="unkeep-file"
+            accessibilityLabel={`Move ${row.path} back to review`}
+            compact
+            disabled={busy}
+            icon={busy ? <Spinner /> : <RotateCcw size={15} color={colors.success} />}
+            onPress={() => onUnkeep(row)}
+          />
+        ) : !row.kept && onKeep ? (
+          <IconButton
+            testID="keep-file"
+            accessibilityLabel={`Keep ${row.path}`}
+            accessibilityHint="Marks it reviewed and moves it out of the list"
+            compact
+            disabled={busy}
+            icon={busy ? <Spinner /> : <Check size={16} color={colors['muted-foreground']} />}
+            onPress={() => onKeep(row)}
+          />
+        ) : null}
         {readable ? (
           <IconButton
+            compact
             accessibilityLabel={`Open ${row.path} full screen`}
             icon={<Maximize2 size={14} color={colors['muted-foreground']} />}
             onPress={() => onOpen(row)}

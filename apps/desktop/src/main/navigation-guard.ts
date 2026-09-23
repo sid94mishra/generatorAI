@@ -39,6 +39,34 @@ export function isAppOrigin(url: string | null | undefined, appUrl: string | nul
 }
 
 /**
+ * Path prefixes the embedded server answers itself. Everything else on the
+ * app origin is a client-side route the single-page app renders.
+ */
+const SERVER_PATH_PREFIXES: readonly string[] = ['/api/', '/internal/', '/assets/'];
+
+/**
+ * The in-app route a URL points at, or `null` when it is not one.
+ *
+ * Callers must have established that `url` is on the app origin. A route is
+ * returned as `path + query + hash`, ready for `history.pushState`; a server
+ * resource (an export, a raw file, a static asset) is not a route and has to
+ * be loaded for real.
+ */
+export function appRouteOf(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const path = parsed.pathname || '/';
+  if (SERVER_PATH_PREFIXES.some((prefix) => path === prefix.slice(0, -1) || path.startsWith(prefix))) return null;
+  // A file name (`/favicon.ico`, `/manifest.webmanifest`) is a static asset.
+  if (/\.[a-z0-9]{2,5}$/i.test(path)) return null;
+  return `${path}${parsed.search}${parsed.hash}`;
+}
+
+/**
  * Schemes the shell may hand to the OS.
  *
  * http/https/mailto are the web's own. The editor schemes are the documented

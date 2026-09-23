@@ -1,3 +1,4 @@
+import type { HarnessProviderId, ReasoningEffort } from './ProviderConfig.js';
 // ────────────────────────────────────────────────────────────────
 // Workflow — Domain entity
 // ────────────────────────────────────────────────────────────────
@@ -22,14 +23,14 @@ export interface HarnessConfig {
   provider?: { name: string; baseUrl: string; apiKey: string; model?: string };
   configDir?: string;
   /** Reasoning effort for models that support it (SDK 0.3.0) */
-  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  reasoningEffort?: ReasoningEffort;
   /** Context window tier — 'long_context' pins the long-context tier for models that support it. */
   contextTier?: 'default' | 'long_context';
   /**
    * Agent provider that should run this stage / workflow / chat. Omit to route
    * by `model`, falling back to the server's primary provider.
    */
-  harnessType?: 'copilot' | 'claude-agent';
+  harnessType?: HarnessProviderId;
   /** Maximum tool-call turns before forcing completion */
   maxTurns?: number;
   /** Session-level permission mode (plan / bypassPermissions / …). */

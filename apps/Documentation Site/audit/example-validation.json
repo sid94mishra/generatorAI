@@ -1,0 +1,166 @@
+[
+  {
+    "id": "create-chat",
+    "module": "packages/shared/src/config/ChatSchemas.ts",
+    "schema": "CreateChatSchema",
+    "passed": true
+  },
+  {
+    "id": "send-prompt",
+    "module": "packages/shared/src/config/ChatSchemas.ts",
+    "schema": "SendChatPromptSchema",
+    "passed": true
+  },
+  {
+    "id": "answer-question",
+    "module": "packages/shared/src/config/ChatSchemas.ts",
+    "schema": "AnswerQuestionSchema",
+    "passed": true
+  },
+  {
+    "id": "edit-plan",
+    "module": "packages/shared/src/config/ChatSchemas.ts",
+    "schema": "UpdatePlanContentSchema",
+    "passed": true
+  },
+  {
+    "id": "approve-plan",
+    "module": "packages/shared/src/config/ChatSchemas.ts",
+    "schema": "PlanDecisionSchema",
+    "passed": true
+  },
+  {
+    "id": "create-agent",
+    "module": "packages/shared/src/config/AgentSchemas.ts",
+    "schema": "CreateAgentSchema",
+    "passed": true
+  },
+  {
+    "id": "agent-overrides",
+    "module": "packages/shared/src/config/AgentSchemas.ts",
+    "schema": "AgentOverridesSchema",
+    "passed": true
+  },
+  {
+    "id": "review-workflow",
+    "module": "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
+    "schema": "ImportWorkflowJsonSchema",
+    "passed": true
+  },
+  {
+    "id": "workflow-run-profile",
+    "module": "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
+    "schema": "RunProfileSchema",
+    "passed": true
+  },
+  {
+    "id": "request-stage-changes",
+    "module": "packages/shared/src/config/ChatSchemas.ts",
+    "schema": "StageReviewDecisionSchema",
+    "passed": true
+  },
+  {
+    "id": "manual-automation",
+    "module": "packages/shared/src/config/AutomationSchemas.ts",
+    "schema": "CreateAutomationSchema",
+    "passed": true
+  },
+  {
+    "id": "scheduled-automation",
+    "module": "packages/shared/src/config/AutomationSchemas.ts",
+    "schema": "CreateAutomationSchema",
+    "passed": true
+  },
+  {
+    "id": "group-dataset",
+    "module": "packages/shared/src/config/AutomationSchemas.ts",
+    "schema": "PreviewIterationsBodySchema",
+    "passed": true
+  },
+  {
+    "id": "http-data-source",
+    "module": "packages/shared/src/config/AutomationSchemas.ts",
+    "schema": "TestDataSourceSchema",
+    "passed": true
+  },
+  {
+    "id": "browser-config",
+    "module": "packages/shared/src/config/BrowserConfigSchema.ts",
+    "schema": "BrowserConfigSchema",
+    "passed": true
+  },
+  {
+    "id": "mcp-http",
+    "module": "packages/shared/src/config/McpSchemas.ts",
+    "schema": "McpServerBodySchema",
+    "passed": true
+  },
+  {
+    "id": "mcp-stdio",
+    "module": "packages/shared/src/config/McpSchemas.ts",
+    "schema": "McpServerBodySchema",
+    "passed": true
+  },
+  {
+    "id": "extension-manifest",
+    "module": "packages/shared/src/config/ExtensionManifestSchema.ts",
+    "schema": "ExtensionManifestSchema",
+    "passed": true
+  },
+  {
+    "id": "background-task",
+    "module": "packages/shared/src/config/OrchestratorSchemas.ts",
+    "schema": "TaskBriefSchema",
+    "passed": true
+  },
+  {
+    "id": "cli-preferences",
+    "module": "packages/cli-core/src/config/schema.ts",
+    "schema": "CliConfigSchema",
+    "passed": true
+  },
+  {
+    "id": "stage-hook",
+    "module": "packages/shared/src/config/WorkflowTemplate.ts",
+    "schema": "HookDefinitionSchema",
+    "passed": true
+  },
+  {
+    "id": "script-profile",
+    "module": "packages/shared/src/config/WorkflowScriptSchema.ts",
+    "schema": "ScriptRunProfileSchema",
+    "passed": true
+  },
+  {
+    "id": "widget-instance",
+    "module": "packages/shared/src/config/WidgetSchemas.ts",
+    "schema": "CreateWidgetInstanceSchema",
+    "passed": true
+  },
+  {
+    "id": "widget-action",
+    "module": "packages/shared/src/config/WidgetSchemas.ts",
+    "schema": "DispatchWidgetActionSchema",
+    "passed": true
+  },
+  {
+    "id": "MCP transport mismatch",
+    "passed": true,
+    "expected": "rejected"
+  },
+  {
+    "id": "Invalid cron",
+    "passed": true,
+    "expected": "rejected"
+  },
+  {
+    "id": "Missing iteration mode",
+    "passed": true,
+    "expected": "rejected"
+  },
+  {
+    "id": "Invalid viewport",
+    "passed": true,
+    "expected": "rejected"
+  }
+]

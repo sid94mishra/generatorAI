@@ -31,7 +31,13 @@ import { EmptyState, ErrorState, LoadingState } from '../ui/States';
 import { useToast } from '../ui/Toast';
 import { haptics } from '../ui/haptics';
 import { usePlanExtras, type PlanDocumentInfo } from './api';
-import { canRequestChanges, offersAutopilot, planDecisionFor, type PlanDecisionKind } from './planDecisions';
+import {
+  canRequestChanges,
+  offersAutopilot,
+  planBodyWithoutTitle,
+  planDecisionFor,
+  type PlanDecisionKind,
+} from './planDecisions';
 import { useCapability } from './useScopes';
 
 const STATUS_TONE: Record<string, Tone> = {
@@ -54,7 +60,19 @@ export function statusLabel(status: string): string {
  * with revisions and comments, and the mutations. Shared by the pane and
  * the route sheet so the two never disagree.
  */
-export function usePlanDocument(chatId: string, options: { active?: boolean; planId?: string | null } = {}) {
+export function usePlanDocument(
+  chatId: string,
+  options: {
+    active?: boolean;
+    planId?: string | null;
+    /**
+     * A decision landed. The hosts close their sheet here: on a phone the
+     * sheet covers the chat, so staying open after "Approve & implement"
+     * hid the agent's work and any approval it asked for next.
+     */
+    onDecided?: (kind: PlanDecisionKind) => void;
+  } = {},
+) {
   const api = useApi();
   const extras = usePlanExtras();
   const queryClient = useQueryClient();
@@ -93,6 +111,7 @@ export function usePlanDocument(chatId: string, options: { active?: boolean; pla
       api.chats.decidePlan(chatId, selected!.planId, planDecisionFor(vars.kind, vars.feedback, vars)),
     onSuccess: (_data, vars) => {
       invalidate();
+      options.onDecided?.(vars.kind);
       toast({
         message:
           vars.kind === 'changes' ? 'Feedback sent' : vars.kind === 'discard' ? 'Plan discarded' : 'Plan approved',
@@ -163,7 +182,7 @@ export interface PlanSheetProps {
 
 /** Route/sheet form: the same body as the pane, inside a Sheet. */
 export function PlanSheet({ visible, onClose, chatId, planId }: PlanSheetProps): React.ReactElement | null {
-  const plan = usePlanDocument(chatId, { active: visible, planId: planId ?? null });
+  const plan = usePlanDocument(chatId, { active: visible, planId: planId ?? null, onDecided: onClose });
   if (!visible) return null;
   return (
     <Sheet visible={visible} onClose={onClose} title={plan.selected?.title ?? 'Plan'} detents={[0.6, 0.92]} initialDetent={1} scrollable={false}>
@@ -218,7 +237,7 @@ export function PlanBody({
     return (
       <EmptyState
         title="No plan yet"
-        message="Switch the composer to “Plan first” and the agent will write one before it changes anything."
+        message="Use “Plan first” to request a plan. Providers with plan-review support publish it here; other providers, including Codex, present it in chat."
         icon={<ScrollText size={22} color={colors['muted-foreground']} />}
       />
     );
@@ -339,7 +358,7 @@ export function PlanBody({
             </View>
           </View>
         ) : (
-          <Markdown content={revisionDoc?.content ?? selected.summary} />
+          <Markdown content={planBodyWithoutTitle(revisionDoc?.content ?? selected.summary, selected.title)} />
         )}
 
         {showComments ? (

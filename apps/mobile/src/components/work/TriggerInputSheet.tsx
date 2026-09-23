@@ -148,7 +148,18 @@ export function TriggerInputSheet({
       : null;
 
   return (
-    <Sheet visible={visible} onClose={onClose} title={`Run ${automation.name}`} detents={[0.75, 0.95]}>
+    <Sheet visible={visible} onClose={onClose} title={`Run ${automation.name}`} detents={[0.92]} footer={
+        <Button
+          label={check.rowCount && !usingDefault ? `Run ${check.rowCount} row${check.rowCount === 1 ? '' : 's'}` : 'Run now'}
+          size="lg"
+          full
+          haptic="none"
+          icon={<Play size={18} color={colors['primary-foreground']} />}
+          loading={trigger.isPending}
+          disabled={trigger.isPending}
+          onPress={submit}
+        />
+    }>
       <View className="gap-4 px-4 pb-6 pt-2">
         {expects ? (
           <Text className="text-sm text-muted-foreground">Each row needs: {expects}</Text>
@@ -231,16 +242,7 @@ export function TriggerInputSheet({
           </Text>
         ) : null}
 
-        <Button
-          label={check.rowCount && !usingDefault ? `Run ${check.rowCount} row${check.rowCount === 1 ? '' : 's'}` : 'Run now'}
-          size="lg"
-          full
-          haptic="none"
-          icon={<Play size={18} color={colors['primary-foreground']} />}
-          loading={trigger.isPending}
-          disabled={trigger.isPending}
-          onPress={submit}
-        />
+
       </View>
     </Sheet>
   );

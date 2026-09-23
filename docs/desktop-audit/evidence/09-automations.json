@@ -1,0 +1,16 @@
+{
+  "url": "/automations",
+  "viewport": {
+    "w": 1440,
+    "h": 870
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Automations",
+    "No automations yet"
+  ],
+  "scrollers": []
+}

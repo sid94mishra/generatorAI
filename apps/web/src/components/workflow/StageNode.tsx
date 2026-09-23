@@ -12,6 +12,7 @@ import { Tooltip } from '@/components/Tooltip.js';
 import { Button } from '@/components/ui/index.js';
 import type { StageNodeData } from '@/stores/workflowBuilderStore.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
+import { useCanvasReadonly } from './canvasContext.js';
 
 /** Color mapping for stage run statuses (used in runtime mode) */
 const statusColors: Record<string, { bg: string; border: string; icon: React.ReactNode }> = {
@@ -59,6 +60,7 @@ const statusColors: Record<string, { bg: string; border: string; icon: React.Rea
 
 function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData>>) {
   const { stage, label } = data;
+  const readonly = useCanvasReadonly();
   const selectNode = useWorkflowBuilderStore((s) => s.selectNode);
   const removeStage = useWorkflowBuilderStore((s) => s.removeStage);
   const duplicateStage = useWorkflowBuilderStore((s) => s.duplicateStage);
@@ -169,7 +171,7 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
         </div>
 
         {/* Action buttons (visible on hover) */}
-        <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+        {!readonly && <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
           <Tooltip content="Duplicate stage" side="top">
             <Button
               onClick={handleDuplicate}
@@ -192,7 +194,7 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </Tooltip>
-        </div>
+        </div>}
       </div>
 
       {/* Capability pills */}

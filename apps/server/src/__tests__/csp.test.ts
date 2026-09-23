@@ -38,6 +38,19 @@ function makeApp() {
 }
 
 describe('Content-Security-Policy', () => {
+  it('allows only the configured widget origin as a cross-origin frame', async () => {
+    const app = express();
+    app.use(createCspMiddleware('http://127.0.0.1:58501'));
+    app.get('/', (_req, res) => res.send('ok'));
+    const res = await request(app).get('/');
+    const directives = (res.headers['content-security-policy'] as string).split(';').map((d) => d.trim());
+    expect(directives).toContain("frame-src 'self' http://127.0.0.1:58501 http://localhost:58501 http://[::1]:58501");
+    expect(directives).toContain("frame-ancestors 'none'");
+    expect(directives).toContain("connect-src 'self'");
+    expect(() => createCspMiddleware('javascript:alert(1)')).toThrow();
+    expect(() => createCspMiddleware('https://user:password@example.com')).toThrow();
+  });
+
   it('does not carry a blanket unsafe-inline on script-src', async () => {
     const res = await request(makeApp()).get('/other');
     const csp = res.headers['content-security-policy'] as string;

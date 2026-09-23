@@ -2,7 +2,7 @@
 // Agent Harness Provider types
 // ────────────────────────────────────────────────────────────────
 
-import type { ILogger } from '@generatorai/shared';
+import type { ILogger, HarnessProviderId } from '@generatorai/shared';
 import type { AgentHostSupervisor } from './AgentHostSupervisor.js';
 
 /**
@@ -14,7 +14,7 @@ import type { AgentHostSupervisor } from './AgentHostSupervisor.js';
  * W38: 'opencode' — OpenCode serve (HTTP + SSE).
  * W39: 'acp'      — ACP breadth client (long-tail agents, @agentclientprotocol/sdk).
  */
-export type HarnessType = 'copilot' | 'claude-agent' | 'codex' | 'opencode' | 'acp';
+export type HarnessType = HarnessProviderId;
 
 /**
  * Union of all provider-specific configuration options.

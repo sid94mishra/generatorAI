@@ -64,7 +64,7 @@ export function createApp(container: Container): Express {
   // 2b. W31 — Content Security Policy. See middleware/csp.ts for the full
   // rationale, including why `script-src` uses a hash-source rather than
   // 'unsafe-inline'.
-  app.use(createCspMiddleware());
+  app.use(createCspMiddleware(widgetOrigin));
   // 2c. Review plan item 14 — nosniff, Referrer-Policy, Permissions-Policy,
   // and HSTS on HTTPS. Set here, in the app, so a deployment that is not
   // fronted by the shipped nginx config is not silently unprotected.

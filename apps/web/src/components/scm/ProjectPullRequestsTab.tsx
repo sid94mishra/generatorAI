@@ -12,7 +12,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AlertTriangle, GitPullRequest, Github } from 'lucide-react';
 import { useProjectPullRequests } from '@/hooks/queries.js';
-import { Badge, Spinner, Tabs, type BadgeTone } from '@/components/ui/index.js';
+import { Badge, Spinner, Tabs, type BadgeTone, Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import type { ScmPullRequestState } from '@generatorai/shared';
 
@@ -65,7 +65,7 @@ export function ProjectPullRequestsTab({ projectId }: { projectId: string | unde
             <ul className="divide-y divide-border rounded-lg border border-border bg-card">
               {data!.items.map((pr) => (
                 <li key={`${pr.codebaseId}#${pr.number}`}>
-                  <button
+                  <Button variant="unstyled"
                     type="button"
                     data-testid="pr-row"
                     onClick={() =>
@@ -100,7 +100,7 @@ export function ProjectPullRequestsTab({ projectId }: { projectId: string | unde
                         {new Date(pr.updatedAt).toLocaleDateString()}
                       </span>
                     )}
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>

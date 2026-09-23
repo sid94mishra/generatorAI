@@ -9,14 +9,14 @@
 // No SDK types leak here. Pure interface.
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentEvent } from '@generatorai/shared';
+import type { AgentEvent, HarnessProviderId } from '@generatorai/shared';
 import type { Permission } from '../../permissions/Permission.js';
 import type { ProviderCapabilities, ProviderInstanceId } from './IProviderInstance.js';
 
 export type HarnessClientState = 'starting' | 'running' | 'stopped' | 'error';
 
 /** Discriminator for runtime harness provider selection. */
-export type HarnessType = 'copilot' | 'claude-agent';
+export type HarnessType = HarnessProviderId;
 
 /**
  * Common options every harness adapter accepts.

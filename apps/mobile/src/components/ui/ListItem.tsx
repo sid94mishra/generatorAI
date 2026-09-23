@@ -8,9 +8,9 @@
 //   ┌────┐  Title (1 line, semibold)                    time
 //   │ ◉ •│  Subtitle (1 line, muted, text-sm)   [badge] [accessory]
 //   └────┘
-//   ───────  hairline, inset 64pt so it lines up with the text
+//   ───────  hairline, inset 52pt so it lines up with the text
 //
-// • The leading `StatusAvatar` carries STATE: a tone-tinted 36pt tile with
+// • The leading `StatusAvatar` carries STATE: a flat 24pt glyph, tinted, with
 //   the kind/provider glyph, plus a small corner dot while something is
 //   running or waiting. Colour only ever means status.
 // • `badge` is for a non-default state only ("Failed", "Off"). A row shows
@@ -28,16 +28,6 @@ import { Text, View } from 'react-native';
 import { Touchable } from './Touchable';
 import { Badge, type Tone } from './primitives';
 import { MAX_SCALE } from './accessibility';
-
-/** Background token class per tone for the avatar tile. */
-const AVATAR_BG: Record<Tone, string> = {
-  neutral: 'bg-subtle',
-  primary: 'bg-accent',
-  success: 'bg-success-muted',
-  warning: 'bg-warning-muted',
-  danger: 'bg-danger-muted',
-  info: 'bg-info-muted',
-};
 
 const DOT_BG: Record<Tone, string> = {
   neutral: 'bg-muted-foreground',
@@ -70,19 +60,22 @@ export interface StatusAvatarProps {
   size?: number;
 }
 
-export function StatusAvatar({ icon, tone = 'neutral', indicator, size = 36 }: StatusAvatarProps): React.ReactElement {
+export function StatusAvatar({ icon, indicator, size = 24 }: StatusAvatarProps): React.ReactElement {
+  // Flat: the glyph and the text, no tile behind the glyph. Desktop's lists
+  // and sidebar draw bare icons, and a filled tile on every row read as a
+  // column of grey blocks. The glyph's own tint and the corner dot carry state.
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      className={`items-center justify-center rounded-2xl ${AVATAR_BG[tone]}`}
+      className="items-center justify-center"
       style={{ width: size, height: size }}
     >
       {icon}
       {indicator ? (
         <View
-          className={`absolute h-3 w-3 rounded-full border-2 border-background ${DOT_BG[indicator]}`}
-          style={{ right: -2, bottom: -2 }}
+          className={`absolute h-2.5 w-2.5 rounded-full border-2 border-background ${DOT_BG[indicator]}`}
+          style={{ right: -3, bottom: -2 }}
         />
       ) : null}
     </View>
@@ -202,7 +195,7 @@ export function ListItem({
   return (
     <View className="bg-background">
       {content}
-      {separator ? <View className="ml-16 h-px bg-border-muted" /> : null}
+      {separator ? <View className="h-px bg-border-muted" style={{ marginLeft: avatar ? 52 : 16 }} /> : null}
     </View>
   );
 }

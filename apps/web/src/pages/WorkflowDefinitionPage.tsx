@@ -32,7 +32,6 @@ import {
   useCreateWorkflowRun,
   useStartWorkflowRun,
   useStartOrchestratedRun,
-  useUploadRunFiles,
 } from '@/hooks/workflowQueries.js';
 import { cn } from '@/lib/utils.js';
 import {
@@ -66,7 +65,6 @@ export function WorkflowDefinitionPage() {
   const createRun = useCreateWorkflowRun();
   const startRun = useStartWorkflowRun();
   const startOrchestratedRun = useStartOrchestratedRun();
-  const uploadRunFiles = useUploadRunFiles();
 
   // Only `loadDefinition` is used on this read-only page — a single,
   // referentially-stable action selector rather than subscribing to the
@@ -122,21 +120,16 @@ export function WorkflowDefinitionPage() {
       if (!id) return;
       setIsRunning(true);
 
-      // Helper to upload files for each category
-      const uploadAllFiles = async (runId: string) => {
-        if (!uploads) return;
-        for (const category of ['prompts', 'skills', 'agents'] as const) {
-          if (uploads[category].length > 0) {
-            await uploadRunFiles.mutateAsync({ runId, category, files: uploads[category] });
-          }
-        }
-      };
-
       try {
-        if (isOrchestrated) {
-          const orchParams: Record<string, unknown> = {
+        // Uploads need the prepared-launch path even for a plain definition:
+        // it creates the final workspace before storing/discovering content.
+        // The legacy create/upload/start sequence writes to a fallback folder
+        // that is abandoned when startRun provisions the workspace.
+        if (isOrchestrated || Object.values(uploads ?? {}).some((files) => files.length > 0)) {
+          const orchParams: Parameters<typeof startOrchestratedRun.mutateAsync>[0] = {
             workflowDefinitionId: id,
             variables,
+            uploads,
           };
 
           if (definition?.projectId) {
@@ -154,10 +147,7 @@ export function WorkflowDefinitionPage() {
           const encoded = encodeStageOverrides(variables, stageOverrides, { orchestrated: true });
           if (encoded.stageOverrides) orchParams['stageOverrides'] = encoded.stageOverrides;
 
-          const context = await startOrchestratedRun.mutateAsync(orchParams as any);
-
-          // Upload files to the run (orchestrator will scan them at Phase 3)
-          await uploadAllFiles(context.workflowRunId);
+          const context = await startOrchestratedRun.mutateAsync(orchParams);
 
           setVariableModalOpen(false);
           navigate(`/workflows/${id}/runs/${context.workflowRunId}`);
@@ -173,9 +163,6 @@ export function WorkflowDefinitionPage() {
           };
           const run = await createRun.mutateAsync(params);
 
-          // Upload files before starting the run
-          await uploadAllFiles(run.id);
-
           await startRun.mutateAsync(run.id);
           setVariableModalOpen(false);
           navigate(`/workflows/${id}/runs/${run.id}`);
@@ -186,7 +173,7 @@ export function WorkflowDefinitionPage() {
         setIsRunning(false);
       }
     },
-    [id, isOrchestrated, createRun, startRun, startOrchestratedRun, uploadRunFiles, navigate],
+    [id, isOrchestrated, createRun, startRun, startOrchestratedRun, navigate],
   );
 
   const handleRun = useCallback(() => {
@@ -221,12 +208,12 @@ export function WorkflowDefinitionPage() {
         <p className="text-sm text-muted-foreground">
           {error ? 'Failed to load workflow' : 'Workflow not found'}
         </p>
-        <button
+        <Button variant="unstyled"
           onClick={() => navigate('/workflows')}
           className="text-sm text-primary underline"
         >
           Back to workflows
-        </button>
+        </Button>
       </div>
     );
   }
@@ -491,7 +478,7 @@ function MenuItem({
   destructive?: boolean;
 }) {
   return (
-    <button
+    <Button variant="unstyled"
       onClick={onClick}
       className={cn(
         'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
@@ -502,7 +489,7 @@ function MenuItem({
     >
       <span className="shrink-0">{icon}</span>
       {label}
-    </button>
+    </Button>
   );
 }
 

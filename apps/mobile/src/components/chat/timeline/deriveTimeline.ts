@@ -117,15 +117,29 @@ export type TimelineRow =
   // A settled turn's folded activity; see `collapseWork`.
   | { kind: 'work'; id: string; work: WorkSummary };
 
-/** The folded activity of a settled turn: "Worked · 7 steps · 42s". */
+/** The folded activity of a settled turn: "Ran 2 commands, read 3 files". */
 export interface WorkSummary {
   /** The rows it stands for, in order — rendered when expanded. */
   rows: TimelineRow[];
+  /** What the steps did, per family, in the order each first happened. */
+  tally: WorkTally[];
   /** Tool calls, nested sub-agent steps included. */
   steps: number;
   failed: number;
   /** Wall time of the turn, when the caller knows it. */
   durationMs?: number;
+}
+
+export interface WorkTally {
+  family: ToolFamily;
+  /** Distinct files for reads and edits (as desktop counts them), calls otherwise. */
+  count: number;
+  /**
+   * For `other` tools the agent's own named actions ("Update to-dos") are
+   * tallied on their own, so the line says "updated the to-do list" instead
+   * of lumping them into "used 3 tools".
+   */
+  label?: string;
 }
 
 export interface DeriveTimelineOptions {
@@ -644,7 +658,11 @@ export function collapseWork(rows: readonly TimelineRow[], prefix: string, durat
     if (run.length === 0) return;
     if (steps >= MIN_WORK_STEPS) {
       workAt.push(out.length);
-      out.push({ kind: 'work', id: `${prefix}work-${run[0]!.id}`, work: { rows: run, steps, failed } });
+      out.push({
+        kind: 'work',
+        id: `${prefix}work-${run[0]!.id}`,
+        work: { rows: flattenGroups(run), tally: tallyWork(run), steps, failed },
+      });
     } else {
       out.push(...run);
     }
@@ -671,9 +689,88 @@ export function collapseWork(rows: readonly TimelineRow[], prefix: string, durat
   return out;
 }
 
-/** "Worked · 7 steps · 42s" — and "· 1 failed" when something did. */
+/**
+ * A work fold lists every call at ONE level: the summary line already says
+ * "Ran 3 commands, read 5 files", so a second tier of "Ran 3 commands" /
+ * "Read 5 files" sub-groups inside it was nesting for its own sake. Groups
+ * outside a fold (a live turn) are untouched.
+ */
+function flattenGroups(rows: readonly TimelineRow[]): TimelineRow[] {
+  const out: TimelineRow[] = [];
+  for (const row of rows) {
+    if (row.kind !== 'group') {
+      out.push(row);
+      continue;
+    }
+    for (const step of row.group.steps) out.push({ kind: 'tool', id: `${row.id}:${step.id}`, step });
+  }
+  return out;
+}
+
+/**
+ * What a folded run did, per tool family. Reads and edits count distinct
+ * files, the way desktop's step groups do ("Read 3 files" after reading one
+ * file three times would be a lie); everything else counts calls. A
+ * sub-agent counts once, not per nested step: its own steps are its report.
+ */
+export function tallyWork(rows: readonly TimelineRow[]): WorkTally[] {
+  const order: string[] = [];
+  const buckets = new Map<string, { family: ToolFamily; label?: string; calls: number; targets: Set<string> }>();
+  const add = (step: ToolStep): void => {
+    const named = step.family === 'other' && NAMED_ACTION[step.label] ? step.label : undefined;
+    const key = named ? `other:${named}` : step.family;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { family: step.family, ...(named ? { label: named } : {}), calls: 0, targets: new Set() };
+      buckets.set(key, bucket);
+      order.push(key);
+    }
+    bucket.calls += 1;
+    const target = (step.fileOp?.filePath ?? step.target).trim();
+    if (target) bucket.targets.add(target);
+  };
+  for (const row of rows) {
+    if (row.kind === 'tool') add(row.step);
+    else if (row.kind === 'group') for (const step of row.group.steps) add(step);
+  }
+  return order.map((key) => {
+    const b = buckets.get(key)!;
+    const count = (b.family === 'read' || b.family === 'edit') && b.targets.size > 0 ? b.targets.size : b.calls;
+    return { family: b.family, count, ...(b.label ? { label: b.label } : {}) };
+  });
+}
+
+/** The gate and bookkeeping tools, named by what they did (see toolPresentation). */
+const NAMED_ACTION: Record<string, (n: number) => string> = {
+  'Update to-dos': () => 'updated the to-do list',
+  'Plan ready for review': (n) => (n === 1 ? 'wrote a plan' : `wrote ${n} plans`),
+  'Question for you': (n) => (n === 1 ? 'asked a question' : `asked ${n} questions`),
+  'Load tools': () => 'loaded tools',
+};
+
+const TALLY_PHRASE: Record<ToolFamily, (n: number) => string> = {
+  shell: (n) => `ran ${plural(n, 'command')}`,
+  read: (n) => `read ${plural(n, 'file')}`,
+  edit: (n) => `edited ${plural(n, 'file')}`,
+  delete: (n) => `deleted ${plural(n, 'file')}`,
+  search: (n) => `searched ${plural(n, 'time')}`,
+  web: (n) => `fetched ${plural(n, 'page')}`,
+  agent: (n) => `ran ${plural(n, 'sub-agent')}`,
+  other: (n) => `used ${plural(n, 'tool')}`,
+};
+
+/** "Ran 2 commands, read 3 files, edited 1 file" — sentence case. */
+export function workTitle(work: WorkSummary): string {
+  const phrases = work.tally.map((t) =>
+    t.label && NAMED_ACTION[t.label] ? NAMED_ACTION[t.label]!(t.count) : TALLY_PHRASE[t.family](t.count),
+  );
+  const text = phrases.length > 0 ? phrases.join(', ') : `worked through ${plural(work.steps, 'step')}`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** The title plus "· 42s" and "· 1 failed" — the row's spoken label. */
 export function workLabel(work: WorkSummary): string {
-  const parts = ['Worked', `${work.steps} ${work.steps === 1 ? 'step' : 'steps'}`];
+  const parts = [workTitle(work)];
   if (work.durationMs !== undefined) parts.push(formatWorkDuration(work.durationMs));
   if (work.failed > 0) parts.push(`${work.failed} failed`);
   return parts.join(' · ');

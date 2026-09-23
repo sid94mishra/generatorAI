@@ -1,0 +1,17 @@
+{
+  "url": "/automations/b5066047-fa2d-4d2a-b92f-842e850591fa",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Gap audit — Loop",
+    "Execution History"
+  ],
+  "scrollers": []
+}

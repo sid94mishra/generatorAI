@@ -20,7 +20,6 @@ import { router } from 'expo-router';
 import { Bell, BellRing, Search } from 'lucide-react-native';
 
 import { IconButton } from '../components/ui/Button';
-import { SettingsButton } from '../components/ui/SettingsButton';
 import { MAX_SCALE } from '../components/ui/accessibility';
 import { useTheme } from '../theme/ThemeProvider';
 import { APPROVALS_ROUTE, SEARCH_ROUTE, needsYouLabel } from './routes';
@@ -88,7 +87,6 @@ export function TabHeaderActions({ children }: { children?: React.ReactNode }): 
       <SearchButton />
       {children}
       <InboxButton />
-      <SettingsButton />
     </View>
   );
 }

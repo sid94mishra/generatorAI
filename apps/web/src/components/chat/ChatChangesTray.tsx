@@ -151,7 +151,7 @@ export const ChatChangesTray = React.memo(function ChatChangesTray({
   // not a second implementation.
   const reviewChanges = useReviewWorkspaceChanges(workspaceId);
   const discardChanges = useDiscardWorkspaceChanges(workspaceId);
-  const { confirm, dialog: confirmDialog } = useConfirm();
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirm();
   // Root-workspace scaffolding is hidden while a codebase is linked (same
   // rule as the Changes tab), so the count here is the count of code changes.
   const summary = useMemo(
@@ -298,7 +298,7 @@ export const ChatChangesTray = React.memo(function ChatChangesTray({
   }, [reviewChanges]);
   const onUndoAll = useCallback(() => {
     void (async () => {
-      const ok = await confirm({
+      const ok = await confirmAction({
         title: 'Undo all changes?',
         description:
           'This restores every changed file in this chat to its base revision. ' +
@@ -309,7 +309,7 @@ export const ChatChangesTray = React.memo(function ChatChangesTray({
       if (!ok) return;
       await discardChanges.mutateAsync({ all: true }).catch(() => undefined);
     })();
-  }, [confirm, discardChanges]);
+  }, [confirmAction, discardChanges]);
 
   const [open, setOpen] = useState<boolean>(() => readOpen());
   const toggle = useCallback(() => {

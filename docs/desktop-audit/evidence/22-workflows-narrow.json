@@ -1,0 +1,16 @@
+{
+  "url": "/workflows",
+  "viewport": {
+    "w": 1000,
+    "h": 720
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Workflows",
+    "No workflows yet"
+  ],
+  "scrollers": []
+}

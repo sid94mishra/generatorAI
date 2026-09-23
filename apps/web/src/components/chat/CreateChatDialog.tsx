@@ -15,7 +15,9 @@ import {
   type DraftSource,
 } from '@/components/chat/sources/sourceModel.js';
 import { getDefaultChatModel } from '@/lib/appPreferences.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
+import { useModels } from '@/hooks/queries.js';
 import {
   SourceControlOptionsFields,
   DEFAULT_SOURCE_CONTROL_OPTIONS,
@@ -91,6 +93,17 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
       setModel(getDefaultChatModel());
     }
   }, [open]);
+
+  // No saved preference → start on the first model that can actually run.
+  // The field used to open on "Select a model…" every single time, and Create
+  // Chat with it left empty handed the choice to whichever provider happened
+  // to be primary — signed in or not.
+  const { data: availableModels } = useModels();
+  useEffect(() => {
+    if (!open || model) return;
+    const first = availableModels?.[0];
+    if (first) setModel(first.id);
+  }, [open, model, availableModels]);
 
   // Reset form on close
   useEffect(() => {
@@ -367,12 +380,11 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
           {/* Orchestrate mode */}
           <div className="rounded-lg border border-[var(--color-border)] p-3">
             <label className="flex cursor-pointer items-start gap-2.5">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 accent-[var(--color-primary)]"
+              <Checkbox
+                className="mt-0.5"
                 checked={orchestratorMode}
                 disabled={selectedAgent?.role === 'orchestrator'}
-                onChange={(e) => setOrchestratorMode(e.target.checked)}
+                onCheckedChange={(v) => setOrchestratorMode(v === true)}
               />
               <span className="min-w-0">
                 <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">

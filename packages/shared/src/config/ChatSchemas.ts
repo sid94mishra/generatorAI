@@ -3,6 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import { HARNESS_PROVIDER_IDS, REASONING_EFFORTS } from '../types/ProviderConfig.js';
 import { BrowserConfigSchema } from './BrowserConfigSchema.js';
 import { McpServerConfigSchema, AgentOverridesSchema } from './AgentSchemas.js';
 import { AGENT_MODES, coerceAgentMode, type AgentMode } from '../types/AgentMode.js';
@@ -58,12 +59,12 @@ const AgentHarnessConfigSchema = z.object({
     model: z.string().optional(),
   }).optional(),
   configDir: z.string().optional(),
-  reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
+  reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
   /**
    * Agent provider for this chat. Omit to route by `model`, falling back to
    * the server's primary provider.
    */
-  harnessType: z.enum(['copilot', 'claude-agent']).optional(),
+  harnessType: z.enum(HARNESS_PROVIDER_IDS).optional(),
   contextTier: z.enum(['default', 'long_context']).optional(),
   maxTurns: z.number().int().min(1).optional(),
   /**

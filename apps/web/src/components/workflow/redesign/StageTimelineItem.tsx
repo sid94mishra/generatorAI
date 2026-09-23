@@ -309,7 +309,7 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
             segments={stage.segments}
             steps={stage.steps}
             answer={stage.answer}
-            active={isActive}
+            active={stage.status === 'running'}
             answerStreaming={isActive && !isAwaiting}
             loading={isActive && !isAwaiting && stage.steps.length === 0}
             error={isFailed ? stage.error : undefined}

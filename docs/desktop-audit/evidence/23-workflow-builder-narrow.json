@@ -1,0 +1,16 @@
+{
+  "url": "/workflows/new",
+  "viewport": {
+    "w": 1000,
+    "h": 720
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Start building your workflow",
+    "No stage selected"
+  ],
+  "scrollers": []
+}

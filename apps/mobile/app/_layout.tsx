@@ -20,8 +20,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { BackHandler, Platform, Text, View } from 'react-native';
 import { Redirect, Stack, SplashScreen, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChevronLeft } from 'lucide-react-native';
 
@@ -41,6 +43,7 @@ import { ConnectionStripHost } from '../src/components/common/ConnectionStrip';
 import { StackHeader, type StackHeaderProps } from '../src/navigation/StackHeader';
 import { backFallbackFor } from '../src/navigation/backFallback';
 import { ErrorBoundary } from '../src/navigation/ErrorBoundary';
+import { AppDrawerHost } from '../src/navigation/shell/AppDrawer';
 
 installCrypto();
 
@@ -67,8 +70,28 @@ function ThemedShell({ children }: { children: React.ReactNode }): React.ReactEl
 
   useEffect(() => {
     setReady(true);
-    void SplashScreen.hideAsync();
   }, []);
+
+  // The native root behind React matches the theme, so nothing unpainted —
+  // a transition, the strip behind the keyboard — shows the system white.
+  useEffect(() => {
+    if (colors.background) void SystemUI.setBackgroundColorAsync(colors.background).catch(() => undefined);
+  }, [colors.background]);
+
+  // The splash comes down once the first screen has had frames to paint, not
+  // in the same tick that first allows it to render: hiding it there exposed
+  // the unpainted root for a frame on every launch.
+  useEffect(() => {
+    if (!ready) return undefined;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => void SplashScreen.hideAsync());
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [ready]);
 
   return (
     <View style={[style, { flex: 1, backgroundColor: colors.background }]}>
@@ -94,7 +117,7 @@ function ThemedShell({ children }: { children: React.ReactNode }): React.ReactEl
  */
 const PUBLIC_ROUTES = new Set(['/pair', '/revoked']);
 
-function AuthGate({ children }: { children: React.ReactNode }): React.ReactElement {
+function AuthLifecycle({ children }: { children: React.ReactNode }): React.ReactElement {
   const { state, initializing, storageLocked } = useAuth();
   const pathname = usePathname();
 
@@ -131,7 +154,16 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
     setTimeout(() => router.push(target as Parameters<typeof router.push>[0]), 0);
   }, [initializing, storageLocked, state.status, pathname]);
 
-  const isPublic = PUBLIC_ROUTES.has(pathname);
+  return <>{children}</>;
+}
+
+/** The navigator stays mounted while a protected screen waits for auth.
+ * Replacing the navigator with an error made its "Pair" action a dead end
+ * on native, and prevented incoming pairing links from being handled.
+ */
+function AuthGate({ children, routeName }: { children: React.ReactNode; routeName: string }): React.ReactElement {
+  const { state, initializing, storageLocked } = useAuth();
+  const isPublic = PUBLIC_ROUTES.has(`/${routeName}`);
 
   // Never route on the first frame: `AuthState` starts at `unpaired`, which is
   // indistinguishable from "checked, and there is no session".
@@ -147,7 +179,7 @@ function AuthGate({ children }: { children: React.ReactNode }): React.ReactEleme
   // `unpaired` — routing to /pair here is what stranded paired users.
   if (storageLocked) return <StorageLocked />;
 
-  if (state.status === 'revoked' && pathname !== '/revoked') {
+  if (state.status === 'revoked' && routeName !== 'revoked' && !isPublic) {
     return <Redirect href="/revoked" />;
   }
 
@@ -281,6 +313,7 @@ function RootStack(): React.ReactElement {
 
   return (
     <Stack
+      screenLayout={({ children, route }) => <AuthGate routeName={route.name}>{children}</AuthGate>}
       screenOptions={{
         // JS header: the native Android one double-pays the status-bar inset
         // (see StackHeader). Same component on every platform.
@@ -308,11 +341,11 @@ function RootStack(): React.ReactElement {
 
       <Stack.Screen
         name="chats/[id]"
-        options={{ title: 'Chat', headerLeft: headerBack('/(tabs)/chats') }}
+        options={{ title: 'Chat', headerShown: false }}
       />
       <Stack.Screen
         name="runs/[id]"
-        options={{ title: 'Run', headerLeft: headerBack('/(tabs)/runs') }}
+        options={{ title: 'Run', headerShown: false }}
       />
       <Stack.Screen
         name="runs/[id]/stages/[stageRunId]"
@@ -328,11 +361,11 @@ function RootStack(): React.ReactElement {
       />
       <Stack.Screen
         name="workflows/[id]"
-        options={{ title: 'Workflow', headerLeft: headerBack('/(tabs)/runs') }}
+        options={{ title: 'Workflow', headerLeft: headerBack('/(tabs)/runs?segment=workflows' as Parameters<typeof goBack>[0]) }}
       />
       <Stack.Screen
         name="scripts/[id]"
-        options={{ title: 'Script', headerLeft: headerBack('/(tabs)/runs') }}
+        options={{ title: 'Script', headerLeft: headerBack('/(tabs)/runs?segment=scripts' as Parameters<typeof goBack>[0]) }}
       />
       <Stack.Screen
         name="projects/[id]"
@@ -371,7 +404,7 @@ function RootStack(): React.ReactElement {
       />
       <Stack.Screen
         name="automations/[id]"
-        options={{ title: 'Automation', headerLeft: headerBack('/(tabs)/runs') }}
+        options={{ title: 'Automation', headerLeft: headerBack('/(tabs)/runs?segment=automations' as Parameters<typeof goBack>[0]) }}
       />
       <Stack.Screen
         name="changes/[workspaceId]/index"
@@ -400,6 +433,7 @@ function RootStack(): React.ReactElement {
       <Stack.Screen name="settings/security" options={{ headerShown: false }} />
       <Stack.Screen name="settings/accessibility" options={{ headerShown: false }} />
       <Stack.Screen name="settings/extensions" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/audio" options={{ headerShown: false }} />
       {/* Global search draws its own back button beside the field. */}
       <Stack.Screen name="search" options={{ headerShown: false }} />
 
@@ -464,6 +498,9 @@ export default function RootLayout(): React.ReactElement {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
+        {/* One keyboard source for the whole app: frame-accurate IME insets on
+            both platforms (see src/components/ui/keyboard.ts). */}
+        <KeyboardProvider>
         <ThemeProvider>
           <PreferencesProvider>
             <ThemedShell>
@@ -478,15 +515,19 @@ export default function RootLayout(): React.ReactElement {
                           `ContextMenu`/`useContextMenu` no-op without it. */}
                       <ContextMenuProvider>
                         {/* app-lock-gate: the biometric <AppLockGate> wraps
-                            <AuthGate> here — outside the auth gate so a locked
+                            <AuthLifecycle> here — outside the auth gate so a locked
                             app never renders a screen, inside the providers so
                             the gate can read preferences and theme. */}
                         <AppLockGate>
-                          <AuthGate>
+                          <AuthLifecycle>
                           {/* D0/S7 — the one line that says the socket is
                               down, retrying, or refused a scope this phone
                               does not hold. In flow above the navigator so
                               it never covers a back button. */}
+                          {/* The navigation drawer wraps the whole shell —
+                              status-bar strip included — so it runs the full
+                              height of the window like a system drawer. */}
+                          <AppDrawerHost>
                           <ConnectionStripHost>
                             {/* A render error on any screen lands here
                                 instead of blanking the app. */}
@@ -494,7 +535,8 @@ export default function RootLayout(): React.ReactElement {
                               <RootStack />
                             </ErrorBoundary>
                           </ConnectionStripHost>
-                          </AuthGate>
+                          </AppDrawerHost>
+                          </AuthLifecycle>
                         </AppLockGate>
                         {/* /app-lock-gate */}
                       </ContextMenuProvider>
@@ -505,6 +547,7 @@ export default function RootLayout(): React.ReactElement {
             </ThemedShell>
           </PreferencesProvider>
         </ThemeProvider>
+        </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

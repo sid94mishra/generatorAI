@@ -65,12 +65,26 @@ export interface RestoreTurnResult {
   skipped: number;
 }
 
+/** What `onRestore` listeners are told. Paths are repo-relative. */
+export interface WorkspaceRestoreNotice {
+  workspaceId: string;
+  repoAlias: string;
+  restoredPaths: string[];
+  deletedPaths: string[];
+  /** The chat that owns the workspace, when one does. */
+  chatId?: string;
+}
+
 export class WorkspaceCheckpointService {
   /**
    * Debounce state for rolling `live` captures, keyed by workspace. Prevents
    * a write-heavy agent turn from producing hundreds of snapshots.
    */
   private readonly liveTimers = new Map<string, NodeJS.Timeout>();
+  /** When the oldest still-unserved live-capture request for a workspace arrived. */
+  private readonly liveWaitingSince = new Map<string, number>();
+  /** Longest a live capture may be put off by further activity. */
+  static readonly LIVE_MAX_WAIT_MS = 6_000;
   static readonly LIVE_DEBOUNCE_MS = 2_000;
 
   /**
@@ -120,6 +134,7 @@ export class WorkspaceCheckpointService {
     turnId: string,
     scope: CheckpointEventScope = {},
     phase: 'before' | 'after' = 'before',
+    options: { ancestorWorkspaceIds?: readonly string[] } = {},
   ): Promise<RestoreTurnResult> {
     const result: RestoreTurnResult = { mounts: [], restored: 0, deleted: 0, skipped: 0 };
     const workspace = await this.workspaceRepo.findById(workspaceId);
@@ -141,6 +156,50 @@ export class WorkspaceCheckpointService {
           .sort((a, b) => b.seq - a.seq)[0];
       }
       if (!target) {
+        // A forked chat owns its workspace but INHERITS its history: the turns
+        // before the fork ran in an ancestor's workspace, so their snapshots
+        // are recorded there. Rewinding the fork to one of them used to drop
+        // the conversation and leave every file as it was, saying nothing.
+        // A worktree fork shares its parent's git object database (and a
+        // copied generated mount carries the objects with it), so the
+        // ancestor's tree can be applied to THIS mount — as a revision
+        // restore, which still snapshots first and stays undoable.
+        const inherited = await this.inheritedTurnSnapshot(
+          options.ancestorWorkspaceIds ?? [],
+          turnId,
+          phase,
+          repo,
+        );
+        if (inherited) {
+          try {
+            const r = await this.checkpoints.restoreFromRevision(
+              workspaceId,
+              repo.alias,
+              repo.repoDir,
+              inherited.treeSha,
+              undefined,
+              inherited.label ?? 'before this message',
+            );
+            this.restoreListener?.(repo.repoDir);
+            result.restored += r.restoredPaths.length;
+            result.deleted += r.deletedPaths.length;
+            result.skipped += r.skipped.length;
+            result.mounts.push({
+              alias: repo.alias,
+              ok: true,
+              checkpointId: inherited.id,
+              restored: r.restoredPaths.length,
+              deleted: r.deletedPaths.length,
+              skipped: r.skipped.length,
+              preRestoreCheckpointId: r.preRestoreCheckpointId,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`[WorkspaceCheckpoints] restoreTurn ${turnId} (inherited) failed for ${repo.alias}: ${message}`);
+            result.mounts.push({ alias: repo.alias, ok: false, checkpointId: inherited.id, error: message });
+          }
+          continue;
+        }
         result.mounts.push({ alias: repo.alias, ok: false, error: 'No snapshot for this turn' });
         continue;
       }
@@ -167,6 +226,34 @@ export class WorkspaceCheckpointService {
       }
     }
     return result;
+  }
+
+  /**
+   * The snapshot an ANCESTOR workspace took for `turnId` on the mount with
+   * this alias — nearest ancestor first — provided its tree is reachable from
+   * this mount's repository. Null when there is none, or when the objects are
+   * not here (a mount that was not forked from the ancestor's repository).
+   */
+  private async inheritedTurnSnapshot(
+    ancestorWorkspaceIds: readonly string[],
+    turnId: string,
+    phase: 'before' | 'after',
+    repo: { alias: string; repoDir: string },
+  ): Promise<CheckpointRecord | null> {
+    for (const ancestorId of ancestorWorkspaceIds) {
+      const all = await this.checkpoints.list({ workspaceId: ancestorId, limit: 5_000, excludeLive: true });
+      const exact = all.filter((c) => c.turnId === turnId && (c.phase ?? 'before') === phase);
+      if (exact.length === 0) continue;
+      const momentMs = Math.min(...exact.map((c) => c.createdAt.getTime()));
+      const candidate =
+        exact.find((c) => c.repoAlias === repo.alias) ??
+        all
+          .filter((c) => c.repoAlias === repo.alias && c.createdAt.getTime() <= momentMs)
+          .sort((a, b) => b.seq - a.seq)[0];
+      if (!candidate) continue;
+      if (await this.git.objectExists(repo.repoDir, candidate.treeSha).catch(() => false)) return candidate;
+    }
+    return null;
   }
 
   /**
@@ -281,10 +368,25 @@ export class WorkspaceCheckpointService {
     const existing = this.liveTimers.get(workspaceId);
     if (existing) clearTimeout(existing);
 
+    // A pure trailing debounce never fires while the agent keeps working — a
+    // tool call every second holds it off until the turn is over, which is
+    // exactly when a live diff stops being useful. So the wait is capped.
+    const now = Date.now();
+    const since = this.liveWaitingSince.get(workspaceId) ?? now;
+    this.liveWaitingSince.set(workspaceId, since);
+    const delay = Math.max(
+      0,
+      Math.min(
+        WorkspaceCheckpointService.LIVE_DEBOUNCE_MS,
+        since + WorkspaceCheckpointService.LIVE_MAX_WAIT_MS - now,
+      ),
+    );
+
     const timer = setTimeout(() => {
       this.liveTimers.delete(workspaceId);
+      this.liveWaitingSince.delete(workspaceId);
       void this.capture({ workspaceId, kind: 'live', ...provenance });
-    }, WorkspaceCheckpointService.LIVE_DEBOUNCE_MS);
+    }, delay);
 
     // Never hold the process open for a rolling snapshot.
     timer.unref?.();
@@ -298,6 +400,7 @@ export class WorkspaceCheckpointService {
       clearTimeout(existing);
       this.liveTimers.delete(workspaceId);
     }
+    this.liveWaitingSince.delete(workspaceId);
   }
 
   /**
@@ -347,6 +450,18 @@ export class WorkspaceCheckpointService {
   async forget(workspaceId: string): Promise<void> {
     this.cancelLiveCapture(workspaceId);
     await this.checkpoints.deleteWorkspace(workspaceId);
+  }
+
+  private readonly restoreListeners = new Set<(notice: WorkspaceRestoreNotice) => void>();
+
+  /**
+   * Be told whenever the user moves files back in time — a rewind, a
+   * checkpoint restore, "Undo" on a changed file. Every one of those paths
+   * ends in `announceRestore`, so this is the one place to listen.
+   */
+  onRestore(listener: (notice: WorkspaceRestoreNotice) => void): () => void {
+    this.restoreListeners.add(listener);
+    return () => { this.restoreListeners.delete(listener); };
   }
 
   /**
@@ -400,6 +515,25 @@ export class WorkspaceCheckpointService {
       },
       scope.sessionId,
     );
+    if (this.restoreListeners.size > 0 && result.restoredPaths.length + result.deletedPaths.length > 0) {
+      let chatId = scope.chatId;
+      if (!chatId) {
+        try {
+          const workspace = await this.workspaceRepo.findById(workspaceId);
+          if (workspace?.ownerType === 'chat' && workspace.ownerId) chatId = workspace.ownerId;
+        } catch { /* a notice is best effort */ }
+      }
+      const notice: WorkspaceRestoreNotice = {
+        workspaceId,
+        repoAlias,
+        restoredPaths: result.restoredPaths,
+        deletedPaths: result.deletedPaths,
+        ...(chatId ? { chatId } : {}),
+      };
+      for (const listener of this.restoreListeners) {
+        try { listener(notice); } catch { /* a listener must not break a restore */ }
+      }
+    }
   }
 
   // ── Events ──────────────────────────────────────────────────

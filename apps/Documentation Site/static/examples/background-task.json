@@ -1,0 +1,11 @@
+{
+  "taskName": "Review URL compatibility",
+  "objective": "Inspect priority-filter URL parsing and report compatibility regressions with file references.",
+  "context": "A new priority filter must preserve existing bookmarked issue URLs.",
+  "boundaries": "Read only. Do not edit files, install dependencies, commit, or push.",
+  "sharedWorkspace": true,
+  "budget": {
+    "maxTokens": 8000,
+    "maxToolCalls": 30
+  }
+}

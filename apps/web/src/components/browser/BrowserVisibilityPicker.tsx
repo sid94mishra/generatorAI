@@ -11,6 +11,7 @@
 import { Eye, EyeOff, Ban, Code2 } from 'lucide-react';
 import { Input, Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 export type BrowserVisibility = 'visible' | 'headless' | 'off';
 
@@ -132,12 +133,11 @@ export function BrowserVisibilityPicker({
         className="flex items-center gap-2 rounded-md border border-[var(--color-input)] px-2.5 py-2 text-[11.5px] text-[var(--color-foreground)]"
         title="Allows the LLM to execute arbitrary Playwright code via run_playwright_code. Off by default."
       >
-        <input
-          type="checkbox"
+        <Checkbox
           data-testid="browser-eval-allowed"
           checked={value.evalAllowed === true}
-          onChange={(e) => onChange({ ...value, evalAllowed: e.target.checked })}
-          className="h-3.5 w-3.5 rounded border-[var(--color-input)]"
+          onCheckedChange={(v) => onChange({ ...value, evalAllowed: v === true })}
+          className="h-3.5 w-3.5"
         />
         <Code2 className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" />
         <span className="font-medium">Allow run_playwright_code</span>

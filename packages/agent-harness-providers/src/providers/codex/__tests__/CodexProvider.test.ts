@@ -702,6 +702,20 @@ describe('CodexProvider — integration parity with the other providers', () => 
     expect(warn).toContainEqual(expect.objectContaining({ params: expect.objectContaining({ field: 'mcpServers.legacy' }) }));
   }, 20_000);
 
+  it('makes non-image attachment paths visible in the actual turn input', async () => {
+    const provider = await started();
+    await provider.createConversation(CONV('attachment'));
+    const response = await provider.sendPromptAndWait('attachment', 'ECHO_PARAMS', [
+      { type: 'file', path: '/uploads/audit-checklist.txt', displayName: 'audit-checklist.txt' },
+      { type: 'file', path: '/uploads/screen.png', displayName: 'screen.png' },
+    ]);
+    const echoed = JSON.parse(response.content) as { turn: { input: Array<Record<string, unknown>> } };
+    expect(echoed.turn.input).toContainEqual(expect.objectContaining({
+      type: 'text', text: expect.stringContaining('/uploads/audit-checklist.txt'),
+    }));
+    expect(echoed.turn.input).toContainEqual({ type: 'localImage', path: '/uploads/screen.png' });
+  }, 20_000);
+
   it("routes approvals to the conversation's own permission handler", async () => {
     const p = await started({ env: { FAKE_CODEX_APPROVAL: '1' }, rpcTimeoutMs: 3_000 });
     const asked: string[] = [];

@@ -17,7 +17,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Modal, StyleSheet, Text, View, useWindowDimensions, type LayoutChangeEvent } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -281,7 +281,9 @@ export function ImageLightbox({
       onRequestClose={onClose}
       accessibilityViewIsModal
     >
-      <View style={styles.backdrop}>
+      {/* Its own gesture root: a Modal is a separate window on Android, where
+          pinch and pan would otherwise never reach the detector (see Sheet). */}
+      <GestureHandlerRootView style={styles.backdrop}>
         <GestureDetector gesture={gesture}>
           <Animated.Image
             source={{ uri: image.src }}
@@ -303,7 +305,7 @@ export function ImageLightbox({
             </Text>
           </View>
         ) : null}
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

@@ -47,7 +47,7 @@ import {
   type PendingConsent,
 } from './computerModel';
 
-/** Shared with SessionPanes, which polls it for the strip's live dot. */
+/** Shared with `useWorkbench`, which polls it for the Computer tool's live dot. */
 export function computerConsentKey(workspaceId: string | null): readonly unknown[] {
   return ['workspaces', workspaceId, 'computer', 'consent'] as const;
 }

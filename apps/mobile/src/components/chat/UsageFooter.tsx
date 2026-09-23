@@ -46,7 +46,7 @@ export function UsageFooter({
       haptic="tap"
       scale="large"
       onPress={() => setExpanded((v) => !v)}
-      className={`self-start rounded-2xl px-3 py-2 ${hint ? 'border border-warning bg-warning-muted' : 'bg-subtle'}`}
+      className={`self-start rounded-2xl px-3 py-2 ${hint ? 'border border-warning bg-warning-muted' : 'bg-control'}`}
     >
       {/* Collapsed, this says the three things that are read: which model,
           how long, what it cost. The arrows-and-lightning token line needed a

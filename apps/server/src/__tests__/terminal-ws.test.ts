@@ -83,7 +83,7 @@ async function startServer(
 ): Promise<{ server: http.Server; url: string }> {
   const server = http.createServer();
   attachTerminalWebSocket(server, fakeContainer(terminalService));
-  await new Promise<void>((resolve) => server.listen(0, resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
   return {

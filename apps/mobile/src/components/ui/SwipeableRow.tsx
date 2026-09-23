@@ -32,6 +32,7 @@ import Animated, {
 
 import { SPRING_SWIPE } from './motion';
 import { haptics } from './haptics';
+import { DRAWER_EDGE_HIT_SLOP } from './SidePanel';
 import { MAX_SCALE, useReduceMotion } from './accessibility';
 import { Touchable } from './Touchable';
 import type { Tone } from './primitives';
@@ -115,6 +116,8 @@ export function SwipeableRow({
         // vertical scroll the moment a finger drifts a pixel sideways.
         .activeOffsetX([-12, 12])
         .failOffsetY([-8, 8])
+        // The left edge strip opens the navigation drawer, not the row.
+        .hitSlop(DRAWER_EDGE_HIT_SLOP)
         .enabled(enabled && actions.length > 0)
         .onBegin(() => {
           startX.value = translateX.value;

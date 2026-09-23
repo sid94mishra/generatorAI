@@ -1,0 +1,91 @@
+{
+  "url": "/chats/466b7da8-9a33-412d-a3e7-ca746a2143af",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Add safe concurrent release mutations",
+    "Add safe concurrent release mutations",
+    "Goal",
+    "Approach",
+    "Changes",
+    "Risks & edge cases",
+    "Verification",
+    "Atlas Release Console",
+    "Run",
+    "Test",
+    "Architecture",
+    "REST API",
+    "Concurrency and compatibility",
+    "409 conflict fields",
+    "Workflow"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "flex-1 overflow-y-auto px-4 py-4",
+      "h": 263,
+      "scroll": 6190,
+      "rect": {
+        "x": 240,
+        "y": 80,
+        "w": 714
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "max-h-56 overflow-y-auto border-t border-border/60 px-1.5 py-1",
+      "h": 223,
+      "scroll": 423,
+      "rect": {
+        "x": 257,
+        "y": 387.5,
+        "w": 680
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "",
+      "h": 484,
+      "scroll": 516,
+      "rect": {
+        "x": 961,
+        "y": 316.5,
+        "w": 319
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "min-h-0 flex-1 overflow-y-auto",
+      "h": 628,
+      "scroll": 1943,
+      "rect": {
+        "x": 961,
+        "y": 172,
+        "w": 319
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "DIV",
+      "classes": "min-h-0 flex-1 overflow-auto px-5 py-4",
+      "h": 643,
+      "scroll": 4696,
+      "rect": {
+        "x": 961,
+        "y": 157,
+        "w": 319
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

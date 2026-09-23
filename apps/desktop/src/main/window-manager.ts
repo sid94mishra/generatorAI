@@ -18,7 +18,7 @@ import {
 } from './platform';
 import type { DesktopCommand } from '../shared/ipc';
 import { IPC_EVENT } from '../shared/ipc';
-import { isAppOrigin, isExternalUrlAllowed } from './navigation-guard';
+import { appRouteOf, isAppOrigin, isExternalUrlAllowed } from './navigation-guard';
 import { hasUnsavedWork } from './unsaved-work';
 import { appWindowPermissionPolicy, installCspFloor, installPermissionPolicy } from './session-hardening';
 
@@ -208,7 +208,15 @@ export class WindowManager {
       // server: the same app, outside the shell, without the desktop bridge.
       // There is one window, so open it here instead.
       if (isAppOrigin(url, this.appUrl)) {
-        win.webContents.loadURL(url).catch((e) => log.warn('In-app popup navigation failed', e));
+        // An app ROUTE is opened the way every other in-app navigation is: as
+        // a route change inside the running page. `loadURL` reached the same
+        // screen by throwing the whole app away — open streams, unsent text,
+        // and every React cleanup, which is what left a native browser view
+        // stranded on screen (see `NativeBrowserHost.attachOwnerWindow`).
+        // Server resources (`/api/…`) are not routes, so they still load.
+        const route = appRouteOf(url);
+        if (route) this.navigateTo(route);
+        else win.webContents.loadURL(url).catch((e) => log.warn('In-app popup navigation failed', e));
         return { action: 'deny' };
       }
       this.openExternalSafely(url);

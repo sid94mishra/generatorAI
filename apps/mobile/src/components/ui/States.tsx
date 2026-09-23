@@ -91,7 +91,7 @@ function Frame({
 
   return (
     <View accessibilityLiveRegion={live} className="items-center gap-3 px-8 py-12">
-      <View className="h-14 w-14 items-center justify-center rounded-3xl bg-emphasis">{icon}</View>
+      <View className="h-14 w-14 items-center justify-center rounded-3xl bg-control">{icon}</View>
       <Text accessibilityRole="header" className="text-center text-lg font-semibold text-foreground">
         {title}
       </Text>

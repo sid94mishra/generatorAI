@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { keyboardOverlap } from '../components/ui/keyboardMath';
+import { androidKeyboardOverlap, keyboardOverlap } from '../components/ui/keyboardMath';
+
+describe('Android edge-to-edge overlap', () => {
+  it('includes the system bar RN subtracts from the IME event', () => {
+    expect(androidKeyboardOverlap(300, 24, false)).toBe(324);
+    expect(androidKeyboardOverlap(300, 0, false)).toBe(300);
+  });
+  it('does not lift hidden or already resized windows', () => {
+    expect(androidKeyboardOverlap(0, 24, false)).toBe(0);
+    expect(androidKeyboardOverlap(300, 24, true)).toBe(0);
+  });
+});
 
 describe('keyboardOverlap', () => {
   it('is the distance from the keyboard top to the window bottom when docked', () => {

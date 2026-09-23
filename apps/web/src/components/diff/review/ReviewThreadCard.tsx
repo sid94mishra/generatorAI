@@ -26,6 +26,7 @@ import {
 import { cn } from '@/lib/utils.js';
 import { Button, Spinner, Textarea } from '@/components/ui/index.js';
 import type { ReviewIntent, ReviewThread, ReviewThreadStatus } from '@/types/review.js';
+import { modEnterLabel } from '@/components/ui/Kbd.js';
 
 const STATUS_LABEL: Record<ReviewThreadStatus, { text: string; className: string }> = {
   draft: { text: 'Draft', className: 'bg-muted text-muted-foreground' },
@@ -242,7 +243,7 @@ export function ReviewThreadCard({
                           variant="ghost"
                           size="icon-sm"
                           aria-label="Save edit"
-                          title="Save (⌘↵)"
+                          title={`Save (${modEnterLabel()})`}
                           onClick={commitEdit}
                           className="mt-0.5 h-5 w-5 rounded hover:bg-accent"
                         >
@@ -319,7 +320,7 @@ export function ReviewThreadCard({
                     }}
                     rows={2}
                     autoFocus
-                    placeholder="Reply… (⌘↵ to send)"
+                    placeholder={`Reply… (${modEnterLabel()} to send)`}
                     aria-label="Reply"
                     className="min-w-0 flex-1 resize-none rounded border bg-transparent px-1.5 py-1 text-xs"
                   />

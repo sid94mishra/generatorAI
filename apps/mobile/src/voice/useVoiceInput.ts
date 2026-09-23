@@ -54,6 +54,11 @@ import { WAVEFORM_BARS } from './dictationCommit';
  * can be reasoned about together. 'paused' is the genuinely new one —
  * VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part C.4.
  */
+/** How long the server has to say `ready` after the socket is opened. */
+const READY_TIMEOUT_MS = 10_000;
+/** How long it has to return `final` after Stop (a long segment on a slow host). */
+const FINAL_TIMEOUT_MS = 30_000;
+
 export type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'paused' | 'transcribing' | 'error';
 
 export interface UseVoiceInputOptions {
@@ -102,6 +107,16 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
   cbRef.current = options;
 
   const socketRef = useRef<WebSocket | null>(null);
+  // A socket that never answers must not leave the composer on a spinner.
+  // Two waits have no natural end: the server's `ready` after we connect, and
+  // its `final` after we stop. When dictation is switched off on the server
+  // the upgrade is simply never answered — no open, no error, no close — and
+  // the pill sat on "Transcribing…" until the user cancelled by hand.
+  const watchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearWatchdog = useCallback(() => {
+    if (watchdog.current != null) clearTimeout(watchdog.current);
+    watchdog.current = null;
+  }, []);
   /** Gate for outgoing audio — flipped by pause()/resume() without teardown. */
   const sendingRef = useRef(false);
   /** Set by cancel(), so a late `final` frame is not applied to the draft. */
@@ -147,6 +162,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
   });
 
   const teardown = useCallback(() => {
+    clearWatchdog();
     sendingRef.current = false;
     try {
       stream.stop();
@@ -171,7 +187,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
       recordModeRef.current = false;
       void setAudioModeAsync(PLAYBACK_AUDIO_MODE).catch(() => undefined);
     }
-  }, [stream, resetLevels]);
+  }, [stream, resetLevels, clearWatchdog]);
 
   const fail = useCallback(
     (message: string) => {
@@ -208,6 +224,12 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
       const socket = new WebSocket(url);
       socket.binaryType = 'arraybuffer';
       socketRef.current = socket;
+      clearWatchdog();
+      watchdog.current = setTimeout(() => {
+        if (socketRef.current === socket) {
+          fail('The transcription service did not answer. Dictation may be switched off on your server.');
+        }
+      }, READY_TIMEOUT_MS);
 
       socket.onopen = () => {
         socket.send(JSON.stringify({ t: 'start' }));
@@ -223,6 +245,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
         }
         switch (frame.t) {
           case 'ready':
+            clearWatchdog();
             // The server, not our own start() call, is what moves us to
             // listening — same rule as the web hook.
             sendingRef.current = true;
@@ -270,7 +293,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
     } catch (err) {
       fail((err as Error).message);
     }
-  }, [supported, fail, socketUrl, stream, teardown]);
+  }, [supported, fail, socketUrl, stream, teardown, clearWatchdog]);
 
   const pause = useCallback(() => {
     if (status !== 'listening') return;
@@ -302,12 +325,19 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
     resetLevels();
     setStatus('transcribing');
     const socket = socketRef.current;
-    if (socket?.readyState === 1) socket.send(JSON.stringify({ t: 'stop' }));
-    else {
+    if (socket?.readyState === 1) {
+      socket.send(JSON.stringify({ t: 'stop' }));
+      clearWatchdog();
+      watchdog.current = setTimeout(() => {
+        if (socketRef.current === socket) {
+          fail('Transcription took too long. What was already added to your message is kept.');
+        }
+      }, FINAL_TIMEOUT_MS);
+    } else {
       teardown();
       setStatus('idle');
     }
-  }, [status, stream, teardown, resetLevels]);
+  }, [status, stream, teardown, resetLevels, clearWatchdog, fail]);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;

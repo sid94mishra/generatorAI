@@ -79,6 +79,8 @@ export function stripExecutionContext(
   return { variables: kept, dropped };
 }
 
+const UNREACHABLE_STAGE_MESSAGE = 'Skipped — no incoming edge or run condition was satisfied';
+
 export class WorkflowRunService {
   /** Track stage run IDs already processed to prevent duplicate handling */
   private processedStageRuns = new Set<string>();
@@ -640,6 +642,10 @@ export class WorkflowRunService {
       const newRunByDefId = new Map(newStageRuns.map((s) => [s.stageDefinitionId, s]));
       for (const sr of ancestorStageRuns) {
         if (sr.status !== 'completed' && sr.status !== 'skipped') continue;
+        // An unreachable successor may become reachable after its predecessor
+        // succeeds on retry. Re-evaluate it instead of freezing the old skip.
+        // Explicit operator/runtime skips retain their existing behavior.
+        if (sr.status === 'skipped' && sr.error === UNREACHABLE_STAGE_MESSAGE) continue;
         const newSr = newRunByDefId.get(sr.stageDefinitionId);
         if (!newSr) continue;
         await this.stageRunRepo.update(newSr.id, {
@@ -1476,7 +1482,7 @@ export class WorkflowRunService {
       if (!sr || sr.status !== 'pending') continue;
       await this.stageRunRepo.update(sr.id, {
         status: 'skipped',
-        error: 'Skipped — no incoming edge or run condition was satisfied',
+        error: UNREACHABLE_STAGE_MESSAGE,
         completedAt: new Date(),
       });
       sr.status = 'skipped';

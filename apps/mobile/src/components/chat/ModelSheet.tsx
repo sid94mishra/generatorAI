@@ -235,7 +235,7 @@ export function ModelSheet({
                   setTab(p.type);
                   setInfoId(null);
                 }}
-                className={`min-h-9 flex-row items-center gap-2 rounded-full border px-3 ${
+                className={`min-h-9 flex-row items-center gap-2 rounded-lg border px-3 ${
                   isActive ? 'border-primary bg-accent' : 'border-border bg-raised'
                 }`}
               >
@@ -331,7 +331,7 @@ function ModelRow({
             {model.name}
           </Text>
           {tokens ? (
-            <View className="rounded-md bg-emphasis px-1.5 py-0.5">
+            <View className="rounded-md bg-control px-1.5 py-0.5">
               <Text
                 maxFontSizeMultiplier={MAX_SCALE.chrome}
                 className="text-xs font-medium text-muted-foreground"

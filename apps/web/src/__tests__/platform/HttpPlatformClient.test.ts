@@ -61,6 +61,23 @@ describe('HttpPlatformClient', () => {
     resetMuxStreamForTests();
   });
 
+  it('sends orchestrated uploads and overrides in one request before execution', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ workflowRunId: 'r1' }, 201));
+    const skill = new File(['skill instructions'], 'review.md', { type: 'text/markdown' });
+    await client.startOrchestratedRun({
+      workflowDefinitionId: 'd1', stageOverrides: [{ stageIndex: 1, skip: true }],
+      uploads: { skills: [skill], prompts: [], agents: [] },
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    const init = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
+    const body = init?.body as FormData;
+    expect(JSON.parse(body.get('config') as string)).toEqual({
+      workflowDefinitionId: 'd1', stageOverrides: [{ stageIndex: 1, skip: true }],
+    });
+    expect((body.get('skills') as File).name).toBe('review.md');
+    expect(new Headers(init?.headers).has('content-type')).toBe(false);
+  });
+
   // ── Session CRUD ──
 
   it('createSession calls POST /api/sessions with JSON body', async () => {

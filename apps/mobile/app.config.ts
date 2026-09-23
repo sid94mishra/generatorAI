@@ -77,6 +77,13 @@ const config: ExpoConfig = {
   orientation: 'default',
   scheme: 'generatorai',
   userInterfaceStyle: 'automatic',
+  // The native root view's colour — what shows wherever React has not painted
+  // yet: the hand-over from the splash, a screen transition, the area behind
+  // the keyboard. Unset, it was the system background, so every launch
+  // flashed a full white frame between the dark splash and the dark app while
+  // the phone was in light mode. ThemedShell keeps it in step with the theme
+  // at runtime; this is the launch value, the splash colour.
+  backgroundColor: '#0d1117',
   // Same mark as the desktop app (apps/desktop/resources/icon.png).
   icon: './assets/icon.png',
   // No `newArchEnabled`: the New Architecture is unconditional from SDK 57,
@@ -159,8 +166,10 @@ const config: ExpoConfig = {
       'expo-splash-screen',
       // `image` is required on Android: the generated splash theme references
       // `@drawable/splashscreen_logo`, and without an image the resource is
-      // never emitted, so `processDebugResources` fails to link.
-      { backgroundColor: '#0d1117', image: './assets/icon.png', imageWidth: 96, resizeMode: 'contain' },
+      // never emitted, so `processDebugResources` fails to link. The image is
+      // the desktop sidebar's lightning-bolt mark (BrandMark), at the size
+      // desktop's own splash draws its logo.
+      { backgroundColor: '#0d1117', image: './assets/splash-mark.png', imageWidth: 72, resizeMode: 'contain' },
     ],
     [
       'expo-secure-store',
@@ -223,6 +232,9 @@ const config: ExpoConfig = {
     // app makes goes to a paired endpoint. SDK 57 dropped the
     // `android.usesCleartextTraffic` config key, hence a plugin.
     './plugins/withCleartextTraffic',
+    './plugins/withShadowNodeRaceFix',
+    // iOS 27 refuses to launch an app without the UIScene life cycle.
+    './plugins/withSceneLifecycle',
   ],
 
   experiments: {

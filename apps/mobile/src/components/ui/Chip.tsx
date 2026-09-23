@@ -17,10 +17,10 @@ import { Text, View } from 'react-native';
 import { ChevronDown, X } from 'lucide-react-native';
 
 import { Touchable } from './Touchable';
-import { MAX_SCALE } from './accessibility';
+import { MAX_SCALE, MIN_TARGET } from './accessibility';
 import { useTheme } from '../../theme/ThemeProvider';
 
-export type ChipTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
+export type ChipTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger' | 'tab';
 export type ChipSize = 'sm' | 'md';
 
 // Opacity modifiers (`bg-primary/15`) are avoided: the palette is delivered
@@ -28,8 +28,10 @@ export type ChipSize = 'sm' | 'md';
 // uses a real `-muted` token. Resting chips are tone-agnostic — colour only
 // appears once the chip is selected, which is the "quiet chrome" rule.
 const SELECTED_CONTAINER: Record<ChipTone, string> = {
-  neutral: 'border-emphasis bg-emphasis',
+  neutral: 'border-border bg-control-strong',
   accent: 'border-primary bg-accent',
+  // A chip used as a TAB: desktop's selected tab is solid primary.
+  tab: 'border-primary-emphasis bg-primary-emphasis',
   success: 'border-success bg-success-muted',
   warning: 'border-warning bg-warning-muted',
   danger: 'border-danger bg-danger-muted',
@@ -38,14 +40,15 @@ const SELECTED_CONTAINER: Record<ChipTone, string> = {
 const SELECTED_TEXT: Record<ChipTone, string> = {
   neutral: 'text-foreground',
   accent: 'text-primary',
+  tab: 'text-primary-foreground',
   success: 'text-success',
   warning: 'text-warning',
   danger: 'text-danger',
 };
 
 const SIZE_CONTAINER: Record<ChipSize, string> = {
-  sm: 'min-h-7 px-2 py-0.5 gap-1',
-  md: 'min-h-8 px-2.5 py-1 gap-1.5',
+  sm: 'min-h-7 px-2.5 py-0.5 gap-1',
+  md: 'h-[34px] px-3 gap-1.5',
 };
 
 const SIZE_TEXT: Record<ChipSize, string> = {
@@ -97,12 +100,14 @@ export function Chip({
   const { colors } = useTheme();
   const isSelected = selected ?? active;
 
-  const container = isSelected ? SELECTED_CONTAINER[tone] : 'border-border bg-raised';
+  const container = isSelected ? SELECTED_CONTAINER[tone] : 'border-border bg-transparent';
   const text = isSelected ? SELECTED_TEXT[tone] : 'text-muted-foreground';
   const iconColor = isSelected
     ? tone === 'accent'
       ? colors.primary
-      : tone === 'neutral'
+      : tone === 'tab'
+        ? colors['primary-foreground']
+        : tone === 'neutral'
         ? colors.foreground
         : colors[tone]
     : colors['muted-foreground'];
@@ -137,7 +142,7 @@ export function Chip({
   if (onRemove) {
     return (
       <View
-        className={`flex-row items-center self-start overflow-hidden rounded-full border ${container}`}
+        className={`flex-row items-center self-start overflow-hidden rounded-lg border ${container}`}
         style={maxWidth ? { maxWidth } : undefined}
       >
         <Touchable
@@ -149,6 +154,7 @@ export function Chip({
           ripple={false}
           scale="none"
           onPress={onPress}
+          style={{ minHeight: MIN_TARGET, minWidth: onPress ? MIN_TARGET : undefined }}
           className={`flex-1 flex-row items-center ${SIZE_CONTAINER[size]} pr-0`}
         >
           {body}
@@ -160,6 +166,7 @@ export function Chip({
           ripple={false}
           scale="none"
           onPress={onRemove}
+          style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET }}
           className={`items-center justify-center ${size === 'sm' ? 'px-1.5' : 'px-2'} self-stretch`}
         >
           <X size={size === 'sm' ? 12 : 14} color={iconColor} />
@@ -167,6 +174,22 @@ export function Chip({
       </View>
     );
   }
+
+  // The VISUAL chip is 28/34pt tall (Material 3's chip is 32dp, iOS's capsule
+  // controls sit in the same range); the TOUCH target around it is the full
+  // platform minimum. Sizing the pill itself to the target made every chip a
+  // 44pt lozenge — short labels ("Go", "C#") rendered as circles and a row of
+  // filters outweighed the content it filtered.
+  const pill = (
+    <View
+      className={`flex-row items-center rounded-lg border ${SIZE_CONTAINER[size]} ${iconOnly ? 'justify-center px-2' : ''} ${container}`}
+      style={maxWidth ? { maxWidth } : undefined}
+    >
+      {body}
+    </View>
+  );
+
+  if (!onPress) return pill;
 
   return (
     <Touchable
@@ -178,10 +201,10 @@ export function Chip({
       disabled={disabled}
       haptic="select"
       onPress={onPress}
-      className={`flex-row items-center rounded-full border ${SIZE_CONTAINER[size]} ${iconOnly ? 'justify-center px-2' : ''} ${container}`}
-      style={maxWidth ? { maxWidth } : undefined}
+      className="justify-center"
+      style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET }}
     >
-      {body}
+      {pill}
     </Touchable>
   );
 }
@@ -200,11 +223,11 @@ export function StaticChip({
   tone?: ChipTone;
   size?: ChipSize;
 }): React.ReactElement {
-  const container = tone === 'neutral' ? 'bg-subtle' : SELECTED_CONTAINER[tone];
+  const container = tone === 'neutral' ? 'bg-control' : SELECTED_CONTAINER[tone];
   const text = tone === 'neutral' ? 'text-muted-foreground' : SELECTED_TEXT[tone];
   return (
     <View
-      className={`flex-row items-center self-start rounded-full ${
+      className={`flex-row items-center self-start rounded-md ${
         size === 'sm' ? 'min-h-6 gap-1 px-2 py-0.5' : 'min-h-7 gap-1.5 px-2.5 py-0.5'
       } ${container}`}
     >

@@ -1,4 +1,6 @@
 // Shared types barrel
+export { HARNESS_PROVIDER_IDS, REASONING_EFFORTS } from './ProviderConfig.js';
+export type { HarnessProviderId, ReasoningEffort } from './ProviderConfig.js';
 export type {
   AgentEvent,
   AgentEventKind,

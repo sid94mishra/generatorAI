@@ -138,7 +138,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
               aria-label="Previous question"
               disabled={current === 0}
               onClick={() => setIndex(current - 1)}
-              className="h-auto rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
+              className="h-6 w-6 shrink-0 rounded p-0 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
@@ -151,7 +151,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
               aria-label="Next question"
               disabled={current >= total - 1}
               onClick={() => setIndex(current + 1)}
-              className="h-auto rounded p-0.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
+              className="h-6 w-6 shrink-0 rounded p-0 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
             >
               <ChevronRight className="h-3.5 w-3.5" />
             </Button>

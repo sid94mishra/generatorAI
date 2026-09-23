@@ -17,12 +17,13 @@
 import React, { useCallback, useState } from 'react';
 import { copyTextToClipboard } from '@/utils/copyToClipboard.js';
 import { useNavigate } from 'react-router-dom';
-import { Copy, GitFork, Loader2 } from 'lucide-react';
+import { Copy, GitFork } from 'lucide-react';
 import { toast } from '@/components/Toast.js';
 import { fetchChatTranscript, useForkChat } from '@/hooks/queries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
 import { ApiError } from '@/platform/apiFetch.js';
+import { Button, Spinner } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 
 interface MessageActionsProps {
@@ -42,7 +43,7 @@ const SYNTHETIC_NOTE =
   'The provider does not support native rewind; the model will receive a summary of the surviving conversation with your next message.';
 
 const BUTTON_CLASS =
-  'inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:cursor-not-allowed disabled:opacity-50';
+  'h-auto inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:cursor-not-allowed disabled:opacity-50';
 
 export function MessageActions({ chatId, turnId, alwaysVisible, className }: MessageActionsProps) {
   const navigate = useNavigate();
@@ -110,7 +111,7 @@ export function MessageActions({ chatId, turnId, alwaysVisible, className }: Mes
       )}
       data-testid="message-actions"
     >
-      <button
+      <Button variant="ghost"
         type="button"
         data-testid="copy-transcript-button"
         onClick={() => void copyTranscript()}
@@ -119,10 +120,10 @@ export function MessageActions({ chatId, turnId, alwaysVisible, className }: Mes
         aria-label="Copy transcript"
         className={BUTTON_CLASS}
       >
-        {copying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+        {copying ? <Spinner size="sm" /> : <Copy className="h-3.5 w-3.5" />}
         Copy transcript
-      </button>
-      <button
+      </Button>
+      <Button variant="ghost"
         type="button"
         data-testid="fork-button"
         onClick={forkFromHere}
@@ -132,12 +133,12 @@ export function MessageActions({ chatId, turnId, alwaysVisible, className }: Mes
         className={BUTTON_CLASS}
       >
         {fork.isPending ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Spinner size="sm" />
         ) : (
           <GitFork className="h-3.5 w-3.5" />
         )}
         Fork from here
-      </button>
+      </Button>
     </div>
   );
 }

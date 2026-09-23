@@ -1,0 +1,11 @@
+{
+  "descriptorId": "REPLACE_WITH_INSTALLED_DESCRIPTOR_ID",
+  "sessionId": "REPLACE_WITH_ACTIVE_SESSION_ID",
+  "surface": "widget",
+  "props": {
+    "title": "Review checklist"
+  },
+  "state": {
+    "items": []
+  }
+}

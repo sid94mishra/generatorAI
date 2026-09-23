@@ -45,8 +45,13 @@
       </div>
     </header>
 
-    <div class="body" id="bodyGrid">
-      <aside class="history-pane" id="historyPane" style="display:none;">
+    <nav class="compact-tabs seg" id="compactTabs" aria-label="Designer panels" hidden>
+      <button data-pane="canvas" aria-pressed="true">Design</button>
+      <button data-pane="history" aria-pressed="false">Versions</button>
+      <button data-pane="chat" aria-pressed="false">Activity</button>
+    </nav>
+    <div class="body" id="bodyGrid" data-active-pane="canvas">
+      <aside class="history-pane" id="historyPane" hidden>
         <div class="pane-header">Versions</div>
         <div class="pane-scroll" id="historyList"></div>
       </aside>
@@ -55,13 +60,13 @@
         <!-- populated by app.js: either the empty-state hero, or the toolbar + canvas -->
       </main>
 
-      <aside class="chat-pane" id="chatPane" style="display:none;">
+      <aside class="chat-pane" id="chatPane" hidden>
         <div class="pane-header">Activity</div>
         <div class="pane-scroll">
           <div id="activityList"></div>
         </div>
         <div class="feedback-box">
-          <textarea id="feedbackText" placeholder="What should change?"></textarea>
+          <textarea id="feedbackText" aria-label="Design feedback" placeholder="What should change?"></textarea>
           <button class="btn primary small" id="askBtn" style="justify-content:center;">Ask agent</button>
           <div class="hint">Sends this to the agent now, alongside a live preview of what you're looking at.</div>
         </div>

@@ -1,4 +1,4 @@
-// Live gate in-chat: Ask-me permission mode → file-writing prompt → in-chat Allow → Changes pane → Stop mid-turn.
+// Live gate in-chat: Ask-me permission mode → file-writing prompt → in-chat Allow → Changes tool → Stop mid-turn.
 import { launch, step, shot, summary, APP_URL, sleep } from './lib.mjs';
 const { ctx, page, consoleLog } = await launch();
 const body = async () => (await page.locator('body').innerText()).replace(/\s+/g, ' ');
@@ -27,7 +27,7 @@ try {
     return page.url();
   });
   await step('Turn options → Ask me', async () => {
-    await vis(/^turn setup/i).click();
+    await vis(/^turn options/i).click();
     await sleep(1000);
     await vis(/^ask me$/i).click();
     await sleep(800);
@@ -56,8 +56,8 @@ try {
     await shot(page, 'after-allow-final');
     return r.t.slice(0, 260);
   });
-  await step('Changes pane', async () => {
-    await vis(/^changes/i).click();
+  await step('Changes tool (via the tray above the composer)', async () => {
+    await vis(/^review changes/i).click();
     await sleep(2500);
     await shot(page, 'changes-pane');
     const t = await body();

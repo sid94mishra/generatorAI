@@ -52,7 +52,11 @@ export function selectChatView(stream: StreamState | undefined): ChatStreamView 
         : last.type === 'text'
           ? 'text'
           : 'other';
-  const gate = awaitsUserDecision(blocks);
+  // A retained stream can miss a resolution while its screen is unmounted.
+  // Completed/failed turns cannot keep the composer blocked by an old card;
+  // genuinely pending server interactions are independently seeded by REST.
+  const isLive = s.status === 'streaming' || s.status === 'thinking' || s.status === 'pending';
+  const gate = isLive ? awaitsUserDecision(blocks) : null;
   let gateBlock: ChatStreamView['gateBlock'] = null;
   if (gate === 'permission' || gate === 'question') {
     for (const b of blocks) {
@@ -78,7 +82,7 @@ export function selectChatView(stream: StreamState | undefined): ChatStreamView 
     lastBlock,
     gateBlock,
     gate,
-    isLive: s.status === 'streaming' || s.status === 'thinking' || s.status === 'pending',
+    isLive,
   };
 }
 

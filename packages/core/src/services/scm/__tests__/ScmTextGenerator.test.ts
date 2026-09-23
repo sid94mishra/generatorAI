@@ -220,6 +220,46 @@ describe('ScmTextGenerator', () => {
     expect(api.sendPromptAndWait).not.toHaveBeenCalled();
   });
 
+  it('writes with the chat\'s own model when Settings names none', async () => {
+    // "Generate" in a chat that is already talking to a model answered with
+    // the chat's NAME and a list of file paths, because no generation model
+    // had been picked in Settings → Source Control.
+    const { api, harness } = fakeHarness();
+    const gen = new ScmTextGenerator({
+      harness,
+      logger: silentLogger,
+      generation: () => ({ provider: null, model: null }),
+    });
+    const result = await gen.generateCommitMessage({
+      ...input,
+      fallbackGeneration: { provider: 'claude-agent', model: 'opus[1m]' },
+    });
+    expect(result).toMatchObject({ source: 'model', model: 'opus[1m]' });
+    const params = (api.createConversation.mock.calls as unknown as Array<
+      [Record<string, unknown>]
+    >)[0]![0];
+    expect(params['model']).toBe('opus[1m]');
+    expect(params['harnessType']).toBe('claude-agent');
+  });
+
+  it('prefers the configured model over the chat\'s', async () => {
+    const { api, harness } = fakeHarness();
+    const gen = new ScmTextGenerator({
+      harness,
+      logger: silentLogger,
+      generation: () => ({ provider: 'claude-agent', model: 'haiku' }),
+    });
+    const result = await gen.generateCommitMessage({
+      ...input,
+      fallbackGeneration: { provider: 'codex', model: 'gpt-5.6-sol' },
+    });
+    expect(result.model).toBe('haiku');
+    const params = (api.createConversation.mock.calls as unknown as Array<
+      [Record<string, unknown>]
+    >)[0]![0];
+    expect(params['harnessType']).toBe('claude-agent');
+  });
+
   it('uses the model reply and deletes the ephemeral conversation', async () => {
     const { api, harness } = fakeHarness();
     const gen = new ScmTextGenerator({

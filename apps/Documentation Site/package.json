@@ -1,0 +1,38 @@
+{
+  "name": "@generatorai/documentation-site",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node scripts/docusaurus.mjs start --host 127.0.0.1 --port 4317 --no-open",
+    "build": "npm run check && node scripts/docusaurus.mjs build",
+    "preview": "node scripts/docusaurus.mjs serve --host 127.0.0.1 --port 4317 --no-open",
+    "reference:generate": "node scripts/generate-reference.mjs",
+    "check": "node scripts/check-docs.mjs",
+    "test:browser": "node scripts/browser-test.mjs",
+    "check:scope": "node scripts/check-scope.mjs",
+    "theme:generate": "node scripts/generate-theme.mjs",
+    "configuration:generate": "node scripts/generate-configuration.mjs && node scripts/generate-examples.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@playwright/test": "1.58.2"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/preset-classic": "3.10.2",
+    "@easyops-cn/docusaurus-search-local": "0.55.3",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "clsx": "2.1.1",
+    "prism-react-renderer": "2.4.1"
+  },
+  "overrides": {
+    "serialize-javascript": "7.0.5",
+    "sockjs": {
+      "uuid": "11.1.1"
+    }
+  }
+}

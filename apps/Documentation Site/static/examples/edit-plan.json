@@ -1,0 +1,5 @@
+{
+  "content": "# Priority filter\n\nPreserve existing URLs. Add parsing, accessible controls, and regression tests.",
+  "expectedRevision": 1,
+  "summary": "Add compatibility and accessibility acceptance criteria."
+}

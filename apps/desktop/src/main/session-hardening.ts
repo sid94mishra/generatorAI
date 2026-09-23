@@ -38,6 +38,7 @@ export const DESKTOP_CSP = [
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data: blob:",
   "connect-src 'self'",
+  "frame-src 'self'",
   "frame-ancestors 'none'",
 ].join('; ');
 

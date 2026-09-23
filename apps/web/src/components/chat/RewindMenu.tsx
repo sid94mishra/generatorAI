@@ -14,7 +14,7 @@
 
 import React, { useCallback, useState } from 'react';
 import { History, Loader2 } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger, Tooltip } from '@/components/ui/index.js';
+import { Popover, PopoverContent, PopoverTrigger, Tooltip, Button } from '@/components/ui/index.js';
 import { toast } from '@/components/Toast.js';
 import { useRewindChat } from '@/hooks/queries.js';
 import { useRewindStore } from '@/stores/rewindStore.js';
@@ -117,7 +117,7 @@ export function RewindMenu({ chatId, turnId, workspaceId, canRewind, className }
   const disabled = !canRewind || rewind.isPending;
 
   const trigger = (
-    <button
+    <Button variant="unstyled"
       type="button"
       data-testid="rewind-button"
       disabled={disabled}
@@ -136,7 +136,7 @@ export function RewindMenu({ chatId, turnId, workspaceId, canRewind, className }
       ) : (
         <History className="h-3.5 w-3.5" />
       )}
-    </button>
+    </Button>
   );
 
   // A disabled trigger never opens the popover, so the reason has to be the
@@ -163,7 +163,7 @@ export function RewindMenu({ chatId, turnId, workspaceId, canRewind, className }
           Rewind to here
         </p>
         {OPTIONS.map((option) => (
-          <button
+          <Button variant="unstyled"
             key={option.scope}
             type="button"
             data-testid={`rewind-option-${option.scope}`}
@@ -176,7 +176,7 @@ export function RewindMenu({ chatId, turnId, workspaceId, canRewind, className }
             <span className="mt-0.5 block text-[11px] leading-snug text-[var(--color-muted-foreground)]">
               {option.help}
             </span>
-          </button>
+          </Button>
         ))}
       </PopoverContent>
     </Popover>

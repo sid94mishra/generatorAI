@@ -35,7 +35,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { WorkflowRunService } from './WorkflowRunService.js';
 import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
-import type { WorkflowPreprocessor } from './WorkflowPreprocessor.js';
+import { repositoryFromInputs, type WorkflowPreprocessor } from './WorkflowPreprocessor.js';
 import type { ResultValidator } from './ResultValidator.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
@@ -305,7 +305,10 @@ export class WorkflowOrchestrator {
    *  5. Validate results
    *  6. Cleanup
    */
-  async startOrchestratedRun(params: OrchestratedRunParams): Promise<OrchestratorContext> {
+  async startOrchestratedRun(
+    params: OrchestratedRunParams,
+    initializeUploads?: (runId: string) => Promise<void>,
+  ): Promise<OrchestratorContext> {
     const definition = await this.definitionService.getDefinition(params.workflowDefinitionId);
     const orchestratorConfig = definition.orchestratorConfig;
 
@@ -313,7 +316,14 @@ export class WorkflowOrchestrator {
     const gitRepos = orchestratorConfig?.gitRepositories ?? [];
 
     // Validate required codebases
-    if (orchestratorConfig?.requiresCodebase && gitRepos.length === 0 && !params.projectId) {
+    // A repository URL typed into the run form counts: the template's clone
+    // step clones it (see `repositoryFromInputs`).
+    if (
+      orchestratorConfig?.requiresCodebase &&
+      gitRepos.length === 0 &&
+      !params.projectId &&
+      !repositoryFromInputs('target', params.variables ?? {})
+    ) {
       throw new ValidationError(
         'This workflow requires at least one codebase. Please provide a git repository URL or link to a project.',
       );
@@ -326,6 +336,10 @@ export class WorkflowOrchestrator {
     const run = await this.workflowRunService.createRun({
       workflowDefinitionId: params.workflowDefinitionId,
       variables: params.variables,
+      // Tags the run with `__projectId`, which is how clients find a
+      // project's runs; without it a run started for a project was listed
+      // under no project at all.
+      ...(params.projectId ? { projectId: params.projectId } : {}),
     });
 
     // If projectId provided, store it on the run
@@ -339,7 +353,9 @@ export class WorkflowOrchestrator {
       workflowDefinitionId: params.workflowDefinitionId,
       clonedRepositories: {},
       featureBranches: {},
-      resolvedVariables: { ...params.variables },
+      // Saved back over the run's variables below, so it has to carry the
+      // project tag `createRun` added, or the run loses it again.
+      resolvedVariables: { ...params.variables, ...(params.projectId ? { __projectId: params.projectId } : {}) },
       preprocessingResults: [],
       postProcessingResults: [],
       stageValidationResults: [],
@@ -363,7 +379,7 @@ export class WorkflowOrchestrator {
 
     // Execute orchestration asynchronously
     const effectiveProjectId = params.projectId ?? definition.projectId;
-    this.executeOrchestration(run, definition, gitRepos, context, effectiveProjectId, params.selectedCodebases)
+    this.executeOrchestration(run, definition, gitRepos, context, effectiveProjectId, params.selectedCodebases, initializeUploads)
       .catch((error) => {
         const errorMsg = error instanceof Error ? error.message : String(error);
         this.logger.error(`[Orchestrator] Run ${run.id} failed: ${errorMsg}`);
@@ -422,6 +438,7 @@ export class WorkflowOrchestrator {
     context: OrchestratorContext,
     projectId?: string,
     selectedCodebases?: string[],
+    initializeUploads?: (runId: string) => Promise<void>,
   ): Promise<void> {
     const orchestratorConfig = definition.orchestratorConfig;
 
@@ -458,6 +475,10 @@ export class WorkflowOrchestrator {
       this.setSystemVariable(context, '__workflowRunId', run.id);
       this.setSystemVariable(context, '__artifactsDirectory', runArtifactsDir);
       this.logger.info(`[Orchestrator] Created per-run workspace: ${runWorkspaceDir}`);
+
+      // Run-specific files must arrive in the final workspace before hooks,
+      // project defaults, or skill discovery can consume them.
+      await initializeUploads?.(run.id);
 
       // ── Workflow Hook: on_run_start ──
       const hookCtx = this.buildWorkflowHookContext(run.id, definition.id, context);

@@ -8,8 +8,8 @@
 // the stream store — independent of the event log — which is how Claude /
 // ChatGPT reconstitute their widgets (fetch on load, not replay).
 //
-// `addWidget` de-dups by instanceId, so calling this alongside SSE replay
-// is safe (whichever arrives first wins; the other is a no-op merge).
+// Called after initial SSE replay: current metadata must win over persisted
+// render events, especially the desktop's ephemeral widget asset port.
 // ────────────────────────────────────────────────────────────────
 
 import { apiFetch } from '@/platform/apiFetch.js';

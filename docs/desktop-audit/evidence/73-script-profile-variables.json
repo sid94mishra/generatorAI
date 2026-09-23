@@ -1,0 +1,32 @@
+{
+  "url": "/scripts/e2e-feature-coverage",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "E2E Feature Coverage Workflow",
+    "Run Profiles",
+    "Stages (4)",
+    "Edges (4)"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "mx-auto max-w-4xl px-6 py-8 h-full overflow-y-auto",
+      "h": 720,
+      "scroll": 1044,
+      "rect": {
+        "x": 312,
+        "y": 80,
+        "w": 896
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

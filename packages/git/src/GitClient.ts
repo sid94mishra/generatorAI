@@ -380,7 +380,7 @@ export class GitClient implements IGitClient {
 
   /** Pull latest changes. */
   async pull(repoDir: string, branch?: string): Promise<void> {
-    const args = ['pull', 'origin'];
+    const args = [...(await this.remoteUrlArgs(repoDir, 'origin')), 'pull', 'origin'];
     if (branch) args.push(branch);
 
     const result = await this.runner.run('git', args, {
@@ -457,7 +457,7 @@ export class GitClient implements IGitClient {
 
   /** Push to origin (optionally a specific branch). */
   async push(repoDir: string, branch?: string): Promise<void> {
-    const pushArgs = ['push', 'origin'];
+    const pushArgs = [...(await this.remoteUrlArgs(repoDir, 'origin')), 'push', 'origin'];
     if (branch) pushArgs.push(branch);
 
     const result = await this.runner.run('git', pushArgs, {
@@ -841,6 +841,45 @@ export class GitClient implements IGitClient {
     }
   }
 
+  /**
+   * `-c url.<absolute>.insteadOf=<relative>` for a remote configured as a
+   * RELATIVE path, else nothing.
+   *
+   * Git resolves a relative remote URL against the process's working
+   * directory, not against the repository that declared it. In the user's own
+   * checkout the two coincide and `../origin.git` works. The app does its work
+   * in a linked worktree somewhere else entirely (under its data directory),
+   * where the same config line points at a directory that does not exist —
+   * every push, fetch and default-branch lookup failed with "'../origin.git'
+   * does not appear to be a git repository". The path is resolved against the
+   * MAIN worktree, where it was written, and handed to git for this one
+   * command; the repository's config is not touched.
+   */
+  private async remoteUrlArgs(repoDir: string, remote: string): Promise<string[]> {
+    const url = await this.getRemoteUrl(repoDir, remote);
+    if (!url || !/^\.{1,2}([\\/]|$)/.test(url)) return [];
+    try {
+      const common = await this.runner.run(
+        'git',
+        ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+        { cwd: repoDir, timeout: 5_000 },
+      );
+      if (common.exitCode !== 0) return [];
+      const commonDir = common.stdout.trim();
+      if (!commonDir) return [];
+      // `<main>/.git` for an ordinary repository; a bare one IS the base.
+      const base = path.basename(commonDir) === '.git' ? path.dirname(commonDir) : commonDir;
+      const absolute = path.resolve(base, url);
+      if (path.resolve(repoDir, url) === absolute) return []; // already right from here
+      // `insteadOf`, not `remote.<name>.url`: that key is multi-valued, so a
+      // `-c` value is ADDED to the configured one rather than replacing it, and
+      // git still tries the relative path (and pushes to both).
+      return ['-c', `url.${absolute}.insteadOf=${url}`];
+    } catch {
+      return [];
+    }
+  }
+
   // ── Private ──
 
   private extractRepoName(url: string): string {
@@ -906,7 +945,36 @@ export class GitClient implements IGitClient {
     }
   }
 
+  /** Tail of the work queued against each throwaway index file. */
+  private readonly indexQueues = new Map<string, Promise<unknown>>();
+
+  /**
+   * One snapshot at a time PER INDEX FILE.
+   *
+   * `git add` and `git write-tree` take `<index>.lock`. Checkpoints, the
+   * Changes summary and the live capture all snapshot the same working tree
+   * through the same throwaway index, from independent timers and requests —
+   * and whenever two overlapped, the loser died with "Unable to create
+   * '…/index.lock': File exists" and returned `null`. Its caller read that as
+   * "no tree": the Changes tab fell to "0 changes" in the middle of a turn and
+   * stayed there until something refetched. Queued, the second simply waits a
+   * few milliseconds for the first.
+   */
   async writeTreeFromWorktree(repoDir: string, indexFile: string, opts?: WriteTreeOptions): Promise<string | null> {
+    const previous = this.indexQueues.get(indexFile) ?? Promise.resolve();
+    const run = previous.then(
+      () => this.writeTreeFromWorktreeNow(repoDir, indexFile, opts),
+      () => this.writeTreeFromWorktreeNow(repoDir, indexFile, opts),
+    );
+    const tail = run.catch(() => undefined);
+    this.indexQueues.set(indexFile, tail);
+    void tail.then(() => {
+      if (this.indexQueues.get(indexFile) === tail) this.indexQueues.delete(indexFile);
+    });
+    return run;
+  }
+
+  private async writeTreeFromWorktreeNow(repoDir: string, indexFile: string, opts?: WriteTreeOptions): Promise<string | null> {
     try {
       await fs.mkdir(path.dirname(indexFile), { recursive: true });
 
@@ -1305,7 +1373,7 @@ export class GitClient implements IGitClient {
   // ══════════════════════════════════════════════════════════════
 
   async fetch(repoDir: string, remote = 'origin', ref?: string): Promise<void> {
-    const args = ['fetch', remote];
+    const args = [...(await this.remoteUrlArgs(repoDir, remote)), 'fetch', remote];
     if (ref) args.push(ref);
 
     const result = await this.runner.run('git', args, {
@@ -1350,7 +1418,7 @@ export class GitClient implements IGitClient {
     // 2. `remote show` — resolves the head even when the symbolic ref is
     //    missing, but contacts the remote.
     try {
-      const show = await this.runner.run('git', ['remote', 'show', remote], {
+      const show = await this.runner.run('git', [...(await this.remoteUrlArgs(repoDir, remote)), 'remote', 'show', remote], {
         cwd: repoDir,
         timeout: 30_000,
       });
@@ -1366,7 +1434,7 @@ export class GitClient implements IGitClient {
 
     // 3. Ask the remote directly for its symref.
     try {
-      const lsRemote = await this.runner.run('git', ['ls-remote', '--symref', remote, 'HEAD'], {
+      const lsRemote = await this.runner.run('git', [...(await this.remoteUrlArgs(repoDir, remote)), 'ls-remote', '--symref', remote, 'HEAD'], {
         cwd: repoDir,
         timeout: 30_000,
       });
@@ -1587,7 +1655,7 @@ export class GitClient implements IGitClient {
   }
 
   async pushSetUpstream(repoDir: string, remote: string, branch: string): Promise<void> {
-    const result = await this.runner.run('git', ['push', '-u', remote, branch], {
+    const result = await this.runner.run('git', [...(await this.remoteUrlArgs(repoDir, remote)), 'push', '-u', remote, branch], {
       cwd: repoDir,
       timeout: this.timeout,
     });

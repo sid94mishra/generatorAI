@@ -681,6 +681,37 @@ describe('WorkflowRunService', () => {
   // ── W23/X-24: retryRun gets a fresh workspace + inherits predecessor outputs ──
 
   describe('retryRun', () => {
+    it('preserves deliberate skips when retrying a different failed stage', async () => {
+      const run = await service.createRun({ workflowDefinitionId: DEF_ID });
+      const stages = await stageRunRepo.getByRunId(run.id);
+      await stageRunRepo.update(stages.find((s) => s.stageDefinitionId === 's-a')!.id, {
+        status: 'skipped', error: 'Skipped by runtime override',
+      });
+      await stageRunRepo.update(stages.find((s) => s.stageDefinitionId === 's-b')!.id, { status: 'failed' });
+      await runRepo.updateStatus(run.id, 'failed');
+      const retried = await service.retryRun(run.id);
+      const fresh = await stageRunRepo.getByRunId(retried.id);
+      expect(fresh.find((s) => s.stageDefinitionId === 's-a')!.status).toBe('skipped');
+    });
+
+    it('re-evaluates successors skipped because a failed predecessor made them unreachable', async () => {
+      const run = await service.createRun({ workflowDefinitionId: DEF_ID });
+      const stages = await stageRunRepo.getByRunId(run.id);
+      await stageRunRepo.update(stages.find((s) => s.stageDefinitionId === 's-a')!.id, { status: 'failed' });
+      await stageRunRepo.update(stages.find((s) => s.stageDefinitionId === 's-b')!.id, {
+        status: 'skipped', error: 'Skipped — no incoming edge or run condition was satisfied',
+      });
+      await runRepo.updateStatus(run.id, 'failed');
+      const retried = await service.retryRun(run.id);
+      const fresh = await stageRunRepo.getByRunId(retried.id);
+      expect(fresh.map((s) => s.status)).toEqual(['pending', 'pending']);
+      await service.startRun(retried.id);
+      const predecessor = fresh.find((s) => s.stageDefinitionId === 's-a')!;
+      await stageRunRepo.update(predecessor.id, { status: 'completed' });
+      await service.onStageCompleted(retried.id, predecessor.id);
+      expect(vi.mocked(stageExec.executeStage).mock.calls.some((c) => c[0].stageDefinitionId === 's-b')).toBe(true);
+    });
+
     it('gives the retry a fresh working directory and inherits predecessor outputs', async () => {
       const run = await service.createRun({ workflowDefinitionId: DEF_ID });
       // Simulate the ancestor having actually executed: dirty execution

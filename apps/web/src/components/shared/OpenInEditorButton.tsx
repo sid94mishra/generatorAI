@@ -148,7 +148,7 @@ export function OpenInEditorButton({ className }: { className?: string }) {
           data-testid="open-in-editor-primary"
           className="h-7 rounded-l-md rounded-r-none border border-r-0 border-border px-2 text-[11px] font-normal text-[var(--color-muted-foreground)] hover:bg-subtle hover:text-[var(--color-foreground)]"
         >
-          <span className="hidden sm:inline">{label}</span>
+          <span className="hidden @min-[800px]:inline">{label}</span>
         </Button>
       </Tooltip>
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>

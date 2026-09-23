@@ -276,7 +276,7 @@ export function ChangesSurface({
   const [bulkBusy, setBulkBusy] = useState<null | 'keep' | 'undo'>(null);
   /** Whether the "Kept (N)" group at the bottom is open. */
   const [showKept, setShowKept] = useState(false);
-  const { confirm, dialog: confirmDialog } = useConfirm();
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirm();
 
   const summaryQuery = useWorkspaceChangeSummary(workspaceId, {
     base,
@@ -479,6 +479,7 @@ export function ChangesSurface({
     anchorText: string;
     /** Viewport point to float the composer beside. */
     anchor: { x: number; y: number } | null;
+    editableLineCount?: number;
   } | null>(null);
   const [previewPrompt, setPreviewPrompt] = useState<string | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -942,7 +943,7 @@ export function ChangesSurface({
    * the rewind timeline.
    */
   const undoAll = useCallback(async () => {
-    const ok = await confirm({
+    const ok = await confirmAction({
       title: 'Undo all changes?',
       description:
         `This restores every changed file in this workspace to its base revision. ` +
@@ -963,7 +964,7 @@ export function ChangesSurface({
     } finally {
       setBulkBusy(null);
     }
-  }, [confirm, discardChanges, reportSkipped]);
+  }, [confirmAction, discardChanges, reportSkipped]);
 
   /**
    * Renders each file's header. Replaces the built-in one so the +/- counts
@@ -990,6 +991,9 @@ export function ChangesSurface({
       const displayPath = display(item.alias, item.path);
       const isActive = activePath === displayPath;
       const commentCount = openThreadCountByFile.get(item.id) ?? 0;
+      const commentSource = sources.find((source) => source.id === item.id);
+      const commentSide = commentSource?.newContents ? 'additions' : 'deletions';
+      const commentContent = commentSide === 'additions' ? commentSource?.newContents : commentSource?.oldContents;
       return (
         <div
           className={cn(
@@ -1153,6 +1157,28 @@ export function ChangesSurface({
                   : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100',
               )}
             >
+              {reviewEnabled && expanded && openable && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Comment on ${item.path}`}
+                  title="Comment on a line range"
+                  disabled={loading || !commentContent}
+                  className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (!commentContent) return;
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const range: DiffLineRange = { start: 1, end: 1, side: commentSide };
+                    setPendingSelection({
+                      file: item, range, anchorText: anchorTextFor(item.id, range),
+                      anchor: { x: rect.left, y: rect.bottom },
+                      editableLineCount: commentContent.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n').length,
+                    });
+                  }}
+                ><MessageSquare className="h-3 w-3" aria-hidden /></Button>
+              )}
               {isKept ? (
                 <Button
                   type="button"
@@ -1246,6 +1272,9 @@ export function ChangesSurface({
       multiMount,
       canOpenInEditor,
       openFileInEditor,
+      sources,
+      reviewEnabled,
+      anchorTextFor,
     ],
   );
 
@@ -1302,7 +1331,7 @@ export function ChangesSurface({
         />
 
         {(hiddenWorkspaceFiles > 0 || showWorkspaceFiles) && (
-          <button
+          <Button variant="unstyled"
             type="button"
             onClick={() => setShowWorkspaceFiles((v) => !v)}
             aria-pressed={showWorkspaceFiles}
@@ -1322,7 +1351,7 @@ export function ChangesSurface({
             {showWorkspaceFiles
               ? 'Hide workspace files'
               : `+${hiddenWorkspaceFiles} workspace ${hiddenWorkspaceFiles === 1 ? 'file' : 'files'}`}
-          </button>
+          </Button>
         )}
 
         {/* Bulk review. "Keep all" accepts every changed file at its current
@@ -1559,6 +1588,13 @@ export function ChangesSurface({
           anchorPreview={pendingSelection.anchorText}
           anchor={pendingSelection.anchor}
           busy={createThread.isPending}
+          {...(pendingSelection.editableLineCount ? {
+            lineCount: pendingSelection.editableLineCount,
+            onRangeChange: (start: number, end: number) => {
+              const range = { ...pendingSelection.range, start, end };
+              setPendingSelection({ ...pendingSelection, range, anchorText: anchorTextFor(pendingSelection.file.id, range) });
+            },
+          } : {})}
           onCancel={cancelPendingSelection}
           onSubmit={(body, intent) => void submitPendingComment(body, intent, false)}
           {...(reviewTarget
@@ -1852,4 +1888,3 @@ function IconButton({
     </Button>
   );
 }
-

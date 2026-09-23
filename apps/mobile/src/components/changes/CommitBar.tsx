@@ -73,6 +73,10 @@ export function CommitBar({
   const [flowOpen, setFlowOpen] = useState(false);
   const [result, setResult] = useState<ScmFlowResult | null>(null);
   const [conflicts, setConflicts] = useState<ScmFlowResult | null>(null);
+  // A merge left in progress from an earlier flow (the app was closed, or the
+  // flow ran on another device): resolvable from the repo's own state, as the
+  // desktop Changes tab does, without having to re-run a flow to be asked.
+  const [mergeSheet, setMergeSheet] = useState(false);
   const [form, setForm] = useState<ScmFlowForm | null>(null);
 
   const readiness = useQuery({
@@ -136,6 +140,7 @@ export function CommitBar({
     onSuccess: () => {
       invalidate();
       setConflicts(null);
+      setMergeSheet(false);
       toast({
         message: 'Asked the agent to resolve the conflicts. Review the changes, then Continue.',
         variant: 'info',
@@ -155,6 +160,7 @@ export function CommitBar({
       setResult(flowResult);
       invalidate();
       setConflicts(null);
+      setMergeSheet(false);
       report(flowResult);
     },
     onError: (err) => toast({ message: errorText(err, 'Could not finish the merge'), variant: 'danger' }),
@@ -165,6 +171,7 @@ export function CommitBar({
     onSuccess: () => {
       invalidate();
       setConflicts(null);
+      setMergeSheet(false);
       toast({ message: 'Merge aborted. Nothing was changed.', variant: 'info' });
     },
     onError: (err) => toast({ message: errorText(err, 'Could not abort the merge'), variant: 'danger' }),
@@ -212,6 +219,23 @@ export function CommitBar({
           </Text>
         ) : null}
 
+        {repo?.mergeInProgress ? (
+          <Touchable
+            testID="scm-merge-in-progress"
+            accessibilityRole="button"
+            accessibilityLabel={`Merge in progress, ${repo.conflictedFiles.length} conflicted ${repo.conflictedFiles.length === 1 ? 'file' : 'files'}. Resolve`}
+            haptic="tap"
+            onPress={() => setMergeSheet(true)}
+            className="min-h-11 flex-row items-center gap-2 rounded-2xl bg-danger-muted px-3"
+          >
+            <TriangleAlert size={14} color={colors.danger} />
+            <Text numberOfLines={1} className="flex-1 text-sm font-medium text-foreground">
+              Merge in progress · {repo.conflictedFiles.length} conflicted {repo.conflictedFiles.length === 1 ? 'file' : 'files'}
+            </Text>
+            <Text className="text-sm font-semibold text-primary">Resolve</Text>
+          </Touchable>
+        ) : null}
+
         {repo && !actionable ? (
           <View className="flex-row gap-2">
             <TriangleAlert size={13} color={colors.warning} />
@@ -253,6 +277,24 @@ export function CommitBar({
           busy={flow.isPending}
           result={result}
           onRun={(values) => flow.mutate(values)}
+        />
+      ) : null}
+
+      {mergeSheet && repo && !conflicts?.conflicts ? (
+        <ConflictSheet
+          visible
+          onClose={() => setMergeSheet(false)}
+          conflicts={{
+            base: repo.defaultBranch ?? 'main',
+            head: repo.branch ?? 'HEAD',
+            files: repo.conflictedFiles,
+            mergeStarted: true,
+          }}
+          chatId={chatId}
+          busy={askAgent.isPending || continueMerge.isPending || abortMerge.isPending}
+          onAskAgent={() => askAgent.mutate()}
+          onContinue={() => continueMerge.mutate()}
+          onAbort={() => abortMerge.mutate()}
         />
       ) : null}
 

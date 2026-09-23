@@ -33,6 +33,7 @@ const stageDuration = meter.createHistogram('workflow.stage.duration_ms', {
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
+import { workflowPromptAttachments } from './workflowPromptAttachments.js';
 
 /**
  * Short, stable digest used to key a durable operation on the CONTENT of a
@@ -369,8 +370,8 @@ export class StageExecutionService {
     variables: Record<string, unknown> | undefined,
   ): Promise<ResolvedAgentProjection> {
     const ref = stageDef.agentRef ?? workflowharnessConfig?.agentRef;
-    if (!ref && !stageDef.agentName) return AgentResolver.empty();
     if (!this.agentResolver) {
+      if (!ref && !stageDef.agentName) return AgentResolver.empty();
       // Fail loudly: silently running a stage without its agent's skills and
       // tool policy is worse than not running it.
       throw new StageExecutionError(
@@ -395,7 +396,7 @@ export class StageExecutionService {
       // `appendInstructions` in the concatenated instructions.
       ...(stageHarness ? { runtimeOverrides: stageHarness } : {}),
       ...(projectId ? { projectId } : {}),
-      harnessType: (sessionConfig['harnessType'] as 'copilot' | 'claude-agent' | undefined) ?? 'copilot',
+      harnessType: (sessionConfig['harnessType'] as HarnessConfig['harnessType']) ?? 'copilot',
       scope: 'stage',
     });
 
@@ -1451,11 +1452,10 @@ export class StageExecutionService {
           if (event.kind === 'harness.message_complete') {
             const data = event.data as { content?: string };
             if (data.content) {
-              // Keep the latest (longest) content — the final message_complete
-              // in the agentic loop contains the full accumulated text.
-              if (data.content.length > turnContent.length) {
-                turnContent = data.content;
-              }
+              // Completion is authoritative even when the final answer is
+              // shorter than commentary. Codex emits discrete segments;
+              // choosing by length can persist "I'll check" over the result.
+              turnContent = data.content;
             }
           }
 
@@ -1954,6 +1954,7 @@ export class StageExecutionService {
         // the one that spends money and writes to the workspace, and the one
         // that used to run again in full every time the process restarted.
         await runTurn(`prompt/${i}`, promptText, async () => {
+          const promptAttachments = await workflowPromptAttachments(variables?.['__promptDirectories']);
           // Save user prompt as chat message
           await this.messageRepo.create({
             id: generateId(),
@@ -2002,7 +2003,7 @@ export class StageExecutionService {
                   this.harness.sendPromptAndWait(
                     conversationId,
                     promptText,
-                    undefined,
+                    promptAttachments.length ? promptAttachments : undefined,
                     signal,
                     stageTurnOptions,
                   ),
@@ -2011,7 +2012,7 @@ export class StageExecutionService {
               await this.harness.sendPrompt(
                 conversationId,
                 promptText,
-                undefined,
+                promptAttachments.length ? promptAttachments : undefined,
                 stageTurnOptions,
               );
             }
@@ -2827,7 +2828,7 @@ export class StageExecutionService {
         }
         if (event.kind === 'harness.message_complete') {
           const data = event.data as { content?: string };
-          if (data.content && data.content.length > turnContent.length) {
+          if (data.content) {
             turnContent = data.content;
           }
         }
@@ -3055,7 +3056,7 @@ export class StageExecutionService {
         }
         if (event.kind === 'harness.message_complete') {
           const data = event.data as { content?: string };
-          if (data.content && data.content.length > turnContent.length) turnContent = data.content;
+          if (data.content) turnContent = data.content;
         }
         if (event.kind === 'harness.idle' && !assistantPersisted && turnContent.trim().length > 0) {
           assistantPersisted = true;

@@ -9,7 +9,7 @@
 
 import React from 'react';
 import { Text, View } from 'react-native';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronDown, ChevronRight } from 'lucide-react-native';
 import type { StageRunSummary } from '@generatorai/client-core';
 
 import { formatDuration, runElapsed } from './formatTime';
@@ -36,6 +36,9 @@ export function StageTimeline({
   busyStageId,
   onOpen,
   onAction,
+  expandedId = null,
+  onToggle,
+  renderExpanded,
 }: {
   stages: readonly StageRunSummary[];
   runStatus: string;
@@ -43,6 +46,13 @@ export function StageTimeline({
   busyStageId: string | null;
   onOpen: (stage: StageRunSummary) => void;
   onAction: (stage: StageRunSummary, action: keyof StageControls) => void;
+  /**
+   * Steps expand in place, one at a time (the desktop run page's behaviour).
+   * Without `onToggle` a tap opens the stage screen, as it always did.
+   */
+  expandedId?: string | null;
+  onToggle?: (stage: StageRunSummary) => void;
+  renderExpanded?: (stage: StageRunSummary) => React.ReactNode;
 }): React.ReactElement {
   const { colors } = useTheme();
 
@@ -56,13 +66,7 @@ export function StageTimeline({
         const quick = controls.retry ? 'retry' : controls.resume ? 'resume' : controls.wake ? 'wake' : null;
 
         return (
-          <Touchable
-            key={stage.id}
-            accessibilityLabel={`Stage ${index + 1}, ${stage.name ?? stage.stageDefinitionId}, ${statusLabel(stage.status)}`}
-            accessibilityHint="Opens the stage transcript and output"
-            haptic="tap"
-            onPress={() => onOpen(stage)}
-          >
+          <View key={stage.id}>
             <View className="flex-row gap-3 px-4">
               {/* Rail: connector above, glyph, connector below. */}
               <View className="w-7 items-center">
@@ -72,23 +76,37 @@ export function StageTimeline({
               </View>
 
               <View className={`flex-1 gap-1 pb-3.5 pt-3.5 ${last ? '' : 'border-b border-border-muted'}`}>
-                <View className="min-h-7 flex-row items-center gap-2">
-                  <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
-                    {stage.name ?? stage.stageDefinitionId}
+                <Touchable
+                  accessibilityLabel={`Stage ${index + 1}, ${stage.name ?? stage.stageDefinitionId}, ${statusLabel(stage.status)}`}
+                  accessibilityHint={onToggle ? 'Shows what this stage is doing' : 'Opens the stage transcript and output'}
+                  {...(onToggle ? { accessibilityState: { expanded: expandedId === stage.id } } : {})}
+                  haptic="tap"
+                  onPress={() => (onToggle ? onToggle(stage) : onOpen(stage))}
+                  className="min-h-12 gap-1"
+                >
+                  <View className="min-h-7 flex-row items-center gap-2">
+                    <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
+                      {stage.name ?? stage.stageDefinitionId}
+                    </Text>
+                    {elapsed != null ? (
+                      <Text className="text-sm text-muted-foreground">{formatDuration(elapsed)}</Text>
+                    ) : null}
+                    {onToggle && expandedId === stage.id ? (
+                      <ChevronDown size={16} color={colors['muted-foreground']} />
+                    ) : (
+                      <ChevronRight size={16} color={colors['muted-foreground']} />
+                    )}
+                  </View>
+                  <Text numberOfLines={1} className="text-sm text-muted-foreground">
+                    {stageSubtitle(stage)}
                   </Text>
-                  {elapsed != null ? (
-                    <Text className="text-sm text-muted-foreground">{formatDuration(elapsed)}</Text>
+                  {stage.error ? (
+                    <Text numberOfLines={3} className="text-sm text-danger">
+                      {stage.error}
+                    </Text>
                   ) : null}
-                  <ChevronRight size={16} color={colors['muted-foreground']} />
-                </View>
-                <Text numberOfLines={1} className="text-sm text-muted-foreground">
-                  {stageSubtitle(stage)}
-                </Text>
-                {stage.error ? (
-                  <Text numberOfLines={3} className="text-sm text-danger">
-                    {stage.error}
-                  </Text>
-                ) : null}
+                </Touchable>
+                {expandedId === stage.id && renderExpanded ? renderExpanded(stage) : null}
                 {quick && canControl ? (
                   <View className="pt-1">
                     <Button
@@ -104,7 +122,7 @@ export function StageTimeline({
                 ) : null}
               </View>
             </View>
-          </Touchable>
+          </View>
         );
       })}
     </View>

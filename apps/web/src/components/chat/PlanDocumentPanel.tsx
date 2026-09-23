@@ -442,9 +442,12 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
               onClick={() => void handleDecision(true, 'exit_only')}
               title="Exit plan mode without implementing"
               aria-label="Discard plan"
-              className="h-8 w-8 items-center justify-center rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+              // `p-0` + `shrink-0`: the default button padding left a 32px
+              // square with a 4px content box, and the icon was squeezed into
+              // it — the control rendered as a single grey dot.
+              className="h-8 w-8 shrink-0 items-center justify-center rounded-md p-0 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
             >
-              <CircleSlash className="h-3.5 w-3.5" />
+              <CircleSlash className="h-3.5 w-3.5 shrink-0" />
             </Button>
           </div>
         </div>

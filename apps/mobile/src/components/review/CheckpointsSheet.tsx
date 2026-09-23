@@ -173,7 +173,7 @@ export function CheckpointsSheet({
             />
           ) : null}
           {!restoreCap.available ? (
-            <View className="mx-4 mt-3 rounded-xl bg-subtle px-3 py-2">
+            <View className="mx-4 mt-3 rounded-xl bg-control px-3 py-2">
               <Text className="text-xs text-muted-foreground">{restoreCap.reason}</Text>
             </View>
           ) : null}

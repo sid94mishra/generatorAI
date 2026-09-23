@@ -711,6 +711,104 @@ export class MountService {
 
   // ── Read ────────────────────────────────────────────────────
 
+  // ── Forking a chat's workspace ─────────────────────────────────
+  //
+  // A fork used to SHARE its parent's workspace. Two chats then edited one set
+  // of files: "Undo all" in the fork reverted the parent's work, each one's
+  // checkpoints rewound the other, and deleting the parent deleted the
+  // workspace out from under the fork. A fork now gets a workspace of its own
+  // that STARTS as a copy of the parent's:
+  //
+  //   worktree  → a new worktree on a new branch cut from the parent's HEAD
+  //               commit (so everything the parent committed is there), then
+  //               the parent's uncommitted files laid over it (`seedFrom`).
+  //   generated → a new managed directory with the parent's files copied in.
+  //   in-place  → still the user's own folder. That mode means "edit it where
+  //               it lives", and there is only one of it to edit.
+
+  /**
+   * The sources a fork of `parentWorkspaceId` should be created with: the
+   * parent's own, with every worktree re-pointed at a NEW branch that starts
+   * from the commit the parent's worktree is on right now.
+   */
+  async sourcesForFork(parentWorkspaceId: string, sources: ChatSourceSpec[]): Promise<ChatSourceSpec[]> {
+    const mounts = await this.list(parentWorkspaceId);
+    const out: ChatSourceSpec[] = [];
+    for (const spec of sources) {
+      const mount = mounts.find((m) =>
+        spec.kind === 'codebase'
+          ? m.codebaseId === spec.codebaseId || (!!spec.alias && m.alias === spec.alias)
+          : (!!m.originPath && path.resolve(m.originPath) === path.resolve(spec.path)) ||
+            (!!spec.alias && m.alias === spec.alias),
+      );
+      if (!mount || mount.mode !== 'worktree' || !mount.git?.isRepo) {
+        out.push(spec);
+        continue;
+      }
+      const head = await this.deps.git.revParse(mount.path, 'HEAD').catch(() => null);
+      // `branch` / `newBranch` dropped on purpose: the parent holds its branch
+      // (a branch lives in one worktree), and the default name is derived from
+      // the fork's own title.
+      const { branch: _branch, newBranch: _newBranch, baseRef: _baseRef, ...rest } = spec;
+      out.push({
+        ...rest,
+        mode: 'worktree',
+        alias: mount.alias,
+        ...(head ? { baseRef: head } : mount.git.branch ? { baseRef: mount.git.branch } : {}),
+      } as ChatSourceSpec);
+    }
+    return out;
+  }
+
+  /**
+   * Make a freshly prepared fork workspace look like its parent's working
+   * tree. Best effort per file: one unreadable file must not cost the fork the
+   * rest. Returns how many paths were brought across.
+   */
+  async seedFrom(parentWorkspaceId: string, childWorkspaceId: string): Promise<number> {
+    const [parents, children] = await Promise.all([this.list(parentWorkspaceId), this.list(childWorkspaceId)]);
+    let copied = 0;
+    for (const child of children) {
+      const parent = parents.find((m) => m.alias === child.alias);
+      if (!parent || child.mode === 'in-place' || path.resolve(parent.path) === path.resolve(child.path)) continue;
+
+      if (child.mode === 'generated') {
+        try {
+          await fs.cp(parent.path, child.path, {
+            recursive: true,
+            force: true,
+            // Dependencies are rebuilt, not copied: they are the bulk of the
+            // bytes and none of the work.
+            filter: (src) => path.basename(src) !== 'node_modules',
+          });
+          copied += 1;
+        } catch (err) {
+          this.deps.logger.warn(`[Mounts] fork: could not copy ${parent.path} → ${child.path}: ${String(err)}`);
+        }
+        continue;
+      }
+
+      // Worktree: the branch already carries what was committed; bring over
+      // exactly what `git status` says differs from it.
+      for (const entry of await this.deps.git.changedFilesSummary(parent.path)) {
+        const to = path.join(child.path, entry.path);
+        try {
+          if (entry.oldPath) await fs.rm(path.join(child.path, entry.oldPath), { force: true });
+          if (entry.code === 'D') {
+            await fs.rm(to, { force: true });
+          } else {
+            await fs.mkdir(path.dirname(to), { recursive: true });
+            await fs.copyFile(path.join(parent.path, entry.path), to);
+          }
+          copied += 1;
+        } catch (err) {
+          this.deps.logger.warn(`[Mounts] fork: could not carry over ${entry.path}: ${String(err)}`);
+        }
+      }
+    }
+    return copied;
+  }
+
   async list(workspaceId: string): Promise<WorkspaceMount[]> {
     return this.deps.mountRepo.findByWorkspace(workspaceId);
   }

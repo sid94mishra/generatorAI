@@ -3,6 +3,7 @@
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 import { fileURLToPath } from 'node:url';
 // Resolve playwright-core from the monorepo root, wherever the repo lives.
@@ -11,10 +12,11 @@ const { chromium, devices } = require('playwright-core');
 
 export const APP_URL = process.env.APP_URL ?? 'http://localhost:8081';
 export const SERVER_URL = process.env.SERVER_URL ?? 'http://127.0.0.1:3111';
-export const OUT = process.env.E2E_OUT ?? path.resolve(process.env.E2E_HOME ?? 'C:/gaimob', 'e2e/shots');
-export const PROFILE = process.env.E2E_PROFILE ?? path.resolve(process.env.E2E_HOME ?? 'C:/gaimob', 'profile');
+const E2E_HOME = process.env.E2E_HOME ?? path.join(os.tmpdir(), 'generatorai-mobile-e2e');
+export const OUT = process.env.E2E_OUT ?? path.resolve(E2E_HOME, 'e2e/shots');
+export const PROFILE = process.env.E2E_PROFILE ?? path.resolve(E2E_HOME, 'profile');
 // Playwright's bundled Chromium (the installed Chrome may refuse remote debugging under policy).
-const CHROME = process.env.E2E_CHROME ?? 'C:/Users/sidmishra/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe';
+const CHROME = process.env.E2E_CHROME; // Otherwise use Playwright's installed Chromium.
 
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -49,7 +51,7 @@ export async function shot(page, name) {
 export async function launch({ fresh = false, viewport } = {}) {
   if (fresh) fs.rmSync(PROFILE, { recursive: true, force: true });
   const ctx = await chromium.launchPersistentContext(PROFILE, {
-    executablePath: CHROME,
+    ...(CHROME ? { executablePath: CHROME } : {}),
     headless: true,
     viewport: viewport ?? { width: 393, height: 852 },
     deviceScaleFactor: 3,
@@ -59,6 +61,9 @@ export async function launch({ fresh = false, viewport } = {}) {
     args: ['--disable-gpu', '--no-first-run'],
   });
   const page = ctx.pages()[0] ?? (await ctx.newPage());
+  // A cold Metro build on a development laptop can exceed Playwright's
+  // navigation default. This does not relax the assertions on loaded UI.
+  page.setDefaultNavigationTimeout(90_000);
   const console_ = [];
   page.on('console', (m) => {
     const t = m.type();
@@ -78,7 +83,7 @@ export function summary() {
 export function pairingUrl() {
   if (process.env.PAIR_URL) return process.env.PAIR_URL;
   if (process.env.PAIR_FILE) return fs.readFileSync(process.env.PAIR_FILE, 'utf8').trim();
-  const j = JSON.parse(fs.readFileSync(path.resolve(process.env.E2E_HOME ?? 'C:/gaimob', 'data/bootstrap-pairing.json'), 'utf8'));
+  const j = JSON.parse(fs.readFileSync(path.resolve(E2E_HOME, 'data/bootstrap-pairing.json'), 'utf8'));
   return j.pairingUrl;
 }
 

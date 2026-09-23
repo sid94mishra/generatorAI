@@ -1,0 +1,29 @@
+{
+  "url": "/workflows/19f45d3c-32e0-4932-917a-6138ebc8f129/runs/02a04f2f-7be2-47d4-a9c7-e68225f07b72",
+  "viewport": {
+    "w": 860,
+    "h": 560,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "E2E Feature Coverage Workflow"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "max-h-[300px] overflow-y-auto overflow-x-hidden p-1",
+      "h": 300,
+      "scroll": 424,
+      "rect": {
+        "x": 111,
+        "y": 133.5,
+        "w": 638
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

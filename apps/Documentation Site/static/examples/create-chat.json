@@ -1,0 +1,24 @@
+{
+  "name": "Issue tracker — design review",
+  "sources": [
+    {
+      "kind": "folder",
+      "path": "/path/to/trial-repository",
+      "mode": "in-place",
+      "alias": "app"
+    }
+  ],
+  "primary": "app",
+  "defaultAgentMode": "plan",
+  "permissionMode": "default",
+  "harnessConfig": {
+    "harnessType": "codex",
+    "reasoningEffort": "high"
+  },
+  "tags": [
+    "documentation-example"
+  ],
+  "browserConfig": {
+    "enabled": false
+  }
+}

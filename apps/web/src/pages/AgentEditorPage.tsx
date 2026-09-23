@@ -34,6 +34,8 @@ import {
   useResolveAgentPreview,
   useSelectableAgents,
 } from '@/hooks/agentQueries.js';
+import { PROVIDERS } from '@/components/shared/ModelPicker.js';
+import { REASONING_EFFORTS } from '@generatorai/shared';
 import { useModels } from '@/hooks/queries.js';
 import { useProjects } from '@/hooks/projectQueries.js';
 import {
@@ -408,6 +410,12 @@ export function AgentEditorPage() {
     { value: '', label: 'Inherit from the binding site' },
     ...(models ?? []).map((m) => ({ value: m.id, label: m.name, description: m.provider })),
   ];
+  const runtimeModelOptions = [
+    { value: '', label: 'Inherit from the binding site' },
+    ...(models ?? []).filter((model) =>
+      !form.runtime.harnessType || model.provider === form.runtime.harnessType)
+      .map((model) => ({ value: model.id, label: model.name, description: model.provider })),
+  ];
 
   const teamCandidates = (selectableAgents ?? []).filter(
     (a) => a.role === 'agent' && a.enabled && a.ref !== `${form.scope}:${effectiveSlug}`,
@@ -740,7 +748,7 @@ export function AgentEditorPage() {
                   ],
                 ] as const
               ).map(([value, label, hint, Icon]) => (
-                <button
+                <Button variant="unstyled"
                   key={value}
                   type="button"
                   disabled={readOnly}
@@ -759,7 +767,7 @@ export function AgentEditorPage() {
                     {label}
                   </div>
                   <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{hint}</p>
-                </button>
+                </Button>
               ))}
             </div>
           </SectionCard>
@@ -933,14 +941,16 @@ export function AgentEditorPage() {
                     patch({
                       runtime: {
                         ...form.runtime,
-                        harnessType: (v || undefined) as 'copilot' | 'claude-agent' | undefined,
+                        harnessType: (v || undefined) as AgentRuntimePolicy['harnessType'],
+                        model: v && models?.find((model) => model.id === form.runtime.model)?.provider !== v
+                          ? undefined
+                          : form.runtime.model,
                       },
                     })
                   }
                   options={[
                     { value: '', label: 'Any provider' },
-                    { value: 'copilot', label: 'GitHub Copilot' },
-                    { value: 'claude-agent', label: 'Claude Agent' },
+                    ...PROVIDERS.map(({ id, label }) => ({ value: id, label })),
                   ]}
                 />
               </Field>
@@ -950,7 +960,7 @@ export function AgentEditorPage() {
                   value={form.runtime.model ?? ''}
                   disabled={readOnly}
                   onChange={(v) => patch({ runtime: { ...form.runtime, model: v || undefined } })}
-                  options={modelOptions}
+                  options={runtimeModelOptions}
                 />
               </Field>
               <Field label="Reasoning effort">
@@ -960,15 +970,12 @@ export function AgentEditorPage() {
                   disabled={readOnly}
                   onChange={(v) =>
                     patch({
-                      runtime: { ...form.runtime, reasoningEffort: (v || undefined) as never },
+                      runtime: { ...form.runtime, reasoningEffort: (v || undefined) as AgentRuntimePolicy['reasoningEffort'] },
                     })
                   }
                   options={[
                     { value: '', label: 'Inherit' },
-                    { value: 'low', label: 'Low' },
-                    { value: 'medium', label: 'Medium' },
-                    { value: 'high', label: 'High' },
-                    { value: 'xhigh', label: 'Extra high' },
+                    ...REASONING_EFFORTS.map((value) => ({ value, label: value === 'xhigh' ? 'Extra high' : value.charAt(0).toUpperCase() + value.slice(1) })),
                   ]}
                 />
               </Field>
@@ -978,7 +985,7 @@ export function AgentEditorPage() {
                   value={form.runtime.contextTier ?? ''}
                   disabled={readOnly}
                   onChange={(v) =>
-                    patch({ runtime: { ...form.runtime, contextTier: (v || undefined) as never } })
+                    patch({ runtime: { ...form.runtime, contextTier: (v || undefined) as AgentRuntimePolicy['contextTier'] } })
                   }
                   options={[
                     { value: '', label: 'Inherit' },

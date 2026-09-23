@@ -8,6 +8,7 @@ import { Plus, Trash2, Eye, Edit3, ChevronUp, ChevronDown } from 'lucide-react';
 import type { PromptDefinition } from '@generatorai/shared';
 import { cn } from '@/lib/utils.js';
 import { Button, Input, Textarea } from '@/components/ui/index.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 interface PromptEditorProps {
   prompts: PromptDefinition[];
@@ -132,12 +133,11 @@ export function PromptEditor({ prompts, onChange, readonly, contentLabel = 'Prom
 
               {/* Wait for completion toggle */}
               <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={prompt.waitForCompletion}
-                  onChange={(e) => updatePrompt(index, { waitForCompletion: e.target.checked })}
+                  onCheckedChange={(v) => updatePrompt(index, { waitForCompletion: v === true })}
                   disabled={readonly}
-                  className="h-3 w-3 rounded border-border"
+                  className="h-3 w-3"
                 />
                 Wait
               </label>

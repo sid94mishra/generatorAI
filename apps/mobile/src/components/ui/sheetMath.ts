@@ -49,9 +49,14 @@ export function detentOffsets(detents: readonly number[], screenHeight: number, 
 }
 
 /** Resist dragging above the tallest detent instead of detaching from the top. */
-export function rubberBand(offset: number, coefficient: number = RUBBER_BAND): number {
+export function rubberBand(offset: number, coefficient?: number): number {
   'worklet';
-  return offset < 0 ? offset * coefficient : offset;
+  // The default is resolved in the BODY. A default PARAMETER that names a
+  // module constant is evaluated on the UI runtime without being captured
+  // into the worklet's closure, so the first drag threw
+  // "Property 'RUBBER_BAND' doesn't exist" and took the app down with it.
+  const k = coefficient === undefined ? RUBBER_BAND : coefficient;
+  return offset < 0 ? offset * k : offset;
 }
 
 /**
@@ -173,4 +178,10 @@ export function renderedOffset(offset: number, sheetHeight: number, renderedHeig
   if (offset < 0) return offset;
   const trimmed = Math.max(0, sheetHeight - renderedHeight);
   return Math.max(0, offset - trimmed);
+}
+
+/** Exclude the translated-offscreen region from the body's layout viewport. */
+export function sheetBottomPadding(offset: number, bottomInset: number): number {
+  'worklet';
+  return Math.max(0, offset) + bottomInset;
 }

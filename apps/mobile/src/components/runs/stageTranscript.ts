@@ -59,3 +59,18 @@ export function transcriptItems(raw: unknown, live: boolean): TranscriptItem[] {
   });
   return items;
 }
+
+/**
+ * A running stage: its saved history up to and including the latest prompt,
+ * then the rows streaming for that prompt. The live stream only holds the
+ * current turn (a new prompt starts a fresh block list), and nothing after
+ * the latest prompt is saved until the turn ends, so the two never overlap.
+ */
+export function withLiveRows(items: TranscriptItem[], live: TimelineRow[]): TranscriptItem[] {
+  if (live.length === 0) return items;
+  let lastPrompt = -1;
+  items.forEach((item, index) => {
+    if (item.kind === 'user') lastPrompt = index;
+  });
+  return [...items.slice(0, lastPrompt + 1), ...live.map((row) => ({ kind: 'row' as const, id: row.id, row }))];
+}

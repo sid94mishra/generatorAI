@@ -84,7 +84,7 @@ export function WorkflowCard({
       <div className="flex items-start gap-2">
         <div className="flex min-w-0 items-center gap-2">
           {selectionMode ? (
-            <button
+            <Button variant="unstyled"
               type="button"
               role="checkbox"
               aria-checked={selected}
@@ -95,7 +95,7 @@ export function WorkflowCard({
               {selected
                 ? <CheckSquare className="h-5 w-5 text-primary" />
                 : <Square className="h-5 w-5 text-muted-foreground" />}
-            </button>
+            </Button>
           ) : (
             <GitBranch className="h-5 w-5 shrink-0 text-primary" />
           )}
@@ -195,7 +195,7 @@ export function WorkflowListRow({
       className={cn(selectionMode && selected && 'ring-2 ring-ring bg-primary/5')}
       leading={
         selectionMode ? (
-          <button
+          <Button variant="unstyled"
             type="button"
             role="checkbox"
             aria-checked={selected}
@@ -206,7 +206,7 @@ export function WorkflowListRow({
             {selected
               ? <CheckSquare className="h-5 w-5 text-primary" />
               : <Square className="h-5 w-5 text-muted-foreground" />}
-          </button>
+          </Button>
         ) : (
           <GitBranch className="h-5 w-5 text-primary" />
         )

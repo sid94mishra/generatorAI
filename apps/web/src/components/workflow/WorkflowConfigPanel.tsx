@@ -37,7 +37,7 @@ export function WorkflowConfigPanel({ open, onClose }: WorkflowConfigPanelProps)
   }, [open]);
 
   return (
-    <Modal open={open} onClose={onClose} size="xl" hideClose>
+    <Modal open={open} onClose={onClose} size="xl" hideClose ariaLabel="Workflow settings">
       {/* Full-bleed two-pane layout inside the Modal body */}
       <div
         className="-mx-5 -my-4 flex h-[calc(100%+2rem)] overflow-hidden"

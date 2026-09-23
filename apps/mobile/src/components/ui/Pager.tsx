@@ -27,7 +27,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Text, View, type LayoutChangeEvent, type ViewStyle } from 'react-native';
+import { Platform, Text, View, type LayoutChangeEvent, type ViewStyle } from 'react-native';
 import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -40,7 +40,7 @@ import Animated, {
 
 import { Touchable } from './Touchable';
 import { useReducedMotionPreset } from './motion';
-import { MAX_SCALE } from './accessibility';
+import { MAX_SCALE, useScreenReader } from './accessibility';
 import { haptics } from './haptics';
 import {
   EDGE_GUTTER,
@@ -168,6 +168,7 @@ export function Pager({
   style,
 }: PagerProps): React.ReactElement {
   const presets = useReducedMotionPreset();
+  const screenReader = useScreenReader();
   const [width, setWidth] = useState(0);
   const widthSv = useSharedValue(0);
   const translateX = useSharedValue(0);
@@ -257,14 +258,14 @@ export function Pager({
 
   const pan = useMemo(() => {
     const gesture = Gesture.Pan()
-      .enabled(enabled && count > 1)
+      .enabled(enabled && !screenReader && count > 1)
       // Horizontal-only activation so a vertical transcript scroll is never
       // stolen by a sideways drift of the thumb.
       .activeOffsetX([-14, 14])
       .failOffsetY([-12, 12])
       .onTouchesDown((event, state) => {
         const touch = event.allTouches[0];
-        if (touch && isEdgeTouch(touch.x, edgeGutter)) state.fail();
+        if (touch && isEdgeTouch(touch.x, edgeGutter, Platform.OS === 'android' ? widthSv.value : undefined)) state.fail();
       })
       .onBegin(() => {
         dragStart.value = translateX.value;
@@ -295,7 +296,7 @@ export function Pager({
       gesture.requireExternalGestureToFail(...innerGestures);
     }
     return gesture;
-  }, [enabled, count, edgeGutter, dragStart, translateX, widthSv, activeSv, presets, commit, simultaneousHandlers, innerGestures]);
+  }, [enabled, screenReader, count, edgeGutter, dragStart, translateX, widthSv, activeSv, presets, commit, simultaneousHandlers, innerGestures]);
 
   const internalProgress = useDerivedValue(() => pageProgress(translateX.value, widthSv.value, count));
 

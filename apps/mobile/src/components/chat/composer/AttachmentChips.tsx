@@ -14,7 +14,7 @@ import { Camera, FileText, TerminalSquare, X } from 'lucide-react-native';
 
 import { Touchable } from '../../ui/Touchable';
 import { Spinner } from '../../ui/States';
-import { MAX_SCALE } from '../../ui/accessibility';
+import { MAX_SCALE, MIN_TARGET } from '../../ui/accessibility';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { formatBytes } from './attachmentPolicy';
 import type { ComposerAttachment } from './types';
@@ -50,11 +50,12 @@ export function AttachmentChips({
             entering={motion.fadeIn(140)}
             exiting={motion.fadeOut(120)}
             layout={motion.layout(160)}
-            accessible
+            accessible={false}
             accessibilityLabel={`${item.kind === 'image' ? 'Image' : item.kind === 'capture' ? 'Capture' : 'File'} ${item.name}${
               failed ? `, failed: ${item.error}` : item.uploading ? ', uploading' : ''
             }`}
-            className={`h-11 flex-row items-center gap-2 rounded-2xl border pl-1.5 pr-1 ${
+            style={{ minHeight: MIN_TARGET }}
+            className={`flex-row items-center gap-2 rounded-2xl border pl-1.5 pr-1 ${
               failed ? 'border-danger bg-danger-muted' : 'border-border bg-raised'
             }`}
           >
@@ -65,7 +66,7 @@ export function AttachmentChips({
                 style={{ width: 32, height: 32, borderRadius: 8 }}
               />
             ) : (
-              <View className="h-8 w-8 items-center justify-center rounded-lg bg-subtle">
+              <View className="h-8 w-8 items-center justify-center rounded-lg bg-control">
                 {item.kind === 'capture' && item.name.startsWith('terminal-') ? (
                   <TerminalSquare size={16} color={colors['muted-foreground']} />
                 ) : item.kind === 'capture' && item.text === undefined ? (
@@ -102,7 +103,8 @@ export function AttachmentChips({
                 accessibilityLabel={`Remove ${item.name}`}
                 haptic="select"
                 onPress={() => onRemove(item.id)}
-                className="h-8 w-8 items-center justify-center rounded-full"
+                style={{ width: MIN_TARGET, height: MIN_TARGET }}
+                className="items-center justify-center rounded-full"
               >
                 <X size={14} color={colors['muted-foreground']} />
               </Touchable>

@@ -73,7 +73,7 @@ describe('deriveRunView — a finished run replays its answer without the live s
     expect(view.stages[0]!.answer).toBe(PERSISTED);
   });
 
-  it('prefers the live stream over the persisted copy when both exist', () => {
+  it('prefers the settled result when the stream only contains earlier fragments', () => {
     const view = deriveRunView(
       input({
         run: { id: 'run-1', status: 'completed', stageRuns: [stageRun({ outputText: PERSISTED })] } as never,
@@ -81,9 +81,18 @@ describe('deriveRunView — a finished run replays its answer without the live s
       }),
     );
 
-    // While a session has the real blocks they are the source of truth — the
-    // persisted copy is a reload fallback, not a replacement.
-    expect(view.stages[0]!.answer).toBe(STREAMED);
+    expect(view.stages[0]!.answer).toBe(PERSISTED);
+    expect(view.stages[0]!.segments).toEqual([]);
+    expect(view.stages[0]!.order).toBe(1);
+  });
+
+  it('shows the finished output while awaiting approval, including after navigation', () => {
+    const view = deriveRunView(input({
+      run: { id: 'run-1', status: 'running', stageRuns: [stageRun({ status: 'awaiting_input', outputText: PERSISTED })] } as never,
+      streams: streamWithAnswer('I will inspect the files.'),
+    }));
+    expect(view.stages[0]!.answer).toBe(PERSISTED);
+    expect(view.stages[0]!.segments).toEqual([]);
   });
 
   it('does NOT fall back while the stage is still running', () => {

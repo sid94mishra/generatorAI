@@ -225,7 +225,7 @@ export function FilesSection({
               accessibilityLabel="Repository root"
               haptic="select"
               onPress={() => setPrefix('')}
-              className="h-7 flex-row items-center gap-1 rounded-full bg-subtle px-2"
+              className="h-7 flex-row items-center gap-1 rounded-lg bg-control px-2"
             >
               <Home size={12} color={colors['muted-foreground']} />
               <Text className="text-xs text-muted-foreground">{repo?.alias ?? 'root'}</Text>
@@ -237,7 +237,7 @@ export function FilesSection({
                   accessibilityLabel={crumb}
                   haptic="select"
                   onPress={() => setPrefix(`${crumbs.slice(0, i + 1).join('/')}/`)}
-                  className="h-7 justify-center rounded-full bg-subtle px-2"
+                  className="h-7 justify-center rounded-lg bg-control px-2"
                 >
                   <Text className="text-xs text-muted-foreground">{crumb}</Text>
                 </Touchable>

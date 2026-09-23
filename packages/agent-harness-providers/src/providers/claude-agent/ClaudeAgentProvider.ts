@@ -219,12 +219,62 @@ interface PersistentSession {
  * message handling, truncation guard, transcript accumulation and permit
  * release exist exactly once.
  */
+/** The events that end a turn for everything downstream of the provider. */
+function isTerminalEvent(event: { kind: string }): boolean {
+  return event.kind === 'harness.idle' || event.kind === 'harness.error';
+}
+
+/**
+ * A `result` the CLI produced for its own bookkeeping, not for the prompt.
+ *
+ * A resumed session settles unfinished business before it reads the next
+ * message. The common case: a background shell the agent started was killed
+ * when the app (and the CLI under it) last exited. On the next prompt the CLI
+ * first reports that — a `task_notification`, then a `result` with
+ * `num_turns: 0`, no text, no tokens and no cost — and only THEN runs the
+ * prompt and sends the real `result`.
+ *
+ * The reader used to take the first `result` as the end of the turn. The
+ * user's message was answered by the model, billed, and thrown away: the chat
+ * showed the prompt with nothing under it and no error, and the answer arrived
+ * a second later to a turn that no longer existed.
+ *
+ * Every condition has to hold, so a real answer can never be mistaken for
+ * one: nothing from the model yet, zero turns, empty text, zero tokens. A
+ * CLI-local command (`/compact`) also ends with zero turns and is exempt —
+ * for it this IS the answer.
+ */
+function isHousekeepingResult(message: SDKMessage, turn: TurnState): boolean {
+  if (message.type !== 'result' || message.subtype !== 'success') return false;
+  if (turn.sawAssistant || turn.fullContent || turn.localCommand) return false;
+  const result = message as unknown as {
+    num_turns?: number;
+    result?: string;
+    usage?: Record<string, unknown>;
+  };
+  if (result.num_turns !== 0 || result.result) return false;
+  const usage = result.usage ?? {};
+  const spent = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']
+    .reduce((sum, key) => sum + (typeof usage[key] === 'number' ? (usage[key] as number) : 0), 0);
+  return spent === 0;
+}
+
 interface TurnState {
   conversationId: string;
   activeQuery: ActiveQuery;
   startedAt: number;
   fullContent: string;
   pendingToolNames: string[];
+  /**
+   * True once the model has said or done anything for THIS prompt. Until then
+   * a `result` cannot be the answer to it — see `isHousekeepingResult`.
+   */
+  sawAssistant: boolean;
+  /**
+   * The prompt is a CLI-local command (`/compact`, `/clear`…). Those finish
+   * with a zero-turn result and no assistant message, legitimately.
+   */
+  localCommand: boolean;
   truncationStopReason?: string;
   releaseExecution?: () => void;
   /** Set by Stop. Everything the runtime sends afterwards is discarded. */
@@ -452,7 +502,15 @@ function versionedModelName(displayName: string, description?: string): string {
  * encoded in the alias (`sonnet[1m]` → 1M) and leave anything we can't know
  * undefined rather than inventing values.
  */
-function mapClaudeModelInfo(m: ClaudeModelInfo): HarnessModel {
+/**
+ * The reasoning effort of a chat that never chose one. One constant, used for
+ * what runs AND for what the model list advertises as the default, so the two
+ * cannot drift apart again. Mid-tier on purpose: never default a model to one
+ * of its most expensive settings.
+ */
+const DEFAULT_EFFORT = 'medium';
+
+function mapClaudeModelInfo(m: ClaudeModelInfo, runtimeDefaultEffort?: string): HarnessModel {
   const id = m.value;
   const longContext = /\[1m\]/i.test(id);
   const model: HarnessModel = {
@@ -494,9 +552,19 @@ function mapClaudeModelInfo(m: ClaudeModelInfo): HarnessModel {
     if (m.supportedEffortLevels?.length) {
       model.reasoningEfforts = [...m.supportedEffortLevels];
       // Prefer a mid level so we never default a model to its most expensive tier.
-      model.defaultReasoningEffort = m.supportedEffortLevels.includes('medium')
-        ? 'medium'
-        : m.supportedEffortLevels[0];
+      //
+      // This is what the composer DISPLAYS for a chat that has never touched
+      // the control, so it has to be the level such a chat actually runs at.
+      // It was not: the list advertised "medium" while the runtime fell back
+      // to "high", and every chat showing "Medium" was billed and paced as
+      // High. The runtime default comes first; "medium" is only the answer
+      // when the model cannot do that level.
+      model.defaultReasoningEffort =
+        runtimeDefaultEffort && m.supportedEffortLevels.includes(runtimeDefaultEffort as never)
+          ? runtimeDefaultEffort
+          : m.supportedEffortLevels.includes('medium')
+            ? 'medium'
+            : m.supportedEffortLevels[0];
     }
   }
   return model;
@@ -1116,7 +1184,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     this.modelProbeInFlight = this.withControlSession(async (q) => {
       const sdkModels = await q.supportedModels();
       return sdkModels.map((m) => ({
-        model: mapClaudeModelInfo(m),
+        model: mapClaudeModelInfo(m, this.options.defaultEffort ?? DEFAULT_EFFORT),
         resolvedModel: (m as unknown as { resolvedModel?: string }).resolvedModel,
       }));
     })
@@ -1709,7 +1777,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         status: 'running',
       };
       this.activeQueries.set(conversationId, activeQuery);
-      const turn = this.beginTurn(conversationId, activeQuery, start, releaseExecution);
+      const turn = this.beginTurn(conversationId, activeQuery, start, releaseExecution, prompt);
 
       if (!persistent) {
         // One-shot fallback: a string prompt cannot carry content blocks, so
@@ -1867,6 +1935,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
           // slow consumer pauses this loop, and the SDK's reader behind it.
           const events = mapClaudeAgentMessageToAgentEvents(message);
           for (const event of events) {
+            if (message.type === 'result' && isTerminalEvent(event)) {
+              // Ahead of the terminal event — see `applyMessageToTurn`.
+              this.recordObservedLimits(message);
+              await this.emitContextUsageSnapshot(conversationId, message);
+            }
             await this.emitEventToHandlers(conversationId, event);
           }
 
@@ -1913,8 +1986,6 @@ export class ClaudeAgentProvider implements IAgentHarness {
                 fullContent = message.result;
               }
             }
-            this.recordObservedLimits(message);
-            this.emitContextUsageSnapshot(conversationId, message);
           }
         }
 
@@ -2482,7 +2553,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       ...(config.additionalDirectories?.length
         ? { additionalDirectories: config.additionalDirectories }
         : {}),
-      effort: config.effort ?? this.options.defaultEffort ?? 'high',
+      effort: config.effort ?? this.options.defaultEffort ?? DEFAULT_EFFORT,
       maxTurns: config.maxTurns ?? this.options.defaultMaxTurns,
       maxBudgetUsd: config.maxBudgetUsd ?? this.options.defaultMaxBudgetUsd,
       includePartialMessages: this.options.includePartialMessages ?? true,
@@ -2497,6 +2568,20 @@ export class ClaudeAgentProvider implements IAgentHarness {
       settingSources: this.options.settingSources ?? [],
       enableFileCheckpointing: this.options.enableFileCheckpointing ?? false,
     };
+
+    // Claude Code's auto-memory is ON by default and is NOT a setting source:
+    // `settingSources: []` keeps the user's CLAUDE.md and settings.json out,
+    // yet the CLI still read and WROTE `~/.claude/projects/<repo>/memory/`.
+    // An app chat told "don't detach the server" saved that as a memory file
+    // in the user's personal Claude Code profile — keyed by the repository,
+    // so it would steer every `claude` session they later ran there, and
+    // anything already in that directory steered the app's agent in return.
+    // The app has its own memory and instruction surfaces; this one belongs
+    // to the user's CLI. It stays on only when the operator has opted into
+    // user-level settings, where sharing the profile is the point.
+    if (!(this.options.settingSources ?? []).includes('user')) {
+      (options as Record<string, unknown>)['settings'] = { autoMemoryEnabled: false };
+    }
 
     // PLN-01 — Claude-native custom plan-mode workflow body. Only meaningful
     // while `permissionMode: 'plan'`; the CLI still wraps it with the
@@ -2736,7 +2821,12 @@ export class ClaudeAgentProvider implements IAgentHarness {
    */
   private readonly contextProbes = new Map<
     string,
-    { inFlight: boolean; latest: ClaudeContextUsageResponse | null }
+    {
+      inFlight: boolean;
+      latest: ClaudeContextUsageResponse | null;
+      /** The turn's `result`, once seen — a probe landing after it still publishes. */
+      resultMessage?: unknown;
+    }
   >();
 
   /**
@@ -2778,6 +2868,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
         const cur = this.contextProbes.get(conversationId);
         if (cur && usage && typeof usage.totalTokens === 'number') {
           cur.latest = usage as unknown as ClaudeContextUsageResponse;
+          // Publish as it lands, not only at `result`:
+          //  - mid-turn this is what makes the gauge MOVE during a long turn
+          //    instead of sitting on the previous turn's figure for minutes;
+          //  - a persistent session keeps its transport open past `result`, so
+          //    a probe that loses that race by a few hundred milliseconds —
+          //    measured: it lost every time on short turns, leaving the gauge
+          //    permanently on the derived estimate with no breakdown — is
+          //    still good, and is published against the result it trailed.
+          void this.publishContextUsage(conversationId, cur.latest, cur.resultMessage);
         }
       })
       .catch((err: unknown) => {
@@ -2812,10 +2911,29 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * the same total as a `derived` snapshot, and a second event carrying a
    * stale or absent breakdown would only overwrite it with less.
    */
-  private emitContextUsageSnapshot(conversationId: string, resultMessage: unknown): void {
+  private async emitContextUsageSnapshot(conversationId: string, resultMessage: unknown, queryHandle?: Query): Promise<void> {
+    let entry = this.contextProbes.get(conversationId);
+    if (!entry) {
+      entry = { inFlight: false, latest: null };
+      this.contextProbes.set(conversationId, entry);
+    }
+    entry.resultMessage = resultMessage;
+    if (entry.latest) {
+      await this.publishContextUsage(conversationId, entry.latest, resultMessage);
+      return;
+    }
+    // Nothing landed during the turn (a one-message answer is over before a
+    // 1–3 s probe can return). A live session is still open, so ask now; the
+    // answer publishes itself when it arrives.
+    if (queryHandle) this.beginContextUsageProbe(conversationId, queryHandle);
+  }
+
+  private async publishContextUsage(
+    conversationId: string,
+    usage: ClaudeContextUsageResponse,
+    resultMessage: unknown,
+  ): Promise<void> {
     try {
-      const usage = this.contextProbes.get(conversationId)?.latest;
-      if (!usage || typeof usage.totalTokens !== 'number') return;
       const lastCall = lastIterationUsage(
         (resultMessage as { usage?: Record<string, unknown> } | undefined)?.usage,
       );
@@ -2876,7 +2994,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
           : {}),
       };
 
-      void this.emitEventToHandlers(conversationId, createAgentEvent('harness.context_usage', {
+      await this.emitEventToHandlers(conversationId, createAgentEvent('harness.context_usage', {
         provider: 'claude-agent',
         source: 'provider',
         currentTokens,
@@ -2966,6 +3084,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     activeQuery: ActiveQuery,
     startedAt: number,
     releaseExecution: () => void,
+    prompt = '',
   ): TurnState {
     let settle: () => void = () => {};
     const done = new Promise<void>((resolve) => {
@@ -2977,6 +3096,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
       startedAt,
       fullContent: '',
       pendingToolNames: [],
+      sawAssistant: false,
+      localCommand: prompt.trimStart().startsWith('/'),
       releaseExecution,
       aborted: false,
       settled: false,
@@ -3333,6 +3454,12 @@ export class ClaudeAgentProvider implements IAgentHarness {
           }
           continue;
         }
+        if (isHousekeepingResult(message, turn)) {
+          // Not this prompt's answer — see `isHousekeepingResult`. Mapping it
+          // would publish `harness.idle` and end the turn in the UI as well.
+          this.rememberSdkSessionId(session, message);
+          continue;
+        }
         await this.applyMessageToTurn(turn, message, session.query);
         if (message.type === 'result') {
           this.rememberSdkSessionId(session, message);
@@ -3423,10 +3550,19 @@ export class ClaudeAgentProvider implements IAgentHarness {
     const { conversationId } = turn;
 
     for (const event of mapClaudeAgentMessageToAgentEvents(message)) {
+      if (message.type === 'result' && isTerminalEvent(event)) {
+        // BEFORE the terminal event, not after it: the chat service drops its
+        // subscription the moment it sees `harness.idle`, so a snapshot sent
+        // afterwards reaches nobody. It did exactly that — the breakdown was
+        // computed every turn and the gauge never once showed it.
+        this.recordObservedLimits(message);
+        await this.emitContextUsageSnapshot(conversationId, message, queryHandle);
+      }
       await this.emitEventToHandlers(conversationId, event);
     }
 
     if (message.type === 'assistant') {
+      turn.sawAssistant = true;
       // See `beginContextUsageProbe` — sampled mid-turn, never awaited.
       this.beginContextUsageProbe(conversationId, queryHandle);
       const betaMsg = message.message;
@@ -3459,10 +3595,6 @@ export class ClaudeAgentProvider implements IAgentHarness {
       if (message.subtype === 'success' && !turn.fullContent && message.result) {
         turn.fullContent = message.result;
       }
-      // Learn the account's real per-model limits, then publish the CLI's
-      // authoritative breakdown alongside the derived estimate.
-      this.recordObservedLimits(message);
-      this.emitContextUsageSnapshot(conversationId, message);
     }
   }
 

@@ -2,8 +2,8 @@
 // ReviewComposerPopover — write a comment on the selected lines
 // ────────────────────────────────────────────────────────────────
 //
-// Opened by the diff's gutter "+" button, which fires on pointer-up with the
-// final selected range (a click = one line, a drag = the whole span).
+// Opened from the diff gutter or a keyboard-accessible file-header action.
+// Header actions expose editable line bounds; gutter actions use the selection.
 //
 // Floats next to the selection rather than docking at the top of the panel.
 // A docked composer forces the reader to look away from the code they just
@@ -14,9 +14,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Send, X } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { Button, Textarea } from '@/components/ui/index.js';
+import { Button, Input, Textarea } from '@/components/ui/index.js';
 import type { ReviewIntent } from '@/types/review.js';
 import { FloatingCard } from './FloatingCard.js';
+import { modEnterLabel } from '@/components/ui/Kbd.js';
 
 const INTENTS: Array<{ value: ReviewIntent; label: string; hint: string }> = [
   { value: 'fix', label: 'Fix', hint: 'Change the code as described' },
@@ -37,6 +38,8 @@ export interface ReviewComposerPopoverProps {
   onSubmit: (body: string, intent: ReviewIntent) => void;
   /** Submit and immediately send this single comment to the agent. */
   onSubmitAndSend?: (body: string, intent: ReviewIntent) => void;
+  lineCount?: number;
+  onRangeChange?: (start: number, end: number) => void;
 }
 
 export function ReviewComposerPopover({
@@ -48,16 +51,31 @@ export function ReviewComposerPopover({
   onCancel,
   onSubmit,
   onSubmitAndSend,
+  lineCount,
+  onRangeChange,
 }: ReviewComposerPopoverProps) {
   const [body, setBody] = useState('');
   const [intent, setIntent] = useState<ReviewIntent>('fix');
+  const [startLine, setStartLine] = useState(String(range.start));
+  const [endLine, setEndLine] = useState(String(range.end));
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
 
-  const canSubmit = body.trim().length > 0 && !busy;
+  const validRange = !onRangeChange || (Number.isSafeInteger(Number(startLine))
+    && Number.isSafeInteger(Number(endLine)) && Number(startLine) >= 1
+    && Number(endLine) >= Number(startLine) && Number(endLine) <= (lineCount ?? 0));
+  const canSubmit = body.trim().length > 0 && !busy && validRange;
+
+  const updateRange = (start: string, end: string) => {
+    setStartLine(start); setEndLine(end);
+    if (Number.isSafeInteger(Number(start)) && Number.isSafeInteger(Number(end))
+      && Number(start) >= 1 && Number(end) >= Number(start) && Number(end) <= (lineCount ?? 0)) {
+      onRangeChange?.(Number(start), Number(end));
+    }
+  };
 
   return (
     <FloatingCard anchor={anchor} onDismiss={onCancel} label="Add review comment">
@@ -84,6 +102,21 @@ export function ReviewComposerPopover({
       </div>
 
       <div className="p-2.5">
+        {onRangeChange && (
+          <div className="mb-2">
+            <div className="flex gap-2">
+              <label className="min-w-0 flex-1 text-xs">Start line
+                <Input type="number" min={1} max={lineCount} value={startLine}
+                  aria-invalid={!validRange} onChange={(e) => updateRange(e.target.value, endLine)} />
+              </label>
+              <label className="min-w-0 flex-1 text-xs">End line
+                <Input type="number" min={1} max={lineCount} value={endLine}
+                  aria-invalid={!validRange} onChange={(e) => updateRange(startLine, e.target.value)} />
+              </label>
+            </div>
+            {!validRange && <p role="alert" className="mt-1 text-xs text-danger">Choose an ordered range from 1 to {lineCount}.</p>}
+          </div>
+        )}
         {anchorPreview && (
           <pre className="mb-1.5 max-h-20 overflow-auto rounded bg-muted/50 p-1.5 font-mono text-[10px] leading-tight">
             {anchorPreview}
@@ -121,7 +154,7 @@ export function ReviewComposerPopover({
             }
           }}
           rows={3}
-          placeholder="What should the agent change here? (⌘↵ to add)"
+          placeholder={`What should the agent change here? (${modEnterLabel()} to add)`}
           aria-label="Review comment"
           className="resize-none px-2 py-1.5 text-xs"
         />

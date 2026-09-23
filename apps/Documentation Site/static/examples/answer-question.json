@@ -1,0 +1,8 @@
+{
+  "answers": {
+    "storage": [
+      "sqlite"
+    ]
+  },
+  "freeformResponse": "Preserve existing records and make the migration reversible."
+}

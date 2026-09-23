@@ -20,11 +20,17 @@ export function backFallbackFor(pathname: string): string | null {
       return '/(tabs)/chats';
     case 'runs':
       // A stage drill-in returns to its run.
-      return third === 'stages' && second ? `/runs/${second}` : '/(tabs)/runs';
+      // A run with no history behind it (a deep link, a notification) backs
+      // out to the Workflows catalogue: there is no runs list, and the run's
+      // workflow is not known from the path. The run screen itself knows it
+      // and offers the workflow directly.
+      return third === 'stages' && second ? `/runs/${second}` : '/(tabs)/runs?segment=workflows';
     case 'workflows':
+      return '/(tabs)/runs?segment=workflows';
     case 'automations':
+      return '/(tabs)/runs?segment=automations';
     case 'scripts':
-      return '/(tabs)/runs';
+      return '/(tabs)/runs?segment=scripts';
     case 'projects':
       // Deeper project screens (PRs, codebases) return to the project.
       return third && second ? `/projects/${second}` : '/(tabs)/projects';

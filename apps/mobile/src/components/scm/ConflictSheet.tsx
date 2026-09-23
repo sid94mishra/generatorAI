@@ -62,7 +62,7 @@ export function ConflictSheet({
           </Text>
         </View>
 
-        <View className="gap-1 rounded-2xl border border-border bg-subtle p-3">
+        <View className="gap-1 rounded-xl border border-border bg-control p-3">
           {conflicts.files.slice(0, 20).map((file) => (
             <Text key={file} numberOfLines={1} className="font-mono text-xs text-foreground">
               {file}

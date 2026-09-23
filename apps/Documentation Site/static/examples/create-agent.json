@@ -1,0 +1,27 @@
+{
+  "scope": "global",
+  "slug": "careful-implementer",
+  "name": "Careful implementer",
+  "description": "Implements focused changes while preserving existing behavior and reporting tests.",
+  "instructions": "Inspect the repository first. Follow existing conventions. Ask before destructive changes. Run focused tests. Never commit or push unless the user requests it.",
+  "role": "agent",
+  "projection": "append",
+  "skillIds": [],
+  "mcpServerIds": [],
+  "tools": {
+    "fileRead": true,
+    "fileWrite": true,
+    "shell": true,
+    "browser": false,
+    "widgets": false,
+    "extensionAuthoring": false,
+    "orchestration": false,
+    "web": false
+  },
+  "runtime": {
+    "harnessType": "codex",
+    "reasoningEffort": "high",
+    "permissionMode": "default",
+    "defaultAgentMode": "auto"
+  }
+}

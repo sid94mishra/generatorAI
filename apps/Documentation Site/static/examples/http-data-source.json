@@ -1,0 +1,14 @@
+{
+  "type": "http",
+  "url": "https://api.example.com/issues",
+  "method": "GET",
+  "resultPath": "items",
+  "timeout": 10000,
+  "schema": {
+    "requiredFields": [
+      "issueId",
+      "feature"
+    ],
+    "maxItems": 100
+  }
+}

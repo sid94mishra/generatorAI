@@ -164,6 +164,24 @@ describe('MuxStreamClient', () => {
     client.disposeAll();
   });
 
+  it('carries a seeded cursor when a scope joins a connection that is already open', async () => {
+    const server = fakeServer();
+    const client = new MuxStreamClient({ fetch: server.fetchImpl });
+    client.subscribe('global', 'all', () => {});
+    await flushMicrotasks();
+    server.push('hello', { connectionId: 'conn_1', active: ['global:all'] });
+    await flushMicrotasks();
+
+    client.subscribe('chat', 'c1', () => {}, { afterSequence: 471 });
+    await flushMicrotasks();
+
+    const mutation = server.calls.find((c) => c.path.endsWith('/subs'));
+    const body = JSON.parse(String(mutation?.init?.body));
+    expect(body.add).toEqual([{ scope: 'chat', id: 'c1' }]);
+    expect(body.cursors).toEqual({ 'chat:c1': 471 });
+    client.disposeAll();
+  });
+
   it('clears the cursor and reports onDisconnected on a scope-local gap frame', async () => {
     const server = fakeServer();
     const client = new MuxStreamClient({ fetch: server.fetchImpl });

@@ -133,7 +133,7 @@ export function ScriptDetailPage() {
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {profiles.map((profile: { name: string; description?: string; sessionMode?: string }) => (
-              <button
+              <Button variant="unstyled"
                 key={profile.name}
                 onClick={() => setSelectedProfile(profile.name === selectedProfile ? undefined : profile.name)}
                 className={cn(
@@ -150,7 +150,7 @@ export function ScriptDetailPage() {
                 {profile.sessionMode && (
                   <div className="text-xs text-muted-foreground mt-1">Mode: {profile.sessionMode}</div>
                 )}
-              </button>
+              </Button>
             ))}
           </div>
           {selectedProfile && (

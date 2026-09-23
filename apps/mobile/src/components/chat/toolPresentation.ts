@@ -11,6 +11,8 @@
 // with the renderer.
 // ────────────────────────────────────────────────────────────────
 
+import { workspaceRelative } from './permissionPreview';
+
 export type ToolKind =
   | 'read'
   | 'edit'
@@ -44,6 +46,15 @@ function anchored(...words: string[]): RegExp {
 }
 
 const RULES: Rule[] = [
+  // The agent's gate tools, by exact name. They are camelCase ("ExitPlanMode"),
+  // which the token-anchored rules below cannot split, so they surfaced as
+  // their raw identifiers in the transcript. Kind `other`, not `task`: the
+  // timeline draws every `task` as a sub-agent card with a spinner.
+  { kind: 'other', label: 'Plan ready for review', match: /^(exit_?plan_?mode|record_?plan)$/i },
+  { kind: 'other', label: 'Question for you', match: /^(ask_?user_?question|ask_?user)$/i },
+  { kind: 'other', label: 'Update to-dos', match: /^todo_?write$/i },
+  // The harness loading deferred tool definitions ("select:ExitPlanMode").
+  { kind: 'other', label: 'Load tools', match: /^tool_?search$/i },
   { kind: 'create', label: 'Create file', match: anchored('create', 'new', 'write', 'touch') },
   { kind: 'delete', label: 'Delete', match: anchored('delete', 'remove', 'rm', 'unlink') },
   {
@@ -111,10 +122,17 @@ export function toolSummary(args: unknown): string | null {
   const record = args as Record<string, unknown>;
   for (const key of SUMMARY_KEYS) {
     const value = record[key];
-    if (typeof value === 'string' && value.trim()) return firstLine(value);
+    if (typeof value === 'string' && value.trim()) {
+      // A file argument is an absolute workspace path — on a phone the row
+      // showed "/private/tmp/…/-Users-…" and cut the file name off. Show it
+      // from the mount root, as the Changes list does.
+      return firstLine(PATH_KEYS.has(key) ? workspaceRelative(value.trim()) : value);
+    }
   }
   return null;
 }
+
+const PATH_KEYS: ReadonlySet<string> = new Set(['path', 'filePath', 'file_path', 'file', 'filename']);
 
 function firstLine(text: string): string {
   const line = text.split('\n', 1)[0]?.trim() ?? '';

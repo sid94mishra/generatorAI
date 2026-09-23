@@ -1,0 +1,46 @@
+{
+  "url": "/automations/new",
+  "viewport": {
+    "w": 1280,
+    "h": 800
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Create Automation",
+    "Basic Info",
+    "Trigger",
+    "Project Scope",
+    "Workflows *",
+    "Input Mode",
+    "Base Variables"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "mx-auto px-6 py-8 h-full overflow-y-auto max-w-3xl",
+      "h": 720,
+      "scroll": 2551,
+      "rect": {
+        "x": 376,
+        "y": 80,
+        "w": 768
+      },
+      "parentScrollers": 0
+    },
+    {
+      "tag": "TEXTAREA",
+      "classes": "w-full rounded-md border border-input bg-background text-foreground placeholder:text-muted-foreground transition-all duration-150 hover:border-[color-mix(in_srgb,var(--primary)_50%,var(--border))] focus:border-[var(--primary)] focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 px-3 py-2 resize-y font-mono text-xs",
+      "h": 176,
+      "scroll": 256,
+      "rect": {
+        "x": 425,
+        "y": 106,
+        "w": 659
+      },
+      "parentScrollers": 1
+    }
+  ]
+}

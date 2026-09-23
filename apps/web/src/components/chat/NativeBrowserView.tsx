@@ -214,11 +214,20 @@ export function NativeBrowserView({ tabId, workspaceId, onUrlChange, onTitleChan
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async (): Promise<void> => {
       if (cancelled) return;
-      try {
-        const dataUrl = await api.screenshot(tabId);
-        if (!cancelled && dataUrl) setPlaceholderBg(dataUrl);
-      } catch { /* ignore */ }
-      if (!cancelled) timer = setTimeout(tick, 1000);
+      // Only while someone can see it. The placeholder exists to cover the
+      // moment the live view is hidden, so it only has to be current while
+      // the view is showing; a tab in the background, a minimised window or
+      // a pane on another right-pane tab was still being captured, encoded
+      // and shipped over IPC every second.
+      const el = containerRef.current;
+      const watching = !document.hidden && !!el && !isContainerHidden(el);
+      if (watching) {
+        try {
+          const dataUrl = await api.screenshot(tabId);
+          if (!cancelled && dataUrl) setPlaceholderBg(dataUrl);
+        } catch { /* ignore */ }
+      }
+      if (!cancelled) timer = setTimeout(tick, watching ? 2000 : 1000);
     };
     void tick();
     return () => {

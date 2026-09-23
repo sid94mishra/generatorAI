@@ -136,3 +136,16 @@ describe('status classification', () => {
     expect(statusLabel('')).toBe('Unknown');
   });
 });
+
+describe('newestRun', () => {
+  it('picks the latest update regardless of list order', async () => {
+    const { newestRun } = await import('../components/runs/runModel');
+    const runs = [
+      { id: 'old', status: 'failed', updatedAt: '2026-09-22T10:00:00Z' },
+      { id: 'new', status: 'completed', updatedAt: '2026-09-22T12:00:00Z' },
+      { id: 'mid', status: 'cancelled', updatedAt: '2026-09-22T11:00:00Z' },
+    ];
+    expect(newestRun(runs)?.id).toBe('new');
+    expect(newestRun([])).toBeUndefined();
+  });
+});

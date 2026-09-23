@@ -1,0 +1,31 @@
+{
+  "url": "/settings/skills",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Settings",
+    "Skills",
+    "5 of 5 enabled"
+  ],
+  "scrollers": [
+    {
+      "tag": "NAV",
+      "classes": "hidden w-60 shrink-0 flex-col gap-5 overflow-y-auto border-r border-border bg-subtle/40 px-3 py-4 sm:flex",
+      "h": 664,
+      "scroll": 778,
+      "rect": {
+        "x": 240,
+        "y": 136,
+        "w": 240
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

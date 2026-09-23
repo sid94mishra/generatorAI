@@ -11,6 +11,7 @@ import { useCatalogPrefsStore } from '@/stores/catalogPrefsStore.js';
 import { cn } from '@/lib/utils.js';
 import { Badge, Button } from '@/components/ui/index.js';
 import type { StageDefinition, HarnessConfig } from '@generatorai/shared';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 interface McpServerSelectorProps {
   stage: StageDefinition;
@@ -119,7 +120,7 @@ export function McpServerSelector({ stage, onUpdate }: McpServerSelectorProps) {
         </div>
       </div>
 
-      <div className="space-y-1 max-h-48 overflow-y-auto">
+      <div className={cn('space-y-1', allServers.length > 8 && 'max-h-80 overflow-y-auto')}>
         {allServers.map((server) => {
           const isEnabled = !excludedServers.has(server.id);
           return (
@@ -132,11 +133,10 @@ export function McpServerSelector({ stage, onUpdate }: McpServerSelectorProps) {
                   : 'border border-transparent hover:bg-subtle opacity-60',
               )}
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={isEnabled}
-                onChange={() => toggleServer(server.id)}
-                className="h-3.5 w-3.5 rounded"
+                onCheckedChange={() => toggleServer(server.id)}
+                className="h-3.5 w-3.5"
               />
               <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <div className="flex-1 min-w-0">

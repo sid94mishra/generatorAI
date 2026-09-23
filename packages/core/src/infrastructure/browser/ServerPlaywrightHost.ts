@@ -413,7 +413,9 @@ export class ServerPlaywrightHost implements IBrowserBridge {
       await context.route('**/*', (route) => {
         let host: string;
         try {
-          host = new URL(route.request().url()).host;
+          // Match the same hostname as the navigation pre-check. Including
+          // :port here rejected explicitly allowed local development servers.
+          host = new URL(route.request().url()).hostname;
         } catch {
           void route.abort();
           return;

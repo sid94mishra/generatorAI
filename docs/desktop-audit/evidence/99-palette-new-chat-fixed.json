@@ -1,0 +1,30 @@
+{
+  "url": "/chats",
+  "viewport": {
+    "w": 1280,
+    "h": 800,
+    "dpr": 2
+  },
+  "bodyOverflow": {
+    "x": 0,
+    "y": 0
+  },
+  "headings": [
+    "Chats",
+    "New Chat"
+  ],
+  "scrollers": [
+    {
+      "tag": "DIV",
+      "classes": "min-h-0 flex-1 overflow-y-auto px-5 py-4",
+      "h": 498,
+      "scroll": 917,
+      "rect": {
+        "x": 257,
+        "y": 160,
+        "w": 766
+      },
+      "parentScrollers": 0
+    }
+  ]
+}

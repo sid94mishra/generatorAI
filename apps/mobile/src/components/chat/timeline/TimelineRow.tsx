@@ -14,8 +14,9 @@
 //
 // Density: steps are borderless one-line rows (`RowFrame` "line"); only
 // failures, waits, running sub-agents and source-control results are cards.
-// A settled turn's activity arrives folded as a `work` row ("Worked · 7
-// steps · 42s"); the turn's actions sit under its FINAL prose only.
+// A settled turn's activity arrives folded as a `work` row ("Ran 2
+// commands, read 3 files · 42s"); the turn's actions sit under its FINAL
+// prose only.
 // ────────────────────────────────────────────────────────────────
 
 import React, { memo, useCallback, useMemo, useState } from 'react';
@@ -63,7 +64,7 @@ import { useStreamStore } from '../../../stream/streamStore';
 import { UsageFooter } from '../UsageFooter';
 import { formatDuration, type ToolKind } from '../toolPresentation';
 import { InlineDiff } from './InlineDiff';
-import { NestedRows, RowEnterContext, RowFrame, statusColor, type RowTone } from './RowFrame';
+import { CARD_ICON_AXIS, NestedRows, RowEnterContext, RowFrame, statusColor, type RowTone } from './RowFrame';
 import { useChatMotion } from '../chatMotion';
 import { ScmResultRow } from './ScmResultRow';
 import { useTimelineActions } from './TimelineActions';
@@ -76,8 +77,11 @@ import {
   type ToolFamily,
   type ToolStep,
   type WorkSummary,
+  formatWorkDuration,
   workLabel,
+  workTitle,
 } from './deriveTimeline';
+import { READ_ALOUD_ENABLED } from '../featureFlags';
 
 /** 4 KB per value — a multi-megabyte result must not lock the UI thread. */
 const MAX_VALUE_CHARS = 4000;
@@ -194,20 +198,33 @@ function RowBody({ row, turnId }: { row: TimelineRow; turnId?: string | undefine
 }
 
 /**
- * A settled turn's folded activity. Collapsed it is one quiet line; expanded
- * it renders the rows it stands for beside a left rule.
+ * A settled turn's folded activity. Collapsed it is one quiet line naming
+ * what the agent did ("Ran 2 commands, read 3 files"); expanded it lists
+ * the steps beside a rule that hangs from this row's icon.
  */
 function WorkRow({ work, turnId }: { work: WorkSummary; turnId?: string | undefined }): React.ReactElement {
   const { colors } = useTheme();
   const [expanded, setExpanded] = useState(false);
-  const label = workLabel(work);
+  const title = workTitle(work);
+  const right =
+    work.failed > 0 || work.durationMs !== undefined ? (
+      <View className="flex-row items-center gap-1.5">
+        {work.failed > 0 ? <Badge label={`${work.failed} failed`} tone="danger" /> : null}
+        {work.durationMs !== undefined ? (
+          <Text className="text-xs text-muted-foreground">{formatWorkDuration(work.durationMs)}</Text>
+        ) : null}
+      </View>
+    ) : null;
   return (
     <RowFrame
       icon={<ListChecks size={16} color={work.failed > 0 ? colors.danger : colors['muted-foreground']} />}
-      title={label}
+      title={title}
+      right={right}
       expanded={expanded}
       onToggle={() => setExpanded((v) => !v)}
-      accessibilityLabel={label}
+      accessibilityLabel={workLabel(work)}
+      flushChildren
+      titleLines={2}
     >
       <NestedRows>
         <View className="gap-1 pb-1">
@@ -286,7 +303,7 @@ function useTextMenu(content: string, turnId?: string | undefined): ContextMenuI
         onPress: () => void copyText(content, toast),
       },
     ];
-    if (readAloud && content.trim()) {
+    if (READ_ALOUD_ENABLED && readAloud && content.trim()) {
       items.push({
         label: 'Read aloud',
         icon: <Volume2 size={18} color={colors.foreground} />,
@@ -353,7 +370,7 @@ function TextRow({
               icon={<Copy size={15} color={colors['muted-foreground']} />}
               onPress={() => void copyText(content, toast)}
             />
-            {readAloud && content.trim() ? (
+            {READ_ALOUD_ENABLED && readAloud && content.trim() ? (
               <IconButton
                 accessibilityLabel="Read reply aloud"
                 variant="ghost"
@@ -515,6 +532,8 @@ export function ToolStepRow({ step, nested = false }: { step: ToolStep; nested?:
   );
 
   const openFull = step.fileOp && openInChanges ? () => openInChanges(step.fileOp!.filePath) : undefined;
+  // Mirrors RowFrame's grammar choice: a tinted top-level row is a card.
+  const asCard = !nested && tone !== 'default';
 
   return (
     <RowFrame
@@ -529,22 +548,25 @@ export function ToolStepRow({ step, nested = false }: { step: ToolStep; nested?:
       menu={menu}
       menuTitle={title}
       nested={nested}
+      flushChildren={isAgent}
     >
       {isAgent ? (
         <View className="gap-1.5 py-2 pr-2">
           {step.children && step.children.length > 0 ? (
-            <NestedRows>
+            <NestedRows {...(asCard ? { axis: CARD_ICON_AXIS } : {})}>
               {step.children.map((child) => (
                 <ToolStepRow key={child.id} step={child} nested />
               ))}
             </NestedRows>
           ) : (
-            <Text className="px-1 text-xs text-muted-foreground">
+            <Text className={`text-xs text-muted-foreground ${asCard ? 'px-3' : 'pl-8'}`}>
               {step.status === 'running' ? 'Starting…' : 'No steps were recorded.'}
             </Text>
           )}
-          <LazyValue label="Brief" value={step.block.args} />
-          {step.block.result !== undefined ? <LazyValue label="Report" value={step.block.result} /> : null}
+          <View className={`gap-1.5 ${asCard ? 'px-3' : 'pl-8'}`}>
+            <LazyValue label="Brief" value={step.block.args} />
+            {step.block.result !== undefined ? <LazyValue label="Report" value={step.block.result} /> : null}
+          </View>
         </View>
       ) : step.fileOp ? (
         <InlineDiff fileOp={step.fileOp} onOpenFull={openFull} />
@@ -665,15 +687,12 @@ function GroupRow({ group }: { group: StepGroup }): React.ReactElement {
       {group.fileOps ? (
         <FileOpMeta meta={`+${group.fileOps.additions} −${group.fileOps.deletions}`} fileOp />
       ) : null}
+      {/* No count pill: the label already says "Ran 2 commands". */}
       {group.status === 'running' ? (
         <Spinner />
       ) : group.status === 'waiting' ? (
         <PauseCircle size={14} color={colors.primary} />
-      ) : (
-        <View className="min-w-5 items-center rounded-full bg-emphasis px-1.5">
-          <Text className="text-xs font-semibold text-muted-foreground">{group.steps.length}</Text>
-        </View>
-      )}
+      ) : null}
     </View>
   );
 
@@ -689,6 +708,7 @@ function GroupRow({ group }: { group: StepGroup }): React.ReactElement {
       menu={menu}
       menuTitle={group.label}
       accessibilityLabel={`${group.label}, ${group.steps.length} steps`}
+      flushChildren
     >
       <NestedRows>
         {group.steps.map((step) => (
