@@ -10,8 +10,8 @@
 // button was a 44pt target competing for room inside a 56pt row, and there
 // was no way at all to rename, delete, or bring a chat back from the archive.
 //
-// `?new=1` opens the creation sheet on arrival, which is what lets the
-// Activity FAB deep-link straight into it instead of duplicating the flow.
+// `?new=1` opens the creation sheet on arrival, which is what lets Home's
+// compose button deep-link straight into it instead of duplicating the flow.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -22,11 +22,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
   ArchiveRestore,
-  BellRing,
+  Circle,
+  CircleCheck,
+  ListChecks,
   MessagesSquare,
   Pencil,
-  Plus,
+  SquarePen,
   Trash2,
+  X,
 } from 'lucide-react-native';
 import { epochOr, isArchived, queryKeys, type ChatSummary } from '@generatorai/client-core';
 
@@ -36,18 +39,20 @@ import { useModels } from '../../src/api/useModels';
 import { NewChatSheet, type NewChatValues } from '../../src/components/chat/NewChatSheet';
 import { RenameSheet } from '../../src/components/chat/RenameSheet';
 import { relativeTime } from '../../src/components/runs/formatTime';
-import { ModelVendorIcon, vendorForModel } from '../../src/components/brand/VendorIcons';
 import { displayChatName, parseChatName } from '../../src/components/common/chatName';
+import { ENTITY_ICON } from '../../src/components/common/entityIcons';
 import { sectionRows, type SectionRow } from '../../src/components/common/groupByDay';
 import { ListItem, ListSectionHeader } from '../../src/components/ui/ListItem';
 import { usePullToRefresh } from '../../src/components/ui/usePullToRefresh';
 import { SegmentedControl } from '../../src/components/ui/SegmentedControl';
-import { Fab } from '../../src/components/ui/Button';
+import { Button, IconButton } from '../../src/components/ui/Button';
+import { haptics } from '../../src/components/ui/haptics';
 import { SearchField } from '../../src/components/ui/Form';
 import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { Screen } from '../../src/components/ui/Screen';
 import { TabHeaderActions } from '../../src/navigation/TabHeaderActions';
+import { MenuButton } from '../../src/navigation/shell/MenuButton';
 import { useTabShell } from '../../src/navigation/tabShell';
 import { SwipeableRow, closeSwipedRow } from '../../src/components/ui/SwipeableRow';
 import { ActionSheet, ConfirmSheet } from '../../src/components/ui/ActionSheet';
@@ -55,7 +60,8 @@ import { useToast } from '../../src/components/ui/Toast';
 import { useScrollToTop, scrollerToTop } from '../../src/navigation/scrollToTop';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
-type Scope = 'active' | 'archived';
+// Desktop's three filters, in its order. `all` is its default too.
+type Scope = 'all' | 'active' | 'archived';
 
 export default function ChatsScreen(): React.ReactElement {
   const api = useApi();
@@ -69,7 +75,24 @@ export default function ChatsScreen(): React.ReactElement {
   useScrollToTop('chats', scrollerToTop(listRef));
 
   const [query, setQuery] = useState('');
-  const [scope, setScope] = useState<Scope>('active');
+  const [scope, setScope] = useState<Scope>('all');
+  // Bulk selection — desktop's "Select" mode. Entered from the header or by
+  // choosing Select from a row's menu; rows then toggle instead of opening.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [confirmBulk, setConfirmBulk] = useState(false);
+  const exitSelection = useCallback(() => {
+    setSelecting(false);
+    setSelected(new Set());
+  }, []);
+  const toggleSelected = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
   const [creating, setCreating] = useState(false);
   const [menuFor, setMenuFor] = useState<ChatSummary | null>(null);
   const [renaming, setRenaming] = useState<ChatSummary | null>(null);
@@ -152,6 +175,22 @@ export default function ChatsScreen(): React.ReactElement {
     onError: () => toast({ message: 'Could not delete that chat.', tone: 'error' }),
   });
 
+  const removeMany = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => api.chats.remove(id)));
+      return { failed: results.filter((r) => r.status === 'rejected').length, total: ids.length };
+    },
+    onSuccess: ({ failed, total }) => {
+      invalidate();
+      exitSelection();
+      toast(
+        failed > 0
+          ? { message: `${total - failed} deleted, ${failed} could not be deleted.`, tone: 'error' }
+          : { message: `${total} ${total === 1 ? 'chat' : 'chats'} deleted.`, tone: 'success' },
+      );
+    },
+  });
+
   const archiveChat = useCallback(
     (chat: ChatSummary) => {
       setStatus.mutate({ id: chat.id, status: 'archived' });
@@ -182,7 +221,7 @@ export default function ChatsScreen(): React.ReactElement {
     const q = query.trim().toLowerCase();
     return (
       list
-        .filter((chat) => (scope === 'archived' ? isArchived(chat) : !isArchived(chat)))
+        .filter((chat) => scope === 'all' || (scope === 'archived' ? isArchived(chat) : !isArchived(chat)))
         // Name AND the last line: "the chat where it said the tests pass" is
         // how people remember a conversation.
         .filter(
@@ -196,6 +235,7 @@ export default function ChatsScreen(): React.ReactElement {
         .sort((a, b) => epochOr(b.updatedAt) - epochOr(a.updatedAt))
     );
   }, [chats.data, query, scope]);
+  const selectableIds = useMemo(() => visible.map((c) => c.id), [visible]);
 
   // Today / Yesterday / This week / Older. Search results stay one flat list:
   // a match's date is not what the user is scanning for.
@@ -217,6 +257,7 @@ export default function ChatsScreen(): React.ReactElement {
     <View className="gap-3 px-4 pb-1">
       <SegmentedControl
         segments={[
+          { value: 'all', label: 'All', count: activeCount + archivedCount },
           { value: 'active', label: 'Active', count: activeCount },
           { value: 'archived', label: 'Archived', count: archivedCount },
         ]}
@@ -246,7 +287,7 @@ export default function ChatsScreen(): React.ReactElement {
             : 'Start one and it appears here.'
       }
       icon={<MessagesSquare size={22} color={colors['muted-foreground']} />}
-      {...(scope === 'active' && !query
+      {...(scope !== 'archived' && !query
         ? { action: { label: 'New chat', onPress: () => setCreating(true) } }
         : {})}
     />
@@ -254,7 +295,64 @@ export default function ChatsScreen(): React.ReactElement {
 
   return (
     <View className="flex-1 bg-background">
-      <Screen title="Chats" variant="compact" trailing={<TabHeaderActions />} scroll={false}>
+      <Screen
+        title={selecting ? `${selected.size} selected` : 'Chats'}
+        variant="compact"
+        leading={
+          selecting ? (
+            <IconButton
+              accessibilityLabel="Cancel selection"
+              icon={<X size={22} color={colors.foreground} />}
+              onPress={exitSelection}
+            />
+          ) : (
+            <MenuButton />
+          )
+        }
+        trailing={
+          selecting ? (
+            <View className="flex-row items-center">
+              <Button
+                label={selected.size === selectableIds.length && selected.size > 0 ? 'Deselect all' : 'Select all'}
+                variant="ghost"
+                size="sm"
+                onPress={() =>
+                  setSelected(selected.size === selectableIds.length ? new Set() : new Set(selectableIds))
+                }
+              />
+              <IconButton
+                testID="chats-bulk-delete"
+                accessibilityLabel={`Delete ${selected.size} selected ${selected.size === 1 ? 'chat' : 'chats'}`}
+                disabled={selected.size === 0 || removeMany.isPending}
+                icon={<Trash2 size={20} color={selected.size === 0 ? colors['muted-foreground'] : colors.danger} />}
+                onPress={() => {
+                  haptics.warn();
+                  setConfirmBulk(true);
+                }}
+              />
+            </View>
+          ) : (
+            <TabHeaderActions>
+              <IconButton
+                testID="chats-new"
+                accessibilityLabel="New chat"
+                icon={<SquarePen size={20} color={colors.foreground} />}
+                onPress={() => setCreating(true)}
+              />
+              {(chats.data?.length ?? 0) > 0 ? (
+                <IconButton
+                  testID="chats-select"
+                  accessibilityLabel="Select chats"
+                  accessibilityHint="Select several chats to delete them together"
+                  icon={<ListChecks size={20} color={colors.foreground} />}
+                  onPress={() => setSelecting(true)}
+                />
+              ) : null}
+            </TabHeaderActions>
+          )
+        }
+        scroll={false}
+      >
         <LegendList
           ref={listRef as never}
           data={rows}
@@ -262,10 +360,14 @@ export default function ChatsScreen(): React.ReactElement {
           getItemType={(row: SectionRow<ChatSummary>) => row.type}
           estimatedItemSize={64}
           recycleItems
+          // Rows read selection state that is not part of `data`; without this
+          // the list keeps the rows it already built, so entering Select mode
+          // left every row still opening its chat.
+          extraData={`${selecting}|${[...selected].join()}`}
           // The gutter is on the rows, not here: LegendList positions every
           // container absolutely, so contentContainerStyle padding never
           // reaches the rows.
-          contentContainerStyle={{ paddingBottom: shell?.listBottom(true) ?? 140 }}
+          contentContainerStyle={{ paddingBottom: shell?.listBottom(false) ?? 32 }}
           ListHeaderComponent={header}
           ListEmptyComponent={empty}
           refreshing={pull.refreshing}
@@ -278,7 +380,10 @@ export default function ChatsScreen(): React.ReactElement {
                 chat={row.item}
                 live={running.has(row.item.id)}
                 waiting={waiting.has(row.item.id)}
-                archived={scope === 'archived'}
+                archived={isArchived(row.item)}
+                selecting={selecting}
+                selected={selected.has(row.item.id)}
+                onToggleSelect={() => toggleSelected(row.item.id)}
                 onArchive={() => archiveChat(row.item)}
                 onUnarchive={() => unarchiveChat(row.item)}
                 onDelete={() => setDeleting(row.item)}
@@ -289,10 +394,17 @@ export default function ChatsScreen(): React.ReactElement {
         />
       </Screen>
 
-      <Fab
-        accessibilityLabel="New chat"
-        icon={<Plus size={22} color={colors['primary-foreground']} />}
-        onPress={() => setCreating(true)}
+
+      <ConfirmSheet
+        visible={confirmBulk}
+        onClose={() => setConfirmBulk(false)}
+        title={`Delete ${selected.size} ${selected.size === 1 ? 'chat' : 'chats'}?`}
+        message="The conversations and their workspaces are removed for good. This cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={() => {
+          setConfirmBulk(false);
+          removeMany.mutate([...selected]);
+        }}
       />
 
       <NewChatSheet
@@ -371,8 +483,8 @@ export default function ChatsScreen(): React.ReactElement {
  *
  * Three facts, in the order they are wanted: what state the chat is in, what
  * it is called, and what was last said in it. State lives in the avatar (tint
- * + corner dot) and is spelled out at the start of the subtitle; a settled
- * chat shows the model vendor's mark instead, so rows are not all one glyph.
+ * + corner dot) and is spelled out at the start of the subtitle. The glyph is
+ * always the chat icon, as everywhere else a chat is listed.
  * Orchestrator workers drop the server's "⚙" marker for a Sub-agent badge.
  */
 function ChatRow({
@@ -380,6 +492,9 @@ function ChatRow({
   live,
   waiting,
   archived,
+  selecting,
+  selected,
+  onToggleSelect,
   onArchive,
   onUnarchive,
   onDelete,
@@ -389,6 +504,9 @@ function ChatRow({
   live: boolean;
   waiting: boolean;
   archived: boolean;
+  selecting: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   onArchive: () => void;
   onUnarchive: () => void;
   onDelete: () => void;
@@ -447,29 +565,38 @@ function ChatRow({
   const subtitle = stateLabel ? [stateLabel, preview].filter(Boolean).join(' · ') : (preview ?? model);
 
   return (
-    <SwipeableRow actions={actions}>
+    <SwipeableRow actions={selecting ? [] : actions}>
       <ListItem
         title={name.title}
+        {...(selecting
+          ? {
+              accessory: selected ? (
+                <CircleCheck size={22} color={colors.primary} />
+              ) : (
+                <Circle size={22} color={colors['muted-foreground']} />
+              ),
+            }
+          : {})}
         titleBadge={name.subAgent ? { label: 'Sub-agent' } : null}
         subtitle={subtitle}
         subtitleTone={state === 'waiting' ? 'warning' : 'muted'}
         meta={relativeTime(chat.updatedAt)}
         avatar={{
-          icon:
-            model && state === 'idle' && vendorForModel(model) !== 'copilot' ? (
-              <ModelVendorIcon modelId={model} size={17} color={colors['muted-foreground']} />
-            ) : state === 'waiting' ? (
-              <BellRing size={17} color={colors.warning} />
-            ) : (
-              <MessagesSquare size={17} color={colors[state === 'running' ? 'info' : 'muted-foreground']} />
-            ),
+          // Always the chat glyph, as on Home, in the drawer and in search:
+          // the tint and the corner dot carry the state.
+          icon: (
+            <ENTITY_ICON.chat
+              size={17}
+              color={colors[state === 'running' ? 'info' : state === 'waiting' ? 'warning' : 'muted-foreground']}
+            />
+          ),
           tone,
           indicator: state === 'waiting' ? 'warning' : state === 'running' ? 'info' : null,
         }}
         accessibilityLabel={`${name.title}.${name.subAgent ? ' Sub-agent.' : ''} ${stateLabel ?? relativeTime(chat.updatedAt)}.${preview ? ` ${preview}` : ''}`}
-        accessibilityHint="Double tap and hold for more actions"
-        onPress={() => router.push(`/chats/${chat.id}`)}
-        onLongPress={onMenu}
+        accessibilityHint={selecting ? (selected ? 'Selected. Double tap to deselect' : 'Double tap to select') : 'Double tap and hold for more actions'}
+        onPress={selecting ? onToggleSelect : () => router.push(`/chats/${chat.id}`)}
+        onLongPress={selecting ? onToggleSelect : onMenu}
       />
     </SwipeableRow>
   );

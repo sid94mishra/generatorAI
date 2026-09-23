@@ -270,3 +270,11 @@ describe('flow results', () => {
     expect(describeFlowResult(flowResult({ status: 'failed', error: 'push rejected' })).tone).toBe('danger');
   });
 });
+
+describe('emptyFlowForm push default', () => {
+  it('matches the desktop Changes tab: on when the mount can push, off when it cannot', () => {
+    expect(emptyFlowForm('.', true).push).toBe(true);
+    expect(emptyFlowForm('.', false).push).toBe(false);
+    expect(emptyFlowForm('.').push).toBe(false);
+  });
+});

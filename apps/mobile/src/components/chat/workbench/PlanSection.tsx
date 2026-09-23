@@ -15,13 +15,16 @@ export function PlanSection({
   chatId,
   active = true,
   initialPlanId = null,
+  onDecided,
 }: {
   chatId: string;
   active?: boolean;
+  /** Close the host sheet so the chat shows the work the decision started. */
+  onDecided?: () => void;
   /** Open on this plan rather than the latest (a plan card's "Open plan"). */
   initialPlanId?: string | null;
 }): React.ReactElement {
   const [planId, setPlanId] = useState<string | null>(initialPlanId);
-  const plan = usePlanDocument(chatId, { active, planId });
+  const plan = usePlanDocument(chatId, { active, planId, ...(onDecided ? { onDecided } : {}) });
   return <PlanBody chatId={chatId} plan={plan} onSelectPlan={setPlanId} />;
 }

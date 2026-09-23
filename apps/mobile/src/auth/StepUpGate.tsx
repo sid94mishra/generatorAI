@@ -67,7 +67,12 @@ export function StepUpGate({
           ? 'This needs a quick check before it opens, so a phone left unlocked cannot reach it.'
           : reason}
       </Text>
-      {phase === 'declined' ? <Button label="Confirm" onPress={retry} /> : null}
+      {/* Wrapped: Button aligns itself to the start, which left it off-centre here. */}
+      {phase === 'declined' ? (
+        <View>
+          <Button label="Confirm" onPress={retry} />
+        </View>
+      ) : null}
     </View>
   );
 }

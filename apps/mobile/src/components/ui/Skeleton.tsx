@@ -102,7 +102,7 @@ export function SkeletonListItem(): React.ReactElement {
           <Skeleton width="80%" height={12} />
         </View>
       </View>
-      <View className="ml-16 h-px bg-border-muted" />
+      <View className="ml-[52px] h-px bg-border-muted" />
     </View>
   );
 }

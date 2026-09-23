@@ -111,7 +111,7 @@ export function TasksSection({ chatId, active = true }: { chatId: string; active
           const isOpen = open === task.taskId;
           const running = ACTIVE.has(task.status);
           return (
-            <View key={task.taskId} className="rounded-2xl border border-border bg-card">
+            <View key={task.taskId} className="border-b border-border-muted">
               <Touchable
                 accessibilityLabel={`${task.taskName}, ${STATUS_LABEL[task.status] ?? task.status}`}
                 accessibilityState={{ expanded: isOpen }}

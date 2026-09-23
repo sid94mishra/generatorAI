@@ -53,7 +53,11 @@ export function ActionSheet({
   if (!visible) return null;
 
   return (
-    <Sheet visible={visible} onClose={onClose} detents={[0.4]} scrollable fitContent>
+    // The detent is only the CEILING for a fit-content sheet. At 0.4 a menu of
+    // six actions (Attach) lost its last row and its Cancel button below the
+    // fold, behind a scroll nobody expects in an action sheet; a native one
+    // grows with its actions and only scrolls when it would leave the screen.
+    <Sheet visible={visible} onClose={onClose} detents={[0.85]} scrollable fitContent>
       {title || message ? (
         <View className="gap-1 px-5 pb-3 pt-1">
           {title ? (

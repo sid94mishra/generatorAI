@@ -8,12 +8,13 @@ describe('backFallbackFor', () => {
     }
   });
 
-  it('returns detail screens to their tab', () => {
+  it('returns detail screens to the catalogue they belong to', () => {
     expect(backFallbackFor('/chats/abc')).toBe('/(tabs)/chats');
-    expect(backFallbackFor('/workflows/w1')).toBe('/(tabs)/runs');
-    expect(backFallbackFor('/automations/a1')).toBe('/(tabs)/runs');
-    expect(backFallbackFor('/scripts/s1')).toBe('/(tabs)/runs');
-    expect(backFallbackFor('/runs/r1')).toBe('/(tabs)/runs');
+    expect(backFallbackFor('/workflows/w1')).toBe('/(tabs)/runs?segment=workflows');
+    expect(backFallbackFor('/automations/a1')).toBe('/(tabs)/runs?segment=automations');
+    expect(backFallbackFor('/scripts/s1')).toBe('/(tabs)/runs?segment=scripts');
+    // There is no runs list: a run backs out to Workflows, where runs live.
+    expect(backFallbackFor('/runs/r1')).toBe('/(tabs)/runs?segment=workflows');
     expect(backFallbackFor('/projects/p1')).toBe('/(tabs)/projects');
     expect(backFallbackFor('/approvals')).toBe('/(tabs)');
   });

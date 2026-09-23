@@ -14,7 +14,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { router, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { FileDiff, Lock, MoreHorizontal, TerminalSquare, Trash2, Workflow as WorkflowIcon } from 'lucide-react-native';
+import { ChevronLeft, Lock, MoreHorizontal, Trash2, Workflow as WorkflowIcon } from 'lucide-react-native';
 import { queryKeys, type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
@@ -23,6 +23,15 @@ import { useRunStream } from '../../src/stream/useRunStream';
 import { ApprovalCard } from '../../src/components/runs/ApprovalCard';
 import { formatDuration, relativeTime, runElapsed } from '../../src/components/runs/formatTime';
 import { StageTimeline } from '../../src/components/runs/StageTimeline';
+import { StageTranscriptInline } from '../../src/components/runs/StageTranscriptInline';
+import { SessionHeader } from '../../src/components/chat/ChatHeader';
+import { SidePanelHost } from '../../src/components/ui/SidePanel';
+import { WorkbenchPanel } from '../../src/components/workbench/WorkbenchPanel';
+import { WorkbenchSheet } from '../../src/components/workbench/WorkbenchSheet';
+import { WorkbenchButton } from '../../src/components/workbench/WorkbenchButton';
+import { useWorkbench } from '../../src/components/workbench/useWorkbench';
+import type { ToolId } from '../../src/components/workbench/workbenchModel';
+import { MAX_SCALE } from '../../src/components/ui/accessibility';
 import { StatusGlyph } from '../../src/components/runs/StatusGlyph';
 import {
   awaitsApproval,
@@ -39,7 +48,7 @@ import { Card, SectionHeader, TONE_TEXT } from '../../src/components/ui/primitiv
 import { ActionSheet, type MenuAction } from '../../src/components/ui/ActionSheet';
 import { Button, IconButton } from '../../src/components/ui/Button';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
-import { PlainScroll } from '../../src/components/ui/Screen';
+import { PlainScroll, goBack } from '../../src/components/ui/Screen';
 import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { useTheme } from '../../src/theme/ThemeProvider';
@@ -58,8 +67,14 @@ export default function RunDetailScreen(): React.ReactElement {
   const navigation = useNavigation();
   const focused = useIsFocused();
   const { colors } = useTheme();
-  const terminalGate = useFeature('terminal');
   const runControl = useFeature('runControl');
+  // The workbench: tools for the run's workspace, as on a chat.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [tool, setTool] = useState<ToolId | null>(null);
+  const [toolOpen, setToolOpen] = useState(false);
+  // One step open at a time. `undefined` = the user has not chosen, so the
+  // running step is shown; `null` = they collapsed it and it stays shut.
+  const [expanded, setExpanded] = useState<string | null | undefined>(undefined);
   const [busyStage, setBusyStage] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -103,19 +118,24 @@ export default function RunDetailScreen(): React.ReactElement {
     [runAction, runId],
   );
 
+  // The navigator header is off for this route: the screen draws its own so
+  // the workbench panel can slide over it (as on a chat).
   React.useLayoutEffect(() => {
-    navigation.setOptions({
-      title: runTitle(run.data?.name, 'Run'),
-      headerRight: () =>
-        run.data ? (
-          <IconButton
-            icon={<MoreHorizontal size={20} color={colors.foreground} />}
-            accessibilityLabel="Run actions"
-            onPress={() => setMenu(true)}
-          />
-        ) : null,
-    });
-  }, [navigation, run.data, colors.foreground]);
+    navigation.setOptions({ title: runTitle(run.data?.name, 'Run'), gestureEnabled: !panelOpen });
+  }, [navigation, run.data?.name, panelOpen]);
+
+  const workbench = useWorkbench({
+    surface: 'run',
+    workspaceId: run.data?.workspaceId ?? null,
+    scopes: runControl.scopes,
+    live: panelOpen || toolOpen,
+  });
+
+  const openTool = useCallback((next: ToolId) => {
+    setPanelOpen(false);
+    setTool(next);
+    setToolOpen(true);
+  }, []);
 
   const decide = useCallback(
     (stage: StageRunSummary, outcome: ApprovalOutcome, feedback?: string) => {
@@ -137,24 +157,58 @@ export default function RunDetailScreen(): React.ReactElement {
     [runId],
   );
 
+  const definitionId = run.data?.workflowDefinitionId;
+  const workflowHref = (
+    definitionId ? `/workflows/${encodeURIComponent(definitionId)}` : '/(tabs)/runs?segment=workflows'
+  ) as NonNullable<Parameters<typeof goBack>[0]>;
+  const backButton = (
+    <IconButton
+      accessibilityLabel="Back"
+      icon={<ChevronLeft size={24} color={colors.foreground} />}
+      // A run belongs to its workflow (desktop: /workflows/:id/runs/:runId), so
+      // with no history behind it Back lands on that workflow's page.
+      onPress={() => goBack(workflowHref)}
+    />
+  );
+  const headerTitle = (text: string, sub?: string): React.ReactElement => (
+    <View>
+      <Text numberOfLines={1} maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-md font-semibold text-foreground">
+        {text}
+      </Text>
+      {sub ? (
+        <Text numberOfLines={1} maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-xs text-muted-foreground">
+          {sub}
+        </Text>
+      ) : null}
+    </View>
+  );
+
   if (run.isLoading) {
     return (
-      <View className="p-4">
-        <SkeletonList rows={5} />
+      <View className="flex-1 bg-background">
+        <SessionHeader leading={backButton} title={headerTitle('Run')} trailing={null} />
+        <View className="p-4">
+          <SkeletonList rows={5} />
+        </View>
       </View>
     );
   }
   if (run.error || !run.data) {
     return (
-      <ErrorState
+      <View className="flex-1 bg-background">
+        <SessionHeader leading={backButton} title={headerTitle('Run')} trailing={null} />
+        <ErrorState
         title={run.error ? 'Could not load this run' : 'Run not found'}
         message={run.error instanceof Error ? run.error.message : undefined}
         onRetry={() => void run.refetch()}
-      />
+        />
+      </View>
     );
   }
 
   const data = run.data;
+  const runningStage = stages.find((st) => isActive(st.status));
+  const expandedStageId = expanded === undefined ? (runningStage?.id ?? null) : expanded;
   const elapsed = runElapsed(data, isActive(data.status) ? null : data.completedAt ?? data.updatedAt);
   const workspaceId = data.workspaceId;
 
@@ -188,6 +242,38 @@ export default function RunDetailScreen(): React.ReactElement {
 
   return (
     <View className="flex-1 bg-background">
+      <SidePanelHost
+        side="right"
+        open={panelOpen}
+        onOpenChange={setPanelOpen}
+        swipeToOpen={false}
+        accessibilityLabel="Workbench"
+        renderPanel={() => (
+          <WorkbenchPanel
+            subtitle={runTitle(data.name, 'Run')}
+            tools={workbench.tools}
+            activeTool={toolOpen ? tool : null}
+            onPick={openTool}
+            onClose={() => setPanelOpen(false)}
+          />
+        )}
+      >
+      <SessionHeader
+        leading={backButton}
+        title={headerTitle(runTitle(data.name, 'Run'), statusLabel(data.status))}
+        trailing={
+          <>
+            {workspaceId ? (
+              <WorkbenchButton badge={workbench.badge} selected={panelOpen} onPress={() => setPanelOpen((v) => !v)} />
+            ) : null}
+            <IconButton
+              icon={<MoreHorizontal size={20} color={colors.foreground} />}
+              accessibilityLabel="Run actions"
+              onPress={() => setMenu(true)}
+            />
+          </>
+        }
+      />
       <PlainScroll onRefresh={pull.onRefresh} refreshing={pull.refreshing}>
         <Card className="gap-3 p-4">
           <View className="flex-row items-start gap-3">
@@ -255,6 +341,17 @@ export default function RunDetailScreen(): React.ReactElement {
             canControl={runControl.available}
             busyStageId={busyStage}
             onOpen={openStage}
+            expandedId={expandedStageId}
+            onToggle={(stage) => setExpanded(expandedStageId === stage.id ? null : stage.id)}
+            renderExpanded={(stage) => (
+              <StageTranscriptInline
+                runId={runId}
+                stage={stage}
+                workspaceId={workspaceId ?? null}
+                connected={connected}
+                onOpenStage={() => openStage(stage)}
+              />
+            )}
             onAction={(stage, action) => {
               setBusyStage(stage.id);
               stageAction.mutate(
@@ -267,22 +364,6 @@ export default function RunDetailScreen(): React.ReactElement {
 
         <SectionHeader title="More" />
         <ListGroup>
-          {workspaceId ? (
-            <ListRow
-              title="Changes"
-              subtitle="Files this run created or edited"
-              icon={<FileDiff size={18} color={colors['muted-foreground']} />}
-              onPress={() => router.push(`/changes/${workspaceId}`)}
-            />
-          ) : null}
-          {workspaceId && terminalGate.available ? (
-            <ListRow
-              title="Terminal"
-              subtitle="Run commands in this workspace"
-              icon={<TerminalSquare size={18} color={colors['muted-foreground']} />}
-              onPress={() => router.push(`/terminal/${workspaceId}`)}
-            />
-          ) : null}
           <ListRow
             title="Workflow"
             subtitle="The definition this run executes"
@@ -291,6 +372,17 @@ export default function RunDetailScreen(): React.ReactElement {
           />
         </ListGroup>
       </PlainScroll>
+      </SidePanelHost>
+
+      <WorkbenchSheet
+        visible={toolOpen}
+        onClose={() => setToolOpen(false)}
+        tool={tool}
+        onToolChange={setTool}
+        tools={workbench.tools}
+        workspaceId={workspaceId ?? null}
+        scopes={runControl.scopes}
+      />
 
       <ActionSheet
         visible={menu}
@@ -322,7 +414,7 @@ export default function RunDetailScreen(): React.ReactElement {
               remove.mutate(undefined, {
                 onSuccess: () => {
                   if (router.canGoBack()) router.back();
-                  else router.replace('/(tabs)/runs');
+                  else router.replace(workflowHref);
                 },
               }),
           },

@@ -95,3 +95,38 @@ describe('formatDuration', () => {
     expect(formatDuration(Number.NaN)).toBeNull();
   });
 });
+
+describe('toolSummary paths', () => {
+  it('shows a file argument from the mount root, not the absolute workspace path', async () => {
+    const { toolSummary } = await import('../components/chat/toolPresentation');
+    expect(toolSummary({ file_path: '/private/tmp/x/ws/executions/abc/source/shopkit/src/pricing/discounts.js' })).toBe(
+      'src/pricing/discounts.js',
+    );
+    // Commands and other text are left as they are.
+    expect(toolSummary({ command: 'cat /private/tmp/x/source/shopkit/a.js' })).toBe('cat /private/tmp/x/source/shopkit/a.js');
+  });
+});
+
+describe('gate tool labels', () => {
+  it('names camelCase gate tools instead of showing their identifiers', async () => {
+    const { toolLabel } = await import('../components/chat/toolPresentation');
+    expect(toolLabel('ExitPlanMode')).toBe('Plan ready for review');
+    expect(toolLabel('exit_plan_mode')).toBe('Plan ready for review');
+    expect(toolLabel('AskUserQuestion')).toBe('Question for you');
+    expect(toolLabel('TodoWrite')).toBe('Update to-dos');
+  });
+
+  it('keeps them as plain tool rows, never sub-agent cards', async () => {
+    const { toolFamily } = await import('../components/chat/timeline/deriveTimeline');
+    expect(toolFamily('ExitPlanMode')).toBe('other');
+    expect(toolFamily('AskUserQuestion')).toBe('other');
+    expect(toolFamily('TodoWrite')).toBe('other');
+  });
+});
+
+describe('toolLabel — harness bookkeeping', () => {
+  it('names ToolSearch for what it does', () => {
+    expect(toolLabel('ToolSearch')).toBe('Load tools');
+    expect(toolKind('ToolSearch')).toBe('other');
+  });
+});

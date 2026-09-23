@@ -65,13 +65,15 @@ export class ErrorBoundary extends React.Component<Props, State> {
           message={error.message || 'An unexpected error stopped this screen from drawing.'}
           onRetry={this.retry}
         />
-        <Button
-          label="Go to Home"
-          variant="ghost"
-          size="sm"
-          onPress={this.goHome}
-          accessibilityHint="Leaves this screen and opens the Home tab"
-        />
+        <View>
+          <Button
+            label="Go to Home"
+            variant="ghost"
+            size="sm"
+            onPress={this.goHome}
+            accessibilityHint="Leaves this screen and opens the Home tab"
+          />
+        </View>
       </View>
     );
   }

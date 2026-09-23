@@ -259,7 +259,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
       <>
       <Card className="gap-3 p-4">
         <View className="flex-row items-center gap-3">
-          <View className="h-10 w-10 items-center justify-center rounded-2xl bg-emphasis">
+          <View className="h-10 w-10 items-center justify-center rounded-xl bg-control">
             <FolderGit2 size={18} color={colors['muted-foreground']} />
           </View>
           <View className="flex-1 gap-0.5">
@@ -527,7 +527,7 @@ function CodebaseRow({ codebase, projectId }: { codebase: CodebaseSummary & Pick
       }
     >
       <View className="min-h-14 flex-row items-center gap-3 px-4 py-2.5">
-        <View className="h-9 w-9 items-center justify-center rounded-2xl bg-emphasis">
+        <View className="h-9 w-9 items-center justify-center">
           {remote ? (
             <FolderGit2 size={18} color={colors['muted-foreground']} />
           ) : (

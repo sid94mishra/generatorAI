@@ -84,14 +84,11 @@ export function SegmentedControl<T extends string>({
   const reduceMotion = useReduceMotion();
   const fontScale = useFontScale();
   const presets = useReducedMotionPreset();
-  const { appearance, colors } = useTheme();
-  // The selected pill must be LIGHTER than the track. `bg-card` on the
-  // `subtle` track is lighter in the light palette but darker in the dark
-  // one, so in dark mode the selected segment read as the recessed one.
-  const indicatorColors =
-    appearance === 'dark'
-      ? { backgroundColor: colors.emphasis, borderColor: colors.input ?? colors.border }
-      : { backgroundColor: colors.card, borderColor: colors.border };
+  const { colors } = useTheme();
+  // Desktop's FilterTabs: a hairline-bordered track and a solid
+  // `primary-emphasis` pill with `primary-foreground` text. Token-driven, so
+  // every theme and appearance gets its own accent rather than a grey pill.
+  const indicatorColor = colors['primary-emphasis'] ?? colors.primary;
 
   const index = Math.max(
     0,
@@ -130,7 +127,7 @@ export function SegmentedControl<T extends string>({
       // 44pt tall, not 40: this is a primary control on the chat screen and
       // it shares the row with nothing else, so the platform minimum is the
       // right floor rather than the desktop segmented-control's 32.
-      className={`min-h-11 rounded-full bg-subtle p-1 ${className}`}
+      className={`min-h-11 rounded-xl border border-border p-1 ${className}`}
       accessibilityRole="tablist"
       {...(accessibilityLabel ? { accessibilityLabel } : {})}
     >
@@ -151,8 +148,8 @@ export function SegmentedControl<T extends string>({
         {slot > 0 ? (
           <Animated.View
             pointerEvents="none"
-            className="absolute bottom-0 top-0 rounded-full"
-            style={[indicatorStyle, { ...indicatorColors, borderWidth: 1, width: slot }]}
+            className="absolute bottom-0 top-0 rounded-lg"
+            style={[indicatorStyle, { backgroundColor: indicatorColor, width: slot }]}
           />
         ) : null}
 
@@ -177,13 +174,13 @@ export function SegmentedControl<T extends string>({
               onPress={() => onChange(segment.value)}
               hitSlop={0}
               style={{ width: slot, minHeight: MIN_TARGET }}
-              className="flex-row items-center justify-center gap-1.5 rounded-full px-3 py-1"
+              className="flex-row items-center justify-center gap-1.5 rounded-lg px-3 py-1"
             >
               {segment.icon}
               <Text
                 numberOfLines={1}
                 maxFontSizeMultiplier={MAX_SCALE.chrome}
-                className={`text-sm font-semibold ${selected ? 'text-foreground' : 'text-muted-foreground'}`}
+                className={`text-sm font-semibold ${selected ? 'text-primary-foreground' : 'text-muted-foreground'}`}
               >
                 {segment.label}
               </Text>
@@ -191,14 +188,13 @@ export function SegmentedControl<T extends string>({
                 <View accessible={false} className="h-1.5 w-1.5 rounded-full bg-success" />
               ) : null}
               {count !== undefined && count > 0 ? (
-                <View className="min-w-5 items-center rounded-full bg-emphasis px-1">
-                  <Text
-                    maxFontSizeMultiplier={MAX_SCALE.chrome}
-                    className="text-xs font-semibold text-muted-foreground"
-                  >
-                    {count}
-                  </Text>
-                </View>
+                // Desktop's FilterTabs: the count is plain text after the label.
+                <Text
+                  maxFontSizeMultiplier={MAX_SCALE.chrome}
+                  className={`text-xs font-semibold ${selected ? 'text-primary-foreground opacity-80' : 'text-muted-foreground opacity-80'}`}
+                >
+                  {count}
+                </Text>
               ) : null}
             </Touchable>
           );

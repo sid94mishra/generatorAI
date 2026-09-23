@@ -404,8 +404,12 @@ function Inline({ nodes }: { nodes: InlineNode[] }): React.ReactElement {
             );
           case 'code':
             return (
-              <Text key={i} className="rounded bg-subtle font-mono text-sm text-foreground">
-                {` ${node.text} `}
+              // Theme-coloured mono text, no background: desktop draws inline
+              // code in the primary colour, and on native a nested Text's
+              // background fills the whole line box, so file names read as
+              // heavy grey highlight bars rather than code.
+              <Text key={i} className="font-mono text-sm font-medium text-primary">
+                {node.text}
               </Text>
             );
           case 'link':

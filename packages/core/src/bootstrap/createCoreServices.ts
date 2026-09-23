@@ -322,6 +322,16 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
 
         if (record?.kind === 'plan_review') {
           const payload = (record.payload ?? {}) as { planId?: string };
+          // The plan itself must stop asking for review too. Clients read
+          // the plan list, not the gate, so a plan left `awaiting_review`
+          // kept its Approve buttons after a restart and every tap came
+          // back 409 with no way out but a new prompt.
+          if (payload.planId && planService) {
+            const plan = await planService.findById(payload.planId).catch(() => null);
+            if (plan?.status === 'awaiting_review') {
+              await planService.setStatus(plan.id, 'expired').catch(() => undefined);
+            }
+          }
           await eventBus.emit(sessionId, {
             kind: 'chat.plan.expired',
             data: { chatId, planId: payload.planId ?? '', interactionId: event.interactionId, reason: event.reason },

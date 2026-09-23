@@ -110,7 +110,7 @@ export default function WorkflowScreen(): React.ReactElement {
       void queryClient.invalidateQueries({ queryKey: queryKeys.workflows() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs() });
       if (router.canGoBack()) router.back();
-      else router.replace('/(tabs)/runs');
+      else router.replace('/(tabs)/runs?segment=workflows' as never);
     },
     onError: (err) => {
       haptics.error();
@@ -161,7 +161,7 @@ export default function WorkflowScreen(): React.ReactElement {
       <PlainScroll onRefresh={pull.onRefresh} refreshing={pull.refreshing}>
         <Card className="gap-2 p-4">
           <View className="flex-row items-center gap-3">
-            <View className="h-10 w-10 items-center justify-center rounded-2xl bg-emphasis">
+            <View className="h-10 w-10 items-center justify-center rounded-xl bg-control">
               <WorkflowIcon size={18} color={colors['muted-foreground']} />
             </View>
             <View className="flex-1 gap-0.5">
@@ -181,6 +181,38 @@ export default function WorkflowScreen(): React.ReactElement {
           ) : null}
         </Card>
 
+        {/* Runs first: on a phone this page is where a workflow's runs live
+            (there is no separate runs list, as on desktop), so they sit right
+            under the summary, ahead of the definition's stages and hooks. */}
+        <SectionHeader
+          title={`Runs (${sortedRuns.length})`}
+          action={
+            sortedRuns.length > RECENT_RUNS ? (
+              <Button
+                label={showAllRuns ? 'Show fewer' : 'Show all'}
+                variant="ghost"
+                size="sm"
+                onPress={() => setShowAllRuns((v) => !v)}
+              />
+            ) : undefined
+          }
+        />
+        {runs.isLoading ? (
+          <SkeletonList rows={3} />
+        ) : sortedRuns.length === 0 ? (
+          <EmptyState
+            title="Never run"
+            message={runControl.available ? 'Start the first run below.' : 'Runs appear here once it has run.'}
+            icon={<Play size={22} color={colors['muted-foreground']} />}
+          />
+        ) : (
+          <FlatRows>
+            {visibleRuns.map((run) => (
+<RunRow key={run.id} run={run} />
+            ))}
+          </FlatRows>
+        )}
+
         <SectionHeader title={`Stages (${stages.length})`} />
         {stages.length === 0 ? (
           <EmptyState title="No stages" message="This workflow has no stages yet." />
@@ -195,12 +227,20 @@ export default function WorkflowScreen(): React.ReactElement {
                   accessibilityHint="Shows instructions, model and review requirements"
                   onPress={() => setSelectedStage(stage)}
                   scale="none"
-                  className={`flex-row gap-3 py-3 ${index > 0 ? 'border-t border-border-muted' : ''}`}
+                  className="flex-row gap-3"
                 >
-                  <View className="h-7 w-7 items-center justify-center rounded-full bg-emphasis">
-                    <Text className="text-sm font-semibold text-muted-foreground">{index + 1}</Text>
+                  {/* The same connected rail as a run's step list, so a
+                      definition and its runs read as one shape. */}
+                  <View className="w-7 items-center">
+                    <View className={`h-3 w-px ${index === 0 ? 'bg-transparent' : 'bg-border'}`} />
+                    <View className="h-7 w-7 items-center justify-center rounded-full bg-control">
+                      <Text className="text-sm font-semibold text-muted-foreground">{index + 1}</Text>
+                    </View>
+                    <View className={`w-px flex-1 ${index === stages.length - 1 ? 'bg-transparent' : 'bg-border'}`} />
                   </View>
-                  <View className="flex-1 gap-1">
+                  <View
+                    className={`flex-1 gap-1 py-3 ${index < stages.length - 1 ? 'border-b border-border-muted' : ''}`}
+                  >
                     <View className="min-h-7 flex-row items-center gap-2">
                       <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
                         {stage.name ?? stage.id ?? `Stage ${index + 1}`}
@@ -245,35 +285,6 @@ export default function WorkflowScreen(): React.ReactElement {
             </FlatRows>
           </>
         ) : null}
-
-        <SectionHeader
-          title={`Runs (${sortedRuns.length})`}
-          action={
-            sortedRuns.length > RECENT_RUNS ? (
-              <Button
-                label={showAllRuns ? 'Show fewer' : 'Show all'}
-                variant="ghost"
-                size="sm"
-                onPress={() => setShowAllRuns((v) => !v)}
-              />
-            ) : undefined
-          }
-        />
-        {runs.isLoading ? (
-          <SkeletonList rows={3} />
-        ) : sortedRuns.length === 0 ? (
-          <EmptyState
-            title="Never run"
-            message={runControl.available ? 'Start the first run below.' : 'Runs appear here once it has run.'}
-            icon={<Play size={22} color={colors['muted-foreground']} />}
-          />
-        ) : (
-          <FlatRows>
-            {visibleRuns.map((run) => (
-<RunRow key={run.id} run={run} />
-            ))}
-          </FlatRows>
-        )}
 
         <View style={{ height: STICKY_BAR_SPACE }} />
       </PlainScroll>
@@ -352,7 +363,7 @@ export default function WorkflowScreen(): React.ReactElement {
           <Text className="text-sm text-muted-foreground">{selectedStage?.approvalRequired ? 'Pauses for your review before continuing.' : 'Continues when the stage finishes.'}</Text>
           <SheetSection title="Instructions" />
           {(selectedStage?.prompts ?? []).map((prompt, i) => (
-            <View key={i} className="gap-1 rounded-2xl bg-subtle p-3">
+            <View key={i} className="gap-1 rounded-xl border border-border p-3">
               <Text className="text-sm font-semibold text-foreground">{prompt.label ?? `Prompt ${i + 1}`}</Text>
               <Text selectable className="text-md leading-relaxed text-foreground">{prompt.text ?? 'File-based prompt'}</Text>
             </View>

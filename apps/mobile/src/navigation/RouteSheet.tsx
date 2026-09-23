@@ -112,32 +112,38 @@ export function RouteSheet({
       </View>
 
       {scroll ? (
-        <ScrollView
-          style={{ flex: 1 }}
-          keyboardDismissMode="interactive"
-          keyboardShouldPersistTaps="handled"
-          // iOS: inset the content by the keyboard so a focused field near
-          // the end can scroll into view. No-op elsewhere.
-          automaticallyAdjustKeyboardInsets
-          contentContainerStyle={{
-            padding: 16,
-            // With a footer, the footer owns the home-indicator inset.
-            paddingBottom: footer ? 24 : insets.bottom + 32,
-            gap: 12,
-          }}
-          refreshControl={
-            onRefresh ? (
-              <RefreshControl
-                refreshing={pull.refreshing}
-                onRefresh={pull.onRefresh}
-                tintColor={colors['muted-foreground']}
-                colors={[colors.primary ?? '']}
-              />
-            ) : undefined
-          }
-        >
-          {children}
-        </ScrollView>
+        // Wrapped in its own view: on an iOS form sheet react-native-screens
+        // looks one level down for a ScrollView and resizes it to the whole
+        // sheet at the sheet's top, which drew the first rows under this
+        // title. Out of its reach, plain flex layout places it.
+        <View collapsable={false} style={{ flex: 1 }}>
+          <ScrollView
+            style={{ flex: 1 }}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+            // iOS: inset the content by the keyboard so a focused field near
+            // the end can scroll into view. No-op elsewhere.
+            automaticallyAdjustKeyboardInsets
+            contentContainerStyle={{
+              padding: 16,
+              // With a footer, the footer owns the home-indicator inset.
+              paddingBottom: footer ? 24 : insets.bottom + 32,
+              gap: 12,
+            }}
+            refreshControl={
+              onRefresh ? (
+                <RefreshControl
+                  refreshing={pull.refreshing}
+                  onRefresh={pull.onRefresh}
+                  tintColor={colors['muted-foreground']}
+                  colors={[colors.primary ?? '']}
+                />
+              ) : undefined
+            }
+          >
+            {children}
+          </ScrollView>
+        </View>
       ) : (
         <View className="flex-1">{children}</View>
       )}

@@ -21,7 +21,7 @@ type Scroller = { scrollToOffset?: (opts: { offset: number; animated?: boolean }
 
 const registry = new Map<string, () => void>();
 
-/** Called by the tab bar when the already-focused tab is tapped again. */
+/** Called by the navigation drawer when the section already on screen is chosen again. */
 export function scrollActiveToTop(routeName: string): void {
   const scroll = registry.get(routeName);
   if (!scroll) return;

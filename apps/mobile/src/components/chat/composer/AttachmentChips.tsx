@@ -66,7 +66,7 @@ export function AttachmentChips({
                 style={{ width: 32, height: 32, borderRadius: 8 }}
               />
             ) : (
-              <View className="h-8 w-8 items-center justify-center rounded-lg bg-subtle">
+              <View className="h-8 w-8 items-center justify-center rounded-lg bg-control">
                 {item.kind === 'capture' && item.name.startsWith('terminal-') ? (
                   <TerminalSquare size={16} color={colors['muted-foreground']} />
                 ) : item.kind === 'capture' && item.text === undefined ? (

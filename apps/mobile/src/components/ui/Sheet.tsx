@@ -55,7 +55,7 @@ import {
   type LayoutChangeEvent,
   type ViewStyle,
 } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   interpolate,
   runOnJS,
@@ -403,6 +403,13 @@ export function Sheet({
 
   return (
     <Modal visible transparent animationType="none" onRequestClose={close} statusBarTranslucent>
+      {/* A Modal is its own native window on Android, outside the app's
+          `GestureHandlerRootView` — so without a gesture root of its own NONE
+          of the pans below ever fire there: the sheet could not be dragged
+          between its detents or swiped away, only closed by the X or the
+          scrim. iOS presents inside the same root and was unaffected, which is
+          how this went unnoticed. */}
+      <GestureHandlerRootView style={styles.gestureRoot}>
       {/* `themeVars` is re-applied here because the modal host is a separate
           subtree: without it every themed class inside resolves to nothing
           and the whole sheet paints transparent. `zIndex` is explicit because
@@ -537,9 +544,14 @@ export function Sheet({
           ) : null}
         </Animated.View>
       </Animated.View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
+
+const styles = StyleSheet.create({
+  gestureRoot: { flex: 1 },
+});
 
 /** A selectable row inside a picker sheet. */
 export function SheetRow({

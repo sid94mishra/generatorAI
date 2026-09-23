@@ -234,10 +234,11 @@ export function ScmFlowSheet({
 
 function initialForm(readiness: RepoReadiness): ScmFlowForm {
   return {
-    ...emptyFlowForm(readiness.alias),
+    // Push is on whenever the mount can push — the desktop Changes tab's
+    // default. It used to need an existing upstream too, so the FIRST push of
+    // a new work branch (the usual case in a chat) defaulted to commit-only.
+    ...emptyFlowForm(readiness.alias, readiness.can.push),
     base: '',
-    // Pushing is the common intent when the branch already tracks a remote.
-    push: readiness.can.push && readiness.hasUpstream,
   };
 }
 
@@ -248,7 +249,7 @@ function errorText(err: unknown, fallback: string): string {
 function Reason({ text }: { text: string }): React.ReactElement {
   const { colors } = useTheme();
   return (
-    <View className="flex-row gap-2 rounded-2xl border border-border bg-subtle p-3">
+    <View className="flex-row gap-2 rounded-xl border border-border bg-control p-3">
       <TriangleAlert size={14} color={colors.warning} />
       <Text className="flex-1 text-xs leading-relaxed text-muted-foreground">{text}</Text>
     </View>
@@ -301,7 +302,7 @@ function StepList({
   const byId = new Map((result?.steps ?? []).map((s) => [s.id as string, s]));
 
   return (
-    <View className="gap-2 rounded-2xl border border-border bg-subtle p-3" accessibilityLabel="Flow progress">
+    <View className="gap-2 rounded-xl border border-border bg-control p-3" accessibilityLabel="Flow progress">
       {steps.map((id) => {
         const step = byId.get(id);
         const status = step?.status;

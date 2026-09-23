@@ -34,21 +34,22 @@ import {
   type TextInputKeyPressEventData,
 } from 'react-native';
 import Animated from 'react-native-reanimated';
+import { KeyboardController } from 'react-native-keyboard-controller';
 import type { SharedValue } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import {
   ArrowUp,
   Brain,
   Camera,
-  ChevronDown,
   ClipboardList,
   ClipboardPaste,
+  Cpu,
+  Maximize2,
   FileText,
   FolderOpen,
   Globe,
   History,
   Image as ImageIcon,
-  Maximize2,
   Mic,
   Plus,
   ShieldCheck,
@@ -62,7 +63,6 @@ import {
 import type { AgentMode, ContextUsageSnapshot, ModelInfo } from '@generatorai/client-core';
 
 import { Chip } from '../ui/Chip';
-import { GlassSurface } from '../ui/GlassSurface';
 import { IconButton } from '../ui/Button';
 import { ProgressRing } from '../ui/ProgressRing';
 import { Spinner } from '../ui/States';
@@ -92,7 +92,15 @@ import {
   type GateBannerProps,
   type WorkspacePrepProps,
 } from './composer/ComposerBanners';
-import { MODE_OPTIONS, turnChipLabel, turnChipParts } from './composer/turnOptions';
+import {
+  MODE_OPTIONS,
+  effectiveEffort,
+  effortOptionsFor,
+  effortTitle,
+  turnChipLabel,
+  turnChipParts,
+} from './composer/turnOptions';
+import { ProviderBrandIcon } from '../brand/VendorIcons';
 import { TERMINAL_CAPTURE_LINES } from './composer/captures';
 import type { ComposerCaptureActions } from './composer/captureContext';
 import { currentTerminalSelection } from '../../terminal/terminalFocus';
@@ -375,8 +383,22 @@ export function Composer(props: ComposerProps): React.ReactElement {
   // ── Gate: the field stays editable so "Cancel and send" has something to send.
   const hasGate = Boolean(props.gate);
   const fieldEditable = !disabled || hasGate;
+  // A focused field that turns read-only (a gate opened mid-typing, the chat
+  // was archived elsewhere) strands the platform keyboard: Android keeps the
+  // IME window "shown" with nothing in it, so the composer stayed lifted over
+  // an empty band the height of the keyboard, and sheets opened against that
+  // phantom inset. Dismissing through the controller clears focus and hides
+  // the IME from whichever view holds it, editable or not.
+  useEffect(() => {
+    if (fieldEditable) return;
+    inputRef.current?.blur();
+    void KeyboardController.dismiss();
+  }, [fieldEditable]);
+
   const hasContent = draft.trim().length > 0 || attachments.length > 0 || Boolean(props.activeCommand);
   const canSend = hasContent && !disabled && !props.sending;
+  const showMic =
+    props.voiceAvailable && !voiceLive && !isStreaming && !props.activeCommand && !hasContent && !props.sending;
   const turnInput = {
     model,
     mode: props.mode,
@@ -386,6 +408,20 @@ export function Composer(props: ComposerProps): React.ReactElement {
   };
   const turnLabel = turnChipLabel(turnInput);
   const turnParts = turnChipParts(turnInput);
+  const effortChoices = effortOptionsFor(model);
+  const currentEffort = effectiveEffort(props.effort, model);
+  const effortLabel = currentEffort ? effortTitle(currentEffort) : 'Effort';
+  // The setup strip measures itself: with the context ring and Stop on screen
+  // (or the Plan chip on), the full chips no longer fit a phone-width card and
+  // the effort chip was cut mid-word. When they do not fit, Plan and effort
+  // drop to their icons — full names stay in their accessibility labels —
+  // and come back as soon as there is room. The full width is re-measured
+  // whenever a label changes.
+  const stripKey = `${turnParts.plan}|${turnParts.model}|${effortLabel}|${turnParts.longContext}|${turnParts.permission ?? ''}`;
+  const [stripWidth, setStripWidth] = useState(0);
+  const [stripFull, setStripFull] = useState<{ key: string; width: number } | null>(null);
+  const fullWidth = stripFull?.key === stripKey ? stripFull.width : 0;
+  const compactStrip = stripWidth > 0 && fullWidth > stripWidth + 1;
 
   // ── Swipe up on the field → history ───────────────────────────
   const touchStart = useRef<{ x: number; y: number; t: number } | null>(null);
@@ -554,7 +590,9 @@ export function Composer(props: ComposerProps): React.ReactElement {
     : props.activeCommand?.argHint ?? 'Ask anything · / actions · @ files';
 
   return (
-    <View className="border-t border-border bg-background">
+    // No top hairline: the changes box and the composer card are each
+    // bordered, so a divider above them drew a second, redundant line.
+    <View className="bg-background">
       {props.dock}
 
       {/* With a gate open, the card above and the gate banner already say
@@ -584,8 +622,12 @@ export function Composer(props: ComposerProps): React.ReactElement {
           its pre-layout offset on Android — pushed half off the screen under
           the gesture bar (seen with the bound-agent chip). It also re-ran on
           every new line while typing. */}
-      <GlassSurface
-        style={{ marginHorizontal: 12, marginBottom: 8, marginTop: 8, borderRadius: 24,
+      {/* Desktop's composer card: the theme's card colour, a 20pt radius and
+          a border that turns primary on focus. Solid rather than Liquid
+          Glass, so it takes the theme's colours instead of the system's. */}
+      <View
+        className="bg-card"
+        style={{ marginHorizontal: 12, marginBottom: 8, marginTop: 8, borderRadius: 20,
           borderWidth: 1, borderColor: focused || voiceLive ? colors.primary : colors.border }}
       >
         {props.activeCommand ? (
@@ -659,17 +701,10 @@ export function Composer(props: ComposerProps): React.ReactElement {
               // Six lines, then the field scrolls internally: a long paste
               // must not push the controls off screen.
               style={{ maxHeight: maxFieldHeight }}
-              className="min-h-9 flex-1 py-1 text-md leading-relaxed text-foreground"
-            />
-            <MicButton
-              // v2 dictation inserts at the caret, so the mic stays offered
-              // with text in the field; v1 keeps its "empty field only" rule.
-              visible={props.voiceAvailable && (voiceV2 || draft.length === 0) && !props.activeCommand}
-              v2={voiceV2}
-              state={props.voiceState ?? (props.voiceActive ? 'listening' : props.voiceBusy ? 'transcribing' : 'idle')}
-              pushToTalk={Boolean(props.pushToTalk)}
-              onStart={voiceV2 ? props.onVoiceStart : props.onVoice}
-              onAccept={props.onVoiceAccept}
+              // No line height here: on iOS a multiline TextInput with an explicit
+              // lineHeight lays its text out against the wrong box — a second
+              // line pushed the first half out of the top of the field.
+              className="min-h-9 flex-1 py-1 text-md text-foreground"
             />
           </View>
         )}
@@ -692,24 +727,76 @@ export function Composer(props: ComposerProps): React.ReactElement {
             onPress={onAttachPress}
           />
 
+          {/* The turn's setup — the desktop composer's row. Model and effort
+              are the two changed most, so each is one tap: the model chip opens
+              the model picker, the effort chip opens the turn-options sheet
+              (effort, mode, permissions, context window). A separate "options"
+              button used to sit here too; on a 402pt iPhone that cost the
+              strip the room it needed and the effort chip was cut to "Mediu".
+              Glyphs on the effort chip say when permissions or the context
+              window differ from the defaults, so nothing set is hidden. */}
           <ScrollView
             horizontal
             keyboardShouldPersistTaps="always"
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8, alignItems: 'center' }}
-            // Written out rather than `flex-1` because the chips must be
-            // allowed to shrink BELOW their content width and scroll inside
-            // their own box. With flex-basis left at `auto` the strip claims
-            // its full content width and the chips render straight through
-            // the context ring and the send button.
+            contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 4 }}
             style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0 }}
+            onLayout={(e) => setStripWidth(e.nativeEvent.layout.width)}
+            onContentSizeChange={(w) => {
+              // Only full-size layouts are measured; the compact one is smaller by design.
+              if (!compactStrip && (stripFull?.key !== stripKey || Math.abs(stripFull.width - w) > 1)) {
+                setStripFull({ key: stripKey, width: w });
+              }
+            }}
           >
-            {/* ONE chip for the whole "how should this turn run" decision.
-                Model, mode, effort, context and permissions used to be three
-                separate chips that could not fit the strip; they are all in
-                the sheet this opens, and the label says what is currently
-                set so nothing is hidden. */}
-            <TurnChip label={turnLabel} parts={turnParts} onPress={() => setSheet('options')} />
+            {/* Plan leads the strip: it changes what Send does, so it must be on
+                screen, not scrolled off behind the model name. */}
+            {turnParts.plan ? (
+              <SetupChip
+                testID="composer-mode"
+                accessibilityLabel="Mode: plan first"
+                accessibilityHint="Choose whether the agent plans before editing"
+                icon={<ClipboardList size={13} color={colors.primary} />}
+                {...(compactStrip ? {} : { label: 'Plan' })}
+                highlighted
+                onPress={() => setSheet('mode')}
+              />
+            ) : null}
+            <SetupChip
+              testID="composer-model"
+              accessibilityLabel={`Model: ${model?.name ?? 'server default'}`}
+              accessibilityHint="Choose the model for this chat"
+              icon={
+                model?.provider ? (
+                  <ProviderBrandIcon provider={model.provider} size={13} color={colors['muted-foreground']} />
+                ) : (
+                  <Cpu size={13} color={colors['muted-foreground']} />
+                )
+              }
+              label={turnParts.model}
+              maxWidth={112}
+              onPress={() => setSheet('model')}
+            />
+            <SetupChip
+              testID="composer-options"
+              accessibilityLabel={`Turn options: ${turnLabel}`}
+              accessibilityHint="Effort, mode, permissions and context window"
+              icon={
+                turnParts.permission === 'bypassPermissions' ? (
+                  <ShieldOff size={13} color={colors.warning} />
+                ) : turnParts.permission === 'acceptEdits' ? (
+                  <ShieldCheck size={13} color={colors.primary} />
+                ) : effortChoices.length > 0 ? (
+                  <Brain size={13} color={turnParts.effortOverride ? colors.primary : colors['muted-foreground']} />
+                ) : (
+                  <SlidersHorizontal size={13} color={colors['muted-foreground']} />
+                )
+              }
+              {...(effortChoices.length > 0 && !compactStrip ? { label: effortLabel } : {})}
+              trailing={turnParts.longContext ? <Maximize2 size={12} color={colors['muted-foreground']} /> : null}
+              highlighted={Boolean(turnParts.effortOverride) || turnParts.permission !== null}
+              onPress={() => setSheet('options')}
+            />
           </ScrollView>
 
           <View className="shrink-0 flex-row items-center gap-1.5">
@@ -727,6 +814,22 @@ export function Composer(props: ComposerProps): React.ReactElement {
               </Touchable>
             ) : null}
 
+            {/* One trailing action, as in iOS Messages and every chat client:
+                the mic while the field is empty, Send once there is something
+                to send, Stop while a turn runs. Showing mic AND a disabled
+                Send cost a 44pt slot the setup strip needed — on a 402pt
+                iPhone the effort chip was cut to "Mediu". The keyboard's own
+                dictation key still covers adding speech to a half-written
+                message. */}
+            <MicButton
+              visible={showMic}
+              v2={voiceV2}
+              state={props.voiceState ?? (props.voiceActive ? 'listening' : props.voiceBusy ? 'transcribing' : 'idle')}
+              pushToTalk={Boolean(props.pushToTalk)}
+              onStart={voiceV2 ? props.onVoiceStart : props.onVoice}
+              onAccept={props.onVoiceAccept}
+            />
+            {showMic ? null : (
             <SendButton
               streaming={isStreaming}
               enabled={canSend}
@@ -736,9 +839,10 @@ export function Composer(props: ComposerProps): React.ReactElement {
               onStop={onStop}
               {...(stopState ? { stopState } : {})}
             />
+            )}
           </View>
         </View>
-      </GlassSurface>
+      </View>
 
       <ModelSheet
         visible={sheet === 'model'}
@@ -915,7 +1019,7 @@ function SendButton({
       }
       delayLongPress={350}
       className={`h-11 w-11 items-center justify-center rounded-full ${
-        streaming ? 'bg-danger' : active ? 'bg-primary' : 'bg-emphasis'
+        streaming ? 'bg-danger' : active ? 'bg-primary' : 'bg-primary opacity-40'
       }`}
     >
       <Animated.View key={streaming ? 'stop' : sending ? 'sending' : 'send'} entering={motion.fadeIn(120)}>
@@ -939,55 +1043,61 @@ function SendButton({
 }
 
 /**
- * The turn-setup chip: the model name as its only text, and one small glyph
- * per non-default setting (plan first, permissions, effort, long context).
- * The joined sentence was truncated to "Sonnet 5 · Medium · Full …" in the
- * strip; the glyphs fit, and the accessibility label still reads it whole.
+ * One control in the composer's setup row: a glyph, an optional short label
+ * and a chevron when it opens a picker. 32pt tall inside a 44pt touch target,
+ * so the row stays compact without any chip being hard to hit.
  */
-function TurnChip({
+function SetupChip({
+  icon,
   label,
-  parts,
   onPress,
+  highlighted = false,
+  trailing = null,
+  maxWidth,
+  accessibilityLabel,
+  accessibilityHint,
+  testID,
 }: {
-  label: string;
-  parts: ReturnType<typeof turnChipParts>;
+  icon: React.ReactNode;
+  label?: string;
   onPress: () => void;
+  /** The value differs from the default — tinted so it is noticed before sending. */
+  highlighted?: boolean;
+  /** A small glyph after the label (e.g. the long-context mark). */
+  trailing?: React.ReactNode;
+  maxWidth?: number;
+  accessibilityLabel: string;
+  accessibilityHint?: string;
+  testID?: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
-  const overridden = parts.plan || parts.permission !== null;
-  const tint = overridden ? colors.primary : colors['muted-foreground'];
-  const glyph = 13;
   return (
     <Touchable
-      accessibilityLabel={`Turn setup: ${label}`}
-      accessibilityHint="Model, mode, effort and permissions for this turn"
+      testID={testID}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
       haptic="tap"
       onPress={onPress}
       className="min-h-11 justify-center"
     >
       <View
-        className={`h-8 flex-row items-center gap-1.5 rounded-full border px-2.5 ${
-          overridden ? 'border-primary bg-accent' : 'border-border bg-raised'
+        // Desktop's composer controls: no fill at rest, a blue tint (its
+        // `bg-primary/10`) when the value differs from the default.
+        className={`h-8 flex-row items-center gap-1.5 rounded-lg ${label ? 'px-2' : 'w-8 justify-center'} ${
+          highlighted ? 'bg-control-strong' : 'bg-transparent'
         }`}
       >
-        <SlidersHorizontal size={glyph} color={colors['muted-foreground']} />
-        <Text
-          numberOfLines={1}
-          maxFontSizeMultiplier={MAX_SCALE.chrome}
-          style={{ maxWidth: 140 }}
-          className={`text-sm font-medium ${overridden ? 'text-primary' : 'text-foreground'}`}
-        >
-          {parts.model}
-        </Text>
-        {parts.plan ? <ClipboardList size={glyph} color={tint} /> : null}
-        {parts.permission === 'bypassPermissions' ? (
-          <ShieldOff size={glyph} color={colors.warning} />
-        ) : parts.permission === 'acceptEdits' ? (
-          <ShieldCheck size={glyph} color={tint} />
+        {icon}
+        {label ? (
+          <Text
+            numberOfLines={1}
+            maxFontSizeMultiplier={MAX_SCALE.chrome}
+            style={maxWidth ? { maxWidth } : undefined}
+            className={`text-sm font-medium ${highlighted ? 'text-primary' : 'text-muted-foreground'}`}
+          >
+            {label}
+          </Text>
         ) : null}
-        {parts.effortOverride ? <Brain size={glyph} color={colors['muted-foreground']} /> : null}
-        {parts.longContext ? <Maximize2 size={glyph} color={colors['muted-foreground']} /> : null}
-        <ChevronDown size={12} color={colors['muted-foreground']} />
+        {trailing}
       </View>
     </Touchable>
   );

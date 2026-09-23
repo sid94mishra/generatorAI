@@ -85,7 +85,7 @@ function TransportChip({ transport }: { transport: TransportBadge }): React.Reac
       onPress={() => router.push('/settings/diagnostics')}
       // The chip is ~20pt tall; the slop brings the target to 44pt.
       hitSlop={12}
-      className={`shrink-0 flex-row items-center gap-1 rounded-full bg-subtle py-0.5 ${healthy ? 'px-1.5' : 'px-2'}`}
+      className={`shrink-0 flex-row items-center gap-1 rounded-full bg-control py-0.5 ${healthy ? 'px-1.5' : 'px-2'}`}
     >
       <StatusDot tone={tone} label={null} />
       {/* On a healthy direct connection the word "LAN" is chrome that costs
@@ -109,5 +109,34 @@ export function ChatHeaderMenuButton({ onPress }: { onPress: () => void }): Reac
       icon={<Ellipsis size={20} color={colors.foreground} />}
       onPress={onPress}
     />
+  );
+}
+
+/**
+ * The chat's own header row.
+ *
+ * Drawn by the screen rather than the navigator so the workbench panel can
+ * slide OVER it (a navigator header sits outside the screen's tree), and so
+ * the leading control is the menu — a chat is a root destination here, the
+ * way it is in every chat client; the system back gesture still leaves it.
+ */
+export function SessionHeader({
+  leading,
+  title,
+  trailing,
+}: {
+  leading: React.ReactNode;
+  title: React.ReactNode;
+  trailing: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <View
+      accessibilityRole="header"
+      className="min-h-[52px] flex-row items-center gap-1 border-b border-border-muted bg-background pl-2 pr-2"
+    >
+      <View className="items-center justify-center">{leading}</View>
+      <View className="min-w-0 flex-1 justify-center px-1">{title}</View>
+      <View className="flex-row items-center">{trailing}</View>
+    </View>
   );
 }

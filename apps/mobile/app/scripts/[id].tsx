@@ -174,7 +174,7 @@ export default function ScriptScreen(): React.ReactElement {
       <PlainScroll onRefresh={pull.onRefresh} refreshing={pull.refreshing}>
         <Card className="gap-2 p-4">
           <View className="flex-row items-center gap-3">
-            <View className="h-10 w-10 items-center justify-center rounded-2xl bg-emphasis">
+            <View className="h-10 w-10 items-center justify-center rounded-xl bg-control">
               <FileCode2 size={18} color={colors['muted-foreground']} />
             </View>
             <View className="flex-1 gap-0.5">
@@ -264,7 +264,7 @@ export default function ScriptScreen(): React.ReactElement {
                   key={`${stage.id}:${index}`}
                   className={`flex-row gap-3 py-3 ${index > 0 ? 'border-t border-border-muted' : ''}`}
                 >
-                  <View className="h-7 w-7 items-center justify-center rounded-full bg-emphasis">
+                  <View className="h-7 w-7 items-center justify-center rounded-full bg-control">
                     <Text className="text-sm font-semibold text-muted-foreground">{index + 1}</Text>
                   </View>
                   <View className="min-h-7 flex-1 justify-center gap-1">

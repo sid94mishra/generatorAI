@@ -15,7 +15,17 @@ module.exports = {
   darkMode: 'class',
   theme: {
     extend: {
-      colors: tailwindColors,
+      // `control*` are the mobile names for desktop's interactive fills, so a
+      // chip, a pill or a count reads blue-tinted in every theme, as desktop's
+      // `bg-accent` / `bg-primary/10` do, instead of the neutral grey
+      // `subtle` / `emphasis` (which stay for content surfaces: code, diffs,
+      // skeletons, tracks). Aliases of existing theme tokens, nothing new.
+      colors: {
+        ...tailwindColors,
+        control: 'var(--sidebar-accent)',
+        'control-strong': 'var(--accent)',
+        'control-foreground': 'var(--sidebar-accent-foreground)',
+      },
       // The token radii stop at 10px, which is a desktop scale. Touch
       // surfaces read as square at that size, so the mobile-only steps below
       // extend the ramp: rows 12, cards 16, sheets 24.

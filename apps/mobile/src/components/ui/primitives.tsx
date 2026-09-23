@@ -109,7 +109,7 @@ export function Badge({
 }): React.ReactElement {
   return (
     <View
-      className={`flex-row items-center gap-1 self-start rounded-full border px-2 py-0.5 ${TONE_BADGE[tone]}`}
+      className={`flex-row items-center gap-1 self-start rounded-md border px-2 py-0.5 ${TONE_BADGE[tone]}`}
     >
       {icon}
       <Text

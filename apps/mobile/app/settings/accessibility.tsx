@@ -111,7 +111,7 @@ export default function AccessibilityScreen(): React.ReactElement {
       <SectionHeader title="Motion" />
       <Card className="gap-3 p-4">
         <View className="flex-row items-center gap-3">
-          <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
+          <View className="h-9 w-9 items-center justify-center">
             <Wind size={18} color={colors.primary} />
           </View>
           <View className="flex-1">
@@ -234,7 +234,7 @@ export default function AccessibilityScreen(): React.ReactElement {
       {biometricLock && canLock ? (
         <Card className="gap-3 p-4">
           <View className="flex-row items-center gap-3">
-            <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
+            <View className="h-9 w-9 items-center justify-center">
               <Lock size={18} color={colors.primary} />
             </View>
             <View className="flex-1">

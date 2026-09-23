@@ -23,9 +23,12 @@ export const TURN_FRACTION = 0.5;
 export const OVERSCROLL_RESISTANCE = 0.3;
 
 /** Whether a touch began inside the reserved edge strip. */
-export function isEdgeTouch(x: number, gutter: number = EDGE_GUTTER, width?: number): boolean {
+export function isEdgeTouch(x: number, gutter?: number, width?: number): boolean {
   'worklet';
-  return x < gutter || (width !== undefined && x > width - gutter);
+  // Default resolved in the body: a default PARAMETER naming a module constant
+  // is not captured into a worklet's closure and throws on the UI runtime.
+  const g = gutter === undefined ? EDGE_GUTTER : gutter;
+  return x < g || (width !== undefined && x > width - g);
 }
 
 /** Resting translateX for a page. */

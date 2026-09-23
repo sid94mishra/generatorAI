@@ -3,16 +3,13 @@
 //
 // Sections, in the order that matters when you have thirty seconds:
 //
-//   approvals   every chat or run waiting on a decision, as cards you can
-//               act on — first, always, whenever there is one
+//   tiles       chats, workflows, automations, server health
 //   feed        Today · Running · Needs you (with counts), urgency-ranked
 //   server      only when degraded
 //
-// The stat tiles that used to sit between the queue and the feed were a
-// second copy of the segmented control's counts, pressing to the same
-// filters; they are gone. So is the quick-action grid: "New chat" is the
-// FAB, "New workflow" led to a coming-soon sheet and "Pair a device" lives
-// in Settings.
+// Decisions are NOT repeated here as a card queue: the header bell opens the
+// approvals sheet, and "Needs you" lists the same items as rows. New chat is
+// the compose icon in the header, not a floating button over the feed.
 //
 // Everything is ONE virtualised list with the sections in its header and
 // footer, so pull-to-refresh and scroll-to-top have one scroller.
@@ -23,7 +20,7 @@ import { View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { router } from 'expo-router';
-import { Plus } from 'lucide-react-native';
+import { SquarePen } from 'lucide-react-native';
 
 import {
   useActivity,
@@ -32,17 +29,23 @@ import {
   type ActivityFilter,
   type Operation,
 } from '../../src/api/useActivity';
-import { ApprovalsQueue } from '../../src/components/home/ApprovalsQueue';
+import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '@generatorai/client-core';
+
+import { useApi } from '../../src/api/useApi';
 import { HealthCard } from '../../src/components/home/HealthCard';
+import { StatTiles } from '../../src/components/home/StatTiles';
 import { OperationCard } from '../../src/components/home/OperationCard';
 import { SectionHeader } from '../../src/components/ui/primitives';
 import { SegmentedControl, useSegmentSwipe } from '../../src/components/ui/SegmentedControl';
-import { Fab } from '../../src/components/ui/Button';
+import { DRAWER_EDGE_HIT_SLOP } from '../../src/components/ui/SidePanel';
+import { IconButton } from '../../src/components/ui/Button';
 import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { Screen } from '../../src/components/ui/Screen';
 import { usePullToRefresh } from '../../src/components/ui/usePullToRefresh';
 import { TabHeaderActions } from '../../src/navigation/TabHeaderActions';
+import { MenuButton } from '../../src/navigation/shell/MenuButton';
 import { useTabShell } from '../../src/navigation/tabShell';
 import { useScrollToTop, scrollerToTop } from '../../src/navigation/scrollToTop';
 import { useTheme } from '../../src/theme/ThemeProvider';
@@ -60,6 +63,7 @@ const EMPTY_TITLE: Record<ActivityFilter, string> = {
 };
 
 export default function HomeScreen(): React.ReactElement {
+  const api = useApi();
   const { colors } = useTheme();
   const shell = useTabShell();
   const [filter, setFilter] = useState<ActivityFilter>('today');
@@ -82,7 +86,6 @@ export default function HomeScreen(): React.ReactElement {
   }, [activity.isLoading, activity.counts.attention]);
 
   const approvals = useMemo(() => groupApprovals(activity.operations), [activity.operations]);
-  const blocked = useMemo(() => [...approvals.chats, ...approvals.runs], [approvals]);
 
   const visible = useMemo(() => filterOperations(activity.operations, filter), [activity.operations, filter]);
 
@@ -106,6 +109,8 @@ export default function HomeScreen(): React.ReactElement {
       Gesture.Pan()
         .activeOffsetX([-24, 24])
         .failOffsetY([-16, 16])
+        // The left edge strip opens the navigation drawer.
+        .hitSlop(DRAWER_EDGE_HIT_SLOP)
         .onEnd((event) => {
           if (Math.abs(event.translationX) < 48) return;
           swipeFilter(event.translationX);
@@ -113,14 +118,13 @@ export default function HomeScreen(): React.ReactElement {
         .runOnJS(true),
     [swipeFilter],
   );
-  // The approval cards carry Allow / Deny buttons; a sideways drag that
-  // starts on one must not flip the feed filter underneath the decision.
-  // This inert pan claims horizontal drags inside the queue and blocks the
-  // outer swipe until it ends.
-  const queueShield = useMemo(
-    () => Gesture.Pan().activeOffsetX([-24, 24]).failOffsetY([-16, 16]).blocksExternalGesture(swipe),
-    [swipe],
-  );
+  // The dashboard's Workflows count. Same key as the Workflows list, so
+  // opening that list afterwards is already warm.
+  const workflows = useQuery({
+    queryKey: queryKeys.workflows(),
+    queryFn: () => api.workflows.list(),
+    staleTime: 60_000,
+  });
 
   const pull = usePullToRefresh(activity.refetch, activity.isFetching);
 
@@ -129,13 +133,12 @@ export default function HomeScreen(): React.ReactElement {
     // reach the rows (containers are absolutely positioned), so each block
     // carries its own 16pt gutter; flat rows bring their own.
     <View className="gap-3 pb-2">
-      {blocked.length > 0 ? (
-        <GestureDetector gesture={queueShield}>
-          <View className="px-4">
-            <ApprovalsQueue blocked={blocked} />
-          </View>
-        </GestureDetector>
-      ) : null}
+      <StatTiles
+        chats={activity.isLoading ? null : activity.counts.chats}
+        workflows={workflows.data ? workflows.data.length : null}
+        automations={activity.isLoading ? null : activity.counts.automations}
+        health={activity.health?.status ?? null}
+      />
       <View className="px-4 pt-1">
         <SegmentedControl segments={segments} value={filter} onChange={setFilter} accessibilityLabel="Activity filter" />
       </View>
@@ -178,7 +181,22 @@ export default function HomeScreen(): React.ReactElement {
 
   return (
     <View className="flex-1 bg-background">
-      <Screen title="Home" variant="compact" trailing={<TabHeaderActions />} scroll={false}>
+      <Screen
+        title="Home"
+        variant="compact"
+        leading={<MenuButton />}
+        trailing={
+          <TabHeaderActions>
+            <IconButton
+              accessibilityLabel="New chat"
+              testID="home-new-chat"
+              icon={<SquarePen size={20} color={colors.foreground} />}
+              onPress={() => router.push('/chats?new=1')}
+            />
+          </TabHeaderActions>
+        }
+        scroll={false}
+      >
         <GestureDetector gesture={swipe}>
           <View className="flex-1">
             <LegendList
@@ -187,7 +205,7 @@ export default function HomeScreen(): React.ReactElement {
               keyExtractor={(op: Operation) => op.id}
               estimatedItemSize={64}
               recycleItems
-              contentContainerStyle={{ paddingBottom: shell?.listBottom(true) ?? 120 }}
+              contentContainerStyle={{ paddingBottom: shell?.listBottom(false) ?? 32 }}
               ListHeaderComponent={header}
               ListEmptyComponent={empty}
               ListFooterComponent={footer}
@@ -199,12 +217,6 @@ export default function HomeScreen(): React.ReactElement {
         </GestureDetector>
       </Screen>
 
-      <Fab
-        accessibilityLabel="New chat"
-        icon={<Plus size={22} color={colors['primary-foreground']} />}
-        label="New chat"
-        onPress={() => router.push('/chats?new=1')}
-      />
     </View>
   );
 }

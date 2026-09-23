@@ -42,3 +42,17 @@ describe('planDecisions (single encoder, D12)', () => {
     expect(canRequestChanges('do X')).toBe(true);
   });
 });
+
+describe('planBodyWithoutTitle', () => {
+  it('drops a first heading that repeats the title', async () => {
+    const { planBodyWithoutTitle } = await import('../components/review/planDecisions');
+    expect(planBodyWithoutTitle('# Add SAVE20 coupon\n\n## Goal\nText', 'Add SAVE20 coupon')).toBe('## Goal\nText');
+  });
+
+  it('keeps a heading that says something else, and bodies with none', async () => {
+    const { planBodyWithoutTitle } = await import('../components/review/planDecisions');
+    expect(planBodyWithoutTitle('# Overview\nText', 'Add SAVE20 coupon')).toBe('# Overview\nText');
+    expect(planBodyWithoutTitle('## Goal\nText', 'Goal')).toBe('## Goal\nText');
+    expect(planBodyWithoutTitle('', 'Plan')).toBe('');
+  });
+});

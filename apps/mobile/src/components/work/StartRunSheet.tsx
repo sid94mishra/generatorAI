@@ -254,15 +254,25 @@ export function StartRunSheet({
 
   return (
     <Sheet visible={visible} onClose={onClose} title={`Run ${workflow.name}`} detents={[0.92]} footer={
-        <Button
-          label="Start run"
-          size="lg"
-          full
-          haptic="commit"
-          loading={start.isPending}
-          disabled={start.isPending}
-          onPress={submit}
-        />
+        // A refusal from the server is pinned WITH the button. It used to be the
+        // last line of the scrolling form, so a long form (or an open keyboard)
+        // hid it and the button simply appeared to do nothing.
+        <View className="gap-2">
+          {serverError ? (
+            <Text accessibilityLiveRegion="assertive" numberOfLines={4} className="text-sm leading-snug text-danger">
+              {serverError}
+            </Text>
+          ) : null}
+          <Button
+            label="Start run"
+            size="lg"
+            full
+            haptic="commit"
+            loading={start.isPending}
+            disabled={start.isPending}
+            onPress={submit}
+          />
+        </View>
     }>
       <View className="gap-4 px-4 pb-6 pt-2">
         {defs.length === 0 ? (
@@ -425,13 +435,6 @@ export function StartRunSheet({
             ) : null}
           </View>
         ) : null}
-
-        {serverError ? (
-          <Text accessibilityLiveRegion="assertive" className="text-sm text-danger">
-            {serverError}
-          </Text>
-        ) : null}
-
 
       </View>
     </Sheet>

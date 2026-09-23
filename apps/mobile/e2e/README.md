@@ -44,7 +44,7 @@ copy rotates the resume credential and the original is logged out), `E2E_OUT` (s
 | `tour2.mjs` | every top-level route renders with no console errors (screenshots) |
 | `chat.mjs` | New chat sheet → send → live streaming → Stop appears |
 | `gatelive.mjs` | Turn options → Ask me → tool prompt → in-chat permission card → Allow → Changes pane → diff → Stop |
-| `panes.mjs <chat>` | Changes / Terminal / Browser panes, More sheet tabs, Stop, long-press menu |
+| `panes.mjs <chat>` | Workbench: header button → tool index → Changes (with commit → push → PR, Keep / Keep all / Undo all) / Terminal / Browser / Files / Plan / Session sheets, Stop, long-press menu |
 | `stop.mjs <chat>` | Stop while a permission is pending clears the gate (two-phase stop wire) |
 | `clear.mjs` | Deny every stale gate from the Approvals sheet |
 | `companion.mjs <chat>` | a companion-scope device streams (read:activity), panes lock honestly, request-access sheet |
@@ -94,3 +94,13 @@ Run only one script at a time against a persistent profile. Cold Metro navigatio
 The audit report and selected native/web evidence are in `docs/mobile-audit/`. Pairing files and browser
 profiles contain credentials and must stay outside the repository. Native iOS execution needs Xcode;
 web phone viewports and an iOS bundle export are not an iOS simulator pass.
+
+## September 2026 redesign
+
+There is no tab bar: top-level screens are reached through the navigation drawer
+(`menu-button`, rows `drawer-home`, `drawer-projects`, `drawer-chats`, `drawer-agents`, `drawer-workflows`, `drawer-scripts`, `drawer-automations` — the desktop sidebar, so there is no Runs row: open a workflow for its runs, `drawer-new-chat`, `drawer-settings`), or by
+URL as before. Session tools are no longer pages beside the transcript — open the index with
+`workbench-button`, pick `workbench-tool-<id>` (`changes`, `files`, `terminal`, `browser`,
+`computer`, `tasks`, `plan`, `session`), and switch in place with the sheet's chip strip. The
+composer's setup row is `composer-model`, `composer-effort`, `composer-mode` (only in plan mode) and
+`composer-options`. Design record: `docs/mobile-redesign/DESIGN.md`.

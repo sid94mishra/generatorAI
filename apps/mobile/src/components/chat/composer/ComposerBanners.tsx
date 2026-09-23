@@ -66,7 +66,7 @@ export function WorkspacePrepBar({ prep }: { prep: WorkspacePrepProps }): React.
       exiting={motion.fadeOut(120)}
       accessibilityLiveRegion="polite"
       className={`mx-3 mt-2 flex-row items-center gap-2 rounded-2xl border px-3 py-2 ${
-        failed ? 'border-danger bg-danger-muted' : 'border-border bg-subtle'
+        failed ? 'border-danger bg-danger-muted' : 'border-border bg-control'
       }`}
     >
       {failed ? <CircleAlert size={16} color={colors.danger} /> : <Spinner />}
@@ -87,7 +87,7 @@ export function WorkspacePrepBar({ prep }: { prep: WorkspacePrepProps }): React.
           haptic="tap"
           disabled={Boolean(prep.retrying)}
           onPress={prep.onRetry}
-          className="h-8 flex-row items-center gap-1 rounded-full bg-raised px-2.5"
+          className="h-8 flex-row items-center gap-1 rounded-lg bg-control px-2.5"
         >
           {prep.retrying ? <Spinner /> : <RotateCcw size={13} color={colors.foreground} />}
           <Text maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-xs font-medium text-foreground">
@@ -132,7 +132,7 @@ export function GateBanner({ gate }: { gate: GateBannerProps }): React.ReactElem
         haptic="commit"
         disabled={Boolean(gate.busy)}
         onPress={gate.onCancelAndSend}
-        className="h-8 flex-row items-center rounded-full bg-raised px-2.5"
+        className="h-8 flex-row items-center rounded-lg bg-control px-2.5"
       >
         {gate.busy ? (
           <Spinner />

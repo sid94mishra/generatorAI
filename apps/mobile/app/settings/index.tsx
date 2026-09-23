@@ -16,20 +16,7 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import {
-  Accessibility,
-  Activity,
-  Bell,
-  Blocks,
-  Cpu,
-  GitBranch,
-  Palette,
-  Puzzle,
-  Server,
-  ShieldCheck,
-  Sparkles,
-  TerminalSquare,
-} from 'lucide-react-native';
+import { Accessibility, Activity, Bell, Blocks, Cpu, GitBranch, Mic, Palette, Puzzle, Server, ShieldCheck, Sparkles, TerminalSquare } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
@@ -134,6 +121,12 @@ export default function SettingsScreen(): React.ReactElement {
           subtitle="How the agent reaches your repositories"
           icon={<GitBranch size={18} color={colors['muted-foreground']} />}
           onPress={() => router.push('/settings/source-control')}
+        />
+        <ListRow
+          title="Audio"
+          subtitle="Dictation engine, punctuation and read-aloud"
+          icon={<Mic size={18} color={colors['muted-foreground']} />}
+          onPress={() => router.push('/settings/audio' as never)}
         />
       </ListGroup>
 

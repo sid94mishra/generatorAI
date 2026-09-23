@@ -83,8 +83,11 @@ export interface MuxConnectionRecord {
    * Set by the attached GET so `POST /:id/subs` can subscribe and confirm on
    * the stream itself. Null while nothing is attached, which is why a
    * mutation on an unattached connection is a 409 rather than a silent no-op.
+   * `cursors` are resume positions for scopes in `add`, keyed like `cursors`.
    */
-  onMutate: ((add: readonly MuxSub[], remove: readonly string[]) => Promise<void>) | null;
+  onMutate:
+    | ((add: readonly MuxSub[], remove: readonly string[], cursors: ReadonlyMap<string, number>) => Promise<void>)
+    | null;
 }
 
 const records = new Map<string, MuxConnectionRecord>();

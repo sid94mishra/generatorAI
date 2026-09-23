@@ -101,7 +101,7 @@ export function ApprovalsQueue({
           accessibilityLabel={`${rest} more waiting, review all`}
           haptic="tap"
           onPress={() => router.push(APPROVALS_ROUTE)}
-          className="min-h-11 items-center justify-center rounded-2xl bg-subtle px-3"
+          className="min-h-11 items-center justify-center rounded-xl bg-control px-3"
         >
           <Text className="text-sm font-medium text-foreground">
             {rest} more waiting — review all

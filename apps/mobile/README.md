@@ -138,6 +138,20 @@ adb shell am start -a android.intent.action.VIEW -d "'<pairingUrl>'" dev.generat
 
 ## iOS
 
+### Running on the iOS simulator
+
+`ios/` is generated and git-ignored. Two scripts cover the whole path:
+
+```sh
+./scripts/ios-sim-setup.sh   # once: an Xcode that fits this macOS + the iOS runtime (asks for Apple ID, 2FA, Mac password)
+./scripts/ios-sim-run.sh     # prebuild + pods if needed, Release build, install, launch
+```
+
+The setup script exists because the App Store only carries the newest Xcode, which can demand a
+newer macOS than the machine has; it installs a chosen version from developer.apple.com through
+`xcodes`. `PAIR_URL='generatorai://pair?code=…' ./scripts/ios-sim-run.sh` opens a pairing link after
+launch; the simulator shares the host's network, so a `127.0.0.1` server address works as is.
+
 There is no Xcode in CI; `expo config --type introspect` and `expo export --platform ios` are the
 static checks. **Run introspect on a clean checkout** (or after `expo prebuild --clean`): a stale,
 gitignored `android/` or `ios/` from an earlier prebuild is read back in and shows permissions that
@@ -191,9 +205,20 @@ Run on a physical iPhone with a Dynamic Island and on an iPad before a release:
 - [ ] **Dictation then read-aloud with the silent switch on.** Dictate, stop, then read a message
       aloud: audible on the loudspeaker, music ducks rather than stops.
 - [ ] **Terminal key bar** stays above the keyboard and does not overlap the last terminal row.
-- [ ] **Swipe-back on panes** (chat → sub-panes, detail screens) follows the finger and cancels
-      cleanly.
-- [ ] **Landscape / notch & iPad Split View.** Rotate on a notched iPhone: headers, rows, tab bar
+- [ ] **Swipe-back** (chat, run and detail screens) follows the finger and cancels cleanly, and is
+      off while the workbench panel is open over a chat or run.
+- [ ] **Navigation drawer.** The menu button and a drag from the left edge of a top-level screen
+      push the content aside and reveal the drawer beneath it; the content keeps a rounded leading
+      corner and dims; tapping it, dragging back, or choosing a row closes it. VoiceOver stays
+      inside the drawer while it is open. (Android: it travels over the content behind a scrim.)
+- [ ] **Workbench.** The header's panel button slides the tool index in from the right on Liquid
+      Glass (opaque with Reduce Transparency); a row raises that tool as a sheet that rests at
+      half and full height, drags between them and dismisses downward; the chip strip switches
+      tool in place; Terminal and Browser survive switching away and back.
+- [ ] **Composer and keyboard.** The composer rides the keyboard frame for frame, including an
+      interactive drag-to-dismiss from the transcript, and lands ON the keys with no gap above the
+      home indicator. A permission prompt arriving while typing closes the keyboard cleanly.
+- [ ] **Landscape / notch & iPad Split View.** Rotate on a notched iPhone: headers, rows, navigation drawer, workbench panel
       and sheets clear the notch on both sides. On iPad use Split View at 1/3, 1/2, 2/3 and Slide
       Over; content centres at 720pt when wide.
 - [ ] **Dark / light.** Status bar contrast, splash (no white flash in dark), home-screen icon has

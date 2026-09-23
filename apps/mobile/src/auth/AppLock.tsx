@@ -26,8 +26,9 @@
 import React, { useCallback, useEffect, useReducer, useRef } from 'react';
 import { AppState, Platform, Text, View, type AppStateStatus } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { Lock, ScanFace, Sparkles } from 'lucide-react-native';
+import { Lock, ScanFace } from 'lucide-react-native';
 
+import { BrandMark } from '../components/brand/BrandMark';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { useTheme } from '../theme/ThemeProvider';
@@ -181,7 +182,7 @@ function NativeAppLockGate({ children }: { children: React.ReactNode }): React.R
           testID={privacyOnly ? 'privacy-overlay' : 'app-lock'}
         >
           {privacyOnly ? (
-            <AppMark color={colors.primary} />
+            <AppMark />
           ) : (
             <LockScreen
               failure={failure}
@@ -197,17 +198,11 @@ function NativeAppLockGate({ children }: { children: React.ReactNode }): React.R
   );
 }
 
-/**
- * The app mark, standing in for an icon asset the project does not ship
- * (there is no `assets/` directory and `app.config.ts` sets no `icon`).
- * Once one exists this becomes an `<Image>` of it.
- */
-function AppMark({ color }: { color: string | undefined }): React.ReactElement {
+/** The app mark: desktop's lightning bolt, the same one the splash shows. */
+function AppMark(): React.ReactElement {
   return (
     <View className="items-center gap-3" accessibilityLabel="GeneratorAI">
-      <View className="h-20 w-20 items-center justify-center rounded-3xl bg-subtle">
-        <Sparkles size={36} color={color} />
-      </View>
+      <BrandMark size={64} />
       <Text className="text-lg font-semibold text-foreground">GeneratorAI</Text>
     </View>
   );
@@ -228,7 +223,7 @@ function LockScreen({
 }): React.ReactElement {
   return (
     <View className="w-full max-w-sm items-center gap-6">
-      <View className="h-20 w-20 items-center justify-center rounded-3xl bg-subtle">
+      <View className="h-20 w-20 items-center justify-center rounded-3xl bg-control">
         {authenticating ? <ScanFace size={36} color={color} /> : <Lock size={36} color={color} />}
       </View>
       <View className="items-center gap-1">
@@ -243,14 +238,17 @@ function LockScreen({
               : 'Unlock with Face ID, Touch ID, fingerprint or your passcode.'}
         </Text>
       </View>
-      <Button
-        label="Unlock"
-        variant="primary"
-        onPress={onUnlock}
-        disabled={authenticating}
-        loading={authenticating}
-        accessibilityHint="Opens the system unlock prompt"
-      />
+      {/* Wrapped: Button aligns itself to the start, which left it off-centre here. */}
+      <View>
+        <Button
+          label="Unlock"
+          variant="primary"
+          onPress={onUnlock}
+          disabled={authenticating}
+          loading={authenticating}
+          accessibilityHint="Opens the system unlock prompt"
+        />
+      </View>
       <Text className="text-center text-xs" style={{ color: muted }}>
         Turn app lock off in Settings › Accessibility.
       </Text>

@@ -1072,7 +1072,15 @@ export class ChatManagementService {
     const pending = (await interactions.listPendingByChat(chatId)).find(
       (i) => i.kind === 'plan_review',
     );
-    if (!pending) return { ok: false, reason: 'No plan review is awaiting a decision' };
+    if (!pending) {
+      // The gate died without a decision (a restart before gate expiry also
+      // expired the plan). A plan still `awaiting_review` here would keep its
+      // Approve buttons on every client forever; settle it so they go away.
+      if (plan.status === 'awaiting_review') {
+        await planService.setStatus(planId, 'expired').catch(() => undefined);
+      }
+      return { ok: false, reason: 'This plan is no longer waiting for review. Ask again to get a new plan.' };
+    }
 
     const chat = await this.chatRepo.getById(chatId).catch(() => null);
 
@@ -3434,6 +3442,25 @@ export class ChatManagementService {
    * anchors); otherwise synthetically — a fresh provider session that gets a
    * digest of the surviving turns in front of the next prompt.
    */
+  /**
+   * Workspaces of the chats this one was forked from, nearest first. Bounded:
+   * a fork of a fork of a fork is plausible, a cycle is not, but a corrupt row
+   * must not spin here.
+   */
+  private async ancestorWorkspaceIds(chat: { id: string; forkedFromChatId?: string | null | undefined }): Promise<string[]> {
+    const out: string[] = [];
+    const seen = new Set<string>([chat.id]);
+    let parentId = chat.forkedFromChatId ?? null;
+    for (let depth = 0; parentId && depth < 16 && !seen.has(parentId); depth += 1) {
+      seen.add(parentId);
+      const parent = await this.chatRepo.getById(parentId).catch(() => null);
+      if (!parent) break;
+      if (parent.workspaceId) out.push(parent.workspaceId);
+      parentId = parent.forkedFromChatId ?? null;
+    }
+    return out;
+  }
+
   async rewindChat(
     chatId: string,
     turnId: string,
@@ -3466,6 +3493,9 @@ export class ChatManagementService {
         chat.workspaceId,
         turnId,
         { chatId, sessionId: chat.sessionId },
+        'before',
+        // A fork inherits turns that ran in its ancestors' workspaces.
+        { ancestorWorkspaceIds: await this.ancestorWorkspaceIds(chat) },
       );
     }
 

@@ -58,7 +58,7 @@ export default function ToolsScreen(): React.ReactElement {
         return (
           <Card key={feature} className="gap-2.5 p-4">
             <View className="flex-row items-center gap-3">
-              <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
+              <View className="h-9 w-9 items-center justify-center">
                 <Icon size={17} color={check.available ? colors.success : colors['muted-foreground']} />
               </View>
               <Text className="flex-1 text-md font-medium text-foreground">{title}</Text>

@@ -175,6 +175,25 @@ const LIFECYCLE_KIND_FAMILIES: readonly string[] = [
 ];
 
 /**
+ * A `{ scopeKey: seq }` resume map from a request body.
+ *
+ * Shared by connection creation and `POST /:id/subs`, so a scope added to a
+ * live connection can resume from a position exactly as one named at open.
+ */
+function parseCursors(raw: unknown): Map<string, number> | { error: string } {
+  const cursors = new Map<string, number>();
+  if (!raw || typeof raw !== 'object') return cursors;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const seq = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+    if (!Number.isSafeInteger(seq) || seq < 0) {
+      return { error: `cursor for ${key} must be a non-negative integer` };
+    }
+    cursors.set(key, seq);
+  }
+  return cursors;
+}
+
+/**
  * Wrap a delivery handler so only lifecycle kinds pass. Exact-match, not
  * prefix: `chat.` would also admit `chat.question.asked`, whose payload is
  * the agent's question text.
@@ -410,22 +429,10 @@ export function createUnifiedStreamRoutes(container: Container): Router {
         );
       }
 
-      const cursors = new Map<string, number>();
-      const rawCursors = req.body?.cursors;
-      if (rawCursors && typeof rawCursors === 'object') {
-        for (const [key, value] of Object.entries(rawCursors as Record<string, unknown>)) {
-          const seq = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
-          if (!Number.isSafeInteger(seq) || seq < 0) {
-            res.status(400).json({
-              error: {
-                code: 'INVALID_RESUME',
-                message: `cursor for ${key} must be a non-negative integer`,
-              },
-            });
-            return;
-          }
-          cursors.set(key, seq);
-        }
+      const cursors = parseCursors(req.body?.cursors);
+      if ('error' in cursors) {
+        res.status(400).json({ error: { code: 'INVALID_RESUME', message: cursors.error } });
+        return;
       }
 
       const created = createConnection(principalKeyOf(principal), subs, cursors);
@@ -508,6 +515,15 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     const remove: string[] = (Array.isArray(req.body?.remove) ? req.body.remove : [])
       .map((k: unknown) => String(k))
       .filter((k: string) => k.length > 0);
+    // Resume positions for scopes being added. Without these a scope joined
+    // to an already-open connection could only start at the live edge, so a
+    // client that knew where it needed to resume from (a turn that was
+    // already running when a chat opened) lost everything before it.
+    const cursors = parseCursors(req.body?.cursors);
+    if ('error' in cursors) {
+      res.status(400).json({ error: { code: 'INVALID_RESUME', message: cursors.error } });
+      return;
+    }
 
     if (!record.onMutate) {
       res.status(409).json({
@@ -520,7 +536,7 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     }
     // 202 now, `subs` frame later — the mutation involves replay and must not
     // hold the control-plane request open behind it (§5.9.2 ③).
-    void record.onMutate(add, remove);
+    void record.onMutate(add, remove, cursors);
     res.status(202).json({ accepted: true });
   });
 
@@ -1012,7 +1028,7 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     // interleave their subscribes and emit two `subs` frames that each
     // describe a set that never existed.
     let mutations: Promise<void> = Promise.resolve();
-    record.onMutate = (add, remove) => {
+    record.onMutate = (add, remove, cursors) => {
       mutations = mutations.then(async () => {
         if (released) return;
         const resumed: Record<string, boolean> = {};
@@ -1028,6 +1044,11 @@ export function createUnifiedStreamRoutes(container: Container): Router {
         }
         for (const sub of add) {
           if (released) return;
+          // After the removals above, which clear the cursor of a scope that
+          // is being re-added with a new filter.
+          const key = scopeKeyOf(sub.scope, sub.id);
+          const cursor = cursors.get(key);
+          if (cursor !== undefined) record.cursors.set(key, cursor);
           await addSub(sub, resumed, rejected);
         }
         if (released) return;

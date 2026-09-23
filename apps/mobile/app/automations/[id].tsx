@@ -139,7 +139,7 @@ export default function AutomationDetailScreen(): React.ReactElement {
       queryClient.removeQueries({ queryKey: queryKeys.automation(automationId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.automations() });
       if (router.canGoBack()) router.back();
-      else router.replace('/(tabs)/runs');
+      else router.replace('/(tabs)/runs?segment=automations' as never);
     },
     onError: (err) => {
       haptics.error();
@@ -269,7 +269,7 @@ export default function AutomationDetailScreen(): React.ReactElement {
       <PlainScroll onRefresh={onRefresh} refreshing={refreshing}>
         <Card className="gap-2.5 p-4">
           <View className="flex-row items-center gap-3">
-            <View className="h-10 w-10 items-center justify-center rounded-2xl bg-emphasis">
+            <View className="h-10 w-10 items-center justify-center rounded-xl bg-control">
               <TriggerIcon size={18} color={colors['muted-foreground']} />
             </View>
             <View className="flex-1 gap-0.5">

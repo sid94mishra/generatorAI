@@ -17,8 +17,12 @@
 //
 // Entering motion only plays for LIVE rows (`RowEnterContext`): a history
 // turn mounting on open — or re-mounting as the list scrolls back — must not
-// spring every row in. Expansion animates height through a layout transition;
-// both are dropped under reduced motion (OS switch or app preference).
+// spring every row in. Expanding a row eases its body open (`Collapsible`:
+// the body's own height animates, so the list re-measures one row and the
+// rows below glide) and turns the chevron. There is no layout transition:
+// the transcript is a virtualised list that positions every row itself, and
+// a Reanimated layout animation inside it made the rows below bounce. All of
+// it is dropped under reduced motion (OS switch or app preference).
 //
 // Long-press opens the shared context menu (`useContextMenu`); the items
 // are supplied by the row, because only the row knows what "copy" means for
@@ -29,9 +33,10 @@
 import React, { createContext, useCallback, useContext } from 'react';
 import { Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
-import { ChevronDown, ChevronRight } from 'lucide-react-native';
+import { ChevronRight } from 'lucide-react-native';
 
 import { useCardEntering } from '../../common/enterMotion';
+import { Collapsible, useChevronTurn } from '../../ui/Collapsible';
 import { useContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
 import { Touchable } from '../../ui/Touchable';
 import { MAX_SCALE } from '../../ui/accessibility';
@@ -54,7 +59,7 @@ const TONE_CARD: Record<RowTone, string> = {
 };
 
 const TONE_ICON_WELL: Record<RowTone, string> = {
-  default: 'bg-subtle',
+  default: 'bg-control',
   primary: 'bg-card',
   info: 'bg-card',
   warning: 'bg-card',
@@ -82,6 +87,16 @@ export interface RowFrameProps {
   /** A child of a sub-agent or a group: always a line, a size smaller. */
   nested?: boolean;
   accessibilityLabel?: string;
+  /**
+   * The expanded body is a `NestedRows` list (a work fold, a group, a
+   * sub-agent's steps). It then starts at the row's own left edge so the
+   * rule runs straight down from the row's icon, as desktop's timeline
+   * connector does. Other bodies (a diff, a command, arguments) are indented
+   * to the title instead.
+   */
+  flushChildren?: boolean;
+  /** Lines the title may wrap to on a line row (a work summary takes two). */
+  titleLines?: number;
   children?: React.ReactNode;
 }
 
@@ -99,6 +114,8 @@ export function RowFrame({
   menuTitle,
   nested = false,
   accessibilityLabel,
+  flushChildren = false,
+  titleLines = 1,
   children,
 }: RowFrameProps): React.ReactElement {
   const { colors } = useTheme();
@@ -128,21 +145,17 @@ export function RowFrame({
     onPress: expandable ? onToggle : undefined,
     onLongPress: hasMenu ? onLongPress : undefined,
   };
+  const turn = useChevronTurn(Boolean(expanded));
   const chevron = expandable ? (
-    expanded ? (
-      <ChevronDown size={16} color={colors['muted-foreground']} />
-    ) : (
+    <Animated.View style={turn}>
       <ChevronRight size={16} color={colors['muted-foreground']} />
-    )
+    </Animated.View>
   ) : null;
   const detailTone = tone === 'danger' ? 'text-danger' : tone === 'warning' ? 'text-warning' : 'text-muted-foreground';
 
   if (!asCard) {
     return (
-      <Animated.View
-        entering={live && !nested ? motion.fadeIn(160) : undefined}
-        layout={expandable ? motion.layout(180) : undefined}
-      >
+      <Animated.View entering={live && !nested ? motion.fadeIn(160) : undefined}>
         <Touchable
           {...touchProps}
           scale="none"
@@ -151,7 +164,7 @@ export function RowFrame({
         >
           <View className="h-5 w-5 items-center justify-center">{icon}</View>
           <View className="flex-1 gap-0.5">
-            <Text numberOfLines={1} maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-sm text-foreground">
+            <Text numberOfLines={titleLines} maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-sm text-foreground">
               <Text className="font-medium">{title}</Text>
               {subtitle ? <Text className="font-mono text-muted-foreground">{`  ${subtitle}`}</Text> : null}
             </Text>
@@ -164,10 +177,10 @@ export function RowFrame({
           {right}
           {chevron}
         </Touchable>
-        {expandable && expanded && children ? (
-          <Animated.View entering={motion.fadeIn(120)} className="pb-1 pl-8">
+        {expandable && children ? (
+          <Collapsible open={Boolean(expanded)} className={flushChildren ? 'pb-1' : 'pb-1 pl-8'}>
             {children}
-          </Animated.View>
+          </Collapsible>
         ) : null}
       </Animated.View>
     );
@@ -176,7 +189,6 @@ export function RowFrame({
   return (
     <Animated.View
       entering={live ? cardEntering : undefined}
-      layout={expandable ? motion.layout(180) : undefined}
       className={`overflow-hidden rounded-2xl border ${TONE_CARD[tone]}`}
     >
       <Touchable
@@ -204,18 +216,41 @@ export function RowFrame({
         {right}
         {chevron}
       </Touchable>
-      {expandable && expanded && children ? (
-        <Animated.View entering={motion.fadeIn(120)} className="border-t border-border-muted">
+      {expandable && children ? (
+        <Collapsible open={Boolean(expanded)} className="border-t border-border-muted">
           {children}
-        </Animated.View>
+        </Collapsible>
       ) : null}
     </Animated.View>
   );
 }
 
-/** Children of a sub-agent or group: plain lines beside a left rule. */
-export function NestedRows({ children }: { children: React.ReactNode }): React.ReactElement {
-  return <View className="ml-2.5 border-l border-border-muted pl-3">{children}</View>;
+/** Centre of a line row's 20pt icon box, from the row's left edge. */
+export const LINE_ICON_AXIS = 10;
+/** Centre of a card row's icon well (12pt padding + half of 28pt). */
+export const CARD_ICON_AXIS = 26;
+
+/**
+ * Children of a sub-agent, a group or a work fold: plain lines beside a left
+ * rule. The rule sits on `axis`, the centre of the parent row's icon, so it
+ * hangs straight down from that icon with no gap on its left; the children's
+ * own icons then line up with the parent's title.
+ */
+export function NestedRows({
+  children,
+  axis = LINE_ICON_AXIS,
+}: {
+  children: React.ReactNode;
+  axis?: number;
+}): React.ReactElement {
+  return (
+    <View
+      className="border-l border-border"
+      style={{ marginLeft: axis - 0.5, paddingLeft: 32 - LINE_ICON_AXIS - 0.5 }}
+    >
+      {children}
+    </View>
+  );
 }
 
 /** The 28pt icon well's colour for a step status. */

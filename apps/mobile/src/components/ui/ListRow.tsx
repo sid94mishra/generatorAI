@@ -63,7 +63,7 @@ export function ListRow({
         // effectively invisible and every settings glyph floated unanchored.
         // In the dark palette the step is still gentle.
         <View
-          className="h-9 w-9 items-center justify-center rounded-2xl bg-emphasis"
+          className="h-9 w-9 items-center justify-center"
           style={iconTint ? { backgroundColor: iconTint } : undefined}
         >
           {icon}

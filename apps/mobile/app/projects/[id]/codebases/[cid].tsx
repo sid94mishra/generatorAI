@@ -195,7 +195,7 @@ export default function CodebaseDetailScreen(): React.ReactElement {
     <PlainScroll onRefresh={onRefresh} refreshing={refreshing}>
       <Card className="gap-3 p-4">
         <View className="flex-row items-center gap-3">
-          <View className="h-10 w-10 items-center justify-center rounded-2xl bg-emphasis">
+          <View className="h-10 w-10 items-center justify-center rounded-xl bg-control">
             {remote ? (
               <FolderGit2 size={18} color={colors['muted-foreground']} />
             ) : (

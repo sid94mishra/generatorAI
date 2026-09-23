@@ -160,7 +160,7 @@ export default function SourceControlScreen(): React.ReactElement {
           </ListGroup>
 
           {connect.kind === 'missing-scope' || connect.kind === 'not-configured' ? (
-            <View className="mt-3 gap-2 rounded-3xl border border-border bg-subtle p-3.5">
+            <View className="mt-3 gap-2 rounded-xl border border-border bg-control p-3.5">
               <View className="flex-row gap-2.5">
                 <Info size={16} color={colors['muted-foreground']} />
                 <Text className="flex-1 text-sm leading-relaxed text-muted-foreground">{connect.reason}</Text>
@@ -178,7 +178,7 @@ export default function SourceControlScreen(): React.ReactElement {
               ) : null}
             </View>
           ) : (
-            <View className="mt-3 flex-row gap-2.5 rounded-3xl border border-border bg-subtle p-3.5">
+            <View className="mt-3 flex-row gap-2.5 rounded-xl border border-border bg-control p-3.5">
               <Info size={16} color={colors['muted-foreground']} />
               <Text className="flex-1 text-sm leading-relaxed text-muted-foreground">
                 Connecting shows a code to approve on github.com. The token is stored on the machine

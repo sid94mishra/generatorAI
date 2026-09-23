@@ -836,7 +836,7 @@ function SourcesPage({
                     accessibilityLabel={d.alias === effectivePrimary ? `${d.alias} is the primary mount` : `Make ${d.alias} the primary mount`}
                     haptic="select"
                     onPress={() => onPrimaryChange(d.alias)}
-                    className={`h-7 justify-center rounded-full px-2 ${d.alias === effectivePrimary ? 'bg-accent' : 'bg-subtle'}`}
+                    className={`h-7 justify-center rounded-lg px-2 ${d.alias === effectivePrimary ? 'bg-control-strong' : 'bg-control'}`}
                   >
                     <Text className={`text-xs font-medium ${d.alias === effectivePrimary ? 'text-primary' : 'text-muted-foreground'}`}>
                       {d.alias === effectivePrimary ? 'Primary' : 'Set primary'}

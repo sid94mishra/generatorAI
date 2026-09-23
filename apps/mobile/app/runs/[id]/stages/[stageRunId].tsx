@@ -28,7 +28,9 @@ import { StatusGlyph } from '../../../../src/components/runs/StatusGlyph';
 import { stageSubtitle } from '../../../../src/components/runs/StageTimeline';
 import { awaitsApproval, pollIntervalFor, stageControlsFor } from '../../../../src/components/runs/runModel';
 import { isActive, isTerminal } from '../../../../src/components/runs/statusStyle';
-import { transcriptItems, type TranscriptItem } from '../../../../src/components/runs/stageTranscript';
+import { transcriptItems, withLiveRows, type TranscriptItem } from '../../../../src/components/runs/stageTranscript';
+import { deriveTimeline } from '../../../../src/components/chat/timeline/deriveTimeline';
+import { useStageLive } from '../../../../src/stream/useStageLive';
 import { useFeature } from '../../../../src/components/runs/useFeature';
 import { usePullRefresh } from '../../../../src/components/runs/usePullRefresh';
 import { TimelineActionsContext } from '../../../../src/components/chat/timeline/TimelineActions';
@@ -104,7 +106,13 @@ export default function StageScreen(): React.ReactElement {
     navigation.setOptions({ title: stage?.name ?? 'Stage' });
   }, [navigation, stage?.name]);
 
-  const items = useMemo(() => transcriptItems(transcript.data, live), [transcript.data, live]);
+  // Nothing past the prompt is saved while the stage runs; stream it instead.
+  const liveState = useStageLive(runId, stageRunId, live);
+  const items = useMemo(() => {
+    const saved = transcriptItems(transcript.data, live);
+    if (!liveState?.blocks.length) return saved;
+    return withLiveRows(saved, deriveTimeline(liveState.blocks, { active: true, idPrefix: `live-${stageRunId}:` }));
+  }, [transcript.data, live, liveState?.blocks, stageRunId]);
   const actions = useMemo(
     () => ({ workspaceId: run.data?.workspaceId ?? null, streamKey: null, toast: (message: string) => toast({ message }) }),
     [run.data?.workspaceId, toast],

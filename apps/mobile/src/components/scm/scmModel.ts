@@ -105,8 +105,14 @@ export interface ScmFlowForm {
   hint?: string;
 }
 
-export function emptyFlowForm(alias: string): ScmFlowForm {
-  return { alias, message: '', push: false, pullRequest: false, title: '', body: '', base: '', draft: false };
+/**
+ * `canPush` seeds the Push switch the way the desktop Changes tab does: on
+ * whenever the mount can push, so the one button commits AND publishes unless
+ * the user says otherwise. It stays off for a mount that cannot push, where an
+ * "on" switch would promise a step the flow will skip.
+ */
+export function emptyFlowForm(alias: string, canPush = false): ScmFlowForm {
+  return { alias, message: '', push: canPush, pullRequest: false, title: '', body: '', base: '', draft: false };
 }
 
 /**

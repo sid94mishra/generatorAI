@@ -7,6 +7,8 @@
 // read from here rather than each re-deriving "can I retry this?".
 // ────────────────────────────────────────────────────────────────
 
+import { epochOr, type Timestamp } from '@generatorai/client-core';
+
 import { isTerminal } from './statusStyle';
 
 /**
@@ -132,4 +134,25 @@ export function effectiveStageStatus<S extends string>(
 ): S | 'failed' {
   if (stage.status === 'completed' && stage.error && runStatus === 'failed') return 'failed';
   return stage.status;
+}
+
+/**
+ * The most recently updated run, whatever order the server listed them in.
+ * The workflows list took the first element and showed the OLDEST run's
+ * status ("last run Failed" over a later success) while the workflow page,
+ * which sorts, showed the right one.
+ */
+export function newestRun<T extends { updatedAt?: Timestamp | null; createdAt?: Timestamp | null }>(
+  runs: readonly T[],
+): T | undefined {
+  let best: T | undefined;
+  let bestAt = -Infinity;
+  for (const run of runs) {
+    const at = epochOr(run.updatedAt ?? run.createdAt ?? null, 0);
+    if (at > bestAt) {
+      best = run;
+      bestAt = at;
+    }
+  }
+  return best;
 }

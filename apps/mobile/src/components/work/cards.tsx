@@ -19,7 +19,7 @@ import { isActive, needsAttention, statusLabel } from '../runs/statusStyle';
 import { ListItem, TONE_COLOR_TOKEN } from '../ui/ListItem';
 import type { Tone } from '../ui/primitives';
 import { runRoute } from '../../navigation/routes';
-import { runTitle } from '../runs/runModel';
+import { newestRun, runTitle } from '../runs/runModel';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function runTone(status: string): Tone {
@@ -91,7 +91,7 @@ export function WorkflowCard({
 } & WorkRowProps): React.ReactElement {
   const { colors } = useTheme();
   const mine = runs.filter((r) => r.workflowDefinitionId === workflow.id);
-  const latest = mine[0];
+  const latest = newestRun(mine);
   const latestTone = latest ? runTone(latest.status) : 'neutral';
   const latestActive = latest ? isActive(latest.status) : false;
 

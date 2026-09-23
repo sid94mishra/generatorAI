@@ -12,6 +12,7 @@ import {
   rowsEqual,
   toolFamily,
   workLabel,
+  workTitle,
   type TimelineRow,
 } from '../components/chat/timeline/deriveTimeline';
 import { chatMessageToBlocks, messageAttachments, messageWasStopped } from '../components/chat/timeline/chatMessageToBlocks';
@@ -396,7 +397,7 @@ describe('deriveTimeline — settled turn collapse', () => {
     if (work.kind !== 'work') throw new Error('expected work');
     expect(work.work.steps).toBe(3);
     expect(work.work.durationMs).toBe(42_000);
-    expect(workLabel(work.work)).toBe('Worked · 3 steps · 42s');
+    expect(workLabel(work.work)).toBe('Loaded tools, searched 1 time, ran 1 sub-agent · 42s');
     expect(kinds(work.work.rows)).toEqual(['tool', 'tool', 'tool']);
   });
 
@@ -427,7 +428,51 @@ describe('deriveTimeline — settled turn collapse', () => {
     if (work.kind !== 'work') throw new Error('expected work');
     expect(work.work.steps).toBe(3);
     expect(work.work.failed).toBe(1);
-    expect(workLabel(work.work)).toBe('Worked · 3 steps · 1 failed');
+    expect(workLabel(work.work)).toBe('Ran 1 sub-agent, ran 1 command · 1 failed');
+  });
+
+  it('names what the steps did, counting distinct files for reads and edits', () => {
+    const rows = deriveTimeline(
+      [
+        tool('Bash', { command: 'ls' }),
+        tool('Read', { file_path: 'a.ts' }),
+        tool('Read', { file_path: 'b.ts' }),
+        tool('Read', { file_path: 'a.ts' }),
+        tool('Edit', { file_path: 'a.ts' }),
+        tool('Write', { file_path: 'c.ts' }),
+        tool('Bash', { command: 'pwd' }),
+      ],
+      { active: false, collapseSettled: true },
+    );
+    const work = rows[0]!;
+    if (work.kind !== 'work') throw new Error('expected work');
+    expect(work.work.tally).toEqual([
+      { family: 'shell', count: 2 },
+      { family: 'read', count: 2 },
+      { family: 'edit', count: 2 },
+    ]);
+    expect(workTitle(work.work)).toBe('Ran 2 commands, read 2 files, edited 2 files');
+  });
+
+  it('lists every call of a fold at one level, with no sub-groups', () => {
+    const rows = deriveTimeline(
+      [tool('Bash', { command: 'ls' }), tool('Bash', { command: 'pwd' }), tool('Read', { file_path: 'a' }), tool('Read', { file_path: 'b' })],
+      { active: false, collapseSettled: true },
+    );
+    const work = rows[0]!;
+    if (work.kind !== 'work') throw new Error('expected work');
+    expect(kinds(work.work.rows)).toEqual(['tool', 'tool', 'tool', 'tool']);
+    expect(workTitle(work.work)).toBe('Ran 2 commands, read 2 files');
+  });
+
+  it('names the agent\'s bookkeeping tools instead of counting them as tools', () => {
+    const rows = deriveTimeline(
+      [tool('TodoWrite', { todos: [] }), tool('Read', { file_path: 'a.ts' }), tool('ExitPlanMode', {}), tool('TodoWrite', { todos: [] })],
+      { active: false, collapseSettled: true },
+    );
+    const work = rows[0]!;
+    if (work.kind !== 'work') throw new Error('expected work');
+    expect(workTitle(work.work)).toBe('Updated the to-do list, read 1 file, wrote a plan');
   });
 
   it('marks only the last prose row of a settled turn as final', () => {

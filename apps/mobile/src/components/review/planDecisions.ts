@@ -53,3 +53,16 @@ export function offersAutopilot(actions: readonly string[] | undefined): boolean
 export function canRequestChanges(feedback: string): boolean {
   return feedback.trim().length > 0;
 }
+
+/**
+ * The plan body without a leading `# Title` that repeats the plan's title.
+ *
+ * Agents open the document with its own title, and the sheet already sets
+ * the title as its heading, so the same words appeared twice back to back
+ * in the few lines of body a phone has room for above the decision bar.
+ */
+export function planBodyWithoutTitle(markdown: string, title: string): string {
+  const match = /^\s*#\s+(.+?)\s*#*\s*(?:\r?\n|$)/.exec(markdown);
+  if (!match || match[1]!.trim().toLowerCase() !== title.trim().toLowerCase()) return markdown;
+  return markdown.slice(match[0].length).replace(/^\s*\n/, '');
+}

@@ -78,7 +78,8 @@ export function PlanCard({
         </View>
       </View>
 
-      {plan.summary ? (
+      {/* Plans without a summary of their own repeat the title here. */}
+      {plan.summary && plan.summary.trim() !== plan.title.trim() ? (
         <Text numberOfLines={6} className="text-sm leading-relaxed text-muted-foreground">
           {plan.summary}
         </Text>
@@ -88,10 +89,15 @@ export function PlanCard({
         accessibilityLabel="Open the full plan"
         haptic="tap"
         onPress={onOpenPlan}
-        className="min-h-11 flex-row items-center gap-2 self-start rounded-2xl bg-subtle px-3 py-2"
+        // `max-w-full` + a shrinking, single-line label: a generated file name
+        // (2026-09-21-harden-flat-amount-….md) is longer than the card, and a
+        // `self-start` row sized to it ran off the right edge of the screen.
+        className="min-h-11 max-w-full flex-row items-center gap-2 self-start rounded-xl bg-control px-3 py-2"
       >
         <FileText size={14} color={colors['muted-foreground']} />
-        <Text className="text-sm text-muted-foreground">Open plan{plan.fileName ? ` · ${plan.fileName}` : ''}</Text>
+        <Text numberOfLines={1} ellipsizeMode="middle" className="shrink text-sm text-muted-foreground">
+          Open plan{plan.fileName ? ` · ${plan.fileName}` : ''}
+        </Text>
       </Touchable>
 
       {requesting ? (

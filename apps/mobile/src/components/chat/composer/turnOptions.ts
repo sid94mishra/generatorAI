@@ -53,10 +53,16 @@ export const TIER_OPTIONS: readonly OptionModel<ContextTier>[] = [
   { value: 'long_context', title: 'Long context', help: 'Larger window, slower and pricier per turn.' },
 ];
 
+/** Desktop's names for effort levels ("xhigh" is "Extra high", not "Xhigh"). */
+export function effortTitle(value: string): string {
+  if (value === 'xhigh') return 'Extra high';
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 export function effortOptionsFor(model: ModelInfo | undefined): OptionModel<string>[] {
   return reasoningEfforts(model).map((value) => ({
     value,
-    title: value.charAt(0).toUpperCase() + value.slice(1),
+    title: effortTitle(value),
     help: EFFORT_COPY[value] ?? '',
   }));
 }
@@ -111,7 +117,11 @@ export function shortModelName(model: ModelInfo | undefined): string {
   // No explicit model means the chat follows the provider's default, which is
   // a real, nameable state — "Model" read like a control that had not loaded.
   if (!model) return 'Default model';
-  return model.name.replace(/^(claude|gpt|gemini|openai|anthropic|google)[\s-]*/i, '').trim() || model.name;
+  const rest = model.name.replace(/^(claude|gpt|gemini|openai|anthropic|google)[\s-]*/i, '').trim();
+  // "Claude Sonnet 5" → "Sonnet 5", but "GPT-6-Astra" must not become
+  // "6-Astra": when only a version number would lead, the vendor word IS the
+  // model's name.
+  return rest && !/^\d/.test(rest) ? rest : model.name;
 }
 
 /**
@@ -162,7 +172,7 @@ export function optionsChipLabel(input: {
 }): string {
   const parts: string[] = [];
   const effort = effectiveEffort(input.effort, input.model);
-  if (effort) parts.push(effort.charAt(0).toUpperCase() + effort.slice(1));
+  if (effort) parts.push(effortTitle(effort));
   if (input.contextTier === 'long_context') parts.push('Long ctx');
   if (input.permissionMode !== 'default') parts.push(permissionLabel(input.permissionMode));
   return parts.length ? parts.join(' · ') : 'Options';

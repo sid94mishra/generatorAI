@@ -446,6 +446,8 @@ export interface WorkflowRunSummary {
   completedAt?: Timestamp | null;
   error?: string | null;
   workspaceId?: string | null;
+  /** Set on a retry: the failed or cancelled run it replaced. */
+  ancestorRunId?: string | null;
 }
 
 export type StageRunStatus =
@@ -1574,7 +1576,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
      * a client that dropped its stream would silently replay nothing and sit
      * on a stale transcript with no error.
      */
-    replay: (scope: string, id: string, afterSeq = 0) =>
+    replay: (scope: string, id: string, afterSeq = 0, limit?: number) =>
       request<{
         rows: Array<{
           id: number;
@@ -1588,7 +1590,9 @@ export function createApiClient(fetchImpl: ApiFetch) {
         nextAfterSeq: number;
       }>(
         fetchImpl,
-        `/api/stream/replay?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}&afterSeq=${afterSeq}`,
+        `/api/stream/replay?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}&afterSeq=${afterSeq}${
+          limit === undefined ? '' : `&limit=${limit}`
+        }`,
       ),
 
     /**

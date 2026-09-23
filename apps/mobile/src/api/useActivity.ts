@@ -158,7 +158,12 @@ export function useActivity() {
       });
     }
 
-    for (const run of (runs.data as WorkflowRunSummary[] | undefined) ?? []) {
+    const runList = (runs.data as WorkflowRunSummary[] | undefined) ?? [];
+    // A failed run that was retried has been dealt with; the retry is the
+    // one to watch. Without this, every retried failure stayed on Home's
+    // "Waiting for you" for good.
+    const retried = new Set(runList.map((run) => run.ancestorRunId).filter((id): id is string => Boolean(id)));
+    for (const run of runList) {
       out.push({
         id: `run:${run.id}`,
         kind: 'run',
@@ -166,7 +171,7 @@ export function useActivity() {
         status: run.status,
         updatedAt: toEpochMs(run.updatedAt) ?? 0,
         href: `/runs/${run.id}`,
-        blocked: needsAttention(run.status),
+        blocked: needsAttention(run.status) && !retried.has(run.id),
         running: isActive(run.status),
       });
     }

@@ -25,7 +25,7 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
 
 const VARIANT_CONTAINER: Record<ButtonVariant, string> = {
   primary: 'bg-primary',
-  secondary: 'bg-raised border border-border',
+  secondary: 'bg-transparent border border-border',
   ghost: 'bg-transparent',
   danger: 'bg-danger',
 };

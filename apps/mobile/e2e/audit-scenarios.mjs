@@ -47,18 +47,24 @@ try {
   } else if (phase === 'panes') {
     await page.goto(`${APP_URL}/chats/${fixtures.chatId}`);
     await requireText('Chat');
-    for (const label of ['Changes', 'Files', 'Terminal', 'Browser', 'Chat']) {
-      await step(`chat pane: ${label}`, async () => {
-        await tap(visible(page.getByRole('tab', { name: new RegExp(`^${label}(,|$)`) })));
+    // Tools live in the workbench: header button → index (from the right) →
+    // the tool as a sheet. Each is opened from the index and closed again.
+    for (const [id, label] of [['changes', 'Changes'], ['files', 'Files'], ['terminal', 'Terminal'], ['browser', 'Browser']]) {
+      await step(`workbench tool: ${label}`, async () => {
+        await tap(visible(page.getByTestId('workbench-button')));
+        await sleep(900);
+        await tap(visible(page.getByTestId(`workbench-tool-${id}`)));
         await sleep(1600);
         const text = await body();
         if (/Something went wrong|Unmatched Route/.test(text)) throw new Error(text);
-        await shot(page, `pane-${label.toLowerCase()}`);
+        await shot(page, `tool-${id}`);
+        await tap(button(/^Close$/));
+        await sleep(700);
         return text.slice(-350).replace(/\s+/g, ' ');
       });
     }
     await step('turn setup and attachment actions', async () => {
-      await tap(button(/^Turn setup:/));
+      await tap(button(/^Turn options:/));
       await requireText('High');
       await shot(page, 'turn-setup');
       await tap(button(/^Close$/));

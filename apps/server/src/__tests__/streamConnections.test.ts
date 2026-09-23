@@ -280,4 +280,41 @@ describe('POST /api/stream/connections/:id/subs', () => {
     await mutateStarted;
     resolveMutate();
   });
+
+  it('hands the mutation the resume cursors of the scopes it adds', async () => {
+    const app = makeApp(principal());
+    const created = await request(app).post('/api/stream/connections').send({ subs: [{ scope: 'chat', id: 'c0' }] });
+    const connectionId = created.body.connectionId as string;
+
+    const seen = new Promise<ReadonlyMap<string, number>>((resolve) => {
+      const record = getConnection(connectionId);
+      if (!record) throw new Error('connection missing');
+      record.onMutate = (_add, _remove, cursors) => {
+        resolve(cursors);
+        return Promise.resolve();
+      };
+    });
+
+    const res = await request(app)
+      .post(`/api/stream/connections/${connectionId}/subs`)
+      .send({ add: [{ scope: 'chat', id: 'c1' }], cursors: { 'chat:c1': 471 } });
+
+    expect(res.status).toBe(202);
+    expect([...(await seen)]).toEqual([['chat:c1', 471]]);
+  });
+
+  it('rejects a malformed resume cursor on a mutation', async () => {
+    const app = makeApp(principal());
+    const created = await request(app).post('/api/stream/connections').send({ subs: [{ scope: 'chat', id: 'c1' }] });
+    const record = getConnection(created.body.connectionId as string);
+    if (!record) throw new Error('connection missing');
+    record.onMutate = () => Promise.resolve();
+
+    const res = await request(app)
+      .post(`/api/stream/connections/${created.body.connectionId as string}/subs`)
+      .send({ add: [{ scope: 'chat', id: 'c2' }], cursors: { 'chat:c2': -1 } });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_RESUME');
+  });
 });

@@ -117,7 +117,7 @@ export function DecisionCard({
           className="gap-2"
         >
           <View className="flex-row items-center gap-2.5">
-            <View className="h-8 w-8 items-center justify-center rounded-2xl bg-subtle">
+            <View className="h-8 w-8 items-center justify-center rounded-xl bg-control">
               <Icon size={16} color={iconColor} />
             </View>
             <View className="flex-1 gap-0.5">

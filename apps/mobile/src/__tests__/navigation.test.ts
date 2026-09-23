@@ -12,12 +12,16 @@ import {
 import {
   FAB_MARGIN,
   FAB_SIZE,
-  LABEL_MAX_SCALE,
-  USE_NATIVE_TABS,
-  tabBarMetrics,
-  tabContentInsets,
+  shellContentInsets,
   withAlpha,
 } from '../navigation/tabsImplementation';
+import {
+  SHELL_SECTIONS,
+  drawerAvailable,
+  isShellRoot,
+  sectionForPath,
+} from '../navigation/shell/sections';
+import { settleOpen, sidePanelWidth, SIDE_PANEL_MAX_WIDTH } from '../components/ui/sidePanelMath';
 import {
   DEFAULT_WORK_SEGMENT,
   WORK_SEGMENTS,
@@ -57,65 +61,77 @@ describe('needsYouLabel', () => {
   });
 });
 
-describe('tabBarMetrics', () => {
-  it('ships the JS tab bar until native tabs are verified', () => {
-    expect(USE_NATIVE_TABS).toBe(false);
+describe('shellContentInsets', () => {
+  it('reserves nothing for a bar: the drawer replaced it', () => {
+    expect(shellContentInsets(34).barOverlap).toBe(0);
   });
 
-  it('uses each platform’s canonical height plus the bottom inset', () => {
-    expect(tabBarMetrics('ios', 34).height).toBe(49 + 34);
-    expect(tabBarMetrics('android', 0).height).toBe(80);
-    expect(tabBarMetrics('web', 0).height).toBe(56);
-  });
-
-  it('never lets the label row overflow the bar', () => {
-    // The web-preview clipping: the bar must be at least icon + label +
-    // padding tall, and grow with the reading size rather than clip.
-    for (const platform of ['ios', 'android', 'web'] as const) {
-      for (const scale of [1, 1.2, 1.4]) {
-        const m = tabBarMetrics(platform, 0, scale);
-        expect(m.contentHeight).toBeGreaterThanOrEqual(m.iconSize + 2 + m.labelLineHeight + 8);
-        expect(m.showLabel).toBe(true);
-      }
-    }
-  });
-
-  it('keeps destination labels visible past the type cap', () => {
-    const m = tabBarMetrics('ios', 0, LABEL_MAX_SCALE + 0.1);
-    expect(m.showLabel).toBe(true);
-  });
-
-  it('draws the active pill only on Android', () => {
-    expect(tabBarMetrics('android', 0).activePill).toBe(true);
-    expect(tabBarMetrics('ios', 0).activePill).toBe(false);
-  });
-});
-
-describe('tabContentInsets', () => {
-  it('only reserves room for the bar where it overlays the scene (iOS)', () => {
-    const ios = tabContentInsets('ios', tabBarMetrics('ios', 34));
-    expect(ios.barOverlap).toBe(83);
-    expect(tabContentInsets('android', tabBarMetrics('android', 24)).barOverlap).toBe(0);
-    expect(tabContentInsets('web', tabBarMetrics('web', 0)).barOverlap).toBe(0);
-  });
-
-  it('floats the FAB a margin above the bar on every platform', () => {
-    for (const platform of ['ios', 'android', 'web'] as const) {
-      const metrics = tabBarMetrics(platform, 34);
-      const insets = tabContentInsets(platform, metrics);
-      expect(insets.fabBottom).toBe(insets.barOverlap + FAB_MARGIN);
-    }
+  it('floats the FAB a margin above the system inset', () => {
+    expect(shellContentInsets(34).fabBottom).toBe(34 + FAB_MARGIN);
+    expect(shellContentInsets(0).fabBottom).toBe(FAB_MARGIN);
+    expect(shellContentInsets(-5).fabBottom).toBe(FAB_MARGIN);
   });
 
   it('pads a list so its last row clears the FAB entirely', () => {
-    for (const platform of ['ios', 'android', 'web'] as const) {
-      const insets = tabContentInsets(platform, tabBarMetrics(platform, 34));
-      // The last row must end above the FAB's top edge.
-      expect(insets.listBottom(true)).toBeGreaterThanOrEqual(insets.fabBottom + FAB_SIZE);
-      // Without a FAB it still clears the bar.
-      expect(insets.listBottom(false)).toBeGreaterThan(insets.barOverlap);
-      expect(insets.listBottom(false)).toBeLessThan(insets.listBottom(true));
+    const insets = shellContentInsets(24);
+    expect(insets.listBottom(true)).toBeGreaterThanOrEqual(insets.fabBottom + FAB_SIZE);
+    expect(insets.listBottom(false)).toBeGreaterThan(24);
+    expect(insets.listBottom(false)).toBeLessThan(insets.listBottom(true));
+  });
+});
+
+describe('navigation drawer sections', () => {
+  const segments = { work: 'workflows', projects: 'projects' } as const;
+
+  it('lists exactly the desktop sidebar, in its order, with no Runs destination', () => {
+    expect(SHELL_SECTIONS.map((s) => s.id)).toEqual([
+      'home', 'projects', 'chats', 'agents', 'workflows', 'scripts', 'automations',
+    ]);
+  });
+
+  it('lights the catalogue a detail route belongs to', () => {
+    expect(sectionForPath('/', segments)).toBe('home');
+    expect(sectionForPath('/chats/abc', segments)).toBe('chats');
+    // A run belongs to its workflow, as on desktop.
+    expect(sectionForPath('/runs/r1/stages/s1', segments)).toBe('workflows');
+    expect(sectionForPath('/workflows/w1', segments)).toBe('workflows');
+    expect(sectionForPath('/automations/a1', segments)).toBe('automations');
+    expect(sectionForPath('/scripts/s1', segments)).toBe('scripts');
+    expect(sectionForPath('/projects/p1/codebases/c1', segments)).toBe('projects');
+  });
+
+  it('defers to the reported segment on the shared roots', () => {
+    expect(sectionForPath('/runs', { work: 'automations', projects: 'projects' })).toBe('automations');
+    expect(sectionForPath('/projects', { work: 'workflows', projects: 'agents' })).toBe('agents');
+  });
+
+  it('lights nothing outside the shell', () => {
+    expect(sectionForPath('/settings/appearance', segments)).toBeNull();
+    expect(sectionForPath('/search', segments)).toBeNull();
+  });
+
+  it('offers the drawer on the roots only; a chat has Back like other pushed screens', () => {
+    for (const path of ['/', '/chats', '/runs', '/projects']) {
+      expect(drawerAvailable(path)).toBe(true);
     }
+    for (const path of ['/chats/c1', '/pair', '/settings', '/chats/c1/plan/p1', '/projects/p1', '/runs/r1', '/runs/r1/stages/s1']) {
+      expect(drawerAvailable(path)).toBe(false);
+    }
+    expect(isShellRoot('/chats/c1')).toBe(false);
+  });
+});
+
+describe('side panel geometry', () => {
+  it('leaves a strip of content visible on a narrow phone', () => {
+    expect(sidePanelWidth(320)).toBeLessThan(320);
+    expect(sidePanelWidth(1024)).toBe(SIDE_PANEL_MAX_WIDTH);
+  });
+
+  it('lets a flick beat position when a drag is released', () => {
+    expect(settleOpen(0.1, 900)).toBe(true);
+    expect(settleOpen(0.9, -900)).toBe(false);
+    expect(settleOpen(0.6, 0)).toBe(true);
+    expect(settleOpen(0.4, 0)).toBe(false);
   });
 });
 
@@ -139,9 +155,16 @@ describe('resolveWorkSegment', () => {
     expect(resolveWorkSegment(['automations', 'runs'], undefined)).toBe('automations');
   });
 
-  it('exposes the four built segments and a stable pref key', () => {
-    expect(WORK_SEGMENTS).toEqual(['workflows', 'runs', 'automations', 'scripts']);
+  it('exposes the desktop catalogues — no Runs — and a stable pref key', () => {
+    expect(WORK_SEGMENTS).toEqual(['workflows', 'scripts', 'automations']);
     expect(WORK_SEGMENT_PREF_KEY).toBe('work.segment');
+  });
+
+  it('lands an old Runs link or stored preference on Workflows, where runs now live', () => {
+    expect(resolveWorkSegment('runs', undefined)).toBe('workflows');
+    expect(resolveWorkSegment('runs', 'scripts')).toBe('workflows');
+    expect(resolveWorkSegment(undefined, 'runs')).toBe('workflows');
+    expect(DEFAULT_WORK_SEGMENT).toBe('workflows');
   });
 
   it('restores a phone left on the scripts segment now that it lists real scripts', () => {

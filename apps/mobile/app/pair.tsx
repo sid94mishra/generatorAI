@@ -322,7 +322,7 @@ export default function PairScreen(): React.ReactElement {
           style={{ paddingBottom: insets.bottom + 16 }}
         >
           <View className="flex-row items-center gap-2.5">
-            <View className="h-9 w-9 items-center justify-center rounded-2xl bg-subtle">
+            <View className="h-9 w-9 items-center justify-center">
               <QrCode size={18} color={colors.primary} />
             </View>
             <View className="flex-1">

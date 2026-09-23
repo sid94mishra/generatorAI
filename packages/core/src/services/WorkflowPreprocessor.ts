@@ -600,9 +600,18 @@ export class WorkflowPreprocessor {
     config: CloneRepoStepConfig,
     context: PreprocessorContext,
   ): Promise<string> {
-    const repo = context.gitRepositories.find((r) => r.alias === config.repoAlias);
+    const declared = context.gitRepositories.find((r) => r.alias === config.repoAlias);
+    if (!declared) {
+      // A checkout the run already has for this alias (a project worktree)
+      // is what the step exists to produce.
+      const existing = context.variables[`repo_path_${config.repoAlias}`];
+      if (typeof existing === 'string' && existing) return existing;
+    }
+    const repo = declared ?? repositoryFromInputs(config.repoAlias, context.variables);
     if (!repo) {
-      throw new Error(`Git repository with alias "${config.repoAlias}" not found`);
+      throw new Error(
+        `No repository to clone for "${config.repoAlias}". Enter a repository URL or run the workflow in a project.`,
+      );
     }
 
     // Skip if already cloned in Phase 1 (cloneRepositories)
@@ -764,4 +773,32 @@ export class WorkflowPreprocessor {
     this.logger.warn(`[Preprocessor] Could not evaluate condition: "${condition}", defaulting to false`);
     return false;
   }
+}
+
+/**
+ * The input names a template uses for "the repository to work on".
+ *
+ * Template import creates a definition with no `gitRepositories` (the URL is
+ * only known at run time), so a template's `clone_repo` step found nothing
+ * under its alias and every run failed before its first stage. The URL the
+ * user typed into the run form is the repository the step means.
+ */
+const REPOSITORY_INPUTS = ['git_url', 'repo_url', 'repository_url', 'repository'] as const;
+
+export function repositoryFromInputs(
+  alias: string,
+  variables: Record<string, unknown>,
+): GitRepositoryConfig | null {
+  for (const name of REPOSITORY_INPUTS) {
+    const url = variables[name];
+    if (typeof url === 'string' && url.trim()) {
+      const branch = variables['branch'];
+      return {
+        alias,
+        url: url.trim(),
+        ...(typeof branch === 'string' && branch.trim() ? { branch: branch.trim() } : {}),
+      };
+    }
+  }
+  return null;
 }

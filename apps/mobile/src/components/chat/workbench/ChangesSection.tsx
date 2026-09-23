@@ -33,6 +33,10 @@ import {
 import { checkpointTime } from '../../review/checkpointGroups';
 import { Touchable } from '../../ui/Touchable';
 import { Button, IconButton } from '../../ui/Button';
+import { Chip } from '../../ui/Chip';
+import { ConfirmSheet } from '../../ui/ActionSheet';
+import { keepRef, keptLabel, splitKept, undoAllMessage } from '../../changes/keptModel';
+import { scmKeys } from '../../scm/api';
 import { EmptyState, ErrorState } from '../../ui/States';
 import { SkeletonList } from '../../ui/Skeleton';
 import { useToast } from '../../ui/Toast';
@@ -45,7 +49,6 @@ import {
   FileDiffPane,
   Toolbar,
   checkpointLabel,
-  restorePath,
   setDiffWrap,
   useChangesSummary,
   useDiffPrefs,
@@ -198,29 +201,85 @@ export function ChangesSection({
       : 'a checkpoint';
   }, [base, changes.summary, checkpoints.data]);
 
-  // Discard is a single-path checkpoint restore, not a reverse patch — the
-  // same call web makes, and undoable because the server snapshots first.
+  // ── Review actions — the desktop Changes tab's set ───────────────
+  //
+  // Keep marks a file reviewed at its current content and moves it to the
+  // Kept group; Discard / Undo all revert files, each mount from its OWN base.
+  // Discard used to be a single-path checkpoint restore, which cannot serve a
+  // mount whose base is a bare commit rather than a checkpoint row (every
+  // worktree mount on its first turn) — `changes/discard` is the call desktop
+  // makes, works for every mount kind and snapshots first, so it is undoable.
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
+  const [showKept, setShowKept] = useState(false);
+  const [confirmUndoAll, setConfirmUndoAll] = useState(false);
+  const markBusy = useCallback((id: string, on: boolean) => {
+    setBusyIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+  const refreshAfterReview = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId] });
+    // The commit bar reads the repo's state from its own key; without this it
+    // went on offering "Commit · 2 files" after Undo all had reverted them.
+    void queryClient.invalidateQueries({ queryKey: scmKeys.readiness(workspaceId) });
+  }, [queryClient, workspaceId]);
+
+  const reviewFiles = useMutation({
+    mutationFn: (body: Parameters<typeof api.workspaces.reviewChanges>[1]) =>
+      api.workspaces.reviewChanges(workspaceId, body),
+    onSuccess: refreshAfterReview,
+    onError: (err) => toast({ message: err instanceof Error ? err.message : 'Could not update the review', tone: 'error' }),
+  });
+
   const restore = useMutation({
-    mutationFn: (vars: { checkpointId: string; paths: string[] }) =>
-      api.workspaces.restoreCheckpoint(workspaceId, vars.checkpointId, { paths: vars.paths }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId] });
-      toast({ message: 'Discarded — a snapshot was saved first', tone: 'success' });
+    mutationFn: (body: Parameters<typeof api.workspaces.discardChanges>[1]) =>
+      api.workspaces.discardChanges(workspaceId, body),
+    onSuccess: (result) => {
+      refreshAfterReview();
+      const failed = result.mounts.find((m) => !m.ok);
+      if (failed?.error) toast({ message: failed.error, tone: 'error' });
+      else toast({ message: 'Reverted — a snapshot was saved first', tone: 'success' });
     },
     onError: (err) => toast({ message: err instanceof Error ? err.message : 'Could not discard', tone: 'error' }),
   });
 
   const discard = useCallback(
     (row: ChangeRow) => {
-      if (!baseCheckpointId) {
-        toast({ message: 'No checkpoint to restore from yet', tone: 'error' });
-        return;
-      }
       haptics.warn();
-      restore.mutate({ checkpointId: baseCheckpointId, paths: [restorePath(row.alias, row.path)] });
+      markBusy(row.id, true);
+      restore.mutate({ files: [{ alias: row.alias, path: row.path }] }, { onSettled: () => markBusy(row.id, false) });
     },
-    [baseCheckpointId, restore, toast],
+    [restore, markBusy],
   );
+
+  const keep = useCallback(
+    (row: ChangeRow) => {
+      haptics.select();
+      markBusy(row.id, true);
+      reviewFiles.mutate({ keep: [keepRef(row)] }, { onSettled: () => markBusy(row.id, false) });
+    },
+    [reviewFiles, markBusy],
+  );
+
+  const unkeep = useCallback(
+    (row: ChangeRow) => {
+      haptics.select();
+      markBusy(row.id, true);
+      reviewFiles.mutate({ unkeep: [{ alias: row.alias, path: row.path }] }, { onSettled: () => markBusy(row.id, false) });
+    },
+    [reviewFiles, markBusy],
+  );
+
+  const split = useMemo(() => splitKept(changes.files), [changes.files]);
+  // Nothing kept any more (the agent edited them again, or they were moved
+  // back): fall out of the Kept view rather than stranding on an empty one.
+  useEffect(() => {
+    if (showKept && split.kept.length === 0) setShowKept(false);
+  }, [showKept, split.kept.length]);
+  const shownFiles = showKept ? split.kept : split.pending;
 
   const commentOn = useCallback(
     (row: { path: string; alias: string }, request: CommentRequest) =>
@@ -309,7 +368,7 @@ export function ChangesSection({
     <View className="flex-1">
       <Toolbar>
         <FileDiffIcon size={14} color={colors['muted-foreground']} />
-        <Text className="text-sm font-medium text-foreground">
+        <Text numberOfLines={1} className="shrink text-sm font-medium text-foreground">
           {changes.files.length} {changes.files.length === 1 ? 'change' : 'changes'}
         </Text>
         {changes.additions > 0 || changes.deletions > 0 ? (
@@ -364,8 +423,56 @@ export function ChangesSection({
         />
       </Toolbar>
 
+      {/* Bulk review — desktop's "Keep all / Undo all" row, with the Kept group
+          as a second view of the same list rather than a collapsed section
+          (a phone has no room for two lists at once). */}
+      {changes.files.length > 0 ? (
+        <View className="min-h-11 flex-row items-center gap-1.5 border-b border-border-muted pl-4 pr-2">
+          <Chip
+            label={`To review ${split.pending.length}`}
+            size="sm"
+            tone="accent"
+            selected={!showKept}
+            onPress={() => setShowKept(false)}
+          />
+          {split.kept.length > 0 ? (
+            <Chip
+              label={keptLabel(split.kept.length)}
+              size="sm"
+              tone="success"
+              selected={showKept}
+              onPress={() => setShowKept(true)}
+            />
+          ) : null}
+          <View className="flex-1" />
+          {!showKept && review.canWrite && split.pending.length > 0 ? (
+            <Button
+              label="Keep all"
+              variant="ghost"
+              size="sm"
+              haptic="commit"
+              loading={reviewFiles.isPending && busyIds.size === 0}
+              disabled={reviewFiles.isPending || restore.isPending}
+              onPress={() => reviewFiles.mutate({ keepAll: true })}
+            />
+          ) : null}
+          {restoreCap.available ? (
+            <Button
+              label="Undo all"
+              variant="ghost"
+              size="sm"
+              disabled={reviewFiles.isPending || restore.isPending}
+              onPress={() => {
+                haptics.warn();
+                setConfirmUndoAll(true);
+              }}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
       {base !== 'baseline' ? (
-        <View className="flex-row items-center gap-2 border-b border-border-muted bg-subtle px-3 py-1.5">
+        <View className="flex-row items-center gap-2 border-b border-border-muted bg-control px-3 py-1.5">
           <History size={12} color={colors['muted-foreground']} />
           <Text numberOfLines={1} className="flex-1 text-xs text-muted-foreground">
             Comparing against {baseLabel}
@@ -405,11 +512,19 @@ export function ChangesSection({
             icon={<FileDiffIcon size={22} color={colors['muted-foreground']} />}
           />
         </View>
+      ) : shownFiles.length === 0 ? (
+        <View className="flex-1">
+          <EmptyState
+            title="All reviewed"
+            message="Every changed file is kept. They return here if the agent edits them again."
+            icon={<FileDiffIcon size={22} color={colors.success} />}
+          />
+        </View>
       ) : (
         <View className="flex-1">
           <ChangesList
             workspaceId={workspaceId}
-            files={changes.files}
+            files={shownFiles}
             base={base}
             expanded={expanded}
             onToggle={toggle}
@@ -419,6 +534,8 @@ export function ChangesSection({
             {...(onOpenInFiles ? { onOpenInFiles: (row: ChangeRow) => onOpenInFiles(row.path, row.alias) } : {})}
             {...(restoreCap.available ? { onDiscard: discard } : {})}
             discarding={restore.isPending}
+            {...(review.canWrite ? { onKeep: keep, onUnkeep: unkeep } : {})}
+            busyIds={busyIds}
             {...(review.canWrite ? { onComment: commentOn } : {})}
             onOpenThreads={openThreadsAt}
             commentDisabledReason={commentDisabledReason}
@@ -449,6 +566,18 @@ export function ChangesSection({
           ) : null}
         </View>
       ) : null}
+
+      <ConfirmSheet
+        visible={confirmUndoAll}
+        onClose={() => setConfirmUndoAll(false)}
+        title="Undo all changes?"
+        message={undoAllMessage(split.pending.length, split.kept.length)}
+        confirmLabel="Undo all"
+        onConfirm={() => {
+          setConfirmUndoAll(false);
+          restore.mutate({ all: true });
+        }}
+      />
 
       <CommitBar
         workspaceId={workspaceId}

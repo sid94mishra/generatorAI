@@ -118,7 +118,7 @@ export function VoicePill({
 
       <View
         className={`h-9 flex-1 flex-row items-center justify-center gap-[3px] rounded-2xl ${
-          state === 'error' ? 'bg-danger-muted' : 'bg-subtle'
+          state === 'error' ? 'bg-danger-muted' : 'bg-control'
         }`}
       >
         {state === 'error' ? (

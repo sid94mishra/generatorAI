@@ -35,7 +35,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, Platform, Share, Text, View } from 'react-native';
+import { Keyboard, Platform, Share, Text, View } from 'react-native';
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,14 +47,11 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
+  ChevronLeft,
   Copy,
-  FolderTree,
-  Gauge,
   GitFork,
   History,
-  ListTree,
   Pencil,
-  ScrollText,
   Share2,
   Square,
   Volume2,
@@ -79,16 +76,18 @@ import {
   useForkChat,
   useRewindChat,
 } from '../../src/api/useChatBranching';
-import { useModels } from '../../src/api/useModels';
+import { findModel, promptLimit, useModels } from '../../src/api/useModels';
 import { useChatStream } from '../../src/stream/useChatStream';
 import { restoredPromptFrom, type ChatRewoundEffect } from '../../src/stream/rewindEffects';
 import { useTwoPhaseStop } from '../../src/stream/useTwoPhaseStop';
 import { protectStream, useStreamStore } from '../../src/stream/streamStore';
+import { useTurnCatchUp } from '../../src/stream/useTurnCatchUp';
 import { useStreamHealth } from '../../src/stream/streamHealth';
 import { useAuth } from '../../src/auth/AuthProvider';
 import { checkFeature } from '../../src/auth/featureGate';
 import { useTextToSpeech } from '../../src/voice/useTextToSpeech';
 import { Composer, type ComposerPane } from '../../src/components/chat/Composer';
+import { READ_ALOUD_ENABLED } from '../../src/components/chat/featureFlags';
 import {
   useComposerController,
   type ComposerController,
@@ -111,7 +110,7 @@ import {
 } from '../../src/components/chat/rewindOptions';
 import { toPlanDecision } from '../../src/components/chat/gateActions';
 import { pendingGateFrom } from '../../src/components/chat/gateFromInteraction';
-import { ChatHeaderMenuButton, ChatHeaderTitle } from '../../src/components/chat/ChatHeader';
+import { ChatHeaderMenuButton, ChatHeaderTitle, SessionHeader } from '../../src/components/chat/ChatHeader';
 import { ChatMenuSheet, type ChatMenuSection } from '../../src/components/chat/ChatMenuSheet';
 import { useChatMotion } from '../../src/components/chat/chatMotion';
 import { displayChatName } from '../../src/components/common/chatName';
@@ -129,19 +128,23 @@ import {
 } from '../../src/components/chat/timeline/mergeScmRows';
 import { useScmResults } from '../../src/components/scm/useScmResults';
 import { activityLabelFor, selectChatView } from '../../src/components/chat/timeline/selectChatView';
-import { SessionPanes, type ChangesFocus } from '../../src/components/chat/panes/SessionPanes';
 import { ComposerCaptureContext } from '../../src/components/chat/composer/captureContext';
-import { routeSection, type PaneDescriptor, type PaneId } from '../../src/components/chat/panes/paneModel';
 import { useTasksSummary } from '../../src/components/chat/panes/useTasksSummary';
-import { MoreSheet, type MoreSection } from '../../src/components/chat/panes/MoreSheet';
+import { SidePanelHost } from '../../src/components/ui/SidePanel';
+import { WorkbenchPanel } from '../../src/components/workbench/WorkbenchPanel';
+import { WorkbenchSheet, type ToolFocus } from '../../src/components/workbench/WorkbenchSheet';
+import { WorkbenchButton } from '../../src/components/workbench/WorkbenchButton';
+import { useWorkbench } from '../../src/components/workbench/useWorkbench';
+import { toolForSection, type ToolId } from '../../src/components/workbench/workbenchModel';
 import { ChangesTray } from '../../src/components/chat/panes/ChangesTray';
 import { useChangesSummary } from '../../src/components/chat/panes/useChangesSummary';
 import { AgentConsole } from '../../src/terminal';
 import { ImageLightbox, type LightboxImage } from '../../src/components/markdown/MarkdownImage';
 import { Button, IconButton } from '../../src/components/ui/Button';
+import { goBack } from '../../src/components/ui/Screen';
 import { Sheet } from '../../src/components/ui/Sheet';
 import { Skeleton } from '../../src/components/ui/Skeleton';
-import { useKeyboardHeight, useKeyboardShown } from '../../src/components/ui/keyboard';
+import { useKeyboardHeight } from '../../src/components/ui/keyboard';
 import { useToast } from '../../src/components/ui/Toast';
 import { ErrorState, Spinner } from '../../src/components/ui/States';
 import { Touchable } from '../../src/components/ui/Touchable';
@@ -212,6 +215,12 @@ function browserArtifactPath(workspaceId: string, relativePath: string): string 
 }
 
 /** The transcript as plain text, for the share sheet. */
+/** Share of the model's prompt window in use, or null when either side is unknown. */
+function contextPercentOf(tokens: number | null, limit: number | null | undefined): number | null {
+  if (tokens == null || !limit || limit <= 0) return null;
+  return Math.min(100, (tokens / limit) * 100);
+}
+
 function transcriptText(messages: readonly ChatMessage[], title: string): string {
   const lines = [title, ''];
   for (const m of messages) {
@@ -231,19 +240,19 @@ export default function ChatScreen(): React.ReactElement {
   const { state } = auth;
   const toast = useToast();
   const insets = useSafeAreaInsets();
-  const keyboardShown = useKeyboardShown();
   const listRef = useRef<LegendListRef | null>(null);
   const motion = useChatMotion();
   const keyboard = useKeyboardHeight();
 
-  const [pane, setPane] = useState<PaneId>('chat');
-  // A request to open one file in the Changes pane; the nonce re-asks for the same file.
-  const [changesFocus, setChangesFocus] = useState<ChangesFocus | null>(null);
-  const [more, setMore] = useState<MoreSection | null>(null);
-  // The plan "Open plan" asked the Workbench to show.
+  // The workbench: an index of session tools in a panel from the right, and
+  // the chosen tool in a sheet from the bottom. The transcript owns the screen.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [tool, setTool] = useState<ToolId | null>(null);
+  const [toolOpen, setToolOpen] = useState(false);
+  // A request to open one file in the Changes tool; the nonce re-asks for the same file.
+  const [changesFocus, setChangesFocus] = useState<ToolFocus | null>(null);
+  // The plan "Open plan" asked the Plan tool to show.
   const [morePlanId, setMorePlanId] = useState<string | null>(null);
-  // The panes the strip offers, so slash commands can route to them.
-  const panesRef = useRef<ReadonlyArray<PaneDescriptor>>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   // The user message a rewind is anchored on: its turn id, and its text so
@@ -252,6 +261,10 @@ export default function ChatScreen(): React.ReactElement {
   const [consoleCallId, setConsoleCallId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<LightboxImage | null>(null);
   const [atBottom, setAtBottom] = useState(true);
+  // True until the reader first touches the transcript. While it holds, the
+  // list keeps following the end as rows measure in: `initialScrollAtEnd`
+  // lands on ESTIMATED sizes, and the real ones arrive after it.
+  const [settling, setSettling] = useState(true);
   const [limit, setLimit] = useState(PAGE_SIZE);
 
   const models = useModels();
@@ -300,16 +313,28 @@ export default function ChatScreen(): React.ReactElement {
     [toast],
   );
 
+  const messages = useQuery({
+    queryKey: [...queryKeys.chatMessages(chatId!), limit],
+    queryFn: () => api.chats.messages(chatId!, { limit }),
+  });
+
+  // A turn that was already running when the chat opened is replayed from
+  // the event log; without it the transcript jumped from the prompt straight
+  // to the gate card. The subscription waits for that one decision.
+  const catchUp = useTurnCatchUp(
+    chatId!,
+    { data: messages.data, settled: !messages.isPending },
+    useStreamStore((s) => s.streams[chat.data?.sessionId ?? chatId!]?.serverTurnId ?? null),
+  );
+
   // Keyed by the chat's session id once known (the store key the screen reads).
   useChatStream({
     chatId: chatId!,
     sessionId: chat.data?.sessionId,
+    enabled: catchUp.ready,
+    catchUpEvents: catchUp.events,
+    afterSequence: catchUp.afterSequence,
     onChatRewound,
-  });
-
-  const messages = useQuery({
-    queryKey: [...queryKeys.chatMessages(chatId!), limit],
-    queryFn: () => api.chats.messages(chatId!, { limit }),
   });
 
   const plans = useQuery({
@@ -416,21 +441,11 @@ export default function ChatScreen(): React.ReactElement {
     return parts.length > 0 ? parts.join(' · ') : null;
   }, [project.data?.name, repoAliases, mode]);
 
+  // The navigator's header is off for this route (see app/_layout.tsx): the
+  // screen draws its own so the workbench panel can slide over it.
   React.useLayoutEffect(() => {
-    navigation.setOptions({
-      title,
-      headerTitle: () => (
-        <ChatHeaderTitle
-          title={title}
-          subtitle={headerSubtitle}
-          transport={transport}
-          onPress={() => setRenameOpen(true)}
-        />
-      ),
-      headerRight: () => <ChatHeaderMenuButton onPress={() => setMenuOpen(true)} />,
-    });
-    // `transport` is rebuilt every render; its label/tone are what matter.
-  }, [navigation, title, headerSubtitle, transport.label, transport.tone]);
+    navigation.setOptions({ title });
+  }, [navigation, title]);
 
   // ── Mutations ────────────────────────────────────────────────
   /**
@@ -659,7 +674,14 @@ export default function ChatScreen(): React.ReactElement {
       void queryClient.invalidateQueries({ queryKey: queryKeys.chatPlans(chatId!) });
     },
     onError: (error) => {
-      if (error instanceof ApiError && error.status === 409) return;
+      // 409: the plan was decided elsewhere, or its review ended without a
+      // decision. Either way the card is stale — refresh it and say so; a
+      // silent 409 left the buttons there doing nothing.
+      if (error instanceof ApiError && error.status === 409) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.chatPlans(chatId!) });
+        toast({ message: 'This plan is no longer waiting for review.', tone: 'info' });
+        return;
+      }
       haptics.error();
       toast({ message: 'Could not send that decision. Try again.', tone: 'error' });
     },
@@ -849,36 +871,27 @@ export default function ChatScreen(): React.ReactElement {
     [tts, toast],
   );
 
-  const openInChanges = useCallback((path: string) => {
-    setChangesFocus((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
-    setPane('changes');
+  const openTool = useCallback((next: ToolId) => {
+    Keyboard.dismiss();
+    if (next !== 'plan') setMorePlanId(null);
+    setPanelOpen(false);
+    setTool(next);
+    setToolOpen(true);
   }, []);
 
-  // iOS edge swipe: on Changes / Terminal / Browser / Computer the left-edge
-  // swipe would pop the WHOLE chat rather than return to the Chat pane (the
-  // pager leaves that edge to the system). Android's back button already
-  // returns to Chat first (below); this gives iOS the same rule by only
-  // allowing the pop gesture from the Chat pane. The strip is the way back.
-  useEffect(() => {
-    navigation.setOptions({ gestureEnabled: pane === 'chat' });
-  }, [navigation, pane]);
+  const openInChanges = useCallback(
+    (path: string) => {
+      setChangesFocus((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
+      openTool('changes');
+    },
+    [openTool],
+  );
 
-  // Hardware back on another pane returns to the Chat pane before it leaves
-  // the chat. (A Changes diff open inside its pane registers its own, newer,
-  // handler and closes first.)
+  // iOS edge swipe pops the chat only when the workbench panel is not open
+  // over it; the panel's own swipe closes that first.
   useEffect(() => {
-    if (pane === 'chat') return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      setPane('chat');
-      return true;
-    });
-    return () => sub.remove();
-  }, [pane]);
-
-  const openWorkbench = useCallback((section: MoreSection) => {
-    if (section !== 'plan') setMorePlanId(null);
-    setMore(section);
-  }, []);
+    navigation.setOptions({ gestureEnabled: !panelOpen });
+  }, [navigation, panelOpen]);
 
   const timelineActions = useMemo<TimelineActions>(
     () => ({
@@ -889,7 +902,7 @@ export default function ChatScreen(): React.ReactElement {
       openInChanges: workspaceId ? openInChanges : undefined,
       openConsole: (callId) => setConsoleCallId(callId),
       openImage: workspaceId ? (image) => void openImage(image) : undefined,
-      readAloud: voice.available ? readAloud : undefined,
+      readAloud: READ_ALOUD_ENABLED && voice.available ? readAloud : undefined,
       toast: (message) => toast({ message, tone: 'info' }),
       // A row only names the turn that was tapped; the screen owns the
       // sheet, the mutation and the composer.
@@ -961,12 +974,13 @@ export default function ChatScreen(): React.ReactElement {
   // ── Composer ─────────────────────────────────────────────────
   // `/browser`, `/terminal`, `/changes` switch the pane; `/files`, `/plan`,
   // `/tasks` open the More sheet. Same table the v1 slash menu used.
-  const onOpenPane = useCallback((section: ComposerPane) => {
-    const target = routeSection(section, panesRef.current);
-    if (!target) return;
-    if ('pane' in target) setPane(target.pane);
-    else openWorkbench(target.more);
-  }, [openWorkbench]);
+  const onOpenPane = useCallback(
+    (section: ComposerPane) => {
+      const target = toolForSection(section);
+      if (target) openTool(target);
+    },
+    [openTool],
+  );
 
   const composer = useComposerController({
     chatId: chatId!,
@@ -982,7 +996,7 @@ export default function ChatScreen(): React.ReactElement {
     messages: messages.data,
     // "Send to chat" from the Terminal / Browser pane: bring the composer
     // forward so the new chip (or inserted text) is in view.
-    onCaptured: () => setPane('chat'),
+    onCaptured: () => setToolOpen(false),
   });
   // Written during render on purpose: the stream's rewind callback is
   // declared above the controller and must see the CURRENT one, not the one
@@ -1069,8 +1083,11 @@ export default function ChatScreen(): React.ReactElement {
   // "Open plan" lands on the Workbench's Plan section — the full document
   // with revisions, edits and comments — not the read-only route.
   const openPlan = useCallback((planId: string) => {
+    Keyboard.dismiss();
     setMorePlanId(planId);
-    setMore('plan');
+    setPanelOpen(false);
+    setTool('plan');
+    setToolOpen(true);
   }, []);
 
   // A pinned card already says a decision is waiting; the transcript's own
@@ -1081,14 +1098,35 @@ export default function ChatScreen(): React.ReactElement {
   );
 
   // "N new" on the jump pill: rows that arrived since the reader scrolled up.
+  // A gate card (permission, question, plan) grows the dock by a third of the
+  // screen, and the list above it shrinks by as much. If the reader was at the
+  // end of the transcript, keep them there: otherwise the prompt they just
+  // sent, and the tool call the card is asking about, slide out of view
+  // behind the card that refers to them.
+  const atBottomRef = useRef(true);
+  atBottomRef.current = atBottom;
+  useEffect(() => {
+    if (!blocked || !atBottomRef.current) return undefined;
+    const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: !motion.reduce }), 120);
+    return () => clearTimeout(t);
+  }, [blocked, motion.reduce]);
+
   const seenCount = useRef(0);
   if (atBottom) seenCount.current = listRows.length;
   const unseen = atBottom ? 0 : Math.max(0, listRows.length - seenCount.current);
 
-  const tasksSummary = useTasksSummary(chatId!, { pollPaused: pane === 'tasks' });
-  const onPanesChange = useCallback((panes: ReadonlyArray<PaneDescriptor>) => {
-    panesRef.current = panes;
-  }, []);
+  const tasksSummary = useTasksSummary(chatId!, { pollPaused: toolOpen && tool === 'tasks' });
+  const workbench = useWorkbench({
+    surface: 'chat',
+    workspaceId,
+    chatId: chatId!,
+    scopes,
+    orchestrator: chat.data?.orchestratorMode === true || boundAgent?.role === 'orchestrator',
+    tasksSummary,
+    model: findModel(models.data, chat.data?.model ?? null)?.name ?? chat.data?.model ?? null,
+    contextPercent: contextPercentOf(view.contextTokens, promptLimit(findModel(models.data, chat.data?.model ?? null))),
+    live: panelOpen || toolOpen,
+  });
 
   // The newest user prompt the server has a turn id for: "Rewind" from the menu.
   const lastPrompt = useMemo(() => {
@@ -1104,13 +1142,13 @@ export default function ChatScreen(): React.ReactElement {
 
   const dockStyle = useAnimatedStyle(
     () => ({
-      // iOS: the keyboard height animates, and the home-indicator inset is
-      // folded into it rather than switched off first (which hopped 34pt).
-      // Android edge-to-edge uses the IME overlap including its system bar;
-      // the safe-area inset is already part of that overlap while typing.
-      paddingBottom: keyboard.value > 0 ? Math.max(keyboard.value, insets.bottom) : keyboardShown ? 0 : insets.bottom,
+      // `keyboard` is the IME's true overlap with the bottom of the window,
+      // frame by frame. The dock is already inset for the home indicator /
+      // gesture bar, and the keyboard covers that strip, so the larger of the
+      // two is the padding — never their sum, which left a gap above the keys.
+      paddingBottom: Math.max(keyboard.value, insets.bottom),
     }),
-    [keyboardShown, insets.bottom],
+    [insets.bottom],
   );
 
   const renderRow = useCallback(
@@ -1121,7 +1159,7 @@ export default function ChatScreen(): React.ReactElement {
         <ActivityRow
           label={item.label}
           speaking={liveSpeaking}
-          {...(voice.available ? { onSpeakLive: onSpeakLive } : {})}
+          {...(READ_ALOUD_ENABLED && voice.available ? { onSpeakLive: onSpeakLive } : {})}
         />
       );
     },
@@ -1142,7 +1180,7 @@ export default function ChatScreen(): React.ReactElement {
             scale="none"
             ripple={false}
             onPress={() => router.push({ pathname: '/chats/[id]', params: { id: forkedFromChatId } })}
-            className="min-h-9 flex-row items-center gap-1.5 bg-subtle px-4 py-1.5"
+            className="min-h-9 flex-row items-center gap-1.5 bg-control px-4 py-1.5"
           >
             <GitFork size={14} color={colors['muted-foreground']} />
             <Text numberOfLines={1} className="flex-1 text-sm text-muted-foreground">
@@ -1152,7 +1190,7 @@ export default function ChatScreen(): React.ReactElement {
         ) : null}
 
         {archived ? (
-          <View accessibilityLiveRegion="polite" className="flex-row items-center gap-2 bg-subtle px-4 py-2">
+          <View accessibilityLiveRegion="polite" className="flex-row items-center gap-2 bg-control px-4 py-2">
             <Archive size={14} color={colors['muted-foreground']} />
             <Text className="flex-1 text-sm font-medium text-muted-foreground">
               This chat is archived. Choose Move to active in the chat menu to continue.
@@ -1196,8 +1234,21 @@ export default function ChatScreen(): React.ReactElement {
               // Chat semantics without inverting the list.
               alignItemsAtEnd
               initialScrollAtEnd
-              maintainScrollAtEnd
-              maintainVisibleContentPosition
+              // Pinned to the end when rows arrive, while a live turn's rows
+              // grow, and while the transcript first measures (`settling`).
+              // NOT when a settled row is expanded or collapsed:
+              // following the end then scrolled the tapped row's header off
+              // the top and left a blank band above the transcript when it
+              // closed. The tapped row stays put instead.
+              maintainScrollAtEnd={{
+                on: { dataChange: true, layout: true, footerLayout: true, itemLayout: view.isLive || settling },
+              }}
+              onTouchStart={settling ? () => setSettling(false) : undefined}
+              // Anchor on DATA changes only ("Load earlier messages" prepends
+              // above the reader). Size anchoring held a row BELOW the one
+              // being expanded in place, so a row near the top grew upward
+              // and scrolled its own header out of view.
+              maintainVisibleContentPosition={{ data: true, size: false }}
               recycleItems={false}
               {...(Platform.OS === 'web'
                 ? {}
@@ -1254,7 +1305,12 @@ export default function ChatScreen(): React.ReactElement {
           {...composer.props}
           dock={
             <>
-              <ChangesTray summary={changes.data} onReview={() => setPane('changes')} onOpenFile={openInChanges} />
+              <ChangesTray
+                workspaceId={workspaceId}
+                summary={changes.data}
+                onReview={() => openTool('changes')}
+                onOpenFile={openInChanges}
+              />
               {blockingPermission ? (
                 <PermissionCard
                   block={blockingPermission}
@@ -1342,24 +1398,6 @@ export default function ChatScreen(): React.ReactElement {
     const hasMessages = (messages.data?.length ?? 0) > 0;
     return [
       {
-        title: 'Workbench',
-        items: [
-          { label: 'Files', icon: icon(FolderTree), onPress: () => (workspaceId ? setPane('files') : openWorkbench('files')) },
-          { label: 'Plan', icon: icon(ScrollText), onPress: () => openWorkbench('plan') },
-          {
-            label: 'Tasks',
-            icon: icon(ListTree),
-            ...(tasksSummary.running > 0
-              ? { trailing: `${tasksSummary.running} running` }
-              : tasksSummary.total > 0
-                ? { trailing: String(tasksSummary.total) }
-                : {}),
-            onPress: () => (panesRef.current.some((p) => p.id === 'tasks') ? setPane('tasks') : openWorkbench('tasks')),
-          },
-          { label: 'Session info', icon: icon(Gauge), onPress: () => openWorkbench('inspector') },
-        ],
-      },
-      {
         title: 'Chat',
         items: [
           { label: 'Rename', icon: icon(Pencil), onPress: () => setRenameOpen(true) },
@@ -1401,7 +1439,7 @@ export default function ChatScreen(): React.ReactElement {
             label: 'Fork chat',
             // No turn id: the server forks from the LAST turn, which is
             // what "fork this chat" means from a chat-level menu.
-            detail: 'A new chat that shares these files and this history.',
+            detail: 'A new chat with this history and its own copy of the files.',
             testID: 'fork-chat',
             icon: icon(GitFork),
             disabled: fork.isPending || archived || !hasMessages,
@@ -1419,8 +1457,8 @@ export default function ChatScreen(): React.ReactElement {
       },
     ];
   }, [
-    colors.foreground, messages.data, openWorkbench, tasksSummary, lastPrompt, archived, isStreaming,
-    title, toast, runCopyTranscript, fork.isPending, runFork, archive, workspaceId,
+    colors.foreground, messages.data, lastPrompt, archived, isStreaming,
+    title, toast, runCopyTranscript, fork.isPending, runFork, archive,
   ]);
 
   if (messages.isError) {
@@ -1437,34 +1475,75 @@ export default function ChatScreen(): React.ReactElement {
     <TimelineActionsContext.Provider value={timelineActions}>
       <ComposerCaptureContext.Provider value={composer.captures}>
         <View className="flex-1">
-          <SessionPanes
-            workspaceId={workspaceId}
-            chatId={chatId!}
-            orchestrator={chat.data?.orchestratorMode === true || boundAgent?.role === 'orchestrator'}
-            tasksSummary={tasksSummary}
-            scopes={scopes}
-            changesCount={changes.data?.stats.files ?? 0}
-            pane={pane}
-            onPaneChange={setPane}
-            focus={changesFocus}
-            renderChat={renderChat}
-            onPanesChange={onPanesChange}
-            agentBusy={isStreaming}
-          />
+          <SidePanelHost
+            side="right"
+            open={panelOpen}
+            onOpenChange={setPanelOpen}
+            swipeToOpen={false}
+            accessibilityLabel="Workbench"
+            renderPanel={() => (
+              <WorkbenchPanel
+                subtitle={headerSubtitle}
+                tools={workbench.tools}
+                activeTool={toolOpen ? tool : null}
+                onPick={openTool}
+                onClose={() => setPanelOpen(false)}
+              />
+            )}
+          >
+            <SessionHeader
+              // A chat is a pushed screen: Back, like every other detail
+              // screen. The menu belongs to the top-level sections only.
+              leading={
+                <IconButton
+                  testID="chat-back"
+                  accessibilityLabel="Back"
+                  icon={<ChevronLeft size={24} color={colors.foreground} />}
+                  onPress={() => goBack('/(tabs)/chats')}
+                />
+              }
+              title={
+                <ChatHeaderTitle
+                  title={title}
+                  subtitle={headerSubtitle}
+                  transport={transport}
+                  onPress={() => setRenameOpen(true)}
+                />
+              }
+              trailing={
+                <>
+                  <WorkbenchButton
+                    badge={workbench.badge}
+                    selected={panelOpen}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setPanelOpen((v) => !v);
+                    }}
+                  />
+                  <ChatHeaderMenuButton onPress={() => setMenuOpen(true)} />
+                </>
+              }
+            />
+            {renderChat()}
+          </SidePanelHost>
 
-          <MoreSheet
-            visible={more !== null}
-            onClose={() => setMore(null)}
-            section={more ?? 'files'}
-            onSectionChange={setMore}
-            chatId={chatId!}
+          <WorkbenchSheet
+            visible={toolOpen}
+            onClose={() => setToolOpen(false)}
+            tool={tool}
+            onToolChange={setTool}
+            tools={workbench.tools}
             workspaceId={workspaceId}
+            scopes={scopes}
+            chatId={chatId!}
             chat={chat.data}
             usage={view.usage}
             contextTokens={view.contextTokens}
             transportLabel={`${transport.label} · ${transport.detail}`}
             streamKey={streamKey}
             planId={morePlanId}
+            agentBusy={isStreaming}
+            changesFocus={changesFocus}
           />
 
           <Sheet
