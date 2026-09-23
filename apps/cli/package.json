@@ -77,7 +77,7 @@
     "esbuild": "^0.25.0",
     "ink": "^6.3.1",
     "ink-testing-library": "^4.0.0",
-    "marked": "^15.0.0",
+    "marked": "^18.0.13",
     "picocolors": "^1.1.1",
     "pino": "^9.5.0",
     "react": "^19.0.0",
