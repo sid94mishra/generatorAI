@@ -51,7 +51,7 @@
     "expo-system-ui": "~57.0.0",
     "expo-web-browser": "~57.0.0",
     "lucide-react-native": "^0.460.0",
-    "marked": "^15.0.7",
+    "marked": "^18.0.13",
     "nativewind": "^4.2.1",
     "qrcode": "^1.5.4",
     "react": "19.2.3",
