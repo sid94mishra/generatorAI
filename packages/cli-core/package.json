@@ -24,7 +24,7 @@
     "@generatorai/client-transport": "workspace:*",
     "@generatorai/secrets": "workspace:*",
     "@generatorai/shared": "workspace:*",
-    "zod": "^3.24.0"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "commander": "^13.1.0"

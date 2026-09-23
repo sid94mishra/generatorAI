@@ -59,6 +59,6 @@
     "@openai/codex": "0.154.0"
   },
   "devDependencies": {
-    "zod": "^3.24.0"
+    "zod": "^4.6.5"
   }
 }
