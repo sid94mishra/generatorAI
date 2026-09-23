@@ -32,6 +32,6 @@
   "dependencies": {
     "@generatorai/secrets": "workspace:*",
     "@generatorai/shared": "workspace:*",
-    "zod": "^3.25.0"
+    "zod": "^4.6.5"
   }
 }
