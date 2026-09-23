@@ -27,6 +27,6 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "commander": "^13.1.0"
+    "commander": "^15.0.0"
   }
 }
