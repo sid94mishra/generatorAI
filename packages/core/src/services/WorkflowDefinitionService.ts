@@ -278,7 +278,6 @@ export class WorkflowDefinitionService {
       // `null` is the wire form for "no agent"; the entity uses undefined.
       agentRef: params.agentRef ?? undefined,
       skills: params.skills,
-      promptType: params.promptType,
       agentMode: params.agentMode,
       browserConfig: params.browserConfig,
       createdAt: new Date(),

@@ -13,16 +13,9 @@ import { AgentModeSchema } from './ChatSchemas.js';
 export const PromptDefinitionSchema = z.object({
   label: z.string().min(1),
   text: z.string().min(1),
-  /** Source type: inline text or file path reference */
-  source: z.enum(['inline', 'file']).default('inline'),
-  /** File path (only used when source is 'file') */
-  filePath: z.string().optional(),
   attachments: z.array(z.string()).optional(),
   waitForCompletion: z.boolean().default(true),
 });
-
-/** Zod schema for PromptType — only inline text or file reference */
-export const PromptTypeSchema = z.enum(['inline', 'file']).default('inline');
 
 /** Zod schema for Skill reference (independent of prompts) */
 export const SkillDefinitionSchema = z.object({
@@ -235,7 +228,6 @@ export const CreateStageSchema = z.object({
   /** When omitted, the service auto-appends (`max existing order + 1`). */
   order: z.number().int().min(0).optional(),
   prompts: z.array(PromptDefinitionSchema).default([]),
-  promptType: PromptTypeSchema.optional(),
   harnessConfigOverrides: HarnessConfigSchema.optional(),
   variables: z.record(z.unknown()).default({}),
   hooks: z.array(HookDefinitionSchema).default([]),
@@ -305,7 +297,6 @@ const ImportStageSchema = z.object({
   templateId: z.string().optional(),
   order: z.number().int().min(0),
   prompts: z.array(PromptDefinitionSchema).default([]),
-  promptType: PromptTypeSchema.optional(),
   harnessConfigOverrides: HarnessConfigSchema.optional(),
   variables: z.record(z.unknown()).default({}),
   hooks: z.array(HookDefinitionSchema).default([]),

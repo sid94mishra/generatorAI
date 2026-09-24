@@ -314,7 +314,7 @@ generatorai workflow stage delete <defId> <stageId>
 ## 7. Edge cases & gotchas
 
 1. **`agentRef` without project link** — the agent picker filters by the workflow's `projectId`. A `null` project lists only global and system agents.
-2. **`prompts[].source = 'file'` with bad path** — the stage fails at preflight; the prompt is read at execution time via `WorkflowPreprocessor`. Path is resolved against the project's prompts directory.
+2. **Prompts are inline text.** There is no file-reference prompt; a `.workflow.mjs` builder script can read a file at authoring time and pass its text.
 3. **`outputFormat = 'json'` but `outputSchema` missing** — JSON parse is still attempted; on parse failure the validation step fails. Always pair them.
 4. **`contextFilter = 'structured'` but predecessor had `outputFormat: 'text'`** — falls back to `summary-only` automatically.
 5. **`condition.type = 'expression'` referencing variables.foo.bar** — dotted path traversal. Missing keys resolve to `undefined`, which compares to anything as `false` (except `!=`).

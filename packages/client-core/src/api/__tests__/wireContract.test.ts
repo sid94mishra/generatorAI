@@ -135,7 +135,7 @@ describe('workflow stage/edge wire contract', () => {
     const { calls, fetchImpl } = capture();
     await createAdminApi(fetchImpl).definitions.addStage('wf1', {
       name: 'build',
-      prompts: [{ label: 'prompt', text: 'build it', source: 'inline', waitForCompletion: true }],
+      prompts: [{ label: 'prompt', text: 'build it', waitForCompletion: true }],
       harnessConfigOverrides: { model: 'gpt-5' },
       timeoutMs: 60_000,
       retryPolicy: { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 },
@@ -144,7 +144,7 @@ describe('workflow stage/edge wire contract', () => {
     expect(calls[0]?.path).toBe('/api/workflow-definitions/wf1/stages');
     expect(calls[0]?.body).toMatchObject({
       name: 'build',
-      prompts: [{ label: 'prompt', text: 'build it', source: 'inline', waitForCompletion: true }],
+      prompts: [{ label: 'prompt', text: 'build it', waitForCompletion: true }],
       harnessConfigOverrides: { model: 'gpt-5' },
       timeoutMs: 60_000,
       retryPolicy: { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 },

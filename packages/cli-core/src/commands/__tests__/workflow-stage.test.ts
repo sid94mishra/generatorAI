@@ -69,7 +69,7 @@ describe('workflow stage add', () => {
 
     expect(addStage).toHaveBeenCalledWith('wf_1', {
       name: 'plan',
-      prompts: [{ label: 'prompt', text: 'do the thing', source: 'inline', waitForCompletion: true }],
+      prompts: [{ label: 'prompt', text: 'do the thing', waitForCompletion: true }],
       harnessConfigOverrides: { model: 'gpt-5' },
       timeoutMs: 60_000,
       retryPolicy: { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 },

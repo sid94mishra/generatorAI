@@ -228,7 +228,6 @@ Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefi
         {
           "label": "Task",
           "text": "Inspect the codebase for {{feature}}. Write a plan with compatibility risks and acceptance tests. Do not implement yet.",
-          "source": "inline",
           "waitForCompletion": true
         }
       ],
@@ -244,7 +243,6 @@ Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefi
         {
           "label": "Task",
           "text": "Implement the approved plan for {{feature}}. Preserve current behavior and keep changes scoped.",
-          "source": "inline",
           "waitForCompletion": true
         }
       ],
@@ -264,7 +262,6 @@ Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefi
         {
           "label": "Task",
           "text": "Run the relevant tests. Inspect the diff. Report commands, results, and unresolved defects. Do not commit or push.",
-          "source": "inline",
           "waitForCompletion": true
         }
       ],
@@ -285,7 +282,6 @@ Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefi
         {
           "label": "Task",
           "text": "Explain the failed verification, identify the likely cause, and propose the smallest follow-up. Do not hide failures.",
-          "source": "inline",
           "waitForCompletion": true
         }
       ],

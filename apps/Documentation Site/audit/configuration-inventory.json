@@ -3940,18 +3940,6 @@
         "constraints": "min 1"
       },
       {
-        "field": "source",
-        "type": "\"inline\" / \"file\"",
-        "presence": "default \"inline\"",
-        "constraints": "—"
-      },
-      {
-        "field": "filePath",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "attachments",
         "type": "array of string",
         "presence": "optional",
@@ -3961,19 +3949,6 @@
         "field": "waitForCompletion",
         "type": "boolean",
         "presence": "default true",
-        "constraints": "—"
-      }
-    ]
-  },
-  {
-    "file": "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
-    "schema": "PromptTypeSchema",
-    "page": "configuration/workflows",
-    "fields": [
-      {
-        "field": "(value)",
-        "type": "\"inline\" / \"file\"",
-        "presence": "default \"inline\"",
         "constraints": "—"
       }
     ]
@@ -6721,18 +6696,6 @@
         "constraints": "min 1"
       },
       {
-        "field": "prompts[].source",
-        "type": "\"inline\" / \"file\"",
-        "presence": "default \"inline\"",
-        "constraints": "—"
-      },
-      {
-        "field": "prompts[].filePath",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "prompts[].attachments",
         "type": "array of string",
         "presence": "optional",
@@ -6742,12 +6705,6 @@
         "field": "prompts[].waitForCompletion",
         "type": "boolean",
         "presence": "default true",
-        "constraints": "—"
-      },
-      {
-        "field": "promptType",
-        "type": "\"inline\" / \"file\"",
-        "presence": "optional",
         "constraints": "—"
       },
       {
@@ -8849,18 +8806,6 @@
         "constraints": "min 1"
       },
       {
-        "field": "stages[].prompts[].source",
-        "type": "\"inline\" / \"file\"",
-        "presence": "default \"inline\"",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].prompts[].filePath",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "stages[].prompts[].attachments",
         "type": "array of string",
         "presence": "optional",
@@ -8870,12 +8815,6 @@
         "field": "stages[].prompts[].waitForCompletion",
         "type": "boolean",
         "presence": "default true",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].promptType",
-        "type": "\"inline\" / \"file\"",
-        "presence": "optional",
         "constraints": "—"
       },
       {
@@ -13735,18 +13674,6 @@
         "field": "stages[].config.prompts[].text",
         "type": "string",
         "presence": "required",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].config.prompts[].source",
-        "type": "\"inline\" / \"file\"",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].config.prompts[].filePath",
-        "type": "string",
-        "presence": "optional",
         "constraints": "—"
       },
       {

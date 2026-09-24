@@ -67,19 +67,6 @@ export class StageBuilder {
     this._prompts = [{
       label: this._name || 'Prompt',
       text,
-      source: 'inline' as const,
-      waitForCompletion: true,
-    }];
-    return this;
-  }
-
-  /** Load prompt from a file path. */
-  promptFile(path: string): this {
-    this._prompts = [{
-      label: this._name || 'Prompt',
-      text: '',
-      source: 'file' as const,
-      filePath: path,
       waitForCompletion: true,
     }];
     return this;

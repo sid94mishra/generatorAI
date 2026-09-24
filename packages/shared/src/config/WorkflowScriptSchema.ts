@@ -44,8 +44,6 @@ const HookDefinitionOutputSchema = z.object({
 const PromptDefinitionOutputSchema = z.object({
   label: z.string().optional(),
   text: z.string(),
-  source: z.enum(['inline', 'file']).optional(),
-  filePath: z.string().optional(),
   attachments: z.array(z.string()).optional(),
   waitForCompletion: z.boolean().optional(),
 });

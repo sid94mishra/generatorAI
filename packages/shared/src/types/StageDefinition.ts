@@ -8,17 +8,10 @@ import type { HookDefinition } from './HookDefinition.js';
 import type { ResultValidationRule } from './WorkflowOrchestrator.js';
 import type { AgentMode } from './AgentMode.js';
 
-/** Type of prompt content source in a stage */
-export type PromptType = 'inline' | 'file';
-
 /** A single prompt to send within a stage */
 export interface PromptDefinition {
   label: string;
   text: string;
-  /** Source type: inline text or file path reference */
-  source?: 'inline' | 'file';
-  /** File path (only used when source is 'file') */
-  filePath?: string;
   attachments?: string[];
   waitForCompletion: boolean;
 }
@@ -79,7 +72,6 @@ export interface StageDefinition {
   templateId?: string;
   order: number;
   prompts: PromptDefinition[];
-  promptType?: PromptType;
   /** Agent harness config overrides for this stage (provider-agnostic) */
   harnessConfigOverrides?: Partial<HarnessConfig>;
   variables: Record<string, unknown>;
@@ -165,7 +157,6 @@ export interface CreateStageParams {
   templateId?: string;
   order?: number;
   prompts?: PromptDefinition[];
-  promptType?: PromptType;
   harnessConfigOverrides?: Partial<HarnessConfig>;
   variables?: Record<string, unknown>;
   hooks?: HookDefinition[];

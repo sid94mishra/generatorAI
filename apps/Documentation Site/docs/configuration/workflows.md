@@ -14,18 +14,8 @@ Zod schema for PromptDefinition
 | --- | --- | --- | --- |
 | label | string | `required` | min 1 |
 | text | string | `required` | min 1 |
-| source | "inline" / "file" | `default "inline"` | — |
-| filePath | string | `optional` | — |
 | attachments | array of string | `optional` | — |
 | waitForCompletion | boolean | `default true` | — |
-
-## PromptTypeSchema
-
-Zod schema for PromptType — only inline text or file reference
-
-| Field | Type / choices | Input / default | Constraints |
-| --- | --- | --- | --- |
-| (value) | "inline" / "file" | `default "inline"` | — |
 
 ## SkillDefinitionSchema
 
@@ -530,11 +520,8 @@ Zod schema for creating a StageDefinition
 | prompts[] | object | `required` | unknown keys: strip |
 | prompts[].label | string | `required` | min 1 |
 | prompts[].text | string | `required` | min 1 |
-| prompts[].source | "inline" / "file" | `default "inline"` | — |
-| prompts[].filePath | string | `optional` | — |
 | prompts[].attachments | array of string | `optional` | — |
 | prompts[].waitForCompletion | boolean | `default true` | — |
-| promptType | "inline" / "file" | `optional` | — |
 | harnessConfigOverrides | object | `optional` | unknown keys: strip |
 | harnessConfigOverrides.model | string | `optional` | — |
 | harnessConfigOverrides.harnessType | "copilot" / "claude-agent" / "codex" / "opencode" / "acp" | `optional` | — |
@@ -908,11 +895,8 @@ Zod schema for importing a full workflow from a JSON file upload
 | stages[].prompts[] | object | `required` | unknown keys: strip |
 | stages[].prompts[].label | string | `required` | min 1 |
 | stages[].prompts[].text | string | `required` | min 1 |
-| stages[].prompts[].source | "inline" / "file" | `default "inline"` | — |
-| stages[].prompts[].filePath | string | `optional` | — |
 | stages[].prompts[].attachments | array of string | `optional` | — |
 | stages[].prompts[].waitForCompletion | boolean | `default true` | — |
-| stages[].promptType | "inline" / "file" | `optional` | — |
 | stages[].harnessConfigOverrides | object | `optional` | unknown keys: strip |
 | stages[].harnessConfigOverrides.model | string | `optional` | — |
 | stages[].harnessConfigOverrides.harnessType | "copilot" / "claude-agent" / "codex" / "opencode" / "acp" | `optional` | — |
@@ -1280,16 +1264,9 @@ import { AgentModeSchema } from './ChatSchemas.js';
 export const PromptDefinitionSchema = z.object({
   label: z.string().min(1),
   text: z.string().min(1),
-  /** Source type: inline text or file path reference */
-  source: z.enum(['inline', 'file']).default('inline'),
-  /** File path (only used when source is 'file') */
-  filePath: z.string().optional(),
   attachments: z.array(z.string()).optional(),
   waitForCompletion: z.boolean().default(true),
 });
-
-/** Zod schema for PromptType — only inline text or file reference */
-export const PromptTypeSchema = z.enum(['inline', 'file']).default('inline');
 
 /** Zod schema for Skill reference (independent of prompts) */
 export const SkillDefinitionSchema = z.object({
@@ -1502,7 +1479,6 @@ export const CreateStageSchema = z.object({
   /** When omitted, the service auto-appends (`max existing order + 1`). */
   order: z.number().int().min(0).optional(),
   prompts: z.array(PromptDefinitionSchema).default([]),
-  promptType: PromptTypeSchema.optional(),
   harnessConfigOverrides: HarnessConfigSchema.optional(),
   variables: z.record(z.unknown()).default({}),
   hooks: z.array(HookDefinitionSchema).default([]),
@@ -1572,7 +1548,6 @@ const ImportStageSchema = z.object({
   templateId: z.string().optional(),
   order: z.number().int().min(0),
   prompts: z.array(PromptDefinitionSchema).default([]),
-  promptType: PromptTypeSchema.optional(),
   harnessConfigOverrides: HarnessConfigSchema.optional(),
   variables: z.record(z.unknown()).default({}),
   hooks: z.array(HookDefinitionSchema).default([]),

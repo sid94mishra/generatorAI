@@ -93,7 +93,6 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
 
   const promptCount = stage.prompts?.length ?? 0;
   const hasTemplate = !!stage.templateId;
-  const promptLabel = (stage.promptType as string) === 'skills' ? 'skill' : (stage.promptType as string) === 'agents' ? 'agent' : 'prompt';
 
   // Capability summary — surface what matters while building, not just the name
   const model = stage.harnessConfigOverrides?.model;
@@ -213,7 +212,7 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
           </span>
         )}
         <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5">
-          {promptCount} {promptLabel}{promptCount !== 1 ? 's' : ''}
+          {promptCount} prompt{promptCount !== 1 ? 's' : ''}
         </span>
         {agentRef && (
           <Tooltip content={`Driven by agent: ${agentRef}`} side="top">

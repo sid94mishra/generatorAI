@@ -321,6 +321,30 @@
         "packages/cli-core/",
         "apps/"
       ]
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(promptType|PromptTypeSchema|PromptType)\\b|promptFile\\(path|source: 'file' as const",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/sdk/",
+        "packages/client-core/",
+        "apps/web/src/components/workflow/",
+        "apps/web/src/stores/workflowBuilderStore.ts",
+        "apps/server/",
+        "apps/mobile/"
+      ],
+      "reason": "WP-1.4: promptType, prompts[].source/filePath and StageBuilder.promptFile() deleted; prompts are inline text"
+    },
+    {
+      "phase": "01",
+      "pattern": "source: 'inline'",
+      "paths": [
+        "packages/",
+        "apps/"
+      ],
+      "reason": "WP-1.4: prompts[].source deleted"
     }
   ],
   "comments": {

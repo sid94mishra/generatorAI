@@ -165,7 +165,6 @@ export type {
   StageEdge,
   StageEdgeType,
   PromptDefinition,
-  PromptType,
   RetryPolicy,
   StageCondition,
   CreateStageParams,

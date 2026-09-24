@@ -70,7 +70,7 @@ MCP client failed, because there isn't one.
 |---|---|---|---|
 | **Skill** | A scoped behavior or rulebook (e.g., "review TypeScript safely"). Often a markdown or JSON instruction file the harness loads on demand. | `templates/system/artifacts/skills/` (system) + `<project>/config/skills/` (project) | `skillDirectories`, `disabledSkills` |
 | **Custom Agent** | A named sub-agent with its own system prompt + tool whitelist. | `templates/system/artifacts/agents/` + `<project>/config/agents/` | `customAgents: CustomAgentConfig[]` |
-| **Prompt template** | A reusable prompt body referenced via `PromptDefinition.source = 'file'`. | `templates/system/artifacts/prompts/` + `<project>/config/prompts/` | injected into `prompts[].text` at preprocessing |
+| **Prompt template** | A reusable prompt file the agent can read. | `templates/system/artifacts/prompts/` + `<project>/config/prompts/` + run uploads | attached to the stage's prompts from the run's prompt directories |
 | **MCP Server** | Model Context Protocol tool provider config (`http`, `sse` or `stdio`) forwarded to the harness SDK, which is the thing that actually speaks MCP. | bundled: `templates/system/mcp-servers.json`; custom: server-side `mcp-settings.json` (Settings → MCP Servers, **not** the browser); project: `project_configs` rows of type `mcp` | `mcpServers: Record<name, McpServerConfig>` |
 
 ---

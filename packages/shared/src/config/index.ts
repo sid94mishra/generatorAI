@@ -52,7 +52,6 @@ export {
   WorkflowDefinitionSchema,
   ImportWorkflowJsonSchema,
   PromptDefinitionSchema,
-  PromptTypeSchema,
   RetryPolicySchema,
   StageConditionSchema,
   VariableDefinitionSchema,
