@@ -41,7 +41,6 @@ const FULL_DEF = {
   orchestratorConfig: {
     category: 'custom',
     codebaseAliases: [],
-    createWorktrees: false,
     requiresCodebase: false,
     preprocessingSteps: [{ type: 'set_variable', name: 'pp', config: { k: 'v' }, failOnError: false, order: 0 }],
     resultValidations: [{ stageIndex: 0, rules: [{ type: 'contains', value: 'WF-LEVEL', message: 'wf-level rule' }] }],

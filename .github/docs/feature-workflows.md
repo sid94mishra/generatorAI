@@ -212,7 +212,6 @@ Hooks at this level run *between* stages or at run boundaries. Stage-scope hooks
 type OrchestratorConfig = {
   templateId?: string;                          // origin template if cloned
   codebaseAliases?: string[];                   // which of the project's codebases to use
-  createWorktrees?: boolean;                    // default true
   requiresCodebase?: boolean;
   autoCommit?: boolean;                         // commit the worktrees after a successful run
   autoPush?: boolean;                           // push the work branch (implied by autoCreatePR)

@@ -147,8 +147,6 @@ const OrchestratorConfigSchema = z.object({
   parentTemplateId: z.string().optional(),
   /** Codebase aliases from the linked project to use for this workflow */
   codebaseAliases: z.array(z.string().min(1).max(50)).max(5).default([]),
-  /** Whether to auto-create worktrees for per-run isolation */
-  createWorktrees: z.boolean().default(true),
   preprocessingSteps: z.array(PreprocessingStepSchema).default([]),
   resultValidations: z.array(StageResultValidationSchema).default([]),
   requiresCodebase: z.boolean().default(false),

@@ -167,8 +167,6 @@ export interface OrchestratorConfig {
   parentTemplateId?: string;
   /** Codebase aliases from the linked project to use */
   codebaseAliases?: string[];
-  /** Whether to auto-create worktrees for per-run isolation */
-  createWorktrees?: boolean;
   /** Preprocessing steps to run before the DAG */
   preprocessingSteps: PreprocessingStep[];
   /** Post-processing steps to run after all stages complete */

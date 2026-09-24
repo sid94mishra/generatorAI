@@ -281,6 +281,11 @@
         "apps/web/src/components/workflow/"
       ],
       "reason": "WP-1.4: gitRepositories + legacy clone path deleted; codebaseAliases + clone_repo from run inputs"
+    },
+    {
+      "phase": "01",
+      "pattern": "\bcreateWorktrees\b",
+      "reason": "WP-1.4: createWorktrees deleted (never read); useWorktree is the switch"
     }
   ],
   "comments": {

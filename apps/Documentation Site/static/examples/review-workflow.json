@@ -19,7 +19,6 @@
     "reviewed-change"
   ],
   "orchestratorConfig": {
-    "createWorktrees": true,
     "requiresCodebase": true,
     "autoCommit": false,
     "autoPush": false,

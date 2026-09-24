@@ -4643,12 +4643,6 @@
         "constraints": "maxLength 5"
       },
       {
-        "field": "orchestratorConfig.createWorktrees",
-        "type": "boolean",
-        "presence": "default true",
-        "constraints": "—"
-      },
-      {
         "field": "orchestratorConfig.preprocessingSteps",
         "type": "array of object",
         "presence": "default []",
@@ -5914,12 +5908,6 @@
         "type": "array of string",
         "presence": "default []",
         "constraints": "maxLength 5"
-      },
-      {
-        "field": "orchestratorConfig.createWorktrees",
-        "type": "boolean",
-        "presence": "default true",
-        "constraints": "—"
       },
       {
         "field": "orchestratorConfig.preprocessingSteps",
@@ -9927,12 +9915,6 @@
         "type": "array of string",
         "presence": "default []",
         "constraints": "maxLength 5"
-      },
-      {
-        "field": "orchestratorConfig.createWorktrees",
-        "type": "boolean",
-        "presence": "default true",
-        "constraints": "—"
       },
       {
         "field": "orchestratorConfig.preprocessingSteps",

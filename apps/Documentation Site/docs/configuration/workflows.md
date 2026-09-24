@@ -172,7 +172,6 @@ Zod schema for creating a WorkflowDefinition
 | orchestratorConfig.category | "system" / "custom" / "derived" | `default "custom"` | — |
 | orchestratorConfig.parentTemplateId | string | `optional` | — |
 | orchestratorConfig.codebaseAliases | array of string | `default []` | maxLength 5 |
-| orchestratorConfig.createWorktrees | boolean | `default true` | — |
 | orchestratorConfig.preprocessingSteps | array of object | `default []` | — |
 | orchestratorConfig.preprocessingSteps[] | object | `required` | unknown keys: strip |
 | orchestratorConfig.preprocessingSteps[].type | "run_script" / "validate_input" / "set_variable" / "conditional" | `required` | — |
@@ -390,7 +389,6 @@ Zod schema for updating a WorkflowDefinition
 | orchestratorConfig.category | "system" / "custom" / "derived" | `default "custom"` | — |
 | orchestratorConfig.parentTemplateId | string | `optional` | — |
 | orchestratorConfig.codebaseAliases | array of string | `default []` | maxLength 5 |
-| orchestratorConfig.createWorktrees | boolean | `default true` | — |
 | orchestratorConfig.preprocessingSteps | array of object | `default []` | — |
 | orchestratorConfig.preprocessingSteps[] | object | `required` | unknown keys: strip |
 | orchestratorConfig.preprocessingSteps[].type | "run_script" / "validate_input" / "set_variable" / "conditional" | `required` | — |
@@ -1088,7 +1086,6 @@ Zod schema for importing a full workflow from a JSON file upload
 | orchestratorConfig.category | "system" / "custom" / "derived" | `default "custom"` | — |
 | orchestratorConfig.parentTemplateId | string | `optional` | — |
 | orchestratorConfig.codebaseAliases | array of string | `default []` | maxLength 5 |
-| orchestratorConfig.createWorktrees | boolean | `default true` | — |
 | orchestratorConfig.preprocessingSteps | array of object | `default []` | — |
 | orchestratorConfig.preprocessingSteps[] | object | `required` | unknown keys: strip |
 | orchestratorConfig.preprocessingSteps[].type | "run_script" / "validate_input" / "set_variable" / "conditional" | `required` | — |
@@ -1419,8 +1416,6 @@ const OrchestratorConfigSchema = z.object({
   parentTemplateId: z.string().optional(),
   /** Codebase aliases from the linked project to use for this workflow */
   codebaseAliases: z.array(z.string().min(1).max(50)).max(5).default([]),
-  /** Whether to auto-create worktrees for per-run isolation */
-  createWorktrees: z.boolean().default(true),
   preprocessingSteps: z.array(PreprocessingStepSchema).default([]),
   resultValidations: z.array(StageResultValidationSchema).default([]),
   requiresCodebase: z.boolean().default(false),

@@ -215,7 +215,6 @@ Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefi
     "reviewed-change"
   ],
   "orchestratorConfig": {
-    "createWorktrees": true,
     "requiresCodebase": true,
     "autoCommit": false,
     "autoPush": false,
