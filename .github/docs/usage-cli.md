@@ -76,7 +76,7 @@ generatorai
 │     clone · create · delete · edge add · edge delete · edge list ·
 │     export · from-template · import-json · list · show · stage add ·
 │     stage delete · stage hook add · stage hook list · stage hook remove
-│     · stage list · stage update · stage variables · update · validate
+│     · stage list · stage update · update · validate
 ├── run                   # Workflow run lifecycle, stage controls and human-in-the-loop gates
 │     cancel · delete · diff · hitl approve · hitl changes-request · hitl
 │     mode · hitl pending · hitl reject · list · messages · pause ·
@@ -215,14 +215,13 @@ Workflow definitions: stages, edges, variables and validation
 | `workflow import-json <file> [options]` | Import a definition from a JSON file | `--name` |
 | `workflow list [options]` | List workflow definitions | `--project` `--tag` `--limit` |
 | `workflow show <workflow>` | Show a definition with its stages and edges | — |
-| `workflow stage add <workflow> [options]` | Add a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--order` `--timeout` `--retries` `--var` `--condition` `--condition-expression` |
+| `workflow stage add <workflow> [options]` | Add a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--order` `--timeout` `--retries` `--condition` `--condition-expression` |
 | `workflow stage delete <workflow> <stage>` | Delete a stage and its edges | — |
 | `workflow stage hook add <workflow> <stage> [options]` | Attach a lifecycle hook to a stage | `--name` `--phase` `--type` `--config` `--priority` `--timeout` `--retries` `--failure-policy` `--disabled` |
 | `workflow stage hook list <workflow> <stage>` | A stage's lifecycle hooks | — |
 | `workflow stage hook remove <workflow> <stage> <hook>` | Detach a lifecycle hook from a stage | — |
 | `workflow stage list <workflow>` | Stages in a definition | — |
-| `workflow stage update <workflow> <stage> [options]` | Patch a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--timeout` `--retries` `--var` `--clear-vars` `--condition` `--condition-expression` |
-| `workflow stage variables <workflow> <stage>` | A stage's variables | — |
+| `workflow stage update <workflow> <stage> [options]` | Patch a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--timeout` `--retries` `--condition` `--condition-expression` |
 | `workflow update <workflow> [options]` | Patch a definition | `--name` `--description` `--tags` |
 | `workflow validate <workflow>` | Check a definition for cycles, orphans and bad references | — |
 

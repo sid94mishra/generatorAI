@@ -74,7 +74,6 @@ function toStageParams(stage: StageDefinition) {
     // Nullable, not optional: clearing the picker must actually unbind the
     // agent rather than leave the previous ref in place.
     agentRef: stage.agentRef ?? null,
-    variables: stage.variables,
     hooks: stage.hooks,
     retryPolicy: stage.retryPolicy,
     timeoutMs: stage.timeoutMs,
@@ -239,7 +238,6 @@ export function WorkflowBuilderPage() {
       name: `Stage ${nodes.length + 1}`,
       order: nodes.length,
       prompts: [],
-      variables: {},
       hooks: [],
       createdAt: new Date(),
     };

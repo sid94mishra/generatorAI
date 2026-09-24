@@ -281,7 +281,6 @@ export const WorkflowTemplateStageSchema = z.object({
   stageTemplateId: z.string().optional(),
   prompts: z.array(StageTemplatePromptSchema).default([]),
   harnessConfigOverrides: TemplateHarnessConfigSchema.optional(),
-  variables: z.record(z.unknown()).default({}),
   hooks: z.array(HookDefinitionSchema).default([]),
   retryPolicy: z.object({
     maxRetries: z.number().int().min(0).max(10).default(0),
@@ -413,7 +412,6 @@ export function templateStageToCreateParams(
     order: order ?? stage.order,
     prompts: stage.prompts,
     harnessConfigOverrides: stage.harnessConfigOverrides,
-    variables: stage.variables,
     hooks: stage.hooks,
     retryPolicy: stage.retryPolicy ?? undefined,
     timeoutMs: stage.timeoutMs ?? undefined,

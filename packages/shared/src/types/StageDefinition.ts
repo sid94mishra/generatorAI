@@ -73,7 +73,6 @@ export interface StageDefinition {
   prompts: PromptDefinition[];
   /** Agent harness config overrides for this stage (provider-agnostic) */
   harnessConfigOverrides?: Partial<HarnessConfig>;
-  variables: Record<string, unknown>;
   hooks: HookDefinition[];
   retryPolicy?: RetryPolicy;
   timeoutMs?: number;
@@ -157,7 +156,6 @@ export interface CreateStageParams {
   order?: number;
   prompts?: PromptDefinition[];
   harnessConfigOverrides?: Partial<HarnessConfig>;
-  variables?: Record<string, unknown>;
   hooks?: HookDefinition[];
   retryPolicy?: RetryPolicy;
   timeoutMs?: number;

@@ -7104,12 +7104,6 @@
         "constraints": "maxLength 200"
       },
       {
-        "field": "variables",
-        "type": "map of unknown",
-        "presence": "default {}",
-        "constraints": "—"
-      },
-      {
         "field": "hooks",
         "type": "array of object",
         "presence": "default []",
@@ -9206,12 +9200,6 @@
         "type": "array of string",
         "presence": "optional",
         "constraints": "maxLength 200"
-      },
-      {
-        "field": "stages[].variables",
-        "type": "map of unknown",
-        "presence": "default {}",
-        "constraints": "—"
       },
       {
         "field": "stages[].hooks",
@@ -13839,12 +13827,6 @@
         "constraints": "—"
       },
       {
-        "field": "stages[].config.variables",
-        "type": "map of unknown",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "stages[].config.harnessConfigOverrides",
         "type": "map of unknown",
         "presence": "optional",
@@ -15783,12 +15765,6 @@
         "constraints": "int; min 1"
       },
       {
-        "field": "variables",
-        "type": "map of unknown",
-        "presence": "default {}",
-        "constraints": "—"
-      },
-      {
         "field": "hooks",
         "type": "array of object",
         "presence": "default []",
@@ -16617,12 +16593,6 @@
         "type": "number",
         "presence": "optional",
         "constraints": "int; min 1"
-      },
-      {
-        "field": "stages[].variables",
-        "type": "map of unknown",
-        "presence": "default {}",
-        "constraints": "—"
       },
       {
         "field": "stages[].hooks",

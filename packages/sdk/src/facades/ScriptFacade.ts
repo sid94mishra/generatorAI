@@ -101,9 +101,6 @@ export class ScriptFacade {
         order: stage.config.order,
         prompts: stage.config.prompts,
         hooks: stage.config.hooks,
-        variables: stage.config.variables
-          ? { ...stage.config.variables, ...(options?.variables ?? {}) }
-          : options?.variables,
         harnessConfigOverrides: stage.config.harnessConfigOverrides,
         agentRef: stage.config.agentRef,
         contextFilter: stage.config.contextFilter,

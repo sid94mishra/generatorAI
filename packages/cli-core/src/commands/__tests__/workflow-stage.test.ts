@@ -6,7 +6,6 @@ const WORKFLOW = { id: 'wf_1', name: 'e2e', status: 'active', createdAt: 0 };
 
 const stageAdd = workflowCommands().find((c) => c.id === 'workflow.stage.add')!;
 const stageUpdate = workflowCommands().find((c) => c.id === 'workflow.stage.update')!;
-const stageVariables = workflowCommands().find((c) => c.id === 'workflow.stage.variables')!;
 const hookAdd = workflowCommands().find((c) => c.id === 'workflow.stage.hook.add')!;
 const hookRemove = workflowCommands().find((c) => c.id === 'workflow.stage.hook.remove')!;
 const edgeAdd = workflowCommands().find((c) => c.id === 'workflow.edge.add')!;
@@ -77,34 +76,13 @@ describe('workflow stage add', () => {
   });
 });
 
-// ── Stage variables / condition / hooks (Phase 7 item 4) ───────────
+// ── Stage condition / hooks (Phase 7 item 4) ──────────────────────
 //
-// `CreateStageSchema` has always accepted `variables`, `condition` and
+// `CreateStageSchema` has always accepted `condition` and
 // `hooks`; no CLI surface set any of them, so a terminal user could not give
-// a stage a variable or a run condition at all.
+// a stage a run condition at all.
 
-describe('workflow stage variables and condition', () => {
-  it('turns --var name=value into the variables record, parsing JSON values', async () => {
-    const addStage = vi.fn(async () => ({ id: 'stage_1' }));
-    await stageAdd.handler(fakeContext({ addStage }), {
-      args: { workflow: 'e2e' },
-      flags: { name: 'plan', var: ['retries=3', 'label=build it', 'opts={"deep":true}'] },
-    } as never);
-
-    expect(addStage.mock.calls[0]?.[1]).toMatchObject({
-      variables: { retries: 3, label: 'build it', opts: { deep: true } },
-    });
-  });
-
-  it('rejects a --var without an =', async () => {
-    await expect(
-      stageAdd.handler(fakeContext({}), {
-        args: { workflow: 'e2e' },
-        flags: { name: 'plan', var: ['justaname'] },
-      } as never),
-    ).rejects.toThrow('name=value');
-  });
-
+describe('workflow stage condition', () => {
   it('sends a StageCondition, and refuses an expression condition with no expression', async () => {
     const addStage = vi.fn(async () => ({ id: 'stage_1' }));
     await stageAdd.handler(fakeContext({ addStage }), {
@@ -123,38 +101,7 @@ describe('workflow stage variables and condition', () => {
     ).rejects.toThrow('--condition-expression');
   });
 
-  it('merges --var into the stage\'s existing variables on update, and replaces them with --clear-vars', async () => {
-    // The route PUTs the whole record — a partial update that did not merge
-    // would silently drop every variable the caller did not name.
-    const stages = [{ id: 's1', name: 'plan', variables: { keep: 1, over: 'old' } }];
-    const updateStage = vi.fn(async () => ({ id: 's1' }));
 
-    await stageUpdate.handler(fakeContext({ updateStage, stages }), {
-      args: { workflow: 'e2e', stage: 'plan' },
-      flags: { var: ['over=new'] },
-    } as never);
-    expect(updateStage.mock.calls[0]?.[2]).toEqual({ variables: { keep: 1, over: 'new' } });
-
-    const replacing = vi.fn(async () => ({ id: 's1' }));
-    await stageUpdate.handler(fakeContext({ updateStage: replacing, stages }), {
-      args: { workflow: 'e2e', stage: 'plan' },
-      flags: { var: ['only=1'], clearVars: true },
-    } as never);
-    expect(replacing.mock.calls[0]?.[2]).toEqual({ variables: { only: 1 } });
-  });
-
-  it('lists a stage\'s variables with non-string values rendered as JSON', async () => {
-    const stages = [{ id: 's1', name: 'plan', variables: { n: 3, s: 'text' } }];
-    const result = await stageVariables.handler(fakeContext({ stages }), {
-      args: { workflow: 'e2e', stage: 'plan' },
-      flags: {},
-    } as never);
-
-    expect(result.data).toEqual([
-      { name: 'n', value: '3' },
-      { name: 's', value: 'text' },
-    ]);
-  });
 });
 
 describe('workflow stage hooks', () => {

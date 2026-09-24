@@ -128,7 +128,6 @@ export interface StageOutput {
       retries: number;
       config: HookConfig;
     }>;
-    variables?: Record<string, unknown>;
     harnessConfigOverrides?: Partial<HarnessConfig>;
     /** AGT-01 — portable `scope:slug` ref of a first-class agent. */
     agentRef?: string;

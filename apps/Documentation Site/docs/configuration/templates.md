@@ -323,7 +323,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | harnessConfigOverrides.configDir | string | `optional` | — |
 | harnessConfigOverrides.reasoningEffort | "low" / "medium" / "high" / "xhigh" / "max" / "ultra" | `optional` | — |
 | harnessConfigOverrides.maxTurns | number | `optional` | int; min 1 |
-| variables | map of unknown | `default {}` | — |
 | hooks | array of object | `default []` | — |
 | hooks[] | object | `required` | unknown keys: strip |
 | hooks[].id | string | `required` | — |
@@ -470,7 +469,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | stages[].harnessConfigOverrides.configDir | string | `optional` | — |
 | stages[].harnessConfigOverrides.reasoningEffort | "low" / "medium" / "high" / "xhigh" / "max" / "ultra" | `optional` | — |
 | stages[].harnessConfigOverrides.maxTurns | number | `optional` | int; min 1 |
-| stages[].variables | map of unknown | `default {}` | — |
 | stages[].hooks | array of object | `default []` | — |
 | stages[].hooks[] | object | `required` | unknown keys: strip |
 | stages[].hooks[].id | string | `required` | — |
@@ -871,7 +869,6 @@ export const WorkflowTemplateStageSchema = z.object({
   stageTemplateId: z.string().optional(),
   prompts: z.array(StageTemplatePromptSchema).default([]),
   harnessConfigOverrides: TemplateHarnessConfigSchema.optional(),
-  variables: z.record(z.unknown()).default({}),
   hooks: z.array(HookDefinitionSchema).default([]),
   retryPolicy: z.object({
     maxRetries: z.number().int().min(0).max(10).default(0),
@@ -1003,7 +1000,6 @@ export function templateStageToCreateParams(
     order: order ?? stage.order,
     prompts: stage.prompts,
     harnessConfigOverrides: stage.harnessConfigOverrides,
-    variables: stage.variables,
     hooks: stage.hooks,
     retryPolicy: stage.retryPolicy ?? undefined,
     timeoutMs: stage.timeoutMs ?? undefined,

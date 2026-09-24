@@ -18,7 +18,6 @@ function makeStage(overrides: Partial<StageDefinition> = {}): StageDefinition {
     name: 'Test Stage',
     order: 0,
     prompts: [{ label: 'p1', text: 'Do something', waitForCompletion: true }],
-    variables: {},
     hooks: [],
     createdAt: new Date(),
     ...overrides,

@@ -84,7 +84,6 @@ const StageOutputSchema = z.object({
     order: z.number().int().min(0),
     prompts: z.array(PromptDefinitionOutputSchema).min(0),
     hooks: z.array(HookDefinitionOutputSchema).optional(),
-    variables: z.record(z.unknown()).optional(),
     harnessConfigOverrides: z.record(z.unknown()).optional(),
     contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
     contextSources: z.array(z.string()).optional(),

@@ -588,7 +588,6 @@ Zod schema for creating a StageDefinition
 | harnessConfigOverrides.agentOverrides.appendInstructions | string | `optional` | max 16000 |
 | harnessConfigOverrides.agentOverrides.extraAllow | array of string | `optional` | maxLength 200 |
 | harnessConfigOverrides.agentOverrides.extraDeny | array of string | `optional` | maxLength 200 |
-| variables | map of unknown | `default {}` | — |
 | hooks | array of object | `default []` | — |
 | hooks[] | object | `required` | unknown keys: strip |
 | hooks[].id | string | `required` | — |
@@ -962,7 +961,6 @@ Zod schema for importing a full workflow from a JSON file upload
 | stages[].harnessConfigOverrides.agentOverrides.appendInstructions | string | `optional` | max 16000 |
 | stages[].harnessConfigOverrides.agentOverrides.extraAllow | array of string | `optional` | maxLength 200 |
 | stages[].harnessConfigOverrides.agentOverrides.extraDeny | array of string | `optional` | maxLength 200 |
-| stages[].variables | map of unknown | `default {}` | — |
 | stages[].hooks | array of object | `default []` | — |
 | stages[].hooks[] | object | `required` | unknown keys: strip |
 | stages[].hooks[].id | string | `required` | — |
@@ -1476,7 +1474,6 @@ export const CreateStageSchema = z.object({
   order: z.number().int().min(0).optional(),
   prompts: z.array(PromptDefinitionSchema).default([]),
   harnessConfigOverrides: HarnessConfigSchema.optional(),
-  variables: z.record(z.unknown()).default({}),
   hooks: z.array(HookDefinitionSchema).default([]),
   retryPolicy: RetryPolicySchema.optional(),
   timeoutMs: z.number().int().min(1000).optional(),
@@ -1545,7 +1542,6 @@ const ImportStageSchema = z.object({
   order: z.number().int().min(0),
   prompts: z.array(PromptDefinitionSchema).default([]),
   harnessConfigOverrides: HarnessConfigSchema.optional(),
-  variables: z.record(z.unknown()).default({}),
   hooks: z.array(HookDefinitionSchema).default([]),
   retryPolicy: RetryPolicySchema.optional(),
   timeoutMs: z.number().int().min(1000).optional(),

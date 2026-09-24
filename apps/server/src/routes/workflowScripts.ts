@@ -138,9 +138,6 @@ export function createWorkflowScriptRoutes(container: Container): Router {
           order: stage.config.order,
           prompts: stage.config.prompts,
           hooks: stage.config.hooks,
-          variables: stage.config.variables
-            ? { ...stage.config.variables, ...(variables ?? {}) }
-            : variables,
           harnessConfigOverrides: stage.config.harnessConfigOverrides,
           agentRef: stage.config.agentRef,
           contextFilter: stage.config.contextFilter,
@@ -270,9 +267,6 @@ export function createWorkflowScriptRoutes(container: Container): Router {
           order: stage.config.order,
           prompts: stage.config.prompts,
           hooks: stage.config.hooks,
-          variables: stage.config.variables
-            ? { ...stage.config.variables, ...(resolvedVars) }
-            : resolvedVars,
           harnessConfigOverrides: stage.config.harnessConfigOverrides,
           agentRef: stage.config.agentRef,
           contextFilter: stage.config.contextFilter,

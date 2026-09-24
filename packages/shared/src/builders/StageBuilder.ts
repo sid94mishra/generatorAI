@@ -31,7 +31,6 @@ export class StageBuilder {
   private _contextSources?: string[];
   private _outputFormat?: 'text' | 'json';
   private _outputSchema?: Record<string, unknown>;
-  private _variables?: Record<string, unknown>;
   private _harnessOverrides?: Partial<HarnessConfig>;
   private _iterationConfig?: IterationConfig;
   private _skills: StageSkillReference[] = [];
@@ -143,12 +142,6 @@ export class StageBuilder {
     return this;
   }
 
-  /** Set stage-scoped variables. */
-  variables(vars: Record<string, unknown>): this {
-    this._variables = vars;
-    return this;
-  }
-
   /** Add a hook (declarative config or inline handler). */
   hook(phase: HookPhase, config: HookDefinitionConfig | StageHookHandler): this {
     if (typeof config === 'function') {
@@ -229,7 +222,6 @@ export class StageBuilder {
         order,
         prompts: this._prompts,
         hooks: this._hooks.length > 0 ? this._hooks : undefined,
-        variables: this._variables,
         harnessConfigOverrides: this._harnessOverrides,
         agentRef: this._agentRef,
         contextFilter: this._contextFilter,

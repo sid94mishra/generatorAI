@@ -113,7 +113,6 @@ since functions can't be serialized — it's validated separately at runtime.
 | stages[].config.hooks[].config&lt;variant 3&gt;.modulePath | string | `optional` | — |
 | stages[].config.hooks[].config&lt;variant 3&gt;.handlerName | string | `optional` | — |
 | stages[].config.hooks[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
-| stages[].config.variables | map of unknown | `optional` | — |
 | stages[].config.harnessConfigOverrides | map of unknown | `optional` | — |
 | stages[].config.contextFilter | "full" / "summary-only" / "none" / "structured" | `optional` | — |
 | stages[].config.contextSources | array of string | `optional` | — |
@@ -262,7 +261,6 @@ const StageOutputSchema = z.object({
     order: z.number().int().min(0),
     prompts: z.array(PromptDefinitionOutputSchema).min(0),
     hooks: z.array(HookDefinitionOutputSchema).optional(),
-    variables: z.record(z.unknown()).optional(),
     harnessConfigOverrides: z.record(z.unknown()).optional(),
     contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
     contextSources: z.array(z.string()).optional(),

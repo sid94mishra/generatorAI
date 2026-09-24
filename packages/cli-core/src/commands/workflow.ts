@@ -45,34 +45,6 @@ const HOOK_TYPES = ['script', 'http', 'function'] as const;
 const HOOK_FAILURE_POLICIES = ['abort', 'skip', 'continue'] as const;
 
 /**
- * `--var name=value` pairs → the `variables` record the stage schema takes
- * (`CreateStageSchema.variables: z.record(z.unknown())`).
- *
- * A value that parses as JSON is stored as JSON (`--var retries=3` is the
- * number 3, `--var opts={"a":1}` an object); anything else is stored as the
- * literal string. Without this every variable would be a string, and a
- * workflow expression comparing one to a number would silently never match.
- */
-function parseVariablePairs(pairs: string[] | undefined): Record<string, unknown> | undefined {
-  if (!pairs?.length) return undefined;
-  const out: Record<string, unknown> = {};
-  for (const pair of pairs) {
-    const at = pair.indexOf('=');
-    if (at <= 0) {
-      throw CliError.usage(`--var expects name=value, got "${pair}".`);
-    }
-    const name = pair.slice(0, at).trim();
-    const raw = pair.slice(at + 1);
-    try {
-      out[name] = JSON.parse(raw) as unknown;
-    } catch {
-      out[name] = raw;
-    }
-  }
-  return out;
-}
-
-/**
  * `--condition`/`--condition-expression` → the `StageCondition` the stage
  * schema takes. `expression` without an expression is refused rather than
  * sent as a condition that can never evaluate.
@@ -475,7 +447,6 @@ export function workflowCommands(): CommandSpec[] {
         { name: 'order', description: 'Display order', type: 'number' },
         { name: 'timeout', description: 'Timeout in seconds', type: 'number' },
         { name: 'retries', description: 'Retry attempts on failure (0-10)', type: 'number' },
-        { name: 'var', description: 'Stage variable as name=value (repeatable)', type: 'string', variadic: true },
         { name: 'condition', description: 'When this stage runs', type: 'string', choices: CONDITION_TYPES },
         { name: 'conditionExpression', description: 'Expression for --condition expression', type: 'string' },
       ],
@@ -490,7 +461,6 @@ export function workflowCommands(): CommandSpec[] {
           order: z.coerce.number().int().optional(),
           timeout: z.coerce.number().int().positive().optional(),
           retries: z.coerce.number().int().min(0).max(10).optional(),
-          var: z.array(z.string()).optional(),
           condition: z.enum(CONDITION_TYPES).optional(),
           conditionExpression: z.string().optional(),
         },
@@ -529,11 +499,6 @@ export function workflowCommands(): CommandSpec[] {
                   flags.retries !== undefined
                     ? { maxRetries: flags.retries, backoffMs: 1000, backoffMultiplier: 2 }
                     : undefined,
-                // `variables` and `condition` are real fields on
-                // `CreateStageSchema` that this command has never exposed —
-                // a stage could only ever be given variables or a run
-                // condition through the web UI or a raw API call.
-                variables: parseVariablePairs(flags.var),
                 condition,
               }),
             },
@@ -561,8 +526,6 @@ export function workflowCommands(): CommandSpec[] {
         { name: 'agent', description: 'Agent reference', type: 'string', completes: 'agent' },
         { name: 'timeout', description: 'Timeout in seconds', type: 'number' },
         { name: 'retries', description: 'Retry attempts (0-10)', type: 'number' },
-        { name: 'var', description: 'Stage variable as name=value (repeatable, merges)', type: 'string', variadic: true },
-        { name: 'clearVars', description: 'Remove every variable before applying --var', type: 'boolean' },
         { name: 'condition', description: 'When this stage runs', type: 'string', choices: CONDITION_TYPES },
         { name: 'conditionExpression', description: 'Expression for --condition expression', type: 'string' },
       ],
@@ -576,8 +539,6 @@ export function workflowCommands(): CommandSpec[] {
           agent: z.string().optional(),
           timeout: z.coerce.number().int().positive().optional(),
           retries: z.coerce.number().int().min(0).max(10).optional(),
-          var: z.array(z.string()).optional(),
-          clearVars: z.boolean().optional(),
           condition: z.enum(CONDITION_TYPES).optional(),
           conditionExpression: z.string().optional(),
         },
@@ -590,16 +551,6 @@ export function workflowCommands(): CommandSpec[] {
           ? await readTextFile(path.resolve(flags.promptFile), 'prompt file')
           : flags.prompt;
 
-        // The route PUTs the whole `variables` record, so a partial update
-        // has to merge against what the stage already has or every unnamed
-        // variable is dropped. `--clear-vars` is the explicit way to ask for
-        // the replacing behaviour instead.
-        const incoming = parseVariablePairs(flags.var);
-        const existing = (stage['variables'] as Record<string, unknown> | undefined) ?? {};
-        const variables =
-          incoming || flags.clearVars
-            ? { ...(flags.clearVars ? {} : existing), ...(incoming ?? {}) }
-            : undefined;
 
         // Same real field names/shapes as `workflow stage add` — see that
         // handler's comment. `updateStage` used to accept a bare
@@ -618,7 +569,6 @@ export function workflowCommands(): CommandSpec[] {
               flags.retries !== undefined
                 ? { maxRetries: flags.retries, backoffMs: 1000, backoffMultiplier: 2 }
                 : undefined,
-            variables,
             condition: buildCondition(flags.condition, flags.conditionExpression),
           }),
           'Pass at least one field to change.',
@@ -627,48 +577,10 @@ export function workflowCommands(): CommandSpec[] {
       },
     }),
 
-    // ── Stage variables and hooks (Phase 7 item 4) ─────────────────
+    // ── Stage hooks (Phase 7 item 4) ─────────────────────────────
     //
-    // `CreateStageSchema` has accepted `variables` and `hooks` since it
-    // existed; no CLI surface ever set either, so the only way to give a
-    // stage a variable or a lifecycle hook was the web UI or a raw API
-    // call. `--var` above covers writing variables; these read them back and
-    // manage the hook array, which is too structured for flat flags to
-    // express as a whole (one hook at a time is exactly the right grain).
-
-    defineCommand({
-      id: 'workflow.stage.variables',
-      group: 'workflow',
-      verb: 'stage variables',
-      aliases: ['stage vars'],
-      summary: "A stage's variables",
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [
-        { name: 'workflow', description: 'Workflow reference', required: true, completes: 'workflow' },
-        { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
-      ],
-      flags: [],
-      schema: inputSchema({ workflow: z.string(), stage: z.string() }, {}),
-      output: {
-        kind: 'list',
-        columns: [
-          { key: 'name', header: 'Name', priority: 0 },
-          { key: 'value', header: 'Value', priority: 0 },
-        ],
-      },
-      async handler(ctx, { args }) {
-        const definition = await findDefinition(ctx, args.workflow);
-        const stage = await findStageFull(ctx, definition.id, args.stage);
-        const variables = (stage['variables'] as Record<string, unknown> | undefined) ?? {};
-        return list(
-          Object.entries(variables).map(([name, value]) => ({
-            name,
-            value: typeof value === 'string' ? value : JSON.stringify(value),
-          })),
-        );
-      },
-    }),
+    // The hook array is too structured for flat flags to express as a
+    // whole; one hook at a time is exactly the right grain.
 
     defineCommand({
       id: 'workflow.stage.hook.list',

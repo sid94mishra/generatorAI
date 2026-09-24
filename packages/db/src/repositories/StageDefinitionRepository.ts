@@ -26,7 +26,6 @@ import { jsonArray, jsonRecord } from '../utils/jsonColumnSchemas.js';
 const stageJsonGuards = {
   prompts: jsonArray,
   harnessConfigOverrides: jsonRecord,
-  variables: jsonRecord,
   hooks: jsonArray,
   retryPolicy: jsonRecord,
   condition: jsonRecord,
@@ -40,7 +39,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
       // DB-03 — validate every JSON column on the insert path.
       validateJsonColumn(stage.prompts, stageJsonGuards.prompts, { column: 'prompts', table: 'stage_definitions' });
       validateJsonColumn(stage.harnessConfigOverrides, stageJsonGuards.harnessConfigOverrides, { column: 'harnessConfigOverrides', table: 'stage_definitions' });
-      validateJsonColumn(stage.variables, stageJsonGuards.variables, { column: 'variables', table: 'stage_definitions' });
       validateJsonColumn(stage.hooks, stageJsonGuards.hooks, { column: 'hooks', table: 'stage_definitions' });
       validateJsonColumn(stage.retryPolicy, stageJsonGuards.retryPolicy, { column: 'retryPolicy', table: 'stage_definitions' });
       validateJsonColumn(stage.condition, stageJsonGuards.condition, { column: 'condition', table: 'stage_definitions' });
@@ -54,7 +52,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
         order: stage.order,
         prompts: stage.prompts,
         harnessConfigOverrides: stage.harnessConfigOverrides ?? null,
-        variables: stage.variables,
         hooks: stage.hooks,
         retryPolicy: stage.retryPolicy ?? null,
         timeoutMs: stage.timeoutMs ?? null,
@@ -104,14 +101,13 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
     // DB-03 — validate only the JSON columns that are in the diff.
     if (updates.prompts !== undefined) validateJsonColumn(updates.prompts, stageJsonGuards.prompts, { column: 'prompts', table: 'stage_definitions' });
     if (updates.harnessConfigOverrides !== undefined) validateJsonColumn(updates.harnessConfigOverrides, stageJsonGuards.harnessConfigOverrides, { column: 'harnessConfigOverrides', table: 'stage_definitions' });
-    if (updates.variables !== undefined) validateJsonColumn(updates.variables, stageJsonGuards.variables, { column: 'variables', table: 'stage_definitions' });
     if (updates.hooks !== undefined) validateJsonColumn(updates.hooks, stageJsonGuards.hooks, { column: 'hooks', table: 'stage_definitions' });
     if (updates.retryPolicy !== undefined) validateJsonColumn(updates.retryPolicy, stageJsonGuards.retryPolicy, { column: 'retryPolicy', table: 'stage_definitions' });
     if (updates.condition !== undefined) validateJsonColumn(updates.condition, stageJsonGuards.condition, { column: 'condition', table: 'stage_definitions' });
     if (updates.resultValidation !== undefined) validateJsonColumn(updates.resultValidation, stageJsonGuards.hooks, { column: 'resultValidation', table: 'stage_definitions' });
-    if (updates.outputSchema !== undefined) validateJsonColumn(updates.outputSchema, stageJsonGuards.variables, { column: 'outputSchema', table: 'stage_definitions' });
+    if (updates.outputSchema !== undefined) validateJsonColumn(updates.outputSchema, jsonRecord, { column: 'outputSchema', table: 'stage_definitions' });
     if (updates.contextSources !== undefined) validateJsonColumn(updates.contextSources, stageJsonGuards.prompts, { column: 'contextSources', table: 'stage_definitions' });
-    if (updates.iterationConfig !== undefined) validateJsonColumn(updates.iterationConfig, stageJsonGuards.variables, { column: 'iterationConfig', table: 'stage_definitions' });
+    if (updates.iterationConfig !== undefined) validateJsonColumn(updates.iterationConfig, jsonRecord, { column: 'iterationConfig', table: 'stage_definitions' });
 
     const values: Record<string, unknown> = {};
     if (updates.name !== undefined) values['name'] = updates.name;
@@ -121,7 +117,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
     if (updates.prompts !== undefined) values['prompts'] = updates.prompts;
     if (updates.harnessConfigOverrides !== undefined)
       values['harnessConfigOverrides'] = updates.harnessConfigOverrides;
-    if (updates.variables !== undefined) values['variables'] = updates.variables;
     if (updates.hooks !== undefined) values['hooks'] = updates.hooks;
     if (updates.retryPolicy !== undefined) values['retryPolicy'] = updates.retryPolicy;
     if (updates.timeoutMs !== undefined) values['timeoutMs'] = updates.timeoutMs;
@@ -194,7 +189,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
       order: row.order,
       prompts: (safeJsonColumn(row.prompts, jsonArray, { fallback: [] }) ?? []) as PromptDefinition[],
       harnessConfigOverrides: safeJsonColumn(row.harnessConfigOverrides, jsonRecord, { fallback: undefined }),
-      variables: safeJsonColumn(row.variables, jsonRecord, { fallback: {} }) ?? {},
       hooks: (safeJsonColumn(row.hooks, jsonArray, { fallback: [] }) ?? []) as HookDefinition[],
       retryPolicy: safeJsonColumn(row.retryPolicy, jsonRecord, { fallback: undefined }) as RetryPolicy | undefined,
       timeoutMs: row.timeoutMs ?? undefined,

@@ -362,6 +362,20 @@
         "packages/shared/src/types/StageDefinition.ts"
       ],
       "reason": "WP-1.4: prompts[].attachments deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "stage(Def)?\\.variables|config\\.variables|stageInput\\.variables|this\\._variables = vars|'workflow\\.stage\\.variables'|parseVariablePairs|clearVars|VariableEditor",
+      "paths": [
+        "packages/shared/src/builders/StageBuilder.ts",
+        "packages/core/src/",
+        "packages/sdk/src/",
+        "packages/cli-core/src/commands/workflow.ts",
+        "apps/server/src/routes/workflowScripts.ts",
+        "apps/web/src/components/workflow/StagePropertiesPanel.tsx",
+        "apps/web/src/pages/WorkflowBuilderPage.tsx"
+      ],
+      "reason": "WP-1.4: stage-level variables and their editor deleted (never merged at run time); definition variables"
     }
   ],
   "comments": {

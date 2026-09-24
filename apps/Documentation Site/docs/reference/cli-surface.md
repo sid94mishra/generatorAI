@@ -7,9 +7,9 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 
 | Measure | Count |
 |---|---:|
-| Commands | 213 |
+| Commands | 212 |
 | Groups | 24 |
-| Server-backed commands | 186 |
+| Server-backed commands | 185 |
 | Destructive commands | 33 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
@@ -217,7 +217,6 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 | `workflow.stage.hook.remove` | `workflow stage hook remove` | yes | yes | yes | yes | workflow, stage, hook | — |
 | `workflow.stage.list` | `workflow stage list` | yes | no | yes | yes | workflow | — |
 | `workflow.stage.update` | `workflow stage update` | yes | no | yes | yes | workflow, stage | — |
-| `workflow.stage.variables` | `workflow stage variables` | yes | no | yes | yes | workflow, stage | — |
 | `workflow.update` | `workflow update` | yes | no | yes | yes | workflow | — |
 | `workflow.validate` | `workflow validate` | yes | no | yes | yes | workflow | — |
 | `workspace.archive` | `workspace archive` | yes | no | yes | yes | workspace | — |

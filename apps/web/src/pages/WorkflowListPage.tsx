@@ -276,7 +276,6 @@ export function WorkflowListPage() {
               waitForCompletion: true,
             },
           ],
-          variables: {},
           hooks: [],
         },
         {
@@ -290,7 +289,6 @@ export function WorkflowListPage() {
               waitForCompletion: true,
             },
           ],
-          variables: {},
           hooks: [],
         },
       ],

@@ -257,7 +257,6 @@ export class WorkflowDefinitionService {
       order: params.order ?? maxOrder + 1,
       prompts: params.prompts ?? [],
       harnessConfigOverrides: params.harnessConfigOverrides,
-      variables: params.variables ?? {},
       hooks: params.hooks ?? [],
       retryPolicy: params.retryPolicy,
       timeoutMs: params.timeoutMs,
@@ -432,7 +431,7 @@ export class WorkflowDefinitionService {
         // Create stages from template stages.
         //
         // Item 7 — this used to hand-pick six fields off each template stage
-        // (name/order/prompts/hooks/harnessConfigOverrides/variables), which
+        // (name/order/prompts/hooks/harnessConfigOverrides), which
         // silently dropped retryPolicy, timeoutMs, condition, contextFilter,
         // resultValidation, expectedOutput, outputSchema,
         // agentRef, contextSources and outputFormat — including
@@ -511,7 +510,6 @@ export class WorkflowDefinitionService {
           waitForCompletion: p.waitForCompletion,
         })),
         hooks: (stage.hooks ?? []) as WorkflowTemplate['hooks'],
-        variables: stage.variables ?? {},
         harnessConfigOverrides: stage.harnessConfigOverrides as WorkflowTemplate['harnessConfig'],
         ...(stage.retryPolicy ? { retryPolicy: stage.retryPolicy } : {}),
         ...(stage.timeoutMs !== undefined ? { timeoutMs: stage.timeoutMs } : {}),

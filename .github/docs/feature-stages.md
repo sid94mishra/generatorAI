@@ -25,7 +25,6 @@ templateId?                   text                  (cloned-from id)
 order                         int                   (display + tie-break for parallel layers)
 prompts                       JSON PromptDefinition[]
 harnessConfigOverrides        JSON Partial<HarnessConfig>
-variables                     JSON Record<string, unknown>   (stage-local variable defaults)
 hooks                         JSON HookDefinition[]
 retryPolicy                   JSON { maxRetries, backoffMs, backoffMultiplier }
 timeoutMs?                    int
@@ -101,9 +100,9 @@ System MCP servers shipped (8 in [templates/system/mcp-servers.json](../../templ
 
 The stage binds a first-class agent with `agentRef` (a portable `scope:slug` ref, e.g. `project:reviewer`). The agent brings its instructions, skills, MCP servers and tool policy; `harnessConfigOverrides.agentOverrides` adds a per-stage delta.
 
-### 2.7 Variables (stage-local)
+### 2.7 Variables
 
-`stage_definitions.variables: Record<string, unknown>` — additional variables visible only to this stage's prompts. Overrides workflow-level defaults but not runtime overrides.
+Stages have no variables of their own: a stage's prompts see the run's variables (the definition's declared variables plus the values the run was started with) and any per-stage runtime override.
 
 ---
 

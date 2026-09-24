@@ -21,7 +21,6 @@ export interface CreateWorkflowInput {
     prompt: string;
     systemPrompt?: string;
     condition?: string;
-    variables?: Record<string, unknown>;
     hooks?: Array<{
       phase: string;
       config: Record<string, unknown>;
@@ -102,7 +101,6 @@ export class WorkflowFacade {
           waitForCompletion: true,
           ...(stageInput.systemPrompt ? { systemPrompt: stageInput.systemPrompt } : {}),
         }],
-        variables: stageInput.variables,
         hooks: stageInput.hooks as never,
         condition: stageInput.condition
           ? { type: 'expression' as const, expression: stageInput.condition }
