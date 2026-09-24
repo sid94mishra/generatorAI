@@ -10,6 +10,7 @@
     { "path": "../shared" },
     { "path": "../core" },
     { "path": "../db" },
-    { "path": "../agent-harness-providers" }
+    { "path": "../agent-harness-providers" },
+    { "path": "../secrets" }
   ]
 }

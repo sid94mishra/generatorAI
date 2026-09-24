@@ -142,7 +142,7 @@ describe('HitlService — P0-a: a post-restart approval must relaunch the stage'
 
     // Process 1 parks the gate, then dies — its promise is never awaited.
     const engine1 = makeEngine();
-    void new HitlService(repo, new EventBus(), mockLogger(), engine1).interrupt('s1', 'wr1', REVIEW_GATE);
+    void new HitlService(repo, new EventBus(), engine1, mockLogger()).interrupt('s1', 'wr1', REVIEW_GATE);
     expect(repo.rows.get('s1')!.status).toBe('awaiting_input');
 
     // Process 2: a fresh service against the same DB. The human approves.
@@ -150,8 +150,8 @@ describe('HitlService — P0-a: a post-restart approval must relaunch the stage'
     const svc2 = new HitlService(
       repo,
       new EventBus(),
-      mockLogger(),
       makeEngine(),
+      mockLogger(),
       undefined,
       async (runId) => { redriven.push(runId); },
     );
@@ -169,8 +169,8 @@ describe('HitlService — P0-a: a post-restart approval must relaunch the stage'
     const svc = new HitlService(
       repo,
       new EventBus(),
-      mockLogger(),
       makeEngine(),
+      mockLogger(),
       undefined,
       async (runId) => { redriven.push(runId); },
     );
@@ -185,34 +185,16 @@ describe('HitlService — P0-a: a post-restart approval must relaunch the stage'
     await expect(pending).resolves.toMatchObject({ approved: true });
   });
 
-  it('works on the in-memory fallback path too (no durableEngine)', async () => {
-    const repo = createMemoryRepo([stubStageRun()]);
-    void new HitlService(repo, new EventBus()).interrupt('s1', 'wr1', REVIEW_GATE);
-
-    const redriven: string[] = [];
-    const svc2 = new HitlService(
-      repo,
-      new EventBus(),
-      mockLogger(),
-      undefined,
-      undefined,
-      async (runId) => { redriven.push(runId); },
-    );
-    await svc2.resume('s1', 'wr1', { approved: true });
-
-    expect(repo.rows.get('s1')!.status).toBe('pending');
-    expect(redriven).toEqual(['wr1']);
-  });
 
   it('reports the failure instead of claiming success when the re-drive throws', async () => {
     const repo = createMemoryRepo([stubStageRun()]);
-    void new HitlService(repo, new EventBus(), mockLogger(), makeEngine()).interrupt('s1', 'wr1', REVIEW_GATE);
+    void new HitlService(repo, new EventBus(), makeEngine(), mockLogger()).interrupt('s1', 'wr1', REVIEW_GATE);
 
     const svc2 = new HitlService(
       repo,
       new EventBus(),
-      mockLogger(),
       makeEngine(),
+      mockLogger(),
       undefined,
       async () => { throw new Error('definition was deleted'); },
     );
@@ -227,7 +209,7 @@ describe('HitlService — P0-a: a post-restart approval must relaunch the stage'
     // was defined — i.e. never for a plain "approve", which is the case a
     // relaunched stage most needs to read back.
     const repo = createMemoryRepo([stubStageRun()]);
-    const svc = new HitlService(repo, new EventBus(), mockLogger(), makeEngine());
+    const svc = new HitlService(repo, new EventBus(), makeEngine(), mockLogger());
     const pending = svc.interrupt('s1', 'wr1', REVIEW_GATE);
     await svc.resume('s1', 'wr1', { approved: true, reason: 'looks good' });
     await pending;
@@ -242,9 +224,9 @@ describe('HitlService — P0-a: a post-restart approval must relaunch the stage'
 describe('HitlService — P0-a: the relaunched stage does not re-ask the human', () => {
   it('returns the verdict already given instead of parking a second time', async () => {
     const repo = createMemoryRepo([stubStageRun()]);
-    void new HitlService(repo, new EventBus(), mockLogger(), makeEngine()).interrupt('s1', 'wr1', REVIEW_GATE);
+    void new HitlService(repo, new EventBus(), makeEngine(), mockLogger()).interrupt('s1', 'wr1', REVIEW_GATE);
 
-    const svc2 = new HitlService(repo, new EventBus(), mockLogger(), makeEngine());
+    const svc2 = new HitlService(repo, new EventBus(), makeEngine(), mockLogger());
     await svc2.resume('s1', 'wr1', { approved: true, value: { choice: 'go' } });
     expect(repo.rows.get('s1')!.status).toBe('pending');
 
@@ -265,10 +247,10 @@ describe('HitlService — P0-a: the relaunched stage does not re-ask the human',
 
   it('does not let a verdict for one gate answer a different gate', async () => {
     const repo = createMemoryRepo([stubStageRun()]);
-    void new HitlService(repo, new EventBus(), mockLogger(), makeEngine())
+    void new HitlService(repo, new EventBus(), makeEngine(), mockLogger())
       .interrupt('s1', 'wr1', REVIEW_GATE);
 
-    const svc2 = new HitlService(repo, new EventBus(), mockLogger(), makeEngine());
+    const svc2 = new HitlService(repo, new EventBus(), makeEngine(), mockLogger());
     await svc2.resume('s1', 'wr1', { approved: true });
 
     // The relaunched stage hits a tool-permission prompt on its way back to
@@ -283,9 +265,9 @@ describe('HitlService — P0-a: the relaunched stage does not re-ask the human',
 
   it('drops a held verdict when the stage is cancelled', async () => {
     const repo = createMemoryRepo([stubStageRun()]);
-    void new HitlService(repo, new EventBus(), mockLogger(), makeEngine()).interrupt('s1', 'wr1', REVIEW_GATE);
+    void new HitlService(repo, new EventBus(), makeEngine(), mockLogger()).interrupt('s1', 'wr1', REVIEW_GATE);
 
-    const svc2 = new HitlService(repo, new EventBus(), mockLogger(), makeEngine());
+    const svc2 = new HitlService(repo, new EventBus(), makeEngine(), mockLogger());
     await svc2.resume('s1', 'wr1', { approved: true });
     svc2.cancelWaiter('s1', 'parent run cancelled');
 

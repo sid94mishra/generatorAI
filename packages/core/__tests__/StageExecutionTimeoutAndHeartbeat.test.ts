@@ -5,7 +5,14 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { StageExecutionService } from '../src/services/StageExecutionService.js';
-import { MockStageRunRepository, MockStageDefinitionRepository } from './MockRepositories.js';
+import {
+  MockStageRunRepository,
+  MockStageDefinitionRepository,
+  MockWorkflowDefinitionRepository,
+  MockWorkflowRunRepository,
+  createFakeWorkspaceManager,
+} from './MockRepositories.js';
+import type { HitlService } from '../src/services/HitlService.js';
 import { MockCopilotPort } from './MockAgentHarness.js';
 import { EventBus } from '../src/events/EventBus.js';
 import type { IChatMessageRepository } from '../src/domain/ports/IRepositories.js';
@@ -114,6 +121,10 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
       eventBus,
       sessionAllocator,
       hookExecutor,
+      createFakeWorkspaceManager(),
+      new MockWorkflowDefinitionRepository(),
+      new MockWorkflowRunRepository(),
+      {} as HitlService,
     );
   });
 

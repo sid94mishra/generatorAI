@@ -132,7 +132,7 @@ describe('HitlService — W22 durable Awakeable path', () => {
   it('interrupt()/resume() round-trip through the durable engine, not the in-memory map', async () => {
     const repo = createMemoryRepo([stubStageRun()]);
     const engine = makeEngine();
-    const svc = new HitlService(repo, new EventBus(), undefined, engine);
+    const svc = new HitlService(repo, new EventBus(), engine);
 
     const pending = svc.interrupt('s1', 'wr1', { toolCall: 'shell.exec' });
     expect(svc.activeWaiterCount).toBe(1);
@@ -149,7 +149,7 @@ describe('HitlService — W22 durable Awakeable path', () => {
   it('does not leak the Awakeable token into the reviewer-facing interrupt_data', async () => {
     const repo = createMemoryRepo([stubStageRun()]);
     const engine = makeEngine();
-    const svc = new HitlService(repo, new EventBus(), undefined, engine);
+    const svc = new HitlService(repo, new EventBus(), engine);
 
     const pending = svc.interrupt('s1', 'wr1', { toolCall: 'shell.exec', args: { cmd: 'ls' } });
     // The token lives in interrupt_data (so resume() can find it), and the
@@ -170,7 +170,7 @@ describe('HitlService — W22 durable Awakeable path', () => {
     // the entries-table awakeable) survives.
     const repo = createMemoryRepo([stubStageRun()]);
     const engineBeforeRestart = makeEngine();
-    const svcBeforeRestart = new HitlService(repo, new EventBus(), undefined, engineBeforeRestart);
+    const svcBeforeRestart = new HitlService(repo, new EventBus(), engineBeforeRestart);
     void svcBeforeRestart.interrupt('s1', 'wr1', { reason: 'needs approval' }); // never awaited — simulates the crash
 
     // "Process 2" (restart): a fresh engine against the same DB. A real
@@ -183,7 +183,7 @@ describe('HitlService — W22 durable Awakeable path', () => {
     const [recoveredPromise] = recovered.values();
 
     // The human approves via the normal API path in the NEW process.
-    const svcAfterRestart = new HitlService(repo, new EventBus(), undefined, engineAfterRestart);
+    const svcAfterRestart = new HitlService(repo, new EventBus(), engineAfterRestart);
     const result = await svcAfterRestart.resume('s1', 'wr1', { approved: true, value: 'approved-after-restart' });
     expect(result.ok).toBe(true);
 
@@ -200,7 +200,7 @@ describe('HitlService — W22 durable Awakeable path', () => {
   it('cancelWaiter() resolves the durable Awakeable as a cancellation, not a hang', async () => {
     const repo = createMemoryRepo([stubStageRun()]);
     const engine = makeEngine();
-    const svc = new HitlService(repo, new EventBus(), undefined, engine);
+    const svc = new HitlService(repo, new EventBus(), engine);
 
     const pending = svc.interrupt('s1', 'wr1', {});
     svc.cancelWaiter('s1', 'parent run cancelled');
@@ -214,7 +214,7 @@ describe('HitlService — W22 durable Awakeable path', () => {
   it('a superseding interrupt() cancels the prior Awakeable for the same stageRunId', async () => {
     const repo = createMemoryRepo([stubStageRun()]);
     const engine = makeEngine();
-    const svc = new HitlService(repo, new EventBus(), undefined, engine);
+    const svc = new HitlService(repo, new EventBus(), engine);
 
     const first = svc.interrupt('s1', 'wr1', { round: 1 });
     const second = svc.interrupt('s1', 'wr1', { round: 2 });
@@ -232,18 +232,9 @@ describe('HitlService — W22 durable Awakeable path', () => {
     const repo = createMemoryRepo([stubStageRun()]);
     const engine = makeEngine();
     // Tiny override timeout — production always uses the 30-day default.
-    const svc = new HitlService(repo, new EventBus(), undefined, engine, 20);
+    const svc = new HitlService(repo, new EventBus(), engine, undefined, 20);
 
     await expect(svc.interrupt('s1', 'wr1', {})).rejects.toThrow(/timed out/);
   });
 
-  it('without a durableEngine, behaves exactly like the pre-W22 in-memory-only path (backward compatible)', async () => {
-    const repo = createMemoryRepo([stubStageRun()]);
-    const svc = new HitlService(repo, new EventBus()); // no durableEngine
-    const pending = svc.interrupt('s1', 'wr1', {});
-    const stored = repo.rows.get('s1')!.interruptData as Record<string, unknown>;
-    expect(stored).not.toHaveProperty('__hitlAwakeableToken'); // no token stashed — fallback path
-    await svc.resume('s1', 'wr1', { approved: true });
-    await expect(pending).resolves.toMatchObject({ approved: true });
-  });
 });

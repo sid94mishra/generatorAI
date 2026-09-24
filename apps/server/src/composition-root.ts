@@ -107,14 +107,11 @@ import {
   ScmTextGenerator,
   SourceControlFlowService,
   EditorLauncherService,
-  DockerSandboxProvider,
-  HostProcessSandboxProvider,
   SandboxScriptRunner,
+  createRunSandbox,
   // orchestrator services
   WorkflowOrchestrator,
-  WorkflowPreprocessor,
   ResultValidator,
-  SandboxLifecycleManager,
   // Phase 4 streaming rewrite (additive)
   StreamBroker,
   // W07 — durable delta log, dual-written alongside stream_cursors
@@ -183,7 +180,7 @@ import {
 } from '@generatorai/core';
 import type {
   IAgentHarness,
-  ISandboxProvider,
+  OrchestratorSandbox,
   TemplateRegistry,
   HookExecutor,
   IMcpHub,
@@ -652,72 +649,22 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   );
 
   // ── Sandbox Infrastructure (conditional) ──
-  let sandboxProvider: ISandboxProvider | undefined;
-  let sandboxLifecycleManager: SandboxLifecycleManager | undefined;
-
-  if (config.sandbox.enabled) {
-    // Determine which provider to use
-    const wantDocker = config.sandbox.provider === 'docker' || config.sandbox.provider === 'auto';
-    let dockerAvailable = false;
-
-    if (wantDocker) {
-      const dockerProvider = new DockerSandboxProvider(logger);
-      dockerAvailable = await dockerProvider.isAvailable();
-
-      if (dockerAvailable) {
-        sandboxProvider = dockerProvider;
-        logger.info('[Container] Docker Sandbox detected — using microVM isolation');
-      } else if (config.sandbox.provider === 'docker') {
-        // User explicitly requested Docker but it's not available
-        logger.error('[Container] Docker Sandbox not available but provider=docker was specified');
-        throw new Error(
-          'Sandbox mode requires Docker Desktop with Sandbox support. ' +
-          'Set sandbox.provider to "auto" or "host" for fallback, or disable sandbox mode.',
-        );
-      }
-    }
-
-    if (!sandboxProvider) {
-      // Host-process fallback has NO hypervisor isolation — agent-generated
-      // code runs directly on the host. Require explicit opt-in (either by
-      // choosing `provider='host'` or by setting the env var below) to prevent
-      // users who configured `auto` from silently running unsandboxed.
-      const hostExplicit = config.sandbox.provider === 'host';
-      const hostAllowed = process.env['GENERATORAI_ALLOW_HOST_SANDBOX'] === 'true';
-      if (!hostExplicit && !hostAllowed) {
-        logger.error(
-          '[Container] Docker Sandbox unavailable and host-process fallback not opted in. ' +
-          'Either install Docker, set sandbox.provider="host" explicitly, ' +
-          'or set GENERATORAI_ALLOW_HOST_SANDBOX=true to proceed without isolation.',
-        );
-        throw new Error(
-          'Sandbox fallback to host-process requires explicit opt-in. ' +
-          'Set GENERATORAI_ALLOW_HOST_SANDBOX=true or sandbox.provider="host".',
-        );
-      }
-      sandboxProvider = new HostProcessSandboxProvider(logger);
-      // Use ERROR level so this cannot be missed in log scrapers; agent code
-      // running on the host is a production hazard.
-      logger.error(
-        '[Container] SANDBOX ISOLATION DISABLED — using host-process fallback. ' +
-        'Agent-generated code will run with the server process\'s privileges. ' +
-        `(opt-in source: ${hostExplicit ? 'sandbox.provider="host"' : 'GENERATORAI_ALLOW_HOST_SANDBOX=true'})`,
-      );
-    }
-
-    sandboxLifecycleManager = new SandboxLifecycleManager(
-      sandboxProvider,
-      {
-        image: config.sandbox.image,
-        cliPort: config.sandbox.cliPort,
-        startupTimeoutMs: config.sandbox.startupTimeoutMs,
-        dockerAvailable,
-      },
-      logger,
-    );
-
-    logger.info(`[Container] Sandbox mode ENABLED (provider: ${dockerAvailable ? 'docker' : 'host-fallback'})`);
-  }
+  // `null` when sandbox mode is off; the provider choice (and its refusal to
+  // fall back to the host without an explicit opt-in) lives in core so the
+  // SDK boots the same sandbox for the same settings.
+  const sandbox: OrchestratorSandbox | null = config.sandbox.enabled
+    ? await createRunSandbox(
+        {
+          provider: config.sandbox.provider,
+          image: config.sandbox.image,
+          cliPort: config.sandbox.cliPort,
+          startupTimeoutMs: config.sandbox.startupTimeoutMs,
+          allowHostFallback: process.env['GENERATORAI_ALLOW_HOST_SANDBOX'] === 'true',
+        },
+        logger,
+      )
+    : null;
+  const sandboxLifecycleManager = sandbox?.lifecycle;
 
   // ── Repositories (v1) ──
   const sessionRepo = new DrizzleSessionRepository(db);
@@ -785,6 +732,58 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // as `settings/computerUse.ts`'s computer-use.json.
   const mcpSettingsStore = new McpSettingsStore(path.dirname(resolve(config.dbPath)));
 
+  // ── Workspace Manager ──
+  const workspaceManager = new WorkspaceManager(
+    executionWorkspaceRepo,
+    workspaceMountRepo,
+    workspaceArtifactRepo,
+    {
+      workspacesDir: config.workspacesDir,
+      defaultGitEnabled: true,
+    },
+    logger,
+    gitManager,
+    // The legacy `worktrees` table: back-fills mounts for pre-mount
+    // workspaces and is unregistered on delete.
+    worktreeRepo,
+  );
+
+  // M8-fix: W18 — the AdmissionController gates stage launches in
+  // the `ordinary` lane. Interactive chat turns bypass this via ChatManagementService.
+  //
+  // W18 requires configuration to be clamped on load, logged, and audited.
+  // Reading these with a bare `parseInt` was a live hang: a typo'd value
+  // parsed to NaN, which `new Semaphore(NaN)` accepted and every `acquire()`
+  // then awaited forever — no error, no log, every workflow stage stuck.
+  // `readBoundedInt` cannot produce a non-finite value, and reports whatever
+  // it had to correct. `undefined` (variable unset) is passed through so the
+  // controller can size the lane from measured machine capacity instead.
+  const laneEnv = (name: string, min: number, max: number, dflt: number): number | undefined =>
+    process.env[name] === undefined
+      ? undefined
+      : readBoundedInt(name, {
+          defaultValue: dflt,
+          min,
+          max,
+          onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
+        });
+
+  const admissionController = new AdmissionController({
+    interactiveConcurrency: laneEnv('GENERATORAI_INTERACTIVE_CONCURRENCY', 1, 64, 4),
+    ordinaryConcurrency: laneEnv('GENERATORAI_ORDINARY_CONCURRENCY', 1, 64, 8),
+    bulkConcurrency: laneEnv('GENERATORAI_BULK_CONCURRENCY', 1, 64, 2),
+    queueWaitTimeoutMs: readBoundedInt('GENERATORAI_ADMISSION_QUEUE_WAIT_MS', {
+      defaultValue: 1_800_000,
+      min: 0,
+      max: 24 * 60 * 60 * 1000,
+      onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
+    }),
+    logger: {
+      info: (msg, meta) => logger.info(msg, meta),
+      warn: (msg, meta) => logger.warn(msg, meta),
+    },
+  });
+
   // Chat extensions object — passed by reference to createCoreServices.
   // `worktreeService` is set later after project services are created.
   const chatExtensions: ChatManagementServiceExtensions = {
@@ -827,7 +826,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Wire the sandbox lifecycle manager as the orphan reaper so
     // StartupRecoveryService can call `cleanupOrphans()` on boot to
     // destroy `genai-run-*` containers left behind by a crash.
-    sandboxCleaner: sandboxLifecycleManager,
+    sandbox,
+    workspaceManager,
+    admissionController,
+    // Post-processing commit/push/PR runs through the same flow as the
+    // Changes tab and agent-native chats (doc §5).
+    scmFlow: sourceControlFlowService,
     config: {
       artifactsDir: config.artifactsDir,
       // P1#7 — bound concurrent stage execution (harness subprocess fan-out).
@@ -884,6 +888,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     planService,
     agentInteractionService,
     dataSourceResolver,
+    workflowPreprocessor,
   } = core;
 
   // STR-01 / CLN-12 — `StreamBroker` is now the only streaming transport.
@@ -1092,18 +1097,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
   // ── Orchestrator Services ──
 
-  const workflowPreprocessor = new WorkflowPreprocessor(
-    gitManager,
-    scriptRunner,
-    eventBus,
-    logger,
-    sourceControlService,
-    // Post-processing commit/push/PR runs through the SAME flow as the
-    // Changes tab and agent-native chats (doc §5) — one branch policy, one
-    // base-branch sync, one conflict dry-run.
-    sourceControlFlowService,
-  );
-
   const resultValidator = new ResultValidator(
     chatMessageRepo,
     stageRunRepo,
@@ -1190,22 +1183,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Chat repo lets the orphan check correctly evaluate chat-owned worktrees
     // (runType 'manual') instead of mis-classifying every live chat worktree.
     chatEntityRepo,
-  );
-
-  // ── Workspace Manager ──
-  const workspaceManager = new WorkspaceManager(
-    executionWorkspaceRepo,
-    workspaceMountRepo,
-    workspaceArtifactRepo,
-    {
-      workspacesDir: config.workspacesDir,
-      defaultGitEnabled: true,
-    },
-    logger,
-    gitManager,
-    // The legacy `worktrees` table: back-fills mounts for pre-mount
-    // workspaces and is unregistered on delete.
-    worktreeRepo,
   );
 
   // ── Mounts ──
@@ -1530,58 +1507,19 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     eventBus,
     logger,
     config.artifactsDir,
-    sandboxLifecycleManager,
-    sandboxProvider,
+    workspaceManager,
     worktreeService,
     projectService,
     projectConfigService,
-    workspaceManager,
     hookExecutor,
+    sandbox,
   );
 
-  // Late-wire workspaceManager into services that were created before it.
-  workflowRunService.setWorkspaceManager(workspaceManager);
+  // Late-wire services that were created after the core graph.
   workflowRunService.setWorktreeService(worktreeService, projectCodebaseRepo);
   workflowRunService.setHookExecutor(hookExecutor);
   workflowRunService.setResultValidator(resultValidator);
 
-  // M8-fix: W18 — wire the AdmissionController so stage launches are gated by
-  // the `ordinary` lane. Interactive chat turns bypass this via ChatManagementService.
-  //
-  // W18 requires configuration to be clamped on load, logged, and audited.
-  // Reading these with a bare `parseInt` was a live hang: a typo'd value
-  // parsed to NaN, which `new Semaphore(NaN)` accepted and every `acquire()`
-  // then awaited forever — no error, no log, every workflow stage stuck.
-  // `readBoundedInt` cannot produce a non-finite value, and reports whatever
-  // it had to correct. `undefined` (variable unset) is passed through so the
-  // controller can size the lane from measured machine capacity instead.
-  const laneEnv = (name: string, min: number, max: number, dflt: number): number | undefined =>
-    process.env[name] === undefined
-      ? undefined
-      : readBoundedInt(name, {
-          defaultValue: dflt,
-          min,
-          max,
-          onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-        });
-
-  const admissionController = new AdmissionController({
-    interactiveConcurrency: laneEnv('GENERATORAI_INTERACTIVE_CONCURRENCY', 1, 64, 4),
-    ordinaryConcurrency: laneEnv('GENERATORAI_ORDINARY_CONCURRENCY', 1, 64, 8),
-    bulkConcurrency: laneEnv('GENERATORAI_BULK_CONCURRENCY', 1, 64, 2),
-    queueWaitTimeoutMs: readBoundedInt('GENERATORAI_ADMISSION_QUEUE_WAIT_MS', {
-      defaultValue: 1_800_000,
-      min: 0,
-      max: 24 * 60 * 60 * 1000,
-      onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-    }),
-    logger: {
-      info: (msg, meta) => logger.info(msg, meta),
-      warn: (msg, meta) => logger.warn(msg, meta),
-    },
-  });
-  workflowRunService.setAdmissionController(admissionController);
-  stageExecutionService.setWorkspaceManager(workspaceManager);
   stageExecutionService.setWorkspaceCheckpointService(workspaceCheckpointService);
 
   // ── Register built-in function hook handlers ──

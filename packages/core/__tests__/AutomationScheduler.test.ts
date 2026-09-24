@@ -13,7 +13,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { createDB, migrateDB, EntryRepository, RegisterRepository } from '@generatorai/db';
 import { AutomationService } from '../src/services/AutomationService.js';
+import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.js';
 import type {
   IAutomationRepository,
   IAutomationExecutionRepository,
@@ -31,6 +33,14 @@ import type {
   PersistedEvent,
   WorkflowRun,
 } from '@generatorai/shared';
+
+/** Automation iterations are durable slots (P01 WP-1.3) — back them with a real engine. */
+function makeEngine(): DurableExecutionEngine {
+  const db = createDB(':memory:');
+  migrateDB(db);
+  const quiet = { debug() {}, info() {}, warn() {}, error() {} } as never;
+  return new DurableExecutionEngine(new RegisterRepository(db), new EntryRepository(db), quiet);
+}
 
 function mockLogger(): ILogger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as ILogger;
@@ -269,7 +279,7 @@ function setup(outcomeFor?: (variables: Record<string, unknown>, defId: string) 
     {} as unknown as WorkflowDefinitionService,
     eventBus,
     mockLogger(),
-    undefined,
+    makeEngine(),
     undefined,
     undefined,
     undefined,

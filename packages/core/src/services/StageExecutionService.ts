@@ -281,29 +281,24 @@ export class StageExecutionService {
     private eventBus: EventBus,
     private sessionAllocator: SessionAllocator,
     private hookExecutor: HookExecutor,
-    private workspaceManager?: WorkspaceManager,
+    private workspaceManager: WorkspaceManager,
     /**
-     * Optional workflow definition repository. When provided, the definition's
-     * `hooksFile` (HooksFileConfig.stages['*' | stageName]) is merged into each
-     * stage's hooks via resolveStageHooks (HOOK-2) — previously `.hooks.json`
-     * per-stage/wildcard hooks were dormant because this path read
-     * `stageDef.hooks` directly. Without it, only inline stage hooks fire.
+     * The definition's `hooksFile` (HooksFileConfig.stages['*' | stageName])
+     * is merged into each stage's hooks via resolveStageHooks (HOOK-2).
      */
-    private workflowDefinitionRepo?: IWorkflowDefinitionRepository,
+    private workflowDefinitionRepo: IWorkflowDefinitionRepository,
     /**
-     * HITL-06: Optional workflow-run repository. Used together with
-     * `hitlService` to read the run's current `permissionMode` on every
-     * tool-permission request and route unmatched requests through the
-     * HITL waiter. Both must be provided for HITL to actually gate tool
-     * calls; without them the harness auto-approves every request.
+     * HITL-06: read with `hitlService` on every tool-permission request — the
+     * run's current `permissionMode` decides whether the request is routed
+     * through the HITL waiter.
      */
-    private workflowRunRepo?: IWorkflowRunRepository,
+    private workflowRunRepo: IWorkflowRunRepository,
     /**
-     * HITL-06: Optional HITL service. Bridges the harness's
-     * `onPermissionRequest` callback into `HitlService.interrupt()` so a
-     * running stage parks in `awaiting_input` until an approver responds.
+     * HITL-06: bridges the harness's `onPermissionRequest` callback into
+     * `HitlService.interrupt()` so a running stage parks in `awaiting_input`
+     * until an approver responds.
      */
-    private hitlService?: HitlService,
+    private hitlService: HitlService,
     /**
      * Optional BrowserService. When present, every stage that has a
      * workspace gets the built-in browser tool set (open_browser_page,
@@ -503,7 +498,7 @@ export class StageExecutionService {
     if (!svc) return;
     void (async () => {
       try {
-        const ws = await this.workspaceManager?.findWorkspaceByOwner(workflowRunId);
+        const ws = await this.workspaceManager.findWorkspaceByOwner(workflowRunId);
         if (!ws) return;
         await svc.capture({
           workspaceId: ws.id,
@@ -533,11 +528,6 @@ export class StageExecutionService {
   /** Reserve a stage for follow-up injection. Idempotent. */
   markFollowUpPending(stageRunId: string): void {
     this.pendingFollowUps.add(stageRunId);
-  }
-
-  /** Late-wire workspace manager (set after construction when DI order requires it). */
-  setWorkspaceManager(wm: WorkspaceManager): void {
-    this.workspaceManager = wm;
   }
 
   /** Late-wire browser service (set after construction to break DI cycles). */
@@ -713,15 +703,6 @@ export class StageExecutionService {
       return null;
     };
 
-    if (!runRepo || !hitl) {
-      // Missing dep — legacy auto-approve, minus anything the agent forbids.
-      return async (request) => {
-        const denied = deniedByAgent(request);
-        return denied
-          ? { granted: false, reason: `The bound agent is not allowed to ${denied}.` }
-          : { granted: true };
-      };
-    }
     return async (request) => {
       const denied = deniedByAgent(request);
       if (denied) {
@@ -989,7 +970,7 @@ export class StageExecutionService {
             await fs.writeFile(wsFilePath, block.content, 'utf-8');
 
             // Track artifact in workspace DB (non-fatal)
-            if (workspaceId && this.workspaceManager) {
+            if (workspaceId) {
               try {
                 await this.workspaceManager.trackArtifact({
                   workspaceId,
@@ -1064,15 +1045,13 @@ export class StageExecutionService {
     // live path. stageDef is a freshly-mapped object from the repo, so mutating
     // its `hooks` here is safe and propagates to every downstream phase
     // (pre_run/post_prompt/post_run/on_error) that reads stageDef.hooks.
-    if (this.workflowDefinitionRepo) {
-      try {
-        const def = await this.workflowDefinitionRepo.getById(stageDef.workflowDefinitionId);
-        if (def.hooksFile) {
-          stageDef.hooks = resolveStageHooks(stageDef.hooks, stageDef.name, def.hooksFile);
-        }
-      } catch {
-        // Definition unreadable — fall back to inline stage hooks only.
+    try {
+      const def = await this.workflowDefinitionRepo.getById(stageDef.workflowDefinitionId);
+      if (def.hooksFile) {
+        stageDef.hooks = resolveStageHooks(stageDef.hooks, stageDef.name, def.hooksFile);
       }
+    } catch {
+      // Definition unreadable — inline stage hooks only.
     }
 
     // Transition: pending → queued → running
@@ -1097,7 +1076,7 @@ export class StageExecutionService {
       // before any prompt dispatch so the snapshot reflects the pre-stage
       // state. Cannot throw — the service swallows its own errors.
       if (this.workspaceCheckpointService) {
-        const ws = await this.workspaceManager?.findWorkspaceByOwner(workflowRunId);
+        const ws = await this.workspaceManager.findWorkspaceByOwner(workflowRunId);
         if (ws) {
           await this.workspaceCheckpointService.capture({
             workspaceId: ws.id,
@@ -1219,7 +1198,7 @@ export class StageExecutionService {
         // fresh workflow run is a fresh user intent to hand the browser
         // to the agent, even if a previous turn detached it.
         this.browserService.reattachOnPrompt(stageWorkspaceId);
-        const workspace = await this.workspaceManager?.getExecutionWorkspace(stageWorkspaceId);
+        const workspace = await this.workspaceManager.getExecutionWorkspace(stageWorkspaceId);
         if (workspace) {
           const cfg = this.browserService.resolveConfig(workspace.browserConfig);
           if (cfg.enabled && cfg.visibility !== 'off') {
@@ -2295,7 +2274,7 @@ export class StageExecutionService {
       //     stage re-parks for the next review round.
       // Reserve the pending-follow-up slot so per-stage session release is
       // deferred until after the reviewer approves.
-      if (stageDef.approvalRequired && this.hitlService) {
+      if (stageDef.approvalRequired) {
         const hitl = this.hitlService;
         this.pendingFollowUps.add(stageRun.id);
         try {

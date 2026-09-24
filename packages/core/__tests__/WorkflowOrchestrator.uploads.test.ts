@@ -23,10 +23,17 @@ describe('WorkflowOrchestrator upload ordering', () => {
       const orchestrator = new WorkflowOrchestrator(
         { createRun: async () => run, startRun } as never,
         { getDefinition: async () => ({ id: 'def', variables: [], hooks: [] }) } as never,
-        {} as never, repo,
+        {} as never,
+        repo,
         { emitGlobal: async () => {}, subscribeGlobal: () => () => {} } as never,
-        log as never, dir, undefined, undefined, undefined, undefined, undefined,
+        log as never,
+        dir,
         { createWorkspace: async () => ({ id: 'ws', rootPath: dir }), getWorkingDirectory: () => join(dir, 'source'), findWorkspaceByOwner: async () => ({ rootPath: dir }) } as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        null,
       );
       const initialize = vi.fn(async () => {
         await uploaded;

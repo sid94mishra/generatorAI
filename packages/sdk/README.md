@@ -84,8 +84,17 @@ const ai = await createGeneratorAI({
   maxConcurrentStages: 8,             // Concurrent stage executions across runs (default: 8)
   logger: { level: 'info' },          // Pino log level or false to disable
   providerOptions: { ... },           // Harness-specific config
+  sandbox: { enabled: false },        // Run stages in a sandbox (Docker, or host with preferDocker: false)
 });
 ```
+
+The SDK wires the same workflow services as the server: durable HITL waits and
+automation iterations, an execution workspace per run under
+`<artifactsDir>/workspaces`, the admission controller, and commit/push/PR
+post-processing through the source-control flow. Source-control accounts live in
+`<artifactsDir>/source-control.json` (tokens in the encrypted secret store beside
+it); `GENERATORAI_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN` seeds an account
+when none exists.
 
 `harness` was called `provider` before the server's `CopilotConfig → HarnessConfig`
 rename; the field was renamed here so an SDK example and a server `.env` use the

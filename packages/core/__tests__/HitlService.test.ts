@@ -12,7 +12,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from 'vitest';
+import { createDB, migrateDB, EntryRepository, RegisterRepository } from '@generatorai/db';
 import { HitlService } from '../src/services/HitlService.js';
+import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.js';
 import { EventBus } from '../src/events/EventBus.js';
 import { StageRunStateMachine } from '../src/domain/state-machines/StageRunStateMachine.js';
 import type { IStageRunRepository } from '../src/domain/ports/IStageRunRepository.js';
@@ -32,6 +34,15 @@ function stubStageRun(overrides: Partial<StageRun> = {}): StageRun {
     createdAt: new Date(),
     ...overrides,
   };
+}
+
+const quiet = { debug() {}, info() {}, warn() {}, error() {} } as never;
+
+/** Every HITL wait is a durable Awakeable (P01 WP-1.3) — back it with a real engine. */
+function makeEngine(): DurableExecutionEngine {
+  const db = createDB(':memory:');
+  migrateDB(db);
+  return new DurableExecutionEngine(new RegisterRepository(db), new EntryRepository(db), quiet);
 }
 
 function createMemoryRepo(initial: StageRun[] = []): IStageRunRepository & {
@@ -98,14 +109,14 @@ describe('HitlService (HITL-01..05)', () => {
     const seen: Array<{ kind: string; data: unknown }> = [];
     bus.subscribeGlobal((e) => seen.push({ kind: e.kind, data: e.data }));
 
-    const svc = new HitlService(repo, bus);
+    const svc = new HitlService(repo, bus, makeEngine());
     // Don't await yet — interrupt returns a pending promise until resume.
     const pending = svc.interrupt('s1', 'wr1', { toolCall: 'shell.exec', args: { cmd: 'ls' } }, { prompt: 'Allow ls?' });
     // Event bus is async — give it a tick.
     await new Promise((r) => setTimeout(r, 20));
 
     expect(repo.rows.get('s1')!.status).toBe('awaiting_input');
-    expect(repo.rows.get('s1')!.interruptData).toEqual({ toolCall: 'shell.exec', args: { cmd: 'ls' } });
+    expect(repo.rows.get('s1')!.interruptData).toMatchObject({ toolCall: 'shell.exec', args: { cmd: 'ls' } });
     const evt = seen.find((e) => e.kind === 'stage_run.awaiting_input');
     expect(evt).toBeDefined();
     expect((evt!.data as { prompt?: string }).prompt).toBe('Allow ls?');
@@ -121,7 +132,7 @@ describe('HitlService (HITL-01..05)', () => {
     const seen: Array<{ kind: string; data: unknown }> = [];
     bus.subscribeGlobal((e) => seen.push({ kind: e.kind, data: e.data }));
 
-    const svc = new HitlService(repo, bus);
+    const svc = new HitlService(repo, bus, makeEngine());
     const pending = svc.interrupt('s1', 'wr1', {});
 
     const result = await svc.resume('s1', 'wr1', {
@@ -143,7 +154,7 @@ describe('HitlService (HITL-01..05)', () => {
 
   it('resume() on a non-awaiting stage returns {ok:false}', async () => {
     const repo = createMemoryRepo([stubStageRun({ status: 'running' })]);
-    const svc = new HitlService(repo, new EventBus());
+    const svc = new HitlService(repo, new EventBus(), makeEngine());
     const result = await svc.resume('s1', 'wr1', { approved: true });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('not awaiting_input');
@@ -151,7 +162,7 @@ describe('HitlService (HITL-01..05)', () => {
 
   it('second resume loses the race', async () => {
     const repo = createMemoryRepo([stubStageRun()]);
-    const svc = new HitlService(repo, new EventBus());
+    const svc = new HitlService(repo, new EventBus(), makeEngine());
     const pending = svc.interrupt('s1', 'wr1', {});
     const first = await svc.resume('s1', 'wr1', { approved: true });
     const second = await svc.resume('s1', 'wr1', { approved: false });
@@ -162,7 +173,7 @@ describe('HitlService (HITL-01..05)', () => {
 
   it('cancelWaiter rejects an awaiting interrupt with a reason', async () => {
     const repo = createMemoryRepo([stubStageRun()]);
-    const svc = new HitlService(repo, new EventBus());
+    const svc = new HitlService(repo, new EventBus(), makeEngine());
     const pending = svc.interrupt('s1', 'wr1', {});
     svc.cancelWaiter('s1', 'parent run cancelled');
     const res = await pending;
@@ -177,7 +188,7 @@ describe('HitlService (HITL-01..05)', () => {
       stubStageRun({ id: 'b', status: 'running' }),
       stubStageRun({ id: 'c', workflowRunId: 'other', status: 'awaiting_input' }),
     ]);
-    const svc = new HitlService(repo, new EventBus());
+    const svc = new HitlService(repo, new EventBus(), makeEngine());
     const pending = await svc.listPending('wr1');
     expect(pending.map((s) => s.id)).toEqual(['a']);
   });

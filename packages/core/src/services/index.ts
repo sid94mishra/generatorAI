@@ -45,7 +45,11 @@ export { buildOrchestratorToolSet } from '../tools/orchestrator/index.js';
 
 // Orchestrator services
 export { WorkflowOrchestrator } from './WorkflowOrchestrator.js';
+export type { OrchestratorSandbox } from './WorkflowOrchestrator.js';
+export { createRunSandbox } from './createRunSandbox.js';
+export type { RunSandboxOptions } from './createRunSandbox.js';
 export { WorkflowPreprocessor } from './WorkflowPreprocessor.js';
+export type { WorkflowScmFlowPort } from './WorkflowPreprocessor.js';
 export { ResultValidator } from './ResultValidator.js';
 export { resolveStageHooks } from './resolveStageHooks.js';
 

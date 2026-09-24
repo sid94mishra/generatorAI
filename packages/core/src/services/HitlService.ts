@@ -62,10 +62,6 @@
 // larger, higher-risk change to the live turn-execution path and is
 // intentionally left for its own pass.
 //
-// When `durableEngine` is undefined (an embedder that hasn't migrated to
-// the v36–v37 durable-storage tables), `interrupt()` falls back to the
-// exact previous in-memory-only behaviour, unchanged.
-//
 // Default mode = auto-approve
 // ---------------------------
 // The product ships with `permission_mode='bypassPermissions'` by default
@@ -176,17 +172,7 @@ interface PendingResolutionRecord {
 
 export class HitlService {
   /**
-   * Active interrupt awaits keyed by stageRunId — the FALLBACK path, used
-   * only when no `durableEngine` was supplied. Each entry resolves when a
-   * matching `resume()` arrives (same process) or is cleared on stage
-   * cancellation. On server restart the map is empty — rows stay
-   * `awaiting_input` in the DB and the scheduler re-runs the stage
-   * once resumed.
-   */
-  private readonly waiters = new Map<string, (res: InterruptResolution) => void>();
-  /**
-   * W22 — stageRunId → its current Awakeable token, when `durableEngine`
-   * is in use. Lets `cancelWaiter()`/a superseding `interrupt()` find the
+   * W22 — stageRunId → its current Awakeable token. Lets `cancelWaiter()`/a superseding `interrupt()` find the
    * right token to resolve without re-reading the DB row.
    */
   private readonly stageAwakeableTokens = new Map<string, string>();
@@ -200,8 +186,9 @@ export class HitlService {
   constructor(
     private readonly stageRunRepo: IStageRunRepository,
     private readonly eventBus: EventBus,
+    /** W22 — every wait is a durable Awakeable. */
+    private readonly durableEngine: DurableExecutionEngine,
     private readonly logger?: HitlLogger,
-    private readonly durableEngine?: DurableExecutionEngine,
     /** Override for `HITL_AWAKEABLE_TIMEOUT_MS` — tests only; production always uses the 30-day default. */
     private readonly awakeableTimeoutMs: number = HITL_AWAKEABLE_TIMEOUT_MS,
     /**
@@ -267,13 +254,10 @@ export class HitlService {
    * Park the stage and wait for a human approver. Returns the resolution
    * the approver supplied via `resume()`.
    *
-   * W22 — when `durableEngine` is supplied (every real server boot), the
-   * wait is backed by a durable Awakeable rather than a bare in-memory
-   * Promise: the token is persisted to `interrupt_data`, so `resume()`
-   * can resolve it correctly even from a fresh process, and the wait now
-   * has a real timeout (`HITL_AWAKEABLE_TIMEOUT_MS`) instead of hanging
-   * forever with nothing durable to show for it. Without a `durableEngine`,
-   * behaves exactly as before (in-memory-only, no timeout).
+   * W22 — the wait is backed by a durable Awakeable rather than a bare
+   * in-memory Promise: the token is persisted to `interrupt_data`, so
+   * `resume()` can resolve it correctly even from a fresh process, and the
+   * wait has a real timeout (`HITL_AWAKEABLE_TIMEOUT_MS`).
    */
   async interrupt(
     stageRunId: string,
@@ -288,47 +272,29 @@ export class HitlService {
     const alreadyDecided = this.takePendingResolution(stageRunId, data);
     if (alreadyDecided) return alreadyDecided;
 
-    let effectiveData = data;
-    let promise: Promise<InterruptResolution>;
-
-    if (this.durableEngine) {
-      // A stage can only interrupt once at a time — supersede any stale
-      // awakeable the same way the in-memory path supersedes a stale waiter.
-      const staleToken = this.stageAwakeableTokens.get(stageRunId);
-      if (staleToken) {
-        this.durableEngine.resolveAwakeable(staleToken, { approved: false, reason: 'superseded by new interrupt' });
-        this.stageAwakeableTokens.delete(stageRunId);
-      }
-
-      const { token, promise: awakeablePromise } = this.durableEngine.createAwakeable(
-        { scope: 'stage_run', scopeId: stageRunId },
-        this.awakeableTimeoutMs,
-      );
-      this.stageAwakeableTokens.set(stageRunId, token);
-      effectiveData = withAwakeableToken(data, token);
-      promise = awakeablePromise
-        .then((payload) => payload as InterruptResolution)
-        .finally(() => {
-          // Only clear if we're still the current token — a superseding
-          // interrupt() may have already replaced it in the map.
-          if (this.stageAwakeableTokens.get(stageRunId) === token) {
-            this.stageAwakeableTokens.delete(stageRunId);
-          }
-        });
-    } else {
-      // Register the waiter SYNCHRONOUSLY before we do any await. That
-      // guarantees a caller who immediately `cancelWaiter()`s (e.g. a
-      // parent-run cancellation racing with our interrupt call) sees the
-      // resolver and doesn't deadlock the returned promise.
-      const stale = this.waiters.get(stageRunId);
-      if (stale) {
-        stale({ approved: false, reason: 'superseded by new interrupt' });
-        this.waiters.delete(stageRunId);
-      }
-      promise = new Promise<InterruptResolution>((resolve) => {
-        this.waiters.set(stageRunId, resolve);
-      });
+    // A stage can only interrupt once at a time — supersede any stale
+    // awakeable.
+    const staleToken = this.stageAwakeableTokens.get(stageRunId);
+    if (staleToken) {
+      this.durableEngine.resolveAwakeable(staleToken, { approved: false, reason: 'superseded by new interrupt' });
+      this.stageAwakeableTokens.delete(stageRunId);
     }
+
+    const { token, promise: awakeablePromise } = this.durableEngine.createAwakeable(
+      { scope: 'stage_run', scopeId: stageRunId },
+      this.awakeableTimeoutMs,
+    );
+    this.stageAwakeableTokens.set(stageRunId, token);
+    const effectiveData = withAwakeableToken(data, token);
+    const promise = awakeablePromise
+      .then((payload) => payload as InterruptResolution)
+      .finally(() => {
+        // Only clear if we're still the current token — a superseding
+        // interrupt() may have already replaced it in the map.
+        if (this.stageAwakeableTokens.get(stageRunId) === token) {
+          this.stageAwakeableTokens.delete(stageRunId);
+        }
+      });
 
     await this.stageRunRepo.interrupt(stageRunId, effectiveData);
     await this.eventBus.emitGlobal({
@@ -350,10 +316,8 @@ export class HitlService {
 
   /**
    * Approver-side resume. Flips status atomically, emits the event, and
-   * resolves the pending wait — the durable Awakeable when `durableEngine`
-   * is in use (works even in a fresh process, since the token travels
-   * through the DB row, not process memory), or the in-memory waiter
-   * otherwise. Returns `{ok: false, reason}` when the row isn't
+   * resolves the pending durable Awakeable (works even in a fresh process,
+   * since the token travels through the DB row, not process memory). Returns `{ok: false, reason}` when the row isn't
    * awaiting_input (already resumed / cancelled / other process won the
    * race).
    */
@@ -370,7 +334,7 @@ export class HitlService {
     try {
       const stage = await this.stageRunRepo.getById(stageRunId);
       parkedKind = interruptKind(stage.interruptData);
-      if (this.durableEngine) awakeableToken = extractAwakeableToken(stage.interruptData);
+      awakeableToken = extractAwakeableToken(stage.interruptData);
     } catch {
       // Row not found or unreadable — resumeFromInterrupt below will
       // correctly report ok:false; nothing to resolve either way.
@@ -380,9 +344,7 @@ export class HitlService {
     // process? That, not the presence of a durable record, decides where the
     // row goes: a live frame continues (`running`), a dead one has to be
     // relaunched, and only `pending` is relaunchable.
-    const hasLiveWaiter = this.durableEngine
-      ? this.stageAwakeableTokens.has(stageRunId)
-      : this.waiters.has(stageRunId);
+    const hasLiveWaiter = this.stageAwakeableTokens.has(stageRunId);
 
     const ok = await this.stageRunRepo.resumeFromInterrupt(
       stageRunId,
@@ -439,14 +401,8 @@ export class HitlService {
       // is the whole point: a fresh process (this one, if the original
       // interrupt() call happened before a restart) can still record the
       // approval correctly rather than silently discarding it.
-      this.durableEngine!.resolveAwakeable(awakeableToken, resolution);
+      this.durableEngine.resolveAwakeable(awakeableToken, resolution);
       this.stageAwakeableTokens.delete(stageRunId);
-    } else {
-      const waiter = this.waiters.get(stageRunId);
-      if (waiter) {
-        this.waiters.delete(stageRunId);
-        waiter(resolution);
-      }
     }
     this.logger?.info?.('[HITL] stage resumed from awaiting_input', {
       stageRunId,
@@ -482,15 +438,9 @@ export class HitlService {
     // leaving one would answer a later, unrelated gate on the same row.
     this.postRestartVerdicts.delete(stageRunId);
     const token = this.stageAwakeableTokens.get(stageRunId);
-    if (token) {
-      this.durableEngine!.resolveAwakeable(token, { approved: false, reason });
-      this.stageAwakeableTokens.delete(stageRunId);
-      return;
-    }
-    const waiter = this.waiters.get(stageRunId);
-    if (!waiter) return;
-    this.waiters.delete(stageRunId);
-    waiter({ approved: false, reason });
+    if (!token) return;
+    this.durableEngine.resolveAwakeable(token, { approved: false, reason });
+    this.stageAwakeableTokens.delete(stageRunId);
   }
 
   /** Read-through to the repository — used by routes / UI / CLI queues. */
@@ -498,8 +448,8 @@ export class HitlService {
     return this.stageRunRepo.findAwaitingInputByRun(workflowRunId);
   }
 
-  /** Number of active awaiters — in-memory or durable-Awakeable-backed (test / ops introspection). */
+  /** Number of active durable-Awakeable awaiters (test / ops introspection). */
   get activeWaiterCount(): number {
-    return this.waiters.size + this.stageAwakeableTokens.size;
+    return this.stageAwakeableTokens.size;
   }
 }

@@ -111,6 +111,13 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
       runRepo,
       eventBus as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[4],
       makeLogger(),
+      "/tmp/gai-art",
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      null,
     );
   });
 

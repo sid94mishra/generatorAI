@@ -102,15 +102,14 @@ function prStep(config: Record<string, unknown> = {}): PostProcessingStep {
   } as PostProcessingStep;
 }
 
-function build(flow: WorkflowScmFlowPort | undefined, gitManager?: Partial<GitManager>) {
+function build(flow: WorkflowScmFlowPort) {
   const emitGlobal = vi.fn(async () => undefined);
   const eventBus = { emitGlobal } as unknown as EventBus;
   const preprocessor = new WorkflowPreprocessor(
-    (gitManager ?? {}) as GitManager,
+    {} as GitManager,
     {} as IScriptRunner,
     eventBus,
     logger,
-    undefined,
     flow,
   );
   return { preprocessor, emitGlobal };
@@ -318,23 +317,5 @@ describe('workflow post-processing → SourceControlFlowService', () => {
     expect(seen).toEqual(['api']);
     expect(results[0]?.success).toBe(false);
     expect(results[0]?.error).toBe('api: push rejected');
-  });
-
-  it('falls back to the legacy GitManager path when no flow service is wired', async () => {
-    const commitAndPush = vi.fn(async () => undefined);
-    const { preprocessor } = build(undefined, { commitAndPush } as unknown as Partial<GitManager>);
-
-    const results = await preprocessor.executePostProcessing(
-      [commitStep()],
-      context({ clonedPaths: { api: '/run/api' } }),
-    );
-
-    expect(commitAndPush).toHaveBeenCalledWith(
-      '/run/api',
-      'feat: workflow changes (run run-1234abcd)',
-      'generatorai/run-1234abcd-api',
-    );
-    expect(results[0]?.success).toBe(true);
-    expect(results[0]?.scm).toBeUndefined();
   });
 });

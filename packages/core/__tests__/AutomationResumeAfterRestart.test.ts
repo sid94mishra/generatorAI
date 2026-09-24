@@ -200,9 +200,6 @@ beforeEach(() => {
     {} as unknown as WorkflowDefinitionService,
     new EventBus(),
     mockLogger(),
-    undefined,
-    undefined,
-    undefined,
     engine,
   );
 });

@@ -17,6 +17,7 @@ function harness() {
     {} as never,
     { emitGlobal: vi.fn(async () => undefined) } as never,
     { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+    { run: vi.fn() },
   );
   const context = (variables: Record<string, unknown>): PreprocessorContext => ({
     workflowRunId: 'run-1',

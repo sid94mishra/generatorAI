@@ -478,10 +478,11 @@
         "lint": "eslint src/"
       },
       "dependencies": [
-        "@generatorai/shared",
+        "@generatorai/agent-harness-providers",
         "@generatorai/core",
         "@generatorai/db",
-        "@generatorai/agent-harness-providers"
+        "@generatorai/secrets",
+        "@generatorai/shared"
       ]
     },
     {
@@ -4305,6 +4306,7 @@
     "packages/core/src/services/chatTranscript.ts",
     "packages/core/src/services/CodebaseService.ts",
     "packages/core/src/services/ComputerService.ts",
+    "packages/core/src/services/createRunSandbox.ts",
     "packages/core/src/services/DAGScheduler.ts",
     "packages/core/src/services/DataSourceResolver.ts",
     "packages/core/src/services/DeltaLog.ts",

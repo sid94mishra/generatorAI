@@ -54,6 +54,15 @@ interface PersistedPostProcessingIntent {
   featureBranches: Record<string, string>;
 }
 
+/**
+ * The run sandbox. `null` when sandbox mode is off in the deployment
+ * config — a configuration, not a missing dependency.
+ */
+export interface OrchestratorSandbox {
+  lifecycle: SandboxLifecycleManager;
+  provider: ISandboxProvider;
+}
+
 export class WorkflowOrchestrator {
   constructor(
     private readonly workflowRunService: WorkflowRunService,
@@ -62,14 +71,14 @@ export class WorkflowOrchestrator {
     private readonly runRepo: IWorkflowRunRepository,
     private readonly eventBus: EventBus,
     private readonly logger: ILogger,
-    private readonly artifactsDir?: string,
-    private readonly sandboxLifecycleManager?: SandboxLifecycleManager,
-    private readonly sandboxProvider?: ISandboxProvider,
-    private readonly worktreeService?: WorktreeService,
-    private readonly projectService?: ProjectService,
-    private readonly projectConfigService?: ProjectConfigService,
-    private readonly workspaceManager?: WorkspaceManager,
-    private readonly hookExecutor?: HookExecutor,
+    /** Holds the definition-scoped uploads (`workflows/<id>/uploads`). */
+    private readonly artifactsDir: string,
+    private readonly workspaceManager: WorkspaceManager,
+    private readonly worktreeService: WorktreeService,
+    private readonly projectService: ProjectService,
+    private readonly projectConfigService: ProjectConfigService,
+    private readonly hookExecutor: HookExecutor,
+    private readonly sandbox: OrchestratorSandbox | null,
   ) {}
 
   /**
@@ -103,7 +112,7 @@ export class WorkflowOrchestrator {
     hooks: WorkflowHookDefinition[] | undefined,
     hookCtx: HookContext,
   ): Promise<HookPhaseResult> {
-    if (!this.hookExecutor || !hooks || hooks.length === 0) return { shouldContinue: true, mergedResult: {} };
+    if (!hooks || hooks.length === 0) return { shouldContinue: true, mergedResult: {} };
     try {
       return await this.hookExecutor.executePhase(
         phase,
@@ -117,21 +126,13 @@ export class WorkflowOrchestrator {
   }
 
   /**
-   * Get the per-run uploads directory.
-   * When WorkspaceManager is available, uses `{workspace}/config/`.
-   * Otherwise falls back to the legacy `{artifactsDir}/runs/{runId}/uploads/` path.
+   * The per-run uploads directory, `{workspace}/config/`. Every run has an
+   * execution workspace (created in Phase 0 of the orchestration).
    */
   async getRunUploadsDir(runId: string): Promise<string> {
-    if (this.workspaceManager) {
-      const workspace = await this.workspaceManager.findWorkspaceByOwner(runId);
-      if (workspace) {
-        const uploadsPath = path.join(workspace.rootPath, 'config');
-        await fs.mkdir(uploadsPath, { recursive: true });
-        return uploadsPath;
-      }
-    }
-    const baseDir = this.artifactsDir ?? path.join(process.cwd(), '.generatorai', 'artifacts');
-    const uploadsPath = path.join(baseDir, 'runs', runId, 'uploads');
+    const workspace = await this.workspaceManager.findWorkspaceByOwner(runId);
+    if (!workspace) throw new Error(`Run ${runId} has no execution workspace`);
+    const uploadsPath = path.join(workspace.rootPath, 'config');
     await fs.mkdir(uploadsPath, { recursive: true });
     return uploadsPath;
   }
@@ -143,37 +144,23 @@ export class WorkflowOrchestrator {
    * so they remain under the artifacts dir.
    */
   async getWorkflowUploadsDir(definitionId: string): Promise<string> {
-    const baseDir = this.artifactsDir ?? path.join(process.cwd(), '.generatorai', 'artifacts');
-    const uploadsPath = path.join(baseDir, 'workflows', definitionId, 'uploads');
+    const uploadsPath = path.join(this.artifactsDir, 'workflows', definitionId, 'uploads');
     await fs.mkdir(uploadsPath, { recursive: true });
     return uploadsPath;
   }
 
-  /**
-   * Get workspace info (directories) for a run.
-   * Delegates to WorkspaceManager when available; legacy fallback otherwise.
-   */
+  /** Workspace, artifacts and uploads directories of a run's execution workspace. */
   async getRunWorkspaceDirs(runId: string): Promise<{
     workspaceDir: string;
     artifactsDir: string;
     uploadsDir: string;
   }> {
-    if (this.workspaceManager) {
-      const workspace = await this.workspaceManager.findWorkspaceByOwner(runId);
-      if (workspace) {
-        return {
-          workspaceDir: workspace.rootPath,
-          artifactsDir: path.join(workspace.rootPath, 'artifacts'),
-          uploadsDir: path.join(workspace.rootPath, 'config'),
-        };
-      }
-    }
-    // Legacy fallback
-    const baseDir = this.artifactsDir ?? path.join(process.cwd(), '.generatorai', 'artifacts');
+    const workspace = await this.workspaceManager.findWorkspaceByOwner(runId);
+    if (!workspace) throw new Error(`Run ${runId} has no execution workspace`);
     return {
-      workspaceDir: path.join(baseDir, 'runs', runId, 'workspace'),
-      artifactsDir: path.join(baseDir, 'runs', runId, 'artifacts'),
-      uploadsDir: path.join(baseDir, 'runs', runId, 'uploads'),
+      workspaceDir: workspace.rootPath,
+      artifactsDir: path.join(workspace.rootPath, 'artifacts'),
+      uploadsDir: path.join(workspace.rootPath, 'config'),
     };
   }
 
@@ -345,9 +332,9 @@ export class WorkflowOrchestrator {
       await this.workflowRunService.cancelRun(runId);
     } finally {
       // Always cleanup sandbox if active
-      if (this.sandboxLifecycleManager) {
+      if (this.sandbox) {
         try {
-          await this.sandboxLifecycleManager.destroyForRun(runId);
+          await this.sandbox.lifecycle.destroyForRun(runId);
           this.logger.info(`[Orchestrator] Sandbox destroyed during cancel for run ${runId}`);
         } catch (sandboxErr) {
           this.logger.warn(`[Orchestrator] Sandbox cleanup error during cancel for run ${runId}: ${sandboxErr}`);
@@ -382,33 +369,20 @@ export class WorkflowOrchestrator {
 
     try {
       // ── Phase 0: Set up per-run workspace directory ──
-      let runWorkspaceDir: string;
-      let runArtifactsDir: string;
-      let workspaceRootPath: string | undefined;
-      if (this.workspaceManager) {
-        // Use unified WorkspaceManager
-        const workspace = await this.workspaceManager.createWorkspace({
-          ownerType: 'workflow_run',
-          ownerId: run.id,
-          projectId,
-          useWorktree: true,
-          gitEnabled: true,
-          stageSystemArtifacts: true,
-          stageProjectArtifacts: !!projectId,
-        });
-        workspaceRootPath = workspace.rootPath;
-        runWorkspaceDir = this.workspaceManager.getWorkingDirectory(workspace);
-        runArtifactsDir = path.join(workspace.rootPath, 'artifacts');
-        // Store workspaceId on the run
-        await this.runRepo.update(run.id, { workspaceId: workspace.id } as Partial<WorkflowRun>);
-      } else {
-        // Legacy fallback — only used when WorkspaceManager is not available
-        const baseDir = this.artifactsDir ?? path.join(process.cwd(), '.generatorai', 'artifacts');
-        runWorkspaceDir = path.join(baseDir, 'runs', run.id, 'workspace');
-        runArtifactsDir = path.join(baseDir, 'runs', run.id, 'artifacts');
-        await fs.mkdir(runWorkspaceDir, { recursive: true });
-        await fs.mkdir(runArtifactsDir, { recursive: true });
-      }
+      const workspace = await this.workspaceManager.createWorkspace({
+        ownerType: 'workflow_run',
+        ownerId: run.id,
+        projectId,
+        useWorktree: true,
+        gitEnabled: true,
+        stageSystemArtifacts: true,
+        stageProjectArtifacts: !!projectId,
+      });
+      const workspaceRootPath = workspace.rootPath;
+      const runWorkspaceDir = this.workspaceManager.getWorkingDirectory(workspace);
+      const runArtifactsDir = path.join(workspace.rootPath, 'artifacts');
+      // Store workspaceId on the run
+      await this.runRepo.update(run.id, { workspaceId: workspace.id } as Partial<WorkflowRun>);
       this.setSystemVariable(context, '__workingDirectory', runWorkspaceDir);
       this.setSystemVariable(context, '__workflowRunId', run.id);
       this.setSystemVariable(context, '__artifactsDirectory', runArtifactsDir);
@@ -441,7 +415,7 @@ export class WorkflowOrchestrator {
       await this.executeWorkflowHooks('pre_clone', definition.hooks, hookCtx);
 
       let resolvedCodebases = selectedCodebases;
-      if (projectId && (!resolvedCodebases || resolvedCodebases.length === 0) && this.projectService && this.worktreeService) {
+      if (projectId && (!resolvedCodebases || resolvedCodebases.length === 0)) {
         try {
           const projectWithCbs = await this.projectService.getProjectWithCodebases(projectId);
           resolvedCodebases = projectWithCbs.codebases
@@ -452,7 +426,7 @@ export class WorkflowOrchestrator {
         }
       }
 
-      if (projectId && resolvedCodebases?.length && this.worktreeService) {
+      if (projectId && resolvedCodebases?.length) {
         await this.eventBus.emitGlobal({
           kind: 'workflow_run.worktree_creating',
           data: {
@@ -477,7 +451,7 @@ export class WorkflowOrchestrator {
         // repo's `origin/HEAD` when this map has no entry for an alias.
         const defaultBranchByCodebase = new Map<string, string>();
         try {
-          const withCodebases = await this.projectService?.getProjectWithCodebases(projectId);
+          const withCodebases = await this.projectService.getProjectWithCodebases(projectId);
           for (const cb of withCodebases?.codebases ?? []) {
             if (cb.defaultBranch) defaultBranchByCodebase.set(cb.id, cb.defaultBranch);
           }
@@ -550,7 +524,7 @@ export class WorkflowOrchestrator {
       await this.executeWorkflowHooks('post_clone', definition.hooks, postCloneHookCtx);
 
       // ── Phase 1.5: Wire project config cascades ──
-      if (projectId && this.projectConfigService) {
+      if (projectId) {
         try {
           await this.wireProjectConfigs(projectId, run.id, context);
         } catch (err) {
@@ -618,9 +592,9 @@ export class WorkflowOrchestrator {
       // ── Phase 4.5: Create sandbox for this run (if sandbox mode is enabled) ──
       let sandboxSession: SandboxSession | undefined;
 
-      if (this.sandboxLifecycleManager && this.sandboxProvider) {
+      if (this.sandbox) {
         try {
-          sandboxSession = await this.sandboxLifecycleManager.createForRun(
+          sandboxSession = await this.sandbox.lifecycle.createForRun(
             run.id,
             runWorkspaceDir,
           );
@@ -691,9 +665,9 @@ export class WorkflowOrchestrator {
       });
 
       // Sandbox cleanup on failure
-      if (this.sandboxLifecycleManager) {
+      if (this.sandbox) {
         try {
-          await this.sandboxLifecycleManager.destroyForRun(run.id);
+          await this.sandbox.lifecycle.destroyForRun(run.id);
           this.logger.info(`[Orchestrator] Sandbox destroyed after failure for run ${run.id}`);
         } catch (sandboxErr) {
           this.logger.warn(`[Orchestrator] Sandbox cleanup failed: ${sandboxErr}`);
@@ -816,9 +790,9 @@ export class WorkflowOrchestrator {
     // that the user needs to review. The workspace is kept for inspection.
 
     // ── Sandbox Cleanup ──
-    if (this.sandboxLifecycleManager) {
+    if (this.sandbox) {
       try {
-        await this.sandboxLifecycleManager.destroyForRun(runId);
+        await this.sandbox.lifecycle.destroyForRun(runId);
         await this.eventBus.emitGlobal({
           kind: 'workflow_run.sandbox_destroyed',
           data: { workflowRunId: runId },
@@ -1217,8 +1191,6 @@ export class WorkflowOrchestrator {
     runId: string,
     context: OrchestratorContext,
   ): Promise<void> {
-    if (!this.projectConfigService || !this.projectService) return;
-
     const configs = await this.projectConfigService.listConfigs(projectId);
     if (configs.length === 0) return;
 

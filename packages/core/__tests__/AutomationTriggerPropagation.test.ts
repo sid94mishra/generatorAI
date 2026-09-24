@@ -12,7 +12,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { createDB, migrateDB, EntryRepository, RegisterRepository } from '@generatorai/db';
 import { AutomationService } from '../src/services/AutomationService.js';
+import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.js';
 import { EventBus } from '../src/events/EventBus.js';
 import type { WorkflowRunService } from '../src/services/WorkflowRunService.js';
 import type { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
@@ -26,6 +28,14 @@ import type {
   ILogger,
   WorkflowRun,
 } from '@generatorai/shared';
+
+/** Automation iterations are durable slots (P01 WP-1.3) — back them with a real engine. */
+function makeEngine(): DurableExecutionEngine {
+  const db = createDB(':memory:');
+  migrateDB(db);
+  const quiet = { debug() {}, info() {}, warn() {}, error() {} } as never;
+  return new DurableExecutionEngine(new RegisterRepository(db), new EntryRepository(db), quiet);
+}
 
 function mockLogger(): ILogger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as ILogger;
@@ -110,20 +120,23 @@ describe('X-21 — the trigger reaches the workflow run', () => {
       {} as unknown as WorkflowDefinitionService,
       new EventBus(),
       mockLogger(),
+      makeEngine(),
     );
   });
 
   it('stamps __triggeredBy on the run a manual trigger creates', async () => {
     await service.triggerManual(AUTOMATION_ID);
 
-    expect(createdRunVariables).toHaveLength(1);
+    // The execution runs in the background (durable slot claim first).
+    await vi.waitFor(() => expect(createdRunVariables).toHaveLength(1));
     expect(createdRunVariables[0]!['__triggeredBy']).toBe('manual');
   });
 
   it('stamps __triggeredBy on the run a webhook trigger creates', async () => {
     await service.triggerWebhook('tok', { topic: 'x' });
 
-    expect(createdRunVariables).toHaveLength(1);
+    // The execution runs in the background (durable slot claim first).
+    await vi.waitFor(() => expect(createdRunVariables).toHaveLength(1));
     // The trigger travels alongside the payload-derived variables, not
     // instead of them.
     expect(createdRunVariables[0]!['__triggeredBy']).toBe('webhook');

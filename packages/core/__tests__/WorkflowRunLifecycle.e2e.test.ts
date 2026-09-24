@@ -14,8 +14,6 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { WorkflowRunService } from '../src/services/WorkflowRunService.js';
 import {
   MockWorkflowRunRepository,
@@ -23,8 +21,10 @@ import {
   MockStageDefinitionRepository,
   MockStageEdgeRepository,
   MockWorkflowDefinitionRepository,
+  createFakeWorkspaceManager,
 } from './MockRepositories.js';
 import { EventBus } from '../src/events/EventBus.js';
+import { AdmissionController } from '../src/services/AdmissionController.js';
 import { DAGScheduler } from '../src/services/DAGScheduler.js';
 import type { StageExecutionService } from '../src/services/StageExecutionService.js';
 import type { SessionAllocator } from '../src/services/SessionAllocator.js';
@@ -127,8 +127,16 @@ describe('E2E: Workflow run lifecycle (event-driven)', () => {
   async function runToTerminal(plan: Map<string, Outcome>): Promise<WorkflowRun> {
     const stageExec = makeDrivingExecutor(plan);
     service = new WorkflowRunService(
-      runRepo, stageRunRepo, stageDefRepo, defRepo, eventBus, dagScheduler,
-      stageExec, noopAllocator, join(tmpdir(), `genai-e2e-${Date.now()}`),
+      runRepo,
+      stageRunRepo,
+      stageDefRepo,
+      defRepo,
+      eventBus,
+      dagScheduler,
+      stageExec,
+      noopAllocator,
+      createFakeWorkspaceManager(),
+      new AdmissionController(),
     );
     const run = await service.createRun({ workflowDefinitionId: DEF_ID });
     createdRunId = run.id;

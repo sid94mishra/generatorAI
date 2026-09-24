@@ -15,7 +15,6 @@ import type { TerminalRunStatus } from './DAGScheduler.js';
 import type { Semaphore } from '../utils/Semaphore.js';
 import type { AdmissionController, AdmissionTicket } from './AdmissionController.js';
 import { generateId, withSpan, getMeter, ValidationError } from '@generatorai/shared';
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { RunLogger } from '../events/StreamLogger.js';
 
@@ -109,13 +108,6 @@ export class WorkflowRunService {
   /** Optional hook executor for workflow-level lifecycle hooks */
   private hookExecutor?: HookExecutor;
   /**
-   * M8-fix: W18 AdmissionController — gates stage launches in the `ordinary`
-   * lane so a wide DAG fan-out doesn't saturate the event loop.
-   * Set via setAdmissionController() from the composition root.
-   */
-  private admissionController?: AdmissionController;
-
-  /**
    * WS-D1 — stage liveness policy. The executor beats every
    * `heartbeatIntervalMs`; a `queued`/`running` stage whose last beat is
    * older than `heartbeatIntervalMs * staleMultiplier` is failed by the
@@ -148,7 +140,13 @@ export class WorkflowRunService {
     private dagScheduler: DAGScheduler,
     private stageExecutionService: StageExecutionService,
     private sessionAllocator: SessionAllocator,
-    private artifactsDir?: string,
+    /** Every run gets an execution workspace (`workflow_run` owner). */
+    private workspaceManager: WorkspaceManager,
+    /**
+     * W18 — every stage launch goes through the `ordinary` lane, so bulk
+     * runs cannot crowd out interactive chat turns.
+     */
+    private admissionController: AdmissionController,
     private logger?: ILogger,
     /**
      * Optional transactional wrapper. When supplied, multi-row writes
@@ -157,12 +155,6 @@ export class WorkflowRunService {
      * as independent statements.
      */
     private withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>,
-    /** Optional workspace manager for unified workspace isolation. */
-    private workspaceManager?: WorkspaceManager,
-    /** Optional worktree service for codebase isolation. */
-    private worktreeService?: WorktreeService,
-    /** Optional codebase repository for resolving project codebases. */
-    private codebaseRepo?: IProjectCodebaseRepository,
     /**
      * Optional concurrency limiter (P1#7). When supplied, every stage launch
      * acquires a permit before executing, bounding how many harness
@@ -172,10 +164,10 @@ export class WorkflowRunService {
     private stageSemaphore?: Semaphore,
   ) {}
 
-  /** Late-wire workspace manager (set after construction when DI order requires it). */
-  setWorkspaceManager(wm: WorkspaceManager): void {
-    this.workspaceManager = wm;
-  }
+  /** Worktree service for codebase isolation — late-wired (constructed after this service). */
+  private worktreeService?: WorktreeService;
+  /** Resolves a project's codebases for worktree creation. */
+  private codebaseRepo?: IProjectCodebaseRepository;
 
   /** Late-wire worktree service (set after construction when DI order requires it). */
   setWorktreeService(wts: WorktreeService, cbRepo: IProjectCodebaseRepository): void {
@@ -186,16 +178,6 @@ export class WorkflowRunService {
   /** Late-wire hook executor for workflow-level lifecycle hooks. */
   setHookExecutor(he: HookExecutor): void {
     this.hookExecutor = he;
-  }
-
-  /**
-   * M8-fix: Late-wire the AdmissionController (W18).
-   * Call from the composition root after construction so all workflow stage
-   * launches go through the `ordinary` lane, preventing bulk runs from
-   * crowding out interactive chat turns.
-   */
-  setAdmissionController(ac: AdmissionController): void {
-    this.admissionController = ac;
   }
 
   /** Late-wire result validator (so per-stage resultValidation rules can run
@@ -328,9 +310,7 @@ export class WorkflowRunService {
       }
     };
 
-    const settled = this.admissionController
-      ? this.admissionController.admit('ordinary', (ticket) => runFn(ticket))
-      : runFn();
+    const settled = this.admissionController.admit('ordinary', (ticket) => runFn(ticket));
 
     settled.catch((err) => {
       this.onStageFailed(runId, stageRun.id, err).catch(() => {/* swallow */});
@@ -682,49 +662,32 @@ export class WorkflowRunService {
 
     // Set up per-run workspace and artifacts directories if not already set
     if (!run.variables?.['__workingDirectory'] || !run.variables?.['__artifactsDirectory']) {
-      let runWorkspaceDir: string;
-      let runArtifactsDir: string;
-      let workspaceId: string | undefined;
-      let workspaceRootPath: string | undefined;
-
       const definition = await this.definitionRepo.getById(run.workflowDefinitionId);
 
-      if (this.workspaceManager) {
-        // Use unified WorkspaceManager for workspace isolation
-        const workspace = await this.workspaceManager.createWorkspace({
-          ownerType: 'workflow_run',
-          ownerId: runId,
-          projectId: definition.projectId,
-          useWorktree: definition.useWorktree ?? true,
-          gitEnabled: true,
-          stageSystemArtifacts: true,
-          stageProjectArtifacts: !!definition.projectId,
-          // Propagate the workflow definition's browserConfig so the
-          // built-in browser tools honour visibility, evalAllowed, and
-          // allowedHosts on the first invocation.
-          ...(definition.browserConfig
-            ? { browserConfig: definition.browserConfig as Record<string, unknown> }
-            : {}),
-        });
-        workspaceId = workspace.id;
-        workspaceRootPath = workspace.rootPath;
-        runWorkspaceDir = this.workspaceManager.getWorkingDirectory(workspace);
-        runArtifactsDir = path.join(workspace.rootPath, 'artifacts');
-      } else {
-        // Fallback: manual directory creation (legacy behavior)
-        const baseDir = this.artifactsDir ?? path.join(process.cwd(), '.generatorai', 'artifacts');
-        runWorkspaceDir = path.join(baseDir, 'runs', runId, 'workspace');
-        runArtifactsDir = path.join(baseDir, 'runs', runId, 'artifacts');
-        await fs.mkdir(runWorkspaceDir, { recursive: true });
-        await fs.mkdir(runArtifactsDir, { recursive: true });
-      }
+      const workspace = await this.workspaceManager.createWorkspace({
+        ownerType: 'workflow_run',
+        ownerId: runId,
+        projectId: definition.projectId,
+        useWorktree: definition.useWorktree ?? true,
+        gitEnabled: true,
+        stageSystemArtifacts: true,
+        stageProjectArtifacts: !!definition.projectId,
+        // Propagate the workflow definition's browserConfig so the
+        // built-in browser tools honour visibility, evalAllowed, and
+        // allowedHosts on the first invocation.
+        ...(definition.browserConfig
+          ? { browserConfig: definition.browserConfig as Record<string, unknown> }
+          : {}),
+      });
+      const workspaceId = workspace.id;
+      const workspaceRootPath = workspace.rootPath;
 
       let updatedVars: Record<string, unknown> = {
         ...(run.variables ?? {}),
-        __workingDirectory: runWorkspaceDir,
-        __artifactsDirectory: runArtifactsDir,
+        __workingDirectory: this.workspaceManager.getWorkingDirectory(workspace),
+        __artifactsDirectory: path.join(workspace.rootPath, 'artifacts'),
         __workflowRunId: runId,
-        ...(workspaceId ? { __workspaceId: workspaceId } : {}),
+        __workspaceId: workspaceId,
       };
 
       // ── Worktree creation for project-linked workflows ──
@@ -743,9 +706,7 @@ export class WorkflowRunService {
         updatedVars,
       );
 
-      const runUpdates: Record<string, unknown> = { variables: updatedVars };
-      if (workspaceId) runUpdates['workspaceId'] = workspaceId;
-      await this.runRepo.update(runId, runUpdates);
+      await this.runRepo.update(runId, { variables: updatedVars, workspaceId });
       run.variables = updatedVars;
     }
 
@@ -1771,7 +1732,6 @@ export class WorkflowRunService {
    * Mark the workspace as completed for a finished run (success, failure, or cancel).
    */
   private async completeWorkspaceForRun(runId: string): Promise<void> {
-    if (!this.workspaceManager) return;
     try {
       const run = await this.runRepo.getById(runId);
       const workspaceId = run.workspaceId ?? (run.variables?.['__workspaceId'] as string | undefined);

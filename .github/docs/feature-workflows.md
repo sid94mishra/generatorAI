@@ -263,10 +263,7 @@ a half-applied merge: the flow probes the merge with `git merge-tree --write-tre
 to a `--no-commit` merge it immediately aborts), so `ScmConflictReport.mergeStarted` is `false`
 and the worktree is exactly as the run left it.
 
-**Legacy fallback.** When no flow service is wired (older embedders — e.g. the SDK's own
-composition in `packages/sdk/src/GeneratorAI.ts`), `commit_and_push` falls back to
-`GitManager.commitAndPush` and `create_pr` to `SourceControlService` / the `gh` CLI, exactly as
-before. The PR url + number are still reported in the step's `output`.
+**One path.** The flow service is a required dependency of `createCoreServices`: the server and the SDK both wire `SourceControlFlowService`, so there is no `GitManager` / `gh` CLI fallback.
 
 ### 3.7 `tags`
 

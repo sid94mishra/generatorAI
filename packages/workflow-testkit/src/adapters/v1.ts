@@ -18,22 +18,27 @@
 //   - turns are classified from the persisted user message's metadata flags
 //     (`isContextMessage`, `isSummaryPrompt`, …) and only then by prompt text.
 //
+// `createCoreServices` requires the workspace manager, the admission
+// controller, the source-control flow and the sandbox choice (P01 WP-1.3), so
+// the testkit wires a real WorkspaceManager (workspaces under `<workDir>/ws`),
+// a real AdmissionController, no sandbox, and a source-control flow that
+// refuses (nothing in the characterisation suite post-processes).
 // What is deliberately NOT wired (the server has it; nothing in the
-// characterisation suite reaches it, and each would pull in git, a browser or
-// the network): WorkspaceManager / WorktreeService / checkpoints (runs use the
-// legacy directory fallback under `<workDir>/art/runs/<runId>`),
-// AdmissionController, BrowserService, agent services, MCP hub, and the
-// StreamBroker event store (the EventBus commits to the legacy `events`
-// table; the testkit captures every event in memory).
+// characterisation suite reaches it, and each would pull in a browser or the
+// network): WorktreeService / checkpoints, BrowserService, agent services, MCP
+// hub, and the StreamBroker event store (the EventBus commits to the legacy
+// `events` table; the testkit captures every event in memory).
 // ────────────────────────────────────────────────────────────────
 
 import { join } from 'node:path';
 import {
+  AdmissionController,
   createCoreServices,
   FetchHttpClient,
   GitManager,
   ResultValidator,
   SandboxedScriptRunner,
+  WorkspaceManager,
   type CoreServices,
 } from '@generatorai/core';
 import {
@@ -55,6 +60,10 @@ import {
   DrizzleSessionAllocationRepository,
   DrizzlePlanRepository,
   DrizzleAgentInteractionRepository,
+  DrizzleExecutionWorkspaceRepository,
+  DrizzleWorkspaceMountRepository,
+  DrizzleWorkspaceArtifactRepository,
+  DrizzleWorktreeRepository,
   RegisterRepository,
   EntryRepository,
 } from '@generatorai/db';
@@ -152,6 +161,15 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
     const gitManager = new GitManager(scriptRunner, logger, { workspacesDir: join(workDir, 'ws') });
     const chatMessageRepo = new DrizzleChatMessageRepository(db);
     const stageRunRepo = new DrizzleStageRunRepository(db);
+    const workspaceManager = new WorkspaceManager(
+      new DrizzleExecutionWorkspaceRepository(db),
+      new DrizzleWorkspaceMountRepository(db),
+      new DrizzleWorkspaceArtifactRepository(db),
+      { workspacesDir: join(workDir, 'ws'), defaultGitEnabled: false },
+      logger,
+      gitManager,
+      new DrizzleWorktreeRepository(db),
+    );
     const services = createCoreServices({
       logger,
       harness,
@@ -175,6 +193,14 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
       registerRepo: new RegisterRepository(db),
       entryRepo: new EntryRepository(db),
       sessionAllocationRepo: new DrizzleSessionAllocationRepository(db),
+      sandbox: null,
+      workspaceManager,
+      admissionController: new AdmissionController(),
+      scmFlow: {
+        run: async () => {
+          throw new Error('testkit: source-control post-processing is not wired');
+        },
+      },
       config: {
         artifactsDir: join(workDir, 'art'),
         ...(ctx.maxConcurrentStages !== undefined ? { maxConcurrentStages: ctx.maxConcurrentStages } : {}),

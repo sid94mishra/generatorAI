@@ -27,7 +27,14 @@ import {
 import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.js';
 import { StartupRecoveryService } from '../src/services/StartupRecoveryService.js';
 import { AgentResolver } from '../src/services/AgentResolver.js';
-import { MockStageRunRepository, MockStageDefinitionRepository } from './MockRepositories.js';
+import {
+  MockStageRunRepository,
+  MockStageDefinitionRepository,
+  MockWorkflowDefinitionRepository,
+  MockWorkflowRunRepository,
+  createFakeWorkspaceManager,
+} from './MockRepositories.js';
+import type { HitlService } from '../src/services/HitlService.js';
 import { EventBus } from '../src/events/EventBus.js';
 import type { IChatMessageRepository, ISessionRepository } from '../src/domain/ports/IRepositories.js';
 import type { IWorkflowRunRepository } from '../src/domain/ports/IWorkflowRunRepository.js';
@@ -222,6 +229,10 @@ describe('W22 — effect sandwich on the stage turn path', () => {
       new EventBus(),
       createSessionAllocator(boot),
       createHookExecutor(),
+      createFakeWorkspaceManager(),
+      new MockWorkflowDefinitionRepository(),
+      new MockWorkflowRunRepository(),
+      {} as HitlService,
     );
     if (opts.durable) service.setDurableEngine(engine);
     if (opts.toolGroups) {

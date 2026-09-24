@@ -7,10 +7,13 @@
 // signature change meant two parallel edits. This factory centralizes
 // that surface so changes land in one place.
 //
-// Platform-specific concerns (harness adapter construction, sandbox
-// lifecycle, HTTP streaming manager, orchestrator file-management
-// routes, composition of CLI platform clients, graceful shutdown) stay
-// in the app's own composition-root.
+// Every dependency the workflow services need is a REQUIRED input (P01
+// WP-1.3): the durable repos, the workspace manager, the admission
+// controller, the source-control flow and the sandbox choice. Both roots
+// (server and SDK) pass them, so no service carries an "absent dependency"
+// fallback. Platform-specific concerns (harness adapter construction,
+// provider choice, HTTP streaming, graceful shutdown) stay in the app's
+// own composition-root.
 // ────────────────────────────────────────────────────────────────
 
 import type { ILogger, AgentEvent } from '@generatorai/shared';
@@ -43,7 +46,6 @@ import { HookExecutor } from '../services/HookExecutor.js';
 import { HookInterceptor } from '../services/HookInterceptor.js';
 import { TemplateRegistry } from '../services/TemplateRegistry.js';
 import { StartupRecoveryService } from '../services/StartupRecoveryService.js';
-import type { ISandboxCleaner } from '../services/StartupRecoveryService.js';
 import { ErrorHandler } from '../services/ErrorHandler.js';
 import { SessionAllocator } from '../services/SessionAllocator.js';
 import { ChatManagementService } from '../services/ChatManagementService.js';
@@ -61,6 +63,10 @@ import { HitlService } from '../services/HitlService.js';
 import { AgentInteractionService } from '../services/AgentInteractionService.js';
 import { PlanService } from '../services/PlanService.js';
 import { DurableExecutionEngine } from '../services/DurableExecutionEngine.js';
+import { WorkflowPreprocessor, type WorkflowScmFlowPort } from '../services/WorkflowPreprocessor.js';
+import type { OrchestratorSandbox } from '../services/WorkflowOrchestrator.js';
+import type { WorkspaceManager } from '../services/WorkspaceManager.js';
+import type { AdmissionController } from '../services/AdmissionController.js';
 import type { RegisterRepository, EntryRepository } from '@generatorai/db';
 import type { AgentService } from '../services/AgentService.js';
 import type { AgentResolver } from '../services/AgentResolver.js';
@@ -107,8 +113,23 @@ export interface CoreServicesInputs {
   /** Optional — persistence for SessionAllocator state (Phase 1, 1.6). */
   sessionAllocationRepo?: ISessionAllocationRepository;
 
-  /** Optional — sandbox orphan reaper (Phase 1, 1.7 / 1.9). */
-  sandboxCleaner?: ISandboxCleaner;
+  /**
+   * The run sandbox, or `null` when sandbox mode is off in the deployment
+   * config. Also the boot-time orphan reaper (Phase 1, 1.7 / 1.9).
+   */
+  sandbox: OrchestratorSandbox | null;
+
+  /** Every run gets an execution workspace. */
+  workspaceManager: WorkspaceManager;
+
+  /** W18 — the lane every stage launch is admitted through. */
+  admissionController: AdmissionController;
+
+  /**
+   * Post-processing commit/push/PR runs through the source-control flow
+   * (doc §5) — the one the Changes tab and agent-native chats use.
+   */
+  scmFlow: WorkflowScmFlowPort;
 
   // Config
   config: {
@@ -121,14 +142,9 @@ export interface CoreServicesInputs {
     projectRoot?: string;
   };
 
-  /**
-   * W22 / W47 — Durable execution engine repositories. Optional so that
-   * existing test embedders that haven't migrated to v36–v38 keep working.
-   * When omitted, `DurableExecutionEngine` is unavailable and
-   * `AutomationService` falls back to its legacy in-memory iteration loop.
-   */
-  registerRepo?: RegisterRepository;
-  entryRepo?: EntryRepository;
+  /** W22 / W47 — durable execution engine repositories. */
+  registerRepo: RegisterRepository;
+  entryRepo: EntryRepository;
 
   /** Optional transactional wrapper for multi-row writes. */
   withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>;
@@ -192,11 +208,10 @@ export interface CoreServices {
 
   /** HITL — human-in-the-loop interrupt/resume primitive. */
   hitlService: HitlService;
-  /**
-   * W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix).
-   * Present only when `registerRepo` and `entryRepo` were supplied.
-   */
-  durableExecutionEngine?: DurableExecutionEngine;
+  /** W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix). */
+  durableExecutionEngine: DurableExecutionEngine;
+  /** Preprocessing + post-processing steps of orchestrated runs. */
+  workflowPreprocessor: WorkflowPreprocessor;
   /** PLN-01 — present only when the plan repositories were supplied. */
   planService?: PlanService;
   agentInteractionService?: AgentInteractionService;
@@ -228,7 +243,10 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     idempotencyKeyRepo,
     sequenceAllocator,
     sessionAllocationRepo,
-    sandboxCleaner,
+    sandbox,
+    workspaceManager,
+    admissionController,
+    scmFlow,
     config,
     withTransaction,
     registerRepo,
@@ -391,25 +409,15 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     workflowRunRepo, // Item 9 — refuse (409) / force-delete a definition with runs
   );
 
-  // W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix).
-  // Only constructed when the caller supplied both durable storage repos
-  // (migration v36–v37). Existing embedders that haven't migrated keep
-  // receiving undefined and use the legacy in-memory iteration loop / a
-  // plain (non-durable) HITL wait — see HitlService's constructor.
-  //
-  // Constructed here (moved up from its previous spot below
-  // WorkflowRunService) so HitlService can take it as its durable
-  // Awakeable backend — HitlService is built next, immediately below.
-  const durableExecutionEngine =
-    registerRepo && entryRepo
-      ? new DurableExecutionEngine(registerRepo, entryRepo, logger)
-      : undefined;
+  // W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix). Built before
+  // HitlService, which takes it as its durable Awakeable backend.
+  const durableExecutionEngine = new DurableExecutionEngine(registerRepo, entryRepo, logger);
 
   // HITL — one service instance per process. Stateless across runs
   // (waiters are per-stageRunId); safe to share.
   // Created before StageExecutionService so it can be injected as the
   // permission bridge (HITL-06).
-  const hitlService = new HitlService(stageRunRepo, eventBus, logger, durableExecutionEngine);
+  const hitlService = new HitlService(stageRunRepo, eventBus, durableExecutionEngine, logger);
 
   const stageExecutionService = new StageExecutionService(
     stageRunRepo,
@@ -419,7 +427,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     eventBus,
     sessionAllocator,
     hookExecutor,
-    undefined, // workspaceManager — late-wired via setWorkspaceManager below
+    workspaceManager,
     workflowDefinitionRepo, // HOOK-2: enables hooksFile per-stage/wildcard merge
     workflowRunRepo,        // HITL-06: read run's permissionMode per request
     hitlService,            // HITL-06: bridge harness prompts to HITL waiter
@@ -428,11 +436,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   // W22 — put the effect sandwich on the real turn path. Without this line
   // `withEffect()` has no production caller and an interrupted stage re-runs
   // every prompt and every tool call from scratch on the next boot. Late-wired
-  // rather than added to an already-11-argument constructor, and a no-op for
-  // embedders that supplied no durable storage.
-  if (durableExecutionEngine) {
-    stageExecutionService.setDurableEngine(durableExecutionEngine);
-  }
+  // rather than added to an already-11-argument constructor.
+  stageExecutionService.setDurableEngine(durableExecutionEngine);
 
   // P1#7 — bound concurrent stage execution (and therefore harness subprocess
   // fan-out). Default 8; configurable, 0 = unlimited.
@@ -465,21 +470,17 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     dagScheduler,
     stageExecutionService,
     sessionAllocator,
-    config.artifactsDir,
+    workspaceManager,
+    admissionController,
     logger,
     withTransaction,
-    undefined, // workspaceManager — late-wired via setWorkspaceManager
-    undefined, // worktreeService — late-wired via setWorktreeService
-    undefined, // codebaseRepo — late-wired via setWorktreeService
     stageSemaphore,
   );
 
   // X-25 — read side of the durable artifact channel, so a successor's
   // context comes from the predecessor's durable result rather than a column
   // that an interrupted stage may never have written.
-  if (durableExecutionEngine) {
-    workflowRunService.setDurableEngine(durableExecutionEngine);
-  }
+  workflowRunService.setDurableEngine(durableExecutionEngine);
 
   // P0-a — an approval that arrives after a restart has no live `interrupt()`
   // frame to resume, so HitlService returns the stage to `pending` and needs
@@ -497,12 +498,11 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     workflowDefinitionService,
     eventBus,
     logger,
+    // W22: durable iteration claiming (P0-41 fix).
+    durableExecutionEngine,
     config.artifactsDir,
     dataSourceResolver,
     withTransaction,
-    // W22: durable iteration claiming (P0-41 fix). Passed through only when
-    // both durable-storage repos are available (migration v36–v37 applied).
-    durableExecutionEngine,
   );
 
   // Track A1 — boot-time reconciler + idempotency sweeper. Only wired
@@ -533,7 +533,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     workflowRunRepo,
     stageRunRepo,
     sessionAllocator,
-    sandboxCleaner,
+    sandbox?.lifecycle,
     // DUR-06 — auto-resume interrupted runs by re-driving from durable DB state.
     (runId: string) => workflowRunService.redriveRun(runId),
     // Skip eager tool-less rehydration of chat sessions — they lazily resume
@@ -543,9 +543,10 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
 
   // X-13 — record which session an interrupted stage lost, and why. Without
   // this the discarded conversation leaves no trace at all.
-  if (durableExecutionEngine) {
-    recoveryService.setDurableEngine(durableExecutionEngine);
-  }
+  recoveryService.setDurableEngine(durableExecutionEngine);
+
+  // Pre/post-processing of orchestrated runs; commit/push/PR through the flow.
+  const workflowPreprocessor = new WorkflowPreprocessor(gitManager, scriptRunner, eventBus, logger, scmFlow);
 
   return {
     eventBus,
@@ -566,7 +567,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     automationService,
     automationRecoveryService,
     hitlService,
-    ...(durableExecutionEngine ? { durableExecutionEngine } : {}),
+    durableExecutionEngine,
+    workflowPreprocessor,
     ...(planService ? { planService } : {}),
     ...(agentInteractionService ? { agentInteractionService } : {}),
     ...(inputs.agentService ? { agentService: inputs.agentService } : {}),

@@ -404,3 +404,22 @@ export class MockStageRunRepository implements IStageRunRepository {
     this.store.clear();
   }
 }
+
+// ── Fake WorkspaceManager ──
+//
+// Every run gets an execution workspace (P01 WP-1.3 — the workspace manager
+// is a required dependency). Service-level tests only need the four calls the
+// run and stage services make; nothing is written to disk.
+
+import type { WorkspaceManager } from '../src/services/WorkspaceManager.js';
+
+export function createFakeWorkspaceManager(root = '/tmp/gai-fake-ws'): WorkspaceManager {
+  return {
+    createWorkspace: async (opts: { ownerId: string }) => ({ id: `ws-${opts.ownerId}`, rootPath: `${root}/${opts.ownerId}` }),
+    getWorkingDirectory: (ws: { rootPath: string }) => `${ws.rootPath}/source`,
+    completeWorkspace: async () => undefined,
+    findWorkspaceByOwner: async () => null,
+    getExecutionWorkspace: async () => null,
+    trackArtifact: async () => undefined,
+  } as unknown as WorkspaceManager;
+}

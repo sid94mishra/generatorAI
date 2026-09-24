@@ -53,6 +53,7 @@ import type { ILogger, ResolvedAgentProjection } from '@generatorai/shared';
 import { ImportWorkflowJsonSchema } from '@generatorai/shared';
 import { createCoreServices, type CoreServices } from '../../src/bootstrap/createCoreServices.js';
 import { AgentResolver } from '../../src/services/AgentResolver.js';
+import { AdmissionController } from '../../src/services/AdmissionController.js';
 import type { IAgentHarness, CreateConversationParams } from '../../src/domain/ports/IAgentHarness.js';
 import type { BrowserService } from '../../src/services/BrowserService.js';
 import type { WorkspaceManager } from '../../src/services/WorkspaceManager.js';
@@ -218,6 +219,11 @@ interface Env {
 
 function boot(db: AppDatabase, workDir: string): Env {
   const calls: Recorded[] = [];
+  // Only case (g) passes a `__workspaceId`; every other case never asks.
+  const workspaces = {
+    getExecutionWorkspace: async (id: string) => ({ id, rootPath: join(workDir, 'ws'), browserConfig: {} }),
+    findWorkspaceByOwner: async () => null,
+  } as unknown as WorkspaceManager;
   const services = createCoreServices({
     logger: quiet,
     harness: spyHarness(calls),
@@ -241,6 +247,10 @@ function boot(db: AppDatabase, workDir: string): Env {
     registerRepo: new RegisterRepository(db),
     entryRepo: new EntryRepository(db),
     sessionAllocationRepo: new DrizzleSessionAllocationRepository(db),
+    sandbox: null,
+    workspaceManager: workspaces,
+    admissionController: new AdmissionController(),
+    scmFlow: { run: async () => { throw new Error('golden: no source control'); } },
     config: { artifactsDir: join(workDir, 'art') },
     withTransaction: (fn) => withTransaction(db, fn),
     chatExtensions: {},
@@ -433,12 +443,7 @@ describe('session composition golden snapshots', () => {
       resolveConfig: () => ({ enabled: false, visibility: 'off' }),
       ensureStarted: async () => undefined,
     } as unknown as BrowserService;
-    const workspaces = {
-      getExecutionWorkspace: async (id: string) => ({ id, rootPath: join(env.workDir, 'ws'), browserConfig: {} }),
-      findWorkspaceByOwner: async () => null,
-    } as unknown as WorkspaceManager;
     env.services.stageExecutionService.setBrowserService(browser);
-    env.services.stageExecutionService.setWorkspaceManager(workspaces);
     const p = await runStage(env, { name: 'golden-browser-stage', agentRef: AGENT_REF }, { __workspaceId: 'ws-golden' });
     const toolNames = ((p as unknown as { tools?: Array<{ name: string }> }).tools ?? []).map((t) => t.name);
     expect(toolNames).toContain('open_browser_page');

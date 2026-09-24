@@ -25,7 +25,6 @@ import { interpolateVariables } from '@generatorai/shared';
 import type { GitManager } from '../infrastructure/GitManager.js';
 import type { IScriptRunner } from '../domain/ports/IScriptRunner.js';
 import type { EventBus } from '../events/EventBus.js';
-import type { SourceControlService } from './SourceControlService.js';
 import * as path from 'node:path';
 
 /**
@@ -130,16 +129,13 @@ export class WorkflowPreprocessor {
     private readonly scriptRunner: IScriptRunner,
     private readonly eventBus: EventBus,
     private readonly logger: ILogger,
-    /** Optional — when set + enabled, PRs go through the active provider. */
-    private readonly sourceControlService?: SourceControlService,
     /**
-     * Agent-native source control (doc §5). When wired, commit/push/PR
-     * post-processing runs through the ONE flow that also serves the Changes
-     * tab and agent-native chats — same branch policy, same base-branch sync,
-     * same conflict dry-run. The legacy `GitManager` path below stays only as
-     * a fallback for embedders that have not wired it.
+     * Agent-native source control (doc §5). Commit/push/PR post-processing
+     * runs through the ONE flow that also serves the Changes tab and
+     * agent-native chats — same branch policy, same base-branch sync, same
+     * conflict dry-run.
      */
-    private readonly scmFlow?: WorkflowScmFlowPort,
+    private readonly scmFlow: WorkflowScmFlowPort,
   ) {}
 
   /**
@@ -409,8 +405,6 @@ export class WorkflowPreprocessor {
     describe: (result: ScmFlowResult) => string,
   ): Promise<PostStepOutcome> {
     const flow = this.scmFlow;
-    if (!flow) throw new Error('Source-control flow service is not wired');
-
     const results: ScmFlowResult[] = [];
     const lines: string[] = [];
     const hint = this.scmHint(context);
@@ -443,37 +437,26 @@ export class WorkflowPreprocessor {
       this.logger.info(`[Preprocessor] Auto-committing all ${targets.length} run repos`);
     }
 
-    if (this.scmFlow) {
-      const push = config.push !== false;
-      return this.runScmFlow(
-        targets,
-        context,
-        (alias) => ({
-          alias,
-          commit: config.generateMessage
-            ? { generate: true }
-            : { message, generate: false },
-          push,
-          // No `pullRequest` here, so the sync step falls back to the repo's
-          // own default branch — which is what a commit-only step wants.
-        }),
-        (result) => {
-          const sha = result.commit?.sha.slice(0, 8);
-          const where = result.branch ?? result.readiness.branch ?? 'HEAD';
-          if (!sha) return `${result.alias}: nothing to commit on ${where}`;
-          return `${result.alias}: committed ${sha} on ${where}${result.pushed ? ' and pushed' : ''}`;
-        },
-      );
-    }
-
-    // ── Legacy fallback: embedders that have not wired the flow service. ──
-    const results: string[] = [];
-    for (const target of targets) {
-      const branch = context.featureBranches[target.alias];
-      await this.gitManager.commitAndPush(target.repoDir, message, branch);
-      results.push(`Committed and pushed ${target.alias} on branch ${branch ?? 'HEAD'}`);
-    }
-    return { output: results.join('; ') };
+    const push = config.push !== false;
+    return this.runScmFlow(
+      targets,
+      context,
+      (alias) => ({
+        alias,
+        commit: config.generateMessage
+          ? { generate: true }
+          : { message, generate: false },
+        push,
+        // No `pullRequest` here, so the sync step falls back to the repo's
+        // own default branch — which is what a commit-only step wants.
+      }),
+      (result) => {
+        const sha = result.commit?.sha.slice(0, 8);
+        const where = result.branch ?? result.readiness.branch ?? 'HEAD';
+        if (!sha) return `${result.alias}: nothing to commit on ${where}`;
+        return `${result.alias}: committed ${sha} on ${where}${result.pushed ? ' and pushed' : ''}`;
+      },
+    );
   }
 
   /** Explicit base > the codebase's default branch > let the flow resolve it. */
@@ -497,57 +480,30 @@ export class WorkflowPreprocessor {
       this.logger.info(`[Preprocessor] Auto-creating PR for all ${targets.length} run repos`);
     }
 
-    if (this.scmFlow) {
-      return this.runScmFlow(
-        targets,
-        context,
-        (alias) => {
-          const base = this.baseFor(config.baseBranch, alias, context);
-          return {
-            alias,
-            push: true,
-            pullRequest: {
-              ...(config.generateText
-                ? { generate: true }
-                : { title, body, generate: false }),
-              ...(base ? { base } : {}),
-              ...(config.draft !== undefined ? { draft: config.draft } : {}),
-            },
-          };
-        },
-        (result) => {
-          const pr = result.pullRequest;
-          return pr
-            ? `PR #${pr.number} created for ${result.alias}: ${pr.url}`
-            : `${result.alias}: no pull request was opened`;
-        },
-      );
-    }
-
-    // ── Legacy fallback: embedders that have not wired the flow service. ──
-    const results: string[] = [];
-    for (const target of targets) {
-      // Prefer the pluggable source-control provider when enabled; fall back
-      // to the legacy gh-CLI path on GitManager otherwise.
-      if (this.sourceControlService && (await this.sourceControlService.isEnabled())) {
-        const pr = await this.sourceControlService.createPullRequest({
-          repoDir: target.repoDir,
-          title,
-          body,
-          base: config.baseBranch,
-        });
-        results.push(`PR #${pr.number} created for ${target.alias}: ${pr.url}`);
-      } else {
-        const pr = await this.gitManager.createPullRequest(
-          target.repoDir,
-          title,
-          body,
-          config.baseBranch,
-        );
-        results.push(`PR #${pr.number} created for ${target.alias}: ${pr.url}`);
-      }
-    }
-    return { output: results.join('; ') };
+    return this.runScmFlow(
+      targets,
+      context,
+      (alias) => {
+        const base = this.baseFor(config.baseBranch, alias, context);
+        return {
+          alias,
+          push: true,
+          pullRequest: {
+            ...(config.generateText
+              ? { generate: true }
+              : { title, body, generate: false }),
+            ...(base ? { base } : {}),
+            ...(config.draft !== undefined ? { draft: config.draft } : {}),
+          },
+        };
+      },
+      (result) => {
+        const pr = result.pullRequest;
+        return pr
+          ? `PR #${pr.number} created for ${result.alias}: ${pr.url}`
+          : `${result.alias}: no pull request was opened`;
+      },
+    );
   }
 
   private async executePostRunScript(

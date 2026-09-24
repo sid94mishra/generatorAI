@@ -21,8 +21,10 @@ import {
   MockStageDefinitionRepository,
   MockStageEdgeRepository,
   MockWorkflowDefinitionRepository,
+  createFakeWorkspaceManager,
 } from './MockRepositories.js';
 import { EventBus } from '../src/events/EventBus.js';
+import { AdmissionController } from '../src/services/AdmissionController.js';
 import { DAGScheduler } from '../src/services/DAGScheduler.js';
 import type { StageExecutionService } from '../src/services/StageExecutionService.js';
 import type { SessionAllocator } from '../src/services/SessionAllocator.js';
@@ -63,6 +65,8 @@ describe('X-21 — a scheduled run starts from a clean execution context', () =>
       new DAGScheduler(stageDefRepo, edgeRepo, stageRunRepo),
       { executeStage: vi.fn(async () => {}) } as unknown as StageExecutionService,
       { releaseAll: vi.fn(async () => {}) } as unknown as SessionAllocator,
+      createFakeWorkspaceManager(),
+      new AdmissionController(),
     );
 
     await defRepo.create({

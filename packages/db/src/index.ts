@@ -478,6 +478,8 @@ import { DrizzleCheckpointRepository } from './repositories/CheckpointRepository
 import { DrizzleReviewRepository } from './repositories/ReviewRepository.js';
 import { DrizzlePlanRepository } from './repositories/PlanRepository.js';
 import { DrizzleAgentInteractionRepository } from './repositories/AgentInteractionRepository.js';
+import { RegisterRepository } from './repositories/RegisterRepository.js';
+import { EntryRepository } from './repositories/EntryRepository.js';
 
 export function createAllRepositories(db: AppDatabase) {
   return {
@@ -510,6 +512,9 @@ export function createAllRepositories(db: AppDatabase) {
     sequenceAllocator: new DrizzleSequenceAllocator(db),
     sessionAllocationRepo: new DrizzleSessionAllocationRepository(db),
     streamCursorRepo: new DrizzleStreamCursorRepository(db),
+    // W22 / W47 — durable execution engine storage.
+    registerRepo: new RegisterRepository(db),
+    entryRepo: new EntryRepository(db),
   };
 }
 

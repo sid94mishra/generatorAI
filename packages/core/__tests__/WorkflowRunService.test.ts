@@ -10,8 +10,10 @@ import {
   MockStageDefinitionRepository,
   MockStageEdgeRepository,
   MockWorkflowDefinitionRepository,
+  createFakeWorkspaceManager,
 } from './MockRepositories.js';
 import { EventBus } from '../src/events/EventBus.js';
+import { AdmissionController } from '../src/services/AdmissionController.js';
 import { DAGScheduler } from '../src/services/DAGScheduler.js';
 import type { StageExecutionService } from '../src/services/StageExecutionService.js';
 import type { SessionAllocator } from '../src/services/SessionAllocator.js';
@@ -92,6 +94,8 @@ describe('WorkflowRunService', () => {
       dagScheduler,
       stageExec,
       sessionAllocator,
+      createFakeWorkspaceManager(),
+      new AdmissionController(),
     );
 
     // Seed a definition with 2 stages (A → B)
@@ -773,7 +777,16 @@ describe('WorkflowRunService', () => {
       // matching real composition-root wiring.
       const pinnedDag = new DAGScheduler(stageDefRepo, edgeRepo, stageRunRepo, runRepo);
       const pinnedService = new WorkflowRunService(
-        runRepo, stageRunRepo, stageDefRepo, defRepo, eventBus, pinnedDag, stageExec, sessionAllocator,
+        runRepo,
+        stageRunRepo,
+        stageDefRepo,
+        defRepo,
+        eventBus,
+        pinnedDag,
+        stageExec,
+        sessionAllocator,
+        createFakeWorkspaceManager(),
+        new AdmissionController(),
       );
 
       const run = await pinnedService.createRun({ workflowDefinitionId: DEF_ID });

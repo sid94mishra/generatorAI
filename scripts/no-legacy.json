@@ -212,12 +212,66 @@
         "packages/shared/src/types/IPlatformClient.ts"
       ],
       "reason": "WP-1.2: IPlatformClient v1 session/workflow methods and hooks deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "(workflowRunService|stageExecutionService)\\.setWorkspaceManager|\\bsetAdmissionController\\b",
+      "reason": "WP-1.3: workspace manager and admission controller are required constructor deps"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bcancelledExecutions\\b|legacy in-memory iteration loop",
+      "paths": [
+        "packages/core/src/"
+      ],
+      "reason": "WP-1.3: AutomationService in-memory iteration loop / cancel Set deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "this\\.waiters\\b|in-memory-only",
+      "paths": [
+        "packages/core/src/services/HitlService.ts"
+      ],
+      "reason": "WP-1.3: HitlService in-memory waiter fallback deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "sourceControlService|gitManager\\.(commitAndPush|createPullRequest)",
+      "paths": [
+        "packages/core/src/services/WorkflowPreprocessor.ts"
+      ],
+      "reason": "WP-1.3: preprocessor GitManager commit/PR fallback deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "legacy auto-approve",
+      "paths": [
+        "packages/core/src/"
+      ],
+      "reason": "WP-1.3: SES legacy auto-approve deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "'runs', run(Id|\\.id), '(uploads|workspace|artifacts)'",
+      "paths": [
+        "packages/core/src/"
+      ],
+      "reason": "WP-1.3: legacy {artifactsDir}/runs/{id}/... directory fallback deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bSDK-9\\b|sandboxCleaner:",
+      "paths": [
+        "packages/sdk/src/",
+        "apps/server/src/"
+      ],
+      "reason": "WP-1.3: the SDK wires the sandbox like the server; createCoreServices takes `sandbox`"
     }
   ],
   "comments": {
     "phase": "01",
     "failFromPhase": null,
-    "baseline": 58,
+    "baseline": 45,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",

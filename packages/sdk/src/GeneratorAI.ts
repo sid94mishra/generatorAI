@@ -16,8 +16,14 @@ import {
   InMemoryMcpHub,
   WorkspaceManager,
   WorkflowOrchestrator,
-  WorkflowPreprocessor,
   ResultValidator,
+  AdmissionController,
+  createRunSandbox,
+  SourceControlRegistry,
+  SourceControlConfigService,
+  RepoReadinessService,
+  ScmTextGenerator,
+  SourceControlFlowService,
   ProjectService,
   CodebaseService,
   WorktreeService,
@@ -46,8 +52,14 @@ import {
   type HarnessType,
 } from '@generatorai/agent-harness-providers';
 import { createLogger, type ILogger } from '@generatorai/shared';
+import { createSecretStore } from '@generatorai/secrets';
 
 import { type GeneratorAIConfig, type ResolvedConfig, resolveConfig } from './config.js';
+
+/** The GitHub token the server also reads, seeded into source control when no account exists. */
+function githubToken(): string | undefined {
+  return process.env['GENERATORAI_GITHUB_TOKEN'] ?? process.env['GITHUB_TOKEN'] ?? process.env['GH_TOKEN'] ?? undefined;
+}
 
 /** `HarnessProviderConfig` option-bag key per harness type. */
 const PROVIDER_OPTIONS_KEY: Record<HarnessType, string> = {
@@ -370,6 +382,56 @@ export class GeneratorAI {
     const customToolRegistry = new CustomToolRegistry();
     const mcpHub = new InMemoryMcpHub();
 
+    // ── Workspace Manager ──
+    const workspacesDir = path.join(resolved.artifactsDir, 'workspaces');
+    fs.mkdirSync(workspacesDir, { recursive: true });
+    const workspaceManager = new WorkspaceManager(
+      repos.executionWorkspaceRepo,
+      repos.workspaceMountRepo,
+      repos.workspaceArtifactRepo,
+      { workspacesDir, defaultGitEnabled: true },
+      logger,
+      gitManager,
+      repos.worktreeRepo,
+    );
+
+    // ── Source control (accounts + the commit → PR flow), as on the server ──
+    // Account settings live in `<artifactsDir>/source-control.json`; tokens in
+    // the encrypted secret store beside it, never in the file.
+    const scmRegistry = new SourceControlRegistry();
+    const scmConfig = new SourceControlConfigService(scmRegistry, {
+      http: httpClient,
+      processRunner: scriptRunner,
+      secrets: createSecretStore({ dataDir: resolved.artifactsDir, logger }),
+      logger,
+      configDir: resolved.artifactsDir,
+      env: {
+        ...(githubToken() ? { githubToken: githubToken()! } : {}),
+        ...(process.env['GENERATORAI_GITHUB_HOST'] ?? process.env['COPILOT_GH_HOST']
+          ? { githubHost: (process.env['GENERATORAI_GITHUB_HOST'] ?? process.env['COPILOT_GH_HOST'])! }
+          : {}),
+      },
+    });
+    await scmConfig.load();
+    const scmFlow = new SourceControlFlowService({
+      git: gitManager,
+      registry: scmRegistry,
+      readiness: new RepoReadinessService({
+        git: gitManager,
+        registry: scmRegistry,
+        logger,
+        settings: () => scmConfig.getSettings(),
+      }),
+      text: new ScmTextGenerator({ harness, logger, generation: () => scmConfig.generation() }),
+      logger,
+      settings: () => scmConfig.getSettings(),
+    });
+
+    // ── Run sandbox (same provider choice as the server) ──
+    const sandbox = resolved.sandbox.enabled
+      ? await createRunSandbox({ provider: resolved.sandbox.preferDocker === false ? 'host' : 'auto' }, logger)
+      : null;
+
     // ── Core Services ──
     const services = createCoreServices({
       logger,
@@ -391,6 +453,13 @@ export class GeneratorAI {
       automationRepo: repos.automationRepo,
       automationExecutionRepo: repos.automationExecutionRepo,
       sessionAllocationRepo: repos.sessionAllocationRepo,
+      registerRepo: repos.registerRepo,
+      entryRepo: repos.entryRepo,
+      sandbox,
+      workspaceManager,
+      // W18 — lane sizes from measured machine capacity.
+      admissionController: new AdmissionController(),
+      scmFlow,
       config: {
         artifactsDir: resolved.artifactsDir,
         maxConcurrentStages: resolved.maxConcurrentStages,
@@ -400,23 +469,7 @@ export class GeneratorAI {
       chatExtensions: { customToolRegistry, mcpHub },
     });
 
-    // ── Workspace Manager + Late-Wire ──
-    const workspacesDir = path.join(resolved.artifactsDir, 'workspaces');
-    fs.mkdirSync(workspacesDir, { recursive: true });
-    const workspaceManager = new WorkspaceManager(
-      repos.executionWorkspaceRepo,
-      repos.workspaceMountRepo,
-      repos.workspaceArtifactRepo,
-      { workspacesDir, defaultGitEnabled: true },
-      logger,
-      gitManager,
-      repos.worktreeRepo,
-    );
-
-    // Late-wire workspace manager into services that were created before it
-    services.workflowRunService.setWorkspaceManager(workspaceManager);
     services.workflowRunService.setHookExecutor(services.hookExecutor);
-    services.stageExecutionService.setWorkspaceManager(workspaceManager);
 
     // ── Project & Codebase Management Services ──
     const projectService = new ProjectService(
@@ -455,13 +508,6 @@ export class GeneratorAI {
     const streamBroker = new StreamBroker(repos.streamCursorRepo, logger);
 
     // ── Workflow Orchestrator (full DAG execution) ──
-    const workflowPreprocessor = new WorkflowPreprocessor(
-      gitManager,
-      scriptRunner,
-      services.eventBus,
-      logger,
-    );
-
     const resultValidator = new ResultValidator(
       repos.chatMessageRepo,
       repos.stageRunRepo,
@@ -472,31 +518,20 @@ export class GeneratorAI {
     // Validation is owned by the run service, as on the server.
     services.workflowRunService.setResultValidator(resultValidator);
 
-    // SDK-9: the SDK does not yet wire sandbox providers (the server does). If
-    // the caller asked for a sandbox, warn instead of silently ignoring it so
-    // the no-op is visible rather than a false sense of isolation.
-    if (resolved.sandbox?.enabled) {
-      logger.warn(
-        '[GeneratorAI] sandbox.enabled=true was requested but the SDK runs stages WITHOUT a sandbox ' +
-        '(sandbox providers are server-only). Commands execute on the host. Run via the server for sandboxing.',
-      );
-    }
-
     const workflowOrchestrator = new WorkflowOrchestrator(
       services.workflowRunService,
       services.workflowDefinitionService,
-      workflowPreprocessor,
+      services.workflowPreprocessor,
       repos.workflowRunRepo,
       services.eventBus,
       logger,
       resolved.artifactsDir,
-      undefined, // sandboxLifecycleManager — not wired in SDK mode (SDK-9); see warning above
-      undefined, // sandboxProvider — not wired in SDK mode (SDK-9); see warning above
+      workspaceManager,
       worktreeService,
       projectService,
       projectConfigService,
-      workspaceManager,
       services.hookExecutor,
+      sandbox,
     );
 
     // ── Workflow Script Loader (if scripts directory exists) ──

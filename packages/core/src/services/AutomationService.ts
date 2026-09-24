@@ -169,14 +169,10 @@ export class AutomationService {
    *  cover claim → dispatch → recompute-and-release, short enough that a
    *  crashed owner's lease expires before the next replica's tick. */
   private readonly leaseMs: number;
-  /** Tracks execution IDs that have been cancelled so background loops can bail out */
-  private cancelledExecutions = new Set<string>();
   /**
    * Phase 2, 2.9 — AbortController per in-flight execution. `cancelExecution`
-   * calls `.abort()` so downstream awaits (data-source HTTP fetches, sleeps,
-   * anything that accepts an AbortSignal) can exit immediately instead of
-   * waiting for the next boundary check on `cancelledExecutions`.
-   * The legacy Set is kept for sites that don't take a signal yet.
+   * calls `.abort()`; downstream awaits that take the signal exit at once,
+   * and the iteration loop checks `isCancelled` at every boundary.
    */
   private executionAborts = new Map<string, AbortController>();
 
@@ -188,6 +184,12 @@ export class AutomationService {
     private workflowDefinitionService: WorkflowDefinitionService,
     private eventBus: EventBus,
     private logger: ILogger,
+    /**
+     * W22 — iteration slots are written to the `entries` table up front and
+     * claimed atomically, so a 1000-row batch that dies at row 40 resumes at
+     * row 41 on restart (P0-41 fix).
+     */
+    private durableEngine: DurableExecutionEngine,
     private artifactsDir?: string,
     private dataSourceResolver?: DataSourceResolver,
     /**
@@ -198,13 +200,6 @@ export class AutomationService {
      * (or vice-versa).
      */
     private withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>,
-    /**
-     * W22 — durable execution engine. When supplied, iteration slots are
-     * written to the `entries` table up front and claimed atomically, so a
-     * 1000-row batch that dies at row 40 resumes at row 41 on restart
-     * (P0-41 fix). When absent, the legacy in-memory iteration loop runs.
-     */
-    private durableEngine?: DurableExecutionEngine,
     /**
      * Item 38 — due-row poller tuning. Optional so existing embedders (and
      * the composition-root call site, which constructs this positionally)
@@ -820,6 +815,10 @@ export class AutomationService {
     // checks before starting a second loop over the same slots.
     const abortController = new AbortController();
     this.executionAborts.set(execution.id, abortController);
+    // A cancel that landed before this loop registered its controller is
+    // on the execution row; honour it.
+    const persisted = await this.executionRepo.getExecutionById(execution.id).catch(() => undefined);
+    if (persisted?.status === 'cancelled') abortController.abort();
 
     let completedCount = seed.completed;
     let failedCount = seed.failed;
@@ -830,11 +829,10 @@ export class AutomationService {
       const maxConcurrency = Math.max(1, automation.maxConcurrency);
 
       // ── W22 — Durable iteration claiming (P0-41 fix) ──────────
-      // When the durable engine is available, write all iteration slots up
-      // front so a restart can claim and resume any still-pending rows
-      // without losing work. On a resume `iterations` is empty and every slot
-      // already exists, so this is a no-op.
-      if (this.durableEngine && iterations.length > 0) {
+      // Write all iteration slots up front so a restart can claim and resume
+      // any still-pending rows without losing work. On a resume `iterations`
+      // is empty and every slot already exists, so this is a no-op.
+      if (iterations.length > 0) {
         const slots = iterations.map((iter, idx) => ({
           index: idx,
           variables: iter.variables,
@@ -851,43 +849,33 @@ export class AutomationService {
 
       // In batch/loop mode, maxConcurrency controls how many iterations run in parallel.
       // Within each iteration, workflows still run sequentially (they share context).
-      for (let batchStart = 0; ; batchStart += maxConcurrency) {
+      for (;;) {
         // Check if this execution has been cancelled before starting a new batch
-        if (this.cancelledExecutions.has(execution.id)) {
+        if (this.isCancelled(execution.id)) {
           this.logger.info(`[AutomationService] Execution ${execution.id} cancelled — stopping iteration loop`);
-          this.cancelledExecutions.delete(execution.id);
           return; // Exit early — cancelExecution already set terminal status
         }
 
-        // W22: when the durable engine is active, use atomic claim instead of
-        // slicing the in-memory array. This prevents duplicate iteration on
-        // restart (the claim is idempotent — already-claimed rows return null).
-        let iterBatch: IterationWorkItem[];
-        if (this.durableEngine) {
-          iterBatch = [];
-          for (let i = 0; i < maxConcurrency; i++) {
-            const claimed = this.durableEngine.claimNextIteration(execution.id);
-            if (!claimed) break;
-            // △ `claimed.index` — NOT a recomputed loop counter. The claim
-            // returns whichever slot is lowest-pending, which after a resume
-            // (or any concurrent claimer) is not `batchStart + offset`:
-            // deriving it from the loop counter labelled recovered rows with
-            // the wrong `iterationIndex`, so the execution-run rows no longer
-            // matched the data the iteration actually ran on.
-            iterBatch.push({
-              index: claimed.index,
-              variables: claimed.variables,
-              label: claimed.label,
-              slotId: claimed.id,
-            });
-          }
-          if (iterBatch.length === 0) break; // No more pending iterations.
-        } else {
-          if (batchStart >= iterations.length) break;
-          iterBatch = iterations
-            .slice(batchStart, batchStart + maxConcurrency)
-            .map((iter, offset) => ({ index: batchStart + offset, ...iter }));
+        // W22: atomic claim — idempotent, so a restart never runs an
+        // iteration twice (already-claimed rows return null).
+        const iterBatch: IterationWorkItem[] = [];
+        for (let i = 0; i < maxConcurrency; i++) {
+          const claimed = this.durableEngine.claimNextIteration(execution.id);
+          if (!claimed) break;
+          // △ `claimed.index` — NOT a recomputed loop counter. The claim
+          // returns whichever slot is lowest-pending, which after a resume
+          // (or any concurrent claimer) is not a loop-counter offset:
+          // deriving it from the loop counter labelled recovered rows with
+          // the wrong `iterationIndex`, so the execution-run rows no longer
+          // matched the data the iteration actually ran on.
+          iterBatch.push({
+            index: claimed.index,
+            variables: claimed.variables,
+            label: claimed.label,
+            slotId: claimed.id,
+          });
         }
+        if (iterBatch.length === 0) break; // No more pending iterations.
 
         const iterResults = await Promise.allSettled(
           iterBatch.map(async (iter) => {
@@ -900,7 +888,7 @@ export class AutomationService {
               // Run all workflows sequentially within this iteration
               for (const workflowDefId of automation.workflowIds) {
                 // Check cancellation before each workflow run within an iteration
-                if (this.cancelledExecutions.has(execution.id)) {
+                if (this.isCancelled(execution.id)) {
                   slotError = 'execution cancelled';
                   return;
                 }
@@ -936,7 +924,7 @@ export class AutomationService {
                 }
               }
             } finally {
-              if (iter.slotId && this.durableEngine) {
+              if (iter.slotId) {
                 this.durableEngine.completeIteration(
                   iter.slotId,
                   slotError ? 'failed' : 'completed',
@@ -978,10 +966,7 @@ export class AutomationService {
       }
 
       // Execution complete — but skip if already cancelled by cancelExecution
-      if (this.cancelledExecutions.has(execution.id)) {
-        this.cancelledExecutions.delete(execution.id);
-        return;
-      }
+      if (this.isCancelled(execution.id)) return;
 
       // Item 28 — three-way outcome. The previous `else → completed` branch
       // reported a batch with 999 failures and 1 success as `completed`,
@@ -1022,10 +1007,7 @@ export class AutomationService {
 
     } catch (err) {
       // Skip overwriting if execution was cancelled
-      if (this.cancelledExecutions.has(execution.id)) {
-        this.cancelledExecutions.delete(execution.id);
-        return;
-      }
+      if (this.isCancelled(execution.id)) return;
 
       await this.executionRepo.updateExecution(execution.id, {
         status: 'failed',
@@ -1077,7 +1059,6 @@ export class AutomationService {
     opts: { activeIterationIndexes?: number[] } = {},
   ): Promise<{ resumed: boolean; reclaimed: number[]; remaining: number; completion: Promise<void> }> {
     const idle = { reclaimed: [] as number[], remaining: 0, completion: Promise.resolve() };
-    if (!this.durableEngine) return { resumed: false, ...idle };
     // Already being driven in this process — a second loop over the same slots
     // would claim nothing but would double-write the terminal status.
     if (this.executionAborts.has(executionId)) return { resumed: false, ...idle };
@@ -1234,7 +1215,7 @@ export class AutomationService {
         backoff = Math.min(backoff * backoffMultiplier, maxBackoff);
       } catch (err) {
         // Cancellation short-circuits everything.
-        if (this.cancelledExecutions.has(executionId)) {
+        if (this.isCancelled(executionId)) {
           await this.executionRepo.updateExecutionRun(execRun.id, {
             status: 'cancelled',
             attemptCount: attempt,
@@ -1291,6 +1272,11 @@ export class AutomationService {
     return 'workflow_failed';
   }
 
+  /** True once `cancelExecution` aborted this execution's in-flight drive. */
+  private isCancelled(executionId: string): boolean {
+    return this.executionAborts.get(executionId)?.signal.aborted === true;
+  }
+
   /**
    * Sleep for `ms` but bail out early if the execution is cancelled.
    */
@@ -1298,7 +1284,7 @@ export class AutomationService {
     const step = 250;
     let waited = 0;
     while (waited < ms) {
-      if (this.cancelledExecutions.has(executionId)) return;
+      if (this.isCancelled(executionId)) return;
       const chunk = Math.min(step, ms - waited);
       await new Promise((r) => setTimeout(r, chunk));
       waited += chunk;
@@ -1579,10 +1565,9 @@ export class AutomationService {
       throw new Error(`Cannot cancel execution in ${execution.status} state`);
     }
 
-    // Signal the background runExecution loop to stop creating new iterations.
-    // AbortController unblocks awaiters that opted into the signal;
-    // `cancelledExecutions` remains as a legacy boundary-poll fallback.
-    this.cancelledExecutions.add(executionId);
+    // Signal the background loop to stop creating new iterations and unblock
+    // awaiters that took the signal. A loop not yet registered reads the
+    // cancelled status off the row when it starts.
     this.executionAborts.get(executionId)?.abort();
 
     // Cancel all pending/running workflow runs in this execution
