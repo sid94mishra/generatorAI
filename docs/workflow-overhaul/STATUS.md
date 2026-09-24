@@ -16,6 +16,36 @@ The coding agent updates this file in every phase PR.
 | 08 Dynamic workflows | wf/phase-08-dynamic | gated (PD-21) | | | |
 | 09 Release gate | wf/phase-09-release | not started | | | |
 
+## Phase 00 checklist
+
+| WP | Item | Done |
+|---|---|---|
+| 0.1 | Backup + definition export script works on a DB copy | [x] |
+| 0.2 | Testkit package + characterisation tests (KNOWN-BUG markers) | [ ] |
+| 0.3 | `pnpm workflow:e2e` end to end on :3111 | [ ] |
+| 0.4 | Dependencies + generator scaffold | [ ] |
+| 0.5 | Golden session snapshots committed | [ ] |
+| 0.6 | Invariant scripts wired (report-only) | [ ] |
+| 0.6b | Migration lock + lint, fresh-DB baseline + tests | [ ] |
+| 0.8 | Run cleanup script exercised on a DB copy | [ ] |
+| 0.7 | Baseline recorded below | [ ] |
+
+## Backup procedure (P00 WP-0.1; run before any migration WP touches a real DB)
+
+1. Stop the developer server on :3100. The script refuses to run while :3100 is listening.
+2. `pnpm workflow:backup`. Defaults: `--db` is `$DB_PATH`, else `<repo>/packages/db/data/generatorai.db`; `--out-root` is `$GENERATORAI_BACKUP_ROOT`, else `~/.generatorai-backups`.
+   It copies `generatorai.db`, `-wal` and `-shm` with `fs.copyFileSync` into `<root>/<YYYYMMDD-HHMMSS>/`, opens the **copy** read-only, and writes:
+   - `workflow-definitions.json`: every definition with its stages and edges, as raw rows (lossless);
+   - `manifest.json`: the copied files and row counts (sessions and chat_messages by owner_type, chats, definitions, stages, edges, runs, stage runs, automations).
+3. Check that `workflow-definitions.json` `count` equals `SELECT COUNT(*) FROM workflow_definitions`, and keep the printed counts: the migration WPs compare chat counts against them.
+4. Run `pnpm workflow:cleanup-runs` (WP-0.8) before v55/v57 purge run history.
+
+Exercised on 2026-09-24 against a copy of the developer DB (`C:/gaiwf/dbcopy`, backup root `C:/gaiwf/backups`):
+- schema v52 (the developer DB is two migrations behind head v54);
+- sessions `{chat: 392, stage_run: 1931}`; chat_messages `{chat: 841, stage_run: 7337}`; chats 362;
+- workflow_definitions 343 (export `count` 343, 867 stages); stage_edges 473;
+- workflow_runs 1113; stage_runs 2809; automations 50.
+
 ## Baseline (filled in P00 WP-0.7)
 - typecheck:
 - tests per package (pass/fail/skip):
