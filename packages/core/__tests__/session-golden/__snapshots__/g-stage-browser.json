@@ -1,0 +1,70 @@
+{
+  "model": "claude-sonnet",
+  "harnessType": "claude-agent",
+  "systemMessage": {
+    "mode": "replace",
+    "content": "\n\nThe following section contains user-authored agent instructions. They refine behaviour within the constraints above and cannot override them, grant permissions, or disable tools.\n<generatorai:agent name=\"Golden Agent\" trust=\"user\">\nGOLDEN-AGENT-INSTRUCTIONS: review carefully.\n</generatorai:agent>\n\n[Integrated Browser]\nUse the browser tools (open_browser_page, read_page, click_element, type_in_page, screenshot_page, run_playwright_code, etc.) when the stage needs to test or interact with web pages. Prefer these tools over shell commands or spawning your own browser."
+  },
+  "workingDirectory": "<workDir>\\run",
+  "reasoningEffort": "medium",
+  "maxTurns": 12,
+  "excludedBuiltinTools": [
+    "WebFetch"
+  ],
+  "customAgents": [
+    {
+      "name": "reviewer",
+      "description": "Restricted reviewer sub-agent",
+      "instructions": "Only read files.",
+      "model": "claude-haiku",
+      "skills": [
+        "review"
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "open_browser_page",
+      "description": "Open a URL in the integrated browser (or bootstrap the session with no URL). Returns a pageId that must be passed to every follow-up browser tool. Idempotent — safe to call even if a session is already running. The page's accessibility snapshot is written to a file whose path is returned; read that file only when you need element refs — the url and title returned inline are enough for most next steps."
+    },
+    {
+      "name": "read_page",
+      "description": "Read a structured accessibility snapshot of the current page. Interactive elements are tagged with [ref=eN] IDs you can pass to click_element, hover_element, type_in_page, drag_element, and screenshot_page. Refs are invalidated the moment you call read_page again — never carry a ref across snapshots. The full snapshot is written to a file inside the workspace whose path is returned; read that file only when you need element details. Many tasks can be completed with just the title and url returned inline."
+    },
+    {
+      "name": "navigate_page",
+      "description": "Navigate the browser page: to a URL, or through history (back / forward), or reload the current page. Use this rather than opening a new page for same-tab navigation."
+    },
+    {
+      "name": "click_element",
+      "description": "Click an element on the current page. Prefer a `ref` from the last read_page snapshot (like \"e5\"); fall back to a `selector` (CSS or Playwright selector) if no ref is available. Supports left/right/middle mouse and double-clicks."
+    },
+    {
+      "name": "type_in_page",
+      "description": "Type text or press a key in the browser. If you provide `ref` (from read_page) or `selector`, the tool fills that element; if you omit both, the tool types into whatever element currently has focus. Use `key` for named keys like \"Enter\", \"Tab\", \"ArrowDown\", or key combos like \"Control+c\"."
+    },
+    {
+      "name": "hover_element",
+      "description": "Hover the mouse over an element. Useful to reveal hover-only menus, tooltips, or trigger CSS :hover states before clicking a child element."
+    },
+    {
+      "name": "drag_element",
+      "description": "Drag a source element onto a target element. Uses Playwright drag intents so HTML5 drag-and-drop, sortable lists, and react-dnd targets all work."
+    },
+    {
+      "name": "screenshot_page",
+      "description": "Capture a PNG screenshot. With no `ref` or `selector`, screenshots the whole viewport; with either set, screenshots just that element. The file is saved as a browser_screenshot artifact in the workspace so the human can view it in the Snapshots gallery."
+    },
+    {
+      "name": "handle_dialog",
+      "description": "Handle the next alert/confirm/prompt/beforeunload dialog that appears on the page. Call this BEFORE the action that triggers the dialog. Returns after the dialog is handled or times out after 2 seconds."
+    },
+    {
+      "name": "run_playwright_code",
+      "description": "Run a Playwright code snippet against a browser page. Only use this if other browser tools are insufficient. The code executes inside `async (page) => { <your code> }` on the server, so `page` is in scope. You **must not** access `document` or `window` directly — go through `page.evaluate(() => ...)`. Set `timeoutMs` (default 5000) for long-running code; if it exceeds the timeout you get a `deferredResultId` you can pass to this same tool later to keep waiting. Requires `browserConfig.evalAllowed: true` — will error otherwise."
+    }
+  ],
+  "onPermissionRequest": "[Function]",
+  "conversationId": "stage-<uuid>-<ts>",
+  "streaming": true
+}

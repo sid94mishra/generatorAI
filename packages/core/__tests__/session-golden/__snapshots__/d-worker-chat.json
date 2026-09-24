@@ -1,0 +1,19 @@
+{
+  "conversationId": "chat-<uuid>-<ts>",
+  "model": "claude-sonnet",
+  "harnessType": "claude-agent",
+  "streaming": true,
+  "systemMessage": {
+    "mode": "append",
+    "content": "USER-SYSTEM-MESSAGE"
+  },
+  "availableTools": [
+    "Read",
+    "Edit"
+  ],
+  "excludedTools": [
+    "my_custom_tool"
+  ],
+  "reasoningEffort": "high",
+  "mcpServers": {}
+}
