@@ -363,7 +363,7 @@ export class StageExecutionService {
   ): Promise<ResolvedAgentProjection> {
     const ref = stageDef.agentRef ?? workflowharnessConfig?.agentRef;
     if (!this.agentResolver) {
-      if (!ref && !stageDef.agentName) return AgentResolver.empty();
+      if (!ref) return AgentResolver.empty();
       // Fail loudly: silently running a stage without its agent's skills and
       // tool policy is worse than not running it.
       throw new StageExecutionError(
@@ -379,7 +379,6 @@ export class StageExecutionService {
 
     const projection = await this.agentResolver.resolve({
       ...(ref ? { agentRef: ref } : {}),
-      ...(stageDef.agentName ? { agentName: stageDef.agentName } : {}),
       ...(workflowharnessConfig ? { baseHarnessConfig: workflowharnessConfig } : {}),
       // The stage's harness overrides are the MOST specific level, so they go
       // in as `runtimeOverrides` — that single slot carries both the stage's

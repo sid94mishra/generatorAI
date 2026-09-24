@@ -103,7 +103,7 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
     ? Object.keys(stage.harnessConfigOverrides.mcpServers).length
     : 0;
   const validationCount = stage.resultValidation?.length ?? 0;
-  const agentName = stage.agentName;
+  const agentRef = stage.agentRef;
   const isStructured = stage.outputFormat === 'json';
 
   return (
@@ -215,10 +215,10 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
         <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5">
           {promptCount} {promptLabel}{promptCount !== 1 ? 's' : ''}
         </span>
-        {agentName && (
-          <Tooltip content={`Delegated to agent: ${agentName}`} side="top">
+        {agentRef && (
+          <Tooltip content={`Driven by agent: ${agentRef}`} side="top">
             <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
-              <Bot className="h-3 w-3" />{agentName}
+              <Bot className="h-3 w-3" />{agentRef}
             </span>
           </Tooltip>
         )}

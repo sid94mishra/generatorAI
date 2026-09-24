@@ -7405,12 +7405,6 @@
         "constraints": "—"
       },
       {
-        "field": "agentName",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "skills",
         "type": "array of object",
         "presence": "optional",
@@ -9535,12 +9529,6 @@
       {
         "field": "stages[].outputFormat",
         "type": "\"text\" / \"json\"",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].agentName",
-        "type": "string",
         "presence": "optional",
         "constraints": "—"
       },
@@ -13960,12 +13948,6 @@
         "constraints": "—"
       },
       {
-        "field": "stages[].config.agentName",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "stages[].config.contextFilter",
         "type": "\"full\" / \"summary-only\" / \"none\" / \"structured\"",
         "presence": "optional",
@@ -16210,12 +16192,6 @@
         "constraints": "—"
       },
       {
-        "field": "agentName",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "agentRef",
         "type": "string",
         "presence": "optional",
@@ -17054,12 +17030,6 @@
       {
         "field": "stages[].approvalRequired",
         "type": "boolean",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].agentName",
-        "type": "string",
         "presence": "optional",
         "constraints": "—"
       },

@@ -382,7 +382,7 @@ const def = await ai.workflows.create(workflow(b => b
   .stage('label', s => s
     .name('Apply label')
     .prompts([{ text: 'Set GitHub label to {{classify.output}}' }])
-    .agentName('github-labeler')
+    .agentRef('project:github-labeler')
   )
 
   .edge('classify', 'summarize', 'on_success')

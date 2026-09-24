@@ -263,7 +263,6 @@ export class WorkflowDefinitionService {
       timeoutMs: params.timeoutMs,
       condition: params.condition,
       contextFilter: params.contextFilter,
-      agentName: params.agentName,
       resultValidation: params.resultValidation,
       expectedOutput: params.expectedOutput,
       outputSchema: params.outputSchema,
@@ -436,7 +435,7 @@ export class WorkflowDefinitionService {
         // Item 7 — this used to hand-pick six fields off each template stage
         // (name/order/prompts/hooks/harnessConfigOverrides/variables), which
         // silently dropped retryPolicy, timeoutMs, condition, contextFilter,
-        // agentName, resultValidation, expectedOutput, outputSchema,
+        // resultValidation, expectedOutput, outputSchema,
         // agentRef, contextSources and outputFormat — including
         // `approvalRequired`, so an approval-gated template ran unattended.
         // `templateStageToCreateParams` is the SAME mapper `importFromJSON`
@@ -526,7 +525,6 @@ export class WorkflowDefinitionService {
         ...(stage.expectedOutput ? { expectedOutput: stage.expectedOutput } : {}),
         ...(stage.outputSchema ? { outputSchema: stage.outputSchema } : {}),
         ...(stage.approvalRequired ? { approvalRequired: true } : {}),
-        ...(stage.agentName ? { agentName: stage.agentName } : {}),
         ...(stage.agentRef ? { agentRef: stage.agentRef } : {}),
         isLocked: false,
       })) as WorkflowTemplate['stages'],

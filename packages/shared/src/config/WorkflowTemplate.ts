@@ -328,7 +328,6 @@ export const WorkflowTemplateStageSchema = z.object({
   expectedOutput: z.string().max(5000).optional(),
   outputSchema: z.record(z.unknown()).optional(),
   approvalRequired: z.boolean().optional(),
-  agentName: z.string().optional(),
   agentRef: z.string().max(128).optional(),
 
   /** Whether the user can modify this stage's prompts */
@@ -423,7 +422,6 @@ export function templateStageToCreateParams(
     contextFilter: stage.contextFilter ?? undefined,
     contextSources: stage.contextSources ?? undefined,
     outputFormat: stage.outputFormat ?? undefined,
-    agentName: stage.agentName ?? undefined,
     agentRef: stage.agentRef ?? undefined,
     resultValidation: stage.resultValidation ?? undefined,
     expectedOutput: stage.expectedOutput ?? undefined,

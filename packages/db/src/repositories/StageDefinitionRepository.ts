@@ -62,7 +62,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
         contextFilter: stage.contextFilter ?? 'summary-only',
         contextSources: stage.contextSources ?? null,
         outputFormat: stage.outputFormat ?? 'text',
-        agentName: stage.agentName ?? null,
         agentRef: stage.agentRef ?? null,
         resultValidation: stage.resultValidation ?? null,
         expectedOutput: stage.expectedOutput ?? null,
@@ -130,7 +129,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
     if (updates.contextFilter !== undefined) values['contextFilter'] = updates.contextFilter;
     if (updates.contextSources !== undefined) values['contextSources'] = updates.contextSources;
     if (updates.outputFormat !== undefined) values['outputFormat'] = updates.outputFormat;
-    if (updates.agentName !== undefined) values['agentName'] = updates.agentName;
     if (updates.agentRef !== undefined) values['agentRef'] = updates.agentRef ?? null;
     if (updates.resultValidation !== undefined) values['resultValidation'] = updates.resultValidation;
     if (updates.expectedOutput !== undefined) values['expectedOutput'] = updates.expectedOutput;
@@ -204,7 +202,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
       contextFilter: (row.contextFilter as ContextFilter) ?? 'summary-only',
       contextSources: (safeJsonColumn(row.contextSources, jsonArray, { fallback: undefined }) ?? undefined) as string[] | undefined,
       outputFormat: (row.outputFormat ?? 'text') as 'text' | 'json',
-      agentName: row.agentName ?? undefined,
       agentRef: row.agentRef ?? undefined,
       resultValidation: (safeJsonColumn(row.resultValidation, jsonArray, { fallback: undefined }) ?? undefined) as ResultValidationRule[] | undefined,
       expectedOutput: row.expectedOutput ?? undefined,

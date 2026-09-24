@@ -118,7 +118,6 @@ since functions can't be serialized — it's validated separately at runtime.
 | stages[].config.hooks[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
 | stages[].config.variables | map of unknown | `optional` | — |
 | stages[].config.harnessConfigOverrides | map of unknown | `optional` | — |
-| stages[].config.agentName | string | `optional` | — |
 | stages[].config.contextFilter | "full" / "summary-only" / "none" / "structured" | `optional` | — |
 | stages[].config.contextSources | array of string | `optional` | — |
 | stages[].config.outputFormat | "text" / "json" | `optional` | — |
@@ -271,7 +270,6 @@ const StageOutputSchema = z.object({
     hooks: z.array(HookDefinitionOutputSchema).optional(),
     variables: z.record(z.unknown()).optional(),
     harnessConfigOverrides: z.record(z.unknown()).optional(),
-    agentName: z.string().optional(),
     contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
     contextSources: z.array(z.string()).optional(),
     outputFormat: z.enum(['text', 'json']).optional(),

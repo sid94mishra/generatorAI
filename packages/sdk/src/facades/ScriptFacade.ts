@@ -105,7 +105,6 @@ export class ScriptFacade {
           ? { ...stage.config.variables, ...(options?.variables ?? {}) }
           : options?.variables,
         harnessConfigOverrides: stage.config.harnessConfigOverrides,
-        agentName: stage.config.agentName,
         agentRef: stage.config.agentRef,
         contextFilter: stage.config.contextFilter,
         contextSources: stage.config.contextSources, // SCRIPT-2 parity

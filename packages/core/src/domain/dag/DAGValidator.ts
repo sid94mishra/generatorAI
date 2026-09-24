@@ -53,7 +53,7 @@ export function validateDAG(
   // A stage bound to an agent is exempt: the agent's instructions are the
   // instruction, so the stage is complete without a separate prompt.
   for (const stage of stages) {
-    const hasAgent = !!stage.agentRef || !!stage.agentName;
+    const hasAgent = !!stage.agentRef;
     if ((!stage.prompts || stage.prompts.length === 0) && !hasAgent) {
       warn({
         code: 'stage-without-prompts',

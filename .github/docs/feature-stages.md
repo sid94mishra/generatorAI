@@ -32,7 +32,6 @@ timeoutMs?                    int
 condition                     JSON StageCondition
 contextFilter?                enum 'full' | 'summary-only' | 'none' | 'structured'
 contextSources?               JSON string[]                  (explicit predecessor list)
-agentName?                    text                            (route through a named custom agent)
 resultValidation?             JSON ResultValidationRule[]
 outputFormat?                 enum 'text' | 'json'
 outputSchema?                 JSON                            (JSON schema for outputFormat=json)
@@ -100,7 +99,7 @@ System MCP servers shipped (8 in [templates/system/mcp-servers.json](../../templ
 
 ### 2.6 Custom Agent
 
-`AgentSelector.tsx` writes both `agentName: string` and `harnessConfigOverrides.customAgents: CustomAgentConfig[]`. Used to route the stage through one named project-scoped agent.
+The stage binds a first-class agent with `agentRef` (a portable `scope:slug` ref, e.g. `project:reviewer`). The agent brings its instructions, skills, MCP servers and tool policy; `harnessConfigOverrides.agentOverrides` adds a per-stage delta.
 
 ### 2.7 Variables (stage-local)
 
@@ -280,7 +279,7 @@ Body (`CreateStageSchema`):
   condition?: StageCondition;
   contextFilter?: 'full' | 'summary-only' | 'none' | 'structured';
   contextSources?: string[];
-  agentName?: string;
+  agentRef?: string;
   resultValidation?: ResultValidationRule[];
   outputFormat?: 'text' | 'json';
   outputSchema?: object;
@@ -314,7 +313,7 @@ generatorai workflow stage delete <defId> <stageId>
 
 ## 7. Edge cases & gotchas
 
-1. **`agentName` without project link** — `AgentSelector` filters by the workflow's `projectId`. A `null` project means no project agents are listed; only system agents.
+1. **`agentRef` without project link** — the agent picker filters by the workflow's `projectId`. A `null` project lists only global and system agents.
 2. **`prompts[].source = 'file'` with bad path** — the stage fails at preflight; the prompt is read at execution time via `WorkflowPreprocessor`. Path is resolved against the project's prompts directory.
 3. **`outputFormat = 'json'` but `outputSchema` missing** — JSON parse is still attempted; on parse failure the validation step fails. Always pair them.
 4. **`contextFilter = 'structured'` but predecessor had `outputFormat: 'text'`** — falls back to `summary-only` automatically.

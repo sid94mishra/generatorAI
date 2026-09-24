@@ -23,7 +23,6 @@ export class StageBuilder {
   private _name = '';
   private _description?: string;
   private _prompts: PromptDefinition[] = [];
-  private _agentName?: string;
   private _agentRef?: string;
   private _timeoutMs?: number;
   private _retryPolicy?: RetryPolicy;
@@ -92,18 +91,10 @@ export class StageBuilder {
     return this;
   }
 
-  /** Delegate this stage to a named agent. */
-  agent(agentName: string): this {
-    this._agentName = agentName;
-    return this;
-  }
-
   /**
-   * Bind a FIRST-CLASS agent by its portable `scope:slug` ref (AGT-01).
-   *
-   * Distinct from `.agent(name)`, which is the legacy artifact-name lookup:
-   * a ref survives export/import because it does not depend on the row id,
-   * and it brings the agent's skills, MCP servers and tool policy with it.
+   * Bind a FIRST-CLASS agent by its portable `scope:slug` ref (AGT-01). A ref
+   * survives export/import because it does not depend on the row id, and it
+   * brings the agent's skills, MCP servers and tool policy with it.
    */
   agentRef(ref: string): this {
     this._agentRef = ref;
@@ -239,7 +230,7 @@ export class StageBuilder {
     if (!this._name) {
       throw new Error(`Stage '${localId}' must have a name (call .name())`);
     }
-    if (this._prompts.length === 0 && !this._agentName && !this._agentRef) {
+    if (this._prompts.length === 0 && !this._agentRef) {
       throw new Error(`Stage '${localId}' must have at least one prompt or an agent`);
     }
 
@@ -253,7 +244,6 @@ export class StageBuilder {
         hooks: this._hooks.length > 0 ? this._hooks : undefined,
         variables: this._variables,
         harnessConfigOverrides: this._harnessOverrides,
-        agentName: this._agentName,
         agentRef: this._agentRef,
         contextFilter: this._contextFilter,
         contextSources: this._contextSources,

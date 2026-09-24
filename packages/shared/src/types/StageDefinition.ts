@@ -103,8 +103,6 @@ export interface StageDefinition {
    * Default: 'text'
    */
   outputFormat?: 'text' | 'json';
-  /** Name of the agent to delegate this stage to. @deprecated superseded by `agentRef`. */
-  agentName?: string;
   /** Portable `scope:slug` ref of the agent driving this stage. */
   agentRef?: string;
   /** Skills specifically for this stage */
@@ -175,7 +173,6 @@ export interface CreateStageParams {
   timeoutMs?: number;
   condition?: StageCondition;
   contextFilter?: ContextFilter;
-  agentName?: string;
   /** Portable `scope:slug` ref of the agent driving this stage. `null` clears it. */
   agentRef?: string | null;
   skills?: StageSkillReference[];

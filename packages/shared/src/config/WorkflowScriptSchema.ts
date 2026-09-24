@@ -89,7 +89,6 @@ const StageOutputSchema = z.object({
     hooks: z.array(HookDefinitionOutputSchema).optional(),
     variables: z.record(z.unknown()).optional(),
     harnessConfigOverrides: z.record(z.unknown()).optional(),
-    agentName: z.string().optional(),
     contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
     contextSources: z.array(z.string()).optional(),
     outputFormat: z.enum(['text', 'json']).optional(),

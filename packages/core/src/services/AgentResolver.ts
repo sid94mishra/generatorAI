@@ -40,8 +40,6 @@ import type { ArtifactCatalog } from './ArtifactCatalog.js';
 export interface ResolveAgentInput {
   /** Portable `scope:slug` ref of the driving agent. */
   agentRef?: string | undefined;
-  /** Legacy `stage.agentName` fallback, matched against agent slug/name. */
-  agentName?: string | undefined;
   overrides?: AgentOverrides | undefined;
   baseHarnessConfig?: Partial<HarnessConfig> | undefined;
   runtimeOverrides?: Partial<HarnessConfig> | undefined;
@@ -281,15 +279,6 @@ export class AgentResolver {
         return null;
       }
       return found;
-    }
-    if (input.agentName) {
-      // Legacy `stage.agentName`: match by slug across project → global → system.
-      const candidates = await this.agentRepo.list({ enabledOnly: true });
-      const byName = candidates.find(
-        (a) => a.slug === input.agentName || a.name === input.agentName,
-      );
-      if (byName) return byName;
-      warnings.push({ code: 'AGENT_NOT_FOUND', params: { ref: input.agentName } });
     }
     return null;
   }

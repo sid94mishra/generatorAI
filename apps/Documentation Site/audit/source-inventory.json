@@ -2577,35 +2577,35 @@
       "method": "POST",
       "path": "/api/workflow-scripts/:id/run",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 194,
+      "line": 193,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/reload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 352,
+      "line": 350,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/:id/reload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 364,
+      "line": 362,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/upload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 391,
+      "line": 389,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/validate",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 440,
+      "line": 438,
       "mounted": true
     },
     {

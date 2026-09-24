@@ -269,7 +269,7 @@
     },
     {
       "phase": "01",
-      "pattern": "\b(gitRepositories|GitRepositoryConfig|cloneRepositories|WorkflowRunProfileSchema|WorkflowRunProfile|SystemWorkflowTemplate|SystemStageTemplate|defaultGitConfig)\b",
+      "pattern": "\\b(gitRepositories|GitRepositoryConfig|cloneRepositories|WorkflowRunProfileSchema|WorkflowRunProfile|SystemWorkflowTemplate|SystemStageTemplate|defaultGitConfig)\\b",
       "paths": [
         "packages/core/src/services/Workflow",
         "packages/core/src/services/Stage",
@@ -284,14 +284,35 @@
     },
     {
       "phase": "01",
-      "pattern": "\bcreateWorktrees\b",
+      "pattern": "\\bcreateWorktrees\\b",
       "reason": "WP-1.4: createWorktrees deleted (never read); useWorktree is the switch"
+    },
+    {
+      "phase": "01",
+      "pattern": "stage(Def)?\\.agentName|input\\.agentName|this\\._agentName|config\\.agentName|agent\\(agentName",
+      "reason": "WP-1.4: stage agentName, StageBuilder.agent() and the resolver name-slug path deleted; agentRef"
+    },
+    {
+      "phase": "01",
+      "pattern": "agentName",
+      "paths": [
+        "packages/shared/src/types/StageDefinition.ts",
+        "packages/shared/src/config/WorkflowTemplate.ts",
+        "packages/shared/src/builders/StageBuilder.ts",
+        "packages/core/src/services/AgentResolver.ts",
+        "packages/core/src/domain/dag/",
+        "packages/db/src/repositories/StageDefinitionRepository.ts",
+        "packages/sdk/src/facades/ScriptFacade.ts",
+        "apps/web/src/components/workflow/StageNode.tsx",
+        "apps/web/src/stores/workflowBuilderStore.ts"
+      ],
+      "reason": "WP-1.4: stage agentName deleted"
     }
   ],
   "comments": {
     "phase": "01",
     "failFromPhase": null,
-    "baseline": 33,
+    "baseline": 31,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",

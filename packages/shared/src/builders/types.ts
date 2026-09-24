@@ -130,7 +130,6 @@ export interface StageOutput {
     }>;
     variables?: Record<string, unknown>;
     harnessConfigOverrides?: Partial<HarnessConfig>;
-    agentName?: string;
     /** AGT-01 — portable `scope:slug` ref of a first-class agent. */
     agentRef?: string;
     contextFilter?: ContextFilter;

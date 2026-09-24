@@ -142,7 +142,6 @@ export function createWorkflowScriptRoutes(container: Container): Router {
             ? { ...stage.config.variables, ...(variables ?? {}) }
             : variables,
           harnessConfigOverrides: stage.config.harnessConfigOverrides,
-          agentName: stage.config.agentName,
           agentRef: stage.config.agentRef,
           contextFilter: stage.config.contextFilter,
           // SCRIPT-2: forward contextSources (.contextFrom([...]) in scripts) —
@@ -275,7 +274,6 @@ export function createWorkflowScriptRoutes(container: Container): Router {
             ? { ...stage.config.variables, ...(resolvedVars) }
             : resolvedVars,
           harnessConfigOverrides: stage.config.harnessConfigOverrides,
-          agentName: stage.config.agentName,
           agentRef: stage.config.agentRef,
           contextFilter: stage.config.contextFilter,
           // SCRIPT-2: forward contextSources (.contextFrom([...]) in scripts) —

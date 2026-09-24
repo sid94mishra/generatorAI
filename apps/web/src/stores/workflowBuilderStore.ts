@@ -651,7 +651,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     // the scripts it is supposed to be equivalent to.
     for (const node of state.nodes) {
       const stage = node.data.stage;
-      const hasAgent = !!stage.agentRef || !!stage.agentName;
+      const hasAgent = !!stage.agentRef;
       if ((!stage.prompts || stage.prompts.length === 0) && !hasAgent) {
         errors.push({
           type: 'missing_prompts',

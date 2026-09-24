@@ -644,7 +644,6 @@ Zod schema for creating a StageDefinition
 | contextFilter | "full" / "summary-only" / "none" / "structured" | `optional` | — |
 | contextSources | array of string | `optional` | maxLength 50 |
 | outputFormat | "text" / "json" | `optional` | — |
-| agentName | string | `optional` | — |
 | skills | array of object | `optional` | maxLength 10 |
 | skills[] | object | `required` | unknown keys: strip |
 | skills[].name | string | `required` | min 1 |
@@ -1023,7 +1022,6 @@ Zod schema for importing a full workflow from a JSON file upload
 | stages[].contextFilter | "full" / "summary-only" / "none" / "structured" | `optional` | — |
 | stages[].contextSources | array of string | `optional` | maxLength 50 |
 | stages[].outputFormat | "text" / "json" | `optional` | — |
-| stages[].agentName | string | `optional` | — |
 | stages[].skills | array of object | `optional` | maxLength 10 |
 | stages[].skills[] | object | `required` | unknown keys: strip |
 | stages[].skills[].name | string | `required` | min 1 |
@@ -1516,8 +1514,6 @@ export const CreateStageSchema = z.object({
   contextSources: z.array(z.string().min(1).max(200)).max(50).optional(),
   /** Output format: 'text' for summary, 'json' for schema-validated JSON */
   outputFormat: z.enum(['text', 'json']).optional(),
-  /** Agent name to delegate this stage to */
-  agentName: z.string().optional(),
   /** Skills specifically for this stage */
   skills: z.array(SkillDefinitionSchema).max(10).optional(),
   /** Per-stage result validation rules */
@@ -1534,7 +1530,7 @@ export const CreateStageSchema = z.object({
   agentMode: AgentModeSchema.optional(),
   /** Integrated Browser overrides for this stage (deep-merged with workflow-level). */
   browserConfig: BrowserConfigSchema.optional(),
-  /** Portable `scope:slug` ref of the agent driving this stage. Supersedes `agentName`. */
+  /** Portable `scope:slug` ref of the agent driving this stage. */
   agentRef: z.string().max(128).optional().nullable(),
 });
 
@@ -1588,7 +1584,6 @@ const ImportStageSchema = z.object({
   contextSources: z.array(z.string().min(1).max(200)).max(50).optional(),
   /** Output format: 'text' for summary, 'json' for schema-validated JSON */
   outputFormat: z.enum(['text', 'json']).optional(),
-  agentName: z.string().optional(),
   skills: z.array(SkillDefinitionSchema).max(10).optional(),
   /** Per-stage result validation rules */
   resultValidation: z.array(ResultValidationRuleSchema).max(20).optional(),
@@ -1604,7 +1599,7 @@ const ImportStageSchema = z.object({
   agentMode: AgentModeSchema.optional(),
   /** Integrated Browser overrides for this stage (deep-merged with workflow-level). */
   browserConfig: BrowserConfigSchema.optional(),
-  /** Portable `scope:slug` ref of the agent driving this stage. Supersedes `agentName`. */
+  /** Portable `scope:slug` ref of the agent driving this stage. */
   agentRef: z.string().max(128).optional(),
 });
 

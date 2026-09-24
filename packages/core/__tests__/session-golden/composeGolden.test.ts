@@ -155,7 +155,7 @@ function goldenProjection(): ResolvedAgentProjection {
 }
 
 const fakeResolver = {
-  resolve: async (input: { agentRef?: string; agentName?: string }) =>
+  resolve: async (input: { agentRef?: string }) =>
     input.agentRef === AGENT_REF ? goldenProjection() : AgentResolver.empty(),
 } as unknown as AgentResolver;
 

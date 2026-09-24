@@ -375,7 +375,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | expectedOutput | string | `optional` | max 5000 |
 | outputSchema | map of unknown | `optional` | — |
 | approvalRequired | boolean | `optional` | — |
-| agentName | string | `optional` | — |
 | agentRef | string | `optional` | max 128 |
 | isLocked | boolean | `default false` | — |
 
@@ -524,7 +523,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | stages[].expectedOutput | string | `optional` | max 5000 |
 | stages[].outputSchema | map of unknown | `optional` | — |
 | stages[].approvalRequired | boolean | `optional` | — |
-| stages[].agentName | string | `optional` | — |
 | stages[].agentRef | string | `optional` | max 128 |
 | stages[].isLocked | boolean | `default false` | — |
 | edges | array of object | `default []` | — |
@@ -924,7 +922,6 @@ export const WorkflowTemplateStageSchema = z.object({
   expectedOutput: z.string().max(5000).optional(),
   outputSchema: z.record(z.unknown()).optional(),
   approvalRequired: z.boolean().optional(),
-  agentName: z.string().optional(),
   agentRef: z.string().max(128).optional(),
 
   /** Whether the user can modify this stage's prompts */
@@ -1019,7 +1016,6 @@ export function templateStageToCreateParams(
     contextFilter: stage.contextFilter ?? undefined,
     contextSources: stage.contextSources ?? undefined,
     outputFormat: stage.outputFormat ?? undefined,
-    agentName: stage.agentName ?? undefined,
     agentRef: stage.agentRef ?? undefined,
     resultValidation: stage.resultValidation ?? undefined,
     expectedOutput: stage.expectedOutput ?? undefined,
