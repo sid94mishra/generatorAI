@@ -259,7 +259,7 @@ export const CreateStageSchema = z.object({
   iterationConfig: IterationConfigSchema.optional(),
   /** When true, pause the stage in `awaiting_input` after completion for human review before advancing the DAG. Default false. */
   approvalRequired: z.boolean().optional(),
-  /** Per-stage agent mode ('auto' | 'plan'). Accepts the legacy 'interactive' alias. */
+  /** Per-stage agent mode ('auto' | 'plan'). */
   agentMode: AgentModeSchema.optional(),
   /** Integrated Browser overrides for this stage (deep-merged with workflow-level). */
   browserConfig: BrowserConfigSchema.optional(),
@@ -328,7 +328,7 @@ const ImportStageSchema = z.object({
   iterationConfig: IterationConfigSchema.optional(),
   /** When true, pause after completion for human review before advancing. */
   approvalRequired: z.boolean().optional(),
-  /** Per-stage agent mode ('auto' | 'plan'). Accepts the legacy 'interactive' alias. */
+  /** Per-stage agent mode ('auto' | 'plan'). */
   agentMode: AgentModeSchema.optional(),
   /** Integrated Browser overrides for this stage (deep-merged with workflow-level). */
   browserConfig: BrowserConfigSchema.optional(),

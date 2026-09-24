@@ -19,7 +19,7 @@ import {
   UpdateChatSchema,
   UpdateChatSourcesSchema,
   SetChatPermissionModeSchema,
-  coerceAgentMode,
+  isAgentMode,
 } from '@generatorai/shared';
 import type { ChatMessage, ChatSourceControlOptions, PlanDocument } from '@generatorai/shared';
 
@@ -499,11 +499,9 @@ export function createChatApiRoutes(container: Container): Router {
       if (projectId !== undefined) updates.projectId = projectId;
       if (harnessConfig !== undefined) updates.harnessConfig = harnessConfig;
       if (status !== undefined && status !== 'archived') updates.status = status;
-      // PLN-01 — sticky per-chat composer defaults. `coerceAgentMode` also
-      // folds the pre-rename `interactive` alias onto `auto`.
-      const coercedMode = coerceAgentMode(defaultAgentMode);
-      if (coercedMode) {
-        updates.defaultAgentMode = coercedMode;
+      // PLN-01 — sticky per-chat composer defaults.
+      if (isAgentMode(defaultAgentMode)) {
+        updates.defaultAgentMode = defaultAgentMode;
       }
       if (permissionMode !== undefined) {
         // Raising a chat to `bypassPermissions` turns the approval gate OFF

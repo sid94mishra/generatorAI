@@ -307,12 +307,26 @@
         "apps/web/src/stores/workflowBuilderStore.ts"
       ],
       "reason": "WP-1.4: stage agentName deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(LEGACY_MODE_ALIASES|coerceAgentMode)\\b",
+      "reason": "WP-1.4: the `interactive` agent-mode alias is gone; AgentMode is `auto` | `plan`",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/db/src/repositories/",
+        "packages/sdk/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "apps/"
+      ]
     }
   ],
   "comments": {
     "phase": "01",
     "failFromPhase": null,
-    "baseline": 31,
+    "baseline": 29,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",

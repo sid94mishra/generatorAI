@@ -144,7 +144,6 @@ export {
   DEFAULT_AGENT_MODE,
   AGENT_MODES,
   isAgentMode,
-  coerceAgentMode,
   PLAN_ACTIONS,
   isPlanAction,
   TERMINAL_INTERACTION_STATUSES,

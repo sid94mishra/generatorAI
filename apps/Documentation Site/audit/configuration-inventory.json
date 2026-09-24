@@ -673,9 +673,9 @@
     "fields": [
       {
         "field": "(value)",
-        "type": "string",
+        "type": "\"auto\" / \"plan\"",
         "presence": "required",
-        "constraints": "transform"
+        "constraints": "—"
       }
     ]
   },
@@ -1678,9 +1678,9 @@
       },
       {
         "field": "defaultAgentMode",
-        "type": "string",
+        "type": "\"auto\" / \"plan\"",
         "presence": "optional",
-        "constraints": "transform"
+        "constraints": "—"
       },
       {
         "field": "permissionMode",
@@ -2459,9 +2459,9 @@
       },
       {
         "field": "defaultAgentMode",
-        "type": "string",
+        "type": "\"auto\" / \"plan\"",
         "presence": "optional",
-        "constraints": "transform"
+        "constraints": "—"
       },
       {
         "field": "permissionMode",
@@ -2719,9 +2719,9 @@
       },
       {
         "field": "mode",
-        "type": "string",
+        "type": "\"auto\" / \"plan\"",
         "presence": "optional",
-        "constraints": "transform"
+        "constraints": "—"
       }
     ]
   },
@@ -7526,9 +7526,9 @@
       },
       {
         "field": "agentMode",
-        "type": "string",
+        "type": "\"auto\" / \"plan\"",
         "presence": "optional",
-        "constraints": "transform"
+        "constraints": "—"
       },
       {
         "field": "browserConfig",
@@ -9654,9 +9654,9 @@
       },
       {
         "field": "stages[].agentMode",
-        "type": "string",
+        "type": "\"auto\" / \"plan\"",
         "presence": "optional",
-        "constraints": "transform"
+        "constraints": "—"
       },
       {
         "field": "stages[].browserConfig",

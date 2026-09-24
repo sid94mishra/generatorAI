@@ -664,7 +664,7 @@ Zod schema for creating a StageDefinition
 | iterationConfig.exitField | string | `optional` | — |
 | iterationConfig.maxIterations | number | `default 10` | int; min 1; max 100 |
 | approvalRequired | boolean | `optional` | — |
-| agentMode | string | `optional` | transform |
+| agentMode | "auto" / "plan" | `optional` | — |
 | browserConfig | object | `optional` | unknown keys: strict |
 | browserConfig.enabled | boolean | `optional` | — |
 | browserConfig.mode | "auto" / "native" / "screencast" | `optional` | — |
@@ -1042,7 +1042,7 @@ Zod schema for importing a full workflow from a JSON file upload
 | stages[].iterationConfig.exitField | string | `optional` | — |
 | stages[].iterationConfig.maxIterations | number | `default 10` | int; min 1; max 100 |
 | stages[].approvalRequired | boolean | `optional` | — |
-| stages[].agentMode | string | `optional` | transform |
+| stages[].agentMode | "auto" / "plan" | `optional` | — |
 | stages[].browserConfig | object | `optional` | unknown keys: strict |
 | stages[].browserConfig.enabled | boolean | `optional` | — |
 | stages[].browserConfig.mode | "auto" / "native" / "screencast" | `optional` | — |
@@ -1526,7 +1526,7 @@ export const CreateStageSchema = z.object({
   iterationConfig: IterationConfigSchema.optional(),
   /** When true, pause the stage in `awaiting_input` after completion for human review before advancing the DAG. Default false. */
   approvalRequired: z.boolean().optional(),
-  /** Per-stage agent mode ('auto' | 'plan'). Accepts the legacy 'interactive' alias. */
+  /** Per-stage agent mode ('auto' | 'plan'). */
   agentMode: AgentModeSchema.optional(),
   /** Integrated Browser overrides for this stage (deep-merged with workflow-level). */
   browserConfig: BrowserConfigSchema.optional(),
@@ -1595,7 +1595,7 @@ const ImportStageSchema = z.object({
   iterationConfig: IterationConfigSchema.optional(),
   /** When true, pause after completion for human review before advancing. */
   approvalRequired: z.boolean().optional(),
-  /** Per-stage agent mode ('auto' | 'plan'). Accepts the legacy 'interactive' alias. */
+  /** Per-stage agent mode ('auto' | 'plan'). */
   agentMode: AgentModeSchema.optional(),
   /** Integrated Browser overrides for this stage (deep-merged with workflow-level). */
   browserConfig: BrowserConfigSchema.optional(),

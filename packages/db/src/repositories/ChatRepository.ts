@@ -5,7 +5,7 @@
 import { count, eq } from 'drizzle-orm';
 import type { IChatRepository } from '@generatorai/core';
 import type { Chat, ChatLocalFolder, ChatStatus, BackgroundTaskMeta, BackgroundTaskStatus } from '@generatorai/shared';
-import { NotFoundError, StorageError, DEFAULT_AGENT_MODE, coerceAgentMode } from '@generatorai/shared';
+import { NotFoundError, StorageError, DEFAULT_AGENT_MODE, isAgentMode } from '@generatorai/shared';
 import { chats } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
@@ -276,7 +276,7 @@ export class DrizzleChatRepository implements IChatRepository {
       forkedAtTurnId: row.forkedAtTurnId ?? undefined,
       conversationSeed: row.conversationSeed ?? undefined,
       backgroundTask,
-      defaultAgentMode: coerceAgentMode(row.defaultAgentMode) ?? DEFAULT_AGENT_MODE,
+      defaultAgentMode: isAgentMode(row.defaultAgentMode) ? row.defaultAgentMode : DEFAULT_AGENT_MODE,
       permissionMode: (row.permissionMode as Chat['permissionMode']) ?? 'bypassPermissions',
       agentRef: row.agentRef ?? undefined,
       agentId: row.agentId ?? undefined,

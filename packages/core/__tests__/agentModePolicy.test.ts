@@ -13,7 +13,6 @@ import {
   AGENT_MODE_REGISTRY,
   DEFAULT_AGENT_MODE,
   agentModeDescriptor,
-  coerceAgentMode,
   isAgentMode,
   isStageReviewOutcome,
 } from '@generatorai/shared';
@@ -71,22 +70,14 @@ describe('agent mode registry', () => {
   });
 });
 
-describe('coerceAgentMode', () => {
-  it('accepts current modes', () => {
-    expect(coerceAgentMode('auto')).toBe('auto');
-    expect(coerceAgentMode('plan')).toBe('plan');
-  });
-
-  it('folds the pre-rename "interactive" alias onto auto', () => {
-    // Exported workflow definitions and older API clients still send this.
-    expect(coerceAgentMode('interactive')).toBe('auto');
+describe('isAgentMode', () => {
+  it('accepts exactly the current modes', () => {
+    expect(isAgentMode('auto')).toBe(true);
+    expect(isAgentMode('plan')).toBe(true);
+    // The pre-rename name is no longer accepted anywhere (P01 WP-1.4).
     expect(isAgentMode('interactive')).toBe(false);
-  });
-
-  it('returns undefined for junk so callers apply their own default', () => {
-    expect(coerceAgentMode('nope')).toBeUndefined();
-    expect(coerceAgentMode(undefined)).toBeUndefined();
-    expect(coerceAgentMode(42)).toBeUndefined();
+    expect(isAgentMode(undefined)).toBe(false);
+    expect(isAgentMode(42)).toBe(false);
   });
 });
 

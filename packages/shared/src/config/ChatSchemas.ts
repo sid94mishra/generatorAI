@@ -6,28 +6,10 @@ import { z } from 'zod';
 import { HARNESS_PROVIDER_IDS, REASONING_EFFORTS } from '../types/ProviderConfig.js';
 import { BrowserConfigSchema } from './BrowserConfigSchema.js';
 import { McpServerConfigSchema, AgentOverridesSchema } from './AgentSchemas.js';
-import { AGENT_MODES, coerceAgentMode, type AgentMode } from '../types/AgentMode.js';
+import { AGENT_MODES, type AgentMode } from '../types/AgentMode.js';
 
-/**
- * Agent mode, accepting the pre-rename `interactive` alias.
- *
- * Exported workflow definitions and older API clients still send
- * `'interactive'`; `coerceAgentMode` folds it onto `'auto'` so a single
- * boundary handles both without leaking the legacy value into the domain.
- */
-export const AgentModeSchema = z
-  .string()
-  .transform((v, ctx) => {
-    const mode = coerceAgentMode(v);
-    if (!mode) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Invalid agent mode. Allowed: ${AGENT_MODES.join(', ')}`,
-      });
-      return z.NEVER;
-    }
-    return mode;
-  }) as unknown as z.ZodType<AgentMode>;
+/** Agent mode: `auto` or `plan`. */
+export const AgentModeSchema = z.enum(AGENT_MODES as [AgentMode, ...AgentMode[]]);
 
 /** Agent harness configuration — provider-agnostic settings for LLM sessions */
 const AgentHarnessConfigSchema = z.object({

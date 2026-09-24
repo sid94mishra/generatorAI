@@ -1023,147 +1023,147 @@
       "method": "POST",
       "path": "/api/chats/:id/cancel",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 582,
+      "line": 580,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/prompt",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 615,
+      "line": 613,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/attachments/:artifactId",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 742,
+      "line": 740,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/messages",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 769,
+      "line": 767,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/transcript",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 799,
+      "line": 797,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/rewind",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 816,
+      "line": 814,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/fork",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 832,
+      "line": 830,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/background-tasks",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 866,
+      "line": 864,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/background-tasks/:taskId",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 877,
+      "line": 875,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/background-tasks/:taskId/cancel",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 888,
+      "line": 886,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/plans",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 907,
+      "line": 905,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/plans/:planId",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 918,
+      "line": 916,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/plans/:planId/content",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 942,
+      "line": 940,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/chats/:id/plans/:planId/content",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 977,
+      "line": 975,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/plans/:planId/comments",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1022,
+      "line": 1020,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/plans/:planId/decision",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1058,
+      "line": 1056,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/plans/:planId/save-to-workspace",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1112,
+      "line": 1110,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/interactions",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1145,
+      "line": 1143,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/interactions/:interactionId/respond",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1165,
+      "line": 1163,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/interactions/:interactionId/permission",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1200,
+      "line": 1198,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/chats/:id/permission-mode",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1233,
+      "line": 1231,
       "mounted": true
     },
     {
