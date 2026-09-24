@@ -23,7 +23,7 @@ This file tracks the implementation of every work package (WP) in the overhaul p
 
 | Phase | Title | Impl | Review | Gate | Commits | Notes |
 |---|---|---|---|---|---|---|
-| 00 | Baseline and safety net | todo | todo | todo | | |
+| 00 | Baseline and safety net | done | todo | pass | cbb9fb6..(0.7 commit) | Gate passes with the baseline exceptions recorded in STATUS.md. Deviations in DEVIATIONS.md (7 P00 rows). |
 | 01 | Spec v2, legacy purge, definitions | todo | todo | todo | | |
 | 02 | SessionComposer | todo | todo | todo | | |
 | 03 | Engine v2 | todo | todo | todo | | |
@@ -39,15 +39,15 @@ This file tracks the implementation of every work package (WP) in the overhaul p
 
 | WP | Task | Status | Review | Commit | Notes |
 |---|---|---|---|---|---|
-| 0.1 | Branch, backup script, definition export | todo | | | |
-| 0.2 | `@generatorai/workflow-testkit` + characterisation tests T1–T8 | todo | | | |
-| 0.3 | Isolated live E2E harness (`scripts/workflow-e2e/`) | todo | | | |
-| 0.4 | Dependencies and generators scaffold | todo | | | |
-| 0.5 | Golden session-composition snapshots | todo | | | |
-| 0.6 | Lint invariants (report-only) + `check-no-legacy` | todo | | | |
-| 0.6b | Migration lock + fresh-DB baseline | todo | | | |
-| 0.8 | Run-worktree cleanup script | todo | | | |
-| 0.7 | Failure baseline recorded in STATUS.md | todo | | | |
+| 0.1 | Branch, backup script, definition export | done | | cbb9fb6, b176da5 | No new branch (single `wf/overhaul` branch, see DEVIATIONS). `scripts/workflow-backup.mjs` (`pnpm workflow:backup`, `--db` / `--out-root` / `--port`): refuses while :3100 listens, copies db/-wal/-shm, exports definitions + stages + edges from the COPY, prints counts. Run on a copy of the dev DB: 343 definitions exported = `COUNT(*)`. 2 unit tests. |
+| 0.2 | `@generatorai/workflow-testkit` + characterisation tests T1–T8 | done | | 1d54024 | Reuses `createCoreServices` + the Drizzle repos over an in-memory `migrateDB`. ScriptedFauxHarness: per-stage `Turn[]` (text, toolCalls, usage, error, delayMs, hang, on). Helpers: runWorkflow, snapshotRun, killAndRestart, route-equivalent commands. VirtualClock drives scripted delays only; no service accepts a clock (list in STATUS). Not wired: WorkspaceManager / worktrees / checkpoints, AdmissionController, browser and agent services, the StreamBroker event store. 30 characterisation tests with `KNOWN-BUG W-xx` markers + 8 unit/smoke tests; 38 pass in ~20 s. New finding: `recover()` re-drives runs before it rehydrates the allocator (W-32 race). |
+| 0.3 | Isolated live E2E harness (`scripts/workflow-e2e/`) | done | | 577c19e | server.mjs (start/stop/status; kills only its own PID tree), run.mjs, scenario.mts, pair.mts, lib/client.mts, lib/db.mjs, scenarios.json (phase 00: T1, T2, T3, T7, T10-small), specs. Live claude-agent (haiku): all 5 PASS. T1 first failed on a harness bug (transcripts truncated at 2000 chars); the one-line fix landed in a61ebbe by mistake. Faux path (`GENERATORAI_LOAD_TEST_FAUX_HARNESS`): all 5 PASS. No stray server left. |
+| 0.4 | Dependencies and generators scaffold | done | | 59a8de5 | fast-check (core, testkit); ajv ^8.20 + ajv-formats ^3 (core); zod-to-json-schema 3.25.2 (root, pinned to zod 3); `scripts/generate-workflow-spec.ts --check` no-op + `pnpm generate:workflow-spec`. |
+| 0.5 | Golden session-composition snapshots | done | | cf9e8c9, 3a2b94a | `packages/core/__tests__/session-golden/composeGolden.test.ts`: 7 file snapshots (a–g), LF-pinned. Drifts asserted as KNOWN-DRIFT: W-50 (systemPromptAppend / maxTurns reach the provider only on resume), W-51 (replace wipes the author's message; stage instructions land before the browser block), W-52 (team restrictions dropped). |
+| 0.6 | Lint invariants (report-only) + `check-no-legacy` | done | | 468dbb2 | `check:workflow-invariants` (report-only; baseline 21 direct stage-status writes) and `check:no-legacy` (+ `scripts/no-legacy.json`, empty), both in `pnpm lint`. 4 unit tests. |
+| 0.6b | Migration lock + fresh-DB baseline | done | | a61ebbe | Head verified: v54 = BASELINE_VERSION. `migrations.lock.json` (54 entries, CRLF-normalised) + `check:migrations-lock` in lint. `pnpm db:baseline [--check]` writes baseline.sql + baseline.generated.ts. `migrateDB` routes: empty → baseline; at/above baseline → versioned only; older → legacy. 7 tests (fixture built at v52, not copied; see DEVIATIONS). Dev-DB copy v52 → v54: chats preserved. |
+| 0.8 | Run-worktree cleanup script | done | | 23fca90 | `pnpm workflow:cleanup-runs [--dry-run]` through WorktreeService.removeWorktree. Branches deleted only if merged or never pushed; orphans listed; writes `cleanup.log` + `cleanup.json`. Real run tested on a git fixture (3 tests). Dry run on the dev-DB copy: 2 worktree rows, 33 run branches (7 deletable, 26 checked out in orphan worktrees), 72 orphan dirs. |
+| 0.7 | Failure baseline recorded in STATUS.md | done | | (this commit) | §7 gate run once: typecheck 50/50; tests 27/31 packages green + 12 environmental baseline failures (symlink EPERM, CRLF autocrlf, POSIX paths, CLI TUI on Windows); lint green incl. 3 new checks; testkit 38/38; live E2E 5/5 (T1 after a judge fix); fresh-DB pass; Date.now() service list. |
 
 ## Phase 01: Spec v2, legacy purge, definition model
 

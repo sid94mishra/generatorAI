@@ -4,7 +4,7 @@ The coding agent updates this file in every phase PR.
 
 | Phase | Branch | Status | PR | Gate report | Notes |
 |---|---|---|---|---|---|
-| 00 Baseline | wf/phase-00-baseline | not started | | | |
+| 00 Baseline | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | Baseline section below | gate pass with the recorded baseline exceptions |
 | 01 Spec, legacy, definitions | wf/phase-01-spec-definitions | not started | | | |
 | 02 SessionComposer | wf/phase-02-session-composer | not started | | | |
 | 03 Engine v2 | wf/phase-03-engine-v2 | not started | | | |
@@ -21,14 +21,14 @@ The coding agent updates this file in every phase PR.
 | WP | Item | Done |
 |---|---|---|
 | 0.1 | Backup + definition export script works on a DB copy | [x] |
-| 0.2 | Testkit package + characterisation tests (KNOWN-BUG markers) | [ ] |
-| 0.3 | `pnpm workflow:e2e` end to end on :3111 | [ ] |
-| 0.4 | Dependencies + generator scaffold | [ ] |
-| 0.5 | Golden session snapshots committed | [ ] |
-| 0.6 | Invariant scripts wired (report-only) | [ ] |
-| 0.6b | Migration lock + lint, fresh-DB baseline + tests | [ ] |
-| 0.8 | Run cleanup script exercised on a DB copy | [ ] |
-| 0.7 | Baseline recorded below | [ ] |
+| 0.2 | Testkit package + characterisation tests (KNOWN-BUG markers) | [x] |
+| 0.3 | `pnpm workflow:e2e` end to end on :3111 | [x] |
+| 0.4 | Dependencies + generator scaffold | [x] |
+| 0.5 | Golden session snapshots committed | [x] |
+| 0.6 | Invariant scripts wired (report-only) | [x] |
+| 0.6b | Migration lock + lint, fresh-DB baseline + tests | [x] |
+| 0.8 | Run cleanup script exercised on a DB copy | [x] |
+| 0.7 | Baseline recorded below | [x] |
 
 ## Backup procedure (P00 WP-0.1; run before any migration WP touches a real DB)
 
@@ -47,11 +47,138 @@ Exercised on 2026-09-24 against a copy of the developer DB (`C:/gaiwf/dbcopy`, b
 - workflow_runs 1113; stage_runs 2809; automations 50.
 
 ## Baseline (filled in P00 WP-0.7)
-- typecheck:
-- tests per package (pass/fail/skip):
-- known failures:
-- live E2E report:
-- services reading `Date.now()` directly (for P03):
+
+The §7 gate was run once on 2026-09-24 at `wf/overhaul` @ 23fca90 (Windows 11, Node 26.8.2, pnpm 10.29.2).
+
+**1. `pnpm install --frozen-lockfile`:** pass.
+
+**2. `pnpm turbo typecheck`:** pass. 50/50 tasks, 2 min 27 s.
+
+**3. `pnpm turbo test --concurrency=2 --continue`:** 8 min 37 s.
+- 27 packages pass.
+- 4 packages fail, with 12 known baseline failures, listed below. Every one fails alone too, and every one lives in code P00 did not touch.
+
+| Package | Pass | Fail | Skip |
+|---|---|---|---|
+| agent-harness-providers | 698 | 0 | 0 |
+| agent-host | 48 | 0 | 0 |
+| auth | 45 | 0 | 0 |
+| browser-host | 8 | 0 | 11 |
+| changes | 46 | 0 | 0 |
+| checkpoints | 19 | 0 | 0 |
+| cli | 318 | **5** | 8 |
+| cli-core | 901 | 0 | 0 |
+| client-core | 297 | 0 | 0 |
+| client-runtime | 33 | 0 | 0 |
+| client-transport | 59 | 0 | 0 |
+| core | 1862 | **3** | 9 |
+| cua-host | 16 | 0 | 0 |
+| db | 136 | 0 | 4 |
+| design-tokens | 239 | 0 | 0 |
+| desktop | 193 | 0 | 1 |
+| git | 56 | **2** | 0 |
+| mcp-server | 18 | 0 | 0 |
+| mobile | 1099 | 0 | 0 |
+| pty-host | 17 | 0 | 0 |
+| relay | 20 | 0 | 0 |
+| relay-protocol | 18 | 0 | 0 |
+| review | 30 | 0 | 0 |
+| sdk | 8 | 0 | 0 |
+| secrets | 16 | 0 | 0 |
+| server | 554 | **2** | 0 |
+| shared | 322 | 0 | 0 |
+| source-control | 64 | 0 | 0 |
+| tui-kit | 99 | 0 | 0 |
+| web | 650 | 0 | 0 |
+| workflow-testkit | 38 | 0 | 0 |
+| root `scripts/__tests__` (`pnpm exec vitest run scripts --project node`) | 71 | 0 | 0 |
+
+**Known baseline failures.** Each is environmental on this machine, and each also fails when run alone:
+
+- **Windows symlink EPERM** (no symlink privilege):
+  - core `StageExecutionService.test.ts` › "delivers uploaded prompt files … without following symlinks";
+  - server `orchestrator-uploads.test.ts` › "refuses a symlinked destination …".
+- **CRLF checkouts** (`core.autocrlf=true` here and in the main checkout):
+  - server `csp.test.ts` › the theme-flash hash. `apps/web/index.html` is checked out with CRLF.
+  - git `GitClientScm.test.ts` › 2 merge tests. They expect `\n` and get `\r\n`.
+  - core `SourceControlFlowService.test.ts` › "(e) start → continue → abort …". Same `\r\n` cause.
+- **POSIX path assumption:** core `workflowPreprocessorClone.test.ts` › "clones the repository URL …" expects `/runs/run-1/target` and gets `\runs\run-1\target`.
+- **CLI TUI on Windows** (deterministic):
+  - cli `narrowWidths.test.ts` › 3 cases ("title bar missing");
+  - `tui-e2e.test.tsx` › "resets the cursor when a pane is replaced";
+  - `tui-sweep.test.ts` › "drives every binding without corrupting a frame".
+- Without `--continue`, `turbo test` stops at the first failing package (cli). The gate command must include `--continue`.
+
+**4. `pnpm lint`:** pass.
+- 27/27 turbo lint tasks pass, and so do the security, durability, docs, syncio and tokens checks.
+- The three new checks:
+  - `check:workflow-invariants`: **21** direct stage-status writes, report-only (`StageExecutionService` 15, `WorkflowRunService` 6);
+  - `check:no-legacy`: 0 patterns;
+  - `check:migrations-lock`: 54 locked and unchanged.
+
+**5. Hard gate: the testkit.** `pnpm --filter @generatorai/workflow-testkit test` passes: 38/38 in about 20 s (3 consecutive runs).
+
+**5. Advisory: the live E2E.** `pnpm workflow:e2e --phase 00 --provider claude-agent` (haiku, :3111).
+- Report `scripts/workflow-e2e/out/20260924-193343/report.json` (git-ignored; copy under `C:/gaiwf/e2e-reports/`):
+  - T2 PASS (140 s);
+  - T3 PASS (116 s);
+  - T7 PASS (157 s);
+  - T10-small PASS (227 s);
+  - T1 FAIL ×3 on a **harness bug**. The judge read transcripts truncated at 2000 chars, and the join's context message is longer. The run itself completed with all 8 stages done.
+- After the fix, `--only T1` passed: `out/20260924-195802/report.json`, 213 s.
+- Outcomes match F_live_tests §1 for these scenarios:
+  - T2 skips `C_stageref` and `C_bang_str` (W-31);
+  - T3: F failed r2, `S` skipped, the run completed;
+  - T7: context mechanics as in F.
+- Faux provider (`--provider faux`): all 5 PASS (`out/20260924-192950` + `out/20260924-193303`).
+- No server was left on :3111.
+
+**5b. Fresh DB:** pass.
+- `BaselineFreshDb.test.ts`:
+  - an empty DB reaches v54 through `baseline.sql` and matches `schema.ts` (tables, columns, types, NOT NULL);
+  - its DDL is identical to the historic path's;
+  - a built v52 fixture upgrades with its chats unchanged.
+- A copy of the developer DB (v52) migrated to v54 through the legacy route in 67 ms. Unchanged afterwards:
+  - sessions: chat 392 / stage_run 1931;
+  - chats: 362;
+  - chat_messages: 8178 rows, 10,993,605 bytes;
+  - definitions: 343.
+- Its DDL is **not** byte-identical to a fresh DB. The drift is historical and not caused by P00:
+  - `chats.selected_artifacts` and `stage_definitions.selected_artifacts` exist only on the upgraded DB;
+  - `conversation_instance_ownership.binding_origin` has default `'explicit'` there vs `'migrated-ambiguous'` fresh;
+  - the index `idx_idempotency_keys_scope_expires` there vs `idx_idempotency_keys_expires` fresh;
+  - three tables have a different column order.
+- P01's v55 must reconcile or tolerate these (see `SchemaConvergence.test.ts`).
+
+**6. `node scripts/check-no-legacy.mjs`:** pass. 0 banned patterns (P00 bans nothing).
+
+**Services that read the wall clock directly.** P03 removes these; none accepts a clock today, so the testkit's `VirtualClock` only drives scripted turn delays. Counts are `Date.now()` / `new Date()` call sites.
+
+| Service | `Date.now()` | `new Date()` | Timers |
+|---|---|---|---|
+| `WorkflowRunService` | 2 | 10 | reconciler `setInterval`, validation backoff `setTimeout` |
+| `StageExecutionService` | 5 | 26 | heartbeat `setInterval`, stage timeout, retry backoff |
+| `DurableExecutionEngine` | 6 | 0 | awakeable timeout `setTimeout` |
+| `DurableSleepService` | 3 | 1 | sweeper |
+| `HitlService` | 2 | 0 | |
+| `StartupRecoveryService` | 3 | 0 | |
+| `SessionAllocator` | 1 (conversation id) | 3 | |
+| `AdmissionController` | 3 | 0 | |
+| `AutomationService` | 0 | 12 | poll `setInterval` |
+| `AutomationRecoveryService` | 2 | 2 | idempotency sweep `setInterval` |
+| `DAGScheduler` | 0 | 1 | |
+| `WorkflowDefinitionService` | 0 | 2 | |
+| `EventBus` | 7 | 0 | |
+| db `StageRunRepository` / `WorkflowRunRepository` | 0 / 0 | 2 / 2 | |
+| db `RegisterRepository` / `EntryRepository` | 2 / 4 | 0 / 0 | |
+
+Two timing facts the testkit had to work around, which P03 should keep in mind:
+- `stage_runs.heartbeat_at` (and `started_at` / `completed_at`) have **one-second** precision, so any stale window under about 1.5 s reaps healthy stages;
+- routing is driven only by the reconciler tick (W-08). The testkit therefore runs a 20 ms tick and a 2 s stale window (200 ms × 10).
+
+**New findings during P00** (recorded against existing register items):
+- **W-32 boot-order race.** `StartupRecoveryService.recover()` re-drives interrupted runs (step 2) before it rehydrates `SessionAllocator` (step 4). A relaunched stage that reaches `allocateSession` first fails with `UNIQUE constraint failed: session_allocations.workflow_run_id`. Live, the ~2.5 s checkpoint capture usually hides it. Pinned by T8.
+- **W-17 finalize race.** The race is deterministic under the production 3 s tick: two validated root stages that both finish before the first tick. Pinned by T4.
 
 ## Migration versions (authoritative, RV-17)
 
