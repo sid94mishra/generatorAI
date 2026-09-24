@@ -9,6 +9,13 @@
  * differs from a fresh generation — the same contract as
  * `scripts/generate-schemas.ts`.
  *
+ * Why `zod-to-json-schema`: the monorepo's schemas are zod 3 (3.25.x, the
+ * `zod` import). zod 4's native `z.toJSONSchema()` only accepts zod 4
+ * schemas, so it cannot convert them. The root pins `zod` ^3.25.76 so the
+ * converter's zod peer resolves to the same zod 3 the schemas use. If the
+ * monorepo moves to zod 4, switch to `z.toJSONSchema()` and drop the
+ * dependency.
+ *
  * Until `@generatorai/workflow-spec` exists there is nothing to generate, so
  * both modes are a no-op that exits 0. It exists now so CI and `pnpm lint`
  * can wire the `--check` call once and never change it.

@@ -18,7 +18,7 @@ const fail = (message = 'provider exploded'): Turn => ({ error: { message, code:
 
 describe('T3 failure paths and edge types (current engine)', () => {
   it('retries with backoff on fresh sessions, then routes on_failure / on_completion / always', async () => {
-    engine = await createTestEngine({ script: { F: [fail(), fail(), fail()] } });
+    engine = await createTestEngine({ script: { F: [fail('boom-1'), fail('boom-2'), fail('boom-3')] } });
     const run = await engine.runWorkflow({
       name: 't3-failure-edges',
       sessionMode: 'auto',
@@ -42,7 +42,7 @@ describe('T3 failure paths and edge types (current engine)', () => {
 
     expect(snap.stages['F']!.status).toBe('failed');
     expect(snap.stages['F']!.retryCount).toBe(2);
-    expect(snap.stages['F']!.error).toBe('provider exploded');
+    expect(snap.stages['F']!.error).toBe('boom-3');
     expect(snap.stages['S']!.status).toBe('skipped');
     for (const n of ['Rec', 'OC', 'AL', 'Z']) expect(snap.stages[n]!.status).toBe('completed');
     // The failure was handled by an on_failure branch → the run completes.
@@ -54,8 +54,13 @@ describe('T3 failure paths and edge types (current engine)', () => {
     expect(new Set(attempts.map((c) => c.conversationId)).size).toBe(3);
     expect(attempts[1]!.startedAt - attempts[0]!.endedAt!).toBeGreaterThanOrEqual(90);
     expect(attempts[2]!.startedAt - attempts[1]!.endedAt!).toBeGreaterThanOrEqual(190);
-    // O-5: the row keeps no attempt history — one retryCount, one error.
-    expect(Object.keys(snap.stages['F']!.row)).not.toContain('attempts'); // KNOWN-BUG W-39 (no per-attempt record)
+    // O-5: no attempt history is kept. Only the last attempt's error survives,
+    // and there is no attempts table to hold the others.
+    const e = engine;
+    const stored = (text: string) =>
+      (e.sqlite.prepare(`SELECT COUNT(*) AS n FROM stage_runs WHERE error LIKE ?`).get(`%${text}%`) as { n: number }).n;
+    expect(stored('boom-1') + stored('boom-2')).toBe(0); // KNOWN-BUG W-39 (earlier attempts' errors are lost)
+    expect(e.sqlite.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'stage_attempts'`).get()).toBeUndefined(); // KNOWN-BUG W-39 (no per-attempt record)
   });
 
   it('an `always` cleanup turns an unhandled failure into a completed run', async () => {

@@ -19,31 +19,164 @@
   "tools": [
     {
       "name": "list_models",
-      "description": "List the models you can assign to background workers, each with a coarse priceTier (\"low\" | \"medium\" | \"high\"). Call this ONCE before your first wave, then pass a cost-appropriate \"model\" to each spawn_background_agent — cheap tiers for simple subtasks, expensive tiers only for hard reasoning."
+      "description": "List the models you can assign to background workers, each with a coarse priceTier (\"low\" | \"medium\" | \"high\"). Call this ONCE before your first wave, then pass a cost-appropriate \"model\" to each spawn_background_agent — cheap tiers for simple subtasks, expensive tiers only for hard reasoning.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "skipPermission": true,
+      "owner": "orchestrator:<uuid>"
     },
     {
       "name": "spawn_background_agent",
-      "description": "Spawn a background WORKER agent (a new chat/session) to complete ONE subtask. Returns { taskId } immediately; the worker runs independently and streams in its own pane. Provide a complete, self-contained brief: the worker inherits NOTHING except what you pass here. Include objective, self-contained context, and explicit boundaries to avoid overlap with sibling workers. Prefer referencing artifact paths (inputArtifacts) over pasting large content. If list_available_agents returns a specialised agent that fits the subtask, you MUST pass its `ref` as `agentRef` — naming the agent in your narration does NOT bind it, and a worker spawned without `agentRef` gets no instructions, skills or tool policy. Use check_background_agents to collect results."
+      "description": "Spawn a background WORKER agent (a new chat/session) to complete ONE subtask. Returns { taskId } immediately; the worker runs independently and streams in its own pane. Provide a complete, self-contained brief: the worker inherits NOTHING except what you pass here. Include objective, self-contained context, and explicit boundaries to avoid overlap with sibling workers. Prefer referencing artifact paths (inputArtifacts) over pasting large content. If list_available_agents returns a specialised agent that fits the subtask, you MUST pass its `ref` as `agentRef` — naming the agent in your narration does NOT bind it, and a worker spawned without `agentRef` gets no instructions, skills or tool policy. Use check_background_agents to collect results.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "taskName": {
+            "type": "string",
+            "description": "Short, unique-ish name shown in the UI."
+          },
+          "objective": {
+            "type": "string",
+            "description": "The ONE outcome this worker must produce."
+          },
+          "context": {
+            "type": "string",
+            "description": "ONLY the facts/decisions the worker needs. Self-contained, no \"see above\"."
+          },
+          "model": {
+            "type": "string",
+            "description": "Optional model/tier for the worker. Omit to use the default worker model."
+          },
+          "inputArtifacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Read-only artifact paths the worker may open."
+          },
+          "boundaries": {
+            "type": "string",
+            "description": "Explicit out-of-scope list to prevent duplicated work."
+          },
+          "budget": {
+            "type": "object",
+            "properties": {
+              "maxTokens": {
+                "type": "number"
+              },
+              "maxToolCalls": {
+                "type": "number"
+              }
+            }
+          },
+          "agentRef": {
+            "type": "string",
+            "description": "Optional `scope:slug` ref of a custom agent that should drive this worker (see list_available_agents). Gives the worker that agent's instructions, skills, MCP servers and tool policy. Omit for a generic worker."
+          }
+        },
+        "required": [
+          "taskName",
+          "objective"
+        ]
+      },
+      "skipPermission": true,
+      "owner": "orchestrator:<uuid>"
     },
     {
       "name": "check_background_agents",
-      "description": "Collect compact result digests for ALL your background workers. Pass wait=true to block until running workers finish (bounded by a timeout). Digests contain summary + artifact references, not full transcripts — open a referenced artifact only if you need more detail."
+      "description": "Collect compact result digests for ALL your background workers. Pass wait=true to block until running workers finish (bounded by a timeout). Digests contain summary + artifact references, not full transcripts — open a referenced artifact only if you need more detail.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "wait": {
+            "type": "boolean",
+            "description": "Block until running workers finish (bounded by timeout)."
+          }
+        }
+      },
+      "skipPermission": true,
+      "owner": "orchestrator:<uuid>"
     },
     {
       "name": "check_background_agent",
-      "description": "Get the compact result digest for ONE background worker by taskId. Pass wait=true to block until it finishes."
+      "description": "Get the compact result digest for ONE background worker by taskId. Pass wait=true to block until it finishes.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "The taskId returned by spawn_background_agent."
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "Block until this worker finishes (bounded by timeout)."
+          }
+        },
+        "required": [
+          "taskId"
+        ]
+      },
+      "skipPermission": true,
+      "owner": "orchestrator:<uuid>"
     },
     {
       "name": "send_to_background_agent",
-      "description": "Send a follow-up message to a background worker (resumes its context) — use to request a revision after reviewing its digest. Bounded by a per-worker review-round limit."
+      "description": "Send a follow-up message to a background worker (resumes its context) — use to request a revision after reviewing its digest. Bounded by a per-worker review-round limit.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "The taskId to send the follow-up to."
+          },
+          "followup": {
+            "type": "string",
+            "description": "The follow-up instruction / revision request."
+          }
+        },
+        "required": [
+          "taskId",
+          "followup"
+        ]
+      },
+      "skipPermission": true,
+      "owner": "orchestrator:<uuid>"
     },
     {
       "name": "list_background_agents",
-      "description": "List your background workers with their current statuses (running / needs_review / completed / failed)."
+      "description": "List your background workers with their current statuses (running / needs_review / completed / failed).",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "skipPermission": true,
+      "owner": "orchestrator:<uuid>"
     },
     {
       "name": "record_plan",
-      "description": "Record an implementation plan for the user to read. Returns immediately and does NOT pause you — after calling it, continue and implement the plan. Call it at most once per turn, and only when the user asked for a plan or the task is large enough to warrant one."
+      "description": "Record an implementation plan for the user to read. Returns immediately and does NOT pause you — after calling it, continue and implement the plan. Call it at most once per turn, and only when the user asked for a plan or the task is large enough to warrant one.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short imperative title, e.g. \"Add OAuth login\"."
+          },
+          "content": {
+            "type": "string",
+            "description": "The full plan as markdown, with Goal / Approach / Changes / Risks & edge cases / Verification sections."
+          }
+        },
+        "required": [
+          "title",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "skipPermission": true,
+      "owner": "plan-mode"
     }
   ],
   "excludedBuiltinTools": [

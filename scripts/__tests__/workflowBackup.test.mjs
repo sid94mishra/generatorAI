@@ -1,5 +1,5 @@
 // P00 WP-0.1 — `pnpm workflow:backup`. Runs under the root vitest "node"
-// project (`pnpm exec vitest run scripts` from the repo root).
+// project (`pnpm test:scripts`; `turbo test` runs it).
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
@@ -77,5 +77,30 @@ describe('workflow-backup', () => {
     } finally {
       srv.close();
     }
+  });
+});
+
+describe('workflow-backup safety (P00 review R15/R16)', () => {
+  it('detects a server listening on IPv6 only', async () => {
+    const { isPortListening } = await import('../workflow-backup.mjs');
+    const srv = net.createServer();
+    const ok = await new Promise((r) => {
+      srv.once('error', () => r(false));
+      srv.listen(0, '::1', () => r(true));
+    });
+    if (!ok) return; // no IPv6 loopback on this host
+    try {
+      expect(await isPortListening(srv.address().port)).toBe(true);
+    } finally {
+      srv.close();
+    }
+  });
+
+  it('never reuses a backup folder, even within the same millisecond', async () => {
+    const { createBackupDir } = await import('../workflow-backup.mjs');
+    const a = createBackupDir(dir);
+    const b = createBackupDir(dir);
+    expect(a).not.toBe(b);
+    expect(path.basename(a)).toMatch(/^\d{8}-\d{6}-\d{3}/);
   });
 });

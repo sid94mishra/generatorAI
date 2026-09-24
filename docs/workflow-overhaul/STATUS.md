@@ -91,7 +91,7 @@ The §7 gate was run once on 2026-09-24 at `wf/overhaul` @ 23fca90 (Windows 11, 
 | tui-kit | 99 | 0 | 0 |
 | web | 650 | 0 | 0 |
 | workflow-testkit | 38 | 0 | 0 |
-| root `scripts/__tests__` (`pnpm exec vitest run scripts --project node`) | 71 | 0 | 0 |
+| root `scripts/__tests__` (`pnpm test:scripts`, now also run by `turbo test` via `//#test:scripts`) | 28 | 0 | 0 |
 
 **Known baseline failures.** Each is environmental on this machine, and each also fails when run alone:
 
@@ -111,10 +111,11 @@ The §7 gate was run once on 2026-09-24 at `wf/overhaul` @ 23fca90 (Windows 11, 
 
 **4. `pnpm lint`:** pass.
 - 27/27 turbo lint tasks pass, and so do the security, durability, docs, syncio and tokens checks.
-- The three new checks:
-  - `check:workflow-invariants`: **21** direct stage-status writes, report-only (`StageExecutionService` 15, `WorkflowRunService` 6);
-  - `check:no-legacy`: 0 patterns;
+- The new checks (after the P00 review):
+  - `check:workflow-invariants`: **24** direct stage-status writes, report-only with a growth ratchet (`BASELINE = 24`). The rule was widened in R9 to also catch `batchUpdateStatus`, `!`/`?.` receivers and patch variables. The 24 are 18 `update({ status })`, 3 `updateStatus`, 2 `batchUpdateStatus` and 1 patch variable, in `StageExecutionService`, `WorkflowRunService` and `StartupRecoveryService`.
+  - `check:no-legacy`: 0 banned patterns. **64** legacy comments (`@deprecated` / `legacy` / `backward compat` / `fallback for old`) in the workflow module, report-only with a growth ratchet (`scripts/no-legacy.json` `comments.baseline`).
   - `check:migrations-lock`: 54 locked and unchanged.
+  - `check:db-baseline`: `baseline.sql` is up to date with the migrations.
 
 **5. Hard gate: the testkit.** `pnpm --filter @generatorai/workflow-testkit test` passes: 38/38 in about 20 s (3 consecutive runs).
 
@@ -135,22 +136,21 @@ The §7 gate was run once on 2026-09-24 at `wf/overhaul` @ 23fca90 (Windows 11, 
 
 **5b. Fresh DB:** pass.
 - `BaselineFreshDb.test.ts`:
-  - an empty DB reaches v54 through `baseline.sql` and matches `schema.ts` (tables, columns, types, NOT NULL);
+  - an empty DB reaches v54 through `baseline.sql` and matches `schema.ts` both ways. Declared → physical must match exactly. Physical → declared (extra columns, defaults, indexes, FKs) must match up to an explicit 20-entry allowlist (legacy `copilot_config*` columns, raw-SQL indexes, 5 indexes `schema.ts` declares that no migration creates, 2 defaults);
   - its DDL is identical to the historic path's;
-  - a built v52 fixture upgrades with its chats unchanged.
-- A copy of the developer DB (v52) migrated to v54 through the legacy route in 67 ms. Unchanged afterwards:
-  - sessions: chat 392 / stage_run 1931;
-  - chats: 362;
-  - chat_messages: 8178 rows, 10,993,605 bytes;
-  - definitions: 343.
-- Its DDL is **not** byte-identical to a fresh DB. The drift is historical and not caused by P00:
+  - two connections opening one empty file apply the baseline once (`BEGIN IMMEDIATE` + re-check);
+  - the **real developer schema** at v52 (`fixtures/schema-v52-dev.sql`, a schema-only dump with no user rows) plus synthetic chats upgrades via the legacy path with the rows unchanged, and converges on the fresh schema up to an explicit 8-entry drift allowlist that P01's v55 must empty;
+  - a v52 DB built by the migrations converges exactly.
+- **Repeatable real-DB check:** `pnpm workflow:dbcopy-upgrade [--db <path>]` (default `C:/gaiwf/dbcopy/generatorai.db`). It copies the DB to a temp dir, runs `migrateDB`, compares counts and sha256 hashes of every `chats` / `sessions` / `chat_messages` row, prints the schema drift, and exits 1 on any change.
+- 2026-09-24 result on the dev-DB copy: v52 → v54 via the legacy route in 63 ms. Chat rows are UNCHANGED (hashes match): chats 362; sessions 2323 (chat 392 / stage_run 1931); messages 8178.
+- The drift from that run is the same 8 entries as the test allowlist:
   - `chats.selected_artifacts` and `stage_definitions.selected_artifacts` exist only on the upgraded DB;
-  - `conversation_instance_ownership.binding_origin` has default `'explicit'` there vs `'migrated-ambiguous'` fresh;
-  - the index `idx_idempotency_keys_scope_expires` there vs `idx_idempotency_keys_expires` fresh;
-  - three tables have a different column order.
-- P01's v55 must reconcile or tolerate these (see `SchemaConvergence.test.ts`).
+  - `binding_origin` defaults to `'explicit'` there and `'migrated-ambiguous'` on a fresh DB;
+  - the index is named `idx_idempotency_keys_scope_expires` there and `idx_idempotency_keys_expires` fresh;
+  - the column order differs in `chats`, `stage_definitions` and `stage_runs`.
+- P01's v55 must reconcile these.
 
-**6. `node scripts/check-no-legacy.mjs`:** pass. 0 banned patterns (P00 bans nothing).
+**6. `node scripts/check-no-legacy.mjs`:** pass. 0 banned patterns (P00 bans nothing); 64 legacy comments, the recorded baseline.
 
 **Services that read the wall clock directly.** P03 removes these; none accepts a clock today, so the testkit's `VirtualClock` only drives scripted turn delays. Counts are `Date.now()` / `new Date()` call sites.
 
@@ -171,6 +171,10 @@ The §7 gate was run once on 2026-09-24 at `wf/overhaul` @ 23fca90 (Windows 11, 
 | `EventBus` | 7 | 0 | |
 | db `StageRunRepository` / `WorkflowRunRepository` | 0 / 0 | 2 / 2 | |
 | db `RegisterRepository` / `EntryRepository` | 2 / 4 | 0 / 0 | |
+| `HookExecutor` | 2 | 0 | hook timeout `setTimeout` |
+| `WorkflowPreprocessor` | 6 | 0 | |
+| `WorkflowScriptLoader` | 2 | 0 | script-load timeout `setTimeout` |
+| `WorkflowOrchestrator` | 0 | 1 | two safety `setTimeout`s (post-processing, completion wait) |
 
 Two timing facts the testkit had to work around, which P03 should keep in mind:
 - `stage_runs.heartbeat_at` (and `started_at` / `completed_at`) have **one-second** precision, so any stale window under about 1.5 s reaps healthy stages;

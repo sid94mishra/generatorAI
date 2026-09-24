@@ -6,7 +6,8 @@
 //                     [--retries 2] [--fresh] [--no-server] [--keep-server]
 //
 // 1. starts the isolated server on :3111 (server.mjs), unless --no-server;
-// 2. pairs ONE device into a fresh creds file under C:/gaiwf/creds/;
+// 2. pairs ONE device into a fresh creds file under C:/gaiwf/creds/ (deleted
+//    again when the run ends);
 // 3. runs every scenario the phase lists in scenarios.json, one at a time,
 //    each in its own `tsx scenario.mts` process (sequential, same creds);
 // 4. judges each result against `expect` (or `expectFaux`), retrying a
@@ -20,7 +21,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { E2E_ROOT, startServer, stopServer } from './server.mjs';
@@ -125,6 +126,9 @@ async function main() {
 
   let started = false;
   const cleanup = async () => {
+    // The device credential is only good for this run's server; never let
+    // them pile up (they are paired, all-scope device keys).
+    rmSync(creds, { force: true });
     if (started && !args['keep-server']) {
       started = false;
       await stopServer();

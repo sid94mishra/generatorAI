@@ -6,9 +6,10 @@
 // how definitions are stored. Before any of them runs against a developer
 // database, this script takes a restorable copy and a human-readable export:
 //
-//   1. Refuses to run while the server port (default 3100) is listening — a
-//      live server holds the WAL and would keep writing while we copy.
-//   2. Copies `<db>`, `<db>-wal` and `<db>-shm` into `<root>/<timestamp>/`
+//   1. Refuses to run while the server port (default 3100) is listening on
+//      IPv4 or IPv6 (a probe that times out counts as listening) — a live
+//      server holds the WAL and would keep writing while we copy.
+//   2. Copies `<db>`, `<db>-wal` and `<db>-shm` into a NEW `<root>/<YYYYMMDD-HHMMSS-mmm>/`
 //      with `fs.copyFileSync` (never rename: OneDrive-style EPERM, and the
 //      source must stay untouched).
 //   3. Opens the COPY read-only with better-sqlite3 (resolved from
@@ -66,20 +67,46 @@ export function defaultBackupRoot() {
   return process.env.GENERATORAI_BACKUP_ROOT || join(homedir(), '.generatorai-backups');
 }
 
-/** Resolves true when something accepts a TCP connection on 127.0.0.1:<port>. */
-export function isPortListening(port, host = '127.0.0.1', timeoutMs = 1500) {
+/**
+ * One TCP probe. A refused/unreachable connection is "free"; a connect is
+ * "listening"; a TIMEOUT is also treated as listening — a hung server still
+ * holds the WAL, so "could not tell" must never mean "safe to copy".
+ */
+function probe(port, host, timeoutMs) {
   return new Promise((res) => {
     const sock = connect({ port, host });
     const done = (v) => { sock.destroy(); res(v); };
-    sock.setTimeout(timeoutMs, () => done(false));
+    sock.setTimeout(timeoutMs, () => done(true));
     sock.once('connect', () => done(true));
     sock.once('error', () => done(false));
   });
 }
 
+/** True when anything answers on <port> over IPv4 (127.0.0.1) or IPv6 (::1). */
+export async function isPortListening(port, timeoutMs = 1500) {
+  const [v4, v6] = await Promise.all([probe(port, '127.0.0.1', timeoutMs), probe(port, '::1', timeoutMs)]);
+  return v4 || v6;
+}
+
+/** Local time with milliseconds: YYYYMMDD-HHMMSS-mmm. */
 export function timestamp(d = new Date()) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${p(d.getMilliseconds(), 3)}`;
+}
+
+/** Create a fresh `<root>/<timestamp>` folder; never reuses an existing one. */
+export function createBackupDir(root) {
+  mkdirSync(root, { recursive: true });
+  for (let i = 0; i < 20; i += 1) {
+    const dir = join(root, i === 0 ? timestamp() : `${timestamp()}-${i}`);
+    try {
+      mkdirSync(dir); // not recursive: EEXIST if another run took the name
+      return dir;
+    } catch (err) {
+      if (err?.code !== 'EEXIST') throw err;
+    }
+  }
+  throw new Error(`could not create a unique backup folder under ${root}`);
 }
 
 /** better-sqlite3 as installed for packages/db (the root has no copy of its own). */
@@ -155,8 +182,7 @@ export async function runBackup({ dbPath, backupRoot, port = 3100, log = console
   const src = resolve(expandHome(dbPath));
   if (!existsSync(src)) throw Object.assign(new Error(`database not found: ${src}`), { exitCode: 2 });
 
-  const dir = join(resolve(expandHome(backupRoot)), timestamp());
-  mkdirSync(dir, { recursive: true });
+  const dir = createBackupDir(resolve(expandHome(backupRoot)));
   const base = 'generatorai.db';
   const copied = [];
   for (const suffix of ['', '-wal', '-shm']) {

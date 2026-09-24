@@ -173,15 +173,21 @@ function golden(params: unknown, workDir: string): string {
       .join('<workDir>')
       .replace(/(chat|stage)-<uuid>-\d+/g, '$1-<uuid>-<ts>')
       .replace(UUID, '<uuid>')
-      .replace(/(chat|stage)-<uuid>-\d+/g, '$1-<uuid>-<ts>');
+      .replace(/(chat|stage)-<uuid>-\d+/g, '$1-<uuid>-<ts>')
+      // Paths under the scratch dir use '/' on every OS, so the snapshots
+      // are identical on Windows and on the ubuntu CI leg.
+      .replace(/<workDir>[^\s"'`]*/g, (m) => m.replace(/\\/g, '/'));
   const walk = (v: unknown, key?: string): unknown => {
     if (typeof v === 'function') return '[Function]';
     if (typeof v === 'string') return norm(v);
     if (Array.isArray(v)) {
       if (key === 'tools') {
+        // Every ToolDefinition field the provider sees (name, description,
+        // parametersSchema, skipPermission, requiredPermissions, …), minus
+        // the handler function itself.
         return v.map((t) => {
-          const tool = t as { name?: string; description?: string; parameters?: unknown };
-          return { name: tool.name, description: norm(tool.description ?? ''), parameters: walk(tool.parameters) };
+          const { handler: _handler, ...tool } = t as Record<string, unknown>;
+          return walk(tool);
         });
       }
       return v.map((x) => walk(x));

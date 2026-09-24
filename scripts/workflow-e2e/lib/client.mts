@@ -20,7 +20,13 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const rt = await import(pathToFileURL(path.join(REPO, 'packages', 'client-runtime', 'src', 'index.ts')).href);
 const { AuthenticatedClientRuntime, SecretSinkDeviceKeyStore, SecretSinkSessionStore, parsePairingCode } = rt as any;
 
-export const BASE = process.env.SERVER_URL ?? 'http://127.0.0.1:3111';
+// The URL comes from server.mjs (E2E_PORT, default 3111), never from a
+// generic env var: a stray SERVER_URL must not point the harness — and the
+// pairing it performs with the local-admin token — at the developer's :3100.
+import { BASE_URL, DEV_PORT } from '../server.mjs';
+
+export const BASE: string = BASE_URL;
+if (new URL(BASE).port === String(DEV_PORT)) throw new Error(`refusing to run the E2E harness against :${DEV_PORT}`);
 export const DATA_DIR = process.env.E2E_DATA_DIR ?? 'C:/gaiwf/data';
 const CREDS = process.env.CREDS ?? 'C:/gaiwf/creds/e2e.json';
 

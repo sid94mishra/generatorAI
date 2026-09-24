@@ -50,9 +50,12 @@ importers:
       vitest:
         specifier: ^3.2.6
         version: 3.2.7(@types/debug@4.1.12)(@types/node@22.20.0)(happy-dom@20.13.2)(jiti@2.6.1)(jsdom@25.0.1)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3)
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
       zod-to-json-schema:
         specifier: 3.25.2
-        version: 3.25.2(zod@4.3.6)
+        version: 3.25.2(zod@3.25.76)
 
   agent-tests:
     devDependencies:
@@ -544,7 +547,7 @@ importers:
     dependencies:
       '@agentclientprotocol/sdk':
         specifier: 1.4.0
-        version: 1.4.0(zod@4.3.6)
+        version: 1.4.0(zod@3.25.76)
       '@generatorai/agent-harness-providers':
         specifier: workspace:*
         version: link:../../packages/agent-harness-providers
@@ -1065,7 +1068,7 @@ importers:
         version: link:../shared
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
-        version: 1.29.0(zod@4.3.6)
+        version: 1.29.0(zod@3.25.76)
 
   packages/relay-protocol:
     dependencies:
@@ -13227,10 +13230,6 @@ snapshots:
     dependencies:
       zod: 3.25.76
 
-  '@agentclientprotocol/sdk@1.4.0(zod@4.3.6)':
-    dependencies:
-      zod: 4.3.6
-
   '@alcalzone/ansi-tokenize@0.2.5':
     dependencies:
       ansi-styles: 6.2.3
@@ -17150,29 +17149,6 @@ snapshots:
       raw-body: 3.0.2
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
-    transitivePeerDependencies:
-      - supports-color
-    optional: true
-
-  '@modelcontextprotocol/sdk@1.29.0(zod@4.3.6)':
-    dependencies:
-      '@hono/node-server': 1.19.14(hono@4.12.16)
-      ajv: 8.20.0
-      ajv-formats: 3.0.1(ajv@8.20.0)
-      content-type: 1.0.5
-      cors: 2.8.6
-      cross-spawn: 7.0.6
-      eventsource: 3.0.7
-      eventsource-parser: 3.0.6
-      express: 5.2.1
-      express-rate-limit: 8.4.1(express@5.2.1)
-      hono: 4.12.16
-      jose: 6.2.3
-      json-schema-typed: 8.0.2
-      pkce-challenge: 5.0.1
-      raw-body: 3.0.2
-      zod: 4.3.6
-      zod-to-json-schema: 3.25.2(zod@4.3.6)
     transitivePeerDependencies:
       - supports-color
 
@@ -27994,11 +27970,6 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@3.25.76):
     dependencies:
       zod: 3.25.76
-    optional: true
-
-  zod-to-json-schema@3.25.2(zod@4.3.6):
-    dependencies:
-      zod: 4.3.6
 
   zod-validation-error@4.0.2(zod@3.25.76):
     dependencies:
@@ -28006,7 +27977,8 @@ snapshots:
 
   zod@3.25.76: {}
 
-  zod@4.3.6: {}
+  zod@4.3.6:
+    optional: true
 
   zustand@4.5.7(@types/react@19.2.14)(react@19.2.4):
     dependencies:

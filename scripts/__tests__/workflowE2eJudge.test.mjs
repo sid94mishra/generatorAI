@@ -1,5 +1,5 @@
 // P00 WP-0.3 — the E2E runner's expectation judge. Runs under the root
-// vitest "node" project (`pnpm exec vitest run scripts`).
+// vitest "node" project (`pnpm test:scripts`; `turbo test` runs it).
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -64,5 +64,35 @@ describe('workflow-e2e judge', () => {
         expect(spec.tag).toBe(id);
       }
     }
+  });
+});
+
+describe('workflow-e2e server ownership (P00 review R17)', () => {
+  const tsx = new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+  const ours = { cmd: `"node.exe" ${tsx} --import ./src/instrumentation.ts src/index.ts`, created: '2026-09-24T10:00:00.0000000Z' };
+
+  it('accepts this worktree’s server with a matching creation time and no listener check', async () => {
+    const { verifyOwnServer } = await import('../workflow-e2e/server.mjs');
+    expect(verifyOwnServer({ pid: process.pid, created: ours.created }, ours, [])).toEqual({ ok: true });
+  });
+
+  it('refuses another checkout’s server (e.g. the developer :3100 one)', async () => {
+    const { verifyOwnServer } = await import('../workflow-e2e/server.mjs');
+    const other = { cmd: 'node C:/Users/dev/GeneratorAI/node_modules/tsx/dist/cli.mjs --import ./src/instrumentation.ts src/index.ts', created: ours.created };
+    expect(verifyOwnServer({ pid: 1, created: ours.created }, other, []).ok).toBe(false);
+  });
+
+  it('refuses a recycled pid', async () => {
+    const { verifyOwnServer } = await import('../workflow-e2e/server.mjs');
+    const r = verifyOwnServer({ pid: 1, created: '2026-09-24T09:00:00.0000000Z' }, ours, []);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/reused/);
+  });
+
+  it('refuses when another process owns the port', async () => {
+    const { verifyOwnServer } = await import('../workflow-e2e/server.mjs');
+    const r = verifyOwnServer({ pid: process.pid, created: ours.created, port: 3111 }, ours, [999_999]);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/owned by another process/);
   });
 });

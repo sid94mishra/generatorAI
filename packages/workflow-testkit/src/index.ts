@@ -1,22 +1,31 @@
 // @generatorai/workflow-testkit — whole-run workflow tests on a fake model.
-// See `engine.ts` for what is wired and what is not, and
-// `__tests__/current-engine/` for the characterisation suite (P00 WP-0.2).
+// `engine.ts` is the engine-neutral facade; `adapters/v1.ts` holds everything
+// specific to today's engine. The characterisation suite (P00 WP-0.2) lives
+// in `__tests__/current-engine/`.
 
 export {
   createTestEngine,
-  DEFAULT_TIMING,
   type TestEngine,
+  type RunHandle,
+  type RunCommands,
+} from './engine.js';
+export {
+  DEFAULT_TIMING,
   type TestEngineOptions,
   type TestEngineTiming,
-  type RunHandle,
   type RunSnapshot,
   type StageSnapshot,
   type CapturedEvent,
   type LogLine,
-  type RunCommands,
   type ApproveBody,
   type RestartOptions,
-} from './engine.js';
+  type RunCommand,
+  type CommandResult,
+  type EngineAdapter,
+  type AdapterContext,
+  type AdapterFactory,
+} from './types.js';
+export { createV1Adapter } from './adapters/v1.js';
 export {
   ScriptedFauxHarness,
   ScriptBook,

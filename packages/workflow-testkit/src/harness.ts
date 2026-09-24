@@ -7,8 +7,9 @@
 // talks to conversations and sends several internal turns per stage
 // (context ack, output retry, summary). This class bridges the two:
 //
-//   1. every prompt is classified into a `TurnKind` from the fixed texts
-//      `StageExecutionService` sends today;
+//   1. every prompt is classified into a `TurnKind` by the engine adapter's
+//      `classify` (the persisted turn metadata), falling back to the fixed
+//      texts `StageExecutionService` sends today (`classifyPrompt`);
 //   2. the conversation is resolved to the stage run currently speaking
 //      through it (via the engine's `resolveStage`, a DB lookup), so the
 //      same script works in `single` and `per-stage` session modes;
@@ -195,6 +196,8 @@ export interface ScriptedFauxHarnessOptions {
   book: ScriptBook;
   /** Maps a conversation to the stage run speaking through it. */
   resolveStage: (conversationId: string) => StageKey;
+  /** Engine-aware turn classification (metadata first); default: `classifyPrompt`. */
+  classify?: (conversationId: string, prompt: string) => TurnKind;
   clock?: TestClock;
   calls?: HarnessCall[];
   generation?: number;
@@ -210,6 +213,7 @@ export class ScriptedFauxHarness extends FauxProvider {
 
   private readonly book: ScriptBook;
   private readonly resolveStage: (conversationId: string) => StageKey;
+  private readonly classify: (conversationId: string, prompt: string) => TurnKind;
   private readonly clock: TestClock;
   private readonly handlers = new Map<string, Set<Handler>>();
   private readonly aborters = new Map<string, Set<AbortController>>();
@@ -221,6 +225,7 @@ export class ScriptedFauxHarness extends FauxProvider {
     super();
     this.book = opts.book;
     this.resolveStage = opts.resolveStage;
+    this.classify = opts.classify ?? ((_c, p) => classifyPrompt(p));
     this.clock = opts.clock ?? new RealClock();
     this.calls = opts.calls ?? [];
     this.generation = opts.generation ?? 0;
@@ -284,7 +289,7 @@ export class ScriptedFauxHarness extends FauxProvider {
   ): Promise<ConversationResponse> {
     if (this.killed) return new Promise<never>(() => undefined);
 
-    const kind = classifyPrompt(prompt);
+    const kind = this.classify(conversationId, prompt);
     const key = this.resolveStage(conversationId);
     const turn = this.book.take(key, kind);
     const call: HarnessCall = {

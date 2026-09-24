@@ -23,7 +23,27 @@
   "tools": [
     {
       "name": "record_plan",
-      "description": "Record an implementation plan for the user to read. Returns immediately and does NOT pause you — after calling it, continue and implement the plan. Call it at most once per turn, and only when the user asked for a plan or the task is large enough to warrant one."
+      "description": "Record an implementation plan for the user to read. Returns immediately and does NOT pause you — after calling it, continue and implement the plan. Call it at most once per turn, and only when the user asked for a plan or the task is large enough to warrant one.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short imperative title, e.g. \"Add OAuth login\"."
+          },
+          "content": {
+            "type": "string",
+            "description": "The full plan as markdown, with Goal / Approach / Changes / Risks & edge cases / Verification sections."
+          }
+        },
+        "required": [
+          "title",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "skipPermission": true,
+      "owner": "plan-mode"
     }
   ]
 }

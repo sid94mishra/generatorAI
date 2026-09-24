@@ -71,8 +71,13 @@ export function dumpSchema(sqlite: Database.Database): string[] {
         ORDER BY rowid`,
     )
     .all() as MasterRow[];
-  const tables = orderTables(rows.filter((r) => r.type === 'table'));
-  const rest = ['index', 'trigger', 'view'].flatMap((type) => rows.filter((r) => r.type === type));
+  // A virtual table (FTS5 etc.) creates its own shadow tables (`<vt>_data`,
+  // `<vt>_idx`, …) when its CREATE VIRTUAL TABLE runs; replaying them as
+  // well would fail with "table already exists".
+  const virtual = rows.filter((r) => r.type === 'table' && /^CREATE\s+VIRTUAL\s+TABLE/i.test(r.sql ?? '')).map((r) => r.name);
+  const isShadow = (r: MasterRow) => virtual.some((v) => r.tbl_name.startsWith(`${v}_`));
+  const tables = orderTables(rows.filter((r) => r.type === 'table' && !isShadow(r)));
+  const rest = ['index', 'trigger', 'view'].flatMap((type) => rows.filter((r) => r.type === type && !isShadow(r)));
   // Line endings normalised: the DDL text comes from template literals, which
   // are CRLF on a Windows checkout and LF everywhere else.
   return [...tables, ...rest].map((r) => `${r.sql!.replace(/\r\n/g, '\n').trim()};`);

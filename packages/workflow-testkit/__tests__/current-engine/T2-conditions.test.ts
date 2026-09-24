@@ -91,7 +91,12 @@ describe('T2 conditional routing (current engine)', () => {
     // `stages.R.status` does not resolve; the unknown identifier evaluates to
     // false and the stage is skipped with no warning anywhere.
     expect(snap.stages['C_stageref']!.status).toBe('skipped'); // KNOWN-BUG W-31 (conditions cannot reference stages/outputs)
-    expect(snap.events.some((e) => e.kind.includes('warning') && JSON.stringify(e.data).includes('stages.R'))).toBe(false); // KNOWN-BUG W-31 (no warning for unknown identifier)
+    // The skip is recorded as the generic "unreachable" reason, and the
+    // definition validator raises nothing about the unknown identifier.
+    expect(snap.stages['C_stageref']!.error).toBe('Skipped — no incoming edge or run condition was satisfied'); // KNOWN-BUG W-31 (no diagnostic for an unknown identifier)
+    const validation = await engine.services.workflowDefinitionService.validateDefinition(snap.run.workflowDefinitionId);
+    expect(validation.valid).toBe(true);
+    expect([...validation.errors, ...validation.warnings].filter((m) => m.includes('stages.R'))).toEqual([]); // KNOWN-BUG W-31 (validator accepts `stages.X…`)
 
     // `!variables.sflag` with sflag = 'false' (a string) → truthy → skipped.
     expect(snap.stages['C_bang_str']!.status).toBe('skipped'); // KNOWN-BUG W-31 (string 'false' is truthy; O-7)

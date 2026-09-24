@@ -87,15 +87,27 @@ export function chooseMigrationRoute(sqlite: Database.Database, opts?: MigrateOp
 }
 
 /** Create an empty database's schema from the baseline and stamp v1..BASELINE_VERSION. */
-function applyBaseline(sqlite: Database.Database): void {
+/**
+ * Two processes can open the same empty file at once (a desktop app and a
+ * CLI, say). `BEGIN IMMEDIATE` takes the write lock up front (waiting out
+ * `busy_timeout`), and the database is re-checked INSIDE the transaction:
+ * the loser finds tables already there, backs off and returns false, and
+ * `migrateDB` re-chooses its route. Exported for the race test.
+ */
+export function applyBaselineIfEmpty(sqlite: Database.Database): boolean {
   const stamped = MIGRATIONS.filter((m) => m.version <= BASELINE_VERSION);
-  sqlite.exec('BEGIN');
+  sqlite.exec('BEGIN IMMEDIATE');
   try {
+    if (chooseMigrationRoute(sqlite).kind !== 'baseline') {
+      sqlite.exec('COMMIT');
+      return false;
+    }
     sqlite.exec(BASELINE_SQL);
     const insert = sqlite.prepare(`INSERT INTO _schema_versions (version, applied_at, name) VALUES (?, ?, ?)`);
     const now = Date.now();
     for (const m of stamped) insert.run(m.version, now, m.name);
     sqlite.exec('COMMIT');
+    return true;
   } catch (err) {
     try { sqlite.exec('ROLLBACK'); } catch { /* best effort */ }
     throw new Error(`Baseline v${BASELINE_VERSION} failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -136,11 +148,15 @@ export function migrateDB(db: AppDatabase, opts?: MigrateOptions): void {
 
   // P00 WP-0.6b — fresh databases start from the generated baseline; ones at
   // or above it skip the legacy bootstrap (see `chooseMigrationRoute`).
-  const route = chooseMigrationRoute(sqlite, opts);
+  let route = chooseMigrationRoute(sqlite, opts);
   if (route.kind === 'baseline') {
-    applyBaseline(sqlite);
-    applyVersionedMigrations(sqlite, BASELINE_VERSION, opts?.targetVersion);
-    return;
+    if (applyBaselineIfEmpty(sqlite)) {
+      applyVersionedMigrations(sqlite, BASELINE_VERSION, opts?.targetVersion);
+      return;
+    }
+    // Another connection created the schema first — take whatever route
+    // the database now calls for.
+    route = chooseMigrationRoute(sqlite, opts);
   }
   if (route.kind === 'versioned') {
     applyVersionedMigrations(sqlite, route.currentVersion, opts?.targetVersion);
@@ -2611,8 +2627,15 @@ function applyVersionedMigrations(
       sqlite.pragma('foreign_keys = OFF');
     }
 
-    sqlite.exec('BEGIN');
+    // IMMEDIATE + re-check: a second process that raced this one to the same
+    // version finds it already applied and skips it, instead of failing on
+    // the `_schema_versions` primary key after re-running its statements.
+    sqlite.exec('BEGIN IMMEDIATE');
     try {
+      if (sqlite.prepare(`SELECT 1 FROM _schema_versions WHERE version = ?`).get(m.version)) {
+        sqlite.exec('COMMIT');
+        continue;
+      }
       for (const stmt of m.sql) {
         // `ALTER TABLE … ADD COLUMN` is the one statement class here that is
         // not naturally re-runnable — SQLite has no `IF NOT EXISTS` for it,

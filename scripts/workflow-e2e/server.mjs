@@ -9,9 +9,12 @@
 // Starts apps/server from source (tsx) with every path isolated under
 // C:/gaiwf/ — PORT 3111, DB_PATH C:/gaiwf/data/data.db, WORKSPACES_DIR
 // C:/gaiwf/ws, ARTIFACTS_DIR C:/gaiwf/art, loopback bind — waits for
-// /api/health, and records its PID in C:/gaiwf/e2e-server.pid. `stop` kills
-// ONLY that process tree, after checking the PID still belongs to a server
-// this script started. It never touches port 3100 or the real DB.
+// /api/health, and records its PID and OS creation time in
+// C:/gaiwf/e2e-server.pid. `stop` kills ONLY that process tree, and only
+// when all of these hold (`verifyOwnServer`): the process runs THIS
+// worktree's tsx CLI on src/index.ts, its creation time matches the record
+// (so a recycled pid is never killed), and it or a child owns the E2E port's
+// listener. It refuses E2E_PORT=3100 and never touches the real DB.
 //
 // Provider: `claude-agent` (default) sets HARNESS_TYPE=claude-agent and uses
 // the machine's Claude login. `faux` sets GENERATORAI_LOAD_TEST_FAUX_HARNESS
@@ -28,9 +31,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+/** The developer server's port. The E2E harness never talks to it. */
+export const DEV_PORT = 3100;
 export const E2E_ROOT = process.env.E2E_ROOT ?? 'C:/gaiwf';
 export const PORT = Number(process.env.E2E_PORT ?? 3111);
+if (PORT === DEV_PORT) throw new Error(`E2E_PORT=${DEV_PORT} is the developer server's port; the E2E harness refuses it`);
 export const BASE_URL = `http://127.0.0.1:${PORT}`;
+/** The tsx CLI of THIS worktree: its path is in the E2E server's command line and nobody else's. */
+const TSX_CLI = path.join(REPO, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 export const DATA_DIR = path.join(E2E_ROOT, 'data');
 export const DB_PATH = path.join(DATA_DIR, 'data.db');
 const PID_FILE = path.join(E2E_ROOT, 'e2e-server.pid');
@@ -43,7 +51,7 @@ function isListening(port) {
       s.destroy();
       resolve(v);
     };
-    s.setTimeout(1000, () => done(false));
+    s.setTimeout(1000, () => done(true)); // a hung listener still owns the port
     s.once('connect', () => done(true));
     s.once('error', () => done(false));
   });
@@ -57,21 +65,81 @@ function readPidFile() {
   }
 }
 
-/** Command line of a live process, or null when it is gone. */
-function commandLineOf(pid) {
+const ps = (script) => execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8' }).trim();
+
+/**
+ * Command line and creation time of a live process, or null when it is
+ * gone. The creation time is what makes a stale pid file safe: a recycled
+ * pid belongs to a process created at a different moment.
+ */
+export function processInfo(pid) {
   try {
     if (process.platform === 'win32') {
-      const out = execFileSync(
-        'powershell.exe',
-        ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
-        { encoding: 'utf8' },
-      ).trim();
-      return out || null;
+      const out = ps(
+        `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}"; ` +
+          `if ($p) { @{ cmd = $p.CommandLine; created = $p.CreationDate.ToUniversalTime().ToString('o') } | ConvertTo-Json -Compress }`,
+      );
+      return out ? JSON.parse(out) : null;
     }
-    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+    const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+    const created = readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]?.split(' ')[19] ?? '';
+    return { cmd, created };
   } catch {
     return null;
   }
+}
+
+/** PIDs listening on a TCP port (Windows: Get-NetTCPConnection; elsewhere: none known). */
+function listenerPids(port) {
+  if (process.platform !== 'win32') return [];
+  try {
+    const out = ps(`(Get-NetTCPConnection -LocalPort ${Number(port)} -State Listen -ErrorAction SilentlyContinue).OwningProcess`);
+    return out ? out.split(/\r?\n/).map((l) => Number(l.trim())).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** A pid and every descendant (tsx runs the server in a child process). */
+function processTree(pid) {
+  if (process.platform !== 'win32') return new Set([pid]);
+  try {
+    const all = JSON.parse(ps(`Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress`));
+    const kids = new Map();
+    for (const p of all) kids.set(p.ParentProcessId, [...(kids.get(p.ParentProcessId) ?? []), p.ProcessId]);
+    const tree = new Set([pid]);
+    const walk = (p) => {
+      for (const c of kids.get(p) ?? []) if (!tree.has(c)) (tree.add(c), walk(c));
+    };
+    walk(pid);
+    return tree;
+  } catch {
+    return new Set([pid]);
+  }
+}
+
+const sameFile = (a, b) => path.resolve(a).toLowerCase().replace(/\\/g, '/') === path.resolve(b).toLowerCase().replace(/\\/g, '/');
+
+/**
+ * Is `pf` (a pid file record) THIS harness's server? All must hold: the
+ * process runs this worktree's tsx CLI, was created when the record says,
+ * and — when the port is listening — owns the listener (itself or a child).
+ */
+export function verifyOwnServer(pf, info = processInfo(pf.pid), listeners = listenerPids(pf.port ?? PORT)) {
+  if (!info) return { ok: false, reason: 'not running' };
+  const cmd = String(info.cmd ?? '');
+  const tsxInCmd = cmd
+    .split(/["\s]+/)
+    .some((tok) => tok && tok.toLowerCase().endsWith('cli.mjs') && sameFile(tok, TSX_CLI));
+  if (!tsxInCmd || !/src[\\/]index\.ts/.test(cmd)) return { ok: false, reason: `not this worktree's E2E server (${cmd.slice(0, 100)})` };
+  if (pf.created && info.created && pf.created !== info.created) {
+    return { ok: false, reason: `pid ${pf.pid} was reused (created ${info.created}, recorded ${pf.created})` };
+  }
+  if (listeners.length > 0) {
+    const tree = processTree(pf.pid);
+    if (!listeners.some((l) => tree.has(l))) return { ok: false, reason: `port ${pf.port ?? PORT} is owned by another process (${listeners.join(', ')})` };
+  }
+  return { ok: true };
 }
 
 async function waitForHealth(timeoutMs) {
@@ -118,15 +186,16 @@ export async function startServer({ provider = 'claude-agent', fresh = false, ti
   if (provider === 'faux') env.GENERATORAI_LOAD_TEST_FAUX_HARNESS = 'true';
   else env.HARNESS_TYPE = provider;
 
-  const tsxCli = path.join(REPO, 'node_modules', 'tsx', 'dist', 'cli.mjs');
   const out = openSync(LOG_FILE, 'w');
-  const child = spawn(process.execPath, [tsxCli, '--import', './src/instrumentation.ts', 'src/index.ts'], {
+  const child = spawn(process.execPath, [TSX_CLI,'--import', './src/instrumentation.ts', 'src/index.ts'], {
     cwd: path.join(REPO, 'apps', 'server'),
     env,
     stdio: ['ignore', out, out],
     windowsHide: true,
   });
-  writeFileSync(PID_FILE, JSON.stringify({ pid: child.pid, port: PORT, provider, startedAt: new Date().toISOString() }));
+  // The OS creation time pins the record to THIS process (see verifyOwnServer).
+  const created = processInfo(child.pid)?.created ?? null;
+  writeFileSync(PID_FILE, JSON.stringify({ pid: child.pid, port: PORT, provider, created, startedAt: new Date().toISOString() }));
   let exited = null;
   child.once('exit', (code) => {
     exited = code;
@@ -160,11 +229,11 @@ export async function stopServer({ log = console.log } = {}) {
     log('[e2e-server] no pid file; nothing to stop');
     return false;
   }
-  const cmd = commandLineOf(pf.pid);
-  if (!cmd) {
+  const check = verifyOwnServer(pf);
+  if (check.reason === 'not running') {
     log(`[e2e-server] pid ${pf.pid} is not running`);
-  } else if (!/src[\\/]index\.ts|tsx/.test(cmd)) {
-    log(`[e2e-server] pid ${pf.pid} is not an E2E server (${cmd.slice(0, 80)}…); refusing to kill it`);
+  } else if (!check.ok) {
+    log(`[e2e-server] pid ${pf.pid}: ${check.reason}; refusing to kill it`);
     unlinkSync(PID_FILE);
     return false;
   } else {
@@ -192,7 +261,7 @@ export async function stopServer({ log = console.log } = {}) {
 
 export async function serverStatus() {
   const pf = readPidFile();
-  return { pidFile: pf, alive: pf ? !!commandLineOf(pf.pid) : false, listening: await isListening(PORT) };
+  return { pidFile: pf, alive: pf ? !!processInfo(pf.pid) : false, ownServer: pf ? verifyOwnServer(pf) : null, listening: await isListening(PORT) };
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

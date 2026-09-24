@@ -44,7 +44,7 @@ describe('T1 fan-out / fan-in (current engine)', () => {
     const snap = await run.waitForTerminal();
 
     expect(snap.run.status).toBe('completed');
-    for (const name of snap.stageOrder) expect(snap.stages[name]!.status).toBe('completed');
+    for (const name of snap.instanceOrder) expect(snap.stages[name]!.status).toBe('completed');
 
     // auto mode resolves to per-stage for a DAG with parallelism (FEAT-1).
     expect(snap.run.sessionMode).toBe('per-stage');
@@ -81,7 +81,7 @@ describe('T1 fan-out / fan-in (current engine)', () => {
       expect(kindsOf(stage)).toEqual(['context', 'prompt', 'summary']); // KNOWN-BUG W-49 (3 turns per stage, O-3)
     }
     // Every stage got its own conversation.
-    expect(new Set(snap.calls.map((c) => c.conversationId)).size).toBe(snap.stageOrder.length);
+    expect(new Set(snap.calls.map((c) => c.conversationId)).size).toBe(snap.instanceOrder.length);
   });
 
   it('a short answer triggers an extra output-retry turn whose reply is appended to the output', async () => {

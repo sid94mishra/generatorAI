@@ -1,4 +1,19 @@
 {
-  "$comment": "Banned identifiers per workflow-overhaul phase (README §7 step 6, R-1). Each phase that deletes a legacy path APPENDS entries here in the same commit, so the name can never come back. `pattern` is a JavaScript regex source, matched per line against packages/** and apps/** source (tests, dist and node_modules excluded). `paths` (optional) limits an entry to path prefixes; `phase` and `reason` are for humans. Starts empty in P00.",
-  "banned": []
+  "$comment": "Workflow overhaul no-legacy guard (README §7 step 6, R-1). `banned`: identifiers each phase removed, APPENDED in the same commit that deletes them; a regex `pattern` matched per line against packages/** and apps/** source (tests, dist, node_modules excluded), optional `paths` prefixes; any hit fails. `comments`: `@deprecated` / `legacy` / `backward compat` / `fallback for old` inside comments of the workflow-module files matched by `paths` (regex sources). Report-only while `phase` < `failFromPhase` (null = not scheduled), but the count may never exceed `baseline`. Each phase bumps `phase` and lowers `baseline`; the phase that clears the module sets `failFromPhase` to itself.",
+  "banned": [],
+  "comments": {
+    "phase": "00",
+    "failFromPhase": null,
+    "baseline": 64,
+    "paths": [
+      "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
+      "^packages/core/src/services/(workflow|automation)[^/]*/",
+      "^packages/core/src/domain/.*(Workflow|Stage|DAG)[^/]*\\.ts$",
+      "^packages/db/src/repositories/(Workflow|Stage|Automation)[^/]*\\.ts$",
+      "^packages/shared/src/.*(Workflow|Stage|Automation)[^/]*\\.ts$",
+      "^apps/server/src/routes/(workflow|automations)[^/]*\\.ts$",
+      "^apps/web/src/.*[Ww]orkflow[^/]*(/|\\.tsx?$)",
+      "^apps/cli/src/.*[Ww]orkflow[^/]*(/|\\.tsx?$)"
+    ]
+  }
 }
