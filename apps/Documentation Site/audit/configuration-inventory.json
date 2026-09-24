@@ -329,36 +329,6 @@
         "constraints": "int; min 1; max 8760"
       },
       {
-        "field": "webhooks",
-        "type": "object",
-        "presence": "default {}",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "webhooks.enabled",
-        "type": "boolean",
-        "presence": "default false",
-        "constraints": "—"
-      },
-      {
-        "field": "webhooks.githubSecret",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "webhooks.webhookToken",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "webhooks.rateLimitPerMinute",
-        "type": "number",
-        "presence": "default 60",
-        "constraints": "int; min 1"
-      },
-      {
         "field": "sandbox",
         "type": "object",
         "presence": "default {}",

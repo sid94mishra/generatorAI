@@ -183,22 +183,6 @@ export interface HookPhaseInfo {
   description?: string;
 }
 
-/**
- * `GET /hooks/sessions/:id/hooks` — grouped by where the hook is defined, not
- * a flat list. A workflow's entry is keyed by hook id and holds only the
- * fields that workflow OVERRIDES (`hookOverrides` is `Record<string,
- * Partial<HookDefinition>>`); the base definition lives in `globalHooks`.
- */
-export interface SessionHooks {
-  sessionId: string;
-  workflowHooks: Array<{
-    workflowId: string;
-    workflowName: string;
-    hooks: Record<string, Partial<HookDefinition>>;
-  }>;
-  globalHooks: HookDefinition[];
-}
-
 export interface DeviceRecord {
   deviceId: string;
   name: string;
@@ -820,11 +804,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── orchestrator.ts ─────────────────────────────────────────
     orchestrator: {
-      templates: () => req<Array<Record<string, unknown>>>('/api/orchestrator/system-workflows'),
-      template: (id: string) =>
-        req<Record<string, unknown>>(`/api/orchestrator/system-workflows/${id}`),
-      fromTemplate: (body: Record<string, unknown>) =>
-        req<WorkflowDefinition>('/api/orchestrator/from-template', json(body)),
       startRun: (body: Record<string, unknown>) =>
         req<Record<string, unknown>>('/api/orchestrator/runs', json(body)),
       cancel: (runId: string) =>
@@ -876,15 +855,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       get: (id: string) => req<Record<string, unknown>>(`/api/templates/${id}`),
     },
 
-    // ── webhooks.ts ─────────────────────────────────────────────
-    webhooks: {
-      list: () => req<Array<Record<string, unknown>>>('/api/webhooks/registrations'),
-      create: (body: Record<string, unknown>) =>
-        req<Record<string, unknown>>('/api/webhooks/registrations', json(body)),
-      remove: (id: string) =>
-        req<void>(`/api/webhooks/registrations/${id}`, { method: 'DELETE' }),
-    },
-
     // ── hooks.ts ────────────────────────────────────────────────
     hooks: {
       /**
@@ -908,8 +878,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         }
         return out;
       },
-      sessionHooks: (sessionId: string) =>
-        req<SessionHooks>(`/api/hooks/sessions/${sessionId}/hooks`),
       /**
        * Dry-runs one hook. The route reads the WHOLE body as a
        * `HookDefinition` and dispatches on `config.type` — `phase` and

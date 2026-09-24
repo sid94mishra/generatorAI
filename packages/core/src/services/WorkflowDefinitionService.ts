@@ -381,9 +381,8 @@ export class WorkflowDefinitionService {
   // ── Template Import/Export ──
 
   /**
-   * THE template importer. `WorkflowOrchestrator.createFromTemplate` (used by
-   * Settings → Templates) and the `/workflow-definitions/import-template`
-   * route both come through here.
+   * THE template importer. Settings → Templates and the
+   * `/workflow-definitions/import` route both come through here.
    *
    * There used to be two: this one and a copy in the orchestrator that was
    * not transactional (a stage-insert failure left a half-built definition),
@@ -496,8 +495,7 @@ export class WorkflowDefinitionService {
       version: `${def.version}.0.0`,
       tags: def.tags ?? [],
       sessionMode: def.sessionMode ?? 'auto',
-      // These mirror fields `createFromTemplate` reads straight back out of the
-      // template, so hardcoding them threw away part of every round trip: a
+      // These round-trip back out of the exported template, so hardcoding them threw away part of every round trip: a
       // workflow that required a codebase came back not requiring one.
       requiresCodebase: def.orchestratorConfig?.requiresCodebase ?? false,
       supportsMultipleCodebases: (def.orchestratorConfig?.codebaseAliases?.length ?? 0) > 1,

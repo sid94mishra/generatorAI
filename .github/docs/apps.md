@@ -20,7 +20,7 @@ Single Node process binding to `$GENERATORAI_PORT` (default 3100). Owns:
 | `system.ts` | `GET /api/system/artifacts`, `GET /api/system/mcp-servers` | `SystemArtifactService` |
 | `copilot.ts` | `GET /api/copilot/models`, `GET /api/copilot/state`, `GET /api/copilot/conversations`, `GET /api/copilot/conversations/:id/messages`, `POST /api/copilot/ping` | `harness` directly |
 | `harness.ts` | `GET /api/harness`, `POST /api/harness/switch` | `harnessProxy.switchAdapter` |
-| `sessions.ts` | v1 `POST/GET/DELETE /api/sessions`, `/{id}/{start,pause,resume,cancel}`, `/{id}/messages` | `SessionService` |
+| `sessions.ts` | `GET /api/sessions/{id}/chat` (message history by session id) | `chatMessageRepo` |
 | `chats.ts`, `chat.ts`, `chats-list.ts` | v2 `POST /api/chats`, `GET /api/chats[/:id]`, `PUT/DELETE /api/chats/:id`, `POST /api/chats/:id/prompt`, `GET /api/chats/:id/messages`, `GET /api/chats/:id/workspace`, `GET /api/chats/:id/workspace/files`, `POST /api/chats/:id/archive` | `ChatManagementService` |
 | `workflows.ts` | v1 legacy CRUD | `WorkflowService` |
 | `workflowDefinitions.ts` | `POST/GET/PATCH/DELETE /api/workflow-definitions`, `POST /api/workflow-definitions/import-json`, `POST /api/workflow-definitions/:id/validate`, `GET /api/workflow-definitions/:id/export`, stage CRUD, edge CRUD | `WorkflowDefinitionService` |
@@ -34,8 +34,7 @@ Single Node process binding to `$GENERATORAI_PORT` (default 3100). Owns:
 | `terminals.ts` | `POST/GET/DELETE /api/workspaces/:id/terminals[/:sid]`, `GET /:sid/scrollback`, `POST /:sid/{resize,signal}` — REST surface for the Integrated Terminal (WS handles live IO) | `TerminalService` |
 | `extensions.ts` | `GET /api/extensions[/:id]`, `GET /api/extensions/widgets`, `POST /api/extensions`, `PATCH /api/extensions/:id`, `DELETE /api/extensions/:id`, `POST /api/extensions/reload`, `POST /api/extensions/:id/reload`, `GET /api/widget-assets/:extensionId/*` — extension install / reload + widget bundle serving | `ExtensionManager` |
 | `widgets.ts` | `GET /api/widgets[?sessionId=&chatId=]`, `GET /api/widgets/:id`, `POST /api/widgets`, `PATCH /api/widgets/:id/state`, `POST /api/widgets/:id/actions`, `DELETE /api/widgets/:id` — widget-instance lifecycle backing the postMessage bridge (see [feature-extensions-widgets.md](./feature-extensions-widgets.md)) | `WidgetService` |
-| `webhooks.ts` | `POST/GET/DELETE /api/webhooks`, `POST /api/webhooks/github`, `POST /api/automations/webhook/:token` | `WebhookService` + `AutomationService` |
-| `hooks.ts` | `GET /api/hooks/phases`, `POST /api/sessions/:id/hooks/test` | `HookExecutor` introspection |
+| `hooks.ts` | `GET /api/hooks/phases`, `POST /api/hooks/sessions/:id/hooks/test` | `HookExecutor` introspection |
 | `stream.ts` | **`GET /api/stream?scope=&id=&afterSeq=&filter=`** (SSE), **`GET /api/stream/replay?scope=&id=&afterSeq=&limit=`** | `StreamBroker` |
 | `templates.ts` | `GET /api/templates[/:id]` | `TemplateRegistry` |
 

@@ -200,15 +200,6 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  webhooks: z
-    .object({
-      enabled: z.boolean().default(false),
-      githubSecret: z.string().optional(),
-      webhookToken: z.string().optional(),
-      rateLimitPerMinute: z.number().int().min(1).default(60),
-    })
-    .default({}),
-
   sandbox: z
     .object({
       /** Enable sandbox execution mode */

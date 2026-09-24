@@ -39,14 +39,12 @@ import {
 import type { AppDatabase } from '@generatorai/db';
 import {
   DrizzleSessionRepository,
-  DrizzleWorkflowRepository,
   DrizzleEventRepository,
   DrizzleSequenceAllocator,
   DrizzleSessionAllocationRepository,
   DrizzleStreamCursorRepository,
   DrizzleChatMessageRepository,
   DrizzleArtifactRepository,
-  DrizzleWebhookRepository,
   // v2 repositories
   DrizzleChatRepository,
   DrizzleWorkflowDefinitionRepository,
@@ -188,14 +186,11 @@ import type {
   ISandboxProvider,
   TemplateRegistry,
   HookExecutor,
-  ConfigResolver,
   IMcpHub,
 
   // Types referenced by call sites below
   EventBus,
-  SessionService,
   ArtifactService,
-  WebhookService,
   ErrorHandler,
   // v2 services
   SessionAllocator,
@@ -726,11 +721,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
   // ── Repositories (v1) ──
   const sessionRepo = new DrizzleSessionRepository(db);
-  const workflowRepo = new DrizzleWorkflowRepository(db);
   const eventRepo = new DrizzleEventRepository(db);
   const chatMessageRepo = new DrizzleChatMessageRepository(db);
   const artifactRepo = new DrizzleArtifactRepository(db);
-  const webhookRepo = new DrizzleWebhookRepository(db);
 
   // ── Repositories (v2) ──
   const chatEntityRepo = new DrizzleChatRepository(db);
@@ -818,7 +811,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     eventRepo,
     chatMessageRepo,
     artifactRepo,
-    webhookRepo,
     chatEntityRepo,
     workflowDefinitionRepo,
     stageDefinitionRepo,
@@ -838,7 +830,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     sandboxCleaner: sandboxLifecycleManager,
     config: {
       artifactsDir: config.artifactsDir,
-      maxConcurrentSessions: config.maxConcurrentSessions,
       // P1#7 — bound concurrent stage execution (harness subprocess fan-out).
       // Env-overridable; defaults to 8 inside createCoreServices when undefined.
       //
@@ -854,7 +845,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
             onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
           })
         : undefined,
-      webhooks: config.webhooks,
       projectRoot: config.projectRoot,
     },
     // Atomically commit multi-row writes (run + stage_rows, automation open);
@@ -876,12 +866,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const {
     eventBus,
     templateRegistry,
-    configResolver,
     hookExecutor,
     hookInterceptor,
-    sessionService,
     artifactService,
-    webhookService,
     recoveryService,
     errorHandler,
     sessionAllocator,
@@ -1541,7 +1528,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     workflowPreprocessor,
     workflowRunRepo,
     eventBus,
-    templateRegistry,
     logger,
     config.artifactsDir,
     sandboxLifecycleManager,
@@ -2244,9 +2230,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     pushTokens,
 
     // Services
-    sessionService,
     artifactService,
-    webhookService,
     errorHandler,
 
     // v2 Services
@@ -2337,7 +2321,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     reloadVoiceConfig,
 
     // v2 Repositories (exposed for route-level queries)
-    workflowRepo,
+    sessionRepo,
     chatEntityRepo,
     chatMessageRepo,
     workflowRunRepo,
@@ -2363,7 +2347,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     durableSleepService,
     templateRegistry,
     hookExecutor,
-    configResolver,
     workflowScriptLoader,
 
     // Widgets & Extensions
@@ -2461,14 +2444,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
           });
       }
 
-      // Register global harness lifecycle hooks
-      const globalHooks = configResolver.resolveGlobalHooks();
-      hookInterceptor.registerClientLifecycleHooks(harness, globalHooks, {
-        sessionId: '__global__',
-        workspacePath: config.workspacesDir,
-        variables: {},
-        eventBus,
-      });
+      // Surface harness client lifecycle events on the global stream
+      hookInterceptor.registerClientLifecycleEvents(harness);
 
       // Restore global event sequence counter from DB so post-restart
       // global events don't collide with pre-restart sequence IDs.
@@ -2709,9 +2686,7 @@ export interface Container {
    * than assuming it exists.
    */
   pushTokens: PushTokenRepository | null;
-  sessionService: SessionService;
   artifactService: ArtifactService;
-  webhookService: WebhookService;
   errorHandler: ErrorHandler;
 
   // v2 services
@@ -2810,7 +2785,7 @@ export interface Container {
   reloadVoiceConfig: () => Promise<void>;
 
   // v2 repositories (for route-level queries)
-  workflowRepo: InstanceType<typeof DrizzleWorkflowRepository>;
+  sessionRepo: InstanceType<typeof DrizzleSessionRepository>;
   chatEntityRepo: InstanceType<typeof DrizzleChatRepository>;
   chatMessageRepo: InstanceType<typeof DrizzleChatMessageRepository>;
   workflowRunRepo: InstanceType<typeof DrizzleWorkflowRunRepository>;
@@ -2855,7 +2830,6 @@ export interface Container {
   durableSleepService: DurableSleepService;
   templateRegistry: TemplateRegistry;
   hookExecutor: HookExecutor;
-  configResolver: ConfigResolver;
   workflowScriptLoader: WorkflowScriptLoader;
 
   // Widgets & Extensions

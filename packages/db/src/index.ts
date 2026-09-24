@@ -44,11 +44,9 @@ export {
   StreamAppendInTransactionError,
 } from './repositories/StreamCursorRepository.js';
 export type { StreamScope, StreamEventRow } from './repositories/StreamCursorRepository.js';
-export { DrizzleWorkflowRepository } from './repositories/WorkflowRepository.js';
 export { DrizzleEventRepository } from './repositories/EventRepository.js';
 export { DrizzleChatMessageRepository } from './repositories/ChatMessageRepository.js';
 export { DrizzleArtifactRepository } from './repositories/ArtifactRepository.js';
-export { DrizzleWebhookRepository } from './repositories/WebhookRepository.js';
 export { DrizzleWorkspaceFileReviewRepository } from './repositories/WorkspaceFileReviewRepository.js';
 
 // v2 repositories
@@ -455,11 +453,9 @@ import { DrizzleSessionRepository } from './repositories/SessionRepository.js';
 import { DrizzleSequenceAllocator } from './repositories/SequenceAllocator.js';
 import { DrizzleSessionAllocationRepository } from './repositories/SessionAllocationRepository.js';
 import { DrizzleStreamCursorRepository } from './repositories/StreamCursorRepository.js';
-import { DrizzleWorkflowRepository } from './repositories/WorkflowRepository.js';
 import { DrizzleEventRepository } from './repositories/EventRepository.js';
 import { DrizzleChatMessageRepository } from './repositories/ChatMessageRepository.js';
 import { DrizzleArtifactRepository } from './repositories/ArtifactRepository.js';
-import { DrizzleWebhookRepository } from './repositories/WebhookRepository.js';
 import { DrizzleChatRepository } from './repositories/ChatRepository.js';
 import { DrizzleAgentRepository } from './repositories/AgentRepository.js';
 import { DrizzleWorkflowDefinitionRepository } from './repositories/WorkflowDefinitionRepository.js';
@@ -486,11 +482,9 @@ import { DrizzleAgentInteractionRepository } from './repositories/AgentInteracti
 export function createAllRepositories(db: AppDatabase) {
   return {
     sessionRepo: new DrizzleSessionRepository(db),
-    workflowRepo: new DrizzleWorkflowRepository(db),
     eventRepo: new DrizzleEventRepository(db),
     chatMessageRepo: new DrizzleChatMessageRepository(db),
     artifactRepo: new DrizzleArtifactRepository(db),
-    webhookRepo: new DrizzleWebhookRepository(db),
     chatEntityRepo: new DrizzleChatRepository(db),
     agentRepo: new DrizzleAgentRepository(db),
     workflowDefinitionRepo: new DrizzleWorkflowDefinitionRepository(db),

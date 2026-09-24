@@ -222,8 +222,7 @@ Source: `apps/server/src/routes/hooks.ts`.
 | Method | Path | Source line |
 | --- | --- | --- |
 | `GET` | `/api/hooks/phases` | 20 |
-| `GET` | `/api/hooks/sessions/:id/hooks` | 38 |
-| `POST` | `/api/hooks/sessions/:id/hooks/test` | 83 |
+| `POST` | `/api/hooks/sessions/:id/hooks/test` | 47 |
 
 ## internal-browser
 
@@ -265,20 +264,17 @@ Source: `apps/server/src/routes/orchestrator.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/orchestrator/system-workflows` | 95 |
-| `GET` | `/api/orchestrator/system-workflows/:id` | 105 |
-| `POST` | `/api/orchestrator/from-template` | 122 |
-| `POST` | `/api/orchestrator/runs` | 158 |
-| `POST` | `/api/orchestrator/runs/:id/cancel` | 228 |
-| `POST` | `/api/orchestrator/workflows/:id/uploads` | 247 |
-| `GET` | `/api/orchestrator/workflows/:id/files` | 312 |
-| `GET` | `/api/orchestrator/workflows/:id/files/download` | 340 |
-| `DELETE` | `/api/orchestrator/workflows/:id/files` | 384 |
-| `POST` | `/api/orchestrator/runs/:id/uploads` | 416 |
-| `GET` | `/api/orchestrator/runs/:id/workspace` | 496 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/download` | 607 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/content` | 674 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/diff` | 734 |
+| `POST` | `/api/orchestrator/runs` | 95 |
+| `POST` | `/api/orchestrator/runs/:id/cancel` | 165 |
+| `POST` | `/api/orchestrator/workflows/:id/uploads` | 184 |
+| `GET` | `/api/orchestrator/workflows/:id/files` | 249 |
+| `GET` | `/api/orchestrator/workflows/:id/files/download` | 277 |
+| `DELETE` | `/api/orchestrator/workflows/:id/files` | 321 |
+| `POST` | `/api/orchestrator/runs/:id/uploads` | 353 |
+| `GET` | `/api/orchestrator/runs/:id/workspace` | 433 |
+| `GET` | `/api/orchestrator/runs/:id/workspace/download` | 544 |
+| `GET` | `/api/orchestrator/runs/:id/workspace/content` | 611 |
+| `GET` | `/api/orchestrator/runs/:id/workspace/diff` | 671 |
 
 ## projects
 
@@ -442,18 +438,6 @@ Source: `apps/server/src/routes/terminals.ts`.
 | `POST` | `/api/workspaces/:id/terminals/:sid/resize` | 172 |
 | `POST` | `/api/workspaces/:id/terminals/:sid/signal` | 198 |
 | `DELETE` | `/api/workspaces/:id/terminals/:sid` | 220 |
-
-## webhooks
-
-Source: `apps/server/src/routes/webhooks.ts`.
-
-| Method | Path | Source line |
-| --- | --- | --- |
-| `POST` | `/api/webhooks/github` | 37 |
-| `POST` | `/api/webhooks/custom/:trigger` | 82 |
-| `GET` | `/api/webhooks/registrations` | 124 |
-| `POST` | `/api/webhooks/registrations` | 138 |
-| `DELETE` | `/api/webhooks/registrations/:id` | 161 |
 
 ## widgets
 

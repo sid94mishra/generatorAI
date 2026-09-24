@@ -22,7 +22,6 @@ export type {
   IEventRepository,
   IChatMessageRepository,
   IArtifactRepository,
-  IWebhookRepository,
   IChatRepository,
   IWorkflowDefinitionRepository,
   IStageDefinitionRepository,

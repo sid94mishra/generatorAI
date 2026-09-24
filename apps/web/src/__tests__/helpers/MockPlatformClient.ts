@@ -4,12 +4,8 @@
 
 import type {
   IPlatformClient,
-  Session,
-  SessionWithWorkflows,
-  Workflow,
   ChatMessage,
   Artifact,
-  CreateSessionParams,
   PersistedEvent,
   WorkflowTemplateSummary,
   EventSubscriptionOptions,
@@ -23,35 +19,6 @@ import type {
   CreateWorkflowRunParams,
 } from '@generatorai/shared';
 import { vi } from 'vitest';
-
-export function createMockSession(overrides: Partial<Session> = {}): Session {
-  return {
-    id: 'session-1',
-    name: 'Test Session',
-    status: 'created',
-    tags: [],
-    createdAt: new Date('2025-01-01T00:00:00Z'),
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
-    ...overrides,
-  };
-}
-
-export function createMockWorkflow(overrides: Partial<Workflow> = {}): Workflow {
-  return {
-    id: 'workflow-1',
-    sessionId: 'session-1',
-    templateId: 'code-generation',
-    name: 'Code Generation',
-    order: 0,
-    status: 'pending',
-    variables: {},
-    hookOverrides: {},
-    currentStep: 0,
-    totalSteps: 3,
-    createdAt: new Date('2025-01-01T00:00:00Z'),
-    ...overrides,
-  };
-}
 
 export function createMockChatMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
@@ -108,53 +75,12 @@ export function createMockTemplate(overrides: Partial<WorkflowTemplateSummary> =
 export class MockPlatformClient implements IPlatformClient {
   readonly platform = 'web' as const;
 
-  sessions: Session[] = [createMockSession()];
-  workflows: Workflow[] = [createMockWorkflow()];
   messages: ChatMessage[] = [];
   artifacts: Artifact[] = [];
   templates: WorkflowTemplateSummary[] = [createMockTemplate()];
 
   initialize = vi.fn(async () => {});
   shutdown = vi.fn(async () => {});
-
-  createSession = vi.fn(async (params: CreateSessionParams): Promise<Session> => {
-    const session = createMockSession({
-      id: `session-${Date.now()}`,
-      name: params.name,
-      description: params.description,
-    });
-    this.sessions.push(session);
-    return session;
-  });
-
-  getSession = vi.fn(async (sessionId: string): Promise<SessionWithWorkflows> => {
-    const session = this.sessions.find((s) => s.id === sessionId);
-    if (!session) throw new Error(`Session ${sessionId} not found`);
-    return {
-      ...session,
-      workflows: this.workflows.filter((w) => w.sessionId === sessionId),
-    };
-  });
-
-  getSessions = vi.fn(async (): Promise<Session[]> => {
-    return [...this.sessions];
-  });
-
-  deleteSession = vi.fn(async (sessionId: string): Promise<void> => {
-    this.sessions = this.sessions.filter((s) => s.id !== sessionId);
-  });
-
-  startSession = vi.fn(async () => {});
-  pauseSession = vi.fn(async () => {});
-  resumeSession = vi.fn(async () => {});
-  cancelSession = vi.fn(async () => {});
-
-  getWorkflows = vi.fn(async (sessionId: string): Promise<Workflow[]> => {
-    return this.workflows.filter((w) => w.sessionId === sessionId);
-  });
-
-  pauseWorkflow = vi.fn(async () => {});
-  resumeWorkflow = vi.fn(async () => {});
 
   sendPrompt = vi.fn(async () => {});
 

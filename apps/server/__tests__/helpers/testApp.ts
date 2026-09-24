@@ -54,10 +54,6 @@ export function createTestConfig(overrides?: Partial<AppConfig>): AppConfig {
       maxScriptTimeoutMs: 5000,
       maxOutputBufferBytes: 1024,
     },
-    webhooks: {
-      enabled: false,
-      rateLimitPerMinute: 60,
-    },
     otel: {
       enabled: false,
       endpoint: 'http://localhost:4318',
@@ -100,38 +96,6 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
   const logger = createTestLogger();
   const eventBus = new EventBus();
 
-  const sessionService = {
-    createSession: vi.fn().mockResolvedValue({
-      id: 'sess-1',
-      name: 'Test Session',
-      status: 'created',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }),
-    getSessions: vi.fn().mockResolvedValue([
-      { id: 'sess-1', name: 'Test Session', status: 'created', createdAt: new Date(), updatedAt: new Date() },
-      { id: 'sess-2', name: 'Running Session', status: 'running', createdAt: new Date(), updatedAt: new Date() },
-    ]),
-    getSession: vi.fn().mockResolvedValue({
-      id: 'sess-1',
-      name: 'Test Session',
-      status: 'created',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }),
-    startSession: vi.fn().mockResolvedValue(undefined),
-    pauseSession: vi.fn().mockResolvedValue(undefined),
-    resumeSession: vi.fn().mockResolvedValue(undefined),
-    cancelSession: vi.fn().mockResolvedValue(undefined),
-    deleteSession: vi.fn().mockResolvedValue(undefined),
-  };
-
-  const workflowRepo = {
-    getBySessionId: vi.fn().mockResolvedValue([
-      { id: 'wf-1', sessionId: 'sess-1', name: 'Workflow 1', order: 0, status: 'pending', hookOverrides: {} },
-    ]),
-  };
-
   const artifactService = {
     getSessionArtifacts: vi.fn().mockResolvedValue([
       { id: 'art-1', sessionId: 'sess-1', name: 'output.ts', path: '/tmp/output.ts', mimeType: 'text/typescript', size: 100 },
@@ -145,14 +109,6 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
       mimeType: 'text/plain',
       size: 50,
     }),
-  };
-
-  const webhookService = {
-    handleGitHub: vi.fn().mockResolvedValue(undefined),
-    handleCustom: vi.fn().mockResolvedValue(undefined),
-    getAllRegistrations: vi.fn().mockResolvedValue([]),
-    createRegistration: vi.fn().mockImplementation(async (reg: unknown) => reg),
-    deleteRegistration: vi.fn().mockResolvedValue(undefined),
   };
 
   const errorHandler = {
@@ -217,11 +173,6 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
       metadata: { id: 'test-script', name: 'Test Script', filePath: '/tmp/test.workflow.mjs', lastModified: new Date(), variables: [], stageCount: 0, profileCount: 0, tags: [] },
     }),
     validateScriptFile: vi.fn().mockResolvedValue({ valid: true, errors: [] }),
-  };
-
-  const configResolver = {
-    resolveGlobalHooks: vi.fn().mockReturnValue([]),
-    resolveSessionConfig: vi.fn().mockReturnValue({}),
   };
 
   // ── v2 Service Mocks ──
@@ -479,16 +430,12 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     workflowOrchestrator,
     harnessProxy,
     harnessRegistry,
-    sessionService,
     artifactService,
-    webhookService,
     errorHandler,
     harness: copilot,
-    workflowRepo,
     templateRegistry,
     hookExecutor,
     workflowScriptLoader,
-    configResolver,
     // v2
     chatManagementService,
     planService: {

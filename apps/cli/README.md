@@ -392,10 +392,7 @@ generatorai run hitl resume <run-id> <stage-id> --reject --reason "Needs more co
 High-level orchestrated workflow runs via system templates.
 
 ```bash
-generatorai orchestrator templates                                   # list system templates
-generatorai orchestrator create-from-template <templateId> [--params '{"key":"value"}']
 generatorai orchestrator start --definition <id> [--project <id>] [--vars '{"key":"value"}']
-generatorai orchestrator context <runId>
 generatorai orchestrator cancel <runId>
 ```
 
@@ -473,19 +470,13 @@ generatorai ws cleanup                          # remove stale workspaces
 
 ---
 
-### webhook
+### hook
 
-Manage inbound webhooks and session hook phases.
+Hook phases and dry-run testing.
 
 ```bash
-# Webhooks (for automations)
-generatorai webhook list
-generatorai webhook create --automation <id> [--secret <secret>]
-generatorai webhook delete <id>
-
-# Hook phases (session lifecycle hooks)
-generatorai webhook hook phases <sessionId>
-generatorai webhook hook test <sessionId> <phase> [--payload '{"key":"value"}']
+generatorai hook phases
+generatorai hook test <sessionId> <phase> [--payload '{"key":"value"}']
 ```
 
 ---

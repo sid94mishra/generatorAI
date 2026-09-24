@@ -1070,13 +1070,11 @@ export type WorkflowTemplateStage = z.infer<typeof WorkflowTemplateStageSchema>;
  *
  * Both entry points that materialise a template into a real workflow —
  * `WorkflowDefinitionService.importFromJSON` (import JSON / round-trip an
- * export) and `WorkflowOrchestrator.createFromTemplate` (Settings → Templates
- * → Create workflow) — must use this. They previously each hand-wrote the
- * mapping and had drifted apart: the importer ignored `contextSources`,
- * `outputFormat` and `agentRef` that the exporter writes, and
- * `createFromTemplate` passed only name/description/order/prompts, silently
- * discarding every retry policy, timeout, condition, validation rule,
- * approval gate, hook and model override the template declared.
+ * export) and `WorkflowDefinitionService.importFromTemplate` (Settings →
+ * Templates → Use) — must use this. They previously each hand-wrote the
+ * mapping and had drifted apart, silently discarding retry policies,
+ * timeouts, conditions, validation rules, approval gates, hooks and model
+ * overrides the template declared.
  */
 export function templateStageToCreateParams(
   stage: WorkflowTemplateStage,

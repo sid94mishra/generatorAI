@@ -19,7 +19,6 @@ import type {
   IEventRepository,
   IChatMessageRepository,
   IArtifactRepository,
-  IWebhookRepository,
   IChatRepository,
   IWorkflowDefinitionRepository,
   IStageDefinitionRepository,
@@ -39,12 +38,9 @@ import type {
 import type { IIdempotencyKeyRepository } from '../services/AutomationRecoveryService.js';
 
 import { EventBus } from '../events/EventBus.js';
-import { SessionService } from '../services/SessionService.js';
 import { ArtifactService } from '../services/ArtifactService.js';
-import { WebhookService } from '../services/WebhookService.js';
 import { HookExecutor } from '../services/HookExecutor.js';
 import { HookInterceptor } from '../services/HookInterceptor.js';
-import { ConfigResolver } from '../services/ConfigResolver.js';
 import { TemplateRegistry } from '../services/TemplateRegistry.js';
 import { StartupRecoveryService } from '../services/StartupRecoveryService.js';
 import type { ISandboxCleaner } from '../services/StartupRecoveryService.js';
@@ -92,7 +88,6 @@ export interface CoreServicesInputs {
   eventRepo: IEventRepository;
   chatMessageRepo: IChatMessageRepository;
   artifactRepo: IArtifactRepository;
-  webhookRepo: IWebhookRepository;
 
   // DAG/run repositories
   chatEntityRepo: IChatRepository;
@@ -118,13 +113,13 @@ export interface CoreServicesInputs {
   // Config
   config: {
     artifactsDir: string;
-    maxConcurrentSessions: number;
     /**
      * P1#7 — max stages executing concurrently across all runs (bounds
      * harness subprocess fan-out). `<= 0` ⇒ unlimited. Defaults to 8.
      */
     maxConcurrentStages?: number;
-    webhooks: { enabled?: boolean; githubSecret?: string; webhookToken?: string };    projectRoot?: string;  };
+    projectRoot?: string;
+  };
 
   /**
    * W22 / W47 — Durable execution engine repositories. Optional so that
@@ -171,14 +166,11 @@ export interface CoreServicesInputs {
 export interface CoreServices {
   eventBus: EventBus;
   templateRegistry: TemplateRegistry;
-  configResolver: ConfigResolver;
   hookExecutor: HookExecutor;
   hookInterceptor: HookInterceptor;
 
   // Session/workflow services
-  sessionService: SessionService;
   artifactService: ArtifactService;
-  webhookService: WebhookService;
   recoveryService: StartupRecoveryService;
   errorHandler: ErrorHandler;
 
@@ -225,7 +217,6 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     eventRepo,
     chatMessageRepo,
     artifactRepo,
-    webhookRepo,
     chatEntityRepo,
     workflowDefinitionRepo,
     stageDefinitionRepo,
@@ -249,29 +240,13 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
 
   // ── Config / Templates ──
   const templateRegistry = new TemplateRegistry(logger);
-  const configResolver = new ConfigResolver(templateRegistry);
 
   // ── Hooks ──
   const hookExecutor = new HookExecutor(scriptRunner, httpClient, eventBus);
   const hookInterceptor = new HookInterceptor(hookExecutor, eventBus);
 
   // ── Session services ──
-  const sessionService = new SessionService(
-    sessionRepo,
-    eventBus,
-    harness,
-    { maxConcurrentSessions: config.maxConcurrentSessions },
-  );
-
   const artifactService = new ArtifactService(artifactRepo, config.artifactsDir);
-
-  const webhookService = new WebhookService(
-    webhookRepo,
-    sessionService,
-    templateRegistry,
-    eventBus,
-    config.webhooks,
-  );
 
   // Build workflow execution services first so the recovery service can depend on them.
   // (Circular dep avoided because sessionAllocator only uses recovery
@@ -575,12 +550,9 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   return {
     eventBus,
     templateRegistry,
-    configResolver,
     hookExecutor,
     hookInterceptor,
-    sessionService,
     artifactService,
-    webhookService,
     recoveryService,
     errorHandler,
     sessionAllocator,

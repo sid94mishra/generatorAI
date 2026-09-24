@@ -1,9 +1,6 @@
 // ────────────────────────────────────────────────────────────────
-// CreateSessionParams — DTO for session creation
+// McpServerConfig — MCP server attachment for a harness session
 // ────────────────────────────────────────────────────────────────
-
-import type { HookDefinition } from './HookDefinition.js';
-import type { HarnessConfig } from './Workflow.js';
 
 /**
  * Superset of what both harness SDKs accept. Copilot uses `<server>-<tool>`
@@ -23,20 +20,4 @@ export interface McpServerConfig {
   timeoutMs?: number;
   /** `false` means the server is NOT mounted at session creation. */
   enabled?: boolean;
-}
-
-export interface CreateSessionParams {
-  name: string;
-  description?: string;
-  /** Default model to use across workflows/chat in this session. */
-  model?: string;
-  /** Workflows to execute. Empty or omitted for free-interaction sessions. */
-  workflows?: Array<{
-    templateId: string;
-    variables?: Record<string, unknown>;
-    hookOverrides?: Record<string, Partial<HookDefinition>>;
-    harnessConfigOverrides?: Partial<HarnessConfig>;
-  }>;
-  mcpServers?: Record<string, McpServerConfig>;
-  tags?: string[];
 }

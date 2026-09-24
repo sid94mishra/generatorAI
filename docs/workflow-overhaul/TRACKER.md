@@ -53,7 +53,7 @@ This file tracks the implementation of every work package (WP) in the overhaul p
 
 | WP | Task | Status | Review | Commit | Notes |
 |---|---|---|---|---|---|
-| 1.1 | Pure dead-code sweep | todo | | | |
+| 1.1 | Pure dead-code sweep | done | | 25fd04c | Every G3 §6 step-0 item deleted (web shims, write-only run-store state + its 3 stream ops, 12 dead hooks + useUpdateAutomation, ?legacy=1 → WorkflowRunPage, Stage actions button, orchestrator context route + activeContexts, resultValidator arg + W-62 listener, DAGScheduler views/aliases, IDAGScheduler/ISessionAllocator, ConfigResolver.resolve/resolveStageConfig, AppConfig.workflow, startPolling/importFromTemplate signatures, deprecated summary fields, CLI --session-mode (W-57), upload template). Hook-phase catalogue derived from HookDefinitionSchema (spec package takes over in 1.5). Timing setters kept as test seam (DEVIATIONS). 24 banned patterns. Tests: DAGScheduler rewritten onto reconcileRun (35 pass); hooks route test asserts schema-derived list; core/server/cli at baseline failures only. |
 | 1.2 | Delete the v1 session/webhook stack | todo | | | |
 | 1.3 | Required deps in `createCoreServices` | todo | | | |
 | 1.4 | Field and feature purges (PD decisions) | todo | | | |

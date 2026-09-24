@@ -387,8 +387,6 @@ export function workflowCommands(): CommandSpec[] {
       id: 'workflow.fromTemplate',
       group: 'workflow',
       verb: 'from-template',
-      aliases: ['import-template'],
-      deprecates: ['workflow import-template', 'wf import-template'],
       summary: 'Create a definition from a system template',
       requiresServer: true,
       sinceVersion: '0.2.0',

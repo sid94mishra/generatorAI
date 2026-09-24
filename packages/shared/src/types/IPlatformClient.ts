@@ -3,11 +3,8 @@
 // Web uses HTTP+SSE, CLI uses in-process direct calls, Desktop uses IPC
 // ────────────────────────────────────────────────────────────────
 
-import type { Session, SessionWithWorkflows } from './Session.js';
-import type { Workflow } from './Workflow.js';
 import type { ChatMessage } from './ChatMessage.js';
 import type { Artifact } from './Artifact.js';
-import type { CreateSessionParams } from './CreateSessionParams.js';
 import type { AgentEvent, PersistedEvent } from './AgentEvent.js';
 import type { Chat, CreateChatParams } from './Chat.js';
 import type { WorkflowDefinition, WorkflowDefinitionWithStages, CreateWorkflowDefinitionParams } from './WorkflowDefinition.js';
@@ -67,23 +64,6 @@ export interface IPlatformClient {
   // ── Lifecycle ──
   initialize(): Promise<void>;
   shutdown(): Promise<void>;
-
-  // ── Session CRUD ──
-  createSession(params: CreateSessionParams): Promise<Session>;
-  getSession(sessionId: string): Promise<SessionWithWorkflows>;
-  getSessions(filter?: { status?: string }): Promise<Session[]>;
-  deleteSession(sessionId: string): Promise<void>;
-
-  // ── Session Control ──
-  startSession(sessionId: string): Promise<void>;
-  pauseSession(sessionId: string): Promise<void>;
-  resumeSession(sessionId: string): Promise<void>;
-  cancelSession(sessionId: string): Promise<void>;
-
-  // ── Workflow Control ──
-  getWorkflows(sessionId: string): Promise<Workflow[]>;
-  pauseWorkflow(workflowId: string): Promise<void>;
-  resumeWorkflow(workflowId: string): Promise<void>;
 
   // ── Chat ──
   sendPrompt(sessionId: string, prompt: string, attachments?: Array<{ type: 'file'; path: string; displayName?: string }>): Promise<void>;

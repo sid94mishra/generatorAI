@@ -2130,13 +2130,5 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         responses: { '200': { description: 'Models' } },
       },
     },
-
-    '/api/webhooks/github': {
-      post: {
-        tags: ['Webhooks'],
-        summary: 'GitHub webhook endpoint (HMAC-verified)',
-        responses: { '200': { description: 'Accepted' }, '401': { description: 'Signature mismatch' } },
-      },
-    },
   },
 };

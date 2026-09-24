@@ -49,11 +49,9 @@ export type {
 } from './HookDefinition.js';
 export { HOOK_PHASE_INFO } from './HookDefinition.js';
 
-export type { Session, SessionWithWorkflows, SessionOwnerType, SessionStatus } from './Session.js';
-export type { SessionTransition } from './SessionStateMachine.js';
+export type { Session, SessionOwnerType, SessionStatus } from './Session.js';
 
-export type { Workflow, HarnessConfig } from './Workflow.js';
-export type { WorkflowStatus, WorkflowTransition } from './WorkflowStateMachine.js';
+export type { HarnessConfig } from './Workflow.js';
 export type { WorkflowRunTransition } from './WorkflowRunStateMachine.js';
 export type { StageRunTransition } from './StageRunStateMachine.js';
 
@@ -75,8 +73,7 @@ export type {
   ComputerConsentRequest,
   ComputerCapabilities,
 } from './ComputerUse.js';
-export type { WebhookRegistration, WebhookDelivery } from './Webhook.js';
-export type { CreateSessionParams, McpServerConfig } from './CreateSessionParams.js';
+export type { McpServerConfig } from './McpServerConfig.js';
 export type { ILogger } from './ILogger.js';
 
 // ── Agents (first-class agent entity) ──

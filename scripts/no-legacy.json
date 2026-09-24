@@ -161,12 +161,63 @@
         "apps/server/src/routes/hooks.ts"
       ],
       "reason": "WP-1.1: hook-phase catalogue is derived from the schema enum"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(WebhookService|SessionService|SessionStateMachine|WorkflowStateMachine|IWorkflowRepository|IWebhookRepository|DrizzleWorkflowRepository|DrizzleWebhookRepository|verifyGitHubSignature|verifyWebhookToken|SessionWithWorkflows|CreateSessionParams|WebhookRegistration|WebhookDelivery|resolveGlobalHooks|registerClientLifecycleHooks|ConfigResolver|createWebhookRoutes|SessionTransition|WorkflowTransition|WebhookConfig)\\b",
+      "reason": "WP-1.2: v1 session/webhook stack deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "/api/webhooks|system-workflows|/orchestrator/from-template|getOrchestratorTemplates?\\b|platform\\.createFromTemplate|async createFromTemplate|orchestrator\\.(templates|template|fromTemplate)\\b",
+      "reason": "WP-1.2: legacy webhook routes, orchestrator template list/import routes deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "'/sessions/:id/hooks'|sessions/\\$\\{\\w+\\}/hooks`",
+      "reason": "WP-1.2: GET /hooks/sessions/:id/hooks deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(sessionHooks|SessionHooks)\\b|webhooks\\.(list|create|remove)\\(|'webhook\\.(list|create|delete)'|'hook\\.list'",
+      "paths": [
+        "packages/client-core/",
+        "packages/cli-core/",
+        "apps/cli/",
+        "apps/web/"
+      ],
+      "reason": "WP-1.2: clients of the deleted routes"
+    },
+    {
+      "phase": "01",
+      "pattern": "WEBHOOKS_ENABLED|githubSecret",
+      "reason": "WP-1.2: AppConfig.webhooks deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "maxConcurrentSessions",
+      "paths": [
+        "packages/sdk/src/",
+        "packages/core/src/bootstrap/",
+        "packages/workflow-testkit/"
+      ],
+      "reason": "WP-1.2: only fed the deleted SessionService"
+    },
+    {
+      "phase": "01",
+      "pattern": "api/sessions/\\$\\{\\w+\\}/(start|pause|resume|cancel)|api/workflows/\\$\\{|\\b(getWorkflows|pauseWorkflow|resumeWorkflow|pauseSession|resumeSession|startSession|useSessions|useCreateSession|usePauseWorkflow|useResumeWorkflow)\\b",
+      "paths": [
+        "apps/web/src/platform/",
+        "apps/web/src/hooks/queries.ts",
+        "packages/shared/src/types/IPlatformClient.ts"
+      ],
+      "reason": "WP-1.2: IPlatformClient v1 session/workflow methods and hooks deleted"
     }
   ],
   "comments": {
     "phase": "01",
     "failFromPhase": null,
-    "baseline": 59,
+    "baseline": 58,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",

@@ -44,7 +44,6 @@ export const GROUPS = [
   { name: 'browser', summary: 'Workspace-scoped Chromium', order: 73 },
   { name: 'computer', summary: 'Computer Use: desktop windows and audit', order: 74 },
   { name: 'hook', summary: 'Lifecycle hooks', order: 80 },
-  { name: 'webhook', summary: 'Incoming and outgoing webhooks', order: 81 },
   { name: 'harness', summary: 'AI provider selection', order: 82 },
   { name: 'source-control', aliases: ['scm'], summary: 'Git provider and pull-request configuration', order: 83 },
   { name: 'security', summary: 'Security posture, devices and audit', order: 84 },
@@ -451,22 +450,6 @@ export function templateCommands(): CommandSpec[] {
 
 export function orchestratorCommands(): CommandSpec[] {
   return [
-    defineCommand({
-      id: 'orchestrator.templates',
-      group: 'orchestrator',
-      verb: 'templates',
-      summary: 'System workflows available to the orchestrator',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [],
-      flags: [],
-      schema: inputSchema({}, {}),
-      output: { kind: 'list', columns: [idColumn, nameColumn, { key: 'description', header: 'Description', priority: 2 }] },
-      async handler(ctx) {
-        return list(await ctx.api.orchestrator.templates());
-      },
-    }),
-
     defineCommand({
       id: 'orchestrator.cancel',
       group: 'orchestrator',
@@ -1551,143 +1534,6 @@ export function platformCommands(): CommandSpec[] {
           ...(result.success ? {} : { exitCode: EXIT_CODES.RESULT_FAILED }),
           message: result.message,
         };
-      },
-    }),
-
-    defineCommand({
-      id: 'hook.list',
-      group: 'hook',
-      verb: 'list',
-      summary: 'Hooks registered on a session — global definitions plus per-workflow overrides',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'session', description: 'Session id', required: true }],
-      flags: [],
-      schema: inputSchema({ session: z.string() }, {}),
-      output: {
-        kind: 'list',
-        columns: [
-          { key: 'scope', header: 'Scope', priority: 0 },
-          { key: 'workflowName', header: 'Workflow', priority: 2 },
-          { key: 'name', header: 'Name', priority: 0 },
-          { key: 'phase', header: 'Phase', priority: 0 },
-          { key: 'type', header: 'Type', priority: 1 },
-          { key: 'failurePolicy', header: 'On failure', priority: 2 },
-          { key: 'priority', header: 'Priority', format: 'number', priority: 3 },
-        ],
-      },
-      async handler(ctx, { args }) {
-        const response = await ctx.api.hooks.sessionHooks(args.session);
-        const rows: Array<Record<string, unknown>> = [];
-        const globalById = new Map((response.globalHooks ?? []).map((hook) => [hook.id, hook]));
-
-        for (const hook of response.globalHooks ?? []) {
-          rows.push({
-            scope: 'global',
-            workflowId: null,
-            workflowName: null,
-            hookId: hook.id,
-            name: hook.name,
-            phase: hook.phase,
-            type: hook.type,
-            priority: hook.priority,
-            failurePolicy: hook.failurePolicy,
-            enabled: hook.enabled,
-          });
-        }
-        for (const wf of response.workflowHooks ?? []) {
-          for (const [hookId, override] of Object.entries(wf.hooks ?? {})) {
-            // `hookOverrides` is a PARTIAL patch keyed by hook id — a field
-            // the override doesn't set falls back to the base definition in
-            // `globalHooks`. Without this fallback, a row that overrides only
-            // e.g. `priority` rendered every other column as undefined even
-            // though the real value was sitting right there in `globalHooks`.
-            const base = globalById.get(hookId);
-            rows.push({
-              scope: 'workflow',
-              workflowId: wf.workflowId,
-              workflowName: wf.workflowName,
-              hookId,
-              name: override.name ?? base?.name,
-              phase: override.phase ?? base?.phase,
-              type: override.type ?? base?.type,
-              priority: override.priority ?? base?.priority,
-              failurePolicy: override.failurePolicy ?? base?.failurePolicy,
-              enabled: override.enabled ?? base?.enabled,
-            });
-          }
-        }
-        return list(rows);
-      },
-    }),
-
-    defineCommand({
-      id: 'webhook.list',
-      group: 'webhook',
-      verb: 'list',
-      aliases: ['ls'],
-      summary: 'Outgoing webhook registrations',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [],
-      flags: [],
-      schema: inputSchema({}, {}),
-      output: {
-        kind: 'list',
-        columns: [
-          idColumn,
-          { key: 'url', header: 'URL', priority: 0 },
-          { key: 'events', header: 'Events', format: 'list', priority: 1 },
-          createdColumn,
-        ],
-      },
-      async handler(ctx) {
-        return list(await ctx.api.webhooks.list());
-      },
-    }),
-
-    defineCommand({
-      id: 'webhook.create',
-      group: 'webhook',
-      verb: 'create',
-      summary: 'Register an outgoing webhook',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'url', description: 'Destination URL', required: true }],
-      flags: [
-        { name: 'event', description: 'Event to deliver (repeatable)', type: 'string', variadic: true },
-        { name: 'secret', description: 'HMAC secret', type: 'string' },
-      ],
-      schema: inputSchema(
-        { url: z.string().url('must be a URL') },
-        { event: z.array(z.string()).optional(), secret: z.string().optional() },
-      ),
-      output: { kind: 'record', successMessage: 'Registered webhook {id}' },
-      async handler(ctx, { args, flags }) {
-        return record(
-          await ctx.api.webhooks.create(
-            compact({ url: args.url, events: flags.event, secret: flags.secret }),
-          ),
-        );
-      },
-    }),
-
-    defineCommand({
-      id: 'webhook.delete',
-      group: 'webhook',
-      verb: 'delete',
-      aliases: ['rm'],
-      summary: 'Remove a webhook registration',
-      requiresServer: true,
-      destructive: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'webhook', description: 'Registration id', required: true }],
-      flags: [],
-      schema: inputSchema({ webhook: z.string() }, {}),
-      output: { kind: 'void', successMessage: 'Removed.' },
-      async handler(ctx, { args }) {
-        await ctx.api.webhooks.remove(args.webhook);
-        return ok('Removed webhook.');
       },
     }),
 

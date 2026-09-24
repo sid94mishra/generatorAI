@@ -88,69 +88,6 @@ export function createOrchestratorRoutes(container: Container): Router {
   ]);
 
   // ═══════════════════════════════════════════════════════════
-  // Workflow Templates
-  // ═══════════════════════════════════════════════════════════
-
-  // GET /orchestrator/system-workflows — List all workflow templates
-  router.get('/system-workflows', (_req, res, next) => {
-    try {
-      const templates = workflowOrchestrator.getWorkflowTemplates();
-      res.json(templates);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // GET /orchestrator/system-workflows/:id — Get a specific workflow template
-  router.get('/system-workflows/:id', (req, res, next) => {
-    try {
-      const id = String(req.params['id']);
-      const template = workflowOrchestrator.getWorkflowTemplate(id);
-      if (!template) {
-        res.status(404).json({
-          error: { code: 'NOT_FOUND', message: `Workflow template not found: ${id}` },
-        });
-        return;
-      }
-      res.json(template);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /orchestrator/from-template — Create a workflow definition from a template
-  router.post('/from-template', async (req, res, next) => {
-    try {
-      const { templateId, name, variables, projectId } = req.body as {
-        templateId: string;
-        name?: string;
-        variables?: Record<string, unknown>;
-        projectId?: string;
-      };
-
-      if (!templateId) {
-        res.status(400).json({
-          error: { code: 'VALIDATION_ERROR', message: 'templateId is required' },
-        });
-        return;
-      }
-
-      const definition = await workflowOrchestrator.createFromTemplate(templateId, {
-        name,
-        variables,
-        projectId,
-      });
-
-      logger.info(`[OrchestratorRoutes] Created definition from template ${templateId}: ${definition.id}`, {
-        requestId: req.requestId,
-      });
-      res.status(201).json(definition);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // ═══════════════════════════════════════════════════════════
   // Orchestrated Runs
   // ═══════════════════════════════════════════════════════════
 

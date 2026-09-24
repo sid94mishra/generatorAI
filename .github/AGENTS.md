@@ -138,7 +138,6 @@ Chat ── 1:1 ── Session ── ExecutionWorkspace (optional)
 
 State machines (all pure, in [packages/core/src/domain/state-machines/](../packages/core/src/domain/state-machines/)):
 
-- `SessionStateMachine` — created → starting → running ⇄ paused → cancelling → cancelled / completed / error
 - `WorkflowRunStateMachine` — pending → starting → running ⇄ paused → completed / failed / cancelled
 - `StageRunStateMachine` — pending → queued → running ⇄ paused / sleeping / awaiting_input → completed / failed / cancelled / skipped
 
@@ -247,7 +246,7 @@ Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 | Webhooks (incoming for automations + outgoing GH webhook) | ✅ | ✅ (`webhook …`) | ✅ (`services.webhookService`) | HMAC verification + delivery audit log. |
 | MCP servers (system + per-project) | ✅ | ✅ (`project mcp …`, `system mcp-servers`) | passed via `params.mcpServers` to harness | 8 system servers by default. |
 | Programmatic Workflow Scripts (PWS) | ✅ (Scripts page + Run with profile) | ✅ (`script …`) | ✅ (`ai.scripts`) | `.workflow.mjs` reloadable without restart. |
-| Templates | ✅ | ✅ (`orchestrator templates`, `workflow from-template`) | ✅ via `services.templateRegistry` | 5 built-in v2 templates. |
+| Templates | ✅ | ✅ (`template list`, `workflow from-template`) | ✅ via `services.templateRegistry` | 5 built-in v2 templates. |
 | Provider switch (Copilot ↔ Claude Agent) | ✅ (Settings → Provider) | ✅ (`harness …`) | constructor option | Hot-swappable via `HarnessProxy.switchAdapter`. |
 | Custom tools (Zod-typed) | n/a | n/a | ✅ (`ai.tools.register / tool()`) | SDK-only. |
 | Custom event subscription | n/a | via `run watch` SSE | ✅ (`ai.events.onAll/onRun/onSession/replay/emit`) | |

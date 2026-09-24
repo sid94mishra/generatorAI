@@ -210,7 +210,7 @@ export class GeneratorAI {
   async initialize(): Promise<void> {
     if (this._initialized) return;
     this._initialized = true;
-    const { templateRegistry, configResolver, hookInterceptor, eventBus, recoveryService, automationService } =
+    const { templateRegistry, hookInterceptor, recoveryService, automationService } =
       this.services;
     const { repos, eventRetention, durableSleep, worktreeCleanup, systemArtifacts } = this._internals;
 
@@ -234,18 +234,8 @@ export class GeneratorAI {
       );
     }
 
-    // 3. Global harness lifecycle hooks.
-    try {
-      const globalHooks = configResolver.resolveGlobalHooks();
-      hookInterceptor.registerClientLifecycleHooks(this._harness, globalHooks, {
-        sessionId: '__global__',
-        workspacePath: path.join(this._config.artifactsDir, 'workspaces'),
-        variables: {},
-        eventBus,
-      });
-    } catch (err) {
-      this.logger.warn(`[GeneratorAI] Global hook registration failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    // 3. Harness client lifecycle events → global event stream.
+    hookInterceptor.registerClientLifecycleEvents(this._harness);
 
     // 4. Restore global event sequence counter (avoids post-restart collisions).
     await repos.eventRepo.initialize();
@@ -392,7 +382,6 @@ export class GeneratorAI {
       eventRepo: repos.eventRepo,
       chatMessageRepo: repos.chatMessageRepo,
       artifactRepo: repos.artifactRepo,
-      webhookRepo: repos.webhookRepo,
       chatEntityRepo: repos.chatEntityRepo,
       workflowDefinitionRepo: repos.workflowDefinitionRepo,
       stageDefinitionRepo: repos.stageDefinitionRepo,
@@ -404,9 +393,7 @@ export class GeneratorAI {
       sessionAllocationRepo: repos.sessionAllocationRepo,
       config: {
         artifactsDir: resolved.artifactsDir,
-        maxConcurrentSessions: resolved.maxConcurrentSessions,
         maxConcurrentStages: resolved.maxConcurrentStages,
-        webhooks: resolved.webhooks,
         projectRoot: resolved.projectRoot,
       },
       withTransaction: <T>(fn: () => Promise<T>) => withTransaction(db, fn),
@@ -501,7 +488,6 @@ export class GeneratorAI {
       workflowPreprocessor,
       repos.workflowRunRepo,
       services.eventBus,
-      services.templateRegistry,
       logger,
       resolved.artifactsDir,
       undefined, // sandboxLifecycleManager — not wired in SDK mode (SDK-9); see warning above

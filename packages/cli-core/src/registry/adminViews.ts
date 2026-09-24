@@ -116,24 +116,6 @@ export const ADMIN_VIEWS: AdminView[] = [
     command: 'hook.phases',
   },
   {
-    id: 'hooks',
-    title: 'Hooks (by session)',
-    description: 'Global hooks plus per-workflow overrides for one session',
-    command: 'hook.list',
-    // `hook list` is session-scoped and there is no "all hooks" route — a
-    // view that silently substituted some session would be showing the wrong
-    // answer confidently, so it asks.
-    prompt: { arg: 'session', message: 'Which session id?' },
-  },
-  {
-    id: 'webhooks',
-    title: 'Webhooks',
-    description: 'Registered outbound webhooks',
-    command: 'webhook.list',
-    createCommand: 'webhook.create',
-    removeCommand: { id: 'webhook.delete', arg: 'webhook' },
-  },
-  {
     id: 'providers',
     title: 'Providers & models',
     description: 'Models each configured harness provider offers',

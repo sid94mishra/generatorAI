@@ -240,20 +240,6 @@ describe('hook wire contract', () => {
       config: { type: 'script', command: 'echo', args: ['hi'] },
     });
   });
-
-  it('types the grouped { workflowHooks, globalHooks } envelope instead of a bare array', async () => {
-    const fetchImpl = (async () =>
-      new Response(
-        JSON.stringify({ sessionId: 's1', workflowHooks: [], globalHooks: [{ id: 'g1' }] }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      )) as unknown as typeof fetch;
-
-    const result = await createAdminApi(fetchImpl).hooks.sessionHooks('s1');
-    // Previously typed `Array<Record<string, unknown>>` — a caller indexing
-    // `result[0]` compiled fine and read `undefined` at every index.
-    expect(result.globalHooks[0]?.id).toBe('g1');
-    expect(result.workflowHooks).toEqual([]);
-  });
 });
 
 describe('review wire contract', () => {

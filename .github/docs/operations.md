@@ -222,8 +222,6 @@ Per-operation git timeout is hardcoded (120s in `GitClient`, shorter for individ
 
 | Var | Default | Purpose |
 |---|---|---|
-| `WEBHOOKS_ENABLED` | `false` | Master switch for incoming webhook handlers |
-| `GITHUB_WEBHOOK_SECRET` | (none) | HMAC shared secret for GitHub webhooks |
 | `WEBHOOK_TOKEN` | (none) | Shared token required on inbound custom-automation webhook triggers (`x-webhook-token` header) |
 
 There is no WEBHOOK_AUTOMATION_BASE_URL env var — nothing in the codebase constructs webhook URLs from a configurable base; there is no such mechanism today.
@@ -385,7 +383,7 @@ For deploying to others (org users / public web):
 2. **Restrict CORS** to your own origins in `apps/server/src/app.ts`.
 3. **Enable sandbox** (`SANDBOX_ENABLED=true`) so user-supplied `script` hooks run isolated.
 4. **Don't expose `/api/copilot/*` publicly** — those endpoints reveal model lists and harness state.
-5. **Webhook secrets** — set `GITHUB_WEBHOOK_SECRET`; rotate automation webhook tokens regularly.
+5. **Webhook secrets** — set a per-automation webhook secret (HMAC, `X-Signature-256`); rotate automation webhook tokens regularly.
 6. **DB at rest** — encrypt the volume if persisting on shared infra. SQLite plain text is the default.
 7. **Path traversal** — enforced by `PathResolver`; don't bypass it in custom code.
 8. **GHEC tokens** — never log them; scrub from spawned environments.

@@ -28,8 +28,8 @@ import {
   useDeleteWorkflowDefinition,
   useBulkDeleteWorkflowDefinitions,
   useImportFromJSON,
-  useWorkflowTemplates,
 } from '@/hooks/workflowQueries.js';
+import { useTemplates } from '@/hooks/queries.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { CardGridSkeleton } from '@/components/Skeleton.js';
 import { WorkflowCard, WorkflowListRow } from '@/components/workflow/WorkflowCard.js';
@@ -62,7 +62,7 @@ export function WorkflowListPage() {
   const navigate = useNavigate();
   const openSettings = useSettingsUiStore((s) => s.openSettings);
   const { data: definitions, isLoading, error } = useWorkflowDefinitions();
-  const { data: systemWorkflows } = useWorkflowTemplates();
+  const { data: systemWorkflows } = useTemplates();
   const deleteDefinition = useDeleteWorkflowDefinition();
   const bulkDelete = useBulkDeleteWorkflowDefinitions();
   const importFromJSON = useImportFromJSON();

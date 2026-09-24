@@ -7,13 +7,9 @@ import type {
   Session,
   SessionStatus,
   SessionOwnerType,
-  Workflow,
-  WorkflowStatus,
   PersistedEvent,
   ChatMessage,
   Artifact,
-  WebhookRegistration,
-  WebhookDelivery,
 } from '@generatorai/shared';
 
 // ── Session Repository ──
@@ -28,17 +24,6 @@ export interface ISessionRepository {
   getByOwner(ownerType: SessionOwnerType, ownerId: string): Promise<Session[]>;
   update(id: string, updates: Partial<Session>): Promise<Session>;
   updateStatus(id: string, status: SessionStatus): Promise<void>;
-  delete(id: string): Promise<void>;
-}
-
-// ── Workflow Repository ──
-
-export interface IWorkflowRepository {
-  create(workflow: Workflow): Promise<Workflow>;
-  getById(id: string): Promise<Workflow>;
-  getBySessionId(sessionId: string): Promise<Workflow[]>;
-  updateStatus(id: string, status: WorkflowStatus): Promise<void>;
-  update(id: string, updates: Partial<Workflow>): Promise<Workflow>;
   delete(id: string): Promise<void>;
 }
 
@@ -94,16 +79,3 @@ export interface IArtifactRepository {
   deleteBySession(sessionId: string): Promise<void>;
 }
 
-// ── Webhook Repository ──
-
-export interface IWebhookRepository {
-  getActiveRegistrations(source: string, eventType: string): Promise<WebhookRegistration[]>;
-  getRegistration(id: string): Promise<WebhookRegistration | null>;
-  getAllRegistrations(): Promise<WebhookRegistration[]>;
-  createRegistration(reg: WebhookRegistration): Promise<WebhookRegistration>;
-  deleteRegistration(id: string): Promise<void>;
-  logDelivery(delivery: WebhookDelivery): Promise<void>;
-  getDeliveryById(deliveryId: string): Promise<WebhookDelivery | null>;
-  updateDeliveryStatus(deliveryId: string, status: string): Promise<void>;
-  updateDelivery(deliveryId: string, updates: Partial<WebhookDelivery>): Promise<void>;
-}

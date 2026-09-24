@@ -300,7 +300,6 @@ b.stage('summarize', s => s
 
 ```
 GET  /api/hooks/phases                       → { totalPhases: 22, categories: { workflow:[…], git:[…], stage:[…], tool:[…], session:[…], client:[…], permission:[…] } }
-GET  /api/sessions/:id/hooks                 → effective hook list for a session
 POST /api/sessions/:id/hooks/test            → fire a hook with a custom payload (dry-run)
 ```
 

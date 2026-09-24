@@ -1,11 +1,10 @@
 import type { HarnessProviderId, ReasoningEffort } from './ProviderConfig.js';
 // ────────────────────────────────────────────────────────────────
-// Workflow — Domain entity
+// HarnessConfig — agent session configuration shared by chats, stages
+// and workflow definitions
 // ────────────────────────────────────────────────────────────────
 
-import type { WorkflowStatus } from './WorkflowStateMachine.js';
-import type { HookDefinition } from './HookDefinition.js';
-import type { McpServerConfig } from './CreateSessionParams.js';
+import type { McpServerConfig } from './McpServerConfig.js';
 import type { AgentMode, AgentPermissionMode } from './AgentMode.js';
 import type { AgentOverrides } from './Agent.js';
 
@@ -48,23 +47,4 @@ export interface HarnessConfig {
   agentRef?: string;
   /** Additive capability delta applied on top of the bound agent. */
   agentOverrides?: AgentOverrides;
-}
-
-export interface Workflow {
-  id: string;
-  sessionId: string;
-  templateId: string;
-  name: string;
-  order: number;
-  status: WorkflowStatus;
-  conversationId?: string;
-  variables: Record<string, unknown>;
-  hookOverrides: Record<string, Partial<HookDefinition>>;
-  harnessConfigOverrides?: Partial<HarnessConfig>;
-  currentStep: number;
-  totalSteps: number;
-  error?: string;
-  startedAt?: Date;
-  completedAt?: Date;
-  createdAt: Date;
 }

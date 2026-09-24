@@ -1,13 +1,9 @@
 // @generatorai/core services exports
-export { SessionService } from './SessionService.js';
 export { ArtifactService } from './ArtifactService.js';
-export { WebhookService } from './WebhookService.js';
-export type { WebhookConfig } from './WebhookService.js';
 export { HookExecutor } from './HookExecutor.js';
 export type { HookContext, HookDryRunPlan, HookDryRunEntry } from './HookExecutor.js';
 export { HookInterceptor } from './HookInterceptor.js';
 export type { SDKHookContext, StageHookContext } from './HookInterceptor.js';
-export { ConfigResolver } from './ConfigResolver.js';
 export { TemplateRegistry } from './TemplateRegistry.js';
 export { StartupRecoveryService } from './StartupRecoveryService.js';
 export { InterruptedTurnRecoveryService, INTERRUPTED_BY_RESTART_CODE } from './InterruptedTurnRecoveryService.js';

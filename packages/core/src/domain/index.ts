@@ -6,8 +6,6 @@ export * from './dag/index.js';
 // Shared domain entities and value objects
 export type {
 	Session,
-	SessionWithWorkflows,
-	Workflow,
 	ChatMessage,
 	Artifact,
 	HookDefinition,

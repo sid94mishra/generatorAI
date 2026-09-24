@@ -47,11 +47,9 @@ export { TOOL_BINARY_KEY, takeToolBinaries } from './IAgentHarness.js';
 
 export type {
   ISessionRepository,
-  IWorkflowRepository,
   IEventRepository,
   IChatMessageRepository,
   IArtifactRepository,
-  IWebhookRepository,
 } from './IRepositories.js';
 
 export type { IChatRepository } from './IChatRepository.js';

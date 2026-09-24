@@ -1460,17 +1460,10 @@
       "mounted": true
     },
     {
-      "method": "GET",
-      "path": "/api/hooks/sessions/:id/hooks",
-      "source": "apps/server/src/routes/hooks.ts",
-      "line": 38,
-      "mounted": true
-    },
-    {
       "method": "POST",
       "path": "/api/hooks/sessions/:id/hooks/test",
       "source": "apps/server/src/routes/hooks.ts",
-      "line": 83,
+      "line": 47,
       "mounted": true
     },
     {
@@ -1516,101 +1509,80 @@
       "mounted": true
     },
     {
-      "method": "GET",
-      "path": "/api/orchestrator/system-workflows",
-      "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 95,
-      "mounted": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/orchestrator/system-workflows/:id",
-      "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 105,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/orchestrator/from-template",
-      "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 122,
-      "mounted": true
-    },
-    {
       "method": "POST",
       "path": "/api/orchestrator/runs",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 158,
+      "line": 95,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/orchestrator/runs/:id/cancel",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 228,
+      "line": 165,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/orchestrator/workflows/:id/uploads",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 247,
+      "line": 184,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/workflows/:id/files",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 312,
+      "line": 249,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/workflows/:id/files/download",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 340,
+      "line": 277,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/orchestrator/workflows/:id/files",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 384,
+      "line": 321,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/orchestrator/runs/:id/uploads",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 416,
+      "line": 353,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/runs/:id/workspace",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 496,
+      "line": 433,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/runs/:id/workspace/download",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 607,
+      "line": 544,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/runs/:id/workspace/content",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 674,
+      "line": 611,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/runs/:id/workspace/diff",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 734,
+      "line": 671,
       "mounted": true
     },
     {
@@ -2262,41 +2234,6 @@
       "path": "/api/workspaces/:id/terminals/:sid",
       "source": "apps/server/src/routes/terminals.ts",
       "line": 220,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/webhooks/github",
-      "source": "apps/server/src/routes/webhooks.ts",
-      "line": 37,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/webhooks/custom/:trigger",
-      "source": "apps/server/src/routes/webhooks.ts",
-      "line": 82,
-      "mounted": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/webhooks/registrations",
-      "source": "apps/server/src/routes/webhooks.ts",
-      "line": 124,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/webhooks/registrations",
-      "source": "apps/server/src/routes/webhooks.ts",
-      "line": 138,
-      "mounted": true
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/webhooks/registrations/:id",
-      "source": "apps/server/src/routes/webhooks.ts",
-      "line": 161,
       "mounted": true
     },
     {
@@ -3182,7 +3119,6 @@
     "GH_HOST",
     "GH_TOKEN",
     "GITHUB_TOKEN",
-    "GITHUB_WEBHOOK_SECRET",
     "HARNESS_TYPE",
     "HOME",
     "KOKORO_DTYPE",
@@ -3224,8 +3160,6 @@
     "USERPROFILE",
     "VISUAL",
     "WAYLAND_DISPLAY",
-    "WEBHOOKS_ENABLED",
-    "WEBHOOK_TOKEN",
     "WEB_DIST_DIR",
     "WIDGET_CONNECT_SRC",
     "WIDGET_ORIGIN",
@@ -3768,7 +3702,6 @@
     "apps/server/src/routes/system.ts",
     "apps/server/src/routes/templates.ts",
     "apps/server/src/routes/terminals.ts",
-    "apps/server/src/routes/webhooks.ts",
     "apps/server/src/routes/widgets.ts",
     "apps/server/src/routes/workflowDefinitions.ts",
     "apps/server/src/routes/workflowRunOrder.ts",
@@ -4288,7 +4221,6 @@
     "packages/core/src/domain/ports/IWorktreeRepository.ts",
     "packages/core/src/domain/state-machines/BrowserSessionStateMachine.ts",
     "packages/core/src/domain/state-machines/index.ts",
-    "packages/core/src/domain/state-machines/SessionStateMachine.ts",
     "packages/core/src/domain/state-machines/StageRunStateMachine.ts",
     "packages/core/src/domain/state-machines/WorkflowRunStateMachine.ts",
     "packages/core/src/events/EventBus.ts",
@@ -4373,7 +4305,6 @@
     "packages/core/src/services/chatTranscript.ts",
     "packages/core/src/services/CodebaseService.ts",
     "packages/core/src/services/ComputerService.ts",
-    "packages/core/src/services/ConfigResolver.ts",
     "packages/core/src/services/DAGScheduler.ts",
     "packages/core/src/services/DataSourceResolver.ts",
     "packages/core/src/services/DeltaLog.ts",
@@ -4417,7 +4348,6 @@
     "packages/core/src/services/scm/turnHint.ts",
     "packages/core/src/services/scm/workspaceMounts.ts",
     "packages/core/src/services/SessionAllocator.ts",
-    "packages/core/src/services/SessionService.ts",
     "packages/core/src/services/shellWords.ts",
     "packages/core/src/services/SourceControlService.ts",
     "packages/core/src/services/StageExecutionService.ts",
@@ -4428,7 +4358,6 @@
     "packages/core/src/services/TemplateRegistry.ts",
     "packages/core/src/services/TerminalService.ts",
     "packages/core/src/services/VoiceService.ts",
-    "packages/core/src/services/WebhookService.ts",
     "packages/core/src/services/WidgetRegistry.ts",
     "packages/core/src/services/WidgetService.ts",
     "packages/core/src/services/WorkflowDefinitionService.ts",
@@ -4504,10 +4433,8 @@
     "packages/db/src/repositories/StageRunRepository.ts",
     "packages/db/src/repositories/StreamCursorRepository.ts",
     "packages/db/src/repositories/SystemConfigRepository.ts",
-    "packages/db/src/repositories/WebhookRepository.ts",
     "packages/db/src/repositories/WidgetInstanceRepository.ts",
     "packages/db/src/repositories/WorkflowDefinitionRepository.ts",
-    "packages/db/src/repositories/WorkflowRepository.ts",
     "packages/db/src/repositories/WorkflowRunRepository.ts",
     "packages/db/src/repositories/WorkspaceArtifactRepository.ts",
     "packages/db/src/repositories/WorkspaceFileReviewRepository.ts",
@@ -4644,7 +4571,6 @@
     "packages/shared/src/types/ChatMessage.ts",
     "packages/shared/src/types/Checkpoint.ts",
     "packages/shared/src/types/ComputerUse.ts",
-    "packages/shared/src/types/CreateSessionParams.ts",
     "packages/shared/src/types/DataSchema.ts",
     "packages/shared/src/types/eventClass.ts",
     "packages/shared/src/types/Extension.ts",
@@ -4653,24 +4579,22 @@
     "packages/shared/src/types/index.ts",
     "packages/shared/src/types/IPlatformClient.ts",
     "packages/shared/src/types/McpServer.ts",
+    "packages/shared/src/types/McpServerConfig.ts",
     "packages/shared/src/types/Project.ts",
     "packages/shared/src/types/ProviderConfig.ts",
     "packages/shared/src/types/RunProfile.ts",
     "packages/shared/src/types/Session.ts",
-    "packages/shared/src/types/SessionStateMachine.ts",
     "packages/shared/src/types/SourceControl.ts",
     "packages/shared/src/types/StageDefinition.ts",
     "packages/shared/src/types/StageRunStateMachine.ts",
     "packages/shared/src/types/Terminal.ts",
     "packages/shared/src/types/Voice.ts",
-    "packages/shared/src/types/Webhook.ts",
     "packages/shared/src/types/Widget.ts",
     "packages/shared/src/types/Workflow.ts",
     "packages/shared/src/types/WorkflowDefinition.ts",
     "packages/shared/src/types/WorkflowOrchestrator.ts",
     "packages/shared/src/types/WorkflowRun.ts",
     "packages/shared/src/types/WorkflowRunStateMachine.ts",
-    "packages/shared/src/types/WorkflowStateMachine.ts",
     "packages/shared/src/types/Workspace.ts",
     "packages/shared/src/utils/batchDataParser.ts",
     "packages/shared/src/utils/computerUseBlocklist.ts",

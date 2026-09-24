@@ -22,7 +22,6 @@ export const workflowKeys = {
   runs: ['workflow-runs'] as const,
   runsByDefinition: (defId: string) => ['workflow-runs', 'by-definition', defId] as const,
   run: (id: string) => ['workflow-run', id] as const,
-  systemWorkflows: ['system-workflows'] as const,
   runWorkspace: (runId: string) => ['run-workspace', runId] as const,
   runScratchpad: (runId: string) => ['run-scratchpad', runId] as const,
 };
@@ -373,28 +372,14 @@ export function useRetryStageRun() {
 // Orchestrator Queries & Mutations
 // ════════════════════════════════════════════════════════════════
 
-/** List all workflow templates */
-export function useWorkflowTemplates() {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: workflowKeys.systemWorkflows,
-    queryFn: () => platform.getOrchestratorTemplates(),
-    staleTime: 60_000,
-  });
-}
-
-/** Create a workflow definition from a template */
+/** Create a workflow definition from a template (`POST /workflow-definitions/import`) */
 export function useCreateFromTemplate() {
   const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (args: {
-      templateId: string;
-      name?: string;
-      variables?: Record<string, unknown>;
-      projectId?: string;
-    }) => platform.createFromTemplate(args.templateId, args),
+    mutationFn: (args: { templateId: string; name?: string }) =>
+      platform.importFromTemplate(args.templateId, args.name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
     },

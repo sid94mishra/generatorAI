@@ -402,22 +402,3 @@ const SignalBodySchema = z.object({
 });
 ```
 
-## webhooks
-
-Source: `apps/server/src/routes/webhooks.ts`. Imported symbols retain their source names; see the linked feature/configuration guides for those values.
-
-### CreateWebhookRegistrationSchema
-
-```typescript
-const CreateWebhookRegistrationSchema = z.object({
-  name: z.string().min(1),
-  source: z.enum(['github', 'custom']),
-  eventType: z.string().min(1),
-  templateId: z.string().min(1),
-  autoStart: z.boolean().default(true),
-  condition: z.string().optional(),
-  sessionConfig: z.record(z.unknown()).optional(),
-  enabled: z.boolean().default(true),
-});
-```
-

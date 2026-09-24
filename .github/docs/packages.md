@@ -60,7 +60,7 @@ The brain. Split into four sub-trees:
 domain/
 ├── ports/                       30+ interfaces (IAgentHarness, I*Repository, ISandboxProvider, IScriptRunner, IHttpClient,
 │                                                  IBrowserBridge, ITerminalHost, …)
-├── state-machines/              SessionStateMachine, WorkflowRunStateMachine, StageRunStateMachine
+├── state-machines/              WorkflowRunStateMachine, StageRunStateMachine
 ├── dag/                         DAGValidator (Kahn), ConditionEvaluator (safe expression eval), types
 └── events/                      AgentEvent factories
 ```
@@ -80,7 +80,6 @@ Thirty-plus services. Most relevant:
 
 | Service | Responsibility |
 |---|---|
-| `SessionService` | v1 session lifecycle + recovery |
 | `ChatManagementService` | v2 chat CRUD + send-prompt + workspace creation |
 | `WorkflowDefinitionService` | CRUD on workflow definitions + stages + edges; validation |
 | `WorkflowRunService` | Run lifecycle, DAG orchestration loop, retries, validation feedback |
@@ -104,7 +103,6 @@ Thirty-plus services. Most relevant:
 | `TerminalService` | Workspace-scoped PTY sessions (see [feature-integrated-terminal.md](./feature-integrated-terminal.md)). Ephemeral `Map<sid, TerminalRecord>` + 4 MiB scrollback ring + idle reaper; hooks into `WorkspaceManager.registerBeforeDelete` for cleanup. |
 | `ExtensionManager` | Hot-load / install / reload / uninstall for system + user + workspace extensions. Runs `loadExtension(ai)` and commits staged contributions atomically into `WidgetRegistry`, `customToolRegistry`, and `SystemArtifactService`. See [feature-extensions-widgets.md](./feature-extensions-widgets.md). |
 | `WidgetService`, `WidgetRegistry` | Lifecycle for `WidgetInstance` rows (`widget_instances` table, migration v14; surface constraint tightened in v16) + in-memory descriptor catalog (incl. action catalog). Emit `harness.widget.render` / `.state` / `.action` / `.invoke` / `.closed` on the bus so the SPA Widget tab + inline widgets stay in sync. Drives agent actions via the `widget:invoke` → `widget:invoke-result` round-trip. |
-| `WebhookService` | Outgoing webhook delivery + signature; incoming webhook dispatch |
 | `WorkflowScriptLoader` | Scan `templates/scripts/*.workflow.mjs`, dynamic-import, validate |
 | `WorkflowOrchestrator` | Higher-level system-template flows + preprocessing |
 | `WorkflowPreprocessor` | Variable resolution + workspace setup before run start |

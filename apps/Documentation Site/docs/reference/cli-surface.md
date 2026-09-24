@@ -7,15 +7,15 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 
 | Measure | Count |
 |---|---:|
-| Commands | 218 |
-| Groups | 25 |
-| Server-backed commands | 191 |
-| Destructive commands | 34 |
+| Commands | 213 |
+| Groups | 24 |
+| Server-backed commands | 186 |
+| Destructive commands | 33 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
 | Bindings executed by a component | 21 |
 | Bindings nothing executes | 0 |
-| Administration views | 22 |
+| Administration views | 20 |
 
 ## Commands
 
@@ -112,11 +112,9 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 | `extension.uninstall` | `extension uninstall` | yes | yes | yes | yes | extension | — |
 | `harness.show` | `harness show` | yes | no | yes | yes | — | — |
 | `harness.switch` | `harness switch` | yes | no | yes | yes | provider | — |
-| `hook.list` | `hook list` | yes | no | yes | yes | session | — |
 | `hook.phases` | `hook phases` | yes | no | yes | yes | — | — |
 | `hook.test` | `hook test` | yes | no | yes | yes | session, phase | --type, --config |
 | `orchestrator.cancel` | `orchestrator cancel` | yes | yes | yes | yes | run | — |
-| `orchestrator.templates` | `orchestrator templates` | yes | no | yes | yes | — | — |
 | `project.codebase.branches` | `project codebase branches` | yes | no | yes | yes | project, codebase | — |
 | `project.codebase.browse` | `project codebase browse` | yes | no | yes | yes | project, codebase | — |
 | `project.codebase.fetch` | `project codebase fetch` | yes | no | yes | yes | project, codebase | — |
@@ -197,9 +195,6 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 | `terminal.list` | `terminal list` | yes | no | yes | yes | workspace | — |
 | `terminal.scrollback` | `terminal scrollback` | yes | no | yes | yes | workspace, terminal | — |
 | `terminal.signal` | `terminal signal` | yes | no | yes | yes | workspace, terminal | — |
-| `webhook.create` | `webhook create` | yes | no | yes | yes | url | — |
-| `webhook.delete` | `webhook delete` | yes | yes | yes | yes | webhook | — |
-| `webhook.list` | `webhook list` | yes | no | yes | yes | — | — |
 | `widget.close` | `widget close` | yes | yes | yes | yes | widget | — |
 | `widget.list` | `widget list` | yes | no | yes | yes | — | — |
 | `widget.read` | `widget read` | yes | no | yes | yes | widget | — |
@@ -423,7 +418,6 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 | extensions | `extension.list` | list |
 | health | `system.health` | record |
 | hook-phases | `hook.phases` | list |
-| hooks | `hook.list` | list |
 | mcp | `system.mcpServers` | list |
 | prompts | `system.artifacts` | list |
 | providers | `system.models` | list |
@@ -434,5 +428,4 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 | skills | `system.artifacts` | list |
 | templates | `template.list` | list |
 | version | `system.version` | record |
-| webhooks | `webhook.list` | list |
 | widgets | `widget.list` | list |

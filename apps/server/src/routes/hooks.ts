@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// Hooks Routes — hook phases, session hooks, and dry-run testing
+// Hooks Routes — hook phases and dry-run testing
 // ────────────────────────────────────────────────────────────────
 
 import { Router } from 'express';
@@ -14,7 +14,7 @@ const HOOK_PHASES = HookDefinitionSchema.shape.phase.options.map((phase) => ({
 
 export function createHooksRoutes(container: Container): Router {
   const router = Router();
-  const { hookExecutor, configResolver, logger } = container;
+  const { hookExecutor, logger } = container;
 
   // GET /hooks/phases — List every available hook phase
   router.get('/phases', (_req, res) => {
@@ -32,42 +32,6 @@ export function createHooksRoutes(container: Container): Router {
       categories: byCategory,
       phases: HOOK_PHASES,
     });
-  });
-
-  // GET /sessions/:id/hooks — Get hooks configured for a session
-  router.get('/sessions/:id/hooks', async (req, res, next) => {
-    try {
-      const sessionId = String(req.params['id']);
-      // Read workflows directly from repository (stable ordering by execution order)
-      const workflows = (await container.workflowRepo.getBySessionId(sessionId))
-        .sort((a, b) => a.order - b.order);
-
-      const sessionHooks: Array<{
-        workflowId: string;
-        workflowName: string;
-        hooks: Record<string, unknown>;
-      }> = [];
-
-      for (const wf of workflows) {
-        const hookOverrides = wf.hookOverrides ?? {};
-        sessionHooks.push({
-          workflowId: wf.id,
-          workflowName: wf.name,
-          hooks: hookOverrides,
-        });
-      }
-
-      // Also include global lifecycle hooks
-      const globalHooks = configResolver.resolveGlobalHooks();
-
-      res.json({
-        sessionId,
-        workflowHooks: sessionHooks,
-        globalHooks,
-      });
-    } catch (err) {
-      next(err);
-    }
   });
 
   // POST /sessions/:id/hooks/test — Dry-run a hook definition.

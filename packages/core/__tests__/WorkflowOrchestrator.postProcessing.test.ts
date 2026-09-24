@@ -103,7 +103,6 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
     const workflowRunServiceStub = {} as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[0];
     const definitionServiceStub = { getDefinition } as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[1];
     const preprocessorStub = { executePostProcessing } as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[2];
-    const templateRegistryStub = {} as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[5];
 
     orchestrator = new WorkflowOrchestrator(
       workflowRunServiceStub,
@@ -111,7 +110,6 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
       preprocessorStub,
       runRepo,
       eventBus as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[4],
-      templateRegistryStub,
       makeLogger(),
     );
   });

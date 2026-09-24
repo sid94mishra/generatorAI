@@ -64,11 +64,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | security.relayDirectorUrl | string | `optional` | — |
 | security.auditRetentionDays | number | `default 365` | int; min 1; max 3650 |
 | security.sessionTtlHours | number | `default 48` | int; min 1; max 8760 |
-| webhooks | object | `default {}` | unknown keys: strip |
-| webhooks.enabled | boolean | `default false` | — |
-| webhooks.githubSecret | string | `optional` | — |
-| webhooks.webhookToken | string | `optional` | — |
-| webhooks.rateLimitPerMinute | number | `default 60` | int; min 1 |
 | sandbox | object | `default {}` | unknown keys: strip |
 | sandbox.enabled | boolean | `default false` | — |
 | sandbox.provider | "docker" / "host" / "auto" | `default "auto"` | — |
@@ -333,15 +328,6 @@ export const AppConfigSchema = z.object({
        * liability, not a convenience.
        */
       sessionTtlHours: z.number().int().min(1).max(8760).default(48),
-    })
-    .default({}),
-
-  webhooks: z
-    .object({
-      enabled: z.boolean().default(false),
-      githubSecret: z.string().optional(),
-      webhookToken: z.string().optional(),
-      rateLimitPerMinute: z.number().int().min(1).default(60),
     })
     .default({}),
 

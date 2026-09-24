@@ -323,11 +323,6 @@ async function startServer(): Promise<void> {
       maxReplayEvents: parseInt(process.env['SSE_MAX_REPLAY'] ?? '10000', 10),
       bufferCleanupDelayMs: parseInt(process.env['SSE_BUFFER_CLEANUP_DELAY_MS'] ?? '300000', 10),
     },
-    webhooks: {
-      enabled: process.env['WEBHOOKS_ENABLED'] === 'true',
-      githubSecret: process.env['GITHUB_WEBHOOK_SECRET'],
-      webhookToken: process.env['WEBHOOK_TOKEN'],
-    },
     security: {
       corsOrigins: process.env['CORS_ORIGINS']
         ? process.env['CORS_ORIGINS'].split(',').map((s) => s.trim())

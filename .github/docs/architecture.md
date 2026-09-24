@@ -17,16 +17,16 @@ GeneratorAI follows **Hexagonal / Ports-and-Adapters with a DDD core**. Four str
 ├─────────────────────────────────────────────────────────────┤
 │ APPLICATION                                                 │
 │   packages/core/src/services                                │
-│     SessionService, ChatManagementService,                  │
+│     ChatManagementService,                                  │
 │     WorkflowDefinitionService, WorkflowRunService,          │
 │     StageExecutionService, DAGScheduler,                    │
-│     SessionAllocator, ConfigResolver, HookExecutor,         │
+│     SessionAllocator, HookExecutor,                         │
 │     HookInterceptor, ArtifactService, AutomationService,    │
 │     HitlService, ResultValidator, DataSourceResolver,       │
 │     ProjectService, CodebaseService, ProjectConfigService,  │
 │     WorktreeService, WorktreeCleanupService,                │
 │     WorkspaceManager, PathResolver, TemplateRegistry,       │
-│     WebhookService, StartupRecoveryService, ErrorHandler,   │
+│     StartupRecoveryService, ErrorHandler,                   │
 │     SandboxLifecycleManager, StreamBroker,                  │
 │     SystemArtifactService, WorkflowScriptLoader,            │
 │     DurableSleepService, WorkflowPreprocessor,              │
@@ -139,7 +139,6 @@ HTTP/SSE listener (Express)
    ├── /api/projects/*      → ProjectService + Codebase/Config services
    ├── /api/workspaces/*    → WorkspaceManager
    ├── /api/hooks/*         → HookExecutor introspection
-   ├── /api/webhooks/*      → WebhookService
    ├── /api/copilot/*       → harness.getModels(), .ping(), .listConversations()
    └── /api/health          → server + db + harness ping
 
@@ -223,7 +222,6 @@ Variables in prompts are interpolated with mustache-style `{{varName}}` after th
 
 All state transitions are encoded as guard tables in pure TypeScript. They have no IO dependencies and are unit-testable in isolation.
 
-- `SessionStateMachine` — 8 states (chat / stage_run / workflow_run own sessions).
 - `WorkflowRunStateMachine` — 7 states.
 - `StageRunStateMachine` — 10 states (includes `sleeping`, `awaiting_input`, `skipped`).
 

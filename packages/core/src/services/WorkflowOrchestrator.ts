@@ -8,8 +8,6 @@
 //   5. Per-stage result validation
 //   6. Post-processing and cleanup
 //
-// Supports system workflows (predefined, locked core logic),
-// custom workflows, and derived workflows built on system templates.
 // ────────────────────────────────────────────────────────────────
 
 import type {
@@ -22,8 +20,6 @@ import type {
   WorkflowDefinition,
   GitRepositoryConfig,
   ILogger,
-  CreateWorkflowDefinitionParams,
-  WorkflowTemplate,
   HookDefinition,
   WorkflowHookDefinition,
   HookPhaseResult,
@@ -43,7 +39,6 @@ import type { WorktreeService } from './WorktreeService.js';
 import type { ProjectService } from './ProjectService.js';
 import type { ProjectConfigService } from './ProjectConfigService.js';
 import type { WorkspaceManager } from './WorkspaceManager.js';
-import type { TemplateRegistry } from './TemplateRegistry.js';
 import type { HookExecutor, HookContext } from './HookExecutor.js';
 
 /**
@@ -66,7 +61,6 @@ export class WorkflowOrchestrator {
     private readonly preprocessor: WorkflowPreprocessor,
     private readonly runRepo: IWorkflowRunRepository,
     private readonly eventBus: EventBus,
-    private readonly templateRegistry: TemplateRegistry,
     private readonly logger: ILogger,
     private readonly artifactsDir?: string,
     private readonly sandboxLifecycleManager?: SandboxLifecycleManager,
@@ -238,46 +232,6 @@ export class WorkflowOrchestrator {
         // Category directory doesn't exist at workflow level — skip
       }
     }
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // Template Management
-  // ════════════════════════════════════════════════════════════════
-
-  /** Get all available workflow templates */
-  getWorkflowTemplates(): WorkflowTemplate[] {
-    return this.templateRegistry.getAllWorkflowTemplates();
-  }
-
-  /** Get a specific workflow template */
-  getWorkflowTemplate(id: string): WorkflowTemplate | undefined {
-    return this.templateRegistry.getWorkflowTemplate(id);
-  }
-
-  /**
-   * Create a workflow definition from a template.
-   * Locked stages are preserved, but user can configure variables.
-   */
-  async createFromTemplate(
-    templateId: string,
-    params: {
-      name?: string;
-      variables?: Record<string, unknown>;
-      projectId?: string;
-    },
-  ): Promise<WorkflowDefinition> {
-    // One importer. This used to be a second copy of
-    // `WorkflowDefinitionService.importFromTemplate` that was not
-    // transactional, hardcoded `sessionMode: 'auto'` and `autoCommit: true`,
-    // and dropped the `imported` tag — see the note on the service method.
-    // Auto-commit stays on for orchestrated (Settings → Templates) imports,
-    // which is what that path always did.
-    return this.definitionService.importFromTemplate(templateId, {
-      name: params.name,
-      projectId: params.projectId,
-      variableOverrides: params.variables,
-      autoCommit: true,
-    });
   }
 
   // ════════════════════════════════════════════════════════════════

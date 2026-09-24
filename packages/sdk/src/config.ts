@@ -63,9 +63,6 @@ export interface GeneratorAIConfig {
    */
   templatesDir?: string;
 
-  /** Max concurrent AI sessions. Defaults to 10 */
-  maxConcurrentSessions?: number;
-
   /**
    * Max stages executing concurrently across all runs — bounds how many harness
    * subprocesses spawn at once so a small host isn't overwhelmed by a wide DAG
@@ -82,12 +79,6 @@ export interface GeneratorAIConfig {
   /** Project root for workspace resolution. Defaults to process.cwd() */
   projectRoot?: string;
 
-  /** Webhook configuration */
-  webhooks?: {
-    enabled?: boolean;
-    githubSecret?: string;
-    webhookToken?: string;
-  };
 }
 
 export interface ResolvedConfig {
@@ -97,16 +88,10 @@ export interface ResolvedConfig {
   artifactsDir: string;
   scriptsDir: string;
   templatesDir: string;
-  maxConcurrentSessions: number;
   maxConcurrentStages: number;
   logger: LoggerConfig | false;
   sandbox: SandboxConfig;
   projectRoot: string;
-  webhooks: {
-    enabled: boolean;
-    githubSecret?: string;
-    webhookToken?: string;
-  };
 }
 
 export function resolveConfig(config: GeneratorAIConfig): ResolvedConfig {
@@ -123,15 +108,9 @@ export function resolveConfig(config: GeneratorAIConfig): ResolvedConfig {
     artifactsDir: config.artifactsDir ?? './artifacts',
     scriptsDir: config.scriptsDir ?? './workflows',
     templatesDir: config.templatesDir ?? './templates',
-    maxConcurrentSessions: config.maxConcurrentSessions ?? 10,
     maxConcurrentStages: config.maxConcurrentStages ?? 8,
     logger: config.logger ?? { level: 'info' },
     sandbox: config.sandbox ?? { enabled: false },
     projectRoot: config.projectRoot ?? process.cwd(),
-    webhooks: {
-      enabled: config.webhooks?.enabled ?? false,
-      githubSecret: config.webhooks?.githubSecret,
-      webhookToken: config.webhooks?.webhookToken,
-    },
   };
 }

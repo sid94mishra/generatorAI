@@ -103,7 +103,7 @@ generatorai
 ├── template              # System workflow templates
 │     list · show
 ├── orchestrator (orch)   # System workflows and orchestrated runs
-│     cancel · templates
+│     cancel
 ├── extension (ext)       # Hot-loadable extensions
 │     disable · enable · list · reload · show · uninstall
 ├── widget                # Agent-rendered widget surfaces
@@ -117,9 +117,7 @@ generatorai
 │     activity · answer · frames · grants · pending · revoke · runtime ·
 │     status
 ├── hook                  # Lifecycle hooks
-│     list · phases · test
-├── webhook               # Incoming and outgoing webhooks
-│     create · delete · list
+│     phases · test
 ├── harness               # AI provider selection
 │     show · switch
 ├── source-control (scm)  # Git provider and pull-request configuration
@@ -372,7 +370,6 @@ System workflows and orchestrated runs
 | Command | What | Flags |
 |---|---|---|
 | `orchestrator cancel <run>` | Cancel an orchestrated run and everything under it | — |
-| `orchestrator templates` | System workflows available to the orchestrator | — |
 
 ### `extension` (alias: `ext`)
 
@@ -450,19 +447,8 @@ Lifecycle hooks
 
 | Command | What | Flags |
 |---|---|---|
-| `hook list <session>` | Hooks registered on a session — global definitions plus per-workflow overrides | — |
 | `hook phases` | Hook phases the server can invoke | — |
 | `hook test <session> <phase> [options]` | Dry-run one hook against a session | `--type` `--config` `--priority` `--timeout` `--retries` `--failure-policy` |
-
-### `webhook`
-
-Incoming and outgoing webhooks
-
-| Command | What | Flags |
-|---|---|---|
-| `webhook create <url> [options]` | Register an outgoing webhook | `--event` `--secret` |
-| `webhook delete <webhook>` | Remove a webhook registration | — |
-| `webhook list` | Outgoing webhook registrations | — |
 
 ### `harness`
 

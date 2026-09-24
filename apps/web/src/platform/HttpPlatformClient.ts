@@ -10,8 +10,6 @@ import type {
   WorkflowTemplateSummary,
   EventSubscriptionOptions,
 } from '@generatorai/shared';
-import type { Session, SessionWithWorkflows } from '@generatorai/shared';
-import type { Workflow } from '@generatorai/shared';
 import type { ChatMessage } from '@generatorai/shared';
 // PLN-01 — plan mode
 import type {
@@ -258,7 +256,6 @@ export interface WorkspaceRetentionRunResult {
   orphans: number;
   failed: number;
 }
-import type { CreateSessionParams } from '@generatorai/shared';
 import type { PersistedEvent, AgentEventKind } from '@generatorai/shared';
 import type {
   Chat,
@@ -275,7 +272,6 @@ import type {
   CreateStageParams,
   CreateEdgeParams,
   ImportWorkflowJson,
-  WorkflowTemplate,
   OrchestratorContext,
   RunWorkspaceInfo,
   RunUploadResult,
@@ -430,63 +426,6 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async shutdown(): Promise<void> {
     // No-op for web client
-  }
-
-  // ── Session CRUD ──
-
-  async createSession(params: CreateSessionParams): Promise<Session> {
-    return apiFetch<Session>(`${this.baseUrl}/api/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-  }
-
-  async getSession(sessionId: string): Promise<SessionWithWorkflows> {
-    return apiFetch<SessionWithWorkflows>(`${this.baseUrl}/api/sessions/${sessionId}`);
-  }
-
-  async getSessions(filter?: { status?: string }): Promise<Session[]> {
-    const params = new URLSearchParams();
-    if (filter?.status) params.set('status', filter.status);
-    const qs = params.toString();
-    return apiFetch<Session[]>(`${this.baseUrl}/api/sessions${qs ? `?${qs}` : ''}`);
-  }
-
-  async deleteSession(sessionId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/sessions/${sessionId}`, { method: 'DELETE' });
-  }
-
-  // ── Session Control ──
-
-  async startSession(sessionId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/sessions/${sessionId}/start`, { method: 'POST' });
-  }
-
-  async pauseSession(sessionId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/sessions/${sessionId}/pause`, { method: 'POST' });
-  }
-
-  async resumeSession(sessionId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/sessions/${sessionId}/resume`, { method: 'POST' });
-  }
-
-  async cancelSession(sessionId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/sessions/${sessionId}/cancel`, { method: 'POST' });
-  }
-
-  // ── Workflow Control ──
-
-  async getWorkflows(sessionId: string): Promise<Workflow[]> {
-    return apiFetch<Workflow[]>(`${this.baseUrl}/api/sessions/${sessionId}/workflows`);
-  }
-
-  async pauseWorkflow(workflowId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflows/${workflowId}/pause`, { method: 'POST' });
-  }
-
-  async resumeWorkflow(workflowId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflows/${workflowId}/resume`, { method: 'POST' });
   }
 
   // ── Chat ──
@@ -1072,11 +1011,11 @@ export class HttpPlatformClient implements IPlatformClient {
     );
   }
 
-  async importFromTemplate(templateId: string): Promise<WorkflowDefinition> {
+  async importFromTemplate(templateId: string, name?: string): Promise<WorkflowDefinition> {
     return apiFetch<WorkflowDefinition>(`${this.baseUrl}/api/workflow-definitions/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ templateId }),
+      body: JSON.stringify({ templateId, ...(name ? { name } : {}) }),
     });
   }
 
@@ -1298,25 +1237,6 @@ export class HttpPlatformClient implements IPlatformClient {
   }
 
   // ── Orchestrator API ──
-
-  async getOrchestratorTemplates(): Promise<WorkflowTemplate[]> {
-    return apiFetch<WorkflowTemplate[]>(`${this.baseUrl}/api/orchestrator/system-workflows`);
-  }
-
-  async getOrchestratorTemplate(id: string): Promise<WorkflowTemplate> {
-    return apiFetch<WorkflowTemplate>(`${this.baseUrl}/api/orchestrator/system-workflows/${id}`);
-  }
-
-  async createFromTemplate(
-    templateId: string,
-    params?: { name?: string; variables?: Record<string, unknown>; projectId?: string },
-  ): Promise<WorkflowDefinition> {
-    return apiFetch<WorkflowDefinition>(`${this.baseUrl}/api/orchestrator/from-template`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ templateId, ...params }),
-    });
-  }
 
   async startOrchestratedRun(params: {
     workflowDefinitionId: string;
@@ -2623,19 +2543,6 @@ export class HttpPlatformClient implements IPlatformClient {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ retentionHours, maxDiskMb }),
     });
-  }
-
-  // PARITY-4: webhook registration management.
-  async listWebhookRegistrations(): Promise<any[]> {
-    return apiFetch<any[]>(`${this.baseUrl}/api/webhooks/registrations`);
-  }
-  async createWebhookRegistration(params: Record<string, unknown>): Promise<any> {
-    return apiFetch<any>(`${this.baseUrl}/api/webhooks/registrations`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params),
-    });
-  }
-  async deleteWebhookRegistration(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/webhooks/registrations/${id}`, { method: 'DELETE' });
   }
 
   // PARITY-8: hook phase listing + dry-run hook testing.

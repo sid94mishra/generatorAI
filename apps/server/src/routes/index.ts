@@ -5,7 +5,6 @@
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
 import { createTemplateRoutes } from './templates.js';
-import { createWebhookRoutes } from './webhooks.js';
 import { createHealthRoutes } from './health.js';
 import { createAuthRoutes } from './auth.js';
 import { createScopeRequestRoutes } from './scopeRequests.js';
@@ -105,9 +104,6 @@ export function createApiRouter(container: Container): Router {
 
   // Templates (2 endpoints)
   router.use('/templates', createTemplateRoutes(container));
-
-  // Webhooks (5 endpoints)
-  router.use('/webhooks', createWebhookRoutes(container));
 
   // Health check and config (2 endpoints)
   router.use('/health', createHealthRoutes(container));

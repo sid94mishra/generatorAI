@@ -104,7 +104,6 @@ export {
 export {
   WorkflowRunStateMachine,
   StageRunStateMachine,
-  SessionStateMachine,
 } from '@generatorai/core';
 
 // ── Harness extension point (bring-your-own-harness) ──
