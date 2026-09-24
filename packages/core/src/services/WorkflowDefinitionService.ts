@@ -420,7 +420,6 @@ export class WorkflowDefinitionService {
         orchestratorConfig: {
           category: 'derived',
           parentTemplateId: templateId,
-          gitRepositories: [],
           requiresCodebase: template.requiresCodebase ?? false,
           preprocessingSteps: (template.preprocessingSteps ?? []) as unknown as OrchestratorConfig['preprocessingSteps'],
           postProcessingSteps: [],

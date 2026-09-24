@@ -20,7 +20,6 @@ import type {
   WorkflowSessionMode,
   HarnessConfig,
   OrchestratorConfig,
-  GitRepositoryConfig,
   EntityScope,
   WorkflowHookDefinition,
 } from '@generatorai/shared';
@@ -66,7 +65,6 @@ interface WorkflowBuilderState {
   variables: VariableDefinition[];
   tags: string[];
   /** Connected git repositories (max 3) */
-  gitRepositories: GitRepositoryConfig[];
   /** Whether to auto-commit changes after workflow completes */
   autoCommit: boolean;
   /** Whether to push the work branch after committing */
@@ -132,7 +130,6 @@ interface WorkflowBuilderState {
   setHarnessConfig: (config: Partial<HarnessConfig> | undefined) => void;
   setVariables: (variables: VariableDefinition[]) => void;
   setTags: (tags: string[]) => void;
-  setGitRepositories: (repos: GitRepositoryConfig[]) => void;
   setAutoCommit: (autoCommit: boolean) => void;
   setAutoPush: (autoPush: boolean) => void;
   setAutoCreatePR: (autoCreatePR: boolean) => void;
@@ -245,7 +242,6 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   harnessConfig: undefined,
   variables: [],
   tags: [],
-  gitRepositories: [],
   autoCommit: true,
   autoPush: false,
   autoCreatePR: false,
@@ -285,20 +281,13 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       harnessConfig: definition.harnessConfig,
       variables: definition.variables ?? [],
       tags: definition.tags ?? [],
-      gitRepositories: definition.orchestratorConfig?.gitRepositories ?? [],
       autoCommit: definition.orchestratorConfig?.autoCommit ?? true,
       autoPush:
         (definition.orchestratorConfig as { autoPush?: boolean } | undefined)?.autoPush ?? false,
       autoCreatePR: definition.orchestratorConfig?.autoCreatePR ?? false,
       scope: (definition as unknown as { scope?: EntityScope }).scope ?? 'global',
       projectId: definition.projectId ?? null,
-      // Prefer `codebaseAliases` (the project/codebase model the server
-      // persists); fall back to the legacy gitRepositories aliases so
-      // definitions saved before that field existed still load.
-      selectedCodebases:
-        definition.orchestratorConfig?.codebaseAliases?.length
-          ? definition.orchestratorConfig.codebaseAliases
-          : (definition.orchestratorConfig?.gitRepositories?.map((r) => r.alias) ?? []),
+      selectedCodebases: definition.orchestratorConfig?.codebaseAliases ?? [],
       hooks: (definition as unknown as { hooks?: WorkflowHookDefinition[] }).hooks ?? [],
       nodes,
       edges,
@@ -323,8 +312,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       harnessConfig: undefined,
       variables: [],
       tags: [],
-      gitRepositories: [],
-      autoCommit: true,
+          autoCommit: true,
       autoPush: false,
       autoCreatePR: false,
       scope: 'global',
@@ -535,7 +523,6 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   setHarnessConfig: (harnessConfig) => set({ harnessConfig, isDirty: true }),
   setVariables: (variables) => set({ variables, isDirty: true }),
   setTags: (tags) => set({ tags, isDirty: true }),
-  setGitRepositories: (gitRepositories) => set({ gitRepositories, isDirty: true }),
   // A PR needs a pushed branch and a push needs a commit, so turning one off
   // turns off everything downstream of it — the same rule the chat options and
   // the server's own flow follow.

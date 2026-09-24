@@ -22,7 +22,6 @@ function harness() {
   const context = (variables: Record<string, unknown>): PreprocessorContext => ({
     workflowRunId: 'run-1',
     variables,
-    gitRepositories: [],
     clonedPaths: {},
     featureBranches: {},
     runWorkspaceDir: '/runs/run-1',
@@ -30,7 +29,7 @@ function harness() {
   return { preprocessor, cloneToDirectory, context };
 }
 
-describe('clone_repo without a declared repository', () => {
+describe('clone_repo from the run inputs', () => {
   it('clones the repository URL the run was started with', async () => {
     const { preprocessor, cloneToDirectory, context } = harness();
     const ctx = context({ git_url: 'https://example.com/shop.git', branch: 'dev' });

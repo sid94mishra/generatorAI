@@ -7,7 +7,6 @@
 import type {
   PreprocessingStep,
   PreprocessingResult,
-  GitRepositoryConfig,
   CloneRepoStepConfig,
   RunScriptStepConfig,
   ValidateInputStepConfig,
@@ -103,14 +102,20 @@ function buildGenVarEnv(variables: Record<string, unknown>): Record<string, stri
   return env;
 }
 
+/** A repository a `clone_repo` step clones, named by the run's inputs. */
+export interface RunRepository {
+  alias: string;
+  url: string;
+  branch?: string;
+}
+
 export interface PreprocessorContext {
   workflowRunId: string;
   variables: Record<string, unknown>;
-  gitRepositories: GitRepositoryConfig[];
   clonedPaths: Record<string, string>;
   featureBranches: Record<string, string>;
   /** Per-run workspace directory where repos are cloned into */
-  runWorkspaceDir?: string;
+  runWorkspaceDir: string;
   /** Workflow name — seeds the generated commit message / PR text. */
   workflowName?: string;
   /** Base branch per repo alias (the codebase's `defaultBranch`). */
@@ -209,42 +214,6 @@ export class WorkflowPreprocessor {
     }
 
     return results;
-  }
-
-  /**
-   * Clone all configured git repositories into the per-run workspace directory.
-   * Each run gets its own fresh clone to avoid merge conflicts.
-   */
-  async cloneRepositories(
-    repos: GitRepositoryConfig[],
-    context: PreprocessorContext,
-  ): Promise<void> {
-    if (!context.runWorkspaceDir) {
-      throw new Error('Missing runWorkspaceDir — per-run isolation requires a run workspace directory');
-    }
-
-    for (const repo of repos) {
-      this.logger.info(`[Preprocessor] Cloning ${repo.alias}: ${repo.url}`);
-
-      // Per-run isolation: clone into {runWorkspace}/{alias}/
-      const targetDir = path.join(context.runWorkspaceDir, repo.alias);
-      const clonedPath = await this.gitManager.cloneToDirectory(repo.url, targetDir, repo.branch);
-
-      context.clonedPaths[repo.alias] = clonedPath;
-
-      // Create feature branch for this run
-      const shortRunId = context.workflowRunId.substring(0, 8);
-      const branchName = `generatorai/run-${shortRunId}-${repo.alias}`;
-      await this.gitManager.checkoutNewBranch(clonedPath, branchName);
-      context.featureBranches[repo.alias] = branchName;
-
-      // Set the repo path as a variable so prompts can reference it
-      context.variables[`repo_path_${repo.alias}`] = clonedPath;
-      context.variables[`repo_branch_${repo.alias}`] = branchName;
-      if (repo.subdirectory) {
-        context.variables[`repo_subdir_${repo.alias}`] = repo.subdirectory;
-      }
-    }
   }
 
   /**
@@ -518,7 +487,7 @@ export class WorkflowPreprocessor {
     }
 
     const result = await this.scriptRunner.run('sh', ['-c', config.script], {
-      cwd: cwd ?? context.runWorkspaceDir ?? process.cwd(),
+      cwd: cwd ?? context.runWorkspaceDir,
       timeout: config.timeoutMs ?? 60_000,
       env,
     });
@@ -556,41 +525,29 @@ export class WorkflowPreprocessor {
     config: CloneRepoStepConfig,
     context: PreprocessorContext,
   ): Promise<string> {
-    const declared = context.gitRepositories.find((r) => r.alias === config.repoAlias);
-    if (!declared) {
-      // A checkout the run already has for this alias (a project worktree)
-      // is what the step exists to produce.
-      const existing = context.variables[`repo_path_${config.repoAlias}`];
-      if (typeof existing === 'string' && existing) return existing;
-    }
-    const repo = declared ?? repositoryFromInputs(config.repoAlias, context.variables);
+    // A checkout the run already has for this alias (a project worktree)
+    // is what the step exists to produce.
+    const existing = context.variables[`repo_path_${config.repoAlias}`];
+    if (typeof existing === 'string' && existing) return existing;
+    const repo = repositoryFromInputs(config.repoAlias, context.variables);
     if (!repo) {
       throw new Error(
         `No repository to clone for "${config.repoAlias}". Enter a repository URL or run the workflow in a project.`,
       );
     }
 
-    // Skip if already cloned in Phase 1 (cloneRepositories)
+    // Skip if an earlier step already cloned it
     if (context.clonedPaths[repo.alias]) {
       const existingPath = context.clonedPaths[repo.alias]!;
       this.logger.info(`[Preprocessor] Repo "${repo.alias}" already cloned at ${existingPath}, skipping`);
       return existingPath;
     }
 
-    // Use per-run workspace directory for isolation
-    if (context.runWorkspaceDir) {
-      const targetDir = path.join(context.runWorkspaceDir, repo.alias);
-      const clonedPath = await this.gitManager.cloneToDirectory(repo.url, targetDir, repo.branch);
-      context.clonedPaths[repo.alias] = clonedPath;
-      context.variables[`repo_path_${repo.alias}`] = clonedPath;
-      return clonedPath;
-    }
-
-    // Fallback to global workspace (legacy)
-    const clonedPath = await this.gitManager.clone(repo.url, repo.branch);
+    // Per-run workspace directory for isolation
+    const targetDir = path.join(context.runWorkspaceDir, repo.alias);
+    const clonedPath = await this.gitManager.cloneToDirectory(repo.url, targetDir, repo.branch);
     context.clonedPaths[repo.alias] = clonedPath;
     context.variables[`repo_path_${repo.alias}`] = clonedPath;
-
     return clonedPath;
   }
 
@@ -734,17 +691,15 @@ export class WorkflowPreprocessor {
 /**
  * The input names a template uses for "the repository to work on".
  *
- * Template import creates a definition with no `gitRepositories` (the URL is
- * only known at run time), so a template's `clone_repo` step found nothing
- * under its alias and every run failed before its first stage. The URL the
- * user typed into the run form is the repository the step means.
+ * A template's repository URL is only known at run time: the URL the user
+ * typed into the run form is the repository the step means.
  */
 const REPOSITORY_INPUTS = ['git_url', 'repo_url', 'repository_url', 'repository'] as const;
 
 export function repositoryFromInputs(
   alias: string,
   variables: Record<string, unknown>,
-): GitRepositoryConfig | null {
+): RunRepository | null {
   for (const name of REPOSITORY_INPUTS) {
     const url = variables[name];
     if (typeof url === 'string' && url.trim()) {

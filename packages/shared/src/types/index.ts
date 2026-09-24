@@ -301,7 +301,6 @@ export {
 
 // ── Orchestrator Types ──
 export type {
-  GitRepositoryConfig,
   PreprocessingStep,
   PreprocessingStepType,
   PreprocessingStepConfig,
@@ -325,9 +324,6 @@ export type {
   OrchestratorContext,
   PreprocessingResult,
   StageValidationResult,
-  SystemWorkflowTemplate,
-  SystemStageTemplate,
-  ConfigurableVariable,
   RunWorkspaceInfo,
   RunUploadResult,
 } from './WorkflowOrchestrator.js';

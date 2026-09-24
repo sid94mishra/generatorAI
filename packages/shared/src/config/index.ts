@@ -28,7 +28,6 @@ export type { AppConfig } from './AppConfig.js';
 export {
   WorkflowTemplateSchema,
   StageTemplateSchema,
-  WorkflowRunProfileSchema,
   HookDefinitionSchema,
   WorkflowHookDefinitionSchema,
   HooksFileConfigSchema,
@@ -42,7 +41,7 @@ export {
   templateStageToCreateParams,
   StageTemplatePromptSchema,
 } from './WorkflowTemplate.js';
-export type { WorkflowTemplate, WorkflowTemplateStage, StageTemplate, WorkflowRunProfile } from './WorkflowTemplate.js';
+export type { WorkflowTemplate, WorkflowTemplateStage, StageTemplate } from './WorkflowTemplate.js';
 
 export {
   CreateWorkflowDefinitionSchema,

@@ -49,7 +49,7 @@ import { useResizable } from '@/hooks/useResizable.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
 import { usePageTitle } from '@/hooks/usePageTitle.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
-import type { StageDefinition, VariableDefinition, CreateWorkflowRunParams, GitRepositoryConfig } from '@generatorai/shared';
+import type { StageDefinition, VariableDefinition, CreateWorkflowRunParams } from '@generatorai/shared';
 import { encodeStageOverrides } from '@generatorai/client-core';
 
 /**
@@ -265,21 +265,12 @@ export function WorkflowBuilderPage() {
   // ── Save ──
   const buildOrchestratorConfig = useCallback(() => {
     // Fresh snapshot — these are only needed at Save/Run time, not reactively.
-    const { selectedCodebases: codebases, gitRepositories, autoCommit, autoPush, autoCreatePR } = useWorkflowBuilderStore.getState();
-    const hasCodebases = codebases.length > 0;
-    const hasGitRepos = gitRepositories.length > 0;
-    if (!hasCodebases && !hasGitRepos) return undefined;
+    const { selectedCodebases: codebases, autoCommit, autoPush, autoCreatePR } = useWorkflowBuilderStore.getState();
+    if (codebases.length === 0) return undefined;
     return {
       category: 'custom' as const,
-      // `codebaseAliases` is the project/codebase field the server schema
-      // accepts and the run path reads. The builder used to send the picked
-      // codebases only as `gitRepositories` (the legacy clone-a-URL field),
-      // which OrchestratorConfigSchema does not declare — so zod stripped it
-      // and the codebase selection silently vanished on every save, leaving
-      // project-linked workflows with `requiresCodebase: true` and no repo to
-      // build a worktree from.
+      // The project codebases the run checks out as worktrees.
       codebaseAliases: codebases,
-      gitRepositories,
       // No preprocessingSteps needed — worktree creation is handled by the orchestrator
       // when projectId + selectedCodebases are present
       preprocessingSteps: [] as Array<{ type: 'clone_repo'; name: string; config: { type: 'clone_repo'; repoAlias: string }; failOnError: boolean; order: number }>,
@@ -487,7 +478,7 @@ export function WorkflowBuilderPage() {
       if (!store.definitionId) return;
       setIsRunning(true);
 
-      const isOrchestrated = !!store.projectId || store.gitRepositories.length > 0;
+      const isOrchestrated = !!store.projectId;
 
       // Helper to upload files for each category
       const uploadAllFiles = async (runId: string) => {

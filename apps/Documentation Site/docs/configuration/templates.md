@@ -586,53 +586,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | resultValidations[].rules[].value | union (string / number) | `required` | — |
 | resultValidations[].rules[].message | string | `required` | — |
 
-## WorkflowRunProfileSchema
-
-| Field | Type / choices | Input / default | Constraints |
-| --- | --- | --- | --- |
-| workflowDefinitionId | string | `optional` | — |
-| templateId | string | `optional` | — |
-| name | string | `optional` | — |
-| variables | map of unknown | `default {}` | — |
-| gitRepositories | array of object | `default []` | — |
-| gitRepositories[] | object | `required` | unknown keys: strip |
-| gitRepositories[].url | string | `required` | — |
-| gitRepositories[].branch | string | `optional` | — |
-| gitRepositories[].alias | string | `optional` | — |
-| projectId | string | `optional` | — |
-| harnessConfigOverrides | object | `optional` | unknown keys: strip |
-| harnessConfigOverrides.model | string | `default "claude-sonnet-4.6"` | — |
-| harnessConfigOverrides.systemMessage | object | `optional` | unknown keys: strip |
-| harnessConfigOverrides.systemMessage.mode | "append" / "replace" | `default "append"` | — |
-| harnessConfigOverrides.systemMessage.content | string | `required` | — |
-| harnessConfigOverrides.systemPromptAppend | string | `optional` | — |
-| harnessConfigOverrides.streaming | boolean | `default true` | — |
-| harnessConfigOverrides.mcpServers | map of object | `default {}` | — |
-| harnessConfigOverrides.mcpServers.{key} | object | `required` | unknown keys: strip |
-| harnessConfigOverrides.mcpServers.{key}.type | "http" / "stdio" | `required` | — |
-| harnessConfigOverrides.mcpServers.{key}.url | string | `optional` | — |
-| harnessConfigOverrides.mcpServers.{key}.command | string | `optional` | — |
-| harnessConfigOverrides.mcpServers.{key}.args | array of string | `optional` | — |
-| harnessConfigOverrides.availableTools | array of string | `default []` | — |
-| harnessConfigOverrides.excludedTools | array of string | `default []` | — |
-| harnessConfigOverrides.skillDirectories | array of string | `default []` | — |
-| harnessConfigOverrides.disabledSkills | array of string | `default []` | — |
-| harnessConfigOverrides.customAgents | array of object | `default []` | — |
-| harnessConfigOverrides.customAgents[] | object | `required` | unknown keys: strip |
-| harnessConfigOverrides.customAgents[].name | string | `required` | — |
-| harnessConfigOverrides.customAgents[].description | string | `required` | — |
-| harnessConfigOverrides.customAgents[].instructions | string | `required` | — |
-| harnessConfigOverrides.customAgents[].tools | array of string | `optional` | — |
-| harnessConfigOverrides.provider | object | `optional` | unknown keys: strip |
-| harnessConfigOverrides.provider.name | string | `required` | — |
-| harnessConfigOverrides.provider.baseUrl | string | `required` | url |
-| harnessConfigOverrides.provider.apiKey | string | `required` | — |
-| harnessConfigOverrides.provider.model | string | `optional` | — |
-| harnessConfigOverrides.configDir | string | `optional` | — |
-| harnessConfigOverrides.reasoningEffort | "low" / "medium" / "high" / "xhigh" / "max" / "ultra" | `optional` | — |
-| harnessConfigOverrides.maxTurns | number | `optional` | int; min 1 |
-| tags | array of string | `default []` | — |
-
 ## Complete validation contract
 
 The following source snapshot contains the additional refinements, transformations, comments, and imported contract names. It is reference material, not a configuration file to paste into the app.
@@ -643,7 +596,7 @@ The following source snapshot contains the additional refinements, transformatio
 ```typescript
 // ────────────────────────────────────────────────────────────────
 // Template System — Unified schemas for Workflow Templates,
-// Stage Templates, and Workflow Run Profiles
+// Stage Templates
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
@@ -1028,37 +981,6 @@ export const WorkflowTemplateSchema = z.object({
 
 export type WorkflowTemplate = z.infer<typeof WorkflowTemplateSchema>;
 
-// ── Workflow Run Profile (runtime config for executing a workflow) ──
-
-export const WorkflowRunProfileSchema = z.object({
-  /** Which workflow definition or template to run */
-  workflowDefinitionId: z.string().optional(),
-  templateId: z.string().optional(),
-
-  /** Name override for the run */
-  name: z.string().optional(),
-
-  /** Variable values for this run */
-  variables: z.record(z.unknown()).default({}),
-
-  /** Git repositories to use */
-  gitRepositories: z.array(z.object({
-    url: z.string(),
-    branch: z.string().optional(),
-    alias: z.string().optional(),
-  })).default([]),
-
-  /** Project to link run to */
-  projectId: z.string().optional(),
-
-  /** Harness config overrides for this specific run */
-  harnessConfigOverrides: TemplateHarnessConfigSchema.optional(),
-
-  /** Tags for this run */
-  tags: z.array(z.string()).default([]),
-});
-
-export type WorkflowRunProfile = z.infer<typeof WorkflowRunProfileSchema>;
 
 
 // ── Template stage → CreateStageParams ─────────────────────────

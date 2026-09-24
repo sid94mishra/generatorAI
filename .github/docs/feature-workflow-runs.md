@@ -91,7 +91,6 @@ Body (`CreateWorkflowRunSchema`):
   projectId?: string;            // override the definition's projectId
   permissionMode?: 'bypassPermissions'|'default'|'acceptEdits'|'plan';
   orchestratorConfig?: {
-    gitRepositories?: Array<{ url?; alias; branch? }>;
     stageOverrides?: StageOverride[];
   };
 }

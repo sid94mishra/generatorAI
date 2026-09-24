@@ -17,8 +17,6 @@ export function ProjectCodebasesTab() {
   const setProjectId = useWorkflowBuilderStore((s) => s.setProjectId);
   const selectedCodebases = useWorkflowBuilderStore((s) => s.selectedCodebases);
   const setSelectedCodebases = useWorkflowBuilderStore((s) => s.setSelectedCodebases);
-  const gitRepositories = useWorkflowBuilderStore((s) => s.gitRepositories);
-  const setGitRepositories = useWorkflowBuilderStore((s) => s.setGitRepositories);
   const autoCommit = useWorkflowBuilderStore((s) => s.autoCommit);
   const setAutoCommit = useWorkflowBuilderStore((s) => s.setAutoCommit);
   const autoPush = useWorkflowBuilderStore((s) => s.autoPush);
@@ -31,34 +29,23 @@ export function ProjectCodebasesTab() {
 
   const handleProjectChange = useCallback(
     (newProjectId: string) => {
+      // Store's setProjectId also clears selectedCodebases
       setProjectId(newProjectId || null);
-      // Store's setProjectId already clears selectedCodebases
-      setGitRepositories([]);
     },
-    [setProjectId, setGitRepositories],
+    [setProjectId],
   );
 
   const toggleCodebase = useCallback(
     (alias: string) => {
       if (selectedCodebases.includes(alias)) {
         setSelectedCodebases(selectedCodebases.filter((a) => a !== alias));
-        setGitRepositories(gitRepositories.filter((r) => r.alias !== alias));
       } else {
         if (selectedCodebases.length >= MAX_CODEBASES) return;
-        const codebase = codebases?.find((c) => c.alias === alias);
-        if (!codebase) return;
+        if (!codebases?.some((c) => c.alias === alias)) return;
         setSelectedCodebases([...selectedCodebases, alias]);
-        setGitRepositories([
-          ...gitRepositories,
-          {
-            url: codebase.url ?? codebase.localPath ?? '',
-            branch: codebase.defaultBranch,
-            alias: codebase.alias,
-          },
-        ]);
       }
     },
-    [selectedCodebases, setSelectedCodebases, gitRepositories, setGitRepositories, codebases],
+    [selectedCodebases, setSelectedCodebases, codebases],
   );
 
   return (

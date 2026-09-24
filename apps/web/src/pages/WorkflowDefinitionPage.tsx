@@ -84,8 +84,8 @@ export function WorkflowDefinitionPage() {
   const { data: projectCodebases } = useProjectCodebases(definition?.projectId ?? undefined);
 
   const linkedCodebases = React.useMemo((): LinkedCodebaseInfo[] | undefined => {
-    if (!definition?.projectId || !definition?.orchestratorConfig?.gitRepositories?.length || !projectCodebases) return undefined;
-    const selectedAliases = definition.orchestratorConfig.gitRepositories.map(r => r.alias);
+    if (!definition?.projectId || !definition?.orchestratorConfig?.codebaseAliases?.length || !projectCodebases) return undefined;
+    const selectedAliases = definition.orchestratorConfig.codebaseAliases;
     return selectedAliases
       .map((alias) => {
         const cb = projectCodebases.find((c) => c.alias === alias);
@@ -93,7 +93,7 @@ export function WorkflowDefinitionPage() {
         return { alias: cb.alias, url: cb.url ?? cb.localPath ?? '', branch: cb.defaultBranch ?? 'main' };
       })
       .filter((x): x is LinkedCodebaseInfo => x !== null);
-  }, [definition?.projectId, definition?.orchestratorConfig?.gitRepositories, projectCodebases]);
+  }, [definition?.projectId, definition?.orchestratorConfig?.codebaseAliases, projectCodebases]);
 
   /**
    * Newest run first. The API returns rows ordered by `createdAt` ASC, so
@@ -123,8 +123,6 @@ export function WorkflowDefinitionPage() {
       try {
         // Uploads need the prepared-launch path even for a plain definition:
         // it creates the final workspace before storing/discovering content.
-        // The legacy create/upload/start sequence writes to a fallback folder
-        // that is abandoned when startRun provisions the workspace.
         if (isOrchestrated || Object.values(uploads ?? {}).some((files) => files.length > 0)) {
           const orchParams: Parameters<typeof startOrchestratedRun.mutateAsync>[0] = {
             workflowDefinitionId: id,
@@ -134,12 +132,7 @@ export function WorkflowDefinitionPage() {
 
           if (definition?.projectId) {
             orchParams['projectId'] = definition.projectId;
-            // Use selectedCodebases from orchestratorConfig.codebaseAliases if available,
-            // fallback to gitRepositories aliases for backward compat with existing definitions
-            orchParams['selectedCodebases'] =
-              definition.orchestratorConfig?.codebaseAliases?.length
-                ? definition.orchestratorConfig.codebaseAliases
-                : definition.orchestratorConfig?.gitRepositories?.map(r => r.alias) ?? [];
+            orchParams['selectedCodebases'] = definition.orchestratorConfig?.codebaseAliases ?? [];
           }
 
           // Pass stage overrides if any are active (shared encoding: a

@@ -8,17 +8,6 @@ import type { ScmFlowResult } from './SourceControl.js';
 import type { HarnessConfig } from './Workflow.js';
 import type { StageRunOverride } from './RunProfile.js';
 
-export interface GitRepositoryConfig {
-  /** Git clone URL (HTTPS or SSH) */
-  url: string;
-  /** Branch to checkout (defaults to default branch) */
-  branch?: string;
-  /** Alias for referencing this repo in prompts (e.g., "frontend", "backend") */
-  alias: string;
-  /** Subdirectory within the repo to focus on (optional) */
-  subdirectory?: string;
-}
-
 /** Preprocessing step types */
 export type PreprocessingStepType =
   | 'clone_repo'
@@ -176,8 +165,6 @@ export interface OrchestratorConfig {
   category: WorkflowCategory;
   /** If derived from a system workflow, reference the parent template */
   parentTemplateId?: string;
-  /** Git repositories to use for this workflow */
-  gitRepositories: GitRepositoryConfig[];
   /** Codebase aliases from the linked project to use */
   codebaseAliases?: string[];
   /** Whether to auto-create worktrees for per-run isolation */
@@ -285,58 +272,3 @@ export interface RunUploadResult {
   directory: string;
 }
 
-/** System workflow template (predefined, non-editable core logic) */
-export interface SystemWorkflowTemplate {
-  id: string;
-  name: string;
-  description: string;
-  category: 'system';
-  version: string;
-  /** Whether the workflow needs codebases */
-  requiresCodebase: boolean;
-  /** Whether multiple codebases are supported */
-  supportsMultipleCodebases: boolean;
-  /** Default git config */
-  defaultGitConfig?: Partial<GitRepositoryConfig>;
-  /** Agent harness configuration (model, MCP servers, tools, etc.) */
-  harnessConfig?: Partial<HarnessConfig>;
-  /** Locked stages (core logic - cannot be modified by users) */
-  stages: SystemStageTemplate[];
-  /** Default edges */
-  edges: Array<{ fromStageIndex: number; toStageIndex: number; edgeType: string }>;
-  /** Default preprocessing */
-  preprocessingSteps: PreprocessingStep[];
-  /** Configurable parameters users can set */
-  configurableVariables: ConfigurableVariable[];
-  /** Result validations */
-  resultValidations: StageResultValidation[];
-  /** Tags for categorization */
-  tags: string[];
-}
-
-export interface SystemStageTemplate {
-  name: string;
-  description?: string;
-  order: number;
-  /** Prompt templates with {{variable}} placeholders */
-  prompts: Array<{
-    label: string;
-    text: string;
-    waitForCompletion: boolean;
-  }>;
-  /** Whether the user can modify this stage's prompts */
-  isLocked: boolean;
-}
-
-/** A configurable variable exposed to users */
-export interface ConfigurableVariable {
-  name: string;
-  type: 'string' | 'number' | 'boolean' | 'choice' | 'text' | 'git_url' | 'git_urls';
-  label: string;
-  description?: string;
-  required: boolean;
-  defaultValue?: unknown;
-  options?: string[];
-  /** Validation rules */
-  validation?: ValidationRule[];
-}

@@ -18,7 +18,6 @@ import type {
   PostProcessingStep,
   WorkflowRun,
   WorkflowDefinition,
-  GitRepositoryConfig,
   ILogger,
   HookDefinition,
   WorkflowHookDefinition,
@@ -49,7 +48,6 @@ import type { HookExecutor, HookContext } from './HookExecutor.js';
 interface PersistedPostProcessingIntent {
   pending: boolean;
   runWorkspaceDir: string;
-  gitRepositories: GitRepositoryConfig[];
   clonedRepositories: Record<string, string>;
   featureBranches: Record<string, string>;
 }
@@ -242,15 +240,11 @@ export class WorkflowOrchestrator {
     const definition = await this.definitionService.getDefinition(params.workflowDefinitionId);
     const orchestratorConfig = definition.orchestratorConfig;
 
-    // Merge git repos from definition config (legacy backward compat)
-    const gitRepos = orchestratorConfig?.gitRepositories ?? [];
-
     // Validate required codebases
     // A repository URL typed into the run form counts: the template's clone
     // step clones it (see `repositoryFromInputs`).
     if (
       orchestratorConfig?.requiresCodebase &&
-      gitRepos.length === 0 &&
       !params.projectId &&
       !repositoryFromInputs('target', params.variables ?? {})
     ) {
@@ -299,14 +293,14 @@ export class WorkflowOrchestrator {
       kind: 'workflow_run.orchestration_started',
       data: {
         workflowRunId: run.id,
-        hasCodebases: gitRepos.length > 0 || (params.selectedCodebases?.length ?? 0) > 0,
+        hasCodebases: (params.selectedCodebases?.length ?? 0) > 0,
         hasPreprocessing: (orchestratorConfig?.preprocessingSteps?.length ?? 0) > 0,
       },
     });
 
     // Execute orchestration asynchronously
     const effectiveProjectId = params.projectId ?? definition.projectId;
-    this.executeOrchestration(run, definition, gitRepos, context, effectiveProjectId, params.selectedCodebases, initializeUploads)
+    this.executeOrchestration(run, definition, context, effectiveProjectId, params.selectedCodebases, initializeUploads)
       .catch((error) => {
         const errorMsg = error instanceof Error ? error.message : String(error);
         this.logger.error(`[Orchestrator] Run ${run.id} failed: ${errorMsg}`);
@@ -359,7 +353,6 @@ export class WorkflowOrchestrator {
   private async executeOrchestration(
     run: WorkflowRun,
     definition: WorkflowDefinition,
-    gitRepos: GitRepositoryConfig[],
     context: OrchestratorContext,
     projectId?: string,
     selectedCodebases?: string[],
@@ -405,11 +398,10 @@ export class WorkflowOrchestrator {
         }
       }
 
-      // ── Phase 1: Clone git repositories ──
       // ── Phase 1: Set up git repositories ──
-      // If projectId is set, use worktrees from project codebases
-      // Otherwise, fall back to legacy clone behavior
-      // Resolve selectedCodebases: if empty but projectId exists, fall back to all ready project codebases
+      // A project run gets one worktree per selected codebase (all ready
+      // project codebases when none were selected). A non-project run
+      // clones its repository in the template's `clone_repo` step.
 
       // ── Workflow Hook: pre_clone ──
       await this.executeWorkflowHooks('pre_clone', definition.hooks, hookCtx);
@@ -479,43 +471,15 @@ export class WorkflowOrchestrator {
           context.resolvedVariables['__workingDirectory'] = primaryWorktree.worktreePath;
           this.logger.info(`[Orchestrator] Set workingDirectory to first worktree: ${primaryWorktree.worktreePath}`);
 
-          // Backward-compat: system templates reference {{repo_path_target}}
-          // (the legacy clone alias). Always set it to the primary worktree path
-          // so templates that use "target" as the alias still resolve correctly.
+          // The system templates name their repository `target`
+          // ({{repo_path_target}}); point it at the primary worktree. Goes away
+          // when the templates move to `run.codebases.<alias>.path` (P01 WP-1.7).
           if (!context.resolvedVariables['repo_path_target']) {
             context.resolvedVariables['repo_path_target'] = primaryWorktree.worktreePath;
           }
         }
 
         this.logger.info(`[Orchestrator] Created ${worktreeInfos.length} worktrees for project run`);
-      } else if (gitRepos.length > 0) {
-        await this.eventBus.emitGlobal({
-          kind: 'workflow_run.worktree_creating',
-          data: {
-            workflowRunId: run.id,
-            codebaseCount: gitRepos.length,
-            codebases: gitRepos.map((r) => ({ alias: r.alias, codebaseId: r.url })),
-          },
-        });
-
-        await this.preprocessor.cloneRepositories(gitRepos, {
-          workflowRunId: run.id,
-          variables: context.resolvedVariables,
-          gitRepositories: gitRepos,
-          clonedPaths: context.clonedRepositories,
-          featureBranches: context.featureBranches,
-          runWorkspaceDir: runWorkspaceDir,
-        });
-
-        // Store feature branches in context variables
-        for (const [alias, branch] of Object.entries(context.featureBranches)) {
-          context.resolvedVariables[`repo_branch_${alias}`] = branch;
-        }
-
-        // Update context variables with repo paths
-        for (const [alias, repoPath] of Object.entries(context.clonedRepositories)) {
-          context.resolvedVariables[`repo_path_${alias}`] = repoPath;
-        }
       }
 
       // ── Workflow Hook: post_clone ──
@@ -547,7 +511,6 @@ export class WorkflowOrchestrator {
           {
             workflowRunId: run.id,
             variables: context.resolvedVariables,
-            gitRepositories: gitRepos,
             clonedPaths: context.clonedRepositories,
             featureBranches: context.featureBranches,
             runWorkspaceDir: runWorkspaceDir,
@@ -639,8 +602,8 @@ export class WorkflowOrchestrator {
       // `reArmPendingPostProcessing()` (called once at boot) re-arms any run
       // whose persisted intent is still `pending`.
 
-      await this.persistPostProcessingIntent(run.id, context, gitRepos, runWorkspaceDir);
-      await this.setupCompletionCleanup(run.id, context, definition, gitRepos, runWorkspaceDir);
+      await this.persistPostProcessingIntent(run.id, context, runWorkspaceDir);
+      await this.setupCompletionCleanup(run.id, context, definition, runWorkspaceDir);
 
       // ── Phase 5: Start the DAG execution ──
       await this.workflowRunService.startRun(run.id);
@@ -710,7 +673,6 @@ export class WorkflowOrchestrator {
     runId: string,
     context: OrchestratorContext,
     definition: WorkflowDefinition,
-    gitRepos: GitRepositoryConfig[],
     runWorkspaceDir: string,
   ): Promise<void> {
     const orchestratorConfig = definition.orchestratorConfig;
@@ -720,7 +682,6 @@ export class WorkflowOrchestrator {
     if (status === 'completed') {
       const postSteps = this.buildPostProcessingSteps(
         orchestratorConfig,
-        gitRepos,
         context.clonedRepositories,
       );
 
@@ -743,7 +704,6 @@ export class WorkflowOrchestrator {
             {
               workflowRunId: runId,
               variables: context.resolvedVariables,
-              gitRepositories: gitRepos,
               clonedPaths: context.clonedRepositories,
               featureBranches: context.featureBranches,
               runWorkspaceDir,
@@ -845,14 +805,13 @@ export class WorkflowOrchestrator {
     runId: string,
     context: OrchestratorContext,
     definition: WorkflowDefinition,
-    gitRepos: GitRepositoryConfig[],
     runWorkspaceDir: string,
   ): Promise<void> {
     const MAX_LISTENER_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
     const current = await this.runRepo.getById(runId).catch(() => undefined);
     if (current && this.isTerminalRunStatus(current.status)) {
-      await this.handleRunTerminal(current.status, runId, context, definition, gitRepos, runWorkspaceDir);
+      await this.handleRunTerminal(current.status, runId, context, definition, runWorkspaceDir);
       return;
     }
 
@@ -869,7 +828,7 @@ export class WorkflowOrchestrator {
           event.kind === 'workflow_run.completed' ? 'completed'
           : event.kind === 'workflow_run.failed' ? 'failed'
           : 'cancelled';
-        await this.handleRunTerminal(status, runId, context, definition, gitRepos, runWorkspaceDir);
+        await this.handleRunTerminal(status, runId, context, definition, runWorkspaceDir);
         unsubscribe();
         clearTimeout(safetyTimeout);
       }
@@ -894,13 +853,11 @@ export class WorkflowOrchestrator {
   private async persistPostProcessingIntent(
     runId: string,
     context: OrchestratorContext,
-    gitRepos: GitRepositoryConfig[],
     runWorkspaceDir: string,
   ): Promise<void> {
     const intent: PersistedPostProcessingIntent = {
       pending: true,
       runWorkspaceDir,
-      gitRepositories: gitRepos,
       clonedRepositories: context.clonedRepositories,
       featureBranches: context.featureBranches,
     };
@@ -969,7 +926,6 @@ export class WorkflowOrchestrator {
           run.id,
           context,
           definition,
-          intent.gitRepositories ?? [],
           intent.runWorkspaceDir ?? '',
         );
       } catch (err) {
@@ -985,18 +941,12 @@ export class WorkflowOrchestrator {
    */
   private buildPostProcessingSteps(
     config: OrchestratorConfig | undefined,
-    gitRepos: GitRepositoryConfig[],
-    /** Worktrees created for this run, keyed by alias (project/codebase model). */
+    /** Repositories this run checked out, keyed by alias (worktrees or clone_repo clones). */
     clonedRepositories: Record<string, string> = {},
   ): PostProcessingStep[] {
     const steps: PostProcessingStep[] = [];
-    // A run has something to commit if it either cloned legacy `gitRepositories`
-    // or (the normal case now) had worktrees created from the project's
-    // codebases. Gating on `gitRepos` alone meant autoCommit / autoCreatePR
-    // never fired for ANY project-linked workflow — the only kind the builder
-    // can create — because the project/codebase model leaves gitRepositories
-    // empty and carries codebases through `codebaseAliases` + worktrees.
-    const hasGitRepos = gitRepos.length > 0 || Object.keys(clonedRepositories).length > 0;
+    // A run has something to commit only when it checked out a repository.
+    const hasGitRepos = Object.keys(clonedRepositories).length > 0;
 
     // Explicit post-processing steps from config
     if (config?.postProcessingSteps) {
@@ -1008,8 +958,7 @@ export class WorkflowOrchestrator {
     // `push` is `autoPush || autoCreatePR`: a PR needs a pushed head, so
     // asking for one implies the push even when `autoPush` was left off.
     // `generateMessage` hands the message to the flow's text generator, which
-    // writes it from the actual diff — the interpolated template is kept as
-    // the fallback for the legacy (no flow service) path.
+    // writes it from the actual diff.
     const hasExplicitCommit = steps.some((s) => s.config.type === 'commit_and_push');
     if (hasGitRepos && config?.autoCommit && !hasExplicitCommit) {
       steps.push({

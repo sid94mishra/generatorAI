@@ -832,7 +832,7 @@ export class WorkflowRunService {
    */
   private async setupProjectWorktrees(
     run: WorkflowRun,
-    definition: { projectId?: string; orchestratorConfig?: { gitRepositories?: Array<{ alias: string }> } },
+    definition: { projectId?: string; orchestratorConfig?: { codebaseAliases?: string[] } },
     runId: string,
     workspaceRootPath: string | undefined,
     updatedVars: Record<string, unknown>,
@@ -841,11 +841,11 @@ export class WorkflowRunService {
     if (!projectId || !this.worktreeService || !this.codebaseRepo) return updatedVars;
 
     try {
-      // Resolve codebases: use orchestratorConfig.gitRepositories aliases OR all project codebases
+      // The definition's codebase selection, else every ready project codebase
       let selectedAliases: string[] = [];
-      const orchConfig = definition.orchestratorConfig;
-      if (orchConfig?.gitRepositories?.length) {
-        selectedAliases = orchConfig.gitRepositories.map((r) => r.alias);
+      const codebaseAliases = definition.orchestratorConfig?.codebaseAliases;
+      if (codebaseAliases?.length) {
+        selectedAliases = codebaseAliases;
       } else {
         // Fall back to ALL ready codebases in the project
         const codebases = await this.codebaseRepo.getByProjectId(projectId);
@@ -872,7 +872,8 @@ export class WorkflowRunService {
         if (worktreeInfos.length > 0) {
           const primaryWorktree = worktreeInfos[0]!;
           updatedVars['__workingDirectory'] = primaryWorktree.worktreePath;
-          // Backward-compat: system templates reference {{repo_path_target}}
+          // The system templates name their repository `target`; goes away when
+          // they move to `run.codebases.<alias>.path` (P01 WP-1.7).
           if (!updatedVars['repo_path_target']) {
             updatedVars['repo_path_target'] = primaryWorktree.worktreePath;
           }

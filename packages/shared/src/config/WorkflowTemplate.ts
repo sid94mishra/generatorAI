@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // Template System — Unified schemas for Workflow Templates,
-// Stage Templates, and Workflow Run Profiles
+// Stage Templates
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
@@ -385,37 +385,6 @@ export const WorkflowTemplateSchema = z.object({
 
 export type WorkflowTemplate = z.infer<typeof WorkflowTemplateSchema>;
 
-// ── Workflow Run Profile (runtime config for executing a workflow) ──
-
-export const WorkflowRunProfileSchema = z.object({
-  /** Which workflow definition or template to run */
-  workflowDefinitionId: z.string().optional(),
-  templateId: z.string().optional(),
-
-  /** Name override for the run */
-  name: z.string().optional(),
-
-  /** Variable values for this run */
-  variables: z.record(z.unknown()).default({}),
-
-  /** Git repositories to use */
-  gitRepositories: z.array(z.object({
-    url: z.string(),
-    branch: z.string().optional(),
-    alias: z.string().optional(),
-  })).default([]),
-
-  /** Project to link run to */
-  projectId: z.string().optional(),
-
-  /** Harness config overrides for this specific run */
-  harnessConfigOverrides: TemplateHarnessConfigSchema.optional(),
-
-  /** Tags for this run */
-  tags: z.array(z.string()).default([]),
-});
-
-export type WorkflowRunProfile = z.infer<typeof WorkflowRunProfileSchema>;
 
 
 // ── Template stage → CreateStageParams ─────────────────────────

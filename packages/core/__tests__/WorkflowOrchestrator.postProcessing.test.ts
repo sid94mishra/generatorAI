@@ -58,7 +58,6 @@ function makeDefinition(overrides: Partial<WorkflowDefinition> = {}): WorkflowDe
     hooks: [],
     orchestratorConfig: {
       category: 'custom',
-      gitRepositories: [],
       preprocessingSteps: [],
       postProcessingSteps: [],
       resultValidations: [],
@@ -203,7 +202,6 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
           __postProcessingIntent: {
             pending: true,
             runWorkspaceDir: '/tmp/ws',
-            gitRepositories: [],
             clonedRepositories: { main: '/tmp/main' },
             featureBranches: {},
           },
@@ -250,7 +248,6 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
           __postProcessingIntent: {
             pending: true,
             runWorkspaceDir: '/tmp/ws',
-            gitRepositories: [],
             clonedRepositories: { main: '/tmp/main' },
             featureBranches: {},
           },

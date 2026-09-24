@@ -266,12 +266,27 @@
         "apps/server/src/"
       ],
       "reason": "WP-1.3: the SDK wires the sandbox like the server; createCoreServices takes `sandbox`"
+    },
+    {
+      "phase": "01",
+      "pattern": "\b(gitRepositories|GitRepositoryConfig|cloneRepositories|WorkflowRunProfileSchema|WorkflowRunProfile|SystemWorkflowTemplate|SystemStageTemplate|defaultGitConfig)\b",
+      "paths": [
+        "packages/core/src/services/Workflow",
+        "packages/core/src/services/Stage",
+        "packages/shared/src/types/WorkflowOrchestrator.ts",
+        "packages/shared/src/config/Workflow",
+        "packages/shared/src/types/index.ts",
+        "apps/web/src/stores/workflowBuilderStore.ts",
+        "apps/web/src/pages/Workflow",
+        "apps/web/src/components/workflow/"
+      ],
+      "reason": "WP-1.4: gitRepositories + legacy clone path deleted; codebaseAliases + clone_repo from run inputs"
     }
   ],
   "comments": {
     "phase": "01",
     "failFromPhase": null,
-    "baseline": 45,
+    "baseline": 33,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",

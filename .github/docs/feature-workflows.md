@@ -217,11 +217,6 @@ type OrchestratorConfig = {
   autoCommit?: boolean;                         // commit the worktrees after a successful run
   autoPush?: boolean;                           // push the work branch (implied by autoCreatePR)
   autoCreatePR?: boolean;
-  gitRepositories?: Array<{                     // LEGACY clone-a-URL path; not accepted by
-    url?: string;                               // the server schema, which strips it. New
-    alias: string;                              // work should use codebaseAliases.
-    branch?: string;
-  }>;
   preprocessing?: { ... };                      // pre-prompt enrichment passes
   postprocessing?: { ... };                     // post-stage transformations
   selectedArtifacts?: {
@@ -234,15 +229,12 @@ type OrchestratorConfig = {
 
 Mostly used by the Orchestrator + system templates. Plain user workflows usually omit this.
 
-**Which codebase field is authoritative.** The project/codebase model uses
-`codebaseAliases` — the builder writes it, `OrchestratorConfigSchema` validates it, and
-the run path reads it to decide which worktrees to create. `gitRepositories` is the older
-clone-a-URL path; the server schema does not declare it, so anything sent there is
-silently dropped by zod. `loadDefinition` still falls back to `gitRepositories` aliases
-when reading so definitions saved before `codebaseAliases` existed keep working.
+**Codebases.** A project-linked run checks out one worktree per `codebaseAliases` entry
+(every ready project codebase when the list is empty). A run without a project clones its
+repository in a template's `clone_repo` step, from the URL entered in the run form.
 
 `autoCommit` / `autoPush` / `autoCreatePR` apply to whatever the run actually has checked out
-— the legacy cloned repos *or* the worktrees created from `codebaseAliases`.
+— the worktrees created from `codebaseAliases` or a `clone_repo` clone.
 
 **They run through the source-control flow.** `buildPostProcessingSteps` turns the flags into a
 `commit_and_push` step (`generateMessage: true`, `push: autoPush || autoCreatePR`) at order 100

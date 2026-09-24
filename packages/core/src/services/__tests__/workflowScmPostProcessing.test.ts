@@ -59,7 +59,6 @@ function context(partial: Partial<PreprocessorContext> = {}): PreprocessorContex
     workflowRunId: 'run-1234abcd',
     workflowName: 'Nightly refactor',
     variables: { __workflowRunId: 'run-1234abcd' },
-    gitRepositories: [],
     clonedPaths: { api: '/run/api', web: '/run/web' },
     featureBranches: { api: 'generatorai/run-1234abcd-api', web: 'generatorai/run-1234abcd-web' },
     baseBranches: { api: 'develop' },
