@@ -1172,6 +1172,25 @@ importers:
         specifier: ^4.0.0
         version: 4.0.0(@types/react@19.2.14)
 
+  packages/workflow-testkit:
+    dependencies:
+      '@generatorai/agent-harness-providers':
+        specifier: workspace:*
+        version: link:../agent-harness-providers
+      '@generatorai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@generatorai/db':
+        specifier: workspace:*
+        version: link:../db
+      '@generatorai/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
+
 packages:
 
   '@11ty/gray-matter@1.0.0':
