@@ -73,7 +73,7 @@ try {
   for (const r of rows) {
     const meta = r.metadata ? JSON.parse(r.metadata) : {};
     const flags = Object.keys(meta).filter((k) => k.startsWith('is') && meta[k] === true);
-    (messages[r.stage] ??= []).push({ role: r.role, content: r.content.slice(0, 2000), flags });
+    (messages[r.stage] ??= []).push({ role: r.role, content: r.content.slice(0, 20_000), flags });
   }
 } finally {
   db.close();
