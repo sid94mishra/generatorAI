@@ -1,0 +1,67 @@
+{
+  "tag": "T3",
+  "description": "failure paths + edge types: F times out (1 s) with 2 retries (F T3)",
+  "timeoutMs": 900000,
+  "def": {
+    "name": "e2e-t3-failure-edges",
+    "sessionMode": "auto"
+  },
+  "stages": [
+    {
+      "name": "F",
+      "prompt": "Write one line containing the token F.",
+      "timeoutMs": 1000,
+      "retryPolicy": {
+        "maxRetries": 2,
+        "backoffMs": 2000,
+        "backoffMultiplier": 2
+      }
+    },
+    {
+      "name": "S",
+      "prompt": "Write one line containing the token S."
+    },
+    {
+      "name": "Rec",
+      "prompt": "Write one line containing the token REC."
+    },
+    {
+      "name": "OC",
+      "prompt": "Write one line containing the token OC."
+    },
+    {
+      "name": "AL",
+      "prompt": "Write one line containing the token AL."
+    },
+    {
+      "name": "Z",
+      "prompt": "Write one line containing the token Z."
+    }
+  ],
+  "edges": [
+    [
+      "F",
+      "S",
+      "on_success"
+    ],
+    [
+      "F",
+      "Rec",
+      "on_failure"
+    ],
+    [
+      "F",
+      "OC",
+      "on_completion"
+    ],
+    [
+      "F",
+      "AL",
+      "always"
+    ],
+    [
+      "Rec",
+      "Z"
+    ]
+  ]
+}

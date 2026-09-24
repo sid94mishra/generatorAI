@@ -42,7 +42,8 @@
     "db:reset": "pnpm --filter @generatorai/db db:reset",
     "db:prepare-dist": "pnpm --filter @generatorai/db db:prepare-dist",
     "sweep:temp": "node scripts/sweep-temp-workspaces.mjs",
-    "workflow:backup": "node scripts/workflow-backup.mjs"
+    "workflow:backup": "node scripts/workflow-backup.mjs",
+    "workflow:e2e": "node scripts/workflow-e2e/run.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

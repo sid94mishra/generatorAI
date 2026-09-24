@@ -1,0 +1,120 @@
+{
+  "tag": "T10-small",
+  "description": "scale, small: 11 stages / 13 edges, chains + two fan-ins, contextFilter none (F T10, reduced)",
+  "timeoutMs": 1200000,
+  "def": {
+    "name": "e2e-t10-small",
+    "sessionMode": "auto"
+  },
+  "stages": [
+    {
+      "name": "root",
+      "prompt": "Write one line containing the token ROOT.",
+      "contextFilter": "none"
+    },
+    {
+      "name": "a1",
+      "prompt": "Write one line containing the token A1.",
+      "contextFilter": "none"
+    },
+    {
+      "name": "a2",
+      "prompt": "Write one line containing the token A2.",
+      "contextFilter": "none"
+    },
+    {
+      "name": "b1",
+      "prompt": "Write one line containing the token B1.",
+      "contextFilter": "none"
+    },
+    {
+      "name": "b2",
+      "prompt": "Write one line containing the token B2.",
+      "contextFilter": "none"
+    },
+    {
+      "name": "join1",
+      "prompt": "Write one line containing the token JOIN1.",
+      "contextFilter": "none"
+    },
+    {
+      "name": "p1",
+      "prompt": "Write one line containing the token P1.",
+      "contextFilter": "none"
+    },
+    {
+      "name": "p2",
+      "prompt": "Write one line containing the token P2.",
+      "contextFilter": "none"
+    },
+    {
+      "name": "p3",
+      "prompt": "Write one line containing the token P3.",
+      "contextFilter": "none"
+    },
+    {
+      "name": "join2",
+      "prompt": "Write one line containing the token JOIN2.",
+      "contextFilter": "none"
+    },
+    {
+      "name": "final",
+      "prompt": "Write one line containing the token FINAL.",
+      "contextFilter": "none"
+    }
+  ],
+  "edges": [
+    [
+      "root",
+      "a1"
+    ],
+    [
+      "a1",
+      "a2"
+    ],
+    [
+      "root",
+      "b1"
+    ],
+    [
+      "b1",
+      "b2"
+    ],
+    [
+      "a2",
+      "join1"
+    ],
+    [
+      "b2",
+      "join1"
+    ],
+    [
+      "join1",
+      "p1"
+    ],
+    [
+      "join1",
+      "p2"
+    ],
+    [
+      "join1",
+      "p3"
+    ],
+    [
+      "p1",
+      "join2"
+    ],
+    [
+      "p2",
+      "join2"
+    ],
+    [
+      "p3",
+      "join2"
+    ],
+    [
+      "join2",
+      "final"
+    ]
+  ]
+}

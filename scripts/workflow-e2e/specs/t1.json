@@ -1,0 +1,89 @@
+{
+  "tag": "T1",
+  "description": "fan-out/fan-in: start -> B1..B5 -> join -> final (F T1)",
+  "timeoutMs": 900000,
+  "def": {
+    "name": "e2e-t1-fanout",
+    "sessionMode": "auto"
+  },
+  "stages": [
+    {
+      "name": "start",
+      "prompt": "Write one line containing the token START."
+    },
+    {
+      "name": "B1",
+      "prompt": "Write one line containing the token B1."
+    },
+    {
+      "name": "B2",
+      "prompt": "Write one line containing the token B2."
+    },
+    {
+      "name": "B3",
+      "prompt": "Write one line containing the token B3."
+    },
+    {
+      "name": "B4",
+      "prompt": "Write one line containing the token B4."
+    },
+    {
+      "name": "B5",
+      "prompt": "Write one line containing the token B5."
+    },
+    {
+      "name": "join",
+      "prompt": "Write one line containing the token JOIN."
+    },
+    {
+      "name": "final",
+      "prompt": "Write one line containing the token FINAL."
+    }
+  ],
+  "edges": [
+    [
+      "start",
+      "B1"
+    ],
+    [
+      "start",
+      "B2"
+    ],
+    [
+      "start",
+      "B3"
+    ],
+    [
+      "start",
+      "B4"
+    ],
+    [
+      "start",
+      "B5"
+    ],
+    [
+      "B1",
+      "join"
+    ],
+    [
+      "B2",
+      "join"
+    ],
+    [
+      "B3",
+      "join"
+    ],
+    [
+      "B4",
+      "join"
+    ],
+    [
+      "B5",
+      "join"
+    ],
+    [
+      "join",
+      "final"
+    ]
+  ]
+}
