@@ -16,8 +16,6 @@ import type {
   OrchestratedRunParams,
   OrchestratorContext,
   OrchestratorConfig,
-  StageValidationResult,
-  StageResultValidation,
   PreprocessingResult,
   PostProcessingStep,
   WorkflowRun,
@@ -36,10 +34,7 @@ import * as path from 'node:path';
 import type { WorkflowRunService } from './WorkflowRunService.js';
 import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
 import { repositoryFromInputs, type WorkflowPreprocessor } from './WorkflowPreprocessor.js';
-import type { ResultValidator } from './ResultValidator.js';
-import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
-import type { IStageDefinitionRepository } from '../domain/ports/IStageDefinitionRepository.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { SandboxLifecycleManager, SandboxSession } from './SandboxLifecycleManager.js';
 import type { ISandboxProvider } from '../domain/ports/ISandboxProvider.js';
@@ -65,16 +60,10 @@ interface PersistedPostProcessingIntent {
 }
 
 export class WorkflowOrchestrator {
-  /** Track active orchestration contexts for cleanup on cancel */
-  private activeContexts = new Map<string, OrchestratorContext>();
-
   constructor(
     private readonly workflowRunService: WorkflowRunService,
     private readonly definitionService: WorkflowDefinitionService,
     private readonly preprocessor: WorkflowPreprocessor,
-    private readonly resultValidator: ResultValidator,
-    private readonly stageRunRepo: IStageRunRepository,
-    private readonly stageDefRepo: IStageDefinitionRepository,
     private readonly runRepo: IWorkflowRunRepository,
     private readonly eventBus: EventBus,
     private readonly templateRegistry: TemplateRegistry,
@@ -358,15 +347,12 @@ export class WorkflowOrchestrator {
       resolvedVariables: { ...params.variables, ...(params.projectId ? { __projectId: params.projectId } : {}) },
       preprocessingResults: [],
       postProcessingResults: [],
-      stageValidationResults: [],
     };
 
     // Store stage overrides in resolved variables so they flow through to stage execution
     if (params.stageOverrides && params.stageOverrides.length > 0) {
       context.resolvedVariables['__stageOverrides'] = params.stageOverrides;
     }
-
-    this.activeContexts.set(run.id, context);
 
     await this.eventBus.emitGlobal({
       kind: 'workflow_run.orchestration_started',
@@ -392,7 +378,13 @@ export class WorkflowOrchestrator {
    * Cancel an orchestrated run — cleanup resources.
    */
   async cancelOrchestratedRun(runId: string): Promise<void> {
-    const context = this.activeContexts.get(runId);
+    // The clones to clean up come from the persisted intent, so a cancel
+    // after a restart cleans up the same paths a live one would.
+    const run = await this.runRepo.getById(runId).catch(() => undefined);
+    const intent = (run?.variables as Record<string, unknown> | undefined)?.[
+      '__postProcessingIntent'
+    ] as PersistedPostProcessingIntent | undefined;
+    const clonedRepositories = intent?.clonedRepositories ?? {};
 
     try {
       // Cancel the workflow run
@@ -409,22 +401,14 @@ export class WorkflowOrchestrator {
       }
 
       // Always cleanup cloned repos even if cancel throws
-      if (context && Object.keys(context.clonedRepositories).length > 0) {
+      if (Object.keys(clonedRepositories).length > 0) {
         try {
-          await this.preprocessor.cleanup(context.clonedRepositories);
+          await this.preprocessor.cleanup(clonedRepositories);
         } catch (cleanupErr) {
           this.logger.warn(`[Orchestrator] Cleanup error during cancel for run ${runId}: ${cleanupErr}`);
         }
       }
-      this.activeContexts.delete(runId);
     }
-  }
-
-  /**
-   * Get the current orchestration context for a run.
-   */
-  getContext(runId: string): OrchestratorContext | undefined {
-    return this.activeContexts.get(runId);
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -721,21 +705,11 @@ export class WorkflowOrchestrator {
       // fired its completion event into a listener that did not exist yet,
       // so the run reported success and never ran auto-commit/auto-PR
       // post-processing. The listener itself also lived only in
-      // `activeContexts` (memory) — a server restart mid-run lost it
-      // entirely. Attaching first (and persisting the intent to the run's
+      // memory — a server restart mid-run lost it entirely. Attaching first (and persisting the intent to the run's
       // `variables` column) closes both holes: `setupCompletionCleanup`
       // checks for an already-terminal run before subscribing, and
       // `reArmPendingPostProcessing()` (called once at boot) re-arms any run
       // whose persisted intent is still `pending`.
-      //
-      // Validation runs if: workflow-level resultValidations exist OR any
-      // stage has per-stage rules.
-      const hasWorkflowValidations = orchestratorConfig?.resultValidations && orchestratorConfig.resultValidations.length > 0;
-      const stages = await this.stageDefRepo.getByDefinitionId(definition.id);
-      const hasStageValidations = stages.some((s) => s.resultValidation && s.resultValidation.length > 0);
-      if (hasWorkflowValidations || hasStageValidations) {
-        this.setupResultValidation(run.id, orchestratorConfig ?? { category: 'custom', gitRepositories: [], preprocessingSteps: [], postProcessingSteps: [], resultValidations: [], requiresCodebase: false, autoCommit: false, autoCreatePR: false });
-      }
 
       await this.persistPostProcessingIntent(run.id, context, gitRepos, runWorkspaceDir);
       await this.setupCompletionCleanup(run.id, context, definition, gitRepos, runWorkspaceDir);
@@ -776,8 +750,6 @@ export class WorkflowOrchestrator {
       if (Object.keys(context.clonedRepositories).length > 0) {
         await this.preprocessor.cleanup(context.clonedRepositories);
       }
-
-      this.activeContexts.delete(run.id);
     }
   }
 
@@ -789,101 +761,6 @@ export class WorkflowOrchestrator {
       return String((event.data as Record<string, unknown>).workflowRunId);
     }
     return undefined;
-  }
-
-  /**
-   * Extract stageRunId from event data safely.
-   */
-  private getEventStageRunId(event: { data?: unknown }): string | undefined {
-    if (event.data && typeof event.data === 'object' && 'stageRunId' in event.data) {
-      return String((event.data as Record<string, unknown>).stageRunId);
-    }
-    return undefined;
-  }
-
-  /**
-   * Setup event listener for stage result validation.
-   * Validates against both orchestratorConfig.resultValidations (workflow-level)
-   * and stageDef.resultValidation (per-stage validation rules).
-   * Includes a safety timeout to prevent memory leaks if the run never completes.
-   */
-  private setupResultValidation(
-    runId: string,
-    config: OrchestratorConfig,
-  ): void {
-    const MAX_LISTENER_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-    const unsubscribe = this.eventBus.subscribeGlobal(async (event) => {
-      const eventRunId = this.getEventRunId(event);
-      if (!eventRunId || eventRunId !== runId) return;
-
-      if (event.kind === 'stage_run.completed' || event.kind === 'stage_run.failed') {
-        const stageRunId = this.getEventStageRunId(event);
-        if (!stageRunId) return;
-
-        // ── Reporting only ──
-        // WorkflowRunService is now the SINGLE owner of result validation and
-        // the validation→retry / validation→failure bridges (see
-        // WorkflowRunService.onStageCompleted, which also merges these
-        // workflow-level resultValidations by stage order). This listener no
-        // longer re-runs validation — doing so previously double-validated
-        // every orchestrated run, causing duplicate retries and conflicting
-        // failure decisions. We only record the per-stage outcome here for the
-        // workflow_run.orchestration_completed report, upserting by stage name
-        // (last terminal event wins) so a validate-retry-then-fail sequence
-        // collapses to a single accurate entry.
-        try {
-          const stageRuns = await this.stageRunRepo.getByRunId(runId);
-          const stageRun = stageRuns.find((sr) => sr.id === stageRunId);
-          if (!stageRun) return;
-
-          const stageDef = await this.stageDefRepo.getById(stageRun.stageDefinitionId);
-          if (!stageDef) return;
-
-          const hasRules =
-            config.resultValidations.some((v: StageResultValidation) => v.stageIndex === stageDef.order) ||
-            (stageDef.resultValidation ?? []).length > 0;
-          if (!hasRules) return;
-
-          const context = this.activeContexts.get(runId);
-          if (context) {
-            const record = {
-              stageIndex: stageDef.order,
-              stageName: stageRun.name,
-              passed: event.kind === 'stage_run.completed',
-              failures:
-                event.kind === 'stage_run.failed' && stageRun.error ? [stageRun.error] : [],
-            };
-            const existingIdx = context.stageValidationResults.findIndex(
-              (r) => r.stageName === record.stageName,
-            );
-            if (existingIdx >= 0) {
-              context.stageValidationResults[existingIdx] = record;
-            } else {
-              context.stageValidationResults.push(record);
-            }
-          }
-        } catch (err) {
-          this.logger.warn(`[Orchestrator] Stage validation reporting error: ${err}`);
-        }
-      }
-
-      // Cleanup when run completes
-      if (
-        event.kind === 'workflow_run.completed' ||
-        event.kind === 'workflow_run.failed' ||
-        event.kind === 'workflow_run.cancelled'
-      ) {
-        unsubscribe();
-        clearTimeout(safetyTimeout);
-      }
-    });
-
-    // Safety timeout: unsubscribe if the run never completes
-    const safetyTimeout = setTimeout(() => {
-      this.logger.warn(`[Orchestrator] Safety timeout: cleaning up validation listener for run ${runId}`);
-      unsubscribe();
-    }, MAX_LISTENER_TTL_MS);
   }
 
   /**
@@ -1014,11 +891,9 @@ export class WorkflowOrchestrator {
         workflowRunId: runId,
         preprocessingResults: context.preprocessingResults,
         postProcessingResults: context.postProcessingResults,
-        stageValidationResults: context.stageValidationResults,
       },
     });
 
-    this.activeContexts.delete(runId);
     await this.clearPostProcessingIntent(runId);
   }
 
@@ -1076,7 +951,6 @@ export class WorkflowOrchestrator {
     const safetyTimeout = setTimeout(() => {
       this.logger.warn(`[Orchestrator] Safety timeout: cleaning up completion listener for run ${runId}`);
       unsubscribe();
-      this.activeContexts.delete(runId);
     }, MAX_LISTENER_TTL_MS);
   }
 
@@ -1150,20 +1024,15 @@ export class WorkflowOrchestrator {
 
       try {
         const definition = await this.definitionService.getDefinition(run.workflowDefinitionId);
-        let context = this.activeContexts.get(run.id);
-        if (!context) {
-          context = {
-            workflowRunId: run.id,
-            workflowDefinitionId: run.workflowDefinitionId,
-            clonedRepositories: intent.clonedRepositories ?? {},
-            featureBranches: intent.featureBranches ?? {},
-            resolvedVariables: { ...run.variables },
-            preprocessingResults: [],
-            postProcessingResults: [],
-            stageValidationResults: [],
-          };
-          this.activeContexts.set(run.id, context);
-        }
+        const context: OrchestratorContext = {
+          workflowRunId: run.id,
+          workflowDefinitionId: run.workflowDefinitionId,
+          clonedRepositories: intent.clonedRepositories ?? {},
+          featureBranches: intent.featureBranches ?? {},
+          resolvedVariables: { ...run.variables },
+          preprocessingResults: [],
+          postProcessingResults: [],
+        };
 
         this.logger.info(
           `[Orchestrator] Re-arming post-processing for run ${run.id} (status=${run.status})`,

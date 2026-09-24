@@ -31,7 +31,6 @@ export const WORKFLOW_GROUP = {
 };
 
 const EDGE_TYPES = ['on_success', 'on_failure', 'on_completion', 'always'] as const;
-const SESSION_MODES = ['isolated', 'shared', 'continue'] as const;
 /** `StageCondition['type']` (`packages/shared/src/types/StageDefinition.ts`). */
 const CONDITION_TYPES = ['always', 'on_success', 'on_failure', 'expression'] as const;
 /**
@@ -205,12 +204,6 @@ export function workflowCommands(): CommandSpec[] {
       args: [{ name: 'name', description: 'Workflow name', required: true }],
       flags: [
         { name: 'description', short: 'd', description: 'Description', type: 'string' },
-        {
-          name: 'sessionMode',
-          description: 'How stages share harness sessions',
-          type: 'string',
-          choices: SESSION_MODES,
-        },
         projectFlag,
         { name: 'tags', description: 'Comma-separated tags', type: 'string' },
       ],
@@ -218,7 +211,6 @@ export function workflowCommands(): CommandSpec[] {
         { name: z.string().min(1) },
         {
           description: z.string().optional(),
-          sessionMode: z.enum(SESSION_MODES).optional(),
           project: z.string().optional(),
           tags: z.string().optional(),
         },
@@ -235,7 +227,6 @@ export function workflowCommands(): CommandSpec[] {
             compact({
               name: args.name,
               description: flags.description,
-              sessionMode: flags.sessionMode,
               projectId,
               tags: parseList(flags.tags),
             }),
@@ -255,7 +246,6 @@ export function workflowCommands(): CommandSpec[] {
       flags: [
         { name: 'name', description: 'New name', type: 'string' },
         { name: 'description', description: 'New description', type: 'string' },
-        { name: 'sessionMode', description: 'Session mode', type: 'string', choices: SESSION_MODES },
         { name: 'tags', description: 'Comma-separated tags (replaces)', type: 'string' },
       ],
       schema: inputSchema(
@@ -263,7 +253,6 @@ export function workflowCommands(): CommandSpec[] {
         {
           name: z.string().optional(),
           description: z.string().optional(),
-          sessionMode: z.enum(SESSION_MODES).optional(),
           tags: z.string().optional(),
         },
       ),
@@ -274,10 +263,9 @@ export function workflowCommands(): CommandSpec[] {
           compact({
             name: flags.name,
             description: flags.description,
-            sessionMode: flags.sessionMode,
             tags: parseList(flags.tags),
           }),
-          'Pass at least one of --name, --description, --session-mode or --tags.',
+          'Pass at least one of --name, --description or --tags.',
         );
         return record(await ctx.api.definitions.update(target.id, body));
       },

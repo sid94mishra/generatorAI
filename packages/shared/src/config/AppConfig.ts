@@ -56,21 +56,6 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  // WS-D1 — workflow stage liveness. `stageTimeoutMs` is the default stage
-  // timeout when a stage definition sets none (the documented 300 s);
-  // `maxStageTimeoutMs` caps any explicit value. The heartbeat is written by
-  // the executor every `heartbeatIntervalMs` while a stage is queued/running
-  // and the run reconciler fails a stage whose last beat is older than
-  // `heartbeatIntervalMs * heartbeatStaleMultiplier`.
-  workflow: z
-    .object({
-      stageTimeoutMs: z.number().int().min(1_000).max(24 * 60 * 60 * 1000).default(300_000),
-      maxStageTimeoutMs: z.number().int().min(1_000).max(7 * 24 * 60 * 60 * 1000).default(4 * 60 * 60 * 1000),
-      heartbeatIntervalMs: z.number().int().min(1_000).max(10 * 60 * 1000).default(10_000),
-      heartbeatStaleMultiplier: z.number().min(2).max(100).default(3),
-    })
-    .default({}),
-
   // PRV-01 — harness selector. Default stays `'copilot'` so every
   // existing deployment continues to use the Copilot SDK. Flip to
   // `'claude-agent'` to route through the Claude Agent SDK bridge.

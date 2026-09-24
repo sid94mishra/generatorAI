@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import { createTestApp } from '../helpers/testApp.js';
 import type { Express } from 'express';
+import { HookDefinitionSchema } from '@generatorai/shared';
 import type { Container } from '../../src/composition-root.js';
 
 describe('Health Routes', () => {
@@ -151,11 +152,15 @@ describe('Hooks Routes', () => {
   });
 
   describe('GET /api/hooks/phases', () => {
-    it('should return all 22 hook phases', async () => {
+    it('returns every phase the hook schema accepts, stage and workflow level', async () => {
       const res = await request(app).get('/api/hooks/phases');
 
       expect(res.status).toBe(200);
-      expect(res.body.totalPhases).toBe(22);
+      expect(res.body.totalPhases).toBe(HookDefinitionSchema.shape.phase.options.length);
+      const phases = (res.body.phases as Array<{ phase: string; category: string }>).map((p) => p.phase);
+      expect(phases).toEqual(HookDefinitionSchema.shape.phase.options);
+      expect(phases).toContain('on_run_start');
+      expect(phases).toContain('on_session_cancelled');
       expect(res.body).toHaveProperty('categories');
       expect(res.body).toHaveProperty('phases');
     });

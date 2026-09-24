@@ -1,17 +1,13 @@
 // ────────────────────────────────────────────────────────────────
-// WorkflowRunPageV2 — Production wire-up of the redesigned run panel.
+// WorkflowRunPage — the run panel.
 //
-// This is the real page: it drives the same data sources the old
-// WorkflowRunPage used (useWorkflowRun, useWorkflowDefinition,
+// Drives the run data sources (useWorkflowRun, useWorkflowDefinition,
 // useWorkflowRunStore, useStreamStore, connectWorkflowRun) and feeds
-// the redesigned components through the pure `deriveRunView`.
-//
-// The old page is preserved at ?legacy=1 for quick side-by-side
-// comparison during rollout.
+// the run components through the pure `deriveRunView`.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
   AlertCircle, ListTree, FolderOpen, FileText, TerminalSquare, LayoutGrid,
@@ -59,10 +55,9 @@ import { openMultiplexedStream } from '@/platform/muxStream.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { runTitle } from '@generatorai/client-core';
 
-export function WorkflowRunPageV2() {
+export function WorkflowRunPage() {
   const { id: definitionId, runId } = useParams<{ id: string; runId: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const platform = usePlatform() as HttpPlatformClient;
 
   // ── Data sources ─────────────────────────────────────────────
@@ -252,13 +247,6 @@ export function WorkflowRunPageV2() {
 
   // Cleanup
   useEffect(() => () => { clearRun(); }, [clearRun]);
-
-  // Redirect legacy → old page if requested
-  useEffect(() => {
-    if (searchParams.get('legacy') === '1') {
-      // Legacy handled elsewhere; V2 is default. No redirect.
-    }
-  }, [searchParams]);
 
   // Fetch permission mode for HitlBanner / RunHeaderBar
   useEffect(() => {
@@ -799,4 +787,4 @@ function workspaceFilesFromRun(workspace: RunWorkspaceInfo | undefined): FileCha
   return out.length > 0 ? out : undefined;
 }
 
-export default WorkflowRunPageV2;
+export default WorkflowRunPage;

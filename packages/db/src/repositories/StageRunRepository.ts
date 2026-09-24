@@ -208,7 +208,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
    * whether the stage's execution frame is still alive. `running` is right
    * only when an in-process `interrupt()` awaiter is about to be resolved and
    * will carry on executing. After a restart that frame is gone, and
-   * `running` is a permanent zombie: `DAGScheduler.getReadyStages` only
+   * `running` is a permanent zombie: `DAGScheduler.reconcileRun` only
    * considers `pending` stages, so nothing ever relaunches it and the run
    * never finishes. `HitlService.resume` picks `pending` in that case so the
    * scheduler re-drives the stage. Both transitions stay one conditional

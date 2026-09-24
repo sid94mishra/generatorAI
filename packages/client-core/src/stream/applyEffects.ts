@@ -128,11 +128,8 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
     case 'scheduleTranscriptCleanup':
     case 'cancelTranscriptCleanup':
     case 'runStatus':
-    case 'runTimeline':
     case 'stageStatus':
-    case 'stageTimeline':
     case 'registerStageSession':
-    case 'stageAwaitingInput':
     case 'selectStageRun':
     case 'stageSettled':
     case 'widgetInvoke':
@@ -172,11 +169,8 @@ const HOST_OPS: ReadonlySet<StreamEffect['op']> = new Set<StreamEffect['op']>([
   'scheduleTranscriptCleanup',
   'cancelTranscriptCleanup',
   'runStatus',
-  'runTimeline',
   'stageStatus',
-  'stageTimeline',
   'registerStageSession',
-  'stageAwaitingInput',
   'selectStageRun',
   'stageSettled',
   'widgetInvoke',

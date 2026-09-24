@@ -1,10 +1,172 @@
 {
   "$comment": "Workflow overhaul no-legacy guard (README §7 step 6, R-1). `banned`: identifiers each phase removed, APPENDED in the same commit that deletes them; a regex `pattern` matched per line against packages/** and apps/** source (tests, dist, node_modules excluded), optional `paths` prefixes; any hit fails. `comments`: `@deprecated` / `legacy` / `backward compat` / `fallback for old` inside comments of the workflow-module files matched by `paths` (regex sources). Report-only while `phase` < `failFromPhase` (null = not scheduled), but the count may never exceed `baseline`. Each phase bumps `phase` and lowers `baseline`; the phase that clears the module sets `failFromPhase` to itself.",
-  "banned": [],
+  "banned": [
+    {
+      "phase": "01",
+      "pattern": "\\bStyledSelect\\b",
+      "paths": [
+        "apps/web/"
+      ],
+      "reason": "WP-1.1: re-export shim deleted; use Select from components/ui"
+    },
+    {
+      "phase": "01",
+      "pattern": "['\"]\\.\\.?/ToggleSwitch\\.js['\"]",
+      "paths": [
+        "apps/web/src/components/workflow/"
+      ],
+      "reason": "WP-1.1: workflow ToggleSwitch shim deleted; import from components/ui"
+    },
+    {
+      "phase": "01",
+      "pattern": "redesign/deriveTimeline",
+      "paths": [
+        "apps/web/"
+      ],
+      "reason": "WP-1.1: re-export shim deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(timelineEvents|awaitingInputStages|addTimelineEvent|setAwaitingInput|clearAwaitingInput|RunTimelineEvent|AwaitingInputInfo)\\b",
+      "paths": [
+        "apps/web/"
+      ],
+      "reason": "WP-1.1: write-only workflowRunStore state deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "'(runTimeline|stageTimeline|stageAwaitingInput)'",
+      "reason": "WP-1.1: stream ops whose only consumer was write-only store state"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(connectAutomationExecution|disconnectAutomationExecution)\\b",
+      "reason": "WP-1.1: dead duplicate of useAutomationExecutionStream"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(useValidateWorkflowDefinition|useImportFromTemplate|useDeleteWorkflowRun|usePauseStageRun|useResumeStageRun|useCancelStageRun|useWorkflowTemplate|useOrchestratorContext|useRunDiff|useWorkflowFiles|useUploadWorkflowFiles|useDeleteWorkflowFile|useUpdateAutomation)\\b",
+      "reason": "WP-1.1: zero-caller hooks deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "WorkflowRunPageV2",
+      "reason": "WP-1.1: renamed WorkflowRunPage"
+    },
+    {
+      "phase": "01",
+      "pattern": "searchParams\\.get\\('legacy'\\)",
+      "reason": "WP-1.1: no-op ?legacy=1 effect deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "aria-label=\"Stage actions\"",
+      "reason": "WP-1.1: dead Stage actions button deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(getOrchestratorContext|activeContexts)\\b|orchestrator/runs/\\$\\{[^}]+\\}/context|'/runs/:id/context'|orchestrator\\.context",
+      "reason": "WP-1.1: in-memory orchestrator context view deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(resultValidator|setupResultValidation|stageValidationResults|getEventStageRunId)\\b",
+      "paths": [
+        "packages/core/src/services/WorkflowOrchestrator.ts"
+      ],
+      "reason": "WP-1.1 / W-62: orchestrator validation reporting deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "stageValidationResults",
+      "paths": [
+        "packages/shared/src/"
+      ],
+      "reason": "WP-1.1 / W-62"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(IDAGScheduler|ISessionAllocator|IServiceInterfaces)\\b",
+      "reason": "WP-1.1: single-implementer ports deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(getRootStages|getReadyStages|getSkippableStages|isDAGComplete|scheduleNext)\\b",
+      "paths": [
+        "packages/core/",
+        "packages/shared/",
+        "packages/sdk/",
+        "packages/workflow-testkit/",
+        "apps/"
+      ],
+      "reason": "WP-1.1: DAGScheduler views/aliases deleted; reconcileRun is the one entry point"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(resolveStageConfig|ResolvedStageConfig|ResolvedWorkflowConfig|SessionWorkflowOverrides)\\b",
+      "reason": "WP-1.1: ConfigResolver.resolve/resolveStageConfig deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(heartbeatStaleMultiplier|maxStageTimeoutMs)\\b|AppConfig(Schema)?\\.workflow\\b",
+      "reason": "WP-1.1: AppConfig.workflow knobs deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "startPolling\\(runId, ",
+      "paths": [
+        "packages/core/src/"
+      ],
+      "reason": "WP-1.1: startPolling(runId)"
+    },
+    {
+      "phase": "01",
+      "pattern": "string \\| ImportFromTemplateOptions",
+      "reason": "WP-1.1: importFromTemplate takes an options object"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(totalRuns|completedRuns|failedRuns)\\?:",
+      "paths": [
+        "packages/client-core/src/api/client.ts"
+      ],
+      "reason": "WP-1.1: deprecated AutomationExecutionSummary fields deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "workflowDefinitionId\\?:|a\\.workflowDefinitionId",
+      "paths": [
+        "apps/mobile/src/components/work/automationModel.ts"
+      ],
+      "reason": "WP-1.1: automations carry workflowIds only"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bSESSION_MODES\\b|session-mode",
+      "paths": [
+        "packages/cli-core/",
+        "apps/cli/"
+      ],
+      "reason": "WP-1.1 / W-57: CLI --session-mode deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "workflow-upload-template",
+      "reason": "WP-1.1: orphan template deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "const HOOK_PHASES: Array",
+      "paths": [
+        "apps/server/src/routes/hooks.ts"
+      ],
+      "reason": "WP-1.1: hook-phase catalogue is derived from the schema enum"
+    }
+  ],
   "comments": {
-    "phase": "00",
+    "phase": "01",
     "failFromPhase": null,
-    "baseline": 64,
+    "baseline": 59,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",

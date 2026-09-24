@@ -4,9 +4,8 @@
 //
 // WS-D1 / review §5.5 — there is exactly ONE readiness predicate
 // (`resolveStageReadiness`) and exactly ONE reconcile (`reconcileDAG`) here.
-// Every public entry point — `getReadyStages`, `getSkippableStages`,
-// `onStageCompleted/Failed/Skipped`, `scheduleNext`, the run service's
-// reconciler tick and crash re-drive — goes through them. The previous
+// The one public entry point, `reconcileRun` — used by the run service's
+// reconciler tick, stage completions and crash re-drive — goes through them. The previous
 // version had four answers to "is this stage ready?" (a router that looked
 // only at the just-finished predecessor, a skipper that asked whether ANY
 // inbound edge was active, an edge-blind restart path, and a terminal-status
@@ -26,7 +25,6 @@ import type { IStageDefinitionRepository } from '../domain/ports/IStageDefinitio
 import type { IStageEdgeRepository } from '../domain/ports/IStageEdgeRepository.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
-import type { IDAGScheduler } from '../domain/ports/IServiceInterfaces.js';
 import { buildDAG } from '../domain/dag/DAGValidator.js';
 import { evaluateCondition } from '../domain/dag/ConditionEvaluator.js';
 import type { DAG } from '../domain/dag/types.js';
@@ -354,7 +352,7 @@ interface QueuedOp<T> {
   reject: (err: Error) => void;
 }
 
-export class DAGScheduler implements IDAGScheduler {
+export class DAGScheduler {
   /**
    * Cached DAG per workflow definition (keyed by definitionId), validated by
    * the two signatures on every build so a mid-run edit of a definition is
@@ -378,7 +376,7 @@ export class DAGScheduler implements IDAGScheduler {
   private runQueueActive = new Set<string>();
 
   /**
-   * △ Diagnostics counters. Not part of `IDAGScheduler`; nothing in
+   * △ Diagnostics counters. Nothing in
    * production reads them. They let a test see whether the cache and the
    * crypto digest were touched.
    */
@@ -573,88 +571,6 @@ export class DAGScheduler implements IDAGScheduler {
       this.stats.reconciles++;
       return reconcileDAG(dag, statusMap, run?.variables ?? undefined);
     });
-  }
-
-  // ── IDAGScheduler surface — every method below is a view of reconcileRun ──
-
-  /** Root stages (no incoming edges) — first to execute. */
-  async getRootStages(workflowRunId: string, workflowDefinitionId: string): Promise<string[]> {
-    const run = await this.loadRun(workflowRunId);
-    const dag = await this.dagForRun(workflowRunId, workflowDefinitionId, run);
-    return [...dag.rootIds];
-  }
-
-  /** Stages that may be launched now. */
-  async getReadyStages(workflowRunId: string, workflowDefinitionId: string): Promise<string[]> {
-    return (await this.reconcileRun(workflowRunId, workflowDefinitionId)).toLaunch;
-  }
-
-  /**
-   * Stages that may be launched after a stage finished. The finished stage's
-   * id is accepted for interface compatibility; the answer is the whole-run
-   * reconcile, which is what a completion must trigger anyway (a fan-in's
-   * readiness depends on every predecessor, not the one that just moved).
-   */
-  async scheduleNext(
-    workflowRunId: string,
-    workflowDefinitionId: string,
-    _completedStageDefId: string,
-  ): Promise<string[]> {
-    return this.getReadyStages(workflowRunId, workflowDefinitionId);
-  }
-
-  /** Alias of {@link getReadyStages} kept for the `IDAGScheduler` contract. */
-  async onStageCompleted(
-    workflowRunId: string,
-    workflowDefinitionId: string,
-    _completedStageDefId: string,
-  ): Promise<string[]> {
-    return this.getReadyStages(workflowRunId, workflowDefinitionId);
-  }
-
-  /** Alias of {@link getReadyStages} kept for the `IDAGScheduler` contract. */
-  async onStageFailed(
-    workflowRunId: string,
-    workflowDefinitionId: string,
-    _failedStageDefId: string,
-  ): Promise<string[]> {
-    return this.getReadyStages(workflowRunId, workflowDefinitionId);
-  }
-
-  /** Alias of {@link getReadyStages}: `always` edges out of a skipped stage are part of the reconcile. */
-  async onStageSkipped(
-    workflowRunId: string,
-    workflowDefinitionId: string,
-    _skippedStageDefId: string,
-  ): Promise<string[]> {
-    return this.getReadyStages(workflowRunId, workflowDefinitionId);
-  }
-
-  /** Stages that can never run (cascaded). */
-  async getSkippableStages(workflowRunId: string, workflowDefinitionId: string): Promise<string[]> {
-    return (await this.reconcileRun(workflowRunId, workflowDefinitionId)).toSkip;
-  }
-
-  /** Terminal status for a run whose DAG is complete. */
-  async computeTerminalRunStatus(
-    workflowRunId: string,
-    workflowDefinitionId: string,
-  ): Promise<TerminalRunStatus> {
-    const run = await this.loadRun(workflowRunId);
-    const dag = await this.dagForRun(workflowRunId, workflowDefinitionId, run);
-    const statusMap = await this.loadStatusMap(workflowRunId);
-    return computeTerminalRunStatusFor(dag, statusMap);
-  }
-
-  /** True when every stage of the DAG has a terminal status. */
-  async isDAGComplete(workflowRunId: string, workflowDefinitionId: string): Promise<boolean> {
-    const run = await this.loadRun(workflowRunId);
-    const dag = await this.dagForRun(workflowRunId, workflowDefinitionId, run);
-    const statusMap = await this.loadStatusMap(workflowRunId);
-    for (const nodeId of dag.nodes.keys()) {
-      if (!isTerminalStageStatus(statusMap.get(nodeId))) return false;
-    }
-    return true;
   }
 
   // ── Cache management ──

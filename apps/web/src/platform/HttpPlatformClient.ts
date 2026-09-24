@@ -1342,10 +1342,6 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  async getOrchestratorContext(runId: string): Promise<OrchestratorContext> {
-    return apiFetch<OrchestratorContext>(`${this.baseUrl}/api/orchestrator/runs/${runId}/context`);
-  }
-
   async cancelOrchestratedRun(runId: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/orchestrator/runs/${runId}/cancel`, { method: 'POST' });
   }

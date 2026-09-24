@@ -139,21 +139,6 @@ export function useCreateAutomation() {
   });
 }
 
-/** Update an automation */
-export function useUpdateAutomation() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { id: string; params: UpdateAutomationParams }) =>
-      platform.updateAutomation(args.id, args.params),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: automationKeys.all });
-      queryClient.invalidateQueries({ queryKey: automationKeys.detail(args.id) });
-    },
-  });
-}
-
 /** Delete an automation */
 export function useDeleteAutomation() {
   const platform = usePlatform() as HttpPlatformClient;

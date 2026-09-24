@@ -26,11 +26,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | copilot.autoRestart | boolean | `default true` | — |
 | copilot.githubToken | string | `optional` | — |
 | copilot.githubHost | string | `optional` | — |
-| workflow | object | `default {}` | unknown keys: strip |
-| workflow.stageTimeoutMs | number | `default 300000` | int; min 1000; max 86400000 |
-| workflow.maxStageTimeoutMs | number | `default 14400000` | int; min 1000; max 604800000 |
-| workflow.heartbeatIntervalMs | number | `default 10000` | int; min 1000; max 600000 |
-| workflow.heartbeatStaleMultiplier | number | `default 3` | min 2; max 100 |
 | harness | object | `default {}` | unknown keys: strip |
 | harness.type | "copilot" / "claude-agent" / "codex" / "opencode" / "acp" | `default "copilot"` | — |
 | harness.copilot | object | `default {}` | unknown keys: strip |
@@ -194,21 +189,6 @@ export const AppConfigSchema = z.object({
        *  accounts get "not authorized to use this Copilot feature" 403s
        *  because the CLI defaults to github.com. */
       githubHost: z.string().optional(),
-    })
-    .default({}),
-
-  // WS-D1 — workflow stage liveness. `stageTimeoutMs` is the default stage
-  // timeout when a stage definition sets none (the documented 300 s);
-  // `maxStageTimeoutMs` caps any explicit value. The heartbeat is written by
-  // the executor every `heartbeatIntervalMs` while a stage is queued/running
-  // and the run reconciler fails a stage whose last beat is older than
-  // `heartbeatIntervalMs * heartbeatStaleMultiplier`.
-  workflow: z
-    .object({
-      stageTimeoutMs: z.number().int().min(1_000).max(24 * 60 * 60 * 1000).default(300_000),
-      maxStageTimeoutMs: z.number().int().min(1_000).max(7 * 24 * 60 * 60 * 1000).default(4 * 60 * 60 * 1000),
-      heartbeatIntervalMs: z.number().int().min(1_000).max(10 * 60 * 1000).default(10_000),
-      heartbeatStaleMultiplier: z.number().min(2).max(100).default(3),
     })
     .default({}),
 

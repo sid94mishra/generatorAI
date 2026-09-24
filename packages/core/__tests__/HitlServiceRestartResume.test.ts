@@ -4,7 +4,7 @@
 // The defect: `resume()` always wrote `awaiting_input → running`. That is
 // correct only while the `interrupt()` frame is still alive to be resumed by
 // the resolved promise. After a restart that frame is gone, and `running` is
-// a status NOTHING relaunches — `DAGScheduler.getReadyStages` only considers
+// a status NOTHING relaunches — `DAGScheduler.reconcileRun` only considers
 // `pending`, `StartupRecoveryService` deliberately leaves `awaiting_input`
 // alone, and the `/approve` route's promise died with the process. The
 // approval was accepted, the stage never ran again, and the run sat in

@@ -7,9 +7,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import type { WorkflowHookDefinition } from '@generatorai/shared';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { cn } from '@/lib/utils.js';
-import { Button, Input } from '@/components/ui/index.js';
-import { ToggleSwitch } from '../ToggleSwitch.js';
-import { StyledSelect } from '../StyledSelect.js';
+import { Button, Input, Select, ToggleSwitch } from '@/components/ui/index.js';
 
 const WORKFLOW_PHASES = [
   { value: 'on_run_start', label: 'On Run Start', description: 'When workflow run begins' },
@@ -137,12 +135,12 @@ export function HooksTab() {
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <StyledSelect
+                <Select
                   value={hook.phase}
                   onChange={(v) => updateHook(idx, { phase: v as WorkflowHookDefinition['phase'] })}
                   options={WORKFLOW_PHASES.map((p) => ({ value: p.value, label: p.label }))}
                 />
-                <StyledSelect
+                <Select
                   value={hook.type}
                   onChange={(v) => {
                     const type = v as 'script' | 'http' | 'function';
@@ -199,7 +197,7 @@ export function HooksTab() {
                 </div>
               )}
 
-              <StyledSelect
+              <Select
                 value={hook.failurePolicy}
                 onChange={(v) => updateHook(idx, { failurePolicy: v as WorkflowHookDefinition['failurePolicy'] })}
                 options={FAILURE_POLICIES.map((p) => ({ value: p.value, label: p.label }))}

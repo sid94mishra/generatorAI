@@ -225,7 +225,7 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
         });
         return;
       }
-      const definition = await workflowDefinitionService.importFromTemplate(templateId, name);
+      const definition = await workflowDefinitionService.importFromTemplate(templateId, { name });
       logger.info(`[WorkflowDefRoutes] Imported definition from template ${templateId}`, {
         requestId: req.requestId,
       });

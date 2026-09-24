@@ -134,7 +134,7 @@ describe('DAGScheduler', () => {
     });
 
     it('should identify root stages', async () => {
-      const roots = await scheduler.getRootStages(RUN_ID, DEF_ID);
+      const roots = [...(await scheduler.buildDAGForDefinition(DEF_ID)).rootIds];
       expect(roots).toEqual([A]);
     });
 
@@ -143,7 +143,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'pending'));
       await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
 
-      const ready = await scheduler.getReadyStages(RUN_ID, DEF_ID);
+      const ready = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(ready).toEqual([A]);
     });
 
@@ -152,7 +152,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'pending'));
       await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
 
-      const next = await scheduler.onStageCompleted(RUN_ID, DEF_ID, A);
+      const next = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(next).toContain(B);
       expect(next).not.toContain(C);
     });
@@ -162,7 +162,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'completed'));
       await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'completed'));
 
-      const complete = await scheduler.isDAGComplete(RUN_ID, DEF_ID);
+      const complete = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).runTerminal !== undefined;
       expect(complete).toBe(true);
     });
 
@@ -171,7 +171,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'running'));
       await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
 
-      const complete = await scheduler.isDAGComplete(RUN_ID, DEF_ID);
+      const complete = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).runTerminal !== undefined;
       expect(complete).toBe(false);
     });
   });
@@ -194,7 +194,7 @@ describe('DAGScheduler', () => {
     });
 
     it('should identify only A as root', async () => {
-      const roots = await scheduler.getRootStages(RUN_ID, DEF_ID);
+      const roots = [...(await scheduler.buildDAGForDefinition(DEF_ID)).rootIds];
       expect(roots).toEqual([A]);
     });
 
@@ -204,7 +204,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
       await stageRunRepo.create(makeStageRun('sr-d', RUN_ID, D, 'pending'));
 
-      const next = await scheduler.onStageCompleted(RUN_ID, DEF_ID, A);
+      const next = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(next).toContain(B);
       expect(next).toContain(C);
       expect(next).not.toContain(D);
@@ -216,7 +216,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
       await stageRunRepo.create(makeStageRun('sr-d', RUN_ID, D, 'pending'));
 
-      const next = await scheduler.onStageCompleted(RUN_ID, DEF_ID, B);
+      const next = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(next).not.toContain(D);
     });
 
@@ -226,7 +226,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'completed'));
       await stageRunRepo.create(makeStageRun('sr-d', RUN_ID, D, 'pending'));
 
-      const next = await scheduler.onStageCompleted(RUN_ID, DEF_ID, C);
+      const next = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(next).toContain(D);
     });
   });
@@ -253,7 +253,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
       await stageRunRepo.create(makeStageRun('sr-d', RUN_ID, D, 'pending'));
 
-      const next = await scheduler.onStageCompleted(RUN_ID, DEF_ID, A);
+      const next = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(next).toContain(B);
       expect(next).toContain(C);
       expect(next).toContain(D);
@@ -275,11 +275,11 @@ describe('DAGScheduler', () => {
 
       // Terminal-ness alone must not make B ready: its only inbound edge is
       // on_success and A failed, so the edge is inactive.
-      const ready = await scheduler.getReadyStages(RUN_ID, DEF_ID);
+      const ready = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(ready).not.toContain(B);
 
       // And it must be positively skipped, never left pending forever.
-      const skippable = await scheduler.getSkippableStages(RUN_ID, DEF_ID);
+      const skippable = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toSkip;
       expect(skippable).toContain(B);
     });
 
@@ -327,7 +327,7 @@ describe('DAGScheduler', () => {
       it('re-driving after a restart does not launch the join either', async () => {
         // The old restart path ignored edge types entirely and ran D.
         scheduler.clearCache(DEF_ID);
-        const ready = await scheduler.getReadyStages(RUN_ID, DEF_ID);
+        const ready = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
         expect(ready).not.toContain(D);
       });
     });
@@ -342,9 +342,9 @@ describe('DAGScheduler', () => {
     });
   });
 
-  // ── isDAGComplete ──
+  // ── run completion (runTerminal) ──
 
-  describe('isDAGComplete', () => {
+  describe("run completion", () => {
     it('should return true when all stages are in terminal state', async () => {
       const A = stageId();
       const B = stageId();
@@ -355,7 +355,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, 'completed'));
       await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'skipped'));
 
-      expect(await scheduler.isDAGComplete(RUN_ID, DEF_ID)).toBe(true);
+      expect((await scheduler.reconcileRun(RUN_ID, DEF_ID)).runTerminal !== undefined).toBe(true);
     });
 
     it('should return false when a stage has no run', async () => {
@@ -363,36 +363,13 @@ describe('DAGScheduler', () => {
       await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
 
       // No stage run exists for A
-      expect(await scheduler.isDAGComplete(RUN_ID, DEF_ID)).toBe(false);
+      expect((await scheduler.reconcileRun(RUN_ID, DEF_ID)).runTerminal !== undefined).toBe(false);
     });
   });
 
-  // ── scheduleNext alias ──
+  // ── terminal run status (EXEC-5) ──
 
-  describe('scheduleNext', () => {
-    it('should return same result as getReadyStages', async () => {
-      const A = stageId();
-      const B = stageId();
-      await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
-      await stageDefRepo.create(makeStageDef(B, DEF_ID, 1));
-      await edgeRepo.create(makeEdge(DEF_ID, A, B));
-
-      await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, 'completed'));
-      await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'pending'));
-
-      const ready = await scheduler.getReadyStages(RUN_ID, DEF_ID);
-
-      // Clear cache so it rebuilds fresh for scheduleNext
-      scheduler.clearCache(DEF_ID);
-
-      const next = await scheduler.scheduleNext(RUN_ID, DEF_ID, A);
-      expect(next).toEqual(ready);
-    });
-  });
-
-  // ── computeTerminalRunStatus (EXEC-5) ──
-
-  describe('computeTerminalRunStatus', () => {
+  describe('reconcileRun().runTerminal', () => {
     it('returns completed when all stages completed', async () => {
       const A = stageId(); const B = stageId();
       await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
@@ -400,7 +377,7 @@ describe('DAGScheduler', () => {
       await edgeRepo.create(makeEdge(DEF_ID, A, B));
       await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, 'completed'));
       await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'completed'));
-      expect(await scheduler.computeTerminalRunStatus(RUN_ID, DEF_ID)).toBe('completed');
+      expect((await scheduler.reconcileRun(RUN_ID, DEF_ID)).runTerminal).toBe('completed');
     });
 
     it('returns failed for an unhandled failure (on_success successor skipped)', async () => {
@@ -410,7 +387,7 @@ describe('DAGScheduler', () => {
       await edgeRepo.create(makeEdge(DEF_ID, A, B, 'on_success'));
       await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, 'failed'));
       await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'skipped'));
-      expect(await scheduler.computeTerminalRunStatus(RUN_ID, DEF_ID)).toBe('failed');
+      expect((await scheduler.reconcileRun(RUN_ID, DEF_ID)).runTerminal).toBe('failed');
     });
 
     it('returns completed when a failure is handled by an on_failure recovery', async () => {
@@ -420,7 +397,7 @@ describe('DAGScheduler', () => {
       await edgeRepo.create(makeEdge(DEF_ID, A, R, 'on_failure'));
       await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, 'failed'));
       await stageRunRepo.create(makeStageRun('sr-r', RUN_ID, R, 'completed'));
-      expect(await scheduler.computeTerminalRunStatus(RUN_ID, DEF_ID)).toBe('completed');
+      expect((await scheduler.reconcileRun(RUN_ID, DEF_ID)).runTerminal).toBe('completed');
     });
 
     it('returns failed when the recovery branch itself fails unhandled', async () => {
@@ -430,7 +407,7 @@ describe('DAGScheduler', () => {
       await edgeRepo.create(makeEdge(DEF_ID, A, R, 'on_failure'));
       await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, 'failed'));
       await stageRunRepo.create(makeStageRun('sr-r', RUN_ID, R, 'failed'));
-      expect(await scheduler.computeTerminalRunStatus(RUN_ID, DEF_ID)).toBe('failed');
+      expect((await scheduler.reconcileRun(RUN_ID, DEF_ID)).runTerminal).toBe('failed');
     });
 
     it('resolves multi-level recovery (A fail → R fail → R2 complete)', async () => {
@@ -443,13 +420,13 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, 'failed'));
       await stageRunRepo.create(makeStageRun('sr-r', RUN_ID, R, 'failed'));
       await stageRunRepo.create(makeStageRun('sr-r2', RUN_ID, R2, 'completed'));
-      expect(await scheduler.computeTerminalRunStatus(RUN_ID, DEF_ID)).toBe('completed');
+      expect((await scheduler.reconcileRun(RUN_ID, DEF_ID)).runTerminal).toBe('completed');
     });
   });
 
   // ── Skip routing of `always` edges (EXEC-6) ──
 
-  describe('onStageSkipped / always-edge skip routing', () => {
+  describe('always-edge skip routing', () => {
     it('routes an always edge out of a skipped stage', async () => {
       // A → B (on_success), B → C (always). A fails → B skipped → C reachable via `always`.
       const A = stageId(); const B = stageId(); const C = stageId();
@@ -462,7 +439,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'skipped'));
       await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
 
-      const next = await scheduler.onStageSkipped(RUN_ID, DEF_ID, B);
+      const next = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(next).toContain(C);
     });
 
@@ -477,7 +454,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'skipped'));
       await stageRunRepo.create(makeStageRun('sr-c', RUN_ID, C, 'pending'));
 
-      const skippable = await scheduler.getSkippableStages(RUN_ID, DEF_ID);
+      const skippable = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toSkip;
       expect(skippable).not.toContain(C);
     });
   });
@@ -516,7 +493,7 @@ describe('DAGScheduler', () => {
       await runRepo.create(makeRun({ env: 'prod' }));
       const sched = new DAGScheduler(stageDefRepo, edgeRepo, stageRunRepo, runRepo);
 
-      const next = await sched.onStageCompleted(RUN_ID, DEF_ID, A);
+      const next = (await sched.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(next).toContain(B);
     });
 
@@ -534,7 +511,7 @@ describe('DAGScheduler', () => {
       await runRepo.create(makeRun({ env: 'dev' }));
       const sched = new DAGScheduler(stageDefRepo, edgeRepo, stageRunRepo, runRepo);
 
-      const next = await sched.onStageCompleted(RUN_ID, DEF_ID, A);
+      const next = (await sched.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(next).not.toContain(B);
     });
 
@@ -549,7 +526,7 @@ describe('DAGScheduler', () => {
       await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'pending'));
 
       // scheduler from beforeEach has NO runRepo
-      const next = await scheduler.onStageCompleted(RUN_ID, DEF_ID, A);
+      const next = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(next).not.toContain(B);
     });
   });

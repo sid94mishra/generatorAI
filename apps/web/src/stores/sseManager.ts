@@ -445,19 +445,6 @@ function invalidateResource(
   }
 }
 
-/**
- * Substitute a stage's display name into a timeline message.
- *
- * The router emits `{stage}` because only the run store knows the name; it
- * falls back to the id so a timeline entry for a stage the store has not seen
- * yet is still readable rather than blank.
- */
-function withStageName(message: string, stageRunId: string): string {
-  const run = useWorkflowRunStore.getState().run;
-  const stageRun = run?.stageRuns.find((sr) => sr.id === stageRunId);
-  return message.replace('{stage}', stageRun?.name ?? stageRunId);
-}
-
 /** Apply the effects only this surface knows how to perform. */
 function applyHostEffect(
   sessionId: string,
@@ -512,21 +499,6 @@ function applyHostEffect(
       return;
     }
 
-    case 'runTimeline': {
-      const store = useWorkflowRunStore.getState();
-      if (!store.run) return;
-      if (effect.runId !== undefined && effect.runId !== store.run.id) return;
-      store.addTimelineEvent({
-        timestamp: new Date(),
-        type: 'run',
-        runId: store.run.id,
-        status: effect.status as WorkflowRunStatus,
-        message: effect.message,
-        data: effect.data,
-      });
-      return;
-    }
-
     case 'stageStatus': {
       const store = useWorkflowRunStore.getState();
       if (!store.run) return;
@@ -534,34 +506,9 @@ function applyHostEffect(
       return;
     }
 
-    case 'stageTimeline': {
-      const store = useWorkflowRunStore.getState();
-      if (!store.run) return;
-      const stageRun = store.run.stageRuns.find((sr) => sr.id === effect.stageRunId);
-      store.addTimelineEvent({
-        timestamp: new Date(),
-        type: 'stage',
-        runId: store.run.id,
-        stageRunId: effect.stageRunId,
-        stageName: stageRun?.name ?? effect.stageRunId,
-        status: effect.status as StageRunStatus,
-        message: withStageName(effect.message, effect.stageRunId),
-        data: effect.data,
-      });
-      return;
-    }
-
     case 'registerStageSession':
       useWorkflowRunStore.getState().registerStageSession(effect.stageRunId, effect.sessionId);
       return;
-
-    case 'stageAwaitingInput': {
-      const store = useWorkflowRunStore.getState();
-      if (!store.run) return;
-      if (effect.data) store.setAwaitingInput(effect.stageRunId, effect.data);
-      else store.clearAwaitingInput(effect.stageRunId);
-      return;
-    }
 
     case 'selectStageRun':
       useWorkflowRunStore.getState().selectStageRun(effect.stageRunId);
@@ -1343,23 +1290,6 @@ export function connectWorkflowRun(
 /** Release the workflow run subscription. */
 export function disconnectWorkflowRun(runId: string): void {
   closeConnection('run', runId);
-}
-
-/**
- * Track B — subscribe to events for a single automation execution.
- * Opens `/api/stream?scope=automation&id=<executionId>`. Events fire
- * on the standard connectionStore. Returns a disconnect function.
- */
-export function connectAutomationExecution(
-  executionId: string,
-  platform: HttpPlatformClient,
-): () => void {
-  return openConnection('automation', executionId, executionId, platform);
-}
-
-/** Release an automation-execution subscription. */
-export function disconnectAutomationExecution(executionId: string): void {
-  closeConnection('automation', executionId);
 }
 
 /** Disconnect every live subscription. Used by tests + page unmount edge cases. */

@@ -482,6 +482,8 @@ export class GeneratorAI {
       logger,
       scriptRunner,
     );
+    // Validation is owned by the run service, as on the server.
+    services.workflowRunService.setResultValidator(resultValidator);
 
     // SDK-9: the SDK does not yet wire sandbox providers (the server does). If
     // the caller asked for a sandbox, warn instead of silently ignoring it so
@@ -497,9 +499,6 @@ export class GeneratorAI {
       services.workflowRunService,
       services.workflowDefinitionService,
       workflowPreprocessor,
-      resultValidator,
-      repos.stageRunRepo,
-      repos.stageDefinitionRepo,
       repos.workflowRunRepo,
       services.eventBus,
       services.templateRegistry,

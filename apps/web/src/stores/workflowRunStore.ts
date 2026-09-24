@@ -18,24 +18,6 @@ import { globalSingleton } from '../lib/globalSingleton.js';
 
 // ── Types ──
 
-export interface RunTimelineEvent {
-  id: string;
-  timestamp: Date;
-  type: 'run' | 'stage';
-  runId: string;
-  stageRunId?: string;
-  stageName?: string;
-  status: WorkflowRunStatus | StageRunStatus;
-  message: string;
-  data?: Record<string, unknown>;
-}
-
-export interface AwaitingInputInfo {
-  stageRunId: string;
-  timestamp: Date;
-  data: Record<string, unknown>;
-}
-
 interface RunMonitorState {
   /** Currently monitored workflow run (full entity with stage runs) */
   run: WorkflowRunWithStages | null;
@@ -43,8 +25,6 @@ interface RunMonitorState {
   stageSessionMap: Record<string, string>;
   /** ID of the currently selected stage for detail view */
   selectedStageRunId: string | null;
-  /** Run timeline events for display */
-  timelineEvents: RunTimelineEvent[];
   /** Whether the run data is loading */
   isLoading: boolean;
   /** Error message if run load failed */
@@ -53,8 +33,6 @@ interface RunMonitorState {
   durationTimerRef: ReturnType<typeof setInterval> | null;
   /** Current elapsed time in ms for active runs (updated by timer) */
   elapsedMs: number;
-  /** Stages currently awaiting human input (HITL) */
-  awaitingInputStages: AwaitingInputInfo[];
 }
 
 interface RunMonitorActions {
@@ -74,8 +52,6 @@ interface RunMonitorActions {
   registerStageSession: (stageRunId: string, sessionId: string) => void;
   /** Get sessionId for a stage run */
   getSessionId: (stageRunId: string) => string | undefined;
-  /** Add a timeline event */
-  addTimelineEvent: (event: Omit<RunTimelineEvent, 'id'>) => void;
   /** Start the duration timer */
   startDurationTimer: () => void;
   /** Stop the duration timer */
@@ -88,10 +64,6 @@ interface RunMonitorActions {
   getSelectedStageRun: () => StageRun | null;
   /** Auto-select the first running or first stage */
   autoSelectStage: () => void;
-  /** Mark a stage as awaiting human input */
-  setAwaitingInput: (stageRunId: string, data: Record<string, unknown>) => void;
-  /** Clear awaiting input for a stage (when input received) */
-  clearAwaitingInput: (stageRunId: string) => void;
 }
 
 // ── Initial state ──
@@ -100,22 +72,13 @@ const initialState: RunMonitorState = {
   run: null,
   stageSessionMap: {},
   selectedStageRunId: null,
-  timelineEvents: [],
   isLoading: false,
   error: null,
   durationTimerRef: null,
   elapsedMs: 0,
-  awaitingInputStages: [],
 };
 
 // ── Helpers ──
-
-let timelineEventCounter = 0;
-
-function generateEventId(): string {
-  timelineEventCounter++;
-  return `evt-${Date.now()}-${timelineEventCounter}`;
-}
 
 function isTerminalRunStatus(status: WorkflowRunStatus): boolean {
   return ['completed', 'failed', 'cancelled'].includes(status);
@@ -277,13 +240,6 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
 
   getSessionId: (stageRunId) => get().stageSessionMap[stageRunId],
 
-  addTimelineEvent: (event) => {
-    const id = generateEventId();
-    set((state) => ({
-      timelineEvents: [...state.timelineEvents, { ...event, id }],
-    }));
-  },
-
   startDurationTimer: () => {
     const { durationTimerRef, run } = get();
     if (durationTimerRef) return; // Already running
@@ -330,25 +286,6 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
     // Fallback to first
     const first = run.stageRuns[0];
     if (first) set({ selectedStageRunId: first.id });
-  },
-
-  setAwaitingInput: (stageRunId, data) => {
-    set((state) => {
-      // Don't add duplicates
-      if (state.awaitingInputStages.some((s) => s.stageRunId === stageRunId)) return state;
-      return {
-        awaitingInputStages: [
-          ...state.awaitingInputStages,
-          { stageRunId, timestamp: new Date(), data },
-        ],
-      };
-    });
-  },
-
-  clearAwaitingInput: (stageRunId) => {
-    set((state) => ({
-      awaitingInputStages: state.awaitingInputStages.filter((s) => s.stageRunId !== stageRunId),
-    }));
   },
 }));
 

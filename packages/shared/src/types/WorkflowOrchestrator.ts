@@ -233,8 +233,6 @@ export interface OrchestratorContext {
   preprocessingResults: PreprocessingResult[];
   /** Post-processing results */
   postProcessingResults: PreprocessingResult[];
-  /** Stage validation results */
-  stageValidationResults: StageValidationResult[];
 }
 
 export interface PreprocessingResult {

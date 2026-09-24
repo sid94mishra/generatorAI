@@ -7,7 +7,6 @@ import type { Session, WorkflowSessionMode } from '@generatorai/shared';
 import { generateId, SessionAllocationError } from '@generatorai/shared';
 import type { ISessionRepository } from '../domain/ports/IRepositories.js';
 import type { IAgentHarness, CreateConversationParams } from '../domain/ports/IAgentHarness.js';
-import type { ISessionAllocator } from '../domain/ports/IServiceInterfaces.js';
 import type {
   ISessionAllocationRepository,
   SessionAllocationRow,
@@ -27,7 +26,7 @@ interface RunAllocation {
   sharedRefCount: number;
 }
 
-export class SessionAllocator implements ISessionAllocator {
+export class SessionAllocator {
   /** Run ID → allocation state */
   private allocations = new Map<string, RunAllocation>();
 

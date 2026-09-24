@@ -130,7 +130,7 @@ export class WorkflowRunService {
     reconcileIntervalMs: 3_000,
   };
 
-  /** WS-D1 — configure stage liveness (see `heartbeatPolicy`). */
+  /** WS-D1 — test timing seam for stage liveness (see `heartbeatPolicy`); nothing in production configures it. */
   setHeartbeatPolicy(policy: Partial<typeof this.heartbeatPolicy>): void {
     this.heartbeatPolicy = { ...this.heartbeatPolicy, ...policy };
   }
@@ -387,7 +387,7 @@ export class WorkflowRunService {
     //    any launch/finalize so the event order reads naturally
     //    (resumed → [stage events] → completed/failed).
     this.subscribeRunEvents(runId);
-    this.startPolling(runId, run.workflowDefinitionId);
+    this.startPolling(runId);
     await this.eventBus.emitGlobal({
       kind: 'workflow_run.resumed',
       data: { workflowRunId: runId },
@@ -854,7 +854,7 @@ export class WorkflowRunService {
     // and may never settle (e.g., session release hangs), and an event may be
     // missed if a subscriber throws. Polling guarantees eventual progress and
     // reaps stages whose heartbeat has gone stale.
-    this.startPolling(runId, run.workflowDefinitionId);
+    this.startPolling(runId);
 
     // Launch the roots. Same reconcile every later stage event takes: a root
     // with a false `condition` is skipped rather than launched, and an
@@ -976,11 +976,9 @@ export class WorkflowRunService {
    * W18 / P1-18 — register a run with the process-wide reconciler.
    *
    * Replaces the previous per-run `setInterval`: instead of N intervals, we
-   * have one that iterates over all active runs. The call signature is kept
-   * compatible with the previous `startPolling(runId, workflowDefinitionId)`
-   * so all existing call sites require no changes.
+   * have one that iterates over all active runs.
    */
-  private startPolling(runId: string, _workflowDefinitionId?: string): void {
+  private startPolling(runId: string): void {
     if (this.activeRunIds.has(runId)) return;
     this.activeRunIds.add(runId);
     this.ensureReconciler();
@@ -1172,7 +1170,7 @@ export class WorkflowRunService {
 
     // Restart event-driven routing + polling backstop for the resumed run
     this.subscribeRunEvents(runId);
-    this.startPolling(runId, run.workflowDefinitionId);
+    this.startPolling(runId);
 
     await this.eventBus.emitGlobal({
       kind: 'workflow_run.resumed',

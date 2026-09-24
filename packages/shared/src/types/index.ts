@@ -47,6 +47,7 @@ export type {
   HookResult,
   HookPhaseResult,
 } from './HookDefinition.js';
+export { HOOK_PHASE_INFO } from './HookDefinition.js';
 
 export type { Session, SessionWithWorkflows, SessionOwnerType, SessionStatus } from './Session.js';
 export type { SessionTransition } from './SessionStateMachine.js';

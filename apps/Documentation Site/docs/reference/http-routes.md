@@ -221,9 +221,9 @@ Source: `apps/server/src/routes/hooks.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/hooks/phases` | 50 |
-| `GET` | `/api/hooks/sessions/:id/hooks` | 68 |
-| `POST` | `/api/hooks/sessions/:id/hooks/test` | 113 |
+| `GET` | `/api/hooks/phases` | 20 |
+| `GET` | `/api/hooks/sessions/:id/hooks` | 38 |
+| `POST` | `/api/hooks/sessions/:id/hooks/test` | 83 |
 
 ## internal-browser
 
@@ -269,17 +269,16 @@ Source: `apps/server/src/routes/orchestrator.ts`.
 | `GET` | `/api/orchestrator/system-workflows/:id` | 105 |
 | `POST` | `/api/orchestrator/from-template` | 122 |
 | `POST` | `/api/orchestrator/runs` | 158 |
-| `GET` | `/api/orchestrator/runs/:id/context` | 228 |
-| `POST` | `/api/orchestrator/runs/:id/cancel` | 245 |
-| `POST` | `/api/orchestrator/workflows/:id/uploads` | 264 |
-| `GET` | `/api/orchestrator/workflows/:id/files` | 329 |
-| `GET` | `/api/orchestrator/workflows/:id/files/download` | 357 |
-| `DELETE` | `/api/orchestrator/workflows/:id/files` | 401 |
-| `POST` | `/api/orchestrator/runs/:id/uploads` | 433 |
-| `GET` | `/api/orchestrator/runs/:id/workspace` | 513 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/download` | 624 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/content` | 691 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/diff` | 751 |
+| `POST` | `/api/orchestrator/runs/:id/cancel` | 228 |
+| `POST` | `/api/orchestrator/workflows/:id/uploads` | 247 |
+| `GET` | `/api/orchestrator/workflows/:id/files` | 312 |
+| `GET` | `/api/orchestrator/workflows/:id/files/download` | 340 |
+| `DELETE` | `/api/orchestrator/workflows/:id/files` | 384 |
+| `POST` | `/api/orchestrator/runs/:id/uploads` | 416 |
+| `GET` | `/api/orchestrator/runs/:id/workspace` | 496 |
+| `GET` | `/api/orchestrator/runs/:id/workspace/download` | 607 |
+| `GET` | `/api/orchestrator/runs/:id/workspace/content` | 674 |
+| `GET` | `/api/orchestrator/runs/:id/workspace/diff` | 734 |
 
 ## projects
 
@@ -391,11 +390,11 @@ Source: `apps/server/src/routes/stream.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/stream/tickets` | 280 |
-| `POST` | `/api/stream/connections` | 363 |
-| `POST` | `/api/stream/connections/:id/subs` | 470 |
-| `GET` | `/api/stream` | 531 |
-| `GET` | `/api/stream/replay` | 1059 |
+| `POST` | `/api/stream/tickets` | 298 |
+| `POST` | `/api/stream/connections` | 381 |
+| `POST` | `/api/stream/connections/:id/subs` | 476 |
+| `GET` | `/api/stream` | 546 |
+| `GET` | `/api/stream/replay` | 1079 |
 
 ## system
 

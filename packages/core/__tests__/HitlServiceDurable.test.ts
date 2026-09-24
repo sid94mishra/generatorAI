@@ -191,7 +191,7 @@ describe('HitlService — W22 durable Awakeable path', () => {
     await expect(recoveredPromise).resolves.toEqual({ approved: true, value: 'approved-after-restart' });
     // P0-a: `pending`, NOT `running`. The stage frame that called interrupt()
     // died with process 1, so there is nothing for `running` to mean — and
-    // `pending` is the only status `DAGScheduler.getReadyStages` will relaunch.
+    // `pending` is the only status `DAGScheduler.reconcileRun` will relaunch.
     // This assertion used to read `running`, which is precisely the permanent
     // zombie: approved, never re-run, run stuck forever.
     expect(repo.rows.get('s1')!.status).toBe('pending');

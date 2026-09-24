@@ -444,8 +444,8 @@ export function automationCommands(): CommandSpec[] {
         columns: [
           idColumn,
           statusColumn,
-          { key: 'totalRuns', header: 'Runs', format: 'number', priority: 1 },
-          { key: 'completedRuns', header: 'Done', format: 'number', priority: 2 },
+          { key: 'totalIterations', header: 'Runs', format: 'number', priority: 1 },
+          { key: 'completedIterations', header: 'Done', format: 'number', priority: 2 },
           createdColumn,
         ],
       },

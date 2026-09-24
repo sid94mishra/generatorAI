@@ -8,7 +8,6 @@ export type { HookContext, HookDryRunPlan, HookDryRunEntry } from './HookExecuto
 export { HookInterceptor } from './HookInterceptor.js';
 export type { SDKHookContext, StageHookContext } from './HookInterceptor.js';
 export { ConfigResolver } from './ConfigResolver.js';
-export type { ResolvedWorkflowConfig, SessionWorkflowOverrides, ResolvedStageConfig } from './ConfigResolver.js';
 export { TemplateRegistry } from './TemplateRegistry.js';
 export { StartupRecoveryService } from './StartupRecoveryService.js';
 export { InterruptedTurnRecoveryService, INTERRUPTED_BY_RESTART_CODE } from './InterruptedTurnRecoveryService.js';

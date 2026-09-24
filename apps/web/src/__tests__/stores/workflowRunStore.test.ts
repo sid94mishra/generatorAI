@@ -107,7 +107,6 @@ describe('workflowRunStore', () => {
       expect(state.run).toBeNull();
       expect(state.stageSessionMap).toEqual({});
       expect(state.selectedStageRunId).toBeNull();
-      expect(state.timelineEvents).toEqual([]);
       expect(state.elapsedMs).toBe(0);
     });
   });
@@ -315,50 +314,6 @@ describe('workflowRunStore', () => {
       useWorkflowRunStore.getState().setRun(run);
 
       expect(useWorkflowRunStore.getState().selectedStageRunId).toBe('sr-a');
-    });
-  });
-
-  // ══════════════════════════════════════════
-  // Timeline events
-  // ══════════════════════════════════════════
-  describe('addTimelineEvent', () => {
-    it('appends timeline events with generated id', () => {
-      useWorkflowRunStore.getState().setRun(makeRun());
-      useWorkflowRunStore.getState().addTimelineEvent({
-        timestamp: new Date(),
-        type: 'run',
-        runId: 'run-1',
-        status: 'running',
-        message: 'Run started',
-      });
-
-      const events = useWorkflowRunStore.getState().timelineEvents;
-      expect(events).toHaveLength(1);
-      expect(events[0]!.id).toBeTruthy();
-      expect(events[0]!.message).toBe('Run started');
-      expect(events[0]!.type).toBe('run');
-    });
-
-    it('accumulates multiple events', () => {
-      useWorkflowRunStore.getState().setRun(makeRun());
-      useWorkflowRunStore.getState().addTimelineEvent({
-        timestamp: new Date(),
-        type: 'run',
-        runId: 'run-1',
-        status: 'running',
-        message: 'Event 1',
-      });
-      useWorkflowRunStore.getState().addTimelineEvent({
-        timestamp: new Date(),
-        type: 'stage',
-        runId: 'run-1',
-        stageRunId: 'sr-1',
-        stageName: 'Build',
-        status: 'running',
-        message: 'Event 2',
-      });
-
-      expect(useWorkflowRunStore.getState().timelineEvents).toHaveLength(2);
     });
   });
 

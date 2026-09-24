@@ -348,7 +348,7 @@ GET  /api/workflow-runs/:id/diff                            → git diff across 
 
 ### Right side pane on the run page
 
-`WorkflowRunPageV2` shares the same `RightPane` shell used by chats. Tabs available on this page:
+`WorkflowRunPage` shares the same `RightPane` shell used by chats. Tabs available on this page:
 
 - **Changes** *(default)* — `RunArtifactsPanel` (per-worktree files + response markdown + code files).
 - **Inspector** — per-stage prompt / output / hooks / tools drill-down (`RightInspector`).

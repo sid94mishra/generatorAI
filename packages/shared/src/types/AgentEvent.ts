@@ -273,7 +273,7 @@ export type AgentEvent =
   | { kind: 'workflow_run.preprocessing_step_failed'; data: { workflowRunId: string; stepName: string; error: string } }
   | { kind: 'workflow_run.stage_validation'; data: { workflowRunId: string; stageRunId: string; stageName: string; passed: boolean; failures: string[] } }
   | { kind: 'workflow_run.orchestration_failed'; data: { workflowRunId: string; error: string } }
-  | { kind: 'workflow_run.orchestration_completed'; data: { workflowRunId: string; preprocessingResults: unknown[]; postProcessingResults?: unknown[]; stageValidationResults: unknown[] } }
+  | { kind: 'workflow_run.orchestration_completed'; data: { workflowRunId: string; preprocessingResults: unknown[]; postProcessingResults?: unknown[] } }
   // ── WorkflowRun Sandbox Events ──
   | { kind: 'workflow_run.sandbox_created'; data: { workflowRunId: string; sandboxName: string; cliUrl: string; isDockerSandbox: boolean } }
   | { kind: 'workflow_run.sandbox_destroyed'; data: { workflowRunId: string } }

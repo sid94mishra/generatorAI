@@ -18,7 +18,7 @@ Live in [templates/](../../templates/) and [templates/system/](../../templates/s
 | Test Generation | `system/test-generation-workflow.json` | ~4 |
 | E2E Testing | `system/e2e-testing-workflow.json` | ~4 |
 
-`templates/workflow-upload-template.json` is a sample for the upload endpoint, not a system template. The four legacy v1 files that used to sit beside it (`code-generation.json`, `code-review.json`, `refactoring.json`, `test-generation.json`) were removed on 2026-09-05: they had no `stages` and failed `WorkflowTemplateSchema` at every boot since the v2 template format landed, so "still loaded for compatibility" was never true — the registry logged four warnings and skipped them.
+The only JSON templates are the system templates above. The four v1 files (`code-generation.json`, `code-review.json`, `refactoring.json`, `test-generation.json`) were removed on 2026-09-05, and the orphan `workflow-upload-template.json` sample (which still used the pre-rename `copilotConfig` key) was removed in the workflow overhaul (P01).
 
 ### Loading
 

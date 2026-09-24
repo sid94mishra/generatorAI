@@ -101,36 +101,6 @@
         "constraints": "—"
       },
       {
-        "field": "workflow",
-        "type": "object",
-        "presence": "default {}",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "workflow.stageTimeoutMs",
-        "type": "number",
-        "presence": "default 300000",
-        "constraints": "int; min 1000; max 86400000"
-      },
-      {
-        "field": "workflow.maxStageTimeoutMs",
-        "type": "number",
-        "presence": "default 14400000",
-        "constraints": "int; min 1000; max 604800000"
-      },
-      {
-        "field": "workflow.heartbeatIntervalMs",
-        "type": "number",
-        "presence": "default 10000",
-        "constraints": "int; min 1000; max 600000"
-      },
-      {
-        "field": "workflow.heartbeatStaleMultiplier",
-        "type": "number",
-        "presence": "default 3",
-        "constraints": "min 2; max 100"
-      },
-      {
         "field": "harness",
         "type": "object",
         "presence": "default {}",

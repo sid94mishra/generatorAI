@@ -468,22 +468,6 @@ export function orchestratorCommands(): CommandSpec[] {
     }),
 
     defineCommand({
-      id: 'orchestrator.context',
-      group: 'orchestrator',
-      verb: 'context',
-      summary: 'Orchestrator context for a run',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
-      flags: [],
-      schema: inputSchema({ run: z.string() }, {}),
-      output: { kind: 'record' },
-      async handler(ctx, { args }) {
-        return record(await ctx.api.orchestrator.context(args.run));
-      },
-    }),
-
-    defineCommand({
       id: 'orchestrator.cancel',
       group: 'orchestrator',
       verb: 'cancel',

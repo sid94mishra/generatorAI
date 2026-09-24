@@ -245,21 +245,18 @@ const MIN_TIMEOUT_MS = 1_000;
  * WS-D1 — default step timeout applied when a stage definition sets no
  * explicit `timeoutMs`. Previously that case (`else if (prompt.waitForCompletion)`)
  * awaited the harness call with NO timeout at all — the docs claimed a
- * "default if unset: 300s" that was never true. Matches
- * `AppConfigSchema.workflow.stageTimeoutMs`'s own default so the two stay in
- * step; overridable per-instance via `setDefaultStageTimeoutMs` (mirrors
- * `WorkflowRunService.setHeartbeatPolicy`) for a composition root that wires
- * the live AppConfig value through.
+ * "default if unset: 300s" that was never true. A module constant: nothing
+ * configures it. `setDefaultStageTimeoutMs` exists only so the testkit can
+ * compress time.
  */
 const DEFAULT_STAGE_TIMEOUT_MS = 300_000;
 
 /**
  * WS-D1 — how often `executeStage` beats `stage_runs.heartbeat_at` while a
- * stage is queued/running. Matches
- * `AppConfigSchema.workflow.heartbeatIntervalMs`'s default; overridable via
- * `setHeartbeatIntervalMs`. `WorkflowRunService`'s reconciler treats a
- * queued/running stage as stuck once its last beat is older than
- * `heartbeatIntervalMs * heartbeatStaleMultiplier` (default 3x — see
+ * stage is queued/running. A module constant; `setHeartbeatIntervalMs`
+ * exists only so the testkit can compress time. `WorkflowRunService`'s
+ * reconciler treats a queued/running stage as stuck once its last beat is
+ * older than `heartbeatIntervalMs * staleMultiplier` (default 3x — see
  * `WorkflowRunService.heartbeatPolicy`), so the two must stay compatible:
  * beating here slower than the reconciler assumes reintroduces false
  * "stuck stage" failures on perfectly healthy runs.
@@ -553,7 +550,7 @@ export class StageExecutionService {
   /** Default step timeout when a stage sets no explicit `timeoutMs` (task 1). */
   private defaultStageTimeoutMs = DEFAULT_STAGE_TIMEOUT_MS;
 
-  /** Override the default step timeout (wire `AppConfig.workflow.stageTimeoutMs`). */
+  /** Test timing seam: override the default step timeout. */
   setDefaultStageTimeoutMs(ms: number): void {
     this.defaultStageTimeoutMs = ms;
   }
@@ -561,7 +558,7 @@ export class StageExecutionService {
   /** How often a running stage beats `stage_runs.heartbeat_at` (task 4). */
   private heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
 
-  /** Override the heartbeat interval (wire `AppConfig.workflow.heartbeatIntervalMs`). */
+  /** Test timing seam: override the heartbeat interval. */
   setHeartbeatIntervalMs(ms: number): void {
     this.heartbeatIntervalMs = ms;
   }

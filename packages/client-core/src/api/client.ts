@@ -517,8 +517,7 @@ export interface AutomationSummary {
   description?: string;
   enabled: boolean;
   triggerType: 'manual' | 'schedule' | 'webhook';
-  workflowDefinitionId: string;
-  workflowIds?: string[];
+  workflowIds: string[];
   cronExpression?: string;
   timezone?: string;
   nextRunAt?: Timestamp | null;
@@ -530,10 +529,6 @@ export interface AutomationExecutionSummary {
   id: string;
   automationId: string;
   status: string;
-  /** @deprecated The server sends the `*Iterations` counts below; kept for older callers. */
-  totalRuns?: number;
-  completedRuns?: number;
-  failedRuns?: number;
   totalIterations?: number;
   completedIterations?: number;
   failedIterations?: number;

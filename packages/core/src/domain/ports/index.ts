@@ -68,7 +68,6 @@ export type { IStageDefinitionRepository } from './IStageDefinitionRepository.js
 export type { IStageEdgeRepository } from './IStageEdgeRepository.js';
 export type { IWorkflowRunRepository } from './IWorkflowRunRepository.js';
 export type { IStageRunRepository } from './IStageRunRepository.js';
-export type { ISessionAllocator, IDAGScheduler } from './IServiceInterfaces.js';
 export type { ISequenceAllocator } from './ISequenceAllocator.js';
 export type {
   ISessionAllocationRepository,

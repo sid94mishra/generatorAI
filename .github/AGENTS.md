@@ -41,7 +41,6 @@ GeneratorAI/
 │   ├── sdk/           Programmatic API: `createGeneratorAI()` + facades (chat/workflows/automations/events/scripts/tools)
 │   └── mcp-server/    MCP tool adapter
 ├── templates/
-│   ├── *.json                       v1 templates (legacy)
 │   ├── system/*.json                v2 system DAG templates (5 built-ins)
 │   ├── system/mcp-servers.json      System MCP registry
 │   ├── system/artifacts/            System skills / agents / prompts (incl. `extension-author` skill)

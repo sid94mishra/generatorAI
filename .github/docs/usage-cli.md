@@ -103,7 +103,7 @@ generatorai
 ├── template              # System workflow templates
 │     list · show
 ├── orchestrator (orch)   # System workflows and orchestrated runs
-│     cancel · context · templates
+│     cancel · templates
 ├── extension (ext)       # Hot-loadable extensions
 │     disable · enable · list · reload · show · uninstall
 ├── widget                # Agent-rendered widget surfaces
@@ -157,7 +157,7 @@ Pairing, this installation's credential, and the device registry
 |---|---|---|
 | `device audit [options]` | Authentication events | `--limit` |
 | `device forget [connection]` | Delete this installation's credential for a server | — |
-| `device invite [options]` | Mint a pairing code for a new device | `--scopes` `--ttl` `--data-dir` |
+| `device invite [options]` | Mint a pairing code for a new device | `--scopes` `--name` `--platform` `--ttl` `--data-dir` |
 | `device invites` | Pairing codes that have not been redeemed yet | — |
 | `device list [options]` | Devices paired with the server | `--all` |
 | `device pair <code> [options]` | Pair this CLI with a server using a pairing code | `--name` |
@@ -173,7 +173,7 @@ Conversations against a provider, optionally scoped to a project
 |---|---|---|
 | `chat archive <chat>` | Archive a chat | — |
 | `chat cancel <chat>` | Stop the in-flight turn | — |
-| `chat create <name> [options]` | Create a chat | `--description` `--model` `--project` `--agent` `--codebase` `--worktree` `--no-worktree` `--tags` `--permission-mode` |
+| `chat create <name> [options]` | Create a chat | `--description` `--model` `--project` `--agent` `--codebase` `--folder` `--worktree` `--no-worktree` `--primary` `--tags` `--permission-mode` |
 | `chat delete <chat>` | Delete a chat and its messages | — |
 | `chat list [options]` | List chats | `--status` `--project` `--limit` |
 | `chat messages <chat> [options]` | Message history | `--limit` `--before` |
@@ -207,7 +207,7 @@ Workflow definitions: stages, edges, variables and validation
 | Command | What | Flags |
 |---|---|---|
 | `workflow clone <workflow> [name]` | Copy a definition, stages and edges included | — |
-| `workflow create <name> [options]` | Create an empty workflow definition | `--description` `--session-mode` `--project` `--tags` |
+| `workflow create <name> [options]` | Create an empty workflow definition | `--description` `--project` `--tags` |
 | `workflow delete <workflow>` | Delete a definition | — |
 | `workflow edge add <workflow> [options]` | Connect two stages | `--from` `--to` `--on` |
 | `workflow edge delete <workflow> <edge>` | Delete an edge | — |
@@ -215,7 +215,7 @@ Workflow definitions: stages, edges, variables and validation
 | `workflow export <workflow> [options]` | Export a definition as JSON | `--out` |
 | `workflow from-template <template> [options]` | Create a definition from a system template | `--name` |
 | `workflow import-json <file> [options]` | Import a definition from a JSON file | `--name` |
-| `workflow list [options]` | List workflow definitions | `--project` `--tag` |
+| `workflow list [options]` | List workflow definitions | `--project` `--tag` `--limit` |
 | `workflow show <workflow>` | Show a definition with its stages and edges | — |
 | `workflow stage add <workflow> [options]` | Add a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--order` `--timeout` `--retries` `--var` `--condition` `--condition-expression` |
 | `workflow stage delete <workflow> <stage>` | Delete a stage and its edges | — |
@@ -225,7 +225,7 @@ Workflow definitions: stages, edges, variables and validation
 | `workflow stage list <workflow>` | Stages in a definition | — |
 | `workflow stage update <workflow> <stage> [options]` | Patch a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--timeout` `--retries` `--var` `--clear-vars` `--condition` `--condition-expression` |
 | `workflow stage variables <workflow> <stage>` | A stage's variables | — |
-| `workflow update <workflow> [options]` | Patch a definition | `--name` `--description` `--session-mode` `--tags` |
+| `workflow update <workflow> [options]` | Patch a definition | `--name` `--description` `--tags` |
 | `workflow validate <workflow>` | Check a definition for cycles, orphans and bad references | — |
 
 ### `run`
@@ -275,7 +275,7 @@ Scheduled, webhook and manual triggers that fan out into runs
 | `automation execution list <automation>` | Executions of an automation | — |
 | `automation execution show <automation> <execution>` | One execution and its nested runs | — |
 | `automation list [options]` | List automations | `--project` |
-| `automation rotate-webhook-token <automation>` | Issue a new webhook token, invalidating the old one | — |
+| `automation rotate-webhook-token <automation>` | Issue a new webhook token + signing secret, invalidating the old ones | — |
 | `automation show <automation>` | Show an automation with recent executions | — |
 | `automation trigger <automation> [options]` | Fire an automation now | `--var` `--payload` |
 | `automation update <automation> [options]` | Patch an automation | `--name` `--schedule` `--max-concurrency` `--on-error` `--var` |
@@ -372,7 +372,6 @@ System workflows and orchestrated runs
 | Command | What | Flags |
 |---|---|---|
 | `orchestrator cancel <run>` | Cancel an orchestrated run and everything under it | — |
-| `orchestrator context <run>` | Orchestrator context for a run | — |
 | `orchestrator templates` | System workflows available to the orchestrator | — |
 
 ### `extension` (alias: `ext`)
@@ -620,6 +619,7 @@ Active in every pane.
 | Key | Action |
 |---|---|
 | `ctrl+k` / `ctrl+p` | Command palette |
+| `?` | Toggle help |
 | `ctrl+c` | Quit |
 | `ctrl+r` | Refresh current view |
 | `escape` | Back / close overlay |
@@ -677,7 +677,6 @@ Any pane with rows, and the fallback for several others.
 
 | Key | Action |
 |---|---|
-| `?` | Toggle help |
 | `/` | Search in view |
 | `down` / `j` | Move down |
 | `up` / `k` | Move up |

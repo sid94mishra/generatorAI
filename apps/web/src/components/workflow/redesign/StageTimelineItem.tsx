@@ -19,7 +19,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Check, Loader2, Clock, Pause, Hand, X, SkipForward, AlertTriangle, Zap, Moon,
-  ChevronRight, ChevronDown, User, FileText, Database, RefreshCw, MoreHorizontal,
+  ChevronRight, ChevronDown, User, FileText, Database, RefreshCw,
   PanelRightOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
@@ -240,20 +240,6 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
               <RefreshCw className="h-2.5 w-2.5" />
             </Button>
           )}
-          <Button
-            onClick={(e) => e.stopPropagation()}
-            variant="ghost"
-            size="icon-sm"
-            className={cn(
-              'h-auto w-auto rounded-md p-0.5 text-[var(--color-muted-foreground)]/60 hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]',
-              // 12px icon + 2px padding is a 16px target; the pseudo-element
-              // brings the clickable area up to 24px without changing the row.
-              'relative before:absolute before:-inset-1 before:content-[""]',
-            )}
-            aria-label="Stage actions"
-          >
-            <MoreHorizontal className="h-3 w-3" />
-          </Button>
           <ChevronDown className={cn('h-3.5 w-3.5 transition-transform text-[var(--color-muted-foreground)]/60', !open && '-rotate-90')} />
         </span>
       </div>

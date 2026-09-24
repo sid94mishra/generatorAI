@@ -79,7 +79,6 @@ function makeContext(overrides: Partial<OrchestratorContext> = {}): Orchestrator
     resolvedVariables: {},
     preprocessingResults: [],
     postProcessingResults: [],
-    stageValidationResults: [],
     ...overrides,
   };
 }
@@ -104,20 +103,14 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
     const workflowRunServiceStub = {} as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[0];
     const definitionServiceStub = { getDefinition } as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[1];
     const preprocessorStub = { executePostProcessing } as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[2];
-    const resultValidatorStub = {} as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[3];
-    const stageRunRepoStub = {} as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[4];
-    const stageDefRepoStub = { getByDefinitionId: vi.fn(async () => []) } as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[5];
-    const templateRegistryStub = {} as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[8];
+    const templateRegistryStub = {} as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[5];
 
     orchestrator = new WorkflowOrchestrator(
       workflowRunServiceStub,
       definitionServiceStub,
       preprocessorStub,
-      resultValidatorStub,
-      stageRunRepoStub,
-      stageDefRepoStub,
       runRepo,
-      eventBus as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[7],
+      eventBus as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[4],
       templateRegistryStub,
       makeLogger(),
     );

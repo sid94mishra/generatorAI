@@ -54,7 +54,7 @@ For a brownfield change, use stages for source analysis, implementation, indepen
 
 ## Source evidence
 
-`apps/web/src/pages/WorkflowDefinitionPage.tsx`, `apps/web/src/pages/WorkflowRunPageV2.tsx`, `apps/web/src/components/workflow/RuntimeDAGCanvas.tsx`, `apps/web/src/components/workflow/redesign/RunHeaderBar.tsx`, `apps/web/src/components/workflow/redesign/RightInspector.tsx`, `apps/web/src/components/workflow/redesign/InlineHitlControls.tsx`, `apps/web/src/components/artifacts/ArtifactBrowser.tsx`, and `packages/shared/src/types/WorkflowRunStateMachine.ts`.
+`apps/web/src/pages/WorkflowDefinitionPage.tsx`, `apps/web/src/pages/WorkflowRunPage.tsx`, `apps/web/src/components/workflow/RuntimeDAGCanvas.tsx`, `apps/web/src/components/workflow/redesign/RunHeaderBar.tsx`, `apps/web/src/components/workflow/redesign/RightInspector.tsx`, `apps/web/src/components/workflow/redesign/InlineHitlControls.tsx`, `apps/web/src/components/artifacts/ArtifactBrowser.tsx`, and `packages/shared/src/types/WorkflowRunStateMachine.ts`.
 
 ## Configuration and worked examples
 

@@ -216,29 +216,10 @@ export type StreamEffect =
 
   // ── Workflow-run store ops ───────────────────────────────────────
   //
-  // `message` on the timeline ops contains `{stage}` where the stage's
-  // display NAME belongs. The router cannot know it — the name lives in the
-  // host's run store, keyed by `stageRunId` — so the host substitutes. Every
-  // other surface simply drops these ops.
+  // Only the web run store consumes these; every other surface drops them.
   | { op: 'runStatus'; runId?: string; status: string; data: Record<string, unknown> }
-  | {
-      op: 'runTimeline';
-      runId?: string;
-      status: string;
-      message: string;
-      data: Record<string, unknown>;
-    }
   | { op: 'stageStatus'; stageRunId: string; status: string; data: Record<string, unknown> }
-  | {
-      op: 'stageTimeline';
-      stageRunId: string;
-      status: string;
-      message: string;
-      data: Record<string, unknown>;
-    }
   | { op: 'registerStageSession'; stageRunId: string; sessionId: string }
-  /** `data: null` clears the HITL prompt rather than raising one. */
-  | { op: 'stageAwaitingInput'; stageRunId: string; data: Record<string, unknown> | null }
   | { op: 'selectStageRun'; stageRunId: string }
   /** Terminal stage: settle its stream and refetch the history it produced. */
   | { op: 'stageSettled'; stageRunId: string }
@@ -1542,18 +1523,7 @@ export class StreamEventRouter {
         const status =
           kind === 'workflow_run.resumed' ? 'running' : kind.replace('workflow_run.', '');
         const runId = optStr(data['runId']) ?? optStr(data['workflowRunId']);
-        const verb = kind === 'workflow_run.resumed' ? 'resumed' : status;
         out.push({ op: 'runStatus', ...(runId ? { runId } : {}), status, data });
-        out.push({
-          op: 'runTimeline',
-          ...(runId ? { runId } : {}),
-          status,
-          message:
-            status === 'cancelling'
-              ? 'Workflow run cancelling...'
-              : `Workflow run ${verb}${optStr(data['error']) ? `: ${str(data['error'])}` : ''}`,
-          data,
-        });
         if (runId) out.push({ op: 'invalidate', resource: 'run', id: runId });
         // `cancelling` is a transient state the LIST does not render, so it
         // does not earn a refetch of every run.
@@ -1644,15 +1614,6 @@ export class StreamEventRouter {
           if (stageSessionId) {
             out.push({ op: 'registerStageSession', stageRunId, sessionId: stageSessionId });
           }
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status,
-            message: `Stage "{stage}" ${status}${
-              optStr(data['error']) ? `: ${str(data['error'])}` : ''
-            }`,
-            data,
-          });
           if (status === 'running') {
             out.push({ op: 'selectStageRun', stageRunId });
             // Not an unconditional reset: after a reload the replay has
@@ -1689,14 +1650,6 @@ export class StreamEventRouter {
         const stageRunId = stageRunIdOf();
         if (!stageRunId) break;
         const started = kind === 'stage_run.step_started';
-        const label = optStr(data['label']) ?? `Step ${str(data['step'])}`;
-        out.push({
-          op: 'stageTimeline',
-          stageRunId,
-          status: started ? 'running' : 'completed',
-          message: `{stage}: ${label} ${started ? 'started' : 'completed'}`,
-          data,
-        });
         if (started && data['step'] !== undefined) {
           out.push({
             op: 'stageStatus',
@@ -1715,14 +1668,6 @@ export class StreamEventRouter {
         const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
         if (stageRunId) {
           out.push({ op: 'stageStatus', stageRunId, status: 'awaiting_input', data });
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status: 'awaiting_input',
-            message: 'Stage "{stage}" awaiting input',
-            data,
-          });
-          out.push({ op: 'stageAwaitingInput', stageRunId, data });
         }
         out.push({
           op: 'addSystemMessage',
@@ -1739,14 +1684,6 @@ export class StreamEventRouter {
         const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
         if (stageRunId) {
           out.push({ op: 'stageStatus', stageRunId, status: 'running', data });
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status: 'running',
-            message: 'Stage "{stage}" input received — resuming',
-            data,
-          });
-          out.push({ op: 'stageAwaitingInput', stageRunId, data: null });
         }
         out.push({
           op: 'addSystemMessage',
@@ -1767,13 +1704,6 @@ export class StreamEventRouter {
             : null;
         if (stageRunId) {
           out.push({ op: 'stageStatus', stageRunId, status: 'sleeping', data });
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status: 'sleeping',
-            message: `Stage "{stage}" sleeping${wake ? ` until ${wake}` : ''}`,
-            data,
-          });
         }
         out.push({
           op: 'addSystemMessage',
@@ -1790,13 +1720,6 @@ export class StreamEventRouter {
         const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
         if (stageRunId) {
           out.push({ op: 'stageStatus', stageRunId, status: 'running', data });
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status: 'running',
-            message: 'Stage "{stage}" woken — resuming',
-            data,
-          });
         }
         out.push({
           op: 'addSystemMessage',
@@ -1812,15 +1735,6 @@ export class StreamEventRouter {
         const stageRunId = stageRunIdOf();
         const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
         const attempt = str(data['attempt'], '?');
-        if (stageRunId) {
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status: 'running',
-            message: `Stage "{stage}" retrying (attempt ${attempt})`,
-            data,
-          });
-        }
         out.push({
           op: 'addSystemMessage',
           key: stageKey,

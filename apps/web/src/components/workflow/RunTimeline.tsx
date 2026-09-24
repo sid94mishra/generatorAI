@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Spinner } from '@/components/ui/index.js';
-import { useWorkflowRunStore, type RunTimelineEvent } from '@/stores/workflowRunStore.js';
+import { useWorkflowRunStore } from '@/stores/workflowRunStore.js';
 import type { StageRun } from '@generatorai/shared';
 
 // ── Status icon mapping ──

@@ -21,11 +21,9 @@ import { PromptFilePicker } from './PromptFilePicker.js';
 import { McpServerSelector } from './McpServerSelector.js';
 import { SkillSelector } from './SkillSelector.js';
 import { AgentBindingSection } from './AgentBindingSection.js';
-import { StyledSelect } from './StyledSelect.js';
-import { ToggleSwitch } from './ToggleSwitch.js';
 import { NumberStepper } from './NumberStepper.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
-import { Button, Input, Textarea } from '@/components/ui/index.js';
+import { Button, Input, Select, Textarea, ToggleSwitch } from '@/components/ui/index.js';
 import { useTemplates } from '@/hooks/queries.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
 import { cn } from '@/lib/utils.js';
@@ -196,7 +194,7 @@ function PropertiesTab({
       <CollapsibleSection title="Model & Template" icon={<Cpu className="h-3.5 w-3.5" />} defaultOpen>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Template</label>
-          <StyledSelect
+          <Select
             aria-label="Template"
             value={stage.templateId ?? ''}
             onChange={(v) => onUpdate({ templateId: v || undefined })}
@@ -230,7 +228,7 @@ function PropertiesTab({
         </div>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Reasoning Effort</label>
-          <StyledSelect
+          <Select
             aria-label="Reasoning Effort"
             value={stage.harnessConfigOverrides?.reasoningEffort ?? ''}
             onChange={(v) => {
@@ -344,7 +342,7 @@ function ExecutionTab({
       <CollapsibleSection title="Execution" icon={<Zap className="h-3.5 w-3.5" />} defaultOpen>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Run Condition</label>
-          <StyledSelect
+          <Select
             aria-label="Run Condition"
             value={stage.condition?.type ?? 'always'}
             onChange={(v) => {
@@ -384,7 +382,7 @@ function ExecutionTab({
         />
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Context from Predecessors</label>
-          <StyledSelect
+          <Select
             aria-label="Context from Predecessors"
             value={stage.contextFilter ?? 'summary-only'}
             onChange={(v) => onUpdate({ contextFilter: (v || 'summary-only') as ContextFilter })}
@@ -588,12 +586,12 @@ function HookEditor({
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <StyledSelect
+            <Select
               value={hook.phase}
               onChange={(v) => updateHook(idx, { phase: v as HookDefinition['phase'] })}
               options={AVAILABLE_PHASES.map((p) => ({ value: p.value, label: p.label }))}
             />
-            <StyledSelect
+            <Select
               value={hook.type}
               onChange={(v) => {
                 const type = v as 'script' | 'http' | 'function';
@@ -648,7 +646,7 @@ function HookEditor({
               />
             </div>
           )}
-          <StyledSelect
+          <Select
             value={hook.failurePolicy}
             onChange={(v) => updateHook(idx, { failurePolicy: v as HookDefinition['failurePolicy'] })}
             options={FAILURE_POLICIES.map((p) => ({ value: p.value, label: p.label }))}
@@ -742,7 +740,7 @@ function ValidationRuleEditor({
               <Trash2 className="h-3 w-3" />
             </Button>
           </div>
-          <StyledSelect
+          <Select
             value={rule.type}
             onChange={(v) => {
               const type = v as ResultValidationRule['type'];

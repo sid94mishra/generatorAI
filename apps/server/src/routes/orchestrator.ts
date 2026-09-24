@@ -224,23 +224,6 @@ export function createOrchestratorRoutes(container: Container): Router {
     }
   });
 
-  // GET /orchestrator/runs/:id/context — Get orchestration context for a run
-  router.get('/runs/:id/context', (req, res, next) => {
-    try {
-      const id = String(req.params['id']);
-      const context = workflowOrchestrator.getContext(id);
-      if (!context) {
-        res.status(404).json({
-          error: { code: 'NOT_FOUND', message: `Orchestration context not found for run: ${id}` },
-        });
-        return;
-      }
-      res.json(context);
-    } catch (err) {
-      next(err);
-    }
-  });
-
   // POST /orchestrator/runs/:id/cancel — Cancel an orchestrated run
   router.post('/runs/:id/cancel', async (req, res, next) => {
     try {

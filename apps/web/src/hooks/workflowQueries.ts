@@ -23,11 +23,8 @@ export const workflowKeys = {
   runsByDefinition: (defId: string) => ['workflow-runs', 'by-definition', defId] as const,
   run: (id: string) => ['workflow-run', id] as const,
   systemWorkflows: ['system-workflows'] as const,
-  systemWorkflow: (id: string) => ['system-workflow', id] as const,
-  orchestratorContext: (runId: string) => ['orchestrator-context', runId] as const,
   runWorkspace: (runId: string) => ['run-workspace', runId] as const,
   runScratchpad: (runId: string) => ['run-scratchpad', runId] as const,
-  workflowFiles: (defId: string) => ['workflow-files', defId] as const,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -119,27 +116,6 @@ export function useBulkDeleteWorkflowDefinitions() {
     },
     onError: () => {
       // Still refresh the list — some deletions may have succeeded
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
-    },
-  });
-}
-
-/** Validate a workflow definition's DAG structure */
-export function useValidateWorkflowDefinition() {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useMutation({
-    mutationFn: (id: string) => platform.validateDefinition(id),
-  });
-}
-
-/** Import a workflow definition from a template */
-export function useImportFromTemplate() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (templateId: string) => platform.importFromTemplate(templateId),
-    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
     },
   });
@@ -352,19 +328,6 @@ export function useCancelWorkflowRun() {
   });
 }
 
-/** Delete a workflow run */
-export function useDeleteWorkflowRun() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => platform.deleteRun(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-    },
-  });
-}
-
 /** PARITY-1: retry a failed workflow run (run-level) */
 export function useRetryWorkflowRun() {
   const platform = usePlatform();
@@ -394,18 +357,6 @@ function useStageControl(action: (runId: string, stageId: string) => Promise<voi
   });
 }
 
-/** Pause a single running stage */
-export function usePauseStageRun() {
-  const platform = usePlatform();
-  return useStageControl((runId, stageId) => platform.pauseStageRun(runId, stageId));
-}
-
-/** Resume a single paused stage */
-export function useResumeStageRun() {
-  const platform = usePlatform();
-  return useStageControl((runId, stageId) => platform.resumeStageRun(runId, stageId));
-}
-
 /** Wake a single sleeping stage ahead of its scheduled wake time */
 export function useWakeStageRun() {
   const platform = usePlatform();
@@ -416,12 +367,6 @@ export function useWakeStageRun() {
 export function useRetryStageRun() {
   const platform = usePlatform();
   return useStageControl((runId, stageId) => platform.retryStageRun(runId, stageId));
-}
-
-/** Cancel a single running/paused stage */
-export function useCancelStageRun() {
-  const platform = usePlatform();
-  return useStageControl((runId, stageId) => platform.cancelStageRun(runId, stageId));
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -435,16 +380,6 @@ export function useWorkflowTemplates() {
     queryKey: workflowKeys.systemWorkflows,
     queryFn: () => platform.getOrchestratorTemplates(),
     staleTime: 60_000,
-  });
-}
-
-/** Get a single workflow template */
-export function useWorkflowTemplate(id: string | undefined) {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: workflowKeys.systemWorkflow(id ?? ''),
-    queryFn: () => platform.getOrchestratorTemplate(id!),
-    enabled: !!id,
   });
 }
 
@@ -483,17 +418,6 @@ export function useStartOrchestratedRun() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
     },
-  });
-}
-
-/** Get orchestration context for a run */
-export function useOrchestratorContext(runId: string | undefined) {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: workflowKeys.orchestratorContext(runId ?? ''),
-    queryFn: () => platform.getOrchestratorContext(runId!),
-    enabled: !!runId,
-    refetchInterval: 10_000,
   });
 }
 
@@ -544,17 +468,6 @@ export function useRunScratchpad(runId: string | undefined, opts?: { isRunning?:
   });
 }
 
-/** Get git diff for workspace repos (falls back to hasGit=false if no git) */
-export function useRunDiff(runId: string | undefined) {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: ['run-diff', runId],
-    queryFn: () => platform.getRunDiff(runId!),
-    enabled: !!runId,
-    staleTime: 30_000,
-  });
-}
-
 /** Upload files (skills/agents/prompts) for a run */
 export function useUploadRunFiles() {
   const platform = usePlatform() as HttpPlatformClient;
@@ -573,44 +486,3 @@ export function useUploadRunFiles() {
 }
 
 // ── Workflow-Level File Management ──
-
-/** Get files uploaded at the workflow definition level */
-export function useWorkflowFiles(definitionId: string | undefined) {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: workflowKeys.workflowFiles(definitionId ?? ''),
-    queryFn: () => platform.getWorkflowFiles(definitionId!),
-    enabled: !!definitionId,
-  });
-}
-
-/** Upload files at the workflow definition level */
-export function useUploadWorkflowFiles() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: {
-      definitionId: string;
-      category: 'skills' | 'agents' | 'prompts';
-      files: File[];
-    }) => platform.uploadWorkflowFiles(params.definitionId, params.category, params.files),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.workflowFiles(variables.definitionId) });
-    },
-  });
-}
-
-/** Delete a file from workflow-level uploads */
-export function useDeleteWorkflowFile() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: { definitionId: string; filePath: string }) =>
-      platform.deleteWorkflowFile(params.definitionId, params.filePath),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.workflowFiles(variables.definitionId) });
-    },
-  });
-}

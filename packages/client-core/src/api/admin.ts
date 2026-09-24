@@ -827,8 +827,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         req<WorkflowDefinition>('/api/orchestrator/from-template', json(body)),
       startRun: (body: Record<string, unknown>) =>
         req<Record<string, unknown>>('/api/orchestrator/runs', json(body)),
-      context: (runId: string) =>
-        req<Record<string, unknown>>(`/api/orchestrator/runs/${runId}/context`),
       cancel: (runId: string) =>
         req<void>(`/api/orchestrator/runs/${runId}/cancel`, json({})),
       /**

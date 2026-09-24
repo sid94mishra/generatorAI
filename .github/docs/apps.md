@@ -123,7 +123,7 @@ Vite-bundled SPA served by Vite in dev and statically from server in prod (`/web
 components/
 ├── layout/            AppLayout, Sidebar (8 nav items), Header, Breadcrumb,
 │                     RightPane (unified tabbed dock — hosts Changes / Inspector / Browser / Terminal tabs
-│                                on both ChatPage and WorkflowRunPageV2; state persisted per-page in localStorage)
+│                                on both ChatPage and WorkflowRunPage; state persisted per-page in localStorage)
 ├── chat/              ChatView, ChatList, ChatMessageList, ChatInput, ChatFilesPanel,
 │                     BrowserPanel (Integrated Browser — VSCode-style share/inspect/capture UI),
 │                     NativeBrowserView (desktop overlay coordinator for Electron's WebContentsView),

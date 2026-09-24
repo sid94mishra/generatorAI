@@ -40,31 +40,13 @@ The top-level product modules exclude the separate `agent-tests` workspace and t
 | `packages/shared` | `@generatorai/shared` | — | [Architecture](/architecture/modules.md) |
 | `packages/source-control` | `@generatorai/source-control` | `shared` | [Architecture](/architecture/modules.md) |
 | `packages/tui-kit` | `@generatorai/tui-kit` | `cli-core`, `design-tokens`, `shared` | [Architecture](/architecture/modules.md) |
+| `packages/workflow-testkit` | `@generatorai/workflow-testkit` | `agent-harness-providers`, `core`, `db`, `shared` | [Architecture](/architecture/modules.md) |
 
 ## Web page components
 
 Guide: [Web page components](/clients/web.md).
 
-- `apps/web/src/pages/AgentEditorPage.tsx`
-- `apps/web/src/pages/AgentsListPage.tsx`
-- `apps/web/src/pages/AutomationDetailPage.tsx`
-- `apps/web/src/pages/AutomationsPage.tsx`
-- `apps/web/src/pages/ChatPage.tsx`
-- `apps/web/src/pages/ChatsListPage.tsx`
-- `apps/web/src/pages/CodebaseDetailPage.tsx`
-- `apps/web/src/pages/CreateAutomationPage.tsx`
-- `apps/web/src/pages/CreateProjectPage.tsx`
-- `apps/web/src/pages/DashboardPage.tsx`
-- `apps/web/src/pages/ProjectDetailPage.tsx`
-- `apps/web/src/pages/ProjectsListPage.tsx`
-- `apps/web/src/pages/PullRequestPage.tsx`
-- `apps/web/src/pages/ScriptDetailPage.tsx`
-- `apps/web/src/pages/ScriptsListPage.tsx`
-- `apps/web/src/pages/SettingsPage.tsx`
-- `apps/web/src/pages/WorkflowBuilderPage.tsx`
-- `apps/web/src/pages/WorkflowDefinitionPage.tsx`
-- `apps/web/src/pages/WorkflowListPage.tsx`
-- `apps/web/src/pages/WorkflowRunPageV2.tsx`
+
 
 ## Mobile route files
 
@@ -100,6 +82,7 @@ Guide: [Mobile route files](/clients/mobile.md).
 - `apps/mobile/app/settings/about.tsx`
 - `apps/mobile/app/settings/accessibility.tsx`
 - `apps/mobile/app/settings/appearance.tsx`
+- `apps/mobile/app/settings/audio.tsx`
 - `apps/mobile/app/settings/capabilities.tsx`
 - `apps/mobile/app/settings/diagnostics.tsx`
 - `apps/mobile/app/settings/extensions.tsx`

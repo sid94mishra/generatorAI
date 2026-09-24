@@ -392,14 +392,11 @@ export class WorkflowDefinitionService {
    * path, left in its duplicate" pattern. The orchestrator's extra inputs
    * (project binding, per-variable default overrides, auto-commit) are options
    * here so there is exactly one mapping.
-   *
-   * `opts` accepts a bare string for backward compatibility (`nameOverride`).
    */
   async importFromTemplate(
     templateId: string,
-    opts?: string | ImportFromTemplateOptions,
+    options: ImportFromTemplateOptions = {},
   ): Promise<WorkflowDefinition> {
-    const options: ImportFromTemplateOptions = typeof opts === 'string' ? { name: opts } : (opts ?? {});
     const template = this.templateRegistry.getWorkflowTemplate(templateId);
     if (!template) throw new ValidationError(`Template not found: ${templateId}`);
 

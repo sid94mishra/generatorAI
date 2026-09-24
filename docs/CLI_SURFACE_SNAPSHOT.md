@@ -13,9 +13,9 @@ same promise as one that does not.
 
 | Measure | Count |
 |---|---:|
-| Commands | 219 |
+| Commands | 218 |
 | Groups | 25 |
-| Server-backed commands | 192 |
+| Server-backed commands | 191 |
 | Destructive commands | 34 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
@@ -122,7 +122,6 @@ same promise as one that does not.
 | `hook.phases` | `hook phases` | yes | no | yes | yes | — | — |
 | `hook.test` | `hook test` | yes | no | yes | yes | session, phase | --type, --config |
 | `orchestrator.cancel` | `orchestrator cancel` | yes | yes | yes | yes | run | — |
-| `orchestrator.context` | `orchestrator context` | yes | no | yes | yes | run | — |
 | `orchestrator.templates` | `orchestrator templates` | yes | no | yes | yes | — | — |
 | `project.codebase.branches` | `project codebase branches` | yes | no | yes | yes | project, codebase | — |
 | `project.codebase.browse` | `project codebase browse` | yes | no | yes | yes | project, codebase | — |
