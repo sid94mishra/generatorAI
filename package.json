@@ -34,6 +34,7 @@
     "clean": "pnpm -r exec node -e \"const fs=require('fs');for(const d of ['dist','dist-bundle','dist-electron','.turbo'])fs.rmSync(d,{recursive:true,force:true});for(const f of fs.readdirSync('.'))if(f.endsWith('.tsbuildinfo'))fs.rmSync(f,{force:true})\"",
     "postinstall": "node scripts/fix-native-exec-bits.mjs",
     "generate:schemas": "pnpm --filter @generatorai/server exec tsx ../../scripts/generate-schemas.ts",
+    "generate:workflow-spec": "pnpm --filter @generatorai/server exec tsx ../../scripts/generate-workflow-spec.ts",
     "db:backup": "pnpm --filter @generatorai/server exec tsx ../../scripts/db-backup.ts",
     "db:reclaim": "pnpm --filter @generatorai/server exec tsx ../../scripts/db-reclaim.ts",
     "db:generate": "pnpm --filter @generatorai/db db:generate",
@@ -73,7 +74,8 @@
     "prettier": "^3.5.0",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.6",
+    "zod-to-json-schema": "3.25.2"
   },
   "dependencies": {
     "tweetnacl": "^1.0.3"

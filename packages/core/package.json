@@ -40,6 +40,8 @@
     "@generatorai/shared": "workspace:*",
     "@generatorai/source-control": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "kokoro-js": "^1.2.1",
     "node-cron": "^4.2.1",
     "playwright": "^1.58.2",
@@ -52,6 +54,7 @@
     "sharp": "^0.34.5"
   },
   "devDependencies": {
-    "@types/node-cron": "^3.0.11"
+    "@types/node-cron": "^3.0.11",
+    "fast-check": "^4.10.2"
   }
 }
