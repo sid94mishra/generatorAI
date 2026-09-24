@@ -3915,7 +3915,6 @@
     "apps/web/src/components/workflow/McpServerSelector.tsx",
     "apps/web/src/components/workflow/NumberStepper.tsx",
     "apps/web/src/components/workflow/PromptEditor.tsx",
-    "apps/web/src/components/workflow/PromptFilePicker.tsx",
     "apps/web/src/components/workflow/redesign/deriveRunView.ts",
     "apps/web/src/components/workflow/redesign/InlineHitlControls.tsx",
     "apps/web/src/components/workflow/redesign/PipelineFlow.tsx",

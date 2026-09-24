@@ -509,7 +509,6 @@ export class WorkflowDefinitionService {
           label: p.label,
           text: p.text,
           waitForCompletion: p.waitForCompletion,
-          attachments: p.attachments ?? [],
         })),
         hooks: (stage.hooks ?? []) as WorkflowTemplate['hooks'],
         variables: stage.variables ?? {},

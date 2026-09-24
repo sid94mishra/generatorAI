@@ -3940,12 +3940,6 @@
         "constraints": "min 1"
       },
       {
-        "field": "attachments",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "waitForCompletion",
         "type": "boolean",
         "presence": "default true",
@@ -6696,12 +6690,6 @@
         "constraints": "min 1"
       },
       {
-        "field": "prompts[].attachments",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "prompts[].waitForCompletion",
         "type": "boolean",
         "presence": "default true",
@@ -8804,12 +8792,6 @@
         "type": "string",
         "presence": "required",
         "constraints": "min 1"
-      },
-      {
-        "field": "stages[].prompts[].attachments",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
       },
       {
         "field": "stages[].prompts[].waitForCompletion",
@@ -13677,12 +13659,6 @@
         "constraints": "—"
       },
       {
-        "field": "stages[].config.prompts[].attachments",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "stages[].config.prompts[].waitForCompletion",
         "type": "boolean",
         "presence": "optional",
@@ -15035,12 +15011,6 @@
         "type": "boolean",
         "presence": "default true",
         "constraints": "—"
-      },
-      {
-        "field": "attachments",
-        "type": "array of string",
-        "presence": "default []",
-        "constraints": "—"
       }
     ]
   },
@@ -15113,12 +15083,6 @@
         "field": "prompts[].waitForCompletion",
         "type": "boolean",
         "presence": "default true",
-        "constraints": "—"
-      },
-      {
-        "field": "prompts[].attachments",
-        "type": "array of string",
-        "presence": "default []",
         "constraints": "—"
       },
       {
@@ -15630,12 +15594,6 @@
         "field": "prompts[].waitForCompletion",
         "type": "boolean",
         "presence": "default true",
-        "constraints": "—"
-      },
-      {
-        "field": "prompts[].attachments",
-        "type": "array of string",
-        "presence": "default []",
         "constraints": "—"
       },
       {
@@ -16472,12 +16430,6 @@
         "field": "stages[].prompts[].waitForCompletion",
         "type": "boolean",
         "presence": "default true",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].prompts[].attachments",
-        "type": "array of string",
-        "presence": "default []",
         "constraints": "—"
       },
       {

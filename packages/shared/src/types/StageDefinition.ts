@@ -12,7 +12,6 @@ import type { AgentMode } from './AgentMode.js';
 export interface PromptDefinition {
   label: string;
   text: string;
-  attachments?: string[];
   waitForCompletion: boolean;
 }
 

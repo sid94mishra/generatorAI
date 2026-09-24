@@ -345,6 +345,23 @@
         "apps/"
       ],
       "reason": "WP-1.4: prompts[].source deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bPromptFilePicker\\b|attachments: z\\.array\\(z\\.string\\(\\)\\)",
+      "paths": [
+        "packages/shared/src/config/",
+        "apps/web/"
+      ],
+      "reason": "WP-1.4: prompts[].attachments and the builder Files tab deleted (stage attachments arrive in P03b, run uploads in P04)"
+    },
+    {
+      "phase": "01",
+      "pattern": "attachments\\?: string\\[\\]",
+      "paths": [
+        "packages/shared/src/types/StageDefinition.ts"
+      ],
+      "reason": "WP-1.4: prompts[].attachments deleted"
     }
   ],
   "comments": {

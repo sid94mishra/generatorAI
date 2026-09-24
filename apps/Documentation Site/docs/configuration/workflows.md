@@ -14,7 +14,6 @@ Zod schema for PromptDefinition
 | --- | --- | --- | --- |
 | label | string | `required` | min 1 |
 | text | string | `required` | min 1 |
-| attachments | array of string | `optional` | — |
 | waitForCompletion | boolean | `default true` | — |
 
 ## SkillDefinitionSchema
@@ -520,7 +519,6 @@ Zod schema for creating a StageDefinition
 | prompts[] | object | `required` | unknown keys: strip |
 | prompts[].label | string | `required` | min 1 |
 | prompts[].text | string | `required` | min 1 |
-| prompts[].attachments | array of string | `optional` | — |
 | prompts[].waitForCompletion | boolean | `default true` | — |
 | harnessConfigOverrides | object | `optional` | unknown keys: strip |
 | harnessConfigOverrides.model | string | `optional` | — |
@@ -895,7 +893,6 @@ Zod schema for importing a full workflow from a JSON file upload
 | stages[].prompts[] | object | `required` | unknown keys: strip |
 | stages[].prompts[].label | string | `required` | min 1 |
 | stages[].prompts[].text | string | `required` | min 1 |
-| stages[].prompts[].attachments | array of string | `optional` | — |
 | stages[].prompts[].waitForCompletion | boolean | `default true` | — |
 | stages[].harnessConfigOverrides | object | `optional` | unknown keys: strip |
 | stages[].harnessConfigOverrides.model | string | `optional` | — |
@@ -1264,7 +1261,6 @@ import { AgentModeSchema } from './ChatSchemas.js';
 export const PromptDefinitionSchema = z.object({
   label: z.string().min(1),
   text: z.string().min(1),
-  attachments: z.array(z.string()).optional(),
   waitForCompletion: z.boolean().default(true),
 });
 

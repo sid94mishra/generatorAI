@@ -5,7 +5,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, Settings2, FileText, Layers, Cpu, Zap, Variable, Shield, Bot, Server, Paperclip, Wand2, Webhook, Link2, Plus, Trash2, Brain, CheckCircle2 } from 'lucide-react';
+import { X, Settings2, FileText, Layers, Cpu, Zap, Variable, Shield, Bot, Server, Wand2, Webhook, Link2, Plus, Trash2, Brain, CheckCircle2 } from 'lucide-react';
 import type {
   StageDefinition,
   StageCondition,
@@ -17,7 +17,6 @@ import type {
 } from '@generatorai/shared';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { PromptEditor } from './PromptEditor.js';
-import { PromptFilePicker } from './PromptFilePicker.js';
 import { McpServerSelector } from './McpServerSelector.js';
 import { SkillSelector } from './SkillSelector.js';
 import { AgentBindingSection } from './AgentBindingSection.js';
@@ -151,7 +150,7 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
 }
 
 // ── Prompt/Context sub-tab type ──
-type PromptSubTab = 'inline' | 'files' | 'agent';
+type PromptSubTab = 'inline' | 'agent';
 
 function PropertiesTab({
   stage,
@@ -263,7 +262,6 @@ function PropertiesTab({
         <div className="flex gap-0.5 rounded-lg bg-subtle/50 p-0.5 mb-3" role="tablist" aria-label="Prompt type">
           {([
             { key: 'inline' as PromptSubTab, label: 'Inline', icon: <FileText className="h-3 w-3" /> },
-            { key: 'files' as PromptSubTab, label: 'Files', icon: <Paperclip className="h-3 w-3" /> },
             { key: 'agent' as PromptSubTab, label: 'Agent', icon: <Bot className="h-3 w-3" /> },
           ]).map(({ key, label, icon }) => (
             <Button
@@ -292,12 +290,6 @@ function PropertiesTab({
             prompts={stage.prompts ?? []}
             onChange={(prompts: PromptDefinition[]) => onUpdate({ prompts })}
             contentLabel="Prompt"
-          />
-        )}
-        {promptSubTab === 'files' && (
-          <PromptFilePicker
-            prompts={stage.prompts ?? []}
-            onChange={(prompts: PromptDefinition[]) => onUpdate({ prompts })}
           />
         )}
         {promptSubTab === 'agent' && (
