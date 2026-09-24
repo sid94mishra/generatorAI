@@ -23,7 +23,7 @@ This file tracks the implementation of every work package (WP) in the overhaul p
 
 | Phase | Title | Impl | Review | Gate | Commits | Notes |
 |---|---|---|---|---|---|---|
-| 00 | Baseline and safety net | done | todo | pass | cbb9fb6..(0.7 commit) | Gate passes with the baseline exceptions recorded in STATUS.md. Deviations in DEVIATIONS.md (7 P00 rows). |
+| 00 | Baseline and safety net | done | todo | pass | cbb9fb6..d772ee3 | Gate passes with the baseline exceptions recorded in STATUS.md. Deviations in DEVIATIONS.md (7 P00 rows). |
 | 01 | Spec v2, legacy purge, definitions | todo | todo | todo | | |
 | 02 | SessionComposer | todo | todo | todo | | |
 | 03 | Engine v2 | todo | todo | todo | | |
@@ -47,7 +47,7 @@ This file tracks the implementation of every work package (WP) in the overhaul p
 | 0.6 | Lint invariants (report-only) + `check-no-legacy` | done | | 468dbb2 | `check:workflow-invariants` (report-only; baseline 21 direct stage-status writes) and `check:no-legacy` (+ `scripts/no-legacy.json`, empty), both in `pnpm lint`. 4 unit tests. |
 | 0.6b | Migration lock + fresh-DB baseline | done | | a61ebbe | Head verified: v54 = BASELINE_VERSION. `migrations.lock.json` (54 entries, CRLF-normalised) + `check:migrations-lock` in lint. `pnpm db:baseline [--check]` writes baseline.sql + baseline.generated.ts. `migrateDB` routes: empty → baseline; at/above baseline → versioned only; older → legacy. 7 tests (fixture built at v52, not copied; see DEVIATIONS). Dev-DB copy v52 → v54: chats preserved. |
 | 0.8 | Run-worktree cleanup script | done | | 23fca90 | `pnpm workflow:cleanup-runs [--dry-run]` through WorktreeService.removeWorktree. Branches deleted only if merged or never pushed; orphans listed; writes `cleanup.log` + `cleanup.json`. Real run tested on a git fixture (3 tests). Dry run on the dev-DB copy: 2 worktree rows, 33 run branches (7 deletable, 26 checked out in orphan worktrees), 72 orphan dirs. |
-| 0.7 | Failure baseline recorded in STATUS.md | done | | (this commit) | §7 gate run once: typecheck 50/50; tests 27/31 packages green + 12 environmental baseline failures (symlink EPERM, CRLF autocrlf, POSIX paths, CLI TUI on Windows); lint green incl. 3 new checks; testkit 38/38; live E2E 5/5 (T1 after a judge fix); fresh-DB pass; Date.now() service list. |
+| 0.7 | Failure baseline recorded in STATUS.md | done | | d772ee3 | §7 gate run once: typecheck 50/50; tests 27/31 packages green + 12 environmental baseline failures (symlink EPERM, CRLF autocrlf, POSIX paths, CLI TUI on Windows); lint green incl. 3 new checks; testkit 38/38; live E2E 5/5 (T1 after a judge fix); fresh-DB pass; Date.now() service list. |
 
 ## Phase 01: Spec v2, legacy purge, definition model
 
