@@ -187,7 +187,7 @@ Each phase review appends its findings and their dispositions here.
 
 ### Phase 00 review (independent reviewer, 2026-09-24): pass-after-fixes
 
-All 24 findings are fixed in the review-fix commit (`FIXCOMMIT`). Tests re-run: `pnpm lint`, the db tests, the testkit tests, the golden test and `pnpm test:scripts`. A faux E2E run was repeated and a dry run on the dev-DB copy re-done.
+All 24 findings are fixed in the review-fix commit (`adb0961`). Tests re-run: `pnpm lint`, the db tests, the testkit tests, the golden test and `pnpm test:scripts`. A faux E2E run was repeated and a dry run on the dev-DB copy re-done.
 
 | # | Sev | Finding | Disposition |
 |---|---|---|---|
