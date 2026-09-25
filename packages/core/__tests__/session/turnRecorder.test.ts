@@ -1,12 +1,8 @@
-// WP-2.9 — the TurnRecorder (chats and stages) and provider-session resume.
+// WP-2.9 — the TurnRecorder (chats and stages).
 
-import { describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, Session } from '@generatorai/shared';
+import { describe, expect, it } from 'vitest';
+import type { AgentEvent } from '@generatorai/shared';
 import { TurnRecorder } from '../../src/services/session/TurnRecorder.js';
-import { SessionAllocator } from '../../src/services/SessionAllocator.js';
-import { EventBus } from '../../src/events/EventBus.js';
-import type { IAgentHarness } from '../../src/domain/ports/IAgentHarness.js';
-import type { ISessionRepository } from '../../src/domain/ports/IRepositories.js';
 
 const ev = (kind: string, data: Record<string, unknown> = {}) => ({ kind, data }) as unknown as AgentEvent;
 
@@ -43,22 +39,5 @@ describe('TurnRecorder', () => {
     expect(replayed.content).toBe('ok');
     expect(replayed.persisted).toBe(true);
     expect(replayed.snapshot()).toEqual(snap);
-  });
-});
-
-describe('provider-session resume for stages (F-3b)', () => {
-  it('the allocator records the provider handle after a stage turn', async () => {
-    const update = vi.fn(async () => ({}) as Session);
-    const allocator = new SessionAllocator(
-      { update } as unknown as ISessionRepository,
-      { getProviderSessionId: () => 'claude-sess-9' } as unknown as IAgentHarness,
-      new EventBus(),
-    );
-    const session = { id: 's1', conversationId: 'c1' } as Session;
-    await allocator.rememberProviderSession(session);
-    expect(update).toHaveBeenCalledWith('s1', { providerSessionId: 'claude-sess-9' });
-    expect(session.providerSessionId).toBe('claude-sess-9');
-    await allocator.rememberProviderSession(session);
-    expect(update).toHaveBeenCalledTimes(1); // unchanged handle, no write
   });
 });

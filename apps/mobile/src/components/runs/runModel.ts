@@ -68,12 +68,15 @@ export interface RunControls {
   retry: boolean;
 }
 
-/** Run-level controls, matching what `workflowRuns.ts` accepts per status. */
+/**
+ * Run-level controls, matching what the run commands accept per status.
+ * `retry` is a fork: a finished run is never mutated.
+ */
 export function runControlsFor(status: string): RunControls {
   return {
-    pause: status === 'running' || status === 'starting',
+    pause: status === 'running' || status === 'starting' || status === 'waiting',
     resume: status === 'paused',
-    cancel: !isTerminal(status) && status !== 'cancelling',
+    cancel: !isTerminal(status) && status !== 'cancelling' && status !== 'finalizing',
     retry: status === 'failed' || status === 'cancelled',
   };
 }
@@ -84,19 +87,32 @@ export interface StageControls {
   cancel: boolean;
 }
 
-/** Stage-level controls. A run that is itself finished offers only Retry. */
+/**
+ * Stage-level controls. In a live run only a PAUSED instance retries (a new
+ * attempt); a run that is itself finished offers only Retry, which forks a
+ * new run from that stage.
+ */
 export function stageControlsFor(stageStatus: string, runStatus?: string): StageControls {
   const runDone = runStatus !== undefined && isTerminal(runStatus);
+  if (runDone) {
+    return { retry: stageStatus === 'failed' || stageStatus === 'cancelled', resume: false, cancel: false };
+  }
   return {
-    retry: stageStatus === 'failed' || (stageStatus === 'cancelled' && !runDone),
-    resume: !runDone && stageStatus === 'paused',
-    cancel:
-      !runDone &&
-      (stageStatus === 'running' ||
-        stageStatus === 'queued' ||
-        stageStatus === 'paused'),
+    retry: stageStatus === 'paused',
+    resume: stageStatus === 'paused',
+    cancel: CANCELLABLE_STAGE.has(stageStatus),
   };
 }
+
+const CANCELLABLE_STAGE: ReadonlySet<string> = new Set([
+  'ready',
+  'starting',
+  'running',
+  'validating',
+  'retry_wait',
+  'waiting',
+  'paused',
+]);
 
 /**
  * Should the screen keep polling?

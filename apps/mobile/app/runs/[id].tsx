@@ -57,7 +57,7 @@ const ACTION_LABEL: Record<RunAction, string> = {
   pause: 'Pause run',
   resume: 'Resume run',
   cancel: 'Cancel run',
-  retry: 'Retry run',
+  retry: 'Retry failed',
 };
 
 export default function RunDetailScreen(): React.ReactElement {
@@ -94,14 +94,7 @@ export default function RunDetailScreen(): React.ReactElement {
   // Only a run that can still call tools has a mode worth showing.
   const live = Boolean(runStatus) && !isTerminal(runStatus ?? '');
   const { mode: permissionMode, setMode } = useRunPermissionMode(runId, live);
-  const interrupts = useQuery({
-    queryKey: queryKeys.runInterrupts(runId),
-    queryFn: () => api.runs.pendingInterrupts(runId),
-    enabled: Boolean(run.data?.stageRuns?.some((s) => awaitsApproval(s.status))),
-    refetchInterval: focused ? pollIntervalFor(runStatus, connected) : false,
-  });
-
-  const pull = usePullRefresh(() => Promise.all([run.refetch(), interrupts.refetch()]));
+  const pull = usePullRefresh(() => run.refetch());
 
   const stages = run.data?.stageRuns ?? [];
   const approvals = useMemo(() => stages.filter((s) => awaitsApproval(s.status)), [stages]);
@@ -322,7 +315,6 @@ export default function RunDetailScreen(): React.ReactElement {
               <ApprovalCard
                 key={stage.id}
                 stage={stage}
-                interruptData={interrupts.data?.find((i) => i.id === stage.id)?.interruptData}
                 busy={busyStage === stage.id}
                 onDecide={(outcome, feedback) => decide(stage, outcome, feedback)}
                 {...(stage.sessionId ? { onOpenStage: () => openStage(stage) } : {})}

@@ -45,27 +45,27 @@ const GLOBAL_ALLOWLIST = [
  */
 
 /**
- * The turn-dispatch calls the effect sandwich has to wrap. Matching the CALL
- * is the point: a new prompt site added to `executeStage` outside `runTurn` is
- * a turn that will re-run in full after every restart, and that is invisible
- * in review because the code looks exactly like the six sites that came before.
+ * The turn-dispatch calls the engine's turn journal has to wrap. Matching the
+ * CALL is the point: a new prompt site added to the executor outside its
+ * journalled `turn()` is a turn that re-runs in full after every restart, and
+ * that is invisible in review because the code looks like the one before it.
  */
-const PROMPT_DISPATCH = /\bthis\.harness\.sendPrompt(?:AndWait)?\s*\(/;
+const PROMPT_DISPATCH = /\bharness\.sendPrompt(?:AndWait)?\s*\(/;
 
 /** @type {Rule[]} */
 const RULES = [
   {
     id: 'HAZ-1-unjournalled-turn-dispatch',
     description:
-      'Every agent turn dispatched from the durable stage path must go through ' +
-      'the effect sandwich, or it re-runs in full after a restart — re-spending ' +
-      'the tokens and re-performing every tool call it already made.',
+      'Every agent turn the engine dispatches must go through the turn journal ' +
+      '(an intent before, the settlement with its message after), or it re-runs ' +
+      'in full after a restart — re-spending the tokens and re-performing every ' +
+      'tool call it already made.',
     remedy:
-      'Wrap the dispatch in `runTurn(operationId, promptForReplay, perform)` ' +
-      'inside `StageExecutionService.executeStage`, which calls ' +
-      '`DurableExecutionEngine.withEffect()`. If the turn genuinely must not ' +
-      'be journalled, say why on the line.',
-    globs: ['packages/core/src/services/StageExecutionService.ts'],
+      'Dispatch inside `StageExecutor.turn()`, which writes `stores.turns.intent` ' +
+      'before the call and `stores.turns.settle` after it. If the turn genuinely ' +
+      'must not be journalled, say why on the line.',
+    globs: ['packages/core/src/services/engine/*.ts'],
     pattern: PROMPT_DISPATCH,
   },
   {
@@ -94,7 +94,7 @@ const RULES = [
     // window this wide would be noise, and a noisy guard gets waived by habit
     // rather than by thought.
     globs: [
-      'packages/core/src/services/StageExecutionService.ts',
+      'packages/core/src/services/engine/StageExecutor.ts',
       'packages/core/src/services/HitlService.ts',
       'packages/core/src/services/WorkflowRunService.ts',
       'packages/core/src/services/AutomationService.ts',
@@ -127,16 +127,16 @@ const RULES = [
   {
     id: 'no-unreclaimed-durable-scope',
     description:
-      '§3.4 requires "retention that fires". `deleteByScope` / ' +
-      '`deleteJournalByScope` must keep at least one production caller — with ' +
-      'none, `registers` and `entries` grow by a row per turn per stage for the ' +
-      'lifetime of the deployment, which is the state this guard was added in.',
+      '§3.4 requires "retention that fires". The stage turn journal ' +
+      '(`registers`, scope `stage_run`) must keep a production release — with ' +
+      'none, `registers` grows by a row per turn per stage for the lifetime of ' +
+      'the deployment, which is the state this guard was added in.',
     remedy:
-      'Call `DurableExecutionEngine.releaseJournal()` at the terminal ' +
-      'transition of a scope (see `StageExecutionService.executeStage`).',
+      'Release the journal at the terminal transition of its scope (see ' +
+      '`DefaultRunLifecycle.finalize`, `stores.turns.release`).',
     globs: ['packages/core/src/services/**/*.ts'],
     // Inverted rule — see the `expectPresent` handling below.
-    pattern: /releaseJournal\(|releaseScope\(/,
+    pattern: /releaseJournal\(|releaseScope\(|turns\.release\(/,
     expectPresent: true,
   },
 ];
@@ -186,34 +186,40 @@ function maskLiteralsAndComments(src) {
 }
 
 /**
- * Character ranges of every `runTurn( … )` call, by balanced-paren matching
- * over the masked source. A dispatch inside one of these is journalled by
- * construction; a dispatch outside them all is not, however close to one it
- * happens to sit.
+ * Character ranges of the body of every journalled `turn( … )` method, by
+ * balanced-bracket matching over the masked source. A dispatch inside one of
+ * these is journalled by construction; a dispatch outside them all is not,
+ * however close to one it happens to sit.
  *
- * △ The first version of this guard instead looked back 60 lines for the
- * nearest `runTurn(`. Mutation testing FAILED it: an unwrapped dispatch
- * inserted just after a wrapped one was accepted, because the wrapped call was
- * still the nearest match behind it. A guard that cannot fail is the same
- * thing as no guard, which is the exact failure this whole file exists to
- * stop repeating.
+ * △ An earlier version of this guard looked back a fixed number of lines for
+ * the journalling call. Mutation testing FAILED it: an unwrapped dispatch
+ * inserted just after a wrapped one was accepted. A guard that cannot fail is
+ * the same thing as no guard, which is the exact failure this whole file
+ * exists to stop repeating.
  */
-function runTurnRanges(masked) {
+function journalledTurnRanges(masked) {
+  // The body of every `turn(` method that writes a journal intent: a dispatch
+  // inside it is journalled. A `turn(` without the intent protects nothing.
   const ranges = [];
-  const marker = /\brunTurn\s*\(/g;
+  const marker = /\bprivate\s+async\s+turn\s*\(/g;
   let m;
   while ((m = marker.exec(masked)) !== null) {
+    let j = m.index + m[0].length - 1;
     let depth = 0;
-    let j = m.index + m[0].length - 1; // sits on the opening paren
     for (; j < masked.length; j += 1) {
       if (masked[j] === '(') depth += 1;
-      else if (masked[j] === ')') {
-        depth -= 1;
-        if (depth === 0) break;
-      }
+      else if (masked[j] === ')' && --depth === 0) break;
     }
-    ranges.push([m.index, j]);
-    marker.lastIndex = m.index + m[0].length;
+    const open = masked.indexOf('{', j);
+    if (open < 0) break;
+    let k = open;
+    depth = 0;
+    for (; k < masked.length; k += 1) {
+      if (masked[k] === '{') depth += 1;
+      else if (masked[k] === '}' && --depth === 0) break;
+    }
+    if (/stores\.turns\.intent\s*\(/.test(masked.slice(open, k))) ranges.push([open, k]);
+    marker.lastIndex = k;
   }
   return ranges;
 }
@@ -288,14 +294,14 @@ for (const rule of RULES) {
         if (WAIVER.test(line)) continue;
 
         if (rule.id === 'HAZ-1-unjournalled-turn-dispatch') {
-          // A dispatch is journalled exactly when it lies inside the argument
-          // list of a `runTurn(...)` call — a fact about the code, not a guess
-          // about how far back to look.
-          ranges ??= runTurnRanges(maskLiteralsAndComments(content));
+          // A dispatch is journalled exactly when it lies inside the body of
+          // the executor's `turn()` — a fact about the code, not a guess about
+          // how far back to look.
+          ranges ??= journalledTurnRanges(maskLiteralsAndComments(content));
           offsets ??= lineOffsets(content);
           const at = offsets[i] ?? 0;
           if (ranges.some(([from, to]) => at > from && at < to)) continue;
-          // Anything else outside `runTurn` must carry an explicit
+          // Anything else outside `turn()` must carry an explicit
           // `// durability-ok:` waiver at the call site. There is deliberately
           // no name-based exemption list — one uniform, visible mechanism,
           // because an exemption that lives in the guard is an exemption

@@ -1,32 +1,27 @@
 // ────────────────────────────────────────────────────────────────
-// DrizzleWorkflowRunRepository — IWorkflowRunRepository impl (v1 engine)
+// DrizzleWorkflowRunRepository — workflow runs (`workflow_runs`, v57).
 //
-// Since v57 `workflow_runs` is the v2 engine's run table. Until the P03
-// cutover deletes the v1 engine, its rows are mapped here (P03 WP-3.2
-// deviation, DEVIATIONS.md):
-//   - the v1 run-level permission mode is optional (the layers resolve an
-//     unset one every turn), so it is kept in `run_overrides.permissionMode`;
-//     the NOT NULL `permission_mode` column holds it or `default`, and v1
-//     never reads the column;
-//   - `session_mode` is gone: every v1 run is `per-stage` (P01 R4);
-//   - `root_run_id` is the run itself.
+// The engine's compare-and-set (`transition`, checked against
+// WORKFLOW_RUN_TRANSITIONS and fenced on `owner_epoch`) is the only status
+// writer. The run row's permission layer: `run_overrides.permissionMode` is
+// the operator's explicit run-level mode (optional: unset lets the stage,
+// workflow and trigger layers decide, re-read every turn); the NOT NULL
+// `permission_mode` column holds the run's effective mode as resolved when
+// it was created or last changed (P04's invocation writes it the same way).
 // ────────────────────────────────────────────────────────────────
 
 import { count, eq, inArray } from 'drizzle-orm';
 import type {
   IWorkflowRunCas,
   IWorkflowRunRepository,
+  MemoizedInstance,
   RunTransitionOptions,
   TransitionResult,
   WorkflowRunRow,
+  WorkflowRunUpdate,
 } from '@generatorai/core';
 import type { WorkflowRunState } from '@generatorai/workflow-spec';
-import type {
-  StageRun,
-  WorkflowRun,
-  WorkflowRunStatus,
-  WorkflowRunPermissionMode,
-} from '@generatorai/shared';
+import type { WorkflowRun, WorkflowRunStatus, WorkflowRunPermissionMode } from '@generatorai/shared';
 import { StorageError, NotFoundError } from '@generatorai/shared';
 import { stageRuns, workflowRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
@@ -35,10 +30,10 @@ import { claimRunOwnership, getRunRow, renewRunOwnership, runTransition } from '
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
 import { validateJsonColumn } from '../utils/validateJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
-import { stageRunInsertValues } from './StageRunRepository.js';
 
-/** The v1 run-level permission mode lives in `run_overrides` (see the header). */
-function v1Overrides(mode: WorkflowRunPermissionMode | null | undefined): Record<string, unknown> {
+type RunOverrides = { permissionMode?: WorkflowRunPermissionMode };
+
+function overrides(mode: WorkflowRunPermissionMode | null | undefined): RunOverrides {
   return mode ? { permissionMode: mode } : {};
 }
 
@@ -48,26 +43,57 @@ function runInsertValues(run: WorkflowRun): typeof workflowRuns.$inferInsert {
     workflowDefinitionId: run.workflowDefinitionId,
     definitionVersionId: run.definitionVersionId,
     name: run.name,
-    status: run.status,
+    status: 'created',
     variables: run.variables,
     error: run.error ?? null,
-    permissionMode: run.permissionMode ?? 'default',
-    runOverrides: v1Overrides(run.permissionMode),
+    permissionMode: run.effectivePermissionMode ?? run.permissionMode ?? 'default',
+    runOverrides: overrides(run.permissionMode),
+    stageOverrides: run.stageOverrides ?? null,
+    projectId: run.projectId ?? null,
+    trigger: run.trigger ?? null,
+    idempotencyKey: run.idempotencyKey ?? null,
+    forkSpec: run.forkSpec ?? null,
+    codebaseSelection: run.codebaseSelection ?? null,
     rootRunId: run.id,
     workspaceId: run.workspaceId ?? null,
-    // W23: persist the ancestor reference for the retry identity chain.
-    ...(run.ancestorRunId ? { ancestorRunId: run.ancestorRunId } : {}),
+    ancestorRunId: run.ancestorRunId ?? null,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
-    startedAt: run.startedAt ?? null,
-    completedAt: run.completedAt ?? null,
+  };
+}
+
+function memoizedValues(runId: string, m: MemoizedInstance, now: Date): typeof stageRuns.$inferInsert {
+  return {
+    id: m.id,
+    workflowRunId: runId,
+    stageKey: m.stageKey,
+    kind: m.kind,
+    name: m.name,
+    instancePath: m.instancePath,
+    status: m.status,
+    statusReason: m.statusReason,
+    skipReason: m.skipReason,
+    gateAs: m.gateAs,
+    outputData: m.outputData ?? null,
+    outputText: m.outputText,
+    summary: m.summary,
+    artifactManifest: m.artifactManifest,
+    error: m.error,
+    errorClass: m.errorClass,
+    errorCode: m.errorCode,
+    usage: m.usage,
+    copiedFromStageRunId: m.copiedFromStageRunId,
+    createdAt: now,
+    updatedAt: now,
+    startedAt: m.startedAt,
+    completedAt: m.completedAt,
   };
 }
 
 export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWorkflowRunCas {
   constructor(private db: AppDatabase) {}
 
-  // ── v2 engine: compare-and-set and ownership (P03 WP-3.1) ──────
+  // ── compare-and-set and ownership (G5 §5.4, RV-27) ─────────────
 
   /** The run's CAS, checked against WORKFLOW_RUN_TRANSITIONS; `ownerEpoch` fences it (RV-27). */
   transition(id: string, from: readonly WorkflowRunState[], to: WorkflowRunState, opts?: RunTransitionOptions): TransitionResult<WorkflowRunRow> {
@@ -86,58 +112,44 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
     return getRunRow(sqliteHandle(this.db), id);
   }
 
-  // ── v1 engine (deleted at the P03 cutover) ─────────────────────
+  // ── rows ────────────────────────────────────────────────────────
 
   async create(run: WorkflowRun): Promise<WorkflowRun> {
+    validateJsonColumn(run.variables, jsonRecord, { column: 'variables', table: 'workflow_runs' });
     try {
-      // DB-03 — validate variables (only JSON column on workflow_runs).
-      validateJsonColumn(run.variables, jsonRecord, { column: 'variables', table: 'workflow_runs' });
       await this.db.insert(workflowRuns).values(runInsertValues(run));
       return run;
     } catch (err) {
-      throw new StorageError(
-        `Failed to create workflow run: ${err instanceof Error ? err.message : String(err)}`,
-        err instanceof Error ? err : undefined,
-      );
+      throw new StorageError(`Failed to create workflow run: ${err instanceof Error ? err.message : String(err)}`, err instanceof Error ? err : undefined);
     }
   }
 
-  /**
-   * The run and its stage runs in ONE synchronous transaction, so a failed
-   * stage insert never leaves a half-materialized run (A-34: no async
-   * transaction wrapper).
-   */
-  async createWithStages(run: WorkflowRun, stages: StageRun[]): Promise<void> {
+  /** A fork and its memoized instances in ONE synchronous transaction (A-34). */
+  async createFork(run: WorkflowRun, memoized: readonly MemoizedInstance[]): Promise<void> {
     validateJsonColumn(run.variables, jsonRecord, { column: 'variables', table: 'workflow_runs' });
     try {
       this.db.transaction((tx) => {
         tx.insert(workflowRuns).values(runInsertValues(run)).run();
-        for (const sr of stages) tx.insert(stageRuns).values(stageRunInsertValues(sr)).run();
+        for (const m of memoized) tx.insert(stageRuns).values(memoizedValues(run.id, m, run.createdAt)).run();
       });
     } catch (err) {
-      throw new StorageError(
-        `Failed to create workflow run: ${err instanceof Error ? err.message : String(err)}`,
-        err instanceof Error ? err : undefined,
-      );
+      throw new StorageError(`Failed to create the fork: ${err instanceof Error ? err.message : String(err)}`, err instanceof Error ? err : undefined);
     }
   }
 
   async getById(id: string): Promise<WorkflowRun> {
-    const rows = await this.db
-      .select()
-      .from(workflowRuns)
-      .where(eq(workflowRuns.id, id))
-      .limit(1);
-    const row = rows[0];
+    const row = (await this.db.select().from(workflowRuns).where(eq(workflowRuns.id, id)).limit(1))[0];
     if (!row) throw new NotFoundError('WorkflowRun', id);
     return this.mapRow(row);
   }
 
+  async findByIdempotencyKey(key: string): Promise<WorkflowRun | null> {
+    const row = (await this.db.select().from(workflowRuns).where(eq(workflowRuns.idempotencyKey, key)).limit(1))[0];
+    return row ? this.mapRow(row) : null;
+  }
+
   async getAll(): Promise<WorkflowRun[]> {
-    const rows = await this.db
-      .select()
-      .from(workflowRuns)
-      .orderBy(workflowRuns.createdAt);
+    const rows = await this.db.select().from(workflowRuns).orderBy(workflowRuns.createdAt);
     return rows.map((r) => this.mapRow(r));
   }
 
@@ -151,80 +163,63 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
   }
 
   async getByStatus(statuses: WorkflowRunStatus[]): Promise<WorkflowRun[]> {
-    const rows = await this.db
-      .select()
-      .from(workflowRuns)
-      .where(inArray(workflowRuns.status, statuses));
+    const rows = await this.db.select().from(workflowRuns).where(inArray(workflowRuns.status, statuses));
     return rows.map((r) => this.mapRow(r));
   }
 
   async countByStatus(statuses: WorkflowRunStatus[]): Promise<number> {
     if (statuses.length === 0) return 0;
-    const [row] = await this.db
-      .select({ value: count() })
-      .from(workflowRuns)
-      .where(inArray(workflowRuns.status, statuses));
+    const [row] = await this.db.select({ value: count() }).from(workflowRuns).where(inArray(workflowRuns.status, statuses));
     return row?.value ?? 0;
   }
 
-  async update(id: string, updates: Partial<WorkflowRun>): Promise<WorkflowRun> {
-    // DB-03 — validate variables when present in the diff.
+  async update(id: string, updates: WorkflowRunUpdate): Promise<WorkflowRun> {
     if (updates.variables !== undefined) {
       validateJsonColumn(updates.variables, jsonRecord, { column: 'variables', table: 'workflow_runs' });
     }
-
     const values: Record<string, unknown> = {};
     if (updates.name !== undefined) values['name'] = updates.name;
-    if (updates.status !== undefined) values['status'] = updates.status;
     if (updates.variables !== undefined) values['variables'] = updates.variables;
     if (updates.error !== undefined) values['error'] = updates.error;
-    if (updates.permissionMode !== undefined) {
-      values['permissionMode'] = updates.permissionMode ?? 'default';
-      values['runOverrides'] = v1Overrides(updates.permissionMode);
-    }
+    if (updates.permissionMode !== undefined) values['runOverrides'] = overrides(updates.permissionMode);
+    if (updates.effectivePermissionMode !== undefined) values['permissionMode'] = updates.effectivePermissionMode;
+    if (updates.projectId !== undefined) values['projectId'] = updates.projectId;
     if (updates.workspaceId !== undefined) values['workspaceId'] = updates.workspaceId;
-    // F8 fix (PLAUSIBLE): ancestorRunId was omitted from the values map, so
-    // any update call attempting to set or correct the ancestor chain was a
-    // silent no-op. ancestorRunId is normally immutable after create(), but
-    // including it here prevents silent data loss in future callers.
-    if (updates.ancestorRunId !== undefined) values['ancestorRunId'] = updates.ancestorRunId;
     if (updates.startedAt !== undefined) values['startedAt'] = updates.startedAt;
     if (updates.completedAt !== undefined) values['completedAt'] = updates.completedAt;
     values['updatedAt'] = new Date();
-
-    await this.db
-      .update(workflowRuns)
-      .set(values)
-      .where(eq(workflowRuns.id, id));
+    await this.db.update(workflowRuns).set(values).where(eq(workflowRuns.id, id));
     return this.getById(id);
   }
 
-  async updateStatus(id: string, status: WorkflowRunStatus): Promise<void> {
-    await this.db
-      .update(workflowRuns)
-      .set({ status, updatedAt: new Date() })
-      .where(eq(workflowRuns.id, id));
-  }
-
   async delete(id: string): Promise<void> {
-    await this.db
-      .delete(workflowRuns)
-      .where(eq(workflowRuns.id, id));
+    await this.db.delete(workflowRuns).where(eq(workflowRuns.id, id));
   }
 
   private mapRow(row: typeof workflowRuns.$inferSelect): WorkflowRun {
+    const trigger = row.trigger as WorkflowRun['trigger'] | null;
+    const stageOverrides = row.stageOverrides as WorkflowRun['stageOverrides'] | null;
+    const forkSpec = row.forkSpec as Record<string, unknown> | null;
     return {
       id: row.id,
       workflowDefinitionId: row.workflowDefinitionId,
       definitionVersionId: row.definitionVersionId,
       name: row.name,
-      status: row.status as WorkflowRunStatus,
-      sessionMode: 'per-stage',
+      status: row.status,
+      ...(row.statusReason ? { statusReason: row.statusReason } : {}),
+      ...(row.outcome ? { outcome: row.outcome } : {}),
+      version: row.version,
       variables: safeJsonColumn(row.variables, jsonRecord, { fallback: {} }) ?? {},
       error: row.error ?? undefined,
-      permissionMode: ((row.runOverrides as { permissionMode?: WorkflowRunPermissionMode } | null)?.permissionMode) ?? undefined,
+      permissionMode: (row.runOverrides as RunOverrides | null)?.permissionMode ?? undefined,
+      effectivePermissionMode: row.permissionMode,
+      ...(row.projectId ? { projectId: row.projectId } : {}),
+      ...(trigger ? { trigger } : {}),
+      ...(stageOverrides ? { stageOverrides } : {}),
+      ...(forkSpec ? { forkSpec } : {}),
+      ...(row.idempotencyKey ? { idempotencyKey: row.idempotencyKey } : {}),
+      ...(row.codebaseSelection !== null && row.codebaseSelection !== undefined ? { codebaseSelection: row.codebaseSelection } : {}),
       workspaceId: row.workspaceId ?? undefined,
-      // W23: ancestor run for the retry identity chain.
       ancestorRunId: row.ancestorRunId ?? undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

@@ -21,13 +21,13 @@ import {
   DrizzleIdempotencyKeyRepository,
   DrizzlePlanRepository,
   DrizzleSequenceAllocator,
-  DrizzleSessionAllocationRepository,
   DrizzleSessionRepository,
   DrizzleStageRunRepository,
   DrizzleWorkflowRunRepository,
   EntryRepository,
   RegisterRepository,
   SqliteWorkflowDefinitionStore,
+  createEngineStores,
   type AppDatabase,
 } from '@generatorai/db';
 import type { ILogger } from '@generatorai/shared';
@@ -158,8 +158,8 @@ export function bootCore(opts: {
     idempotencyKeyRepo: new DrizzleIdempotencyKeyRepository(db),
     registerRepo: new RegisterRepository(db),
     entryRepo: new EntryRepository(db),
-    sessionAllocationRepo: new DrizzleSessionAllocationRepository(db),
-    sandbox: null,
+    engineStores: createEngineStores(db),
+    toHarnessError: (_provider, raw) => raw,
     workspaceManager:
       opts.workspaceManager ??
       ({
@@ -183,7 +183,7 @@ export function bootCore(opts: {
     dispose() {
       services.agentInteractionService?.dispose();
       services.automationService.shutdown();
-      services.workflowRunService.shutdown();
+      void services.engine.stop();
       try {
         closeDB(db);
       } catch {

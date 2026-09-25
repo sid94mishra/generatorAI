@@ -9,7 +9,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTestEngine, createV2Adapter, type TestEngine } from '../../src/index.js';
+import { createTestEngine, type TestEngine } from '../../src/index.js';
 
 let engine: TestEngine | undefined;
 afterEach(async () => {
@@ -30,10 +30,9 @@ const T1 = {
   edges: [...BRANCHES.map((b) => ['start', b] as const), ...BRANCHES.map((b) => [b, 'join'] as const), ['join', 'final'] as const],
 };
 
-describe('T1 fan-out / fan-in (engine v2)', () => {
+describe('T1 fan-out / fan-in (engine)', () => {
   it('runs the branches concurrently, joins once after all of them, and completes', async () => {
     engine = await createTestEngine({
-      adapter: createV2Adapter,
       script: Object.fromEntries(BRANCHES.map((b) => [b, [{ text: `${b} branch output: this line is long enough to be kept.`, delayMs: 150 }]])),
     });
     const run = await engine.runWorkflow(T1);
@@ -67,7 +66,7 @@ describe('T1 fan-out / fan-in (engine v2)', () => {
   });
 
   it('spends no context, output-retry or leaf summary turns (W-48, W-49)', async () => {
-    engine = await createTestEngine({ adapter: createV2Adapter, script: { start: [{ text: 'OK-START' }] } });
+    engine = await createTestEngine({ script: { start: [{ text: 'OK-START' }] } });
     const run = await engine.runWorkflow({ stages: [{ name: 'start', prompt: 'Say OK.' }] });
     const snap = await run.waitForTerminal();
     expect(snap.run.status).toBe('completed');

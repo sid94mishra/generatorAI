@@ -10,6 +10,8 @@ import type {
   EventSubscriptionOptions,
 } from '@generatorai/shared';
 import type {
+  ForkRunRequest,
+  RunCommand,
   WorkflowDefinitionRecord,
   WorkflowDefinitionSummary,
   WorkflowDefinitionVersionRecord,
@@ -270,7 +272,6 @@ import type {
   WorkflowRun,
   WorkflowRunWithStages,
   CreateWorkflowRunParams,
-  StageRun,
   OrchestratorContext,
   RunWorkspaceInfo,
   RunUploadResult,
@@ -1085,54 +1086,30 @@ export class HttpPlatformClient implements IPlatformClient {
     await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}/start`, { method: 'POST' });
   }
 
-  async pauseRun(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}/pause`, { method: 'POST' });
+  async runCommand(runId: string, command: RunCommand): Promise<void> {
+    // 202 `{runId, command}`; a refused command (409 invalid_state /
+    // version_conflict, 404, 400) throws an ApiError the caller surfaces.
+    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/commands`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(command),
+    });
   }
 
-  async resumeRun(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}/resume`, { method: 'POST' });
-  }
-
-  async cancelRun(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}/cancel`, { method: 'POST' });
+  async forkRun(runId: string, request: ForkRunRequest = {}): Promise<WorkflowRun> {
+    // 201 with the fork (already started); the source run stays terminal.
+    return apiFetch<WorkflowRun>(`${this.baseUrl}/api/workflow-runs/${runId}/fork`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
   }
 
   async deleteRun(id: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}`, { method: 'DELETE' });
   }
 
-  // PARITY-1: run-level retry (re-runs a failed run from `failed → created`).
-  async retryRun(id: string): Promise<{ runId: string }> {
-    // The response carries the NEW run's id; callers navigate to it.
-    const res = await apiFetch<{ runId: string }>(
-      `${this.baseUrl}/api/workflow-runs/${id}/retry`,
-      { method: 'POST' },
-    );
-    return { runId: res?.runId ?? id };
-  }
-
-  // ── PARITY-2: true per-stage controls ──
-  // These hit the dedicated /stages/:stageId/{pause,resume,retry,cancel}
-  // endpoints (handled by StageExecutionService), so pausing/retrying ONE
-  // stage no longer cascades to the whole run (the prior web behaviour wired
-  // these to run-level mutations). Matches the CLI's stage controls.
-  async pauseStageRun(runId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/pause`, { method: 'POST' });
-  }
-
-  async resumeStageRun(runId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/resume`, { method: 'POST' });
-  }
-
-  async retryStageRun(runId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/retry`, { method: 'POST' });
-  }
-
-  async cancelStageRun(runId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/cancel`, { method: 'POST' });
-  }
-
-  // ── HITL — permission mode + resume (HITL-04/05) ──
+  // ── HITL — permission mode (HITL-04) ──
 
   async getPermissionMode(
     runId: string,
@@ -1151,10 +1128,6 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  async listPendingInterrupts(runId: string): Promise<StageRun[]> {
-    return apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/pending-interrupts`);
-  }
-
   /**
    * Read the on-disk scratchpad for a run. This is where each stage's
    * full output text (or structured JSON) is aggregated, keyed by
@@ -1163,45 +1136,6 @@ export class HttpPlatformClient implements IPlatformClient {
    */
   async getRunScratchpad(runId: string): Promise<RunScratchpad> {
     return apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/scratchpad`);
-  }
-
-  async resumeStage(
-    runId: string,
-    stageId: string,
-    resolution: {
-      /**
-       * The verdict. `rejected` is terminal — it fails the stage and blocks
-       * every downstream stage.
-       */
-      outcome: 'approved' | 'changes_requested' | 'rejected';
-      value?: unknown;
-      reason?: string;
-      followUpPrompt?: string;
-    },
-  ): Promise<{ ok: boolean; reason?: string }> {
-    // Server returns 200 `{ok:true}` on success and 409 on lost races.
-    // Catch the 409 and surface it as a business outcome so the HitlPanel
-    // can display the reason rather than a generic error toast.
-    //
-    // NB: Uses /approve (HITL approval) rather than /resume (pause/resume).
-    // Two routes existed at the same path; HITL was renamed to /approve
-    // so Express routing picks the correct handler unambiguously.
-    try {
-      const body = await apiFetch<{ ok?: boolean; reason?: string } | undefined>(
-        `${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/approve`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(resolution),
-        },
-      );
-      return { ok: body?.ok ?? true, reason: body?.reason };
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        return { ok: false, reason: err.message };
-      }
-      throw err;
-    }
   }
 
   // ── Copilot-specific API calls (not in IPlatformClient but useful for web) ──

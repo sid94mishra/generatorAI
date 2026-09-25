@@ -1,12 +1,13 @@
 // ────────────────────────────────────────────────────────────────
 // T7 — context passing between stages (F_live_tests §1 T7, §5 `t7.json`).
 //
-// CHARACTERISATION of today's engine. `// KNOWN-BUG W-xx` marks the
-// assertions PHASE-02/03 flip.
+// Predecessor results reach a stage inside its FIRST prompt, fenced as
+// untrusted (`<generatorai:stage-context>`): no separate context turn
+// (W-49, F O-3) and no file-writing boilerplate on every prompt (W-48).
 // ────────────────────────────────────────────────────────────────
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTestEngine, type TestEngine } from '../../src/index.js';
+import { createTestEngine, stageKeyFor, type TestEngine } from '../../src/index.js';
 
 let engine: TestEngine | undefined;
 afterEach(async () => {
@@ -42,8 +43,8 @@ const T7 = {
   ] as const,
 };
 
-describe('T7 context passing (current engine)', () => {
-  it('delivers predecessor context per context.mode / context.from, as an extra model turn', async () => {
+describe('T7 context passing (engine)', () => {
+  it('delivers predecessor context per context.mode / context.from, inside the first prompt', async () => {
     engine = await createTestEngine({
       script: { A: [{ text: A_OUTPUT }, { on: 'summary', text: A_SUMMARY }] },
     });
@@ -51,26 +52,26 @@ describe('T7 context passing (current engine)', () => {
     const snap = await run.waitForTerminal();
     expect(snap.run.status).toBe('completed');
 
-    const contextOf = (stage: string) => snap.calls.find((c) => c.stageName === stage && c.kind === 'context');
+    const promptOf = (stage: string) => snap.calls.find((c) => c.stageName === stage && c.kind === 'prompt')!.prompt;
 
-    // summary-only (default): the summary, not the output.
-    expect(contextOf('B_summary')!.prompt).toContain(A_SUMMARY);
-    expect(contextOf('B_summary')!.prompt).not.toContain('CODEWORD-PELICAN');
+    // summary (default): the summary, not the output.
+    expect(promptOf('B_summary')).toContain(A_SUMMARY);
+    expect(promptOf('B_summary')).not.toContain('CODEWORD-PELICAN');
     // output: the complete output.
-    expect(contextOf('B_full')!.prompt).toContain('CODEWORD-PELICAN');
-    // none: no context turn at all.
-    expect(contextOf('B_none')).toBeUndefined();
-    // structured: summary (+ outputData when the stage produced JSON).
-    expect(contextOf('B_struct')!.prompt).toContain(A_SUMMARY);
+    expect(promptOf('B_full')).toContain('CODEWORD-PELICAN');
+    // none: no context block at all.
+    expect(promptOf('B_none')).not.toContain('generatorai:stage-context');
+    // structured: the summary (+ the structured output when the stage produced JSON).
+    expect(promptOf('B_struct')).toContain(A_SUMMARY);
     // context.from pulls a stage that is not a predecessor.
-    expect(contextOf('B_srcs')!.prompt).toContain('## Completed Stage: "A"');
-    expect(contextOf('B_srcs')!.prompt).not.toContain('## Completed Stage: "B_none"');
+    expect(promptOf('B_srcs')).toContain('## Completed stage "A"');
+    expect(promptOf('B_srcs')).not.toContain('## Completed stage "B_none"');
+    // The context is fenced as untrusted text.
+    expect(promptOf('B_full')).toMatch(/^<generatorai:stage-context trust="untrusted">/);
 
-    // Context is a separate model turn before the prompt, with its own reply.
-    const kinds = snap.calls.filter((c) => c.stageName === 'B_full').map((c) => c.kind);
-    expect(kinds).toEqual(['context', 'prompt', 'summary']); // KNOWN-BUG W-49 (context costs a model turn; O-3)
-    const contextMsg = snap.stages['B_full']!.messages.find((m) => m.metadata?.['isContextMessage'] === true);
-    expect(contextMsg?.role).toBe('user');
+    // No context turn: a leaf stage spends exactly its prompt (W-49).
+    expect(snap.calls.filter((c) => c.stageName === 'B_full').map((c) => c.kind)).toEqual(['prompt']);
+    expect(snap.stages[stageKeyFor('B_full')]!.messages.some((m) => m.turnRole === 'context')).toBe(false);
   });
 
   it('interpolates {{name}}, {{variables.x}} and {{run.id}}, and warns about a declared variable with no value', async () => {
@@ -78,7 +79,7 @@ describe('T7 context passing (current engine)', () => {
     const run = await engine.runWorkflow(T7, { topic: 'otters' });
     const snap = await run.waitForTerminal();
     const prompt = snap.calls.find((c) => c.stageName === 'V_interp' && c.kind === 'prompt')!.prompt;
-    expect(prompt.startsWith(`TOPIC=otters FULL=otters RUN=${snap.run.id} MISSING=`)).toBe(true);
+    expect(prompt).toContain(`TOPIC=otters FULL=otters RUN=${snap.run.id} MISSING=`);
     const warn = snap.events.find(
       (e) => e.kind === 'harness.session_info' && e.data['infoType'] === 'unresolved_variables',
     );
@@ -88,8 +89,8 @@ describe('T7 context passing (current engine)', () => {
       .importDefinition({ stages: [{ name: 'X', prompt: 'hi {{never_declared}}' }] })
       .catch((e: unknown) => e);
     expect((err as { issues?: Array<{ code: string }> }).issues?.map((i) => i.code)).toContain('template-unknown-variable');
-    // Every prompt carries the file-writing boilerplate (O-6).
-    expect(prompt).toContain('**IMPORTANT: How to create files**'); // KNOWN-BUG W-48 (boilerplate on every prompt provokes refusals)
+    // No file-writing boilerplate rides on the prompt (W-48, O-6).
+    expect(prompt).not.toContain('**IMPORTANT: How to create files**');
   });
 
   it('a linear workflow gives every stage its own fresh session with its own config', async () => {
@@ -102,9 +103,8 @@ describe('T7 context passing (current engine)', () => {
       edges: [['S1', 'S2']],
     });
     const snap = await run.waitForTerminal();
-    expect(snap.run.sessionMode).toBe('per-stage');
-    // v2 sessionReuse 'fresh' (P01 review R4): one conversation per stage, each
-    // created with its own stage's model (W-09 closed for the v1 engine).
+    // sessionReuse 'fresh' (the default): one conversation per stage, each
+    // created with its own stage's model (W-09).
     expect(new Set(snap.calls.map((c) => c.conversationId)).size).toBe(2);
     const models = [...engine.harness.conversationParams.values()].map((p) => p.model).sort();
     expect(models).toEqual(['model-one', 'model-two']);

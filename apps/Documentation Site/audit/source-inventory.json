@@ -1000,189 +1000,189 @@
       "method": "GET",
       "path": "/api/chats",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 314,
+      "line": 322,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 391,
+      "line": 399,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/chats/:id/sources",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 406,
+      "line": 414,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/workspace/prepare",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 424,
+      "line": 432,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/chats/:id",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 440,
+      "line": 448,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/chats/:id",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 452,
+      "line": 460,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/cancel",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 566,
+      "line": 588,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/prompt",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 599,
+      "line": 621,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/attachments/:artifactId",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 726,
+      "line": 748,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/messages",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 753,
+      "line": 775,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/transcript",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 783,
+      "line": 805,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/rewind",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 800,
+      "line": 822,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/fork",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 816,
+      "line": 838,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/background-tasks",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 850,
+      "line": 872,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/background-tasks/:taskId",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 861,
+      "line": 883,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/background-tasks/:taskId/cancel",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 872,
+      "line": 894,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/plans",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 891,
+      "line": 913,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/plans/:planId",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 902,
+      "line": 924,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/plans/:planId/content",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 926,
+      "line": 948,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/chats/:id/plans/:planId/content",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 961,
+      "line": 983,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/plans/:planId/comments",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1006,
+      "line": 1028,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/plans/:planId/decision",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1042,
+      "line": 1064,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/plans/:planId/save-to-workspace",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1096,
+      "line": 1118,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/interactions",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1129,
+      "line": 1151,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/interactions/:interactionId/respond",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1149,
+      "line": 1171,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/interactions/:interactionId/permission",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1184,
+      "line": 1206,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/chats/:id/permission-mode",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1217,
+      "line": 1239,
       "mounted": true
     },
     {
@@ -2400,133 +2400,77 @@
       "method": "POST",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 53,
+      "line": 62,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 66,
+      "line": 75,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 98,
+      "line": 105,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/scratchpad",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 111,
+      "line": 118,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/start",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 140,
+      "line": 148,
       "mounted": true
     },
     {
       "method": "POST",
-      "path": "/api/workflow-runs/:id/pause",
+      "path": "/api/workflow-runs/:id/commands",
       "source": "apps/server/src/routes/workflowRuns.ts",
       "line": 162,
       "mounted": true
     },
     {
       "method": "POST",
-      "path": "/api/workflow-runs/:id/resume",
+      "path": "/api/workflow-runs/:id/fork",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 176,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/workflow-runs/:id/retry",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 192,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/workflow-runs/:id/cancel",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 222,
+      "line": 185,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 236,
+      "line": 197,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/stages",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 255,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/workflow-runs/:runId/stages/:stageId/pause",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 266,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/workflow-runs/:runId/stages/:stageId/resume",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 280,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/workflow-runs/:runId/stages/:stageId/retry",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 302,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/workflow-runs/:runId/stages/:stageId/cancel",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 330,
+      "line": 216,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 356,
+      "line": 231,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 367,
-      "mounted": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/workflow-runs/:id/pending-interrupts",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 403,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/workflow-runs/:runId/stages/:stageId/approve",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 423,
+      "line": 242,
       "mounted": true
     },
     {
@@ -3110,7 +3054,6 @@
     "LOCALAPPDATA",
     "LOG_LEVEL",
     "MAX_CONCURRENT_SESSIONS",
-    "MAX_CONCURRENT_STAGES",
     "MOONSHINE_DTYPE",
     "MOONSHINE_MODEL",
     "NODE_ENV",
@@ -4022,6 +3965,7 @@
     "packages/agent-harness-providers/src/childEnv.ts",
     "packages/agent-harness-providers/src/childRegistry.ts",
     "packages/agent-harness-providers/src/conformance/index.ts",
+    "packages/agent-harness-providers/src/errors.ts",
     "packages/agent-harness-providers/src/hardening/approvalGate.ts",
     "packages/agent-harness-providers/src/hardening/byteCap.ts",
     "packages/agent-harness-providers/src/hardening/contextLedger.ts",
@@ -4168,6 +4112,8 @@
     "packages/core/src/domain/dag/buildDAG.ts",
     "packages/core/src/domain/dag/index.ts",
     "packages/core/src/domain/dag/types.ts",
+    "packages/core/src/domain/errors/index.ts",
+    "packages/core/src/domain/errors/StageError.ts",
     "packages/core/src/domain/index.ts",
     "packages/core/src/domain/ports/IAgentHarness.ts",
     "packages/core/src/domain/ports/IAgentRepository.ts",
@@ -4175,6 +4121,7 @@
     "packages/core/src/domain/ports/IChatRepository.ts",
     "packages/core/src/domain/ports/IComputerBridge.ts",
     "packages/core/src/domain/ports/IComputerConsentStore.ts",
+    "packages/core/src/domain/ports/IEngineStore.ts",
     "packages/core/src/domain/ports/IExecutionWorkspaceRepository.ts",
     "packages/core/src/domain/ports/IExtensionRegistry.ts",
     "packages/core/src/domain/ports/IHookBridge.ts",
@@ -4186,10 +4133,10 @@
     "packages/core/src/domain/ports/IProjectRepository.ts",
     "packages/core/src/domain/ports/IProviderInstance.ts",
     "packages/core/src/domain/ports/IRepositories.ts",
+    "packages/core/src/domain/ports/IRunStore.ts",
     "packages/core/src/domain/ports/ISandboxProvider.ts",
     "packages/core/src/domain/ports/IScriptRunner.ts",
     "packages/core/src/domain/ports/ISequenceAllocator.ts",
-    "packages/core/src/domain/ports/ISessionAllocationRepository.ts",
     "packages/core/src/domain/ports/ISpeechToTextEngine.ts",
     "packages/core/src/domain/ports/IStageRunRepository.ts",
     "packages/core/src/domain/ports/ITerminalHost.ts",
@@ -4202,10 +4149,16 @@
     "packages/core/src/domain/ports/IWorkspaceFileReviewRepository.ts",
     "packages/core/src/domain/ports/IWorkspaceMountRepository.ts",
     "packages/core/src/domain/ports/IWorktreeRepository.ts",
+    "packages/core/src/domain/scheduler/decide.ts",
+    "packages/core/src/domain/scheduler/ids.ts",
+    "packages/core/src/domain/scheduler/index.ts",
+    "packages/core/src/domain/scheduler/readiness.ts",
+    "packages/core/src/domain/scheduler/terminal.ts",
+    "packages/core/src/domain/scheduler/types.ts",
     "packages/core/src/domain/state-machines/BrowserSessionStateMachine.ts",
     "packages/core/src/domain/state-machines/index.ts",
-    "packages/core/src/domain/state-machines/StageRunStateMachine.ts",
-    "packages/core/src/domain/state-machines/WorkflowRunStateMachine.ts",
+    "packages/core/src/domain/workflow-graph/compile.ts",
+    "packages/core/src/domain/workflow-graph/index.ts",
     "packages/core/src/events/EventBus.ts",
     "packages/core/src/events/index.ts",
     "packages/core/src/index.ts",
@@ -4281,6 +4234,7 @@
     "packages/core/src/services/ArtifactService.ts",
     "packages/core/src/services/AutomationRecoveryService.ts",
     "packages/core/src/services/AutomationService.ts",
+    "packages/core/src/services/BootHousekeeping.ts",
     "packages/core/src/services/BrowserService.ts",
     "packages/core/src/services/ChatManagementService.ts",
     "packages/core/src/services/chatSystemHints.ts",
@@ -4288,12 +4242,22 @@
     "packages/core/src/services/CodebaseService.ts",
     "packages/core/src/services/ComputerService.ts",
     "packages/core/src/services/createRunSandbox.ts",
-    "packages/core/src/services/DAGScheduler.ts",
     "packages/core/src/services/definitions/canonical.ts",
     "packages/core/src/services/definitions/RunDefinitionReader.ts",
     "packages/core/src/services/definitions/runScope.ts",
     "packages/core/src/services/DeltaLog.ts",
     "packages/core/src/services/DurableExecutionEngine.ts",
+    "packages/core/src/services/engine/EffectsDispatcher.ts",
+    "packages/core/src/services/engine/index.ts",
+    "packages/core/src/services/engine/LeaseReaper.ts",
+    "packages/core/src/services/engine/OutboxDispatcher.ts",
+    "packages/core/src/services/engine/OutputExtractor.ts",
+    "packages/core/src/services/engine/outputRules.ts",
+    "packages/core/src/services/engine/RunActor.ts",
+    "packages/core/src/services/engine/RunLifecycle.ts",
+    "packages/core/src/services/engine/RunSupervisor.ts",
+    "packages/core/src/services/engine/StageExecutor.ts",
+    "packages/core/src/services/engine/TimerService.ts",
     "packages/core/src/services/ErrorHandler.ts",
     "packages/core/src/services/ExtensionApi.ts",
     "packages/core/src/services/ExtensionManager.ts",
@@ -4317,7 +4281,6 @@
     "packages/core/src/services/push/index.ts",
     "packages/core/src/services/push/notificationPolicy.ts",
     "packages/core/src/services/push/PushDispatcher.ts",
-    "packages/core/src/services/ResultValidator.ts",
     "packages/core/src/services/SandboxLifecycleManager.ts",
     "packages/core/src/services/scm/AutoSourceControlRunner.ts",
     "packages/core/src/services/scm/EditorLauncherService.ts",
@@ -4347,12 +4310,9 @@
     "packages/core/src/services/session/TurnRecorder.ts",
     "packages/core/src/services/session/types.ts",
     "packages/core/src/services/session/workspaceExposure.ts",
-    "packages/core/src/services/SessionAllocator.ts",
     "packages/core/src/services/SessionHookRegistry.ts",
     "packages/core/src/services/shellWords.ts",
     "packages/core/src/services/SourceControlService.ts",
-    "packages/core/src/services/StageExecutionService.ts",
-    "packages/core/src/services/StartupRecoveryService.ts",
     "packages/core/src/services/StreamBroker.ts",
     "packages/core/src/services/StreamWriteBatcher.ts",
     "packages/core/src/services/SystemArtifactService.ts",
@@ -4438,6 +4398,8 @@
     "packages/db/src/migrations/v55/spec/validate/security.ts",
     "packages/db/src/migrations/v55/spec/validate/validateWorkflow.ts",
     "packages/db/src/migrations/v55_workflow_definitions_v2.ts",
+    "packages/db/src/migrations/v57/ddl.ts",
+    "packages/db/src/migrations/v57_workflow_engine_v2.ts",
     "packages/db/src/repositories/AgentInteractionRepository.ts",
     "packages/db/src/repositories/AgentRepository.ts",
     "packages/db/src/repositories/ArtifactRepository.ts",
@@ -4450,6 +4412,9 @@
     "packages/db/src/repositories/ComputerUseRepository.ts",
     "packages/db/src/repositories/ConversationInstanceOwnershipRepository.ts",
     "packages/db/src/repositories/ConversationOwnershipRepository.ts",
+    "packages/db/src/repositories/engineCas.ts",
+    "packages/db/src/repositories/EngineRepositories.ts",
+    "packages/db/src/repositories/EngineStores.ts",
     "packages/db/src/repositories/EntryRepository.ts",
     "packages/db/src/repositories/EventRepository.ts",
     "packages/db/src/repositories/ExecutionWorkspaceRepository.ts",
@@ -4462,8 +4427,8 @@
     "packages/db/src/repositories/PushTokenRepository.ts",
     "packages/db/src/repositories/RegisterRepository.ts",
     "packages/db/src/repositories/ReviewRepository.ts",
+    "packages/db/src/repositories/RunStore.ts",
     "packages/db/src/repositories/SequenceAllocator.ts",
-    "packages/db/src/repositories/SessionAllocationRepository.ts",
     "packages/db/src/repositories/SessionRepository.ts",
     "packages/db/src/repositories/StageRunRepository.ts",
     "packages/db/src/repositories/StreamCursorRepository.ts",
@@ -4615,14 +4580,12 @@
     "packages/shared/src/types/RunProfile.ts",
     "packages/shared/src/types/Session.ts",
     "packages/shared/src/types/SourceControl.ts",
-    "packages/shared/src/types/StageRunStateMachine.ts",
     "packages/shared/src/types/Terminal.ts",
     "packages/shared/src/types/Voice.ts",
     "packages/shared/src/types/Widget.ts",
     "packages/shared/src/types/Workflow.ts",
     "packages/shared/src/types/WorkflowOrchestrator.ts",
     "packages/shared/src/types/WorkflowRun.ts",
-    "packages/shared/src/types/WorkflowRunStateMachine.ts",
     "packages/shared/src/types/Workspace.ts",
     "packages/shared/src/utils/batchDataParser.ts",
     "packages/shared/src/utils/computerUseBlocklist.ts",
@@ -4693,7 +4656,7 @@
     "packages/workflow-spec/src/validate/scope.ts",
     "packages/workflow-spec/src/validate/security.ts",
     "packages/workflow-spec/src/validate/validateWorkflow.ts",
-    "packages/workflow-testkit/src/adapters/v1.ts",
+    "packages/workflow-testkit/src/adapters/v2.ts",
     "packages/workflow-testkit/src/clock.ts",
     "packages/workflow-testkit/src/definitions.ts",
     "packages/workflow-testkit/src/engine.ts",

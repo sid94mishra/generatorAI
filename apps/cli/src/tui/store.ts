@@ -124,7 +124,8 @@ export type OverlayKind =
         startedAt?: string | number | null;
         completedAt?: string | number | null;
         error?: string | null;
-        retryCount?: number;
+        /** The latest attempt number; retries are the attempts beyond the first. */
+        attempts?: number;
       }>;
       variables: Record<string, unknown>;
     };

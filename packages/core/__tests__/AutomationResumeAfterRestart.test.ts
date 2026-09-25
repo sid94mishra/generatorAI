@@ -359,8 +359,8 @@ describe('P0-b — an interrupted automation batch resumes instead of reporting 
 
   it('leaves an iteration whose workflow run is still live claimed, so it is not run twice', async () => {
     simulateCrashedBatch();
-    // Iteration 4's workflow run survived the restart and is being re-driven
-    // by StartupRecoveryService.
+    // Iteration 4's workflow run survived the restart and is being driven
+    // by the workflow engine's recovery.
     stores.workflowRuns.set('live-run', { id: 'live-run', status: 'running' } as unknown as WorkflowRun);
     stores.execRuns.push({
       id: 'live-exec-run',

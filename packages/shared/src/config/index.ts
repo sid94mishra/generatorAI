@@ -56,7 +56,6 @@ export {
   SetChatPermissionModeSchema,
   ResolveToolPermissionSchema,
   UpdateChatSchema,
-  StageReviewDecisionSchema,
 } from './ChatSchemas.js';
 
 // Orchestrator mode — background-agent task brief + result digest contracts

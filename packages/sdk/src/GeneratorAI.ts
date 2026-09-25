@@ -16,8 +16,11 @@ import {
   InMemoryMcpHub,
   WorkspaceManager,
   WorkflowOrchestrator,
-  ResultValidator,
   AdmissionController,
+  DefaultRunLifecycle,
+  EngineLockedError,
+  runBootHousekeeping,
+  type OrchestratorSandbox,
   createRunSandbox,
   SourceControlRegistry,
   SourceControlConfigService,
@@ -41,11 +44,13 @@ import {
   closeDB,
   migrateDB,
   createAllRepositories,
+  createEngineStores,
   EventRetentionService,
   type AppDatabase,
 } from '@generatorai/db';
 import {
   createHarnessProvider,
+  harnessErrorOf,
   HarnessProxy,
   type HarnessType,
 } from '@generatorai/agent-harness-providers';
@@ -88,6 +93,8 @@ import * as path from 'node:path';
 /** Background services + repositories the SDK lifecycle (initialize/shutdown) owns. */
 interface GeneratorAIInternals {
   repos: ReturnType<typeof createAllRepositories>;
+  /** The run sandbox (its orphan reaper runs at boot), or null. */
+  sandbox: OrchestratorSandbox | null;
   eventRetention: EventRetentionService;
   worktreeCleanup: WorktreeCleanupService;
   systemArtifacts: SystemArtifactService;
@@ -208,8 +215,10 @@ export class GeneratorAI {
    *  1. load workflow/stage templates + system artifacts
    *  2. **start the harness** (without this, no workflow/chat can run)
    *  3. register global harness lifecycle hooks
-   *  4. restore the global event-sequence counter
-   *  5. recover interrupted runs/sessions (+ rehydrate the session allocator)
+   *  4. restore the event-sequence counters, finish closing sessions, reap sandbox orphans
+   *  5. start the workflow engine: the single-engine lock (the server, the
+   *     desktop app and every SDK instance on one database share it), then
+   *     recovery of every live run
    *  6. start automation cron jobs
    *  7. start background sweepers (event retention, durable step.sleep, worktree GC)
    *
@@ -219,9 +228,8 @@ export class GeneratorAI {
   async initialize(): Promise<void> {
     if (this._initialized) return;
     this._initialized = true;
-    const { templateRegistry, hookInterceptor, recoveryService, automationService } =
-      this.services;
-    const { repos, eventRetention, worktreeCleanup, systemArtifacts } = this._internals;
+    const { templateRegistry, hookInterceptor, engine, eventBus, automationService } = this.services;
+    const { repos, sandbox, eventRetention, worktreeCleanup, systemArtifacts } = this._internals;
 
     // 1. Templates (root + system subdirectory), tolerating a missing dir.
     const templatesDir = this._config.templatesDir;
@@ -249,8 +257,23 @@ export class GeneratorAI {
     // 4. Restore global event sequence counter (avoids post-restart collisions).
     await repos.eventRepo.initialize();
 
-    // 5. Recover interrupted runs/sessions (also rehydrates SessionAllocator).
-    await recoveryService.recover();
+    await runBootHousekeeping({
+      eventBus,
+      sessionRepo: repos.sessionRepo,
+      harness: this._harness,
+      ...(sandbox ? { orphanReaper: sandbox.lifecycle } : {}),
+      logger: this.logger,
+    });
+
+    // 5. The workflow engine. Another live process owning this database's
+    //    engine leaves this instance without one: run commands then fail
+    //    with `engine_unavailable`, everything else works.
+    try {
+      await engine.start();
+    } catch (err) {
+      if (!(err instanceof EngineLockedError)) throw err;
+      this.logger.error(`[GeneratorAI] ${err.message}`);
+    }
 
     // 6. Automation cron scheduler.
     await automationService.initializeCronJobs();
@@ -280,10 +303,9 @@ export class GeneratorAI {
       // Best-effort
     }
 
-    // Stop run poll loops + EventBus subscriptions so no new events are produced
-    // and no setInterval handles are orphaned.
+    // Stop the workflow engine (timers, reaper, outbox) and release its lock.
     try {
-      this.services.workflowRunService.shutdown();
+      await this.services.engine.stop();
     } catch {
       // Best-effort
     }
@@ -445,22 +467,20 @@ export class GeneratorAI {
       stageRunRepo: repos.stageRunRepo,
       automationRepo: repos.automationRepo,
       automationExecutionRepo: repos.automationExecutionRepo,
-      sessionAllocationRepo: repos.sessionAllocationRepo,
       registerRepo: repos.registerRepo,
       entryRepo: repos.entryRepo,
-      sandbox,
+      engineStores: createEngineStores(db),
+      toHarnessError: harnessErrorOf,
+      engineOwnerLabel: `sdk:${process.pid}`,
       workspaceManager,
-      // W18 — lane sizes from measured machine capacity.
-      admissionController: new AdmissionController(),
+      // The engine's one concurrency gate (W-66): stage launches use the ordinary lane.
+      admissionController: new AdmissionController({ ordinaryConcurrency: resolved.maxConcurrentStages }),
       scmFlow,
       config: {
         artifactsDir: resolved.artifactsDir,
-        maxConcurrentStages: resolved.maxConcurrentStages,
       },
       chatExtensions: { customToolRegistry, mcpHub },
     });
-
-    services.workflowRunService.setHookExecutor(services.hookExecutor);
 
     // ── Project & Codebase Management Services ──
     const projectService = new ProjectService(
@@ -492,23 +512,15 @@ export class GeneratorAI {
       logger,
     );
 
-    // Late-wire worktreeService into WorkflowRunService
-    services.workflowRunService.setWorktreeService(worktreeService, repos.projectCodebaseRepo);
+    // The engine's prepare phase creates a project run's codebase worktrees.
+    if (services.engine.lifecycle instanceof DefaultRunLifecycle) {
+      services.engine.lifecycle.setWorktrees({ service: worktreeService, codebases: repos.projectCodebaseRepo });
+    }
 
     // ── Stream Broker ──
     const streamBroker = new StreamBroker(repos.streamCursorRepo, logger);
 
-    // ── Workflow Orchestrator (full DAG execution) ──
-    const resultValidator = new ResultValidator(
-      repos.chatMessageRepo,
-      repos.stageRunRepo,
-      services.eventBus,
-      logger,
-      scriptRunner,
-    );
-    // Validation is owned by the run service, as on the server.
-    services.workflowRunService.setResultValidator(resultValidator);
-
+    // ── Workflow Orchestrator (clone/preprocess + post-processing around a run) ──
     const workflowOrchestrator = new WorkflowOrchestrator(
       services.workflowRunService,
       services.workflowDefinitionService,
@@ -589,7 +601,7 @@ export class GeneratorAI {
       worktreeService,
       projectConfigService,
       browserService,
-      { repos, eventRetention, worktreeCleanup, systemArtifacts },
+      { repos, sandbox, eventRetention, worktreeCleanup, systemArtifacts },
       scriptLoader,
       customToolRegistry,
     );

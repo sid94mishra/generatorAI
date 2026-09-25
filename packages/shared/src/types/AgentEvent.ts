@@ -271,7 +271,7 @@ export type AgentEvent =
   | { kind: 'workflow_run.completed'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.failed'; data: { workflowRunId: string; error: string } }
   | { kind: 'workflow_run.cancelled'; data: { workflowRunId: string } }
-  | { kind: 'workflow_run.retried'; data: { workflowRunId: string; ancestorRunId?: string } }
+  | { kind: 'workflow_run.forked'; data: { workflowRunId: string; ancestorRunId: string; rerunFrom: string[]; memoized: number } }
   // ── WorkflowRun Orchestration Events ──
   | { kind: 'workflow_run.orchestration_started'; data: { workflowRunId: string; hasCodebases: boolean; hasPreprocessing: boolean } }
   | { kind: 'workflow_run.worktree_creating'; data: { workflowRunId: string; codebaseCount: number; codebases: Array<{ alias: string; codebaseId: string }> } }
@@ -297,10 +297,7 @@ export type AgentEvent =
   | { kind: 'workflow_run.permission_mode_changed'; data: { workflowRunId: string; mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan'; previous?: string } }
   // ── StageRun Events ──
   | { kind: 'stage_run.pending'; data: { stageRunId: string; workflowRunId: string; name: string } }
-  | { kind: 'stage_run.queued'; data: { stageRunId: string; workflowRunId: string; name: string } }
   | { kind: 'stage_run.running'; data: { stageRunId: string; workflowRunId: string; sessionId?: string; name?: string } }
-  | { kind: 'stage_run.step_started'; data: { stageRunId: string; workflowRunId: string; step: number; totalSteps: number; label: string } }
-  | { kind: 'stage_run.step_completed'; data: { stageRunId: string; workflowRunId: string; step: number } }
   | { kind: 'stage_run.paused'; data: { stageRunId: string; workflowRunId: string; reason?: string } }
   | { kind: 'stage_run.resumed'; data: { stageRunId: string; workflowRunId: string } }
   | { kind: 'stage_run.completed'; data: { stageRunId: string; workflowRunId: string; name?: string } }
@@ -308,6 +305,7 @@ export type AgentEvent =
   | { kind: 'stage_run.cancelled'; data: { stageRunId: string; workflowRunId: string } }
   | { kind: 'stage_run.skipped'; data: { stageRunId: string; workflowRunId: string; reason: string } }
   | { kind: 'stage_run.retrying'; data: { stageRunId: string; workflowRunId: string; retryCount: number } }
+  | { kind: 'stage_run.repairing'; data: { stageRunId: string; workflowRunId: string; repair: number; failures?: unknown } }
   // HITL — human-in-the-loop lifecycle events.
   | { kind: 'stage_run.awaiting_input'; data: { stageRunId: string; workflowRunId: string; interruptData?: unknown; prompt?: string } }
   | { kind: 'stage_run.input_received'; data: { stageRunId: string; workflowRunId: string; value?: unknown } }

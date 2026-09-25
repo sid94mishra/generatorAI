@@ -48,6 +48,8 @@ function StatusPill({ status }: { status: RunView['status'] }) {
     pending:    { icon: <Clock className="h-3.5 w-3.5" />, label: 'Pending',    tone: 'muted' },
     starting:   { icon: <Spinner size="sm" />, label: 'Starting', tone: 'primary' },
     running:    { icon: <Spinner size="sm" />, label: 'Running',  tone: 'primary' },
+    waiting:    { icon: <Clock className="h-3.5 w-3.5" />, label: 'Waiting', tone: 'warning' },
+    finalizing: { icon: <Spinner size="sm" />, label: 'Finalizing', tone: 'primary' },
     paused:     { icon: <Pause className="h-3.5 w-3.5" />, label: 'Paused',    tone: 'warning' },
     cancelling: { icon: <Spinner size="sm" />, label: 'Cancelling', tone: 'warning' },
     cancelled:  { icon: <Square className="h-3.5 w-3.5" />, label: 'Cancelled', tone: 'muted' },
@@ -79,7 +81,7 @@ export function RunHeaderBar({
   const failed = run.stages.filter((s) => s.status === 'failed').length;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  const isRunning = run.status === 'running' || run.status === 'starting';
+  const isRunning = run.status === 'running' || run.status === 'starting' || run.status === 'waiting';
   const isPaused = run.status === 'paused';
   const isTerminal = run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled';
 
@@ -161,12 +163,13 @@ export function RunHeaderBar({
         {isTerminal && run.status !== 'completed' && (
           <Button
             onClick={onRetry}
+            title="Re-run every stage that did not complete in a new run"
             variant="ghost"
             size="sm"
             className="h-auto flex items-center gap-1 rounded-md bg-[var(--color-primary)] px-2.5 py-1 text-[11.5px] font-medium text-white hover:brightness-110"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            Retry
+            Retry failed
           </Button>
         )}
         <span className="mx-1 h-4 w-px bg-[var(--color-border)]" />

@@ -15,7 +15,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { ENGINE_LEVEL, WORKFLOW_FORMAT_VERSION } from './constants.js';
 import { EXPRESSION_GRAMMAR, grammarFilters, grammarFunctions, type GrammarRow } from './expr/grammar.js';
 import { InvocationRequestSchema, InvocationTriggerSchema } from './schemas/invocation.js';
-import { RunCommandSchema } from './schemas/commands.js';
+import { ForkRunRequestSchema, RunCommandSchema } from './schemas/commands.js';
 import { WorkflowGraphSchema } from './schemas/graph.js';
 import { STAGE_RUN_TRANSITIONS } from './state/stageRun.js';
 import { WORKFLOW_RUN_TRANSITIONS } from './state/workflowRun.js';
@@ -202,6 +202,10 @@ export function renderFieldsMarkdown(): string {
     '## Run commands',
     '',
     fieldTable(RunCommandSchema),
+    '',
+    '## Fork request',
+    '',
+    fieldTable(ForkRunRequestSchema),
     '',
     '## Stage-run state machine',
     '',

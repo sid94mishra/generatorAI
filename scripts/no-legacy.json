@@ -740,12 +740,64 @@
         "apps/web/"
       ],
       "reason": "WP-2.11: moved to components/session and take a session"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\b(DAGScheduler|StageExecutionService|SessionAllocator|StartupRecoveryService|ResultValidator|StageRunStateMachine|WorkflowRunStateMachine)\\b",
+      "reason": "WP-3.7: the v1 engine is deleted; the RunSupervisor (actor, decide(), StageExecutor, recovery) is the engine"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\b(DEFAULT_RETRY_POLICY|retryInSession|retryStageAfterValidation|processedStageRuns|sendStageFollowUp|markFollowUpPending|redriveRun|setHeartbeatPolicy|setDefaultStageTimeoutMs|setHeartbeatIntervalMs|STAGE_OUTPUT_ARTIFACT)\\b",
+      "reason": "WP-3.7: v1 retry, follow-up, reconciler and heartbeat paths are deleted (retries are attempts, recovery is the supervisor's)"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\b(pauseRun|resumeRun|cancelRun|retryRun|pauseStageRun|resumeStageRun|retryStageRun|cancelStageRun|listPendingInterrupts)\\b",
+      "reason": "WP-3.7: operator actions are run commands (POST /workflow-runs/:id/commands); a re-run is forkRun"
+    },
+    {
+      "phase": "03",
+      "pattern": "pending-interrupts|/stages/[^'\"`]*/(pause|resume|retry|cancel|approve)\\b",
+      "reason": "WP-3.7: the per-action run routes are deleted; pending approvals are the awaiting_input instances of GET /workflow-runs/:id"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\b(ISessionAllocationRepository|DrizzleSessionAllocationRepository|WorkflowSessionMode)\\b",
+      "reason": "WP-3.7: sessions are run_sessions keyed by the engine; no run-level session mode"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\bmaxConcurrentStages\\b|MAX_CONCURRENT_STAGES",
+      "paths": [
+        "packages/core/src/",
+        "apps/server/src/"
+      ],
+      "reason": "WP-3.5/3.7: the admission controller is the one concurrency gate (W-66); no stage Semaphore"
+    },
+    {
+      "phase": "03",
+      "pattern": "workflow_run\\.retried|stage_run\\.(queued|step_started|step_completed)\\b",
+      "reason": "WP-3.7: v1 event kinds; a fork emits workflow_run.forked"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\b(EngineGated|ENGINE_SUPPORTS_V2|ENGINE_UPGRADE_HINT)\\b",
+      "paths": [
+        "apps/web/"
+      ],
+      "reason": "WP-3.7: ENGINE_LEVEL is v2; every v2 builder control is enabled"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\bhitl(Service)?\\.(interrupt|resume|cancelWaiter|setRedriveRun)\\(",
+      "reason": "WP-3.7: stage gates park the executor frame; HitlService answers instances with run commands"
     }
   ],
   "comments": {
-    "phase": "02",
+    "phase": "03",
     "failFromPhase": null,
-    "baseline": 11,
+    "baseline": 5,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",

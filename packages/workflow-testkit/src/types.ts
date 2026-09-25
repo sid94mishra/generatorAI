@@ -2,12 +2,10 @@
 // Engine-neutral types of the workflow testkit (P00 review R20).
 //
 // Tests talk to a `TestEngine`; the `TestEngine` talks to an
-// `EngineAdapter`. Everything that knows how TODAY's engine works — the
-// copied route logic, the v1 tables, the private heartbeat map, the
-// `stage-<id>-<ts>` conversation ids, prompt-text turn classification —
-// lives in `adapters/v1.ts`. PHASE-03 adds a v2 adapter beside it; the
-// characterisation tests it keeps, and every new scenario test, run
-// against either by choosing `createTestEngine({ adapter })`.
+// `EngineAdapter`. Everything that knows how the engine works — its
+// supervisor, the commands API mapping, the v57 tables read raw for
+// snapshots, `turn_role` turn classification — lives in `adapters/v2.ts`
+// (the v1 adapter was deleted with the v1 engine at the P03 cutover).
 // ────────────────────────────────────────────────────────────────
 
 import type Database from 'better-sqlite3';
@@ -19,31 +17,28 @@ import type { HarnessCall, ScriptBook, ScriptedFauxHarness, ScriptSource, StageK
 import type { WorkflowSpecJson } from './definitions.js';
 
 /**
- * Service timing, scaled down from production so whole runs take
- * milliseconds. Every knob maps to a setter the services already expose.
+ * Engine timing, scaled down from production so whole runs take
+ * milliseconds (the supervisor's lock, ownership and reaper periods).
  */
 export interface TestEngineTiming {
-  /** WorkflowRunService reconciler tick (prod 3000). */
-  reconcileIntervalMs?: number;
-  /** Stage heartbeat period (prod 10000). */
-  heartbeatIntervalMs?: number;
-  /** Stale after `heartbeatIntervalMs * staleMultiplier` (prod 3). */
-  staleMultiplier?: number;
-  /** Deadline for a waited prompt turn with no `timeoutMs` (prod 30 min). */
-  defaultStageTimeoutMs?: number;
+  /** A crashed generation's engine lock goes stale after this (prod 30 s). */
+  lockStaleMs?: number;
+  /** Lock and ownership renewal (prod 10 s). */
+  lockRenewMs?: number;
+  /** Run ownership lease (prod 60 s). */
+  ownershipTtlMs?: number;
+  /** Lease reaper period (prod 15 s). */
+  reaperEveryMs?: number;
+  /** How long `settle()` waits by default. */
+  settleMs?: number;
 }
 
-/**
- * `stage_runs.heartbeat_at` had ONE-SECOND precision before v57 (it is
- * milliseconds now), so a stale window under ~1.5 s reaped healthy stages.
- * 200 ms × 10 = 2 s keeps a real margin while still letting a test provoke
- * the reaper (W-02) with a few seconds of delay.
- */
 export const DEFAULT_TIMING: Required<TestEngineTiming> = {
-  reconcileIntervalMs: 20,
-  heartbeatIntervalMs: 200,
-  staleMultiplier: 10,
-  defaultStageTimeoutMs: 60_000,
+  lockStaleMs: 150,
+  lockRenewMs: 40,
+  ownershipTtlMs: 60_000,
+  reaperEveryMs: 100,
+  settleMs: 100,
 };
 
 export interface CapturedEvent {
@@ -64,13 +59,11 @@ export interface LogLine {
 
 /** One executed node of a run: a stage today; a loop iteration's stage or map item later. */
 export interface StageSnapshot {
-  /**
-   * Stable address of the instance inside the run. v1 has no scopes, so it
-   * is the stage name; v2 uses G5's `instance_path` (e.g. `review_loop#2/fix`).
-   */
+  /** Stable address of the instance inside the run: G5's `instance_path` (e.g. `review_loop#2/fix`). */
   instancePath: string;
   name: string;
   status: StageRun['status'];
+  /** Attempts that ended `failed` or `interrupted` (what `retry.maxAttempts` counts). */
   retryCount: number;
   outputText?: string;
   summary?: string;
@@ -82,15 +75,15 @@ export interface StageSnapshot {
   row: StageRun;
   /** Chat messages that belong to this instance. */
   messages: Array<Pick<ChatMessage, 'role' | 'content'> & { metadata?: Record<string, unknown>; turnRole?: string; complete?: boolean }>;
-  /** Engine v2: the instance's attempts, oldest first. */
+  /** The instance's attempts, oldest first. */
   attempts?: Array<{ attemptNo: number; mode: string; status: string; errorCode: string | null; repairCount: number; sessionId: string | null }>;
-  /** Engine v2: why the instance is in its status (`interrupted:process_restart_unsafe`, `retry:resume`, …). */
+  /** Why the instance is in its status (`interrupted:process_restart_unsafe`, `retry:resume`, …). */
   statusReason?: string | null;
 }
 
 export interface RunSnapshot {
   run: WorkflowRun;
-  /** Instances keyed by `instancePath` (v1: the stage name). */
+  /** Instances keyed by `instancePath`. */
   stages: Record<string, StageSnapshot>;
   /** Instance paths in definition order. */
   instanceOrder: string[];
@@ -109,21 +102,22 @@ export interface ApproveBody {
   followUpPrompt?: string;
 }
 
-/** Operator commands, engine-neutral (they become the P03 commands API). */
+/** Operator commands, as shortcuts over the commands API and fork. */
 export type RunCommand =
   | { type: 'start' }
+  /** `pause {mode: interrupt}` on the run. */
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'cancel' }
-  | { type: 'retry-run' }
+  /** Fork the terminal run (`forkRun`, default options); `runId` of the result is the fork. */
+  | { type: 'retry-run'; request?: Record<string, unknown> }
+  /** `retry {mode: resume}` of a paused instance. */
   | { type: 'retry-stage'; stageRunId: string }
   | { type: 'approve'; stageRunId: string; body?: ApproveBody }
-  /** Force a stage into `awaiting_input` (the deleted test-only interrupt route, WP-1.4). */
-  | { type: 'interrupt'; stageRunId: string; data?: unknown; prompt?: string }
-  /** Engine v2: any `RunCommand` of `@generatorai/workflow-spec`, as the commands API takes it. */
+  /** Any `RunCommand` of `@generatorai/workflow-spec`, as the commands API takes it. */
   | { type: 'command'; command: Record<string, unknown> };
 
-/** What a command returned, in HTTP terms. `runId` is set for a retry. */
+/** What a command returned, in HTTP terms. `runId` is set for a fork. */
 export interface CommandResult {
   status: number;
   body?: unknown;
@@ -131,18 +125,8 @@ export interface CommandResult {
 }
 
 export interface RestartOptions {
-  /** Run the engine's boot recovery on the new generation. Default true. */
+  /** Start the engine (lock + recovery) on the new generation. Default true. */
   recover?: boolean;
-  /**
-   * v1 only. Rehydrate `SessionAllocator` BEFORE `recover()`. `recover()`
-   * re-drives runs (step 2) before it rehydrates the allocator (step 4); a
-   * relaunched stage that reaches `allocateSession` first inserts a second
-   * `session_allocations` row and fails on its UNIQUE key (W-32). On the live
-   * server the relaunch first spends ~2.5 s in the workspace checkpoint
-   * capture, so the allocator usually wins; this flag stands in for that
-   * latency, which the testkit does not have. Default false (the code's order).
-   */
-  allocatorFirst?: boolean;
 }
 
 /** State shared by the facade and the adapter; survives every generation. */
@@ -157,7 +141,6 @@ export interface AdapterContext {
   logs: LogLine[];
   timing: Required<TestEngineTiming>;
   maxConcurrentStages?: number;
-  resultValidation: boolean;
   /** Secret store contents (`namespace/name` → value); wires the MCP hub + vault when set. */
   secrets?: Record<string, string>;
 }
@@ -167,7 +150,7 @@ export interface EngineAdapter {
   readonly name: string;
   /** Current process generation (0 at boot, +1 per restart). */
   readonly generation: number;
-  /** The engine's service graph (engine-specific; v1: `CoreServices`). */
+  /** The engine's service graph. */
   readonly services: CoreServices;
   readonly harness: ScriptedFauxHarness;
   /** The stage instance speaking through a provider conversation. */
@@ -186,7 +169,7 @@ export interface EngineAdapter {
   isTerminal(snap: RunSnapshot): boolean;
   /** Stage keys by name for the run's pinned definition version. */
   stageIds(runId: string): Promise<Record<string, string>>;
-  /** The instance id (v1: stage run id) for an instance path. */
+  /** The instance id for an instance path (or a stage name). */
   instanceId(runId: string, instancePath: string): string;
   killAndRestart(opts?: RestartOptions): Promise<void>;
   dispose(): Promise<void>;
@@ -202,11 +185,9 @@ export interface TestEngineOptions {
   timing?: TestEngineTiming;
   /** Scratch directory for artifacts/workspaces. Default: a fresh temp dir. */
   workDir?: string;
-  /** Stage Semaphore width (prod default 8). */
+  /** The admission controller's ordinary lane: how many stages run at once (prod default 8). */
   maxConcurrentStages?: number;
-  /** Wire `ResultValidator` like the server does. Default true. */
-  resultValidation?: boolean;
-  /** The engine under test. Default: today's engine (`createV1Adapter`). */
+  /** The engine under test. Default: `createV2Adapter`. */
   adapter?: AdapterFactory;
   /**
    * Secret store contents (`namespace/name` → value). When set, the MCP hub

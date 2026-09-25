@@ -7,10 +7,16 @@ import type { TimelineStep, UsageInfo } from '@/components/chat/redesign/types.j
 import type { ContextUsageSnapshot } from '@generatorai/client-core';
 import type { StreamSegment } from '@/components/agent/deriveTimeline.js';
 
+/**
+ * The run page's visual stage states, normalized from the v2 instance states:
+ * `ready` covers ready/starting, `running` covers validating, `waiting`
+ * covers waiting/retry_wait.
+ */
 export type StageStatus =
   | 'pending'
-  | 'queued'
+  | 'ready'
   | 'running'
+  | 'waiting'
   | 'paused'
   | 'awaiting_input'
   | 'completed'
@@ -22,6 +28,8 @@ export type RunStatus =
   | 'pending'
   | 'starting'
   | 'running'
+  | 'waiting'
+  | 'finalizing'
   | 'paused'
   | 'cancelling'
   | 'cancelled'

@@ -93,6 +93,7 @@ export const STAGE_RUN_TRANSITIONS: readonly StageRunTransition[] = Object.freez
   ...rows('validating', 'completed', 'sched:attempt_succeeded', 'actor', WORK, 'same transaction as successor activation'),
   ...rows('awaiting_input', 'running', 'exec:input_received', 'executor', WORK, 'frame alive; lease re-stamped'),
   ...rows('awaiting_input', 'ready', 'sched:input_received', 'actor', WORK, 'no frame after a restart; the resume attempt carries the verdict'),
+  ...rows('awaiting_input', 'paused', 'sched:frame_lost', 'actor', WORK, 'an in-turn gate (tool permission, question, plan) lost to a restart: paused(interrupted)'),
   ...rows('awaiting_input', 'failed', 'user:reject', 'actor', WORK, 'rejected_by_human'),
   ...rows('awaiting_input', 'cancelled', 'user:cancel', 'actor', WORK_AND_CONTAINER, 'waiter cancelled'),
   ...rows('awaiting_input', 'cancelled', 'run:cancel', 'actor', WORK_AND_CONTAINER, 'waiter cancelled'),

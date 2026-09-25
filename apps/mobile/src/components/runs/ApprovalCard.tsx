@@ -22,20 +22,18 @@ import { useCardEntering } from '../common/enterMotion';
 
 export function ApprovalCard({
   stage,
-  interruptData,
   busy,
   onDecide,
   onOpenStage,
 }: {
+  /** An `awaiting_input` stage run; its `interruptData` is what the gate asks. */
   stage: StageRunSummary;
-  /** From pending-interrupts when present; the stage row's own copy otherwise. */
-  interruptData: unknown;
   busy: boolean;
   onDecide: (outcome: ApprovalOutcome, feedback?: string) => void;
   onOpenStage?: () => void;
 }): React.ReactElement {
   const entering = useCardEntering();
-  const view = interruptOf(interruptData ?? stage.interruptData);
+  const view = interruptOf(stage.interruptData);
   const [feedback, setFeedback] = useState<'changes' | 'approve' | null>(null);
   const [confirmReject, setConfirmReject] = useState(false);
   const name = stage.name ?? stage.stageKey;

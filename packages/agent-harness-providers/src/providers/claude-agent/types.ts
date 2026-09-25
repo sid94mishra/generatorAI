@@ -203,7 +203,7 @@ export interface StoredConversationConfig {
   lastUsedAt?: number;
   /**
    * HITL-06 (Claude parity): Domain permission callback provided by the
-   * caller (usually `StageExecutionService.buildPermissionHandler`). Bridged
+   * caller (the session composer's gates, `applyModeConfig`). Bridged
    * to the Claude SDK's `canUseTool` in `buildQueryOptions`. When absent,
    * the SDK's own `permissionMode` decides.
    */

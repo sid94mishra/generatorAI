@@ -631,10 +631,9 @@ function NotificationQueue({ onClose }: { onClose: () => void }): React.JSX.Elem
 // `stages`/`variables` are a point-in-time snapshot fetched when this
 // opened (`App.tsx`'s `openStageDetail`) — this overlay does not re-fetch
 // while open, matching the terminal chooser's `select` overlay. Per-stage
-// steps and run-wide hooks, though, DO need to be live: they come out of
-// the pane's own timeline (`stage_run.step_started`/`.step_completed`,
-// `hook.*`), which is already reducer-maintained and keeps updating while
-// this overlay is open.
+// Run-wide hooks, though, DO need to be live: they come out of the pane's
+// own timeline (`hook.*`), which is already reducer-maintained and keeps
+// updating while this overlay is open.
 
 function StageDetailOverlay({
   overlay,
@@ -648,10 +647,6 @@ function StageDetailOverlay({
   const selection = useSelection(overlay.stages.length);
 
   const selectedStage = overlay.stages[selection.index];
-  const steps = useMemo(
-    () => (timeline?.items ?? []).filter((item) => item.kind === 'step' && item.stageRunId === selectedStage?.id),
-    [timeline, selectedStage?.id],
-  );
   // Hooks are run-wide, not stage-scoped (no producer correlates a hook to
   // a specific stage run) — shown once, not per selected stage.
   const hooks = useMemo(() => (timeline?.items ?? []).filter((item) => item.kind === 'hook'), [timeline]);
@@ -683,7 +678,9 @@ function StageDetailOverlay({
               {' '}
               <Text color={statusColor(stage.status)}>{stage.status.padEnd(10)}</Text>
               {stage.name ?? stage.id}
-              {stage.retryCount ? <Text color={theme.c('warning')}>{`  retry ×${stage.retryCount}`}</Text> : null}
+              {(stage.attempts ?? 0) > 1 ? (
+                <Text color={theme.c('warning')}>{`  retry ×${(stage.attempts ?? 1) - 1}`}</Text>
+              ) : null}
             </Text>
           )}
         />
@@ -701,18 +698,6 @@ function StageDetailOverlay({
               <Text color={theme.c('danger')} wrap="wrap">
                 {selectedStage.error}
               </Text>
-            ) : null}
-
-            {steps.length > 0 ? (
-              <Box flexDirection="column" marginTop={1}>
-                <Text color={theme.c('muted')}>Steps</Text>
-                {steps.map((step) => (
-                  <Text key={step.id}>
-                    {step.step?.status === 'complete' ? theme.glyphs.success : theme.glyphs.running}{' '}
-                    {step.step?.label ?? step.text}
-                  </Text>
-                ))}
-              </Box>
             ) : null}
           </Box>
         ) : null}

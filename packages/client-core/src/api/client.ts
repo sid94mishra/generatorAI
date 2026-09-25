@@ -6,7 +6,12 @@
 // no transport, no retries live here — those belong to the layers below.
 // ────────────────────────────────────────────────────────────────
 
-import type { WorkflowDefinitionRecord } from '@generatorai/workflow-spec';
+import type {
+  RunCommand,
+  StageRunState,
+  WorkflowDefinitionRecord,
+  WorkflowRunState,
+} from '@generatorai/workflow-spec';
 
 export interface ApiFetch {
   (path: string, init?: RequestInit): Promise<Response>;
@@ -436,15 +441,8 @@ export interface WorkflowSummary {
   tags?: string[];
 }
 
-export type RunStatus =
-  | 'created'
-  | 'pending'
-  | 'starting'
-  | 'running'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+/** The v2 run states (`waiting`, `finalizing` and `cancelling` included). */
+export type RunStatus = WorkflowRunState;
 
 export interface WorkflowRunSummary {
   id: string;
@@ -459,20 +457,20 @@ export interface WorkflowRunSummary {
   completedAt?: Timestamp | null;
   error?: string | null;
   workspaceId?: string | null;
-  /** Set on a retry: the failed or cancelled run it replaced. */
+  /** Set on a fork: the terminal run it re-runs. */
   ancestorRunId?: string | null;
+  /** Why the run is in its status (`budget_exhausted`, …). */
+  statusReason?: string | null;
+  /** CAS version (`expectedVersion` on run commands). */
+  version?: number;
 }
 
-export type StageRunStatus =
-  | 'pending'
-  | 'queued'
-  | 'running'
-  | 'paused'
-  | 'awaiting_input'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'skipped';
+/**
+ * The v2 instance states. `ready`/`starting` are admitted-and-launching,
+ * `validating` is still the live attempt, `retry_wait` a retry backoff,
+ * `awaiting_input` a human gate.
+ */
+export type StageRunStatus = StageRunState;
 
 export interface StageRunSummary {
   id: string;
@@ -485,41 +483,30 @@ export interface StageRunSummary {
   startedAt?: Timestamp | null;
   completedAt?: Timestamp | null;
   error?: string | null;
-  retryCount?: number;
-  currentStep?: number;
-  totalSteps?: number;
+  /** `triage`, `review_loop#2/fix`: unique per run; the stage key at the top level. */
+  instancePath?: string;
+  /** The latest attempt number (0 before the first attempt); retries are attempts beyond the first. */
+  currentAttempt?: number;
+  /** Why the instance is in its status (`retry:resume`, `aborted:pause`, …). */
+  statusReason?: string | null;
+  /** Why a skipped instance was skipped (`guard`, `operator`, `unreachable`, …). */
+  skipReason?: string | null;
   /** Harness-produced summary of what the stage did. */
   summary?: string | null;
   /** Full raw output of the stage's main prompt(s). */
   outputText?: string | null;
   outputData?: Record<string, unknown> | null;
   artifactManifest?: Array<{ path: string; language: string; action: string; sizeBytes: number }> | null;
-  /** The parked payload while `awaiting_input` — shape varies by gate kind. */
+  /**
+   * The parked payload while `awaiting_input` — `kind` is
+   * `stage_completion_review`, `tool_permission`, `question` or `plan_review`.
+   * Pending approvals are the run's `awaiting_input` stage runs; there is no
+   * separate pending-approvals endpoint.
+   */
   interruptData?: unknown;
 }
 
-/**
- * One entry of `GET /workflow-runs/:id/pending-interrupts`.
- *
- * The server returns the parked STAGE RUN rows themselves
- * (`HitlService.listPending` → `StageRun[]`), so `id` is the stage-run id —
- * the id the approve route takes — and the prompt, when there is
- * one, lives inside `interruptData`. This previously declared a
- * `{ stageId, prompt }` shape the server never sent, which is how a client
- * ended up matching on a field that was always undefined.
- */
-export interface PendingInterrupt {
-  id: string;
-  workflowRunId: string;
-  /** The stage key in the run's pinned graph. */
-  stageKey: string;
-  name?: string;
-  status: StageRunStatus;
-  sessionId?: string | null;
-  interruptData?: unknown;
-}
-
-/** Outcomes the HITL approve endpoint accepts. */
+/** Outcomes the `approve` run command accepts. */
 export type ApprovalOutcome = 'approved' | 'changes_requested' | 'rejected';
 
 // ── Automations ─────────────────────────────────────────────────
@@ -924,7 +911,6 @@ export const queryKeys = {
     workflowId ? (['runs', 'by-workflow', workflowId] as const) : (['runs'] as const),
   run: (runId: string) => ['runs', 'detail', runId] as const,
   runStages: (runId: string) => ['runs', 'detail', runId, 'stages'] as const,
-  runInterrupts: (runId: string) => ['runs', 'detail', runId, 'interrupts'] as const,
   runScratchpad: (runId: string) => ['runs', 'detail', runId, 'scratchpad'] as const,
   /** One stage session's persisted transcript. */
   stageTranscript: (runId: string, stageRunId: string) =>
@@ -1298,30 +1284,20 @@ export function createApiClient(fetchImpl: ApiFetch) {
       stages: (id: string) =>
         request<StageRunSummary[]>(fetchImpl, `/api/workflow-runs/${id}/stages`),
 
-      pendingInterrupts: (id: string) =>
-        request<PendingInterrupt[]>(fetchImpl, `/api/workflow-runs/${id}/pending-interrupts`),
-
       /**
-       * Answer a stage's HITL gate.
+       * Send a run command (`POST /workflow-runs/:id/commands`).
        *
-       * This is the ONE mutating run operation a mobile device can perform:
-       * the route policy classifies it as `exec:agent` (answering the agent)
-       * rather than `write:workflows` (editing the workflow). Everything else
-       * below is intentionally absent from the mobile surface.
+       * `approve` (answering a stage's HITL gate) is the ONE mutating run
+       * operation a mobile device can perform without `write:workflows`: the
+       * route policy classifies the commands route as `exec:agent` (answering
+       * the agent), and the route itself demands `write:workflows` for every
+       * other command. The pending gates are the run's `awaiting_input` stage
+       * runs (`runs.get(id).stageRuns`).
        */
-      approve: (
-        runId: string,
-        stageId: string,
-        body: {
-          outcome: ApprovalOutcome;
-          reason?: string;
-          followUpPrompt?: string;
-          value?: unknown;
-        },
-      ) =>
-        request<{ message: string; outcome: ApprovalOutcome; followUp: boolean }>(
+      command: (runId: string, body: RunCommand) =>
+        request<{ runId: string; command: string }>(
           fetchImpl,
-          `/api/workflow-runs/${runId}/stages/${stageId}/approve`,
+          `/api/workflow-runs/${runId}/commands`,
           json(body),
         ),
     },

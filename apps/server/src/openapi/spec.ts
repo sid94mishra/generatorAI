@@ -670,18 +670,18 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           definitionVersionId: { type: 'string', description: 'The immutable definition version this run executes' },
           status: {
             type: 'string',
-            enum: [
-              'pending', 'queued', 'running', 'paused', 'completed',
-              'failed', 'cancelled',
-            ],
+            enum: ['created', 'starting', 'running', 'waiting', 'paused', 'finalizing', 'cancelling', 'completed', 'failed', 'cancelled'],
           },
+          statusReason: { type: 'string', nullable: true },
+          outcome: { type: 'string', enum: ['completed', 'failed', 'cancelled'], nullable: true },
+          version: { type: 'integer', description: 'CAS version (`expectedVersion` on commands)' },
+          ancestorRunId: { type: 'string', nullable: true, description: 'The run this one was forked from' },
           permissionMode: {
             type: 'string',
             enum: ['bypassPermissions', 'default', 'acceptEdits', 'plan'],
             description:
-              'HITL permission mode. Default `bypassPermissions` is fully ' +
-              'autonomous. Flip to `plan` / `default` / `acceptEdits` to ' +
-              'surface interrupts for human approval (see /pending-interrupts).',
+              "The operator's explicit run-level permission mode; unset lets the stage, workflow and trigger " +
+              'layers and the deployment posture decide. Gated modes park stages `awaiting_input` for approval.',
           },
           variables: { type: 'object', additionalProperties: true },
           startedAt: { type: 'string', format: 'date-time', nullable: true },
@@ -696,18 +696,20 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           workflowRunId: { type: 'string' },
           stageKey: { type: 'string', description: "The stage's key in the run's pinned graph" },
           name: { type: 'string' },
+          instancePath: { type: 'string', description: 'Unique per run; the stage key at the top level' },
           status: {
             type: 'string',
             enum: [
-              'pending', 'queued', 'running', 'paused', 'completed',
-              'failed', 'cancelled', 'skipped', 'awaiting_input',
+              'pending', 'ready', 'starting', 'running', 'validating', 'awaiting_input', 'waiting',
+              'retry_wait', 'paused', 'completed', 'failed', 'skipped', 'cancelled',
             ],
           },
-          interruptData: {},
-          retryCount: { type: 'integer' },
+          statusReason: { type: 'string', nullable: true },
+          interruptData: { description: 'What an awaiting_input instance asks for; answered with the approve command' },
+          currentAttempt: { type: 'integer' },
           version: { type: 'integer' },
         },
-        required: ['id', 'workflowRunId', 'stageKey', 'status'],
+        required: ['id', 'workflowRunId', 'stageKey', 'instancePath', 'status'],
       },
       Automation: {
         type: 'object',
@@ -723,15 +725,32 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           enabled: { type: 'boolean' },
         },
       },
-      ResumeStageRequest: {
+      RunCommand: {
+        type: 'object',
+        description:
+          'Discriminated by `command`. The full JSON Schema ships as `@generatorai/workflow-spec/run-command.schema.json`.',
+        properties: {
+          command: { type: 'string', enum: ['pause', 'resume', 'cancel', 'retry', 'skip', 'fail', 'approve'] },
+          instanceId: { type: 'string', description: 'The instance the command targets; omitted means the run' },
+          expectedVersion: { type: 'integer' },
+          mode: { type: 'string', enum: ['drain', 'interrupt', 'resume', 'restart'], description: 'pause: drain|interrupt; retry: resume|restart' },
+          as: { type: 'string', enum: ['completed', 'skipped'], description: 'skip only' },
+          outcome: { type: 'string', enum: ['approved', 'changes_requested', 'rejected'], description: 'approve only' },
+          feedback: { type: 'string', description: 'approve only' },
+          data: { type: 'object', additionalProperties: true, description: "approve only: a question's answers, a plan decision" },
+        },
+        required: ['command'],
+      },
+      ForkRunRequest: {
         type: 'object',
         properties: {
-          outcome: { type: 'string', enum: ['approved', 'changes_requested', 'rejected'] },
-          value: {},
-          reason: { type: 'string' },
-          followUpPrompt: { type: 'string' },
+          rerunFrom: { type: 'array', items: { type: 'string' }, description: 'Instance paths re-run with everything downstream; default: every instance that did not complete' },
+          definition: { type: 'string', enum: ['pinned', 'latest'] },
+          variablesOverride: { type: 'object', additionalProperties: true },
+          workspace: { type: 'string', enum: ['restore_checkpoint', 'reuse', 'fresh'] },
+          idempotencyKey: { type: 'string' },
+          start: { type: 'boolean' },
         },
-        required: ['outcome'],
       },
       Agent: {
         type: 'object',
@@ -1604,28 +1623,49 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
       },
     },
-    '/api/workflow-runs/{runId}/pause': {
+    '/api/workflow-runs/{runId}/start': {
       post: {
         tags: ['Runs'],
-        summary: 'Pause a running workflow',
+        summary: 'Start a created run',
         parameters: [runIdParam],
-        responses: { '200': { description: 'Paused' } },
+        responses: { '202': { description: 'Start initiated' }, '409': { description: 'Not a created run' } },
       },
     },
-    '/api/workflow-runs/{runId}/resume': {
+    '/api/workflow-runs/{runId}/commands': {
       post: {
-        tags: ['Runs'],
-        summary: 'Resume a paused workflow',
+        tags: ['Runs', 'HITL'],
+        summary: 'An operator command on the run or one of its instances',
+        description:
+          'pause {mode: drain|interrupt}, resume, cancel, retry {mode: resume|restart}, skip {as}, fail, approve {outcome, feedback?, data?}. ' +
+          '`instanceId` targets one instance; `expectedVersion` makes the command conditional. `approve` needs exec:agent; every other command also needs write:workflows.',
         parameters: [runIdParam],
-        responses: { '200': { description: 'Running' } },
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RunCommand' } } },
+        },
+        responses: {
+          '202': { description: 'Accepted by the engine' },
+          '400': { description: 'Invalid command' },
+          '403': { description: 'A run-control command without write:workflows' },
+          '404': { description: 'Unknown run or instance' },
+          '409': { description: 'invalid_state, version_conflict or conflict' },
+          '503': { description: 'No workflow engine in this process' },
+        },
       },
     },
-    '/api/workflow-runs/{runId}/cancel': {
+    '/api/workflow-runs/{runId}/fork': {
       post: {
         tags: ['Runs'],
-        summary: 'Cancel a workflow',
+        summary: 'Re-run a terminal run as a new run',
         parameters: [runIdParam],
-        responses: { '200': { description: 'Cancelled' } },
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ForkRunRequest' } } },
+        },
+        responses: {
+          '201': { description: 'The fork', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowRun' } } } },
+          '409': { description: 'The source run is not terminal' },
+        },
       },
     },
     '/api/workflow-runs/{runId}/permission-mode': {
@@ -1669,101 +1709,6 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           },
         },
         responses: { '200': { description: 'Mode updated' } },
-      },
-    },
-    '/api/workflow-runs/{runId}/pending-interrupts': {
-      get: {
-        tags: ['Runs', 'HITL'],
-        summary: 'List stages awaiting human approval',
-        parameters: [runIdParam],
-        responses: {
-          '200': {
-            description: 'Pending stages',
-            content: {
-              'application/json': {
-                schema: { type: 'array', items: { $ref: '#/components/schemas/StageRun' } },
-              },
-            },
-          },
-        },
-      },
-    },
-    '/api/workflow-runs/{runId}/stages/{stageId}/resume': {
-      post: {
-        tags: ['Runs', 'HITL'],
-        summary: 'Approve or reject an awaiting_input stage',
-        parameters: [
-          runIdParam,
-          { in: 'path', name: 'stageId', required: true, schema: { type: 'string' } },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/ResumeStageRequest' },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Resumed',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: { ok: { type: 'boolean' } },
-                },
-              },
-            },
-          },
-          '409': {
-            description: 'Stage no longer awaiting_input (race)',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    ok: { type: 'boolean' },
-                    reason: { type: 'string' },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-    '/api/workflow-runs/{runId}/stages/{stageId}/pause': {
-      post: {
-        tags: ['Runs'],
-        summary: 'Pause a specific stage run',
-        parameters: [
-          runIdParam,
-          { in: 'path', name: 'stageId', required: true, schema: { type: 'string' } },
-        ],
-        responses: { '200': { description: 'Paused' } },
-      },
-    },
-    '/api/workflow-runs/{runId}/stages/{stageId}/retry': {
-      post: {
-        tags: ['Runs'],
-        summary: 'Retry a failed stage',
-        parameters: [
-          runIdParam,
-          { in: 'path', name: 'stageId', required: true, schema: { type: 'string' } },
-        ],
-        responses: { '200': { description: 'Queued for retry' } },
-      },
-    },
-    '/api/workflow-runs/{runId}/stages/{stageId}/cancel': {
-      post: {
-        tags: ['Runs'],
-        summary: 'Cancel a stage',
-        parameters: [
-          runIdParam,
-          { in: 'path', name: 'stageId', required: true, schema: { type: 'string' } },
-        ],
-        responses: { '200': { description: 'Cancelled' } },
       },
     },
 

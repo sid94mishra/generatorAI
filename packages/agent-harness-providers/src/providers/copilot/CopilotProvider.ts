@@ -1839,7 +1839,7 @@ export class CopilotProvider implements IAgentHarness {
 
     // Phase 2, 2.23 + 2.25 — adapter-level `defaultTimeoutMs` is a last-ditch
     // guard so a stuck SDK session can't hang indefinitely. The callers
-    // (StageExecutionService, HookExecutor) drive their own timeouts via
+    // (the engine's StageExecutor, HookExecutor) drive their own timeouts via
     // `signal`; this fires only when nothing else bounds the wait.
     //
     // HITL-07: the watchdog is a rolling interval instead of a single

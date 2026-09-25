@@ -1542,6 +1542,11 @@ export class StreamEventRouter {
         break;
       }
 
+      // A fork is a NEW run (`workflowRunId`); its ancestor stays terminal.
+      case 'workflow_run.forked':
+        out.push({ op: 'invalidate', resource: 'runs' });
+        break;
+
       // Orchestration / pre- and post-processing progress. Narration for the
       // RUN, so it goes on the session key rather than into a stage.
       case 'workflow_run.orchestration_started':
@@ -1604,7 +1609,6 @@ export class StreamEventRouter {
 
       // ── Stage run lifecycle ──────────────────────────────────────
       case 'stage_run.pending':
-      case 'stage_run.queued':
       case 'stage_run.running':
       case 'stage_run.paused':
       case 'stage_run.completed':
@@ -1648,25 +1652,6 @@ export class StreamEventRouter {
         const parentRunId = optStr(data['workflowRunId']);
         if (parentRunId) out.push({ op: 'invalidate', resource: 'run', id: parentRunId });
         out.push({ op: 'invalidate', resource: 'runs' });
-        break;
-      }
-
-      case 'stage_run.step_started':
-      case 'stage_run.step_completed': {
-        // Flush BEFORE recording the transition so the step boundary keeps
-        // its place in the transcript.
-        this.flushKey(key, out);
-        const stageRunId = stageRunIdOf();
-        if (!stageRunId) break;
-        const started = kind === 'stage_run.step_started';
-        if (started && data['step'] !== undefined) {
-          out.push({
-            op: 'stageStatus',
-            stageRunId,
-            status: 'running',
-            data: { currentStep: data['step'], totalSteps: data['totalSteps'] },
-          });
-        }
         break;
       }
 

@@ -52,7 +52,7 @@ export const LIFECYCLE_EVENT_KINDS: ReadonlySet<string> = new Set([
   'workflow_run.completed',
   'workflow_run.failed',
   'workflow_run.cancelled',
-  'workflow_run.retried',
+  'workflow_run.forked',
   // Automations
   'automation_execution.started',
   'automation_execution.completed',
@@ -93,8 +93,12 @@ export function deriveStreamScopes(event: {
 }): ScopeTarget[] {
   const targets: ScopeTarget[] = [];
 
+  // An engine event from the outbox carries its `runSeq`: the outbox
+  // publisher already put it on its run scope, awaited (G5 §5.8), so the
+  // bridge must not publish it there a second time.
   const runId = readString(event.data, 'workflowRunId');
-  if (runId) targets.push({ scope: 'run', id: runId });
+  const fromOutbox = !!event.data && typeof (event.data as { runSeq?: unknown }).runSeq === 'number';
+  if (runId && !fromOutbox) targets.push({ scope: 'run', id: runId });
 
   const chatId = readString(event.data, 'chatId');
   if (chatId) targets.push({ scope: 'chat', id: chatId });

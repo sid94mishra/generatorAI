@@ -40,9 +40,9 @@ describe('no-direct-stage-status-write', () => {
     expect(secondArg('id')).toBe('');
   });
 
-  it('is report-only in P00 with a recorded baseline', () => {
-    expect(MODE).toBe('report');
-    expect(BASELINE).toBe(24);
+  it('is a hard failure since the P03 cutover, with no tolerated writes', () => {
+    expect(MODE).toBe('fail');
+    expect(BASELINE).toBe(0);
   });
 });
 

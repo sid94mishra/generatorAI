@@ -61,3 +61,32 @@ export const RunCommandSchema = z
   ])
   .describe('An operator command on a run');
 export type RunCommand = z.infer<typeof RunCommandSchema>;
+
+/**
+ * `forkRun` (P03 WP-3.8, G5 §3.8): re-run a terminal run as a NEW run. A
+ * terminal run is never mutated. Instances not downstream of any `rerunFrom`
+ * path are memoized (copied as completed, never re-validated).
+ */
+export const ForkRunRequestSchema = z
+  .object({
+    rerunFrom: z
+      .array(z.string().min(1).max(500))
+      .max(200)
+      .optional()
+      .describe('Instance paths to run again with everything downstream; omitted means every instance that did not complete'),
+    definition: z
+      .enum(['pinned', 'latest'])
+      .default('pinned')
+      .describe("pinned keeps the source run's definition version; latest runs the current published version"),
+    variablesOverride: z.record(z.unknown()).optional().describe('Variables merged over the source run variables'),
+    workspace: z
+      .enum(['restore_checkpoint', 'reuse', 'fresh'])
+      .default('fresh')
+      .describe('fresh provisions a new workspace; reuse runs in the source workspace; restore_checkpoint reuses it rolled back to the checkpoint before the earliest re-run instance'),
+    idempotencyKey: z.string().min(1).max(200).optional().describe('A repeated key returns the fork it already created'),
+    start: z.boolean().default(true).describe('Start the fork immediately'),
+  })
+  .strict()
+  .describe('Fork a terminal run');
+export type ForkRunRequest = z.input<typeof ForkRunRequestSchema>;
+export type ForkRunOptions = z.output<typeof ForkRunRequestSchema>;

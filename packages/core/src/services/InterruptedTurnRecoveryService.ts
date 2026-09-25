@@ -4,7 +4,7 @@
 // Stream durability covered two of three failure shapes: a client reload and a
 // transport drop both replay from the durable log and pick the turn back up.
 // The third — the SERVER restarting mid-turn — was not handled at all:
-// `StartupRecoveryService` skips chat sessions by design (re-hydrating them
+// boot housekeeping skips chat sessions by design (re-hydrating them
 // without their tool handlers would poison the SDK session), the per-turn
 // finalizers live in `ChatManagementService`'s memory, and nothing at boot
 // wrote a terminal event. A client reconnecting after the restart replayed the

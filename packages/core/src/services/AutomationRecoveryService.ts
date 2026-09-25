@@ -121,8 +121,8 @@ export class AutomationRecoveryService {
 
     // ── P0-b: re-drive whatever is left before finalising anything ──
     if (this.onResumeExecution) {
-      // Iterations whose workflow run is still live. StartupRecoveryService
-      // re-drives those, so their slots must keep their claim — reclaiming
+      // Iterations whose workflow run is still live. The workflow engine's
+      // recovery drives those, so their slots must keep their claim — reclaiming
       // them here would run the same iteration twice.
       const activeIterationIndexes = runs
         .filter((_run, idx) => statuses[idx] === 'pending' || statuses[idx] === 'running')

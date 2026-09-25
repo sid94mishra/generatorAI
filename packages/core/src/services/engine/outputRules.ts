@@ -1,8 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // The hard output rules of a stage (`output.rules`), evaluated on a text.
 //
-// One evaluator for both engines: `ResultValidator` (v1) and the v2
-// `OutputExtractor`. Every rule is bounded: `regex` runs on the linear-time
+// Evaluated by the engine's `OutputExtractor` (the output contract). Every rule is bounded: `regex` runs on the linear-time
 // engine (RV-21), `custom_script` has its own timeout.
 // ────────────────────────────────────────────────────────────────
 

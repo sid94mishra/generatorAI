@@ -13,7 +13,8 @@ import type {
   WorkflowGraphInput,
   WorkflowTemplate,
 } from '@generatorai/workflow-spec';
-import type { WorkflowRun, WorkflowRunWithStages, CreateWorkflowRunParams, StageRun } from './WorkflowRun.js';
+import type { ForkRunRequest, RunCommand } from '@generatorai/workflow-spec';
+import type { WorkflowRun, WorkflowRunWithStages, CreateWorkflowRunParams } from './WorkflowRun.js';
 
 /** Platform type discriminator */
 export type PlatformType = 'web' | 'cli' | 'desktop';
@@ -104,22 +105,19 @@ export interface IPlatformClient {
   listRuns(filter?: { definitionId?: string; status?: string }): Promise<WorkflowRun[]>;
   getRun(id: string): Promise<WorkflowRunWithStages>;
   startRun(id: string): Promise<void>;
-  pauseRun(id: string): Promise<void>;
-  resumeRun(id: string): Promise<void>;
-  cancelRun(id: string): Promise<void>;
   /**
-   * PARITY-1: run-level retry. Creates and starts a NEW run that inherits
-   * the failed run's definition, variables and already-successful stages,
-   * and resolves with that new run's id — the ancestor stays terminal.
+   * Every operator action on a run or one of its instances (P03 commands
+   * API): pause, resume, cancel, retry, skip, fail and approve (which also
+   * answers an in-turn tool permission, question or plan review). A refused
+   * command rejects with the server's 409/400/404 error.
    */
-  retryRun(id: string): Promise<{ runId: string }>;
+  runCommand(runId: string, command: RunCommand): Promise<void>;
+  /**
+   * Re-run a terminal run as a NEW run (G5 §3.8); the source stays terminal.
+   * Resolves with the fork.
+   */
+  forkRun(runId: string, request?: ForkRunRequest): Promise<WorkflowRun>;
   deleteRun(id: string): Promise<void>;
-
-  // ── PARITY-2: per-stage controls (dedicated /stages/:id/* endpoints) ──
-  pauseStageRun(runId: string, stageId: string): Promise<void>;
-  resumeStageRun(runId: string, stageId: string): Promise<void>;
-  retryStageRun(runId: string, stageId: string): Promise<void>;
-  cancelStageRun(runId: string, stageId: string): Promise<void>;
 
   // ── HITL — permission mode + interrupt resume (HITL-04) ──
   getPermissionMode(runId: string): Promise<{
@@ -130,15 +128,4 @@ export interface IPlatformClient {
     runId: string,
     mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan',
   ): Promise<void>;
-  listPendingInterrupts(runId: string): Promise<StageRun[]>;
-  resumeStage(
-    runId: string,
-    stageId: string,
-    resolution: {
-      outcome: 'approved' | 'changes_requested' | 'rejected';
-      value?: unknown;
-      reason?: string;
-      followUpPrompt?: string;
-    },
-  ): Promise<{ ok: boolean; reason?: string }>;
 }

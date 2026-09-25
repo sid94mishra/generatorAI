@@ -745,7 +745,7 @@ export const MIGRATIONS: readonly Migration[] = [
       version: 2,
       name: 'phase1_session_allocations',
       sql: [
-        // 1.6: persistent SessionAllocator state
+        // 1.6: persistent session allocation state (dropped by v57)
         `
         CREATE TABLE IF NOT EXISTS session_allocations (
           id                TEXT PRIMARY KEY,
@@ -2066,7 +2066,7 @@ export const MIGRATIONS: readonly Migration[] = [
       // W23 / X-24 — Run identity model.
       //
       // A user-initiated retry no longer mutates the terminal (failed) run.
-      // Instead, retryRun() creates a NEW WorkflowRun with ancestorRunId
+      // Instead, a retry creates a NEW WorkflowRun with ancestorRunId
       // pointing to the run it was retried from. This establishes an
       // immutable audit chain:
       //

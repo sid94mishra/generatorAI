@@ -4,7 +4,7 @@
 //
 // The Claude SDK invokes `canUseTool(toolName, input, ctx)` for every
 // tool call it wants to execute. We translate that into the domain's
-// `PermissionRequest.type` union so `StageExecutionService.buildPermissionHandler`
+// `PermissionRequest.type` union so the session gates (`StageGatePort`, the chat gates)
 // can apply the same policy across providers (Copilot / Claude / …).
 //
 // Mapping rules (case-insensitive on the tool name):

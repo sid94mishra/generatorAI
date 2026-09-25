@@ -179,8 +179,8 @@ describe('ChatManagementService', () => {
     //
     // Persisting both produced one call the user could see twice — the copy
     // holding the RESULT could not say what the tool was called with, and the
-    // copy holding the args stayed `running` forever. `StageExecutionService`
-    // already merged these; the chat path did not.
+    // copy holding the args stayed `running` forever. The stage
+    // path already merged these; the chat path did not.
     it('merges a tool call re-announced with the same callId', async () => {
       const chat = await service.createChat({ name: 'Tool dedup' });
       const session = await sessionRepo.getById(chat.sessionId);

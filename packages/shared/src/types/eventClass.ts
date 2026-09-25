@@ -156,7 +156,7 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'workflow_run.completed': 'item',
   'workflow_run.failed': 'item',
   'workflow_run.cancelled': 'item',
-  'workflow_run.retried': 'item',
+  'workflow_run.forked': 'item',
   'workflow_run.orchestration_started': 'item',
   'workflow_run.worktree_creating': 'item',
   'workflow_run.worktree_created': 'item',
@@ -179,10 +179,7 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
 
   // stage_run
   'stage_run.pending': 'item',
-  'stage_run.queued': 'item',
   'stage_run.running': 'item',
-  'stage_run.step_started': 'item',
-  'stage_run.step_completed': 'item',
   'stage_run.paused': 'item',
   'stage_run.resumed': 'item',
   'stage_run.completed': 'item',
@@ -190,6 +187,7 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'stage_run.cancelled': 'item',
   'stage_run.skipped': 'item',
   'stage_run.retrying': 'item',
+  'stage_run.repairing': 'item',
   'stage_run.awaiting_input': 'item',
   'stage_run.input_received': 'item',
 

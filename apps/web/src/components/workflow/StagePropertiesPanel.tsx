@@ -2,8 +2,8 @@
 // StagePropertiesPanel — right sidebar editing one stage (or one edge)
 // of the v2 `WorkflowGraph`. Collapsible accordion sections, a
 // Properties / Execution tab bar, validator issues shown next to the
-// field they point at. Controls the current engine cannot execute are
-// rendered disabled with the upgrade tooltip (`EngineGated`).
+// field they point at. Every v2 field is editable: the engine executes
+// all of them (ENGINE_LEVEL v2).
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -32,7 +32,7 @@ import { NumberStepper } from './NumberStepper.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
 import { patchSession } from './sessionPatch.js';
 import { EDGE_TYPE_LABELS, EDGE_TYPE_HINTS } from './edgeTypeStyles.js';
-import { EngineGated, ENGINE_SUPPORTS_V2, ENGINE_UPGRADE_HINT, ExpressionField, FieldIssues, issuesAt } from './engineGate.js';
+import { ExpressionField, FieldIssues, issuesAt } from './engineGate.js';
 import { Button, Input, Select, Textarea, ToggleSwitch } from '@/components/ui/index.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { cn } from '@/lib/utils.js';
@@ -363,36 +363,30 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
           </p>
         </div>
 
-        <EngineGated>
-          <label className="mb-1.5 block text-xs font-medium text-foreground">Join</label>
-          <Select
-            aria-label="Join mode"
-            value={stage.join.mode}
-            disabled={!ENGINE_SUPPORTS_V2}
-            onChange={(v) =>
-              onUpdate({
-                join: v === 'all' ? { mode: 'all' } : v === 'any' ? { mode: 'any', cancelRemaining: false } : { mode: 'n_of_m', n: 1, cancelRemaining: false },
-              })
-            }
-            options={[
-              { value: 'all', label: 'All predecessors' },
-              { value: 'any', label: 'Any predecessor' },
-              { value: 'n_of_m', label: 'N of M predecessors' },
-            ]}
-          />
-        </EngineGated>
+        <label className="mb-1.5 block text-xs font-medium text-foreground">Join</label>
+        <Select
+          aria-label="Join mode"
+          value={stage.join.mode}
+          onChange={(v) =>
+            onUpdate({
+              join: v === 'all' ? { mode: 'all' } : v === 'any' ? { mode: 'any', cancelRemaining: false } : { mode: 'n_of_m', n: 1, cancelRemaining: false },
+            })
+          }
+          options={[
+            { value: 'all', label: 'All predecessors' },
+            { value: 'any', label: 'Any predecessor' },
+            { value: 'n_of_m', label: 'N of M predecessors' },
+          ]}
+        />
         <FieldIssues issues={issuesAt(issues, '/join')} />
 
         <ContextEditor stage={stage} onUpdate={onUpdate} issues={issues} />
 
-        <EngineGated>
-          <ToggleSwitch
-            checked={stage.sessionReuse === 'continue'}
-            disabled={!ENGINE_SUPPORTS_V2}
-            onChange={(checked) => onUpdate({ sessionReuse: checked ? 'continue' : 'fresh' })}
-            label="Continue the conversation across loop iterations"
-          />
-        </EngineGated>
+        <ToggleSwitch
+          checked={stage.sessionReuse === 'continue'}
+          onChange={(checked) => onUpdate({ sessionReuse: checked ? 'continue' : 'fresh' })}
+          label="Continue the conversation across loop iterations"
+        />
         <FieldIssues issues={issuesAt(issues, '/sessionReuse', '/sessionGroup')} />
       </CollapsibleSection>
 
@@ -416,7 +410,6 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
                 placeholder="What should the reviewer check?"
               />
             </div>
-            <EngineGated>
             <ToggleSwitch
               checked={stage.approval.allowChanges}
               onChange={(checked) => onUpdate({ approval: { ...stage.approval!, allowChanges: checked } })}
@@ -433,7 +426,6 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
                 step={1}
               />
             )}
-            </EngineGated>
           </div>
         )}
         <FieldIssues issues={issuesAt(issues, '/approval')} />
@@ -455,16 +447,21 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
           unit="sec"
         />
         {(['queueMs', 'idleMs', 'totalMs'] as const).map((field) => (
-          <EngineGated key={field}>
-            <NumberStepper
-              label={`${field === 'queueMs' ? 'Queue' : field === 'idleMs' ? 'Idle' : 'Total'} timeout (seconds)`}
-              value={stage.timeouts?.[field] ? stage.timeouts[field]! / 1000 : 0}
-              onChange={() => undefined}
-              min={0}
-              step={30}
-              unit="sec"
-            />
-          </EngineGated>
+          <NumberStepper
+            key={field}
+            label={`${field === 'queueMs' ? 'Queue' : field === 'idleMs' ? 'Idle' : 'Total'} timeout (seconds, 0 = default)`}
+            value={stage.timeouts?.[field] ? stage.timeouts[field]! / 1000 : 0}
+            onChange={(v) => {
+              const rest = { ...(stage.timeouts ?? {}) };
+              if (v > 0) rest[field] = v * 1000;
+              else delete rest[field];
+              onUpdate({ timeouts: Object.keys(rest).length > 0 ? rest : undefined });
+            }}
+            min={0}
+            max={field === 'totalMs' ? 604_800 : 86_400}
+            step={30}
+            unit="sec"
+          />
         ))}
         <FieldIssues issues={issuesAt(issues, '/timeouts')} />
       </CollapsibleSection>
@@ -504,7 +501,6 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
               step={0.5}
               unit="x"
             />
-            <EngineGated>
             <NumberStepper
               label="Max delay (ms)"
               value={stage.retry.maxDelayMs}
@@ -527,7 +523,6 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
                 ]}
               />
             </div>
-            </EngineGated>
           </div>
         )}
         <FieldIssues issues={issuesAt(issues, '/retry')} />
@@ -541,22 +536,19 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
             options={[
               { value: '', label: 'Engine default' },
               { value: 'fail', label: 'Fail the stage' },
-              { value: 'pause', label: 'Pause for an operator', disabled: !ENGINE_SUPPORTS_V2, description: ENGINE_SUPPORTS_V2 ? undefined : ENGINE_UPGRADE_HINT },
+              { value: 'pause', label: 'Pause for an operator' },
             ]}
           />
           <FieldIssues issues={issuesAt(issues, '/onExhausted')} />
         </div>
 
         <div className="mt-3">
-          <EngineGated>
-            <ToggleSwitch
-              checked={!!stage.repair}
-              disabled={!ENGINE_SUPPORTS_V2}
-              onChange={(checked) => onUpdate({ repair: checked ? RepairPolicySchema.parse({}) : undefined })}
-              label="Repair turns"
-              description="Ask the agent to fix output that fails its contract before retrying."
-            />
-          </EngineGated>
+          <ToggleSwitch
+            checked={!!stage.repair}
+            onChange={(checked) => onUpdate({ repair: checked ? RepairPolicySchema.parse({}) : undefined })}
+            label="Repair turns"
+            description="Ask the agent to fix output that fails its contract before retrying."
+          />
           <FieldIssues issues={issuesAt(issues, '/repair')} />
         </div>
       </CollapsibleSection>
@@ -564,23 +556,27 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
       <OutputSection stage={stage} onUpdate={onUpdate} issues={issues} />
 
       <CollapsibleSection title="Limits" icon={<GitMerge className="h-3.5 w-3.5" />} defaultOpen={false}>
-        <EngineGated>
-          <NumberStepper
-            label="Budget: max turns (0 = none)"
-            value={stage.budget?.maxTurns ?? 0}
-            onChange={() => undefined}
-            min={0}
-          />
-        </EngineGated>
-        <EngineGated>
-          <ToggleSwitch
-            checked={!!stage.compensate}
-            disabled={!ENGINE_SUPPORTS_V2}
-            onChange={() => undefined}
-            label="Compensation actions"
-            description="Undo actions run when the run fails or is cancelled."
-          />
-        </EngineGated>
+        <NumberStepper
+          label="Budget: max turns (0 = none)"
+          value={stage.budget?.maxTurns ?? 0}
+          onChange={(v) => {
+            const rest = { ...(stage.budget ?? {}) };
+            if (v > 0) rest.maxTurns = v;
+            else delete rest.maxTurns;
+            onUpdate({ budget: Object.keys(rest).length > 0 ? rest : undefined });
+          }}
+          min={0}
+          max={100_000}
+        />
+        {/* Compensation actions are authored in the workflow document; the
+            panel shows whether the stage has any and can remove them. */}
+        <ToggleSwitch
+          checked={!!stage.compensate?.length}
+          disabled={!stage.compensate?.length}
+          onChange={(checked) => { if (!checked) onUpdate({ compensate: undefined }); }}
+          label="Compensation actions"
+          description="Undo actions run when the run fails or is cancelled. Defined in the workflow document; turn off to remove them."
+        />
         <FieldIssues issues={issuesAt(issues, '/budget', '/compensate')} />
       </CollapsibleSection>
 
@@ -686,21 +682,18 @@ function OutputSection({ stage, onUpdate, issues }: SectionProps) {
           ]}
         />
       </div>
-      <EngineGated>
-        <label className="mb-1.5 block text-xs font-medium text-foreground">Extraction</label>
-        <Select
-          aria-label="Output extraction"
-          value={output.extraction}
-          disabled={!ENGINE_SUPPORTS_V2}
-          onChange={(v) => setOutput({ extraction: v as AgentStage['output']['extraction'] })}
-          options={[
-            { value: 'auto', label: 'Automatic' },
-            { value: 'native', label: 'Native' },
-            { value: 'tool', label: 'submit_output tool' },
-            { value: 'final_json_block', label: 'Final JSON block' },
-          ]}
-        />
-      </EngineGated>
+      <label className="mb-1.5 block text-xs font-medium text-foreground">Extraction</label>
+      <Select
+        aria-label="Output extraction"
+        value={output.extraction}
+        onChange={(v) => setOutput({ extraction: v as AgentStage['output']['extraction'] })}
+        options={[
+          { value: 'auto', label: 'Automatic' },
+          { value: 'native', label: 'Native' },
+          { value: 'tool', label: 'submit_output tool' },
+          { value: 'final_json_block', label: 'Final JSON block' },
+        ]}
+      />
       <div>
         <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-foreground">
           <Braces className="h-3.5 w-3.5" /> JSON Schema
@@ -1230,15 +1223,12 @@ function EdgePropertiesPanel({ edgeId, onClose }: { edgeId: string; onClose: () 
           />
           <p className="mt-1 text-[10px] text-muted-foreground">Optional. False makes the edge inactive.</p>
         </div>
-        <EngineGated>
-          <ToggleSwitch
-            checked={edge.handlesFailure === true}
-            disabled={!ENGINE_SUPPORTS_V2}
-            onChange={(checked) => update({ handlesFailure: checked || undefined })}
-            label="Handles failure"
-            description="A completion or always edge counts as handling a failure of the source."
-          />
-        </EngineGated>
+        <ToggleSwitch
+          checked={edge.handlesFailure === true}
+          onChange={(checked) => update({ handlesFailure: checked || undefined })}
+          label="Handles failure"
+          description="A completion or always edge counts as handling a failure of the source."
+        />
         <FieldIssues issues={issues.filter((i) => !(i.field ?? '').startsWith('/when'))} />
       </div>
     </div>

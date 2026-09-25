@@ -6,7 +6,6 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { AgentResolver } from '../../src/services/AgentResolver.js';
-import type { HitlService } from '../../src/services/HitlService.js';
 import { SessionComposer, type ComposeInput } from '../../src/services/session/SessionComposer.js';
 import { StageGatePort } from '../../src/services/session/StageGatePort.js';
 import { TurnContextRegistry } from '../../src/services/session/gates.js';
@@ -28,13 +27,12 @@ const stage: SessionOwner = {
 
 const eventBus = { emit: async () => undefined, emitGlobal: async () => undefined } as unknown as EventBus;
 
-function fakeHitl(parked: Array<{ stageRunId: string; kind: string }>): HitlService {
-  return {
-    interrupt: async (stageRunId: string, _run: string, data: { kind: string }) => {
-      parked.push({ stageRunId, kind: data.kind });
-      return { outcome: 'approved' };
-    },
-  } as unknown as HitlService;
+/** The engine's park, recording what parked. */
+function fakePark(parked: Array<{ stageRunId: string; kind: string }>) {
+  return async (turn: { owner: { kind: string; stageRunId?: string } }, data: Record<string, unknown>) => {
+    parked.push({ stageRunId: turn.owner.stageRunId ?? '', kind: String(data['kind']) });
+    return { outcome: 'approved' as const };
+  };
 }
 
 function composer(deps: SessionComposerDeps = {}): SessionComposer {
@@ -50,7 +48,7 @@ function stageInput(over: Partial<ComposeInput> & { mode?: string; parked?: Arra
     spec: {},
     attended: true,
     gates: new StageGatePort({
-      hitl: fakeHitl(parked),
+      park: fakePark(parked),
       eventBus,
       harnessTypeOf: () => 'claude-agent',
       readPermissionMode: async () => mode,

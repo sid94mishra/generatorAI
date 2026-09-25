@@ -550,6 +550,8 @@ function toneOf(status: string): 'running' | 'success' | 'failure' | 'warning' |
   switch (status) {
     case 'running':
     case 'starting':
+    case 'validating':
+    case 'finalizing':
       return 'running';
     case 'completed':
       return 'success';
@@ -557,10 +559,13 @@ function toneOf(status: string): 'running' | 'success' | 'failure' | 'warning' |
     case 'cancelled':
       return 'failure';
     case 'paused':
+    case 'waiting':
+    case 'retry_wait':
     case 'awaiting_input':
       return 'warning';
     case 'pending':
-    case 'queued':
+    case 'ready':
+    case 'created':
       return 'idle';
     default:
       return 'neutral';

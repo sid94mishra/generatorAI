@@ -261,3 +261,14 @@ export function toHarnessError(provider: HarnessErrorProvider, raw: unknown): Ha
   return new HarnessError(hit?.code ?? 'transport', message, provider, opts);
 }
 
+
+const HARNESS_ERROR_PROVIDERS: ReadonlySet<string> = new Set<HarnessErrorProvider>(['claude-agent', 'codex', 'copilot', 'opencode', 'acp', 'faux']);
+
+/**
+ * The engine's harness boundary (`CoreServicesInputs.toHarnessError`): a
+ * provider id the engine read from a session (possibly unknown or absent)
+ * maps to its classifier; anything else is classified generically.
+ */
+export function harnessErrorOf(provider: string | undefined, raw: unknown): HarnessError {
+  return toHarnessError((provider && HARNESS_ERROR_PROVIDERS.has(provider) ? provider : 'faux') as HarnessErrorProvider, raw);
+}

@@ -787,7 +787,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * but a hook with nothing to ask is not a boundary. This is the one place a
    * host can attach a policy that applies to EVERY conversation this provider
    * creates, including the ones that pass no `hooks` of their own —
-   * `acp-entry.ts` and `StageExecutionService`, both of which currently rely
+   * `acp-entry.ts` and the workflow engine's stage sessions, both of which rely
    * solely on `canUseTool` and are therefore ungated.
    *
    * Left `undefined` deliberately: see `DEFER` in `preToolUseHandler` for why
@@ -955,7 +955,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * fires on EVERY tool call". The hook did fire on every tool call — of the
    * conversations that supplied a `HookBridge` with an `onPreToolUse`. Two
    * production callers supply none (`apps/server/src/acp-entry.ts`, and
-   * `StageExecutionService`, which passes `onPermissionRequest` but no
+   * the workflow engine's stage sessions, which pass `onPermissionRequest` but no
    * `hooks`), so for them nothing was installed and the only gate was
    * `canUseTool` — which Anthropic documents as "invoked only when the
    * permission evaluation flow resolves to a prompt … To gate every tool call,

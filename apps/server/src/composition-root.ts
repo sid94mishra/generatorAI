@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import * as path from 'node:path';
-import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand } from '@generatorai/agent-harness-providers';
+import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand, harnessErrorOf } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
 import { readAudioPreferences } from './settings/audio.js';
@@ -36,11 +36,11 @@ import {
   PushTokenRepository,
 } from '@generatorai/db';
 import type { AppDatabase } from '@generatorai/db';
+import { createEngineStores } from '@generatorai/db';
 import {
   DrizzleSessionRepository,
   DrizzleEventRepository,
   DrizzleSequenceAllocator,
-  DrizzleSessionAllocationRepository,
   DrizzleStreamCursorRepository,
   DrizzleChatMessageRepository,
   DrizzleArtifactRepository,
@@ -84,7 +84,9 @@ import {
 import {
   // Bootstrap — shared core services factory
   createCoreServices,
-  StartupRecoveryService,
+  runBootHousekeeping,
+  EngineLockedError,
+  DefaultRunLifecycle,
   InterruptedTurnRecoveryService,
   OrphanProcessReaper,
   SandboxedScriptRunner,
@@ -108,7 +110,6 @@ import {
   createRunSandbox,
   // orchestrator services
   WorkflowOrchestrator,
-  ResultValidator,
   // Phase 4 streaming rewrite (additive)
   StreamBroker,
   // W07 — durable delta log, dual-written alongside stream_cursors
@@ -185,19 +186,18 @@ import type {
   ArtifactService,
   ErrorHandler,
   // v2 services
-  SessionAllocator,
   ChatManagementService,
   OrchestratorService,
   WorkflowDefinitionService,
   RunDefinitionReader,
-  DAGScheduler,
-  StageExecutionService,
+  RunSupervisor,
+  OutboxPublisher,
   WorkflowRunService,
   // automation services
   AutomationService,
   // Track A1 — boot reconciler + idempotency sweeper
   AutomationRecoveryService,
-  // HITL-03 — human-in-the-loop interrupt/resume service
+  // HITL — the operator side of parked stage instances
   HitlService,
   AgentInteractionService,
   PlanService,
@@ -702,9 +702,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // sequence IDs. Without it, the in-memory counter in EventRepository
   // can collide when multiple processes write to the same DB.
   const sequenceAllocator = new DrizzleSequenceAllocator(db);
-  // Persist SessionAllocator state (Phase 1, 1.6) so a restart doesn't
-  // orphan SDK sessions.
-  const sessionAllocationRepo = new DrizzleSessionAllocationRepository(db);
 
   // Section 8 (TOL-01 / TOL-06) — harness-agnostic tool + MCP layer.
   // Declared BEFORE `createCoreServices` so they can be threaded into
@@ -792,6 +789,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     repoReadinessService,
   };
 
+  // The engine's outbox publisher needs the stream broker, which is built
+  // after the core graph; it is assigned right after the broker exists.
+  let publishEngineEvent: OutboxPublisher = async () => {
+    throw new Error('the engine outbox publisher is not wired yet');
+  };
+
   // Core services factory — shared with the CLI composition root. Any
   // change to the service graph lands in one place. Platform-specific
   // wiring (stream manager, sandbox manager, orchestrator stack) stays
@@ -817,11 +820,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // W22 / W47 — durable execution engine storage.
     registerRepo,
     entryRepo,
-    sessionAllocationRepo,
-    // Wire the sandbox lifecycle manager as the orphan reaper so
-    // StartupRecoveryService can call `cleanupOrphans()` on boot to
-    // destroy `genai-run-*` containers left behind by a crash.
-    sandbox,
+    // The workflow engine (P03): its stores over this database, the harness
+    // boundary, and the outbox publisher (wired below, once the stream
+    // broker exists).
+    engineStores: createEngineStores(db),
+    toHarnessError: harnessErrorOf,
+    publishEngineEvent: (event, row) => publishEngineEvent(event, row),
+    engineOwnerLabel: `server:${process.pid}`,
     workspaceManager,
     admissionController,
     // Post-processing commit/push/PR runs through the same flow as the
@@ -829,21 +834,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     scmFlow: sourceControlFlowService,
     config: {
       artifactsDir: config.artifactsDir,
-      // P1#7 — bound concurrent stage execution (harness subprocess fan-out).
-      // Env-overridable; defaults to 8 inside createCoreServices when undefined.
-      //
-      // Bounded read: this value reaches `new Semaphore(...)`, and a bare
-      // `parseInt` of a typo'd value yielded NaN — which the semaphore
-      // accepted and then never granted a permit for, hanging every stage
-      // launch silently. `readBoundedInt` cannot produce a non-finite value.
-      maxConcurrentStages: process.env['MAX_CONCURRENT_STAGES']
-        ? readBoundedInt('MAX_CONCURRENT_STAGES', {
-            defaultValue: 8,
-            min: 1,
-            max: 64,
-            onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-          })
-        : undefined,
     },
     // Section 8 — thread harness-agnostic extensions into ChatManagementService.
     // Until a module registers tools / overrides MCP / installs a HookBridge
@@ -864,15 +854,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     hookExecutor,
     hookInterceptor,
     artifactService,
-    recoveryService,
     errorHandler,
-    sessionAllocator,
     chatManagementService,
     orchestratorService,
-    dagScheduler,
     workflowDefinitionService,
     runDefinitionReader,
-    stageExecutionService,
+    engine,
     workflowRunService,
     automationService,
     automationRecoveryService,
@@ -913,6 +900,17 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger.info('[Container] GENERATORAI_DELTA_LOG=true — deltas are dual-written to the file delta log (experimental)');
   }
   const streamBroker = new StreamBroker(streamCursorRepo, logger, deltaLog ? { deltaLog } : {});
+
+  // The engine's outbox publisher (G5 §5.8, B-21): every engine event is
+  // published to its run's stream scope AND broadcast globally (the RV-5
+  // terminal-event listeners read the global bus), both AWAITED before the
+  // outbox row is marked dispatched. The event carries its `runSeq`, so the
+  // bridge below knows the run scope already has it.
+  publishEngineEvent = async (event, row) => {
+    const data = { ...event.data, runSeq: row.runSeq };
+    await streamBroker.publish('run', row.workflowRunId, event.kind, data);
+    await eventBus.emitGlobal({ kind: event.kind, data } as Parameters<typeof eventBus.emitGlobal>[0]);
+  };
 
   // P1-4 / EVT-01 — the durable stream log is now the event bus's commit point
   // AND its sequence source. `emit()` awaits `append` before broadcasting, so a
@@ -1054,14 +1052,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   }
 
   // ── Orchestrator Services ──
-
-  const resultValidator = new ResultValidator(
-    chatMessageRepo,
-    stageRunRepo,
-    eventBus,
-    logger,
-    scriptRunner,
-  );
 
   // ── Project & Codebase Management Services ──
   const projectService = new ProjectService(
@@ -1474,12 +1464,15 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     sandbox,
   );
 
-  // Late-wire services that were created after the core graph.
-  workflowRunService.setWorktreeService(worktreeService, projectCodebaseRepo);
-  workflowRunService.setHookExecutor(hookExecutor);
-  workflowRunService.setResultValidator(resultValidator);
-
-  stageExecutionService.setWorkspaceCheckpointService(workspaceCheckpointService);
+  // Late-wire services that were created after the core graph: the
+  // engine's prepare phase creates the project's worktrees, its executor
+  // and compensation use checkpoints, and a `restore_checkpoint` fork rolls
+  // the source workspace back.
+  if (engine.lifecycle instanceof DefaultRunLifecycle) {
+    engine.lifecycle.setWorktrees({ service: worktreeService, codebases: projectCodebaseRepo });
+  }
+  engine.setCheckpoints(workspaceCheckpointService);
+  workflowRunService.setCheckpointService(workspaceCheckpointService);
 
   // ── Register built-in function hook handlers ──
   // These handlers demonstrate the HookResult return channel and can be
@@ -2132,10 +2125,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     orchestratorService,
     workflowDefinitionService,
     runDefinitionReader,
+    engine,
     workflowRunService,
-    dagScheduler,
-    stageExecutionService,
-    sessionAllocator,
 
     // Orchestrator
     workflowOrchestrator,
@@ -2345,9 +2336,26 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // global events don't collide with pre-restart sequence IDs.
       await eventRepo.initialize();
 
-      // Recover interrupted sessions (also restores per-session EventBus
-      // sequence counters from DB via restoreCounters()).
-      await recoveryService.recover();
+      // Boot housekeeping: EventBus sequence counters, sessions a crash left
+      // closing, and orphaned sandbox containers.
+      await runBootHousekeeping({
+        eventBus,
+        sessionRepo,
+        harness,
+        ...(sandbox ? { orphanReaper: sandbox.lifecycle } : {}),
+        logger,
+      });
+
+      // The workflow engine: the single-engine lock, then recovery of every
+      // live run (G5 §3.10). Another live process on this database owns the
+      // engine; this one serves everything else, and run commands answer
+      // ENGINE_UNAVAILABLE.
+      try {
+        await engine.start();
+      } catch (err) {
+        if (!(err instanceof EngineLockedError)) throw err;
+        logger.error(`[Container] ${err.message}`);
+      }
 
       // Chat turns the previous process died in: persist what streamed and
       // write the terminal events a reconnecting client is waiting for.
@@ -2481,9 +2489,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       eventRetentionService.stop();
       worktreeCleanupService.stop();
       workspaceRetentionService.stop();
-      // Stop run poll loops + unsubscribe EventBus listeners + close run loggers
-      // so no new events are produced and no setInterval handles are orphaned.
-      workflowRunService.shutdown();
+      // Stop the workflow engine: its timers, reaper and outbox, and release
+      // the engine lock. In-flight attempts are recovered by the next boot.
+      await engine.stop();
 
       // Kill any live terminal sessions (PTY handles hold FDs → must not
       // outlive the process on shutdown paths where OS reaping is unreliable).
@@ -2580,10 +2588,9 @@ export interface Container {
   workflowDefinitionService: WorkflowDefinitionService;
   /** The graph of each run's pinned definition version. */
   runDefinitionReader: RunDefinitionReader;
+  /** The workflow engine (P03). */
+  engine: RunSupervisor;
   workflowRunService: WorkflowRunService;
-  dagScheduler: DAGScheduler;
-  stageExecutionService: StageExecutionService;
-  sessionAllocator: SessionAllocator;
 
   // Orchestrator
   workflowOrchestrator: WorkflowOrchestrator;

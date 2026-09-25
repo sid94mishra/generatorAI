@@ -591,7 +591,7 @@ export class EntryRepository {
 
   /**
    * List all entries for a scope — used by the reconnect snapshot path and
-   * by StartupRecoveryService to find pending gates.
+   * by recovery to find pending gates.
    */
   listByScope(scope: EntryScope, scopeId: string): EntryRecord[] {
     const rows = this.listByScopeStmt.all(scope, scopeId) as EntryRow[];

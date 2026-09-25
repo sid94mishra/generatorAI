@@ -14,7 +14,7 @@
 // expiries and lifecycle results. The TimerService and the LeaseReaper act
 // only on runs this process owns.
 //
-// RECOVERY (it replaces StartupRecoveryService; fixes W-16/W-32/B-10/B-20)
+// RECOVERY (the only run recovery; fixes W-16/W-32/B-10/B-20)
 // never completes a stage on missing work. For every started, non-terminal
 // run: take it over, then for each attempt that was live when the previous
 // process died —
@@ -25,9 +25,11 @@
 //     operator; otherwise (safe turns only, or every turn settled) it ends as
 //     `interrupted/lease_expired` with a safe replay → a resume attempt
 //     replays the settled turns from the journal;
-//   - `awaiting_input` (its frame died with the process): the attempt is
-//     settled `aborted`, the verdict stays durable, and an approval then
-//     starts a resume attempt that carries it;
+//   - `awaiting_input` (its frame died with the process): `frame_lost`. A
+//     completion review stays parked (its turns settled) and its approval
+//     starts a resume attempt that carries the verdict; a gate inside a
+//     turn (tool permission, question, plan review) pauses the instance as
+//     `interrupted`, and a resume re-sends the turn;
 // then re-arm the run's timers, re-dispatch a lost `prepare`/`finalize`, and
 // post a `tick`. Sessions need no rehydration: `run_sessions` is read at
 // bind time, after every row above was settled (B-20).
@@ -56,7 +58,7 @@ import { EffectsDispatcher } from './EffectsDispatcher.js';
 import { inFlightIsSafe, LeaseReaper } from './LeaseReaper.js';
 import { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
 import { RunActor, type DecideRecord, type ProcessResult } from './RunActor.js';
-import { DefaultRunLifecycle, type RunLifecycle } from './RunLifecycle.js';
+import { DefaultRunLifecycle, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';
 import { journalEpoch, StageExecutor, type ExecutorTiming } from './StageExecutor.js';
 import { TimerService } from './TimerService.js';
 
@@ -98,6 +100,8 @@ export interface RunSupervisorDeps {
   publish?: OutboxPublisher | undefined;
   /** Prepare/finalize (default: `DefaultRunLifecycle`). */
   lifecycle?: RunLifecycle | undefined;
+  /** PD-17 start check of the default lifecycle's `prepare`. */
+  permissionCheck?: RunLifecycleDeps['permissionCheck'];
   /** This process's boot id (default: a random UUID). */
   bootId?: string | undefined;
   /** A label for the lock row (host, pid). */
@@ -120,7 +124,9 @@ export class EngineLockedError extends Error {
   }
 }
 
-export type CommandResult = { ok: true } | { ok: false; code: 'not_found' | 'invalid_state' | 'version_conflict' | 'invalid_command' | 'fenced' | 'conflict'; message: string };
+export type CommandResult =
+  | { ok: true }
+  | { ok: false; code: 'not_found' | 'invalid_state' | 'version_conflict' | 'invalid_command' | 'fenced' | 'conflict' | 'engine_unavailable'; message: string };
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 
@@ -183,6 +189,7 @@ export class RunSupervisor {
         eventBus: deps.eventBus,
         hookExecutor: deps.hookExecutor,
         checkpoints: deps.checkpoints,
+        permissionCheck: deps.permissionCheck,
         logger: deps.logger,
         now: this.now,
       });
@@ -204,6 +211,22 @@ export class RunSupervisor {
       logger: deps.logger,
       everyMs: this.timing.reaperEveryMs,
     });
+  }
+
+  /** The engine's stores (the run facade's CAS for a setup failure before `start`). */
+  get stores(): EngineStores {
+    return this.deps.stores;
+  }
+
+  /** Whether this process hosts the engine (started, not stopped). */
+  get running(): boolean {
+    return this.started && !this.stopped;
+  }
+
+  /** Late wiring: checkpoints are built after the engine (composition root). */
+  setCheckpoints(checkpoints: WorkspaceCheckpointService): void {
+    this.executor.setCheckpoints(checkpoints);
+    if (this.lifecycle instanceof DefaultRunLifecycle) this.lifecycle.setCheckpoints(checkpoints);
   }
 
   // ── Boot ─────────────────────────────────────────────────────
@@ -276,12 +299,18 @@ export class RunSupervisor {
 
   /** Start a created run: `created → starting`, then the prepare phases. */
   async startRun(runId: string): Promise<CommandResult> {
+    if (!this.running) return this.unavailable();
     return this.result(await this.send(runId, { type: 'start' }));
   }
 
   /** An operator command (the P03 commands API calls this). */
   async command(runId: string, command: RunCommand): Promise<CommandResult> {
+    if (!this.running) return this.unavailable();
     return this.result(await this.send(runId, { type: 'command', command }));
+  }
+
+  private unavailable(): CommandResult {
+    return { ok: false, code: 'engine_unavailable', message: 'The workflow engine is not running in this process (another process owns this database, or it stopped)' };
   }
 
   private result(r: ProcessResult): CommandResult {
@@ -388,7 +417,7 @@ export class RunSupervisor {
           });
         } else if (inst.status === 'awaiting_input') {
           interrupted += 1;
-          await actor.post({ type: 'attempt_settled', stageRunId: inst.id, attemptNo, outcome: { kind: 'aborted', reason: 'superseded' } });
+          await actor.post({ type: 'frame_lost', stageRunId: inst.id, attemptNo });
         }
       }
       this.timers.loadRun(runId);

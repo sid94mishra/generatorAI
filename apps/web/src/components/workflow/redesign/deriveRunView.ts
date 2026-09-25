@@ -22,8 +22,12 @@ import { deriveTimeline, deriveAnswer, deriveSegments, countTools } from '@/comp
 
 const STAGE_STATUS_MAP: Record<StageRunStatus, StageStatus> = {
   pending:        'pending',
-  queued:         'queued',
+  ready:          'ready',
+  starting:       'ready',
   running:        'running',
+  validating:     'running',
+  waiting:        'waiting',
+  retry_wait:     'waiting',
   paused:         'paused',
   completed:      'completed',
   failed:         'failed',
@@ -36,6 +40,8 @@ const RUN_STATUS_MAP: Record<WorkflowRunStatus, RunStatus> = {
   created:    'pending',
   starting:   'starting',
   running:    'running',
+  waiting:    'waiting',
+  finalizing: 'finalizing',
   paused:     'paused',
   cancelling: 'cancelling',
   completed:  'completed',
@@ -266,7 +272,7 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
 
     const steps = deriveTimeline(stream?.blocks, { active: status === 'running' });
     const stepsDone = steps.filter((s) => s.status === 'done' || s.status === 'failed').length;
-    const stepsTotal = Math.max(sr.totalSteps ?? 0, steps.length);
+    const stepsTotal = steps.length;
 
     // The stream store only holds blocks THIS browser session actually
     // received. After a reload it is empty, so a completed stage derived an

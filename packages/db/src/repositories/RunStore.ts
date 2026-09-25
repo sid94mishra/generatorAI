@@ -113,6 +113,9 @@ export class RunStore implements IRunStore {
       budget: parse<RunRecord['budget']>(r['budget'], null),
       unattended: !!trigger?.kind && !ATTENDED_TRIGGERS.has(trigger.kind),
       startedAt: (r['started_at'] as number | null) ?? null,
+      skipKeys: parse<Array<{ stageKey?: string; skip?: boolean }> | null>(r['stage_overrides'], null)
+        ?.filter((o) => o.skip === true && typeof o.stageKey === 'string')
+        .map((o) => o.stageKey!) ?? [],
     };
     const rows = this.sqlite
       .prepare(

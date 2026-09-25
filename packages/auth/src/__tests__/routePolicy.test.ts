@@ -113,21 +113,19 @@ describe('route policy — mobile device authority', () => {
     // RUN-TIME authority. Requiring `write:workflows` here would conflate it
     // with the DESIGN-TIME right to edit a workflow, and would lock out the
     // one client the approval flow exists for.
-    expect(allowed(mobile, '/workflow-runs/r1/stages/s1/approve', 'POST')).toBe(true);
+    // The commands route admits `exec:agent`; the route itself refuses
+    // every command other than `approve` without `write:workflows`.
+    expect(allowed(mobile, '/workflow-runs/r1/commands', 'POST')).toBe(true);
   });
 
   it('still cannot control the run itself', () => {
     // The narrowing above is surgical: operating a run is a different act
-    // from answering it, and remains behind the full write grant.
+    // from answering it, and remains behind the full write grant (the
+    // non-approve commands are refused by the commands route itself).
     for (const path of [
       '/workflow-runs',
       '/workflow-runs/r1/start',
-      '/workflow-runs/r1/pause',
-      '/workflow-runs/r1/resume',
-      '/workflow-runs/r1/cancel',
-      '/workflow-runs/r1/retry',
-      '/workflow-runs/r1/stages/s1/cancel',
-      '/workflow-runs/r1/stages/s1/retry',
+      '/workflow-runs/r1/fork',
     ]) {
       expect(allowed(mobile, path, 'POST'), `should NOT be able to POST ${path}`).toBe(false);
     }
@@ -249,7 +247,7 @@ describe('route policy — other principals keep their authority', () => {
 
   it('the HITL narrowing did not widen anything for a read-only principal', () => {
     const readOnly = ['read:workflows'];
-    expect(allowed(readOnly, '/workflow-runs/r1/stages/s1/approve', 'POST')).toBe(false);
-    expect(allowed(readOnly, '/workflow-runs/r1/stages/s1/approve', 'GET')).toBe(true);
+    expect(allowed(readOnly, '/workflow-runs/r1/commands', 'POST')).toBe(false);
+    expect(allowed(readOnly, '/workflow-runs/r1/commands', 'GET')).toBe(true);
   });
 });

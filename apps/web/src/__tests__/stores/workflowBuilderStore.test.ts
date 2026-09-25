@@ -207,11 +207,10 @@ describe('workflowBuilderStore', () => {
     expect(promptIssue?.severity).toBe('error');
   });
 
-  it('validate reports engine-gated fields', () => {
+  it('validate accepts v2 fields at engine level v2', () => {
     store().loadRecord(makeRecord());
     store().updateStage('build', { join: { mode: 'any', cancelRemaining: false } });
-    const issue = store().validate().find((i) => i.code === 'engine-unsupported');
-    expect(issue).toMatchObject({ stageKey: 'build', field: '/join/mode' });
+    expect(store().validate().find((i) => i.code === 'engine-unsupported')).toBeUndefined();
   });
 
   // ── Save bookkeeping ──

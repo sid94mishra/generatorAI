@@ -872,7 +872,7 @@ export class AutomationService {
    * left to claim, which is the reconciler's signal to finalise as before.
    *
    * `activeIterationIndexes` are iterations whose workflow run is still live
-   * (StartupRecoveryService re-drives those); their leases are left alone so
+   * (the workflow engine's recovery drives those); their leases are left alone so
    * the work is not started twice. Everything else is handed back immediately
    * — a process that has restarted cannot still be running them.
    *
@@ -1402,7 +1402,7 @@ export class AutomationService {
     for (const run of runs) {
       if (run.status === 'running' || run.status === 'pending') {
         try {
-          if (run.workflowRunId) await this.workflowRunService.cancelRun(run.workflowRunId);
+          if (run.workflowRunId) await this.workflowRunService.command(run.workflowRunId, { command: 'cancel' });
         } catch {
           // Run may already be in terminal state
         }

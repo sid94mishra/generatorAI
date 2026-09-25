@@ -1,15 +1,14 @@
 // ────────────────────────────────────────────────────────────────
-// T2 — conditional routing (F_live_tests §1 T2, §5 `t2.json`), on v2
-// documents: stage `guard`s and edge `when`s in Expression v2, evaluated
-// by the v1 engine (P01 WP-1.7). The W-31 / W-30 KNOWN-BUGs of the v1
-// grammar flipped: guards can read upstream stages, and a broken or
+// T2 — conditional routing (F_live_tests §1 T2, §5 `t2.json`): stage
+// `guard`s and edge `when`s in Expression v2, evaluated by `decide()` after
+// readiness. Guards can read upstream stages (W-31), and a broken or
 // mistyped expression is rejected when the definition is saved instead of
-// silently skipping at run time.
+// silently skipping at run time (W-30).
 // ────────────────────────────────────────────────────────────────
 
 import { WorkflowValidationError } from '@generatorai/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTestEngine, type TestEngine } from '../../src/index.js';
+import { createTestEngine, stageKeyFor, type RunSnapshot, type TestEngine } from '../../src/index.js';
 
 let engine: TestEngine | undefined;
 afterEach(async () => {
@@ -52,14 +51,17 @@ const T2 = {
   ] as const,
 };
 
-describe('T2 conditional routing (v2 guards and edge when on the v1 engine)', () => {
+/** An instance by its stage NAME (instances are keyed by instance path, the stage key). */
+const st = (snap: RunSnapshot, name: string) => snap.stages[stageKeyFor(name)]!;
+
+describe('T2 conditional routing (guards and edge when)', () => {
   it('evaluates guards and edge `when`, reads upstream stages, and cascades skips', async () => {
     engine = await createTestEngine();
     const run = await engine.runWorkflow(T2, { env: 'prod', count: 5, flag: false });
     const snap = await run.waitForTerminal();
 
     expect(snap.run.status).toBe('completed');
-    const status = (n: string) => snap.stages[n]!.status;
+    const status = (n: string) => st(snap, n).status;
 
     for (const ran of ['R', 'C_and', 'C_not', 'C_amp', 'C_stageref']) expect(status(ran)).toBe('completed');
     for (const skipped of ['C_or_false', 'C_paren']) expect(status(skipped)).toBe('skipped');
@@ -80,8 +82,8 @@ describe('T2 conditional routing (v2 guards and edge when on the v1 engine)', ()
     engine = await createTestEngine();
     const run = await engine.runWorkflow(T2, { env: 'prod', count: 4, flag: true });
     const snap = await run.waitForTerminal();
-    expect(snap.stages['C_amp']!.status).toBe('skipped');
-    expect(snap.stages['C_not']!.status).toBe('skipped');
+    expect(st(snap, 'C_amp').status).toBe('skipped');
+    expect(st(snap, 'C_not').status).toBe('skipped');
     expect(snap.run.status).toBe('completed');
   });
 

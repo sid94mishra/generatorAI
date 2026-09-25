@@ -220,7 +220,7 @@ export function classifyStageError(err: unknown): ClassifiedError {
     return classified(COMPOSE_CODES[code] ?? 'config_invalid', message, { details: { composeCode: code } });
   }
   if (name === 'AdmissionTimeoutError') return classified('queue_timeout', message);
-  if (name === 'StageRejectedError' || field(err, 'rejected') === true) return classified('rejected_by_human', message);
+  if (field(err, 'rejected') === true) return classified('rejected_by_human', message);
   if (name === 'PermissionGatingUnsupportedError') return classified('config_invalid', message);
 
   const status = field<unknown>(err, 'status') ?? field<unknown>(err, 'statusCode');

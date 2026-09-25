@@ -48,7 +48,7 @@ async function record(name: string, spec: WorkflowSpecJson, script: Record<strin
   }
 }
 
-describe('scheduler replay fixtures (engine v2)', () => {
+describe('scheduler replay fixtures (engine)', () => {
   it('fan-out and join', async () => {
     await record(
       'fanout-join',

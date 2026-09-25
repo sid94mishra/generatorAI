@@ -137,7 +137,7 @@ describe('AgentResolver — capability union', () => {
     expect(p.warnings.map((w) => w.code)).toContain('SKILL_NOT_FOUND');
   });
 
-  // Guards the stage wiring: `StageExecutionService` hands the stage's own
+  // Guards the stage wiring: the stage session hands the stage's own
   // `harnessConfigOverrides` in as `runtimeOverrides`, which is the ONLY level
   // that carries `excludedMcpServerIds`. Before that, a stage-level MCP
   // exclusion silently did nothing.

@@ -3395,7 +3395,7 @@ export function App({
         startedAt: s.startedAt ? String(s.startedAt) : null,
         completedAt: s.completedAt ? String(s.completedAt) : null,
         error: s.error ?? null,
-        retryCount: s.retryCount,
+        attempts: s.currentAttempt,
       })),
       variables: run?.variables ?? {},
     });

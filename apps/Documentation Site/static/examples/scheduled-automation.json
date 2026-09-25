@@ -1,6 +1,7 @@
 {
   "name": "Weekday repository review",
   "triggerType": "schedule",
+  "permissionMode": "acceptEdits",
   "cronExpression": "0 9 * * MON-FRI",
   "timezone": "Asia/Kolkata",
   "missedRunPolicy": "run_once",

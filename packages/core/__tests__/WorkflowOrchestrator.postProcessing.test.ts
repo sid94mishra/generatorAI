@@ -130,7 +130,6 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
       definitionVersionId: versionId,
       name: 'fast run',
       status: 'completed',
-      sessionMode: 'auto',
       variables: {},
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -161,7 +160,6 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
       definitionVersionId: versionId,
       name: 'slow run',
       status: 'running',
-      sessionMode: 'auto',
       variables: {},
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -197,7 +195,6 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
         definitionVersionId: versionId,
         name: 'restarted run',
         status: 'completed',
-        sessionMode: 'auto',
         variables: {
           __postProcessingIntent: {
             pending: true,
@@ -228,7 +225,6 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
         definitionVersionId: versionId,
         name: 'normal run',
         status: 'completed',
-        sessionMode: 'auto',
         variables: {},
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -246,7 +242,6 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
         definitionVersionId: versionId,
         name: 'twice run',
         status: 'completed',
-        sessionMode: 'auto',
         variables: {
           __postProcessingIntent: {
             pending: true,

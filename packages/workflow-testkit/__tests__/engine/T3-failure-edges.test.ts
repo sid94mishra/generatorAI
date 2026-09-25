@@ -10,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTestEngine, createV2Adapter, type TestEngine, type Turn } from '../../src/index.js';
+import { createTestEngine, type TestEngine, type Turn } from '../../src/index.js';
 
 let engine: TestEngine | undefined;
 afterEach(async () => {
@@ -21,9 +21,9 @@ afterEach(async () => {
 /** A transient provider failure (an overloaded upstream). */
 const overloaded = (n: number): Turn => ({ error: { message: `upstream overloaded (${n})` } });
 
-describe('T3 failure paths (engine v2)', () => {
+describe('T3 failure paths (engine)', () => {
   it('retries a transient failure in the same conversation, then routes failure / completion / always', async () => {
-    engine = await createTestEngine({ adapter: createV2Adapter, script: { f: [overloaded(1), overloaded(2), overloaded(3)] } });
+    engine = await createTestEngine({ script: { f: [overloaded(1), overloaded(2), overloaded(3)] } });
     const run = await engine.runWorkflow({
       name: 't3-failure-edges-v2',
       stages: [
@@ -67,7 +67,7 @@ describe('T3 failure paths (engine v2)', () => {
   });
 
   it('an `always` cleanup no longer masks an unhandled failure (W-29)', async () => {
-    engine = await createTestEngine({ adapter: createV2Adapter, script: { f: [overloaded(1)] } });
+    engine = await createTestEngine({ script: { f: [overloaded(1)] } });
     const run = await engine.runWorkflow({
       stages: [
         { name: 'f', prompt: 'F', retry: { maxAttempts: 1, initialDelayMs: 100, backoffMultiplier: 1 }, onExhausted: 'fail' },
@@ -83,7 +83,7 @@ describe('T3 failure paths (engine v2)', () => {
   });
 
   it('a deterministic failure is not retried; unhandled, it pauses for an operator, who fails it', async () => {
-    engine = await createTestEngine({ adapter: createV2Adapter, script: { ff: [{ error: { message: 'invalid api key' } }] } });
+    engine = await createTestEngine({ script: { ff: [{ error: { message: 'invalid api key' } }] } });
     const run = await engine.runWorkflow({
       stages: [
         { name: 'a', prompt: 'A' },
@@ -109,7 +109,7 @@ describe('T3 failure paths (engine v2)', () => {
   });
 
   it('the attempt deadline covers every turn and fails a hung one (W-15)', async () => {
-    engine = await createTestEngine({ adapter: createV2Adapter, script: { ff: [{ hang: true }] } });
+    engine = await createTestEngine({ script: { ff: [{ hang: true }] } });
     const run = await engine.runWorkflow({
       stages: [{ name: 'ff', prompt: 'FF', timeouts: { attemptMs: 1000 }, retry: { maxAttempts: 1, initialDelayMs: 100, backoffMultiplier: 1 }, onExhausted: 'fail' }],
     });

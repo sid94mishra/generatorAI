@@ -39,8 +39,8 @@ export interface LiveItem {
   executionId?: string;
 }
 
-const RUN_RUNNING = new Set(['running', 'starting', 'cancelling']);
-const RUN_ATTENTION = new Set(['failed', 'paused', 'awaiting_input']);
+const RUN_RUNNING = new Set(['running', 'starting', 'finalizing', 'cancelling']);
+const RUN_ATTENTION = new Set(['failed', 'paused', 'waiting']);
 const EXEC_RUNNING = new Set(['running', 'pending']);
 
 function isToday(ts: number): boolean {

@@ -11,7 +11,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTestEngine, createV2Adapter, type TestEngine, type Turn } from '../../src/index.js';
+import { createTestEngine, type TestEngine, type Turn } from '../../src/index.js';
 
 let engine: TestEngine | undefined;
 afterEach(async () => {
@@ -38,9 +38,9 @@ async function pendingCall(e: TestEngine, stage: string, kind = 'prompt'): Promi
   }
 }
 
-describe('T5 human in the loop (engine v2)', () => {
+describe('T5 human in the loop (engine)', () => {
   it('approve advances the DAG; a second approve and an approve of a non-parked instance are refused', async () => {
-    engine = await createTestEngine({ adapter: createV2Adapter, script: { p1: [{ text: P1_ANSWER }] } });
+    engine = await createTestEngine({ script: { p1: [{ text: P1_ANSWER }] } });
     const run = await engine.runWorkflow(HITL);
     let snap = await run.waitForStage('p1', 'awaiting_input');
     expect(snap.stages['p1']!.interruptData).toMatchObject({ kind: 'stage_completion_review', reviewRound: 1, output: P1_ANSWER });
@@ -58,7 +58,7 @@ describe('T5 human in the loop (engine v2)', () => {
   });
 
   it('reject fails the stage without a retry and skips its successor', async () => {
-    engine = await createTestEngine({ adapter: createV2Adapter, script: { p1: [{ text: P1_ANSWER }] } });
+    engine = await createTestEngine({ script: { p1: [{ text: P1_ANSWER }] } });
     const run = await engine.runWorkflow(HITL);
     await run.waitForStage('p1', 'awaiting_input');
     expect((await engine.commands.approve(run.runId, run.stageRunId('p1'), { outcome: 'rejected', reason: 'no' })).status).toBe(202);
@@ -71,7 +71,7 @@ describe('T5 human in the loop (engine v2)', () => {
   });
 
   it('request changes runs a journalled revision that is persisted and reaches the successor (F-2, W-46)', async () => {
-    engine = await createTestEngine({ adapter: createV2Adapter, script: { p1: [{ text: P1_ANSWER }, { text: `${P1_ANSWER} REVISED` }] } });
+    engine = await createTestEngine({ script: { p1: [{ text: P1_ANSWER }, { text: `${P1_ANSWER} REVISED` }] } });
     const run = await engine.runWorkflow(HITL);
     await run.waitForStage('p1', 'awaiting_input');
     const p1 = run.stageRunId('p1');
@@ -101,10 +101,9 @@ describe('T5 human in the loop (engine v2)', () => {
   });
 });
 
-describe('T5 pause / cancel (engine v2)', () => {
+describe('T5 pause / cancel (engine)', () => {
   it('a pause mid-turn stops the stage with nothing sent after it; resume finishes the work (F-1, W-01)', async () => {
     engine = await createTestEngine({
-      adapter: createV2Adapter,
       script: { l1: [{ hang: true }, { text: 'L1 finished its numbered list after the resume, as asked.' }] },
     });
     const run = await engine.runWorkflow({
@@ -124,7 +123,8 @@ describe('T5 pause / cancel (engine v2)', () => {
     snap = await run.snapshot();
     expect(snap.stages['l1']!.status).toBe('paused');
     expect(snap.calls.filter((c) => c.stageName === 'l1').map((c) => `${c.kind}:${c.outcome}`)).toEqual(['prompt:aborted']);
-    expect(snap.calls.every((c) => c.startedAt < pauseAt)).toBe(true);
+    // Nothing was sent after the pause (a call in the same millisecond is the one that was paused).
+    expect(snap.calls.every((c) => c.startedAt <= pauseAt)).toBe(true);
     expect(snap.stages['l1']!.attempts?.map((a) => a.status)).toEqual(['aborted']);
     expect(snap.stages['l2']!.status).toBe('pending');
 
@@ -143,7 +143,7 @@ describe('T5 pause / cancel (engine v2)', () => {
 
   it('cancel stops every live instance with nothing dispatched after it, and releases the sessions (B-3, B-15)', async () => {
     const hang: Turn[] = [{ hang: true }];
-    engine = await createTestEngine({ adapter: createV2Adapter, script: { k1: hang, k2: hang, k3: hang } });
+    engine = await createTestEngine({ script: { k1: hang, k2: hang, k3: hang } });
     const run = await engine.runWorkflow({
       name: 't5-cancel-v2',
       stages: [

@@ -37,7 +37,7 @@ export function createReviewRoutes(container: Container): Router {
   const {
     reviewThreadService,
     chatManagementService,
-    stageExecutionService,
+    workflowRunService,
     checkpointService,
     logger,
   } = container;
@@ -279,11 +279,25 @@ export function createReviewRoutes(container: Container): Router {
         typeof target.runId === 'string' &&
         typeof target.stageId === 'string'
       ) {
-        await stageExecutionService.sendStageFollowUp(
-          target.stageId,
-          target.runId,
-          submission.prompt,
-        );
+        // A stage parked on its completion review takes the review as a
+        // revision request (the `approve` command, changes_requested). A
+        // follow-up on a finished stage arrives with the stage conversation
+        // API (P03b); until then it is refused rather than lost.
+        const r = await workflowRunService.command(target.runId, {
+          command: 'approve',
+          instanceId: target.stageId,
+          outcome: 'changes_requested',
+          feedback: submission.prompt,
+        });
+        if (!r.ok) {
+          res.status(409).json({
+            error: {
+              code: 'STAGE_NOT_AWAITING_REVIEW',
+              message: `The stage is not waiting for a review (${r.message})`,
+            },
+          });
+          return;
+        }
         delivered = true;
       }
 

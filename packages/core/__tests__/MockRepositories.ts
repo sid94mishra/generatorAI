@@ -27,7 +27,7 @@ import type {
   NewVersion,
   ReplaceGraphResult,
 } from '../src/domain/ports/IWorkflowDefinitionStore.js';
-import type { IWorkflowRunRepository } from '../src/domain/ports/IWorkflowRunRepository.js';
+import type { IWorkflowRunRepository, MemoizedInstance, WorkflowRunUpdate } from '../src/domain/ports/IWorkflowRunRepository.js';
 import type { IStageRunRepository } from '../src/domain/ports/IStageRunRepository.js';
 
 // ── MockChatRepository ──
@@ -307,18 +307,37 @@ export async function seedDefinition(
 export class MockWorkflowRunRepository implements IWorkflowRunRepository {
   private store = new Map<string, WorkflowRun>();
 
-  /** `createWithStages` writes its stage rows here. */
-  constructor(private readonly stageRuns?: IStageRunRepository) {}
-
-  async createWithStages(run: WorkflowRun, stageRuns: StageRun[]): Promise<void> {
-    if (!this.stageRuns) throw new Error('MockWorkflowRunRepository: pass the stage-run repository to the constructor');
-    this.store.set(run.id, { ...run });
-    for (const sr of stageRuns) await this.stageRuns.create(sr);
-  }
+  /** `createFork` writes its memoized instances here. */
+  constructor(private readonly stageRuns?: MockStageRunRepository) {}
 
   async create(run: WorkflowRun): Promise<WorkflowRun> {
     this.store.set(run.id, { ...run });
     return { ...run };
+  }
+
+  async createFork(run: WorkflowRun, memoized: readonly MemoizedInstance[]): Promise<void> {
+    if (!this.stageRuns) throw new Error('MockWorkflowRunRepository: pass the stage-run repository to the constructor');
+    this.store.set(run.id, { ...run });
+    for (const m of memoized) {
+      this.stageRuns.seed({
+        id: m.id,
+        workflowRunId: run.id,
+        stageKey: m.stageKey,
+        instancePath: m.instancePath,
+        kind: m.kind,
+        name: m.name,
+        status: m.status,
+        currentAttempt: 0,
+        version: 0,
+        ...(m.outputText !== null ? { outputText: m.outputText } : {}),
+        ...(m.summary !== null ? { summary: m.summary } : {}),
+        createdAt: run.createdAt,
+      });
+    }
+  }
+
+  async findByIdempotencyKey(key: string): Promise<WorkflowRun | null> {
+    return [...this.store.values()].find((r) => r.idempotencyKey === key) ?? null;
   }
 
   async getById(id: string): Promise<WorkflowRun> {
@@ -346,7 +365,7 @@ export class MockWorkflowRunRepository implements IWorkflowRunRepository {
     return (await this.getByStatus(statuses)).length;
   }
 
-  async update(id: string, updates: Partial<WorkflowRun>): Promise<WorkflowRun> {
+  async update(id: string, updates: WorkflowRunUpdate): Promise<WorkflowRun> {
     const existing = this.store.get(id);
     if (!existing) throw new Error(`WorkflowRun ${id} not found`);
     const updated = { ...existing, ...updates, updatedAt: new Date() };
@@ -354,11 +373,11 @@ export class MockWorkflowRunRepository implements IWorkflowRunRepository {
     return { ...updated };
   }
 
-  async updateStatus(id: string, status: WorkflowRunStatus): Promise<void> {
+  /** Test seam: a status the engine's CAS would have written. */
+  setStatus(id: string, status: WorkflowRunStatus): void {
     const existing = this.store.get(id);
     if (!existing) throw new Error(`WorkflowRun ${id} not found`);
     existing.status = status;
-    existing.updatedAt = new Date();
   }
 
   async delete(id: string): Promise<void> {
@@ -375,9 +394,9 @@ export class MockWorkflowRunRepository implements IWorkflowRunRepository {
 export class MockStageRunRepository implements IStageRunRepository {
   private store = new Map<string, StageRun>();
 
-  async create(stageRun: StageRun): Promise<StageRun> {
+  /** Test seam: an instance row as the engine would have written it. */
+  seed(stageRun: StageRun): void {
     this.store.set(stageRun.id, { ...stageRun });
-    return { ...stageRun };
   }
 
   async getById(id: string): Promise<StageRun> {
@@ -396,70 +415,6 @@ export class MockStageRunRepository implements IStageRunRepository {
     return [...this.store.values()]
       .filter((sr) => sr.workflowRunId === workflowRunId && statuses.includes(sr.status))
       .map((sr) => ({ ...sr }));
-  }
-
-  async update(id: string, updates: Partial<StageRun>): Promise<StageRun> {
-    const existing = this.store.get(id);
-    if (!existing) throw new Error(`StageRun ${id} not found`);
-    const updated = { ...existing, ...updates };
-    this.store.set(id, updated);
-    return { ...updated };
-  }
-
-  async updateStatus(id: string, status: StageRunStatus): Promise<void> {
-    const existing = this.store.get(id);
-    if (!existing) throw new Error(`StageRun ${id} not found`);
-    existing.status = status;
-  }
-
-  async incrementRetryCount(id: string): Promise<void> {
-    const existing = this.store.get(id);
-    if (!existing) throw new Error(`StageRun ${id} not found`);
-    existing.retryCount += 1;
-  }
-
-  async resetForRetry(id: string): Promise<void> {
-    const existing = this.store.get(id);
-    if (!existing) throw new Error(`StageRun ${id} not found`);
-    existing.status = 'pending';
-    existing.error = undefined;
-    existing.startedAt = undefined;
-    existing.completedAt = undefined;
-  }
-
-  async claimForExecution(id: string): Promise<boolean> {
-    const existing = this.store.get(id);
-    if (!existing || existing.status !== 'pending') return false;
-    existing.status = 'queued';
-    existing.version = (existing.version ?? 0) + 1;
-    return true;
-  }
-
-  async batchUpdateStatus(ids: string[], status: StageRunStatus): Promise<void> {
-    for (const id of ids) {
-      const existing = this.store.get(id);
-      if (existing) {
-        existing.status = status;
-      }
-    }
-  }
-
-  /**
-   * WS-D1 — liveness beat, mirroring `DrizzleStageRunRepository.heartbeat`:
-   * only writes while the row is `queued`/`running`, returns whether it did.
-   * Exists on the mock so `StageExecutionService`'s heartbeat timer (task 4)
-   * has something real to assert against in tests instead of silently
-   * hitting a missing method.
-   */
-  async heartbeat(id: string): Promise<boolean> {
-    const existing = this.store.get(id);
-    if (!existing || (existing.status !== 'queued' && existing.status !== 'running')) return false;
-    existing.heartbeatAt = new Date();
-    return true;
-  }
-
-  async delete(id: string): Promise<void> {
-    this.store.delete(id);
   }
 
   async deleteByRunId(workflowRunId: string): Promise<void> {

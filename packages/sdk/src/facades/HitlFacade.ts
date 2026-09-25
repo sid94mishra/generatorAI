@@ -1,56 +1,38 @@
 // ────────────────────────────────────────────────────────────────
 // HitlFacade — ai.hitl.*
 //
-// Human-in-the-loop operations: interrupt stages to request human
-// input, resume with approval/rejection.
+// The operator side of a stage's human gates. A gate (completion review,
+// tool permission, question, plan review) parks its stage instance in
+// `awaiting_input`; these methods list and answer the parked instances.
+// Answers and cancels are run commands (`approve`, `cancel`).
 // ────────────────────────────────────────────────────────────────
 
-import type { CoreServices, HitlService, InterruptResolution } from '@generatorai/core';
+import { RunCommandRefusedError, type CoreServices, type HitlService, type StageVerdict } from '@generatorai/core';
+import type { StageRun } from '@generatorai/shared';
 
-export interface InterruptOptions {
-  /** Prompt to display to the human reviewer */
-  prompt?: string;
-}
-
-export type { InterruptResolution };
+export type { StageVerdict };
 
 export class HitlFacade {
   private hitlService: HitlService;
 
-  constructor(private services: CoreServices) {
+  constructor(services: CoreServices) {
     this.hitlService = services.hitlService;
   }
 
-  /**
-   * Interrupt a running stage and wait for human input.
-   *
-   * The stage enters `awaiting_input` status. Call `resume()` to continue.
-   * Returns a promise that resolves when the human responds.
-   */
-  async interrupt(
-    stageRunId: string,
-    workflowRunId: string,
-    data: unknown,
-    options?: InterruptOptions,
-  ): Promise<InterruptResolution> {
-    return this.hitlService.interrupt(stageRunId, workflowRunId, data, options);
+  /** The run's instances waiting on a human (their `interruptData` is the request). */
+  pending(workflowRunId: string): Promise<StageRun[]> {
+    return this.hitlService.listPending(workflowRunId);
   }
 
-  /**
-   * Resume a stage that is awaiting human input.
-   */
-  async resume(
-    stageRunId: string,
-    workflowRunId: string,
-    resolution: InterruptResolution,
-  ): Promise<{ ok: boolean; reason?: string }> {
-    return this.hitlService.resume(stageRunId, workflowRunId, resolution);
+  /** Answer a parked instance. Throws when the engine refuses (not awaiting input, stale version, …). */
+  async resolve(workflowRunId: string, instanceId: string, verdict: StageVerdict): Promise<void> {
+    const r = await this.hitlService.resolve(workflowRunId, instanceId, verdict);
+    if (!r.ok) throw new RunCommandRefusedError(r);
   }
 
-  /**
-   * Cancel a pending interrupt (rejects the waiting promise).
-   */
-  cancelWaiter(stageRunId: string, reason: string): void {
-    this.hitlService.cancelWaiter(stageRunId, reason);
+  /** Cancel a parked instance (its waiter is released by the engine). */
+  async cancel(workflowRunId: string, instanceId: string): Promise<void> {
+    const r = await this.hitlService.cancel(workflowRunId, instanceId);
+    if (!r.ok) throw new RunCommandRefusedError(r);
   }
 }

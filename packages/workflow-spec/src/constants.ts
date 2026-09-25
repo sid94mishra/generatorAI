@@ -15,7 +15,7 @@
  */
 export const ENGINE_LEVELS = ['v1', 'v2'] as const;
 export type EngineLevel = (typeof ENGINE_LEVELS)[number];
-export const ENGINE_LEVEL: EngineLevel = 'v1';
+export const ENGINE_LEVEL: EngineLevel = 'v2';
 
 /** The only `formatVersion` a `WorkflowGraph` document may carry. */
 export const WORKFLOW_FORMAT_VERSION = 2 as const;

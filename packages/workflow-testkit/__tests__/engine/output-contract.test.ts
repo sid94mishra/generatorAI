@@ -10,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTestEngine, createV2Adapter, type TestEngine } from '../../src/index.js';
+import { createTestEngine, type TestEngine } from '../../src/index.js';
 
 let engine: TestEngine | undefined;
 afterEach(async () => {
@@ -34,10 +34,9 @@ const triage = (extra: Record<string, unknown> = {}) => ({
   edges: [['triage', 'fix']] as const,
 });
 
-describe('output contract (engine v2)', () => {
+describe('output contract (engine)', () => {
   it('an invalid answer gets one repair turn; submit_output delivers the fix; the successor sees it', async () => {
     engine = await createTestEngine({
-      adapter: createV2Adapter,
       script: {
         triage: [
           { text: 'Here is the triage:\n```json\n{"severity": 3}\n```' },
@@ -67,7 +66,6 @@ describe('output contract (engine v2)', () => {
   it('an exhausted repair budget restarts the attempt on a fresh session, carrying nothing over', async () => {
     const bad = { text: '```json\n{"severity": "medium"}\n```' };
     engine = await createTestEngine({
-      adapter: createV2Adapter,
       script: {
         triage: [
           bad,
@@ -94,7 +92,6 @@ describe('output contract (engine v2)', () => {
 
   it('hard rules judge the latest answer only, never the rejected one (F-6/F-7, B-11)', async () => {
     engine = await createTestEngine({
-      adapter: createV2Adapter,
       script: {
         notes: [
           { text: 'DRAFT: release notes still being written, nothing final here yet.' },

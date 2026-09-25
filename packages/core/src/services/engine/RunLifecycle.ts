@@ -2,16 +2,18 @@
 // RunLifecycle — the `prepare` and `finalize` effects of the v2 engine
 // (P03 WP-3.6, G5 §3.9, §5.10).
 //
-// `prepare` runs while the run is `starting` (the workspace, then the
+// `prepare` runs while the run is `starting` (the PD-17 permission check,
+// the workspace with the project's codebase worktrees, then the
 // `on_run_start` hooks) and posts `prepared` or `prepare_failed`.
 // `finalize` runs while the run is `finalizing` or `cancelling`:
 // compensation for the completed instances `decide()` listed (last completed
 // first, the saga order), the workflow's `onFailure` / `onExit` actions and
-// its run hooks, then the run's sessions are released (B-15) and the
-// workspace is completed. It posts `finalized {ok}`; a failed compensation
+// its run hooks, then the run's sessions (B-15) and turn journals are
+// released and the workspace is completed. It posts `finalized {ok}`; a failed compensation
 // makes the run `failed` (`finalize_failed`) without stopping the others.
-// Clone/preprocess and commit/PR post-processing join these two phases in
-// P04 (one lifecycle for every entry point).
+// Clone/preprocess (still the orchestrator's, before `start`) and commit/PR
+// post-processing join these two phases in P04 (one lifecycle for every
+// entry point).
 // ────────────────────────────────────────────────────────────────
 
 import * as path from 'node:path';
@@ -24,6 +26,7 @@ import type {
   WorkflowHookDefinition,
 } from '@generatorai/workflow-spec';
 import type { EngineStores } from '../../domain/ports/IEngineStore.js';
+import type { IProjectCodebaseRepository } from '../../domain/ports/IProjectCodebaseRepository.js';
 import type { IAgentHarness } from '../../domain/ports/IAgentHarness.js';
 import type { ISessionRepository } from '../../domain/ports/IRepositories.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
@@ -35,6 +38,7 @@ import { userVariables } from '../definitions/runScope.js';
 import type { HookContext, HookExecutor } from '../HookExecutor.js';
 import type { WorkspaceCheckpointService } from '../WorkspaceCheckpointService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
+import type { WorktreeService } from '../WorktreeService.js';
 
 export interface RunLifecycle {
   /** The run's setup phases; throws with the phase name to fail the run (`setup:<phase>`). */
@@ -64,6 +68,13 @@ export interface RunLifecycleDeps {
   eventBus: EventBus;
   hookExecutor?: HookExecutor | undefined;
   checkpoints?: WorkspaceCheckpointService | undefined;
+  /**
+   * PD-17: refuse a run whose permission mode a stage's provider cannot hold
+   * (throws). Runs first, before anything is created for the run.
+   */
+  permissionCheck?: ((run: WorkflowRun, graph: WorkflowGraph) => Promise<void>) | undefined;
+  /** Git worktrees of the project's codebases (late-wired: built after the engine). */
+  worktrees?: { service: WorktreeService; codebases: IProjectCodebaseRepository } | undefined;
   logger?: ILogger | undefined;
   now?: () => number;
 }
@@ -81,9 +92,23 @@ export class DefaultRunLifecycle implements RunLifecycle {
     this.now = deps.now ?? Date.now;
   }
 
+  /** Late wiring (the composition root builds these after the engine). */
+  setWorktrees(worktrees: { service: WorktreeService; codebases: IProjectCodebaseRepository }): void {
+    this.deps.worktrees = worktrees;
+  }
+
+  setCheckpoints(checkpoints: WorkspaceCheckpointService): void {
+    this.deps.checkpoints = checkpoints;
+  }
+
   async prepare(runId: string): Promise<void> {
     const run = await this.deps.runRepo.getById(runId);
     const graph = await this.deps.definitions.get(run.definitionVersionId);
+    if (this.deps.permissionCheck) {
+      await this.deps.permissionCheck(run, graph).catch((err: unknown) => {
+        throw new PrepareError('permission', err instanceof Error ? err.message : String(err));
+      });
+    }
     await this.ensureWorkspace(run, graph).catch((err: unknown) => {
       throw new PrepareError('workspace', err instanceof Error ? err.message : String(err));
     });
@@ -106,16 +131,44 @@ export class DefaultRunLifecycle implements RunLifecycle {
       stageProjectArtifacts: !!projectId,
       ...(graph.workflow.session.browser ? { browserConfig: graph.workflow.session.browser as Record<string, unknown> } : {}),
     });
-    await this.deps.runRepo.update(run.id, {
-      workspaceId: workspace.id,
-      variables: {
-        ...vars,
-        __workingDirectory: workspaceManager.getWorkingDirectory(workspace),
-        __artifactsDirectory: path.join(workspace.rootPath, 'artifacts'),
-        __workflowRunId: run.id,
-        __workspaceId: workspace.id,
-      },
-    });
+    const variables: Record<string, unknown> = {
+      ...vars,
+      __workingDirectory: workspaceManager.getWorkingDirectory(workspace),
+      __artifactsDirectory: path.join(workspace.rootPath, 'artifacts'),
+      __workflowRunId: run.id,
+      __workspaceId: workspace.id,
+    };
+    await this.setupProjectWorktrees(run, graph, workspace.rootPath, variables);
+    await this.deps.runRepo.update(run.id, { workspaceId: workspace.id, variables });
+  }
+
+  /**
+   * Worktrees of a project-linked run's codebases: the definition's codebase
+   * selection, else every ready codebase of the project. Each checkout is
+   * recorded in the run state (`run.codebases.<alias>`) and the first one
+   * becomes the working directory. Non-fatal: a run without its worktrees
+   * still runs in the workspace. (Orchestrated runs clone their own
+   * checkouts before `start` and arrive with a working directory.)
+   */
+  private async setupProjectWorktrees(run: WorkflowRun, graph: WorkflowGraph, rootPath: string, variables: Record<string, unknown>): Promise<void> {
+    const worktrees = this.deps.worktrees;
+    const projectId = (run.variables?.['__projectId'] as string | undefined) ?? graph.workflow.projectId ?? undefined;
+    if (!projectId || !worktrees) return;
+    try {
+      const aliases = graph.workflow.lifecycle.codebaseAliases?.length
+        ? graph.workflow.lifecycle.codebaseAliases
+        : (await worktrees.codebases.getByProjectId(projectId)).filter((cb) => cb.status === 'ready').map((cb) => cb.alias);
+      if (aliases.length === 0) return;
+      const infos = await worktrees.service.createRunWorktrees(projectId, run.id, aliases, 'workflow', path.join(rootPath, 'source'));
+      for (const wt of infos) {
+        const alias = path.basename(wt.worktreePath);
+        variables[`repo_path_${alias}`] = wt.worktreePath;
+        variables[`repo_branch_${alias}`] = wt.branchName;
+      }
+      if (infos[0]) variables['__workingDirectory'] = infos[0].worktreePath;
+    } catch (err) {
+      this.deps.logger?.warn(`[RunLifecycle] worktree creation for ${run.id} failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   async finalize(runId: string, outcome: RunOutcome, compensate: readonly string[]): Promise<{ ok: boolean; error?: string }> {
@@ -141,6 +194,8 @@ export class DefaultRunLifecycle implements RunLifecycle {
     }
     await this.runHooks(RUN_HOOK_PHASE[outcome], graph, run);
     await this.releaseSessions(runId);
+    // The turn journal only serves a replay; a terminal run never replays (its re-run is a fork).
+    for (const inst of state?.instances ?? []) this.deps.stores.turns.release(inst.id);
     const workspaceId = run.workspaceId ?? (run.variables?.['__workspaceId'] as string | undefined);
     if (workspaceId) {
       await this.deps.workspaceManager.completeWorkspace(workspaceId).catch((err: unknown) => {

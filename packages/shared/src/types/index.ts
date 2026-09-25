@@ -50,8 +50,6 @@ export type {
 export type { Session, SessionOwnerType, SessionStatus } from './Session.js';
 
 export type { HarnessConfig } from './Workflow.js';
-export type { WorkflowRunTransition } from './WorkflowRunStateMachine.js';
-export type { StageRunTransition } from './StageRunStateMachine.js';
 
 export type { ChatMessage, ChatMessageMetadata } from './ChatMessage.js';
 export type { Artifact } from './Artifact.js';
@@ -156,7 +154,6 @@ export type {
   WorkflowRunWithStages,
   CreateWorkflowRunParams,
   WorkflowRunPermissionMode,
-  WorkflowSessionMode,
   ArtifactManifestEntry,
   RunScratchpad,
   RunScratchpadEntry,

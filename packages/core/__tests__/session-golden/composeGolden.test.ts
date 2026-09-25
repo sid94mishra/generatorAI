@@ -1,10 +1,9 @@
 // ────────────────────────────────────────────────────────────────
 // Golden snapshots of session composition — chat and stage (P00 WP-0.5).
 //
-// Three builders assemble provider conversation params today:
 // ChatManagementService.createChat, ChatManagementService.buildConversationConfig
-// (resume) and StageExecutionService.executeStage (→ SessionAllocator). PHASE-02
-// extracts ONE SessionComposer from them, and the chat prompt-cache prefix
+// (resume) and the engine's StageExecutor (P03) all build their conversation
+// params through ONE SessionComposer (P02), and the chat prompt-cache prefix
 // must stay byte-identical while it does (R-10). These snapshots are that
 // guard: each case serialises exactly what reached `createConversation` /
 // `resumeConversation` (ids, paths and handler functions redacted).
@@ -44,13 +43,13 @@ import {
   DrizzleIdempotencyKeyRepository,
   DrizzlePlanRepository,
   DrizzleSequenceAllocator,
-  DrizzleSessionAllocationRepository,
   DrizzleSessionRepository,
   DrizzleStageRunRepository,
   DrizzleWorkflowRunRepository,
   EntryRepository,
   RegisterRepository,
   SqliteWorkflowDefinitionStore,
+  createEngineStores,
   type AppDatabase,
 } from '@generatorai/db';
 import type { ILogger, ResolvedAgentProjection } from '@generatorai/shared';
@@ -266,8 +265,8 @@ function boot(db: AppDatabase, workDir: string): Env {
     idempotencyKeyRepo: new DrizzleIdempotencyKeyRepository(db),
     registerRepo: new RegisterRepository(db),
     entryRepo: new EntryRepository(db),
-    sessionAllocationRepo: new DrizzleSessionAllocationRepository(db),
-    sandbox: null,
+    engineStores: createEngineStores(db),
+    toHarnessError: (_provider, raw) => raw,
     workspaceManager: workspaces,
     admissionController: new AdmissionController(),
     scmFlow: { run: async () => { throw new Error('golden: no source control'); } },
@@ -290,11 +289,11 @@ function fresh(): Env {
   return env;
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const env of envs.splice(0)) {
     env.services.agentInteractionService?.dispose();
     env.services.automationService.shutdown();
-    env.services.workflowRunService.shutdown();
+    await env.services.engine.stop();
     try {
       closeDB(env.db);
     } catch {
@@ -320,9 +319,8 @@ const lastCreate = (env: Env) => env.calls.filter((c) => c.op === 'create').at(-
 async function runStage(
   env: Env,
   stage: Record<string, unknown>,
-  extraVars: Record<string, unknown> = {},
 ): Promise<CreateConversationParams> {
-  const { workflowDefinitionService, workflowRunService, stageExecutionService } = env.services;
+  const { workflowDefinitionService, workflowRunService, engine } = env.services;
   const def = await workflowDefinitionService.createFromSpec(
     {
       formatVersion: 2,
@@ -340,12 +338,25 @@ async function runStage(
     { canEditCommands: true, status: 'published' },
   );
   const run = await workflowRunService.createRun({ workflowDefinitionId: def.id });
-  const [stageRun] = await new DrizzleStageRunRepository(env.db).getByRunId(run.id);
-  await stageExecutionService.executeStage(stageRun!, run.id, 'per-stage', def.graph.workflow.session, {
-    __workingDirectory: join(env.workDir, 'run'),
-    __workflowRunId: run.id,
-    ...extraVars,
+  // The run's workspace exists already (the fake manager has one): the prepare phase keeps it.
+  await new DrizzleWorkflowRunRepository(env.db).update(run.id, {
+    variables: {
+      ...run.variables,
+      __workingDirectory: join(env.workDir, 'run'),
+      __artifactsDirectory: join(env.workDir, 'art'),
+      __workflowRunId: run.id,
+      __workspaceId: 'ws-golden',
+    },
   });
+  const before = env.calls.filter((c) => c.op === 'create').length;
+  await engine.start();
+  await workflowRunService.startRun(run.id);
+  const deadline = Date.now() + 10_000;
+  while (env.calls.filter((c) => c.op === 'create').length === before) {
+    if (Date.now() > deadline) throw new Error('the stage never created its conversation');
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  await engine.stop();
   return lastCreate(env);
 }
 

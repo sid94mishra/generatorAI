@@ -21,9 +21,10 @@ function makeStageRun(overrides: Partial<StageRun> = {}): StageRun {
     stageKey: 'stage_1',
     name: 'Stage 1',
     status: 'pending',
-    currentStep: 0,
-    totalSteps: 1,
-    retryCount: 0,
+    instancePath: 'stage_1',
+    kind: 'agent',
+    currentAttempt: 0,
+    version: 0,
     createdAt: new Date(),
     ...overrides,
   } as StageRun;
@@ -36,7 +37,6 @@ function makeRun(overrides: Partial<WorkflowRunWithStages> = {}): WorkflowRunWit
     definitionVersionId: 'ver-1',
     name: 'Test Run',
     status: 'created',
-    sessionMode: 'auto',
     variables: {},
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -195,13 +195,6 @@ describe('workflowRunStore', () => {
       expect(stage!.error).toBe('OOM');
     });
 
-    it('updates currentStep', () => {
-      useWorkflowRunStore.getState().setRun(makeRun());
-      useWorkflowRunStore.getState().updateStageRunStatus('sr-1', 'running', { currentStep: 2 });
-
-      const stage = useWorkflowRunStore.getState().run!.stageRuns.find((s) => s.id === 'sr-1');
-      expect(stage!.currentStep).toBe(2);
-    });
   });
 
   // ══════════════════════════════════════════
@@ -210,11 +203,11 @@ describe('workflowRunStore', () => {
   describe('updateStageRun', () => {
     it('applies partial updates to a stage run', () => {
       useWorkflowRunStore.getState().setRun(makeRun());
-      useWorkflowRunStore.getState().updateStageRun('sr-1', { name: 'Renamed', retryCount: 2 });
+      useWorkflowRunStore.getState().updateStageRun('sr-1', { name: 'Renamed', currentAttempt: 2 });
 
       const stage = useWorkflowRunStore.getState().run!.stageRuns.find((s) => s.id === 'sr-1');
       expect(stage!.name).toBe('Renamed');
-      expect(stage!.retryCount).toBe(2);
+      expect(stage!.currentAttempt).toBe(2);
     });
 
     it('updates sessionId in stageSessionMap', () => {
@@ -291,11 +284,11 @@ describe('workflowRunStore', () => {
       expect(useWorkflowRunStore.getState().selectedStageRunId).toBe('sr-b');
     });
 
-    it('falls back to first queued when none running', () => {
+    it('falls back to first ready when none running', () => {
       const run = makeRun({
         stageRuns: [
           makeStageRun({ id: 'sr-a', name: 'A', status: 'completed' }),
-          makeStageRun({ id: 'sr-b', name: 'B', status: 'queued' }),
+          makeStageRun({ id: 'sr-b', name: 'B', status: 'ready' }),
         ],
       });
       useWorkflowRunStore.setState({ selectedStageRunId: null });

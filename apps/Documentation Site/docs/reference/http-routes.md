@@ -96,33 +96,33 @@ Source: `apps/server/src/routes/chats.ts`.
 | Method | Path | Source line |
 | --- | --- | --- |
 | `POST` | `/api/chats` | 260 |
-| `GET` | `/api/chats` | 314 |
-| `GET` | `/api/chats/:id` | 391 |
-| `PUT` | `/api/chats/:id/sources` | 406 |
-| `POST` | `/api/chats/:id/workspace/prepare` | 424 |
-| `DELETE` | `/api/chats/:id` | 440 |
-| `PATCH` | `/api/chats/:id` | 452 |
-| `POST` | `/api/chats/:id/cancel` | 566 |
-| `POST` | `/api/chats/:id/prompt` | 599 |
-| `GET` | `/api/chats/:id/attachments/:artifactId` | 726 |
-| `GET` | `/api/chats/:id/messages` | 753 |
-| `GET` | `/api/chats/:id/transcript` | 783 |
-| `POST` | `/api/chats/:id/rewind` | 800 |
-| `POST` | `/api/chats/:id/fork` | 816 |
-| `GET` | `/api/chats/:id/background-tasks` | 850 |
-| `GET` | `/api/chats/:id/background-tasks/:taskId` | 861 |
-| `POST` | `/api/chats/:id/background-tasks/:taskId/cancel` | 872 |
-| `GET` | `/api/chats/:id/plans` | 891 |
-| `GET` | `/api/chats/:id/plans/:planId` | 902 |
-| `GET` | `/api/chats/:id/plans/:planId/content` | 926 |
-| `PUT` | `/api/chats/:id/plans/:planId/content` | 961 |
-| `POST` | `/api/chats/:id/plans/:planId/comments` | 1006 |
-| `POST` | `/api/chats/:id/plans/:planId/decision` | 1042 |
-| `POST` | `/api/chats/:id/plans/:planId/save-to-workspace` | 1096 |
-| `GET` | `/api/chats/:id/interactions` | 1129 |
-| `POST` | `/api/chats/:id/interactions/:interactionId/respond` | 1149 |
-| `POST` | `/api/chats/:id/interactions/:interactionId/permission` | 1184 |
-| `PATCH` | `/api/chats/:id/permission-mode` | 1217 |
+| `GET` | `/api/chats` | 322 |
+| `GET` | `/api/chats/:id` | 399 |
+| `PUT` | `/api/chats/:id/sources` | 414 |
+| `POST` | `/api/chats/:id/workspace/prepare` | 432 |
+| `DELETE` | `/api/chats/:id` | 448 |
+| `PATCH` | `/api/chats/:id` | 460 |
+| `POST` | `/api/chats/:id/cancel` | 588 |
+| `POST` | `/api/chats/:id/prompt` | 621 |
+| `GET` | `/api/chats/:id/attachments/:artifactId` | 748 |
+| `GET` | `/api/chats/:id/messages` | 775 |
+| `GET` | `/api/chats/:id/transcript` | 805 |
+| `POST` | `/api/chats/:id/rewind` | 822 |
+| `POST` | `/api/chats/:id/fork` | 838 |
+| `GET` | `/api/chats/:id/background-tasks` | 872 |
+| `GET` | `/api/chats/:id/background-tasks/:taskId` | 883 |
+| `POST` | `/api/chats/:id/background-tasks/:taskId/cancel` | 894 |
+| `GET` | `/api/chats/:id/plans` | 913 |
+| `GET` | `/api/chats/:id/plans/:planId` | 924 |
+| `GET` | `/api/chats/:id/plans/:planId/content` | 948 |
+| `PUT` | `/api/chats/:id/plans/:planId/content` | 983 |
+| `POST` | `/api/chats/:id/plans/:planId/comments` | 1028 |
+| `POST` | `/api/chats/:id/plans/:planId/decision` | 1064 |
+| `POST` | `/api/chats/:id/plans/:planId/save-to-workspace` | 1118 |
+| `GET` | `/api/chats/:id/interactions` | 1151 |
+| `POST` | `/api/chats/:id/interactions/:interactionId/respond` | 1171 |
+| `POST` | `/api/chats/:id/interactions/:interactionId/permission` | 1206 |
+| `PATCH` | `/api/chats/:id/permission-mode` | 1239 |
 
 ## computer
 
@@ -478,25 +478,17 @@ Source: `apps/server/src/routes/workflowRuns.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/workflow-runs` | 53 |
-| `GET` | `/api/workflow-runs` | 66 |
-| `GET` | `/api/workflow-runs/:id` | 98 |
-| `GET` | `/api/workflow-runs/:id/scratchpad` | 111 |
-| `POST` | `/api/workflow-runs/:id/start` | 140 |
-| `POST` | `/api/workflow-runs/:id/pause` | 162 |
-| `POST` | `/api/workflow-runs/:id/resume` | 176 |
-| `POST` | `/api/workflow-runs/:id/retry` | 192 |
-| `POST` | `/api/workflow-runs/:id/cancel` | 222 |
-| `DELETE` | `/api/workflow-runs/:id` | 236 |
-| `GET` | `/api/workflow-runs/:id/stages` | 255 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/pause` | 266 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/resume` | 280 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/retry` | 302 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/cancel` | 330 |
-| `GET` | `/api/workflow-runs/:id/permission-mode` | 356 |
-| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 367 |
-| `GET` | `/api/workflow-runs/:id/pending-interrupts` | 403 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/approve` | 423 |
+| `POST` | `/api/workflow-runs` | 62 |
+| `GET` | `/api/workflow-runs` | 75 |
+| `GET` | `/api/workflow-runs/:id` | 105 |
+| `GET` | `/api/workflow-runs/:id/scratchpad` | 118 |
+| `POST` | `/api/workflow-runs/:id/start` | 148 |
+| `POST` | `/api/workflow-runs/:id/commands` | 162 |
+| `POST` | `/api/workflow-runs/:id/fork` | 185 |
+| `DELETE` | `/api/workflow-runs/:id` | 197 |
+| `GET` | `/api/workflow-runs/:id/stages` | 216 |
+| `GET` | `/api/workflow-runs/:id/permission-mode` | 231 |
+| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 242 |
 
 ## workflowScripts
 

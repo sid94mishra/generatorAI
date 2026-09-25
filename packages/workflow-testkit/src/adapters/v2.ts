@@ -1,15 +1,16 @@
 // ────────────────────────────────────────────────────────────────
-// The v2 engine adapter (P03 WP-3.6, P00 review R20): whole runs on the
-// RunSupervisor / RunActor / StageExecutor of `@generatorai/core`, over the
-// same in-memory database, scripted fake model and service graph as v1.
+// The engine adapter (P03, P00 review R20): whole runs on the engine of
+// `@generatorai/core` — the `RunSupervisor` / `RunActor` / `StageExecutor`
+// that `createCoreServices` builds, as the server does — over an in-memory
+// database and a scripted fake model.
 //
-// What is v2-specific, all of it here:
-//   - the engine is a `RunSupervisor` over `createEngineStores(db)`, with the
+// What is engine-specific, all of it here:
+//   - the engine is `services.engine` over `createEngineStores(db)`, with the
 //     admission controller as its only concurrency gate; each generation
 //     has its own boot id, and a crash leaves the engine lock behind (the
 //     next generation waits for it to go stale, as a real restart would);
-//   - runs are created by `WorkflowRunService.createRun` (it stays the
-//     create path until P04) and started with `supervisor.startRun`;
+//   - runs are created by `WorkflowRunService.createRun` (the create path
+//     until P04) and started with `startRun`; a run retry is `forkRun`;
 //   - operator commands are `RunCommand`s (the commands API);
 //   - instances are addressed by `instance_path` (a stage KEY at the top
 //     level), snapshots read the v57 tables raw (v2 statuses, attempts,
@@ -19,12 +20,12 @@
 // ────────────────────────────────────────────────────────────────
 
 import { join } from 'node:path';
-import { toHarnessError, type HarnessErrorProvider } from '@generatorai/agent-harness-providers';
+import { harnessErrorOf } from '@generatorai/agent-harness-providers';
 import {
   AdmissionController,
   InMemoryMcpHub,
   McpCredentialVault,
-  RunSupervisor,
+  RunCommandRefusedError,
   createCoreServices,
   FetchHttpClient,
   GitManager,
@@ -32,6 +33,7 @@ import {
   WorkspaceManager,
   type CoreServices,
   type DecideRecord,
+  type RunSupervisor,
   type SupervisorTiming,
 } from '@generatorai/core';
 import {
@@ -47,7 +49,6 @@ import {
   DrizzleAutomationExecutionRepository,
   DrizzleIdempotencyKeyRepository,
   DrizzleSequenceAllocator,
-  DrizzleSessionAllocationRepository,
   DrizzlePlanRepository,
   DrizzleAgentInteractionRepository,
   DrizzleExecutionWorkspaceRepository,
@@ -81,17 +82,12 @@ interface Generation {
 
 const TERMINAL_RUN = new Set(['completed', 'failed', 'cancelled']);
 
-/** Test timing: a crashed generation's lock goes stale in 150 ms. */
-const TEST_TIMING: SupervisorTiming = { lockStaleMs: 150, lockRenewMs: 40, ownershipTtlMs: 60_000, reaperEveryMs: 100 };
-
 function captureLogger(logs: LogLine[], generation: number): ILogger {
   const push = (level: LogLine['level']) => (message: string) => {
     logs.push({ generation, level, message: String(message) });
   };
   return { debug: push('debug'), info: push('info'), warn: push('warn'), error: push('error') } as unknown as ILogger;
 }
-
-const PROVIDERS: ReadonlySet<string> = new Set(['claude-agent', 'codex', 'copilot', 'opencode', 'acp', 'faux']);
 
 type Row = Record<string, unknown>;
 const parse = (v: unknown): unknown => {
@@ -112,7 +108,13 @@ export const createV2Adapter: AdapterFactory = (ctx) => buildV2Adapter(ctx, {});
 
 function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdapter {
   const { db, sqlite, workDir, clock, book, calls, events, logs } = ctx;
-  const timing: SupervisorTiming = { ...TEST_TIMING, ...(opts.timing ?? {}) };
+  const timing: SupervisorTiming = {
+    lockStaleMs: ctx.timing.lockStaleMs,
+    lockRenewMs: ctx.timing.lockRenewMs,
+    ownershipTtlMs: ctx.timing.ownershipTtlMs,
+    reaperEveryMs: ctx.timing.reaperEveryMs,
+    ...(opts.timing ?? {}),
+  };
   let eventSeq = 0;
 
   const byConversation = sqlite.prepare(`
@@ -194,8 +196,11 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
       idempotencyKeyRepo: new DrizzleIdempotencyKeyRepository(db),
       registerRepo: new RegisterRepository(db),
       entryRepo: new EntryRepository(db),
-      sessionAllocationRepo: new DrizzleSessionAllocationRepository(db),
-      sandbox: null,
+      engineStores: createEngineStores(db),
+      toHarnessError: harnessErrorOf,
+      engineOwnerLabel: `testkit-gen-${n}`,
+      engineTiming: timing,
+      ...(opts.onDecide ? { engineOnDecide: opts.onDecide } : {}),
       workspaceManager,
       admissionController: admission,
       scmFlow: {
@@ -209,24 +214,7 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
       agentInteractionRepo: new DrizzleAgentInteractionRepository(db),
     });
 
-    const supervisor = new RunSupervisor({
-      stores: createEngineStores(db),
-      runRepo: workflowRunRepo,
-      definitions: services.runDefinitionReader,
-      harness,
-      composer: services.sessionComposer,
-      sessionRepo,
-      eventBus: services.eventBus,
-      workspaceManager,
-      admission,
-      hookExecutor: services.hookExecutor,
-      scriptRunner,
-      toHarnessError: (provider, raw) => toHarnessError((provider && PROVIDERS.has(provider) ? provider : 'faux') as HarnessErrorProvider, raw),
-      ownerLabel: `testkit-gen-${n}`,
-      logger,
-      timing,
-      ...(opts.onDecide ? { onDecide: opts.onDecide } : {}),
-    });
+    const supervisor = services.engine;
 
     const record = (e: { sessionId: string; kind: string; data: unknown }): void => {
       events.push({ seq: ++eventSeq, generation: n, sessionId: e.sessionId, kind: e.kind, data: (e.data ?? {}) as Record<string, unknown>, at: Date.now() });
@@ -240,7 +228,6 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
     gen.harness.kill();
     gen.supervisor.executor.kill();
     await gen.supervisor.stop({ releaseLock: false });
-    gen.services.workflowRunService.shutdown();
     gen.services.agentInteractionService?.dispose();
     gen.services.automationService.shutdown();
     for (const off of gen.unsubscribe) off();
@@ -254,22 +241,9 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
 
   const snapshot = async (runId: string): Promise<RunSnapshot> => {
     await started;
-    const r = sqlite.prepare(`SELECT * FROM workflow_runs WHERE id = ?`).get(runId) as Row | undefined;
+    const r = sqlite.prepare(`SELECT id, definition_version_id FROM workflow_runs WHERE id = ?`).get(runId) as Row | undefined;
     if (!r) throw new Error(`no run ${runId}`);
-    const run = {
-      id: r['id'],
-      workflowDefinitionId: r['workflow_definition_id'],
-      definitionVersionId: r['definition_version_id'],
-      name: r['name'],
-      status: r['status'],
-      sessionMode: 'per-stage',
-      variables: (parse(r['variables']) as Record<string, unknown> | undefined) ?? {},
-      ...(r['error'] ? { error: r['error'] } : {}),
-      statusReason: r['status_reason'] ?? null,
-      outcome: r['outcome'] ?? null,
-      createdAt: new Date(r['created_at'] as number),
-      updatedAt: new Date(r['updated_at'] as number),
-    } as unknown as WorkflowRun;
+    const run: WorkflowRun = await new DrizzleWorkflowRunRepository(db).getById(runId);
     const graph = await current.services.runDefinitionReader.get(r['definition_version_id'] as string);
     const order = new Map(graph.stages.map((s, i) => [s.key, i]));
     const rows = stageRows(runId).sort(
@@ -348,10 +322,10 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
     };
   };
 
+  /** The commands API's answer (`POST /workflow-runs/:id/commands`). */
   const toHttp = (r: Awaited<ReturnType<RunSupervisor['command']>>): CommandResult => {
     if (r.ok) return { status: 202 };
-    const status = r.code === 'not_found' ? 404 : r.code === 'invalid_command' ? 400 : 409;
-    return { status, body: { error: { code: r.code, message: r.message } } };
+    return { status: new RunCommandRefusedError(r).httpStatus, body: { error: { code: r.code, message: r.message } } };
   };
 
   const command = async (runId: string, cmd: RunCommand): Promise<CommandResult> => {
@@ -360,7 +334,12 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
     const send = async (c: SpecRunCommand) => toHttp(await sup.command(runId, c));
     switch (cmd.type) {
       case 'start':
-        return toHttp(await sup.startRun(runId));
+        try {
+          await current.services.workflowRunService.startRun(runId);
+          return { status: 202 };
+        } catch (err) {
+          return errorResult(err);
+        }
       case 'pause':
         return send({ command: 'pause', mode: 'interrupt' });
       case 'resume':
@@ -382,10 +361,21 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
       case 'command':
         return send(cmd.command as unknown as SpecRunCommand);
       case 'retry-run':
-      case 'interrupt':
-        // Fork is WP-3.8 (part 3); the test-only interrupt has no v2 equivalent.
-        return { status: 501, body: { error: { code: 'NOT_IMPLEMENTED', message: `${cmd.type} is not part of engine v2 yet` } } };
+        try {
+          const fork = await current.services.workflowRunService.forkRun(runId, cmd.request ?? {});
+          return { status: 201, body: fork, runId: fork.id };
+        } catch (err) {
+          return errorResult(err);
+        }
     }
+  };
+
+  /** A thrown refusal in HTTP terms (the server's error middleware). */
+  const errorResult = (err: unknown): CommandResult => {
+    const e = err as { httpStatus?: number; category?: string; code?: string; message?: string };
+    const status =
+      typeof e.httpStatus === 'number' ? e.httpStatus : e.category === 'state' ? 409 : e.category === 'validation' ? 400 : e.category === 'not_found' ? 404 : 500;
+    return { status, body: { error: { code: e.code ?? 'ERROR', message: e.message ?? String(err) } } };
   };
 
   return {
@@ -399,7 +389,7 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
     get harness() {
       return current.harness;
     },
-    /** The current generation's supervisor (v2 only). */
+    /** The current generation's engine. */
     get supervisor() {
       return current.supervisor;
     },
@@ -420,10 +410,7 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
         ...(runOpts.testRun ? { testRun: true } : {}),
         ...(runOpts.permissionMode ? { permissionMode: runOpts.permissionMode } : {}),
       });
-      if (runOpts.start !== false) {
-        const r = await current.supervisor.startRun(run.id);
-        if (!r.ok) throw new Error(`start refused: ${r.message}`);
-      }
+      if (runOpts.start !== false) await current.services.workflowRunService.startRun(run.id);
       return run.id;
     },
     command,

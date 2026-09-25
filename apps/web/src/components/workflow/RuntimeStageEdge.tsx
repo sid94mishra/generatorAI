@@ -37,8 +37,8 @@ function getEdgeStyle(sourceStatus: string, targetStatus: string, edgeType: stri
     };
   }
 
-  // Source completed, target pending/queued → dashed
-  if (sourceStatus === 'completed' && (targetStatus === 'pending' || targetStatus === 'queued')) {
+  // Source completed, target pending/ready → dashed
+  if (sourceStatus === 'completed' && (targetStatus === 'pending' || targetStatus === 'ready' || targetStatus === 'starting')) {
     return {
       stroke: baseColor,
       strokeWidth: 2,

@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // StageExecutor — one attempt of one agent stage (P03 WP-3.5, G5 §3.3–3.4,
-// §5.6, §5.9). Carved out of StageExecutionService for the v2 engine.
+// §5.6, §5.9).
 //
 // State ownership (the handoff contract): the executor owns the in-attempt
 // transitions, each a CAS on `stage_runs` —
@@ -57,7 +57,7 @@ import { redactProjection } from '../AgentResolver.js';
 import { replayPolicyForToolGroups } from '../DurableExecutionEngine.js';
 import type { RunDefinitionReader } from '../definitions/RunDefinitionReader.js';
 import { userVariables } from '../definitions/runScope.js';
-import type { InterruptResolution } from '../HitlService.js';
+import type { InterruptResolution } from '../session/StageGatePort.js';
 import type { HookContext, HookExecutor } from '../HookExecutor.js';
 import type { PlanService } from '../PlanService.js';
 import type { WorkspaceCheckpointService } from '../WorkspaceCheckpointService.js';
@@ -247,6 +247,11 @@ export class StageExecutor {
     this.now = deps.now ?? Date.now;
   }
 
+  /** Late wiring (the composition root builds checkpoints after the engine). */
+  setCheckpoints(checkpoints: WorkspaceCheckpointService): void {
+    this.deps.checkpoints = checkpoints;
+  }
+
   /** Whether this process has a live frame for the instance (recovery and the actor's deliveries). */
   hasFrame(stageRunId: string, attemptNo?: number): boolean {
     const f = this.frames.get(stageRunId);
@@ -408,7 +413,7 @@ export class StageExecutor {
       epoch: journalEpoch(attempts, attemptNo),
       agentMode: spec.defaultAgentMode ?? DEFAULT_AGENT_MODE,
       // W-41: hook-injected variables are scoped to this attempt, never the run's object.
-      variables: { ...(run.variables ?? {}) },
+      variables: { ...(run.variables ?? {}), ...(run.stageOverrides?.find((o) => o.stageKey === stage.key)?.variables ?? {}) },
       workspace,
       workDir: pinned ?? this.deps.workspaceManager.getWorkingDirectory(workspace),
       permissionSource: runPermissionSource(() => this.deps.runRepo.getById(runId), stage.session, graph.workflow.session),

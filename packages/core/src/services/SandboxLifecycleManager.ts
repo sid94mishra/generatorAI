@@ -237,7 +237,7 @@ export class SandboxLifecycleManager {
    * orphan, and best-effort destroys containers not known to the current
    * process (which implies a previous crash).
    *
-   * Returns a summary the StartupRecoveryService can log.
+   * Returns a summary boot housekeeping logs.
    */
   async cleanupOrphans(): Promise<{ destroyed: string[]; failed: string[] }> {
     const destroyed: string[] = [];

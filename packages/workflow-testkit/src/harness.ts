@@ -9,7 +9,7 @@
 //
 //   1. every prompt is classified into a `TurnKind` by the engine adapter's
 //      `classify` (the persisted turn metadata), falling back to the fixed
-//      texts `StageExecutionService` sends today (`classifyPrompt`);
+//      prompt texts (`classifyPrompt`);
 //   2. the conversation is resolved to the stage run currently speaking
 //      through it (via the engine's `resolveStage`, a DB lookup), so the
 //      same script works in `single` and `per-stage` session modes;
@@ -80,6 +80,12 @@ export interface Turn {
   text?: string;
   /** Tool calls reported before the text, each completing immediately. */
   toolCalls?: ScriptedToolCall[];
+  /**
+   * Ask the conversation's permission gate (`onPermissionRequest`) before
+   * anything else, as a provider does for a gated tool; the turn waits for
+   * the answer. A denial is recorded on the call as `permission: false`.
+   */
+  permission?: { type: string; description: string };
   /** Reported as `harness.usage` at the end of the turn. */
   usage?: { inputTokens?: number; outputTokens?: number; cost?: number };
   /** The turn fails: `harness.error` is emitted and the call rejects. */
@@ -126,6 +132,8 @@ export interface HarnessCall {
   stageRunId: string;
   kind: TurnKind;
   prompt: string;
+  /** A scripted permission request's answer. */
+  permission?: boolean;
   /** The per-turn options the engine sent (agent mode, permission mode). */
   options?: SendPromptOptions;
   /** The scripted turn that answered, or undefined for a default reply. */
@@ -140,8 +148,8 @@ export interface HarnessCall {
 }
 
 /**
- * Classify a prompt by the fixed texts `StageExecutionService` sends. The
- * strings are today's; PHASE-02/03 replace them with typed turn roles.
+ * Classify a prompt by its text: the fallback when no `turn_role` was
+ * persisted for it (the adapter classifies by `turn_role` first).
  */
 export function classifyPrompt(text: string): TurnKind {
   const t = text.trimStart();
@@ -351,6 +359,15 @@ export class ScriptedFauxHarness extends FauxProvider {
         call.outcome = 'aborted';
         call.response = '';
         return { content: '' };
+      }
+
+      if (turn?.permission) {
+        const gate = (this.conversationParams.get(conversationId) as unknown as Record<string, unknown> | undefined)?.['onPermissionRequest'] as
+          | ((req: { type: string; description: string }) => Promise<{ granted: boolean }>)
+          | undefined;
+        const answer = gate ? await gate(turn.permission) : { granted: true };
+        if (this.killed) return new Promise<never>(() => undefined);
+        call.permission = answer.granted;
       }
 
       if (turn?.toolCalls?.length) {

@@ -112,6 +112,8 @@ export interface RunRecord {
   /** Started by something other than a person (automation, schedule, webhook, agent): pauses expire (PD-2). */
   unattended: boolean;
   startedAt: number | null;
+  /** Stage keys an operator skipped for this run (`stage_overrides`); they skip instead of launching. */
+  skipKeys?: readonly string[];
 }
 
 export interface RunState {
@@ -147,6 +149,13 @@ export type RunMessage =
   /** A durable timer fired (its row is already marked fired by the TimerService CAS). */
   | { type: 'timer_fired'; timerId: string; kind: TimerKind; stageRunId: string | null }
   | { type: 'lease_expired'; stageRunId: string; owner: string; safeReplay?: boolean }
+  /**
+   * Recovery: the executor frame parked in `awaiting_input` died with the
+   * process. A gate inside a turn (tool permission, question, plan review)
+   * pauses the instance (`interrupted`); a completion review stays parked
+   * and its approval starts a resume attempt (G5 §3.10 step 4).
+   */
+  | { type: 'frame_lost'; stageRunId: string; attemptNo: number }
   | { type: 'command'; command: RunCommand }
   /** The `finalize` effect is done (compensation, onExit/onFailure, post-processing). */
   | { type: 'finalized'; ok: boolean; error?: string }

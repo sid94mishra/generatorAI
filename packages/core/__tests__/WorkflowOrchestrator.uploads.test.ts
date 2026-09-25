@@ -18,7 +18,7 @@ describe('WorkflowOrchestrator upload ordering', () => {
       const store = new MockWorkflowDefinitionStore();
       const { versionId } = await seedDefinition(store, testGraph(['a', 'b']), 'def');
       const repo = new MockWorkflowRunRepository();
-      const run = await repo.create({ id: 'run-upload', workflowDefinitionId: 'def', definitionVersionId: versionId, name: 'Audit', status: 'created', sessionMode: 'auto', variables: {}, createdAt: new Date(), updatedAt: new Date() });
+      const run = await repo.create({ id: 'run-upload', workflowDefinitionId: 'def', definitionVersionId: versionId, name: 'Audit', status: 'created', variables: {}, createdAt: new Date(), updatedAt: new Date() });
       let finishUpload!: () => void;
       const uploaded = new Promise<void>((resolve) => { finishUpload = resolve; });
       const startRun = vi.fn(async (id: string) => {
@@ -28,8 +28,9 @@ describe('WorkflowOrchestrator upload ordering', () => {
         expect(await readFile(join(dir, 'config/skills/audit/SKILL.md'), 'utf8')).toBe('audit skill');
       });
       const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+      const createRun = vi.fn(async () => run);
       const orchestrator = new WorkflowOrchestrator(
-        { createRun: async () => run, startRun } as never,
+        { createRun, startRun } as never,
         { resolveVersionForRun: async () => versionId } as never,
         new RunDefinitionReader(store),
         {} as never,
@@ -56,7 +57,8 @@ describe('WorkflowOrchestrator upload ordering', () => {
       expect(startRun).not.toHaveBeenCalled();
       finishUpload();
       await vi.waitFor(() => expect(startRun).toHaveBeenCalledWith('run-upload'));
-      expect((await repo.getById(run.id)).variables?.['__stageOverrides']).toEqual([{ stageKey: 'b', skip: true }]);
+      // The overrides ride on the run row (`stage_overrides`), which the engine reads.
+      expect(createRun).toHaveBeenCalledWith(expect.objectContaining({ stageOverrides: [{ stageKey: 'b', skip: true }] }));
       expect(log.error).not.toHaveBeenCalled();
     } finally { await rm(dir, { recursive: true, force: true }); }
   });

@@ -17,18 +17,10 @@ export type TimelineItemKind =
   | 'thinking'
   | 'tool'
   | 'stage'
-  | 'step'
   | 'hook'
   | 'notice'
   | 'error'
   | 'usage';
-
-export interface StepState {
-  index: number;
-  totalSteps?: number;
-  label?: string;
-  status: 'running' | 'complete';
-}
 
 export interface HookState {
   name: string;
@@ -66,7 +58,6 @@ export interface TimelineItem {
    */
   stageRunId?: string;
   tool?: ToolCallState;
-  step?: StepState;
   hook?: HookState;
   level?: 'info' | 'warn' | 'error';
   usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number; costUsd?: number };
@@ -465,54 +456,6 @@ export function reduceEvent(
     case 'stage_run.input_received':
       return { ...base, pendingApproval: null };
 
-    // Phase 6 item 4 — per-stage step progress, for the stage detail view.
-    // Verified against the real producer (`StageExecutionService.ts`):
-    // fields are exactly `stageRunId`/`workflowRunId`/`step`/`totalSteps`/
-    // `label`, matching `AgentEvent.ts`'s declared shape.
-    case 'stage_run.step_started': {
-      // Step/hook progress is the same class of granular noise as a tool
-      // call — gated by the same `showTools` flag (Phase 6 item 4's
-      // per-pane verbosity control derives it from the pane's level) so
-      // "minimal" verbosity actually reduces what a run pane shows, not
-      // just its assistant/thinking text.
-      if (options.showTools === false) return base;
-      const stageRunId = str(data['stageRunId']);
-      const index = num(data['step']) ?? 0;
-      const step: StepState = {
-        index,
-        ...(num(data['totalSteps']) !== undefined ? { totalSteps: num(data['totalSteps']) } : {}),
-        ...(data['label'] ? { label: str(data['label']) } : {}),
-        status: 'running',
-      };
-      return push(
-        base,
-        {
-          id: itemId(),
-          kind: 'step',
-          text: step.label ?? `step ${index + 1}`,
-          complete: false,
-          at: now,
-          ...(stageRunId ? { stageRunId } : {}),
-          step,
-        },
-        options,
-      );
-    }
-
-    case 'stage_run.step_completed': {
-      if (options.showTools === false) return base;
-      const stageRunId = str(data['stageRunId']);
-      const index = num(data['step']) ?? 0;
-      return {
-        ...base,
-        items: base.items.map((item) =>
-          item.kind === 'step' && item.stageRunId === stageRunId && item.step?.index === index
-            ? { ...item, complete: true, step: { ...item.step, status: 'complete' } }
-            : item,
-        ),
-      };
-    }
-
     // Hooks are correlated to the whole run (`workflowRunId`), NOT to a
     // specific stage run — `HookExecutor.ts`'s real emit calls carry no
     // `stageRunId`/`stageId` at all, confirmed by reading every emit site,
@@ -739,7 +682,7 @@ export function reduceEvent(
     // Emitted on the PARENT chat's session, so a chat pane open on the
     // parent already receives these through its normal subscription; no
     // new scope needed. Rendered inline as notice/error cards, the same
-    // treatment stage/hook/step events already get, rather than a separate
+    // treatment stage/hook events already get, rather than a separate
     // toast mechanism this reducer has no way to trigger (it is pure).
     case 'chat.background_task.spawned':
       return push(

@@ -334,7 +334,7 @@ export class SessionComposer {
     owner: SessionOwner,
     conversationId: string,
     options: SendPromptOptions,
-    extra: { turnId?: string; semaphore?: { pause(): void; resume(): Promise<void> }; policy?: TurnPolicy } = {},
+    extra: { turnId?: string; policy?: TurnPolicy } = {},
   ): string {
     const turnId = extra.turnId ?? generateId();
     this.turns.set(conversationId, {
@@ -348,7 +348,6 @@ export class SessionComposer {
       interactionIds: [],
       nextSequence: 0,
       cardSequence: new Map(),
-      ...(extra.semaphore ? { semaphore: extra.semaphore } : {}),
       ...(extra.policy ? { policy: extra.policy } : {}),
     });
     return turnId;

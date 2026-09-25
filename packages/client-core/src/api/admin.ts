@@ -48,6 +48,8 @@ import type {
   WorkflowGraphInput,
   ScriptRunProfile,
   WorkflowTemplate,
+  ForkRunRequest,
+  RunCommand,
 } from '@generatorai/workflow-spec';
 import {
   json,
@@ -282,10 +284,11 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       list: (params?: { definitionId?: string; status?: string; limit?: number }) =>
         req<RunSummary[]>(`/api/workflow-runs${qs({ ...params })}`),
 
-      get: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}`),
+      /** The run with its stage runs (instances). */
+      get: (id: string) => req<RunSummary & { stageRuns: StageRun[] }>(`/api/workflow-runs/${id}`),
 
       /**
-       * Creates a run in `pending`. It does NOT begin executing — the server
+       * Creates a run in `created`. It does NOT begin executing — the server
        * models creation and start as two steps so variables can be validated
        * and a profile applied before any stage is scheduled. Callers that
        * want "run it now" must follow with `start`.
@@ -294,31 +297,26 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         req<RunSummary>('/api/workflow-runs', json(body)),
 
       start: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/start`, json({})),
-      pause: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/pause`, json({})),
-      resume: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/resume`, json({})),
-      retry: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/retry`, json({})),
-      cancel: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/cancel`, json({})),
+
+      /**
+       * Every operator action on a run or one of its instances (P03 commands
+       * API): pause, resume, cancel, retry, skip, fail, approve. The server
+       * answers 202; a refused command throws its 409/400/404.
+       */
+      command: (id: string, body: RunCommand) =>
+        req<{ runId: string; command: string }>(`/api/workflow-runs/${id}/commands`, json(body)),
+      /**
+       * Re-run a terminal run as a NEW run (G5 §3.8). The default re-runs every
+       * instance that did not complete; completed ones are memoized.
+       */
+      fork: (id: string, body: ForkRunRequest = {}) =>
+        req<RunSummary>(`/api/workflow-runs/${id}/fork`, json(body)),
+
       remove: (id: string) => req<void>(`/api/workflow-runs/${id}`, { method: 'DELETE' }),
 
       stages: (id: string) => req<StageRun[]>(`/api/workflow-runs/${id}/stages`),
       scratchpad: (id: string) =>
         req<Record<string, unknown>>(`/api/workflow-runs/${id}/scratchpad`),
-
-      stage: {
-        pause: (runId: string, stageId: string) =>
-          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/pause`, json({})),
-        resume: (runId: string, stageId: string) =>
-          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/resume`, json({})),
-        retry: (runId: string, stageId: string) =>
-          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/retry`, json({})),
-        cancel: (runId: string, stageId: string) =>
-          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/cancel`, json({})),
-        approve: (runId: string, stageId: string, body: Record<string, unknown>) =>
-          req<Record<string, unknown>>(
-            `/api/workflow-runs/${runId}/stages/${stageId}/approve`,
-            json(body),
-          ),
-      },
 
       permissionMode: {
         get: (id: string) =>
@@ -330,9 +328,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
             jsonWith('PATCH', { mode }),
           ),
       },
-
-      pendingInterrupts: (id: string) =>
-        req<Array<Record<string, unknown>>>(`/api/workflow-runs/${id}/pending-interrupts`),
     },
 
     // ── automations.ts ──────────────────────────────────────────

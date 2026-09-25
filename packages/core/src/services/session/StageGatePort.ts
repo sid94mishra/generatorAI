@@ -1,16 +1,19 @@
 // ────────────────────────────────────────────────────────────────
-// StageGatePort — a stage's human gates, on the durable HITL wait (WP-2.6).
+// StageGatePort — a stage's human gates (WP-2.6), parked by the engine.
 //
 // Unlike a chat's interactions (which expire on restart because the SDK
-// callback cannot survive one), a stage parks on `HitlService.interrupt`:
-// the row goes `awaiting_input`, a verdict given after a restart is held for
-// the relaunched stage, and the stage-semaphore permit is released while a
-// human thinks. Each gate also announces itself with the chat's event shapes
-// under `stage.*` (with `stageRunId`), so the stream renders the same cards.
+// callback cannot survive one), a stage parks its executor frame: the
+// instance goes `awaiting_input` (a CAS) with the request in
+// `interrupt_data`, the admission slot is handed back while a human thinks,
+// and the `approve` run command delivers the verdict. A gate whose frame
+// dies with the process pauses the instance (`interrupted`), and a resume
+// re-sends the turn (G5 §3.10). Each gate also announces itself with the
+// chat's event shapes under `stage.*` (with `stageRunId`), so the stream
+// renders the same cards.
 // ────────────────────────────────────────────────────────────────
 
 import { generateId } from '@generatorai/shared';
-import type { AgentEvent, AgentQuestionResponse, PlanAction, PlanDecision } from '@generatorai/shared';
+import type { AgentEvent, AgentQuestionResponse, PlanAction, PlanDecision, StageReviewOutcome } from '@generatorai/shared';
 import type {
   PermissionRequest,
   PermissionResponse,
@@ -26,20 +29,24 @@ import {
   resolveModeDescriptor,
   resolveTurnPermissionMode,
 } from '../agentModePolicy.js';
-import type { HitlService, InterruptResolution } from '../HitlService.js';
 import type { PlanService } from '../PlanService.js';
 import { stampCardSequence, type GatePort } from './gates.js';
 import type { TurnContext } from './types.js';
 
+/** A human verdict on a parked gate. A cancelled wait resolves `rejected` with a reason. */
+export interface InterruptResolution {
+  outcome: StageReviewOutcome;
+  value?: unknown;
+  reason?: string;
+}
+
 export interface StageGatePortDeps {
-  /** The v1 engine's durable wait. */
-  hitl?: HitlService | undefined;
   /**
-   * The v2 engine's wait (P03 WP-3.5): the executor moves its instance to
+   * The engine's wait (P03 WP-3.5): the executor moves its instance to
    * `awaiting_input` (a CAS), releases its admission slot and waits for the
-   * verdict the actor delivers. Takes precedence over `hitl`.
+   * verdict the actor delivers.
    */
-  park?: ((turn: TurnContext, data: Record<string, unknown>, prompt: string) => Promise<InterruptResolution>) | undefined;
+  park: (turn: TurnContext, data: Record<string, unknown>, prompt: string) => Promise<InterruptResolution>;
   eventBus: EventBus;
   planService?: PlanService | undefined;
   /** The run workspace's managed root: plans land in its `plans/` folder. */
@@ -67,17 +74,8 @@ export class StageGatePort implements GatePort {
     await this.deps.eventBus.emit(sessionId, { kind, data } as unknown as AgentEvent);
   }
 
-  /** Park on the HITL wait with the stage-semaphore permit released. */
-  private async park(turn: TurnContext, data: Record<string, unknown>, prompt: string): Promise<InterruptResolution> {
-    if (this.deps.park) return this.deps.park(turn, data, prompt);
-    const { stageRunId, workflowRunId } = stageIds(turn);
-    if (!this.deps.hitl) return { outcome: 'rejected', reason: 'No approval channel is available for this stage.' };
-    turn.semaphore?.pause();
-    try {
-      return await this.deps.hitl.interrupt(stageRunId, workflowRunId, data, { prompt });
-    } finally {
-      await turn.semaphore?.resume();
-    }
+  private park(turn: TurnContext, data: Record<string, unknown>, prompt: string): Promise<InterruptResolution> {
+    return this.deps.park(turn, data, prompt);
   }
 
   async permission(req: PermissionRequest, turn: TurnContext): Promise<PermissionResponse> {

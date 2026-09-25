@@ -11,24 +11,20 @@
 // automation can no longer hand every nightly run the same directory.
 // ────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { WorkflowRunService } from '../src/services/WorkflowRunService.js';
 import {
   MockWorkflowRunRepository,
   MockStageRunRepository,
   MockWorkflowDefinitionStore,
-  createFakeWorkspaceManager,
   seedDefinition,
   testGraph,
 } from './MockRepositories.js';
 import { EventBus } from '../src/events/EventBus.js';
-import { AdmissionController } from '../src/services/AdmissionController.js';
-import { DAGScheduler } from '../src/services/DAGScheduler.js';
 import { RunDefinitionReader } from '../src/services/definitions/RunDefinitionReader.js';
 import { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
+import type { RunSupervisor } from '../src/services/engine/RunSupervisor.js';
 import type { TemplateRegistry } from '../src/services/TemplateRegistry.js';
-import type { StageExecutionService } from '../src/services/StageExecutionService.js';
-import type { SessionAllocator } from '../src/services/SessionAllocator.js';
 
 const DEF_ID = 'def-1';
 
@@ -48,11 +44,7 @@ describe('X-21 — a scheduled run starts from a clean execution context', () =>
       definitions,
       new WorkflowDefinitionService(store, {} as TemplateRegistry),
       new EventBus(),
-      new DAGScheduler(definitions, stageRunRepo, runRepo),
-      { executeStage: vi.fn(async () => {}) } as unknown as StageExecutionService,
-      { releaseAll: vi.fn(async () => {}) } as unknown as SessionAllocator,
-      createFakeWorkspaceManager(),
-      new AdmissionController(),
+      {} as RunSupervisor, // creating a run does not touch the engine
     );
 
     await seedDefinition(store, testGraph(['a'], [], { name: 'Nightly' }), DEF_ID);
@@ -62,7 +54,7 @@ describe('X-21 — a scheduled run starts from a clean execution context', () =>
     const run = await service.createRun({ workflowDefinitionId: DEF_ID, variables: { topic: 't' }, triggeredBy: 'schedule' });
     const stored = await runRepo.getById(run.id);
     expect(stored.variables?.['topic']).toBe('t');
-    expect(stored.variables?.['__triggeredBy']).toBe('schedule');
+    expect(stored.trigger).toEqual({ kind: 'automation', via: 'schedule' });
     expect(stored.variables?.['__workingDirectory']).toBeUndefined();
   });
 

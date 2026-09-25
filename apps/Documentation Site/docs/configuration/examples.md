@@ -360,18 +360,20 @@ Contract: `InvocationStageOverrideSchema` in `packages/workflow-spec/src/schemas
 
 ## Request changes at a workflow gate
 
-POST /api/workflow-runs/:runId/stages/:stageId/approve at a waiting review gate. outcome rejected terminates that stage; the legacy approved:false means changes_requested, not rejected.
+POST /api/workflow-runs/:id/commands with the id of the instance waiting for review. outcome rejected fails that stage; changes_requested sends the feedback to the stage as a revision, which is validated again before the next review.
 
-Contract: `StageReviewDecisionSchema` in `packages/shared/src/config/ChatSchemas.ts`.
+Contract: `RunCommandSchema` in `packages/workflow-spec/src/schemas/commands.ts`.
 
 ```json
 {
+  "command": "approve",
+  "instanceId": "9b2d7c1e-5f4a-5c3b-8e21-0d6f4a7b3c10",
   "outcome": "changes_requested",
-  "followUpPrompt": "Add a regression test for the legacy bookmarked URL before continuing."
+  "feedback": "Add a regression test for the bookmarked URL before continuing."
 }
 ```
 
-**Verify:** Confirm the stage resumes with the requested follow-up and presents its next review state.
+**Verify:** Confirm the stage runs its revision and presents its next review state.
 
 <ExampleDownload file="request-stage-changes.json" />
 
@@ -385,6 +387,7 @@ Contract: `CreateAutomationSchema` in `packages/shared/src/config/AutomationSche
 {
   "name": "Review queued fixes",
   "triggerType": "manual",
+  "permissionMode": "acceptEdits",
   "workflowIds": [
     "11111111-1111-4111-8111-111111111111"
   ],
@@ -446,6 +449,7 @@ Contract: `CreateAutomationSchema` in `packages/shared/src/config/AutomationSche
 {
   "name": "Weekday repository review",
   "triggerType": "schedule",
+  "permissionMode": "acceptEdits",
   "cronExpression": "0 9 * * MON-FRI",
   "timezone": "Asia/Kolkata",
   "missedRunPolicy": "run_once",

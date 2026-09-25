@@ -213,9 +213,6 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
       if (data?.['sessionId']) {
         updates.sessionId = data['sessionId'] as string;
       }
-      if (data?.['currentStep'] !== undefined) {
-        updates.currentStep = data['currentStep'] as number;
-      }
       return { ...sr, ...updates };
     });
 
@@ -274,8 +271,8 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
     const { run } = get();
     if (!run || run.stageRuns.length === 0) return;
 
-    // Priority: first running, then first queued, then first pending, then first
-    const priority: StageRunStatus[] = ['running', 'queued', 'pending', 'completed', 'failed'];
+    // Priority: first running, then first ready, then first pending, then first
+    const priority: StageRunStatus[] = ['running', 'ready', 'pending', 'completed', 'failed'];
     for (const status of priority) {
       const found = run.stageRuns.find((sr) => sr.status === status);
       if (found) {

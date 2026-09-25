@@ -18,14 +18,18 @@ export type StatusStyle = readonly [string, string];
 const STYLES: Record<string, StatusStyle> = {
   running: ['bg-info-muted', 'text-info'],
   starting: ['bg-info-muted', 'text-info'],
+  validating: ['bg-info-muted', 'text-info'],
+  finalizing: ['bg-info-muted', 'text-info'],
 
-  queued: ['bg-subtle', 'text-muted-foreground'],
+  ready: ['bg-subtle', 'text-muted-foreground'],
   pending: ['bg-subtle', 'text-muted-foreground'],
   created: ['bg-subtle', 'text-muted-foreground'],
   cancelled: ['bg-subtle', 'text-muted-foreground'],
   skipped: ['bg-subtle', 'text-muted-foreground'],
 
   paused: ['bg-warning-muted', 'text-warning'],
+  waiting: ['bg-warning-muted', 'text-warning'],
+  retry_wait: ['bg-warning-muted', 'text-warning'],
   awaiting_input: ['bg-warning-muted', 'text-warning'],
 
   completed: ['bg-success-muted', 'text-success'],
@@ -41,6 +45,7 @@ export function statusStyle(status: AnyRunStatus): StatusStyle {
 /** Statuses whose wire name is not what a person should read. */
 const LABELS: Record<string, string> = {
   awaiting_input: 'Needs you',
+  retry_wait: 'Retrying',
 };
 
 export function statusLabel(status: AnyRunStatus): string {
@@ -65,8 +70,17 @@ export function needsAttention(status: AnyRunStatus): boolean {
 
 /** Statuses that are still in flight. */
 export function isActive(status: AnyRunStatus): boolean {
-  return status === 'running' || status === 'starting' || status === 'queued';
+  return ACTIVE.has(status);
 }
+
+const ACTIVE: ReadonlySet<string> = new Set([
+  'ready',
+  'starting',
+  'running',
+  'validating',
+  'retry_wait',
+  'finalizing',
+]);
 
 /** Statuses that will never change again without an explicit action. */
 export function isTerminal(status: AnyRunStatus): boolean {

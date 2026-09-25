@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
 import type { CreateWorkflowRunParams } from '@generatorai/shared';
-import type { WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
+import type { ForkRunRequest, RunCommand, WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
 import type { StageOverrideWire } from '@generatorai/client-core';
 
 // ── Query Keys ──
@@ -221,81 +221,42 @@ export function useStartWorkflowRun() {
   });
 }
 
-/** Pause a running workflow run */
-export function usePauseWorkflowRun() {
+/**
+ * Send a run command (pause, resume, cancel, retry, skip, fail, approve) to
+ * the run or one of its instances. A refused command rejects with the
+ * server's 409/400/404; the run refetches either way.
+ */
+export function useRunCommand() {
   const platform = usePlatform();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (id: string) => platform.pauseRun(id),
-    onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(id) });
-    },
-  });
-}
-
-/** Resume a paused workflow run */
-export function useResumeWorkflowRun() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => platform.resumeRun(id),
-    onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(id) });
-    },
-  });
-}
-
-/** Cancel a running/paused workflow run */
-export function useCancelWorkflowRun() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => platform.cancelRun(id),
-    onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(id) });
-    },
-  });
-}
-
-/** PARITY-1: retry a failed workflow run (run-level) */
-export function useRetryWorkflowRun() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => platform.retryRun(id),
-    onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(id) });
-    },
-  });
-}
-
-// ── PARITY-2: per-stage controls (pause/resume/retry/cancel a single stage) ──
-
-type StageControlArgs = { runId: string; stageId: string };
-
-function useStageControl(action: (runId: string, stageId: string) => Promise<void>) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ runId, stageId }: StageControlArgs) => action(runId, stageId),
-    onSuccess: (_data, { runId }) => {
+    mutationFn: ({ runId, command }: { runId: string; command: RunCommand }) =>
+      platform.runCommand(runId, command),
+    onSettled: (_data, _err, { runId }) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
       queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
     },
   });
 }
 
-/** Retry a single failed stage */
-export function useRetryStageRun() {
+/**
+ * Fork a terminal run (WP-3.8): a NEW run re-executes every instance that did
+ * not complete (or `rerunFrom` and everything downstream); completed ones are
+ * memoized. Resolves with the fork, which callers navigate to.
+ */
+export function useForkRun() {
   const platform = usePlatform();
-  return useStageControl((runId, stageId) => platform.retryStageRun(runId, stageId));
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ runId, request }: { runId: string; request?: ForkRunRequest }) =>
+      platform.forkRun(runId, request ?? {}),
+    onSuccess: (_fork, { runId }) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
+    },
+  });
 }
 
 // ════════════════════════════════════════════════════════════════

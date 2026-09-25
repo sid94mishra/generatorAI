@@ -12,7 +12,7 @@
 // supply neither:
 //
 //   • `apps/server/src/acp-entry.ts` — no hooks, no onPermissionRequest.
-//   • `StageExecutionService` — passes `onPermissionRequest` but no `hooks`,
+//   • the engine's stage sessions — pass `onPermissionRequest` but no `hooks`,
 //     so every workflow stage was gated by `canUseTool` alone. Anthropic
 //     documents `canUseTool` as "invoked only when the permission evaluation
 //     flow resolves to a prompt … To gate every tool call, use a `PreToolUse`
@@ -94,7 +94,7 @@ describe('W35 — PreToolUse is installed on EVERY conversation', () => {
     expect(preToolUseOf(options)).toBeInstanceOf(Function);
   });
 
-  it('installs the gate when only `onPermissionRequest` is supplied (the StageExecutionService shape)', () => {
+  it('installs the gate when only `onPermissionRequest` is supplied (the stage-session shape)', () => {
     // This is the exact shape workflow stages create: a canUseTool handler and
     // no hooks. canUseTool is a fall-through prompt, not a gate (N-5).
     const options = queryOptionsFor(makeProvider(), {
@@ -213,7 +213,7 @@ describe('W35 — preToolUseGated() is honest', () => {
 
     expect(provider.preToolUseGated()).toBe(true);
     // A conversation with NO hooks of its own is now genuinely gated — this is
-    // what makes the `true` honest for acp-entry / StageExecutionService.
+    // what makes the `true` honest for acp-entry and stage sessions.
     const options = queryOptionsFor(provider, { conversationId: 'c-default-gate' });
     expect(decisionOf(await preToolUseOf(options)!(HOOK_INPUT()))).toBe('deny');
     expect(provider.preToolUseGated('c-default-gate')).toBe(true);

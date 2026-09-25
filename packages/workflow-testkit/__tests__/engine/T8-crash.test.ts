@@ -16,7 +16,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { AdmissionController, EngineLockedError, RunSupervisor, type WorkspaceManager } from '@generatorai/core';
 import { createEngineStores, DrizzleSessionRepository, DrizzleWorkflowRunRepository } from '@generatorai/db';
-import { createTestEngine, createV2Adapter, type TestEngine } from '../../src/index.js';
+import { createTestEngine, type TestEngine } from '../../src/index.js';
 
 let engine: TestEngine | undefined;
 afterEach(async () => {
@@ -41,10 +41,9 @@ const T8 = {
   edges: [['c1', 'c2']] as const,
 };
 
-describe('T8 crash recovery (engine v2)', () => {
+describe('T8 crash recovery (engine)', () => {
   it('a crash mid-turn pauses the interrupted stage (never completes it); an operator retry finishes it (W-16)', async () => {
     engine = await createTestEngine({
-      adapter: createV2Adapter,
       script: { c1: [{ hang: true }, { text: 'C1 answer after the restart: 1 2 3 ... 600, all written out.' }] },
     });
     const run = await engine.runWorkflow(T8);
@@ -76,7 +75,6 @@ describe('T8 crash recovery (engine v2)', () => {
 
   it('a crash while parked for approval: the settled turn replays, it is not re-sent (F-3)', async () => {
     engine = await createTestEngine({
-      adapter: createV2Adapter,
       script: { c1: [{ text: 'C1 answer: 1 2 3 ... 600, all numbers written out as requested.' }] },
     });
     const run = await engine.runWorkflow({ ...T8, stages: [{ ...T8.stages[0], approval: {} }, T8.stages[1]] });
@@ -98,8 +96,36 @@ describe('T8 crash recovery (engine v2)', () => {
     expect(snap.calls.find((c) => c.stageName === 'c2')!.prompt).toContain('C1 answer');
   });
 
+  it('a tool permission lost to a crash pauses the stage (interrupted); a resume re-sends the turn, which asks again', async () => {
+    const ask = { type: 'shell_exec', description: 'run the test suite' };
+    engine = await createTestEngine({
+      script: { c1: [{ permission: ask, text: 'never sent' }, { permission: ask, text: 'C1 finished after the restart, tests green.' }] },
+    });
+    const run = await engine.runWorkflow(T8, {}, { permissionMode: 'default' });
+    let snap = await run.waitForStage('c1', 'awaiting_input');
+    expect(snap.stages['c1']!.interruptData).toMatchObject({ kind: 'tool_permission' });
+
+    await engine.killAndRestart();
+    snap = await run.waitForStage('c1', 'paused');
+    // The request died with its turn: nothing to approve, the stage waits for an operator (G5 §3.10).
+    expect(snap.stages['c1']!.statusReason).toBe('interrupted');
+    expect(snap.stages['c1']!.attempts?.map((a) => a.status)).toEqual(['aborted']);
+
+    expect((await engine.commands.send(run.runId, { type: 'command', command: { command: 'resume', instanceId: run.stageRunId('c1') } })).status).toBe(202);
+    snap = await run.waitForStage('c1', 'awaiting_input');
+    expect(snap.stages['c1']!.interruptData).toMatchObject({ kind: 'tool_permission' });
+    expect((await engine.commands.approve(run.runId, run.stageRunId('c1'), { outcome: 'approved' })).status).toBe(202);
+    snap = await run.waitForTerminal();
+    expect(snap.run.status).toBe('completed');
+    expect(snap.stages['c1']!.attempts?.map((a) => `${a.mode}:${a.status}`)).toEqual(['fresh:aborted', 'resume:succeeded']);
+    expect(snap.calls.filter((c) => c.stageName === 'c1').map((c) => `${c.generation}:${c.kind}:${c.permission ?? '-'}`)).toEqual([
+      '0:prompt:-',
+      '1:continuation:true',
+    ]);
+  });
+
   it('a second engine on the same database refuses to start (RV-27)', async () => {
-    engine = await createTestEngine({ adapter: createV2Adapter });
+    engine = await createTestEngine();
     const { db, services, harness } = engine;
     const second = new RunSupervisor({
       stores: createEngineStores(db),

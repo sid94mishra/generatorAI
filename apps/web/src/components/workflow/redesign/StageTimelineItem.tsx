@@ -30,11 +30,12 @@ import { ContextUsageGauge } from '@/components/shared/ContextUsageGauge.js';
 import { InlineHitlControls } from './InlineHitlControls.js';
 import type { StageStatus, StageView } from './types.js';
 
-/** What `/stages/:id/approve` takes for an in-turn gate. */
+/** The `approve` run command's answer to an in-turn gate. */
 export interface StageGateResolution {
   outcome: 'approved' | 'changes_requested';
-  value: Record<string, unknown>;
-  reason?: string;
+  /** The structured answer (`{interactionId, answers}`, `{planId, action}`, …). */
+  data: Record<string, unknown>;
+  feedback?: string;
 }
 
 interface StageTimelineItemProps {
@@ -57,8 +58,8 @@ interface StageTimelineItemProps {
   onTerminalRejectHitl?: (id: string, reason?: string) => void;
   /**
    * Answer one of the stage's in-turn gates (tool permission, question, plan
-   * review) through `/stages/:id/approve`: the parked turn continues with the
-   * value, nothing is re-sent as a follow-up (P02 review R7).
+   * review) with the `approve` run command: the parked turn continues with
+   * the data, nothing is re-sent as a follow-up (P02 review R7).
    */
   onResolveGate?: (id: string, resolution: StageGateResolution) => void;
   onRetry?: (id: string) => void;
@@ -72,7 +73,8 @@ function statusVisual(status: StageStatus) {
   switch (status) {
     case 'completed':      return { Icon: Check,          dot: 'bg-[var(--color-success)] text-white',        label: 'Completed',       tone: 'success', pulse: false };
     case 'running':        return { Icon: Loader2,        dot: 'bg-[var(--color-primary)] text-white',        label: 'Running',         tone: 'primary', pulse: 'spin' };
-    case 'queued':         return { Icon: Clock,          dot: 'bg-[var(--color-primary)]/40 text-white',     label: 'Queued',          tone: 'primary', pulse: false };
+    case 'ready':          return { Icon: Clock,          dot: 'bg-[var(--color-primary)]/40 text-white',     label: 'Queued',          tone: 'primary', pulse: false };
+    case 'waiting':        return { Icon: Clock,          dot: 'bg-[var(--color-warning)]/60 text-white',     label: 'Waiting',         tone: 'warning', pulse: false };
     case 'pending':        return { Icon: Clock,          dot: 'bg-[var(--color-muted-foreground)]/30 text-[var(--color-muted-foreground)]', label: 'Pending', tone: 'muted', pulse: false };
     case 'paused':         return { Icon: Pause,          dot: 'bg-[var(--color-warning)] text-white',        label: 'Paused',          tone: 'warning', pulse: false };
     case 'awaiting_input': return { Icon: Hand,           dot: 'bg-[var(--color-warning)] text-white',        label: 'Awaiting input',  tone: 'warning', pulse: 'breathe' };
@@ -234,7 +236,7 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
           {isFailed && onRetry && (
             <Button
               onClick={(e) => { e.stopPropagation(); onRetry(stage.id); }}
-              title="Retry stage"
+              title="Re-run from this stage"
               variant="ghost"
               size="icon-sm"
               className="h-auto w-auto rounded-md border border-[var(--color-border)] p-0.5 text-[var(--color-muted-foreground)] hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)]"
@@ -284,18 +286,18 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
                     onResolveGate(stage.id, {
                       // A denied call is not a verdict on the run: `rejected` would end it.
                       outcome: behavior === 'allow' ? 'approved' : 'changes_requested',
-                      value: { interactionId, ...(message ? { message } : {}) },
-                      ...(message ? { reason: message } : {}),
+                      data: { interactionId, ...(message ? { message } : {}) },
+                      ...(message ? { feedback: message } : {}),
                     }),
                   onAnswerQuestion: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) =>
                     onResolveGate(stage.id, {
                       outcome: 'approved',
-                      value: { interactionId, answers, ...(freeformResponse ? { freeformResponse } : {}) },
+                      data: { interactionId, answers, ...(freeformResponse ? { freeformResponse } : {}) },
                     }),
                   onApprovePlan: (planId: string, action: 'implement_interactive' | 'implement_autopilot') =>
-                    onResolveGate(stage.id, { outcome: 'approved', value: { planId, action } }),
+                    onResolveGate(stage.id, { outcome: 'approved', data: { planId, action } }),
                   onRequestPlanChanges: (planId: string, feedback: string) =>
-                    onResolveGate(stage.id, { outcome: 'changes_requested', value: { planId, feedback }, reason: feedback }),
+                    onResolveGate(stage.id, { outcome: 'changes_requested', data: { planId, feedback }, feedback }),
                 }
               : {})}
           />

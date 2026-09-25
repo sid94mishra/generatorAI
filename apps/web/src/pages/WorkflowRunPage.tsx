@@ -21,8 +21,7 @@ import { useStreamStore } from '@/stores/streamStore.js';
 import { useShallow } from 'zustand/react/shallow';
 import {
   useWorkflowRun, useWorkflowDefinition, useWorkflowDefinitionVersion,
-  usePauseWorkflowRun, useResumeWorkflowRun, useCancelWorkflowRun, useRetryWorkflowRun,
-  useRetryStageRun,
+  useRunCommand, useForkRun,
   useRunWorkspace,
   useRunScratchpad,
 } from '@/hooks/workflowQueries.js';
@@ -30,6 +29,7 @@ import { usePlatform } from '@/providers/PlatformProvider.js';
 import { connectWorkflowRun } from '@/stores/sseManager.js';
 import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
 import type { WorkflowRunPermissionMode } from '@generatorai/shared';
+import type { RunCommand } from '@generatorai/workflow-spec';
 
 import { RunHeaderBar } from '@/components/workflow/redesign/RunHeaderBar.js';
 import { PipelineFlow } from '@/components/workflow/redesign/PipelineFlow.js';
@@ -104,11 +104,8 @@ export function WorkflowRunPage() {
 
   // ── Mutations ────────────────────────────────────────────────
 
-  const pauseRun = usePauseWorkflowRun();
-  const resumeRun = useResumeWorkflowRun();
-  const cancelRun = useCancelWorkflowRun();
-  const retryRun = useRetryWorkflowRun();
-  const retryStageMutation = useRetryStageRun();
+  const runCommand = useRunCommand();
+  const forkRun = useForkRun();
 
   // ── UI state ─────────────────────────────────────────────────
 
@@ -340,76 +337,84 @@ export function WorkflowRunPage() {
     setFocusedStageId(id);
   }, []);
 
-  const handlePause = useCallback(() => { if (runId) void pauseRun.mutateAsync(runId); }, [runId, pauseRun]);
-  const handleResume = useCallback(() => { if (runId) void resumeRun.mutateAsync(runId); }, [runId, resumeRun]);
-  const handleCancel = useCallback(() => { if (runId) void cancelRun.mutateAsync(runId); }, [runId, cancelRun]);
-  // Retry produces a NEW run (the failed one stays terminal), so follow the
-  // user to it — staying put on the ancestor is what made retry look inert.
-  const handleRetry = useCallback(() => {
-    if (!runId) return;
-    void retryRun.mutateAsync(runId).then((res) => {
-      if (res?.runId && res.runId !== runId && definitionId) {
-        navigate(`/workflows/${definitionId}/runs/${res.runId}`);
-      }
+  const sendCommand = useCallback((command: RunCommand) => {
+    if (!runId) return Promise.resolve();
+    return runCommand.mutateAsync({ runId, command }).catch((e: unknown) => {
+      console.error(`Run command "${command.command}" failed:`, e);
     });
-  }, [runId, retryRun, navigate, definitionId]);
+  }, [runId, runCommand]);
 
-  const handleApproveHitl = useCallback(async (stageId: string, followUp?: string) => {
+  // Pause in `interrupt` mode: in-flight stages pause too, not just new launches.
+  const handlePause = useCallback(() => { void sendCommand({ command: 'pause', mode: 'interrupt' }); }, [sendCommand]);
+  const handleResume = useCallback(() => { void sendCommand({ command: 'resume' }); }, [sendCommand]);
+  const handleCancel = useCallback(() => { void sendCommand({ command: 'cancel' }); }, [sendCommand]);
+
+  // A terminal run is never mutated: "Retry failed" forks a NEW run that
+  // re-runs every instance that did not complete (completed ones are
+  // memoized), and `rerunFrom` re-runs one stage and everything downstream.
+  // Follow the user to the fork — staying on the ancestor looks inert.
+  const forkAndOpen = useCallback((rerunFrom?: string[]) => {
     if (!runId) return;
-    try {
-      await platform.resumeStage(runId, stageId, {
-        outcome: 'approved',
-        reason: followUp ? 'approved with follow-up' : 'approved via UI',
-        followUpPrompt: followUp,
-      });
-    } catch (e) {
-      console.error('HITL approve failed:', e);
-    }
-  }, [runId, platform]);
+    void forkRun.mutateAsync({ runId, request: rerunFrom ? { rerunFrom } : {} }).then(
+      (fork) => {
+        const defId = fork.workflowDefinitionId ?? definitionId;
+        if (fork.id !== runId && defId) navigate(`/workflows/${defId}/runs/${fork.id}`);
+      },
+      (e: unknown) => console.error('Fork failed:', e),
+    );
+  }, [runId, forkRun, navigate, definitionId]);
+  const handleRetry = useCallback(() => forkAndOpen(), [forkAndOpen]);
+
+  // Every gate answer is the `approve` command on the parked instance.
+  const handleApproveHitl = useCallback(async (stageId: string, followUp?: string) => {
+    await sendCommand({
+      command: 'approve',
+      instanceId: stageId,
+      outcome: 'approved',
+      ...(followUp ? { feedback: followUp } : {}),
+    });
+  }, [sendCommand]);
 
   // R7 — a stage's permission / question / plan-review card answers its gate.
   const handleResolveGate = useCallback(async (stageId: string, resolution: StageGateResolution) => {
-    if (!runId) return;
-    try {
-      await platform.resumeStage(runId, stageId, resolution);
-    } catch (e) {
-      console.error('Stage gate answer failed:', e);
-    }
-  }, [runId, platform]);
+    await sendCommand({
+      command: 'approve',
+      instanceId: stageId,
+      outcome: resolution.outcome,
+      data: resolution.data,
+      ...(resolution.feedback ? { feedback: resolution.feedback } : {}),
+    });
+  }, [sendCommand]);
 
   const handleRejectHitl = useCallback(async (stageId: string, feedback?: string) => {
-    if (!runId) return;
-    try {
-      await platform.resumeStage(runId, stageId, {
-        outcome: 'changes_requested',
-        reason: feedback ?? 'changes requested via UI',
-        followUpPrompt: feedback,
-      });
-    } catch (e) {
-      console.error('HITL request-changes failed:', e);
-    }
-  }, [runId, platform]);
+    await sendCommand({
+      command: 'approve',
+      instanceId: stageId,
+      outcome: 'changes_requested',
+      ...(feedback ? { feedback } : {}),
+    });
+  }, [sendCommand]);
 
   /**
    * Terminal rejection: fails the stage so the DAG blocks every downstream
    * stage and the run stops. Distinct from "request changes", which loops.
    */
   const handleTerminalRejectHitl = useCallback(async (stageId: string, reason?: string) => {
-    if (!runId) return;
-    try {
-      await platform.resumeStage(runId, stageId, {
-        outcome: 'rejected',
-        reason: reason ?? 'rejected via UI',
-      });
-    } catch (e) {
-      console.error('HITL reject failed:', e);
-    }
-  }, [runId, platform]);
+    await sendCommand({
+      command: 'approve',
+      instanceId: stageId,
+      outcome: 'rejected',
+      ...(reason ? { feedback: reason } : {}),
+    });
+  }, [sendCommand]);
 
+  // A failed stage of a finished run re-runs from that stage in a fork.
+  const runIsTerminal =
+    runData?.status === 'failed' || runData?.status === 'cancelled' || runData?.status === 'completed';
   const handleRetryStage = useCallback((stageId: string) => {
-    if (!runId) return;
-    void retryStageMutation.mutateAsync({ runId, stageId });
-  }, [runId, retryStageMutation]);
+    const instancePath = runData?.stageRuns.find((sr) => sr.id === stageId)?.instancePath;
+    if (instancePath) forkAndOpen([instancePath]);
+  }, [runData?.stageRuns, forkAndOpen]);
 
   // ── Loading / error ─────────────────────────────────────────
 
@@ -551,7 +556,7 @@ export function WorkflowRunPage() {
                 onRejectHitl={handleRejectHitl}
                 onTerminalRejectHitl={handleTerminalRejectHitl}
                 onResolveGate={handleResolveGate}
-                onRetry={handleRetryStage}
+                onRetry={runIsTerminal ? handleRetryStage : undefined}
                 onSelectFiles={selectStage}
                 onSelectOutput={selectStage}
                 onOpenInspector={(id) => {

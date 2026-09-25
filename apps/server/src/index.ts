@@ -252,7 +252,7 @@ async function startServer(): Promise<void> {
   // W20 / X-18 — server.lock: identity file written on startup and removed on
   // clean shutdown. If a lock from a previous process (different PID) exists we
   // log a warning — the previous server may not have exited cleanly (e.g. SIGKILL).
-  // We do NOT refuse to start; StartupRecoveryService handles in-flight state.
+  // We do NOT refuse to start; the workflow engine's recovery handles in-flight runs.
   const lockPath = resolve(dbDataDir, 'server.lock');
   const instanceId = randomUUID();
   const lockPort = parseInt(process.env['PORT'] ?? '3100', 10);
@@ -265,7 +265,7 @@ async function startServer(): Promise<void> {
       if (prev.pid && prev.pid !== process.pid) {
         console.warn(
           `[Server] server.lock (pid=${prev.pid}, id=${prev.instanceId ?? '?'}) found from a prior instance — ` +
-          'it may not have exited cleanly. Proceeding; StartupRecoveryService will reconcile in-flight state.',
+          'it may not have exited cleanly. Proceeding; the workflow engine will recover in-flight runs.',
         );
       }
     }

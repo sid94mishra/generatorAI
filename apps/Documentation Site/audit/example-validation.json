@@ -55,8 +55,8 @@
   },
   {
     "id": "request-stage-changes",
-    "module": "packages/shared/src/config/ChatSchemas.ts",
-    "schema": "StageReviewDecisionSchema",
+    "module": "packages/workflow-spec/src/schemas/commands.ts",
+    "schema": "RunCommandSchema",
     "passed": true
   },
   {

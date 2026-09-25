@@ -2,9 +2,11 @@
 // WorkflowFacade — ai.workflows.*
 // ────────────────────────────────────────────────────────────────
 
-import type { CoreServices, WorkflowScriptLoader, IWorkflowRunRepository, WorkflowOrchestrator } from '@generatorai/core';
+import { RunCommandRefusedError, type CoreServices, type WorkflowScriptLoader, type IWorkflowRunRepository, type WorkflowOrchestrator } from '@generatorai/core';
 import type { PersistedEvent, WorkflowRun } from '@generatorai/shared';
 import type {
+  ForkRunRequest,
+  RunCommand,
   ValidationResult,
   WorkflowDefinitionRecord,
   WorkflowDefinitionSummary,
@@ -206,19 +208,14 @@ export class WorkflowFacade {
     }
   }
 
-  /** Pause a running workflow */
-  async pause(runId: string): Promise<void> {
-    return this.services.workflowRunService.pauseRun(runId);
-  }
-
-  /** Resume a paused workflow */
-  async resume(runId: string): Promise<void> {
-    return this.services.workflowRunService.resumeRun(runId);
-  }
-
-  /** Cancel a workflow */
-  async cancel(runId: string): Promise<void> {
-    return this.services.workflowRunService.cancelRun(runId);
+  /**
+   * An operator command on the run or one of its instances: pause, resume,
+   * cancel, retry, skip, fail, approve (the engine's commands API). Throws
+   * when the engine refuses it.
+   */
+  async command(runId: string, command: RunCommand): Promise<void> {
+    const r = await this.services.workflowRunService.command(runId, command);
+    if (!r.ok) throw new RunCommandRefusedError(r);
   }
 
   /** Get current status of a run */
@@ -226,9 +223,13 @@ export class WorkflowFacade {
     return this.runRepo.getById(runId);
   }
 
-  /** Retry a failed run */
-  async retry(runId: string): Promise<WorkflowRun> {
-    return this.services.workflowRunService.retryRun(runId);
+  /**
+   * Re-run a terminal run as a NEW run (the source stays as it ended). By
+   * default every instance that did not complete runs again; completed ones
+   * are copied with their results.
+   */
+  async fork(runId: string, request?: ForkRunRequest): Promise<WorkflowRun> {
+    return this.services.workflowRunService.forkRun(runId, request);
   }
 
   /** Delete a run */

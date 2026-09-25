@@ -3,7 +3,7 @@
 //
 // An in-memory SQLite database migrated with the real `migrateDB`, a scripted
 // fake provider (`ScriptedFauxHarness`), and an ENGINE ADAPTER that boots the
-// engine under test over them (default: today's engine, `adapters/v1.ts`).
+// engine under test over them (`adapters/v2.ts`, the engine since P03).
 // This file is engine-neutral: it owns the shared state (DB, clock, script,
 // captured calls/events/logs), the run handles and polling, and delegates
 // every engine-specific step — starting a run, operator commands, snapshots,
@@ -20,7 +20,7 @@ import type { StageRun } from '@generatorai/shared';
 import { RealClock, type TestClock } from './clock.js';
 import { ScriptBook, type HarnessCall, type ScriptedFauxHarness } from './harness.js';
 import type { WorkflowSpecJson } from './definitions.js';
-import { createV1Adapter } from './adapters/v1.js';
+import { createV2Adapter } from './adapters/v2.js';
 import {
   DEFAULT_TIMING,
   type ApproveBody,
@@ -43,7 +43,7 @@ export interface RunHandle {
   db: AppDatabase;
   /** Events for this run (live view). */
   readonly events: CapturedEvent[];
-  /** Instance id (v1: stage run id) for an instance path (v1: stage name). */
+  /** Instance id for an instance path (or a stage name). */
   stageRunId(instancePath: string): string;
   /** Resolve once the run is terminal (the adapter decides what that means). */
   waitForTerminal(timeoutMs?: number): Promise<RunSnapshot>;
@@ -60,12 +60,10 @@ export interface RunCommands {
   pause(runId: string): Promise<void>;
   resume(runId: string): Promise<void>;
   cancel(runId: string): Promise<void>;
-  /** Retry a failed/cancelled run — returns the NEW run id. Throws like the engine does. */
-  retryRun(runId: string): Promise<string>;
+  /** Fork a terminal run (every instance that did not complete runs again) — returns the fork's id. */
+  fork(runId: string): Promise<string>;
   retryStage(runId: string, stageRunId: string): Promise<void>;
   approve(runId: string, stageRunId: string, body?: ApproveBody): Promise<CommandResult>;
-  /** Force a stage into `awaiting_input` for a manual approval. */
-  interrupt(runId: string, stageRunId: string, data?: unknown): Promise<CommandResult>;
   /** Any command, as data. */
   send(runId: string, cmd: RunCommand): Promise<CommandResult>;
 }
@@ -106,11 +104,12 @@ export interface TestEngine {
   /**
    * Simulate a crash and a reboot on the same database: the current
    * generation's harness dies (its in-flight turns never settle), its timers
-   * stop, and a fresh service graph is built over the same DB. With `recover`
-   * (default) the new generation runs the engine's boot recovery.
+   * stop, its engine lock stays behind, and a fresh service graph is built
+   * over the same DB. With `recover` (default) the new generation starts its
+   * engine (the lock, then recovery).
    */
   killAndRestart(opts?: RestartOptions): Promise<void>;
-  /** Let pending async work land (a few reconcile ticks). */
+  /** Let pending async work land. */
   settle(ms?: number): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -132,7 +131,7 @@ export async function createTestEngine(opts: TestEngineOptions = {}): Promise<Te
   migrateDB(db);
   const sqlite = rawSqlite(db);
 
-  const adapter = (opts.adapter ?? createV1Adapter)({
+  const adapter = (opts.adapter ?? createV2Adapter)({
     db,
     sqlite,
     workDir,
@@ -143,7 +142,6 @@ export async function createTestEngine(opts: TestEngineOptions = {}): Promise<Te
     logs,
     timing,
     ...(opts.maxConcurrentStages !== undefined ? { maxConcurrentStages: opts.maxConcurrentStages } : {}),
-    resultValidation: opts.resultValidation !== false,
     ...(opts.secrets ? { secrets: opts.secrets } : {}),
   });
 
@@ -192,12 +190,14 @@ export async function createTestEngine(opts: TestEngineOptions = {}): Promise<Te
     pause: async (runId) => void (await adapter.command(runId, { type: 'pause' })),
     resume: async (runId) => void (await adapter.command(runId, { type: 'resume' })),
     cancel: async (runId) => void (await adapter.command(runId, { type: 'cancel' })),
-    retryRun: async (runId) => (await adapter.command(runId, { type: 'retry-run' })).runId!,
+    fork: async (runId) => {
+      const r = await adapter.command(runId, { type: 'retry-run' });
+      if (!r.runId) throw new Error(`fork refused (${r.status}): ${JSON.stringify(r.body)}`);
+      return r.runId;
+    },
     retryStage: async (runId, stageRunId) => void (await adapter.command(runId, { type: 'retry-stage', stageRunId })),
     approve: (runId, stageRunId, body) =>
       adapter.command(runId, { type: 'approve', stageRunId, ...(body ? { body } : {}) }),
-    interrupt: (runId, stageRunId, data) =>
-      adapter.command(runId, { type: 'interrupt', stageRunId, ...(data !== undefined ? { data } : {}) }),
   };
 
   return {
@@ -231,7 +231,7 @@ export async function createTestEngine(opts: TestEngineOptions = {}): Promise<Te
     handle: makeHandle,
     snapshotRun: (runId) => adapter.snapshot(runId),
     killAndRestart: (restartOpts) => adapter.killAndRestart(restartOpts),
-    async settle(ms = timing.reconcileIntervalMs * 5) {
+    async settle(ms = timing.settleMs) {
       await new Promise((r) => setTimeout(r, ms));
     },
     async dispose() {

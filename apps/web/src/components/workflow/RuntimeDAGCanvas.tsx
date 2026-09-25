@@ -226,12 +226,17 @@ function RuntimeDAGCanvasComponent({ definitionEdges, className }: RuntimeDAGCan
       const status = data?.stageRun?.status;
       switch (status) {
         case 'completed': return 'var(--color-success)';
-        case 'running': return 'var(--color-info)';
+        case 'running':
+        case 'validating': return 'var(--color-info)';
         case 'failed': return 'var(--color-danger)';
-        case 'paused': return 'var(--color-warning)';
+        case 'paused':
+        case 'waiting':
+        case 'retry_wait':
+        case 'awaiting_input': return 'var(--color-warning)';
         case 'cancelled': return 'var(--color-muted-foreground)';
         case 'skipped': return 'var(--color-border)';
-        case 'queued': return 'var(--color-primary)';
+        case 'ready':
+        case 'starting': return 'var(--color-primary)';
         default: return 'var(--color-emphasis)';
       }
     },

@@ -159,11 +159,6 @@ export interface TurnContext {
   nextSequence: number;
   /** planId | interactionId → the ordinal that card was issued. */
   cardSequence: Map<string, number>;
-  /**
-   * Stage only: releases/re-acquires the stage-semaphore permit while a gate
-   * is parked on a human.
-   */
-  semaphore?: { pause(): void; resume(): Promise<void> };
   /** The owner's tool policy; absent means the compose-time binding decides. */
   policy?: TurnPolicy | undefined;
 }

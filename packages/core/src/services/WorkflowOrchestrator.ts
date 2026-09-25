@@ -274,11 +274,6 @@ export class WorkflowOrchestrator {
       ...(params.projectId ? { projectId: params.projectId } : {}),
     });
 
-    // If projectId provided, store it on the run
-    if (params.projectId) {
-      await this.runRepo.update(run.id, { projectId: params.projectId } as Partial<WorkflowRun>);
-    }
-
     // Initialize context
     const context: OrchestratorContext = {
       workflowRunId: run.id,
@@ -291,11 +286,6 @@ export class WorkflowOrchestrator {
       preprocessingResults: [],
       postProcessingResults: [],
     };
-
-    // Store stage overrides in resolved variables so they flow through to stage execution
-    if (params.stageOverrides && params.stageOverrides.length > 0) {
-      context.resolvedVariables['__stageOverrides'] = params.stageOverrides;
-    }
 
     await this.eventBus.emitGlobal({
       kind: 'workflow_run.orchestration_started',
@@ -330,8 +320,9 @@ export class WorkflowOrchestrator {
     const clonedRepositories = intent?.clonedRepositories ?? {};
 
     try {
-      // Cancel the workflow run
-      await this.workflowRunService.cancelRun(runId);
+      // Cancel the workflow run (a command: the engine stops its instances and finalizes)
+      const r = await this.workflowRunService.command(runId, { command: 'cancel' });
+      if (!r.ok && r.code !== 'invalid_state') throw new Error(`Cancel of run ${runId} was refused: ${r.message}`);
     } finally {
       // Always cleanup sandbox if active
       if (this.sandbox) {
@@ -541,7 +532,7 @@ export class WorkflowOrchestrator {
 
       // ── Phase 3: Scan uploads directory for custom content ──
       // If files were uploaded via the /uploads endpoint, wire them
-      // into the variables so StageExecutionService passes them to the SDK.
+      // into the variables so the stage sessions pass them to the SDK.
       try {
         await this.scanAndWireUploads(run.id, context);
       } catch (uploadErr) {
@@ -616,12 +607,8 @@ export class WorkflowOrchestrator {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
 
-      // Mark run as failed
-      await this.runRepo.update(run.id, {
-        status: 'failed',
-        error: `Orchestration failed: ${errorMsg}`,
-        completedAt: new Date(),
-      });
+      // A setup phase before `start` failed: the run fails as a failed prepare phase would.
+      await this.workflowRunService.failSetup(run.id, 'orchestration', `Orchestration failed: ${errorMsg}`);
 
       await this.eventBus.emitGlobal({
         kind: 'workflow_run.orchestration_failed',
@@ -998,7 +985,7 @@ export class WorkflowOrchestrator {
 
   /**
    * Scan the per-run uploads directory and wire found content into
-   * context variables so StageExecutionService can pass them to the SDK.
+   * context variables so the stage sessions can pass them to the SDK.
    *
    * - uploads/skills/ → __skillDirectories (array of directory paths)
    * - uploads/agents/ → __customAgents (array of agent definition objects)

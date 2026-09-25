@@ -1,8 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // engineGate — builder helpers shared by the stage panel, the edge
-// editor and the workflow settings:
-//   • `EngineGated` renders a control the current engine cannot execute
-//     (the spec's `engineIssues` list) disabled, with the upgrade tooltip;
+// editor and the workflow settings. The engine runs every v2 field
+// (ENGINE_LEVEL v2), so no control is gated any more:
 //   • `FieldIssues` shows the validator's issues next to the field they
 //     point at (D-25);
 //   • `ExpressionField` is an Expression v2 textarea with a live parse.
@@ -10,27 +9,10 @@
 
 import React, { useMemo } from 'react';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
-import { ENGINE_LEVEL, parseExpression } from '@generatorai/workflow-spec';
-import { Textarea, Tooltip } from '@/components/ui/index.js';
+import { parseExpression } from '@generatorai/workflow-spec';
+import { Textarea } from '@/components/ui/index.js';
 import type { BuilderIssue } from '@/stores/workflowBuilderStore.js';
 import { cn } from '@/lib/utils.js';
-
-/** True once the engine that executes every v2 field ships (P03 flips ENGINE_LEVEL). */
-export const ENGINE_SUPPORTS_V2: boolean = ENGINE_LEVEL === 'v2';
-
-export const ENGINE_UPGRADE_HINT = 'Available after the engine upgrade';
-
-/** Wrap a control the engine gate rejects: rendered, disabled, with a tooltip. */
-export function EngineGated({ children, className }: { children: React.ReactNode; className?: string }) {
-  if (ENGINE_SUPPORTS_V2) return <>{children}</>;
-  return (
-    <Tooltip content={ENGINE_UPGRADE_HINT} side="top">
-      <div className={cn('cursor-not-allowed opacity-60', className)} aria-disabled="true" data-engine-gated="">
-        <div className="pointer-events-none">{children}</div>
-      </div>
-    </Tooltip>
-  );
-}
 
 /** Issues whose field is `prefix` or lies under it. */
 export function issuesAt(issues: readonly BuilderIssue[], ...prefixes: string[]): BuilderIssue[] {

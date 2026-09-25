@@ -370,7 +370,7 @@ function applyFailure(w: Working, inst: InstanceState, err: ClassifiedError, saf
 
 // ── Run-level building blocks ─────────────────────────────────────
 
-function pauseRun(w: Working, mode: 'drain' | 'interrupt', statusReason: string): void {
+function pauseWholeRun(w: Working, mode: 'drain' | 'interrupt', statusReason: string): void {
   w.runTransition('paused', { statusReason });
   for (const inst of w.sorted()) {
     // The run's own pause TTL covers these (PD-2).
@@ -381,7 +381,7 @@ function pauseRun(w: Working, mode: 'drain' | 'interrupt', statusReason: string)
   if (w.run.unattended) w.timer('pause_ttl', null, PAUSE_TTL_MS, w.run.version);
 }
 
-function resumeRun(w: Working): void {
+function resumeWholeRun(w: Working): void {
   w.runTransition('running', { statusReason: null });
   w.push({ t: 'cancel_timer', kind: 'pause_ttl', stageRunId: null });
   for (const inst of w.sorted()) {
@@ -403,7 +403,7 @@ function compensationOrder(w: Working, outcome: RunOutcome): string[] {
     .map((i) => i.id);
 }
 
-function cancelRun(w: Working, statusReason: string, outcome?: RunOutcome): void {
+function cancelWholeRun(w: Working, statusReason: string, outcome?: RunOutcome): void {
   if (w.run.status === 'finalizing') {
     // Post-processing is skipped; compensation still runs.
     w.runTransition('cancelling', { statusReason, outcome: 'cancelled' });
@@ -468,6 +468,20 @@ function onAttemptSettled(w: Working, msg: Extract<RunMessage, { type: 'attempt_
   }
 }
 
+/** Gates answered inside a turn: their turn never settled, so a lost frame cannot be resumed by a verdict alone. */
+const IN_TURN_GATES = new Set(['tool_permission', 'question', 'plan_review']);
+
+function onFrameLost(w: Working, msg: Extract<RunMessage, { type: 'frame_lost' }>): void {
+  const inst = w.get(msg.stageRunId);
+  if (!inst || msg.attemptNo !== inst.currentAttempt || inst.attemptStatus !== 'running' || inst.status !== 'awaiting_input') return;
+  w.settleAttempt(inst, 'aborted');
+  const kind = inst.interruptData && typeof inst.interruptData === 'object' ? (inst.interruptData as { kind?: unknown }).kind : undefined;
+  if (typeof kind !== 'string' || !IN_TURN_GATES.has(kind)) return; // a completion review stays parked; its verdict starts a resume attempt
+  // G5 §3.10 step 4: the request died with its turn. A resume re-sends the turn, which asks again.
+  w.transition(inst, 'paused', { statusReason: 'interrupted', interruptData: null });
+  stageEvent(w, 'stage_run.paused', inst, { reason: 'interrupted' });
+}
+
 function onUsage(w: Working, msg: Extract<RunMessage, { type: 'usage_tick' }>): void {
   const inst = w.get(msg.stageRunId);
   if (!inst) return;
@@ -515,7 +529,7 @@ function onTimer(w: Working, msg: Extract<RunMessage, { type: 'timer_fired' }>):
       return;
     }
     case 'run_budget_wall_clock':
-      if (!inst && (w.run.status === 'running' || w.run.status === 'waiting')) pauseRun(w, 'drain', 'budget_exhausted');
+      if (!inst && (w.run.status === 'running' || w.run.status === 'waiting')) pauseWholeRun(w, 'drain', 'budget_exhausted');
       return;
     default:
       return; // wait / loop timers arrive with their node kinds (P05)
@@ -541,15 +555,15 @@ function onCommand(w: Working, command: RunCommand): void {
     switch (command.command) {
       case 'pause':
         if (!RUN_LIVE.includes(w.run.status)) return w.reject('invalid_state', `cannot pause a ${w.run.status} run`);
-        return pauseRun(w, command.mode, `user:${command.mode}`);
+        return pauseWholeRun(w, command.mode, `user:${command.mode}`);
       case 'resume':
         if (w.run.status !== 'paused') return w.reject('invalid_state', `cannot resume a ${w.run.status} run`);
-        return resumeRun(w);
+        return resumeWholeRun(w);
       case 'cancel':
         if (!['created', 'starting', 'running', 'waiting', 'paused', 'finalizing'].includes(w.run.status)) {
           return w.reject('invalid_state', `cannot cancel a ${w.run.status} run`);
         }
-        return cancelRun(w, 'user_cancel');
+        return cancelWholeRun(w, 'user_cancel');
       default:
         return w.reject('invalid_command', `${command.command} needs an instanceId`);
     }
@@ -726,6 +740,11 @@ function resolveReadiness(w: Working): void {
           continue;
         }
       }
+      if (w.run.skipKeys?.includes(inst.stageKey)) {
+        w.transition(inst, 'skipped', { skipReason: 'operator', skipCauseId: null, statusReason: 'operator' });
+        stageEvent(w, 'stage_run.skipped', inst, { reason: 'operator' });
+        continue;
+      }
       w.transition(inst, 'ready', { statusReason: null });
       if (node.join.mode !== 'all' && node.join.cancelRemaining) {
         for (const key of exclusiveLosers(w, node)) {
@@ -798,7 +817,7 @@ function settle(w: Working): void {
 
   if (overBudget(w.run.usage, w.run.budget)) {
     // An exhausted run budget refuses new launches (G5 §2.11): the run drains.
-    pauseRun(w, 'drain', 'budget_exhausted');
+    pauseWholeRun(w, 'drain', 'budget_exhausted');
     return;
   }
 
@@ -849,6 +868,9 @@ export function decide(graph: CompiledWorkflow, state: RunState, msg: RunMessage
       break;
     case 'lease_expired':
       onLeaseExpired(w, msg);
+      break;
+    case 'frame_lost':
+      onFrameLost(w, msg);
       break;
     case 'command':
       onCommand(w, msg.command);

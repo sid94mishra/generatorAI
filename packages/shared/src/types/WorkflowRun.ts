@@ -2,13 +2,7 @@
 // WorkflowRun + StageRun — Runtime execution instances (v2)
 // ────────────────────────────────────────────────────────────────
 
-/**
- * How the v1 engine allocates sessions across a run's stages. A run starts
- * `auto` and resolves it from the graph shape (linear → `single`, any
- * parallelism → `per-stage`); stage session groups replace this in the
- * engine upgrade.
- */
-export type WorkflowSessionMode = 'single' | 'per-stage' | 'auto';
+import type { StageRunState, WorkflowRunState } from '@generatorai/workflow-spec';
 
 /** Artifact manifest entry — a file a stage created or modified. */
 export interface ArtifactManifestEntry {
@@ -18,36 +12,21 @@ export interface ArtifactManifestEntry {
   sizeBytes: number;
 }
 
-/** WorkflowRun lifecycle statuses */
-export type WorkflowRunStatus =
-  | 'created'
-  | 'starting'
-  | 'running'
-  | 'paused'
-  | 'cancelling'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+/**
+ * WorkflowRun lifecycle statuses: the v2 engine's run states (G5 §5.10).
+ * `waiting` means nothing is launchable or in flight but something awaits
+ * input, a timer or an operator; `finalizing` runs compensation and exit
+ * actions once the outcome is fixed.
+ */
+export type WorkflowRunStatus = WorkflowRunState;
 
-/** StageRun lifecycle statuses */
-export type StageRunStatus =
-  | 'pending'
-  | 'queued'
-  | 'running'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'skipped'
-  /**
-   * HITL-01 — the stage is paused waiting for a human approver to supply
-   * a value via `POST /api/workflow-runs/:runId/stages/:stageId/resume`.
-   * The payload needed for the approval (tool args, free-form prompt,
-   * permission request, etc.) is persisted in `stage_runs.interrupt_data`
-   * so a restart shows the same queue. Transitions back to `running` via
-   * `sys:input_received`.
-   */
-  | 'awaiting_input';
+/**
+ * StageRun (instance) statuses: the v2 engine's instance states (G5 §5.9).
+ * `ready` is admitted-and-waiting-for-a-slot, `starting`/`running`/
+ * `validating` are the live attempt, `retry_wait` a retry backoff,
+ * `awaiting_input` a human gate (the payload is `interruptData`).
+ */
+export type StageRunStatus = StageRunState;
 
 /**
  * HITL + TOL-04 — the permission policy a run's tool calls are judged by.
@@ -80,36 +59,40 @@ export interface WorkflowRun {
   definitionVersionId: string;
   name: string;
   status: WorkflowRunStatus;
-  sessionMode: WorkflowSessionMode;
+  /** Why the run is in its status (`budget_exhausted`, `setup:<phase>`, …). */
+  statusReason?: string;
+  /** Fixed when the run enters `finalizing`. */
+  outcome?: 'completed' | 'failed' | 'cancelled';
+  /** CAS version, bumped by every run transition (`expectedVersion` on commands). */
+  version?: number;
   variables: Record<string, unknown>;
   error?: string;
   /**
-   * HITL + TOL-04 — per-run permission mode. Persisted so (a) a restarted
-   * server restores the user's choice, (b) the UI/CLI can query current
-   * mode without racing config state, (c) an audit trail shows what mode
-   * was active during execution.
-   *
-   * `undefined` on runs created before this column landed is treated as
-   * `bypassPermissions` (the default) by the evaluator.
+   * The operator's explicit run-level permission mode (the run row, the most
+   * specific layer; stored in `run_overrides`). Undefined lets the stage,
+   * workflow and trigger layers and then the deployment posture decide.
    */
   permissionMode?: WorkflowRunPermissionMode;
+  /** The project the run belongs to. */
+  projectId?: string;
+  /** What started the run (`{kind: 'user' | 'automation' | 'fork' | …}`); non-user kinds are unattended (PD-2). */
+  trigger?: { kind: string; [key: string]: unknown };
+  /** The resolved run-level mode when the run was created or last changed (display; the layers decide per turn). */
+  effectivePermissionMode?: WorkflowRunPermissionMode;
+  /** A fork's request (`rerunFrom`, `definition`, `workspace`, …). */
+  forkSpec?: Record<string, unknown>;
+  /** A repeated key returns the run it created. */
+  idempotencyKey?: string;
+  /** The codebases the run was started with (P04 invocation). */
+  codebaseSelection?: unknown;
+  /** Per-stage overrides of this run, by stage key: skip it, or extra variables for it. */
+  stageOverrides?: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }>;
   /** Workspace ID — links to the execution workspace for this run */
   workspaceId?: string;
   /**
-   * W23 — Run identity model (X-24 fix).
-   *
-   * When the user retries a failed run, a NEW run is created rather than
-   * mutating the terminal record. `ancestorRunId` points to the run this
-   * was created from (the failed one, or an earlier ancestor in a retry
-   * chain). This establishes an immutable audit chain so:
-   *
-   *   - A terminal run (failed/cancelled/completed) is never mutated.
-   *   - "Retry" is always additive — the original run stays permanently
-   *     queryable as the lineage root.
-   *   - Parallel follow-ups are possible (two retry runs branching from
-   *     the same ancestor).
-   *
-   * Absent on first-attempt runs (undefined).
+   * The run this one was forked from (G5 §3.8). A terminal run is never
+   * mutated: re-running it is a fork, a NEW run whose memoized instances
+   * are copied from the ancestor. Absent on runs that are not forks.
    */
   ancestorRunId?: string;
   createdAt: Date;
@@ -118,54 +101,53 @@ export interface WorkflowRun {
   completedAt?: Date;
 }
 
-/** StageRun domain entity — one execution instance of a stage within a workflow run */
+/**
+ * StageRun domain entity — one INSTANCE of a stage within a workflow run
+ * (the v2 engine's `stage_runs` row). Attempts are separate rows
+ * (`stage_attempts`); `currentAttempt` is the latest one.
+ */
 export interface StageRun {
   id: string;
   workflowRunId: string;
   /** Key of the stage in the run's pinned definition version. */
   stageKey: string;
+  /** `triage`, `review_loop#2/fix`: unique per run; the stage key at the top level. */
+  instancePath: string;
+  /** The node kind (`agent` until P05). */
+  kind: string;
+  /** The conversation of the current attempt. */
   sessionId?: string;
   name: string;
   status: StageRunStatus;
-  currentStep: number;
-  totalSteps: number;
-  retryCount: number;
-  /**
-   * Phase 1, 1.25 — optimistic-lock version. Bumped on every mutation;
-   * callers pass the last-seen value to conditional updates (e.g.
-   * `incrementRetryCount(id, version)`) to avoid racing another process.
-   */
+  /** Why the instance is in its status (`retry:resume`, `aborted:pause`, `interrupted`, …). */
+  statusReason?: string;
+  /** The latest attempt number (0 before the first attempt). */
+  currentAttempt: number;
+  /** CAS version, bumped by every transition and patch. */
   version: number;
   error?: string;
+  errorClass?: string;
+  errorCode?: string;
+  /** Why a skipped instance was skipped (`guard`, `operator`, `unreachable`, …). */
+  skipReason?: string;
   /** Auto-generated summary of the work done in this stage, used to pass context to successor stages */
   summary?: string;
-  /**
-   * Full raw output text produced by the stage's main prompt(s), captured before
-   * the summary turn. Persisted so a successor stage with `context.mode: 'output'`
-   * can receive the predecessor's complete output (not just the condensed
-   * summary). May be large; only injected when a downstream stage opts into it.
-   */
+  /** The stage's output text (the latest prompt, repair or revision answer). */
   outputText?: string;
-  /** Validated structured output JSON matching the stage's outputSchema */
+  /** Validated structured output JSON matching the stage's output schema */
   outputData?: Record<string, unknown>;
   /** Manifest of files created/modified by this stage */
   artifactManifest?: Array<{ path: string; language: string; action: string; sizeBytes: number }>;
   /**
-   * HITL-02 — opaque payload the stage asked an approver for. Set when
-   * the stage enters `awaiting_input`; cleared on resume. Shape is
-   * stage-defined (tool-call args for approval prompts, free-form data
-   * for user-input requests, etc.). Persisted so reconnecting web/CLI
-   * clients can re-render the pending request.
+   * What an `awaiting_input` instance asks an approver for (`kind`:
+   * `stage_completion_review`, `tool_permission`, `question`, `plan_review`).
+   * Answered with the `approve` run command.
    */
   interruptData?: unknown;
-  /**
-   * WS-D1 — last liveness beat written by the executor while the stage is
-   * `queued`/`running`. The run reconciler fails a stage whose beat is older
-   * than the configured stale window, which is the only reaper that still
-   * works when the process that was running the stage is gone.
-   */
-  heartbeatAt?: Date;
+  /** Rolled-up usage of the instance's attempts. */
+  usage?: Record<string, unknown>;
   createdAt: Date;
+  updatedAt?: Date;
   startedAt?: Date;
   completedAt?: Date;
 }
@@ -181,14 +163,8 @@ export interface CreateWorkflowRunParams {
   variables?: Record<string, unknown>;
   projectId?: string;
   /**
-   * W23: When this run was created by retrying a terminal run, supply the
-   * id of the failed/cancelled ancestor. Absent on first-attempt runs.
-   */
-  ancestorRunId?: string;
-  /**
    * The version to run. Omitted: the definition's current published version
-   * (or, with `testRun`, a test version of its working graph). A retry
-   * passes its ancestor's version so copied stage results line up.
+   * (or, with `testRun`, a test version of its working graph).
    */
   definitionVersionId?: string;
   /** Run the working graph as a `test` version (the only way to run a draft). */

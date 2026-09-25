@@ -59,8 +59,7 @@ export type {
   HookContext,
   HookResult,
   HookHandler,
-  InterruptOptions,
-  InterruptResolution,
+  StageVerdict,
   CreateWorkspaceInput,
   WorkspaceFilters,
 } from './facades/index.js';
@@ -110,11 +109,13 @@ export {
   HarnessConnectionError,
 } from '@generatorai/shared';
 
-// ── State Machines (stable, pure — re-export from core) ──
+// ── Run and instance state tables (stable, pure data) ──
 export {
-  WorkflowRunStateMachine,
-  StageRunStateMachine,
-} from '@generatorai/core';
+  STAGE_RUN_TRANSITIONS,
+  WORKFLOW_RUN_TRANSITIONS,
+  type RunCommand,
+  type ForkRunRequest,
+} from '@generatorai/workflow-spec';
 
 // ── Harness extension point (bring-your-own-harness) ──
 // `IAgentHarness` is part of the STABLE surface: an integrator can implement it

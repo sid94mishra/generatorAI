@@ -40,7 +40,10 @@ export function StatusGlyph({
   switch (status) {
     case 'running':
     case 'starting':
-    case 'queued':
+    case 'ready':
+    case 'validating':
+    case 'retry_wait':
+    case 'finalizing':
     case 'cancelling':
       glyph = <ActivityIndicator size="small" color={color} />;
       break;
@@ -51,6 +54,7 @@ export function StatusGlyph({
       glyph = <X size={icon} color={color} />;
       break;
     case 'paused':
+    case 'waiting':
       glyph = <Pause size={icon} color={color} />;
       break;
     case 'awaiting_input':

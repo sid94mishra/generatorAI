@@ -25,7 +25,8 @@ function statusVisual(status: StageStatus): { Icon: React.ComponentType<{ classN
   switch (status) {
     case 'completed':      return { Icon: Check,          classes: 'text-[var(--color-success)]',           pulse: false };
     case 'running':        return { Icon: Loader2,        classes: 'text-[var(--color-primary)]',           pulse: true };
-    case 'queued':         return { Icon: Clock,          classes: 'text-[var(--color-primary)]/70',        pulse: false };
+    case 'ready':          return { Icon: Clock,          classes: 'text-[var(--color-primary)]/70',        pulse: false };
+    case 'waiting':        return { Icon: Clock,          classes: 'text-[var(--color-warning)]/80',        pulse: false };
     case 'pending':        return { Icon: Clock,          classes: 'text-[var(--color-muted-foreground)]/50', pulse: false };
     case 'paused':         return { Icon: Pause,          classes: 'text-[var(--color-warning)]',           pulse: false };
     case 'awaiting_input': return { Icon: Hand,           classes: 'text-[var(--color-warning)]',           pulse: true };

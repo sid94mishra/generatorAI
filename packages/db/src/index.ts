@@ -38,7 +38,6 @@ export { DrizzleSessionRepository } from './repositories/SessionRepository.js';
 export { PushTokenRepository, MAX_PUSH_FAILURES } from './repositories/PushTokenRepository.js';
 export type { PushTokenRecord, PushProvider } from './repositories/PushTokenRepository.js';
 export { DrizzleSequenceAllocator } from './repositories/SequenceAllocator.js';
-export { DrizzleSessionAllocationRepository } from './repositories/SessionAllocationRepository.js';
 export {
   DrizzleStreamCursorRepository,
   StreamAppendInTransactionError,
@@ -336,7 +335,6 @@ export { migrateDB } from './migrations/index.js';
 // Used by the SDK facade to collapse 25+ constructor calls into one.
 import { DrizzleSessionRepository } from './repositories/SessionRepository.js';
 import { DrizzleSequenceAllocator } from './repositories/SequenceAllocator.js';
-import { DrizzleSessionAllocationRepository } from './repositories/SessionAllocationRepository.js';
 import { DrizzleStreamCursorRepository } from './repositories/StreamCursorRepository.js';
 import { DrizzleEventRepository } from './repositories/EventRepository.js';
 import { DrizzleChatMessageRepository } from './repositories/ChatMessageRepository.js';
@@ -391,7 +389,6 @@ export function createAllRepositories(db: AppDatabase) {
     planRepo: new DrizzlePlanRepository(db),
     agentInteractionRepo: new DrizzleAgentInteractionRepository(db),
     sequenceAllocator: new DrizzleSequenceAllocator(db),
-    sessionAllocationRepo: new DrizzleSessionAllocationRepository(db),
     streamCursorRepo: new DrizzleStreamCursorRepository(db),
     // W22 / W47 — durable execution engine storage.
     registerRepo: new RegisterRepository(db),

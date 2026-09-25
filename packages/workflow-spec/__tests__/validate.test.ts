@@ -36,9 +36,9 @@ describe('a valid workflow', () => {
   });
 
   it('defaults to the current engine level', () => {
-    expect(ENGINE_LEVEL).toBe('v1');
+    expect(ENGINE_LEVEL).toBe('v2');
     const r = validateWorkflow(graph([agent('a', { repair: {} })]));
-    expect(codes(r)).toEqual(['engine-unsupported']);
+    expect(codes(r)).toEqual([]);
   });
 });
 

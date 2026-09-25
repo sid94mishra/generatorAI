@@ -246,24 +246,6 @@ export const UpdateChatSchema = z.object({
   sourceControl: ChatSourceControlInputSchema,
 });
 
-/**
- * POST /api/workflow-runs/:runId/stages/:stageId/approve
- *
- * `outcome` is the modern tri-state verdict. The legacy boolean `approved` is
- * still accepted so existing clients keep working: `true` → approved,
- * `false` → changes_requested (never `rejected`, which must be explicit
- * because it terminates the run).
- */
-export const StageReviewDecisionSchema = z.object({
-  outcome: z.enum(['approved', 'changes_requested', 'rejected']).optional(),
-  approved: z.boolean().optional(),
-  /** Free-text change request sent to the agent as a follow-up prompt. */
-  followUpPrompt: z.string().max(50_000).optional(),
-  /** Why the stage was rejected — surfaced on the failed stage. */
-  reason: z.string().max(10_000).optional(),
-  value: z.unknown().optional(),
-});
-
 /** Zod schema for sending a chat prompt */
 export const SendChatPromptSchema = z.object({
   prompt: z.string().min(1).max(100_000),

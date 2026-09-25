@@ -306,53 +306,26 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
       definitionVersionId: 'ver-1',
       name: 'Test Run',
       status: 'created',
-      sessionMode: 'auto',
       variables: {},
       createdAt: new Date(),
       updatedAt: new Date(),
     }),
     startRun: vi.fn().mockResolvedValue(undefined),
-    pauseRun: vi.fn().mockResolvedValue(undefined),
-    resumeRun: vi.fn().mockResolvedValue(undefined),
-    cancelRun: vi.fn().mockResolvedValue(undefined),
+    // The commands API: the engine accepted the command.
+    command: vi.fn().mockResolvedValue({ ok: true }),
     deleteRun: vi.fn().mockResolvedValue(undefined),
-    onStageCompleted: vi.fn().mockResolvedValue(undefined),
-    onStageFailed: vi.fn().mockResolvedValue(undefined),
-    // retryRun creates a NEW run (W23 lineage) — the route must start
-    // *that* one, not the ancestor it was called with.
-    retryRun: vi.fn().mockResolvedValue({
+    // forkRun creates (and starts) a NEW run; the source stays terminal.
+    forkRun: vi.fn().mockResolvedValue({
       id: 'run-retry-1',
       workflowDefinitionId: 'def-1',
       definitionVersionId: 'ver-1',
       name: 'Test Run (retry)',
       status: 'created',
-      sessionMode: 'auto',
       variables: {},
       ancestorRunId: 'run-1',
       createdAt: new Date(),
       updatedAt: new Date(),
     }),
-  };
-
-  const dagScheduler = {
-    buildDAGForRun: vi.fn().mockResolvedValue(undefined),
-    reconcileRun: vi.fn().mockResolvedValue(undefined),
-  };
-
-  const stageExecutionService = {
-    executeStage: vi.fn().mockResolvedValue(undefined),
-    pauseStage: vi.fn().mockResolvedValue(undefined),
-    resumeStage: vi.fn().mockResolvedValue(undefined),
-    cancelStage: vi.fn().mockResolvedValue(undefined),
-  };
-
-  const sessionAllocator = {
-    allocateSession: vi.fn().mockResolvedValue({
-      id: 'sess-alloc-1',
-      conversationId: 'conv-alloc-1',
-    }),
-    releaseSession: vi.fn().mockResolvedValue(undefined),
-    releaseAll: vi.fn().mockResolvedValue(undefined),
   };
 
   const chatEntityRepo = {
@@ -382,7 +355,6 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
       definitionVersionId: 'ver-1',
       name: 'Test Run',
       status: 'running',
-      sessionMode: 'auto',
       variables: {},
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -392,21 +364,13 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     getByStatus: vi.fn().mockResolvedValue([]),
     countByStatus: vi.fn().mockResolvedValue(0),
     update: vi.fn(),
-    updateStatus: vi.fn(),
     delete: vi.fn(),
   };
 
   const stageRunRepo = {
-    create: vi.fn(),
     getById: vi.fn(),
     getByRunId: vi.fn().mockResolvedValue([]),
     getByStatus: vi.fn().mockResolvedValue([]),
-    update: vi.fn(),
-    updateStatus: vi.fn(),
-    incrementRetryCount: vi.fn(),
-    resetForRetry: vi.fn(),
-    batchUpdateStatus: vi.fn(),
-    delete: vi.fn(),
     deleteByRunId: vi.fn(),
   };
 
@@ -461,9 +425,6 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     workflowDefinitionService,
     runDefinitionReader,
     workflowRunService,
-    dagScheduler,
-    stageExecutionService,
-    sessionAllocator,
     chatEntityRepo,
     // The chat LIST route enriches each row with a one-line preview of its
     // newest message, in one batched query. Without this double the route

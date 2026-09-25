@@ -97,7 +97,7 @@ export class ErrorHandler {
         // CopilotAdapter handles this via auto-restart monitoring
         break;
       case 'COPILOT_TIMEOUT':
-        // Could queue a retry - handled at StageExecutionService level
+        // A stage's retry policy is the engine's (attempts, G5 §3.2)
         break;
       case 'GIT_ERROR':
         // Log for debugging, user can retry manually
@@ -109,7 +109,7 @@ export class ErrorHandler {
         // Retry at service level with backoff
         break;
       case 'STAGE_EXECUTION':
-        // StageExecutionService handles retry with exponential backoff
+        // The engine retries per the stage's retry policy (attempts with backoff)
         break;
     }
   }

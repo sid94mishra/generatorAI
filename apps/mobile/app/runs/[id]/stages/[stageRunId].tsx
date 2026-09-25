@@ -93,12 +93,6 @@ export default function StageScreen(): React.ReactElement {
     refetchInterval: focused && live ? (connected ? 15_000 : 5_000) : false,
   });
 
-  const interrupts = useQuery({
-    queryKey: queryKeys.runInterrupts(runId),
-    queryFn: () => api.runs.pendingInterrupts(runId),
-    enabled: Boolean(stage && awaitsApproval(stage.status)),
-  });
-
   const pull = usePullRefresh(() => Promise.all([run.refetch(), transcript.refetch()]));
 
   React.useLayoutEffect(() => {
@@ -197,7 +191,6 @@ export default function StageScreen(): React.ReactElement {
       {awaitsApproval(stage.status) ? (
         <ApprovalCard
           stage={stage}
-          interruptData={interrupts.data?.find((i) => i.id === stage.id)?.interruptData}
           busy={approve.isPending}
           onDecide={(outcome: ApprovalOutcome, feedback?: string) =>
             approve.mutate({ stageRunId, outcome, ...(feedback ? { feedback } : {}) })

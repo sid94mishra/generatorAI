@@ -22,10 +22,9 @@ import { useTheme } from '../../theme/ThemeProvider';
 
 export function stageSubtitle(stage: StageRunSummary): string {
   const parts: string[] = [statusLabel(stage.status)];
-  if (isActive(stage.status) && stage.totalSteps && stage.totalSteps > 1) {
-    parts.push(`step ${Math.min((stage.currentStep ?? 0) + 1, stage.totalSteps)} of ${stage.totalSteps}`);
-  }
-  if (stage.retryCount) parts.push(`retry ${stage.retryCount}`);
+  // Retries are the attempts beyond the first.
+  const retries = (stage.currentAttempt ?? 0) - 1;
+  if (retries > 0) parts.push(`retry ${retries}`);
   return parts.join(' · ');
 }
 

@@ -14,11 +14,10 @@
 //     inspected statically, so it counts as a possible status write
 //   - raw SQL `UPDATE stage_runs SET … status`
 //
-// MODE. P00 ships this REPORT-ONLY: it prints every hit and the count and
-// exits 0, so the baseline is visible without blocking. PHASE-03 (which
-// introduces `transition()` with compare-and-set) flips `MODE` to 'fail'
-// in this file; from then on any hit fails `pnpm lint`.
-//   node scripts/check-workflow-invariants.mjs [--json] [--fail]
+// MODE. P00 shipped this report-only with a baseline of 24 hits; PHASE-03
+// deleted the v1 engine (the engine's compare-and-set `transition()` is the
+// only status writer) and flipped `MODE` to 'fail': any hit fails `pnpm lint`.
+//   node scripts/check-workflow-invariants.mjs [--json]
 //
 // A single line can be waived with a trailing `// workflow-invariant-ok: <reason>`.
 // ────────────────────────────────────────────────────────────────
@@ -28,16 +27,11 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { globFiles } from './lib/globFiles.mjs';
 
-/** 'report' until PHASE-03 WP-3.x flips it to 'fail'. */
-export const MODE = 'report';
+/** A hard failure since the P03 cutover (WP-3.7). */
+export const MODE = 'fail';
 
-/**
- * Hits recorded at P00 (24: 18 `update({ status })`, 3 `updateStatus`,
- * 2 `batchUpdateStatus`, 1 patch variable). Report-only still FAILS when
- * the count grows past this, so no phase adds a new direct write while
- * PHASE-03 removes the old ones. Lower it as writes go.
- */
-export const BASELINE = 24;
+/** Direct writes tolerated: none since the P03 cutover (P00 recorded 24). */
+export const BASELINE = 0;
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN = ['packages/*/src/**/*.{ts,tsx,mts}', 'apps/*/src/**/*.{ts,tsx,mts}'];
@@ -145,7 +139,7 @@ if (isMain) {
     for (const h of hits) console.log(`  ${h.file}:${h.line}  [${h.kind}]  ${h.text.slice(0, 110)}`);
     console.log(
       `[workflow-invariants] no-direct-stage-status-write: ${hits.length} direct stage status write(s) ` +
-        `outside StageRunRepository (${fail ? 'FAIL mode' : `report-only until PHASE-03; baseline ${BASELINE}`})`,
+        `outside the engine compare-and-set (${fail ? 'FAIL mode' : `report-only; baseline ${BASELINE}`})`,
     );
   }
   if (fail && hits.length > 0) process.exit(1);

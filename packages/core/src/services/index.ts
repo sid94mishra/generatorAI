@@ -7,7 +7,8 @@ export { SessionHookRegistry, sessionHookBridgeFactory } from './SessionHookRegi
 export type { SessionHookHandler } from './SessionHookRegistry.js';
 export type { SDKHookContext, StageHookContext } from './HookInterceptor.js';
 export { TemplateRegistry, TemplateLoadError, TEMPLATE_FILE_SUFFIX } from './TemplateRegistry.js';
-export { StartupRecoveryService } from './StartupRecoveryService.js';
+export { runBootHousekeeping } from './BootHousekeeping.js';
+export type { BootHousekeepingDeps, BootHousekeepingSummary, ISandboxCleaner } from './BootHousekeeping.js';
 export { InterruptedTurnRecoveryService, INTERRUPTED_BY_RESTART_CODE } from './InterruptedTurnRecoveryService.js';
 export { OrphanProcessReaper, selectOrphans } from './OrphanProcessReaper.js';
 export type { OsProcess, OrphanProcessReaperOptions, ReapSummary } from './OrphanProcessReaper.js';
@@ -15,7 +16,6 @@ export type { InterruptedTurnRecoverySummary } from './InterruptedTurnRecoverySe
 export { ErrorHandler } from './ErrorHandler.js';
 
 // Workflow execution services
-export { SessionAllocator } from './SessionAllocator.js';
 export { ChatManagementService } from './ChatManagementService.js';
 export type {
   ChatManagementServiceExtensions,
@@ -29,9 +29,8 @@ export { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
 export { canonicalGraph } from './definitions/canonical.js';
 export { userVariables, codebasesOf, runScope, stagesScope, templateScope } from './definitions/runScope.js';
 export type { RunScope, StageScope, CodebaseScope } from './definitions/runScope.js';
-export { DAGScheduler } from './DAGScheduler.js';
-export { StageExecutionService } from './StageExecutionService.js';
-export { WorkflowRunService } from './WorkflowRunService.js';
+export { WorkflowRunService, RunCommandRefusedError, stripExecutionContext } from './WorkflowRunService.js';
+export type { StageProviderResolver } from './WorkflowRunService.js';
 
 // W18 — Admission control + concurrency management
 export { AdmissionController, AdmissionTimeoutError, laneFor, sizeLane } from './AdmissionController.js';
@@ -57,7 +56,6 @@ export { createRunSandbox } from './createRunSandbox.js';
 export type { RunSandboxOptions } from './createRunSandbox.js';
 export { WorkflowPreprocessor } from './WorkflowPreprocessor.js';
 export type { WorkflowScmFlowPort } from './WorkflowPreprocessor.js';
-export { ResultValidator } from './ResultValidator.js';
 // Engine v2 (P03 WP-3.5/3.6)
 export * from './engine/index.js';
 
@@ -90,7 +88,8 @@ export type { SandboxSession, SandboxLifecycleConfig } from './SandboxLifecycleM
 
 // HITL-01..05 — human-in-the-loop interrupt/resume.
 export { HitlService } from './HitlService.js';
-export type { InterruptResolution, HitlLogger } from './HitlService.js';
+export type { RunCommandPort, StageVerdict } from './HitlService.js';
+export type { InterruptResolution } from './session/StageGatePort.js';
 
 // PLN-01 — plan mode
 export { AgentInteractionService } from './AgentInteractionService.js';

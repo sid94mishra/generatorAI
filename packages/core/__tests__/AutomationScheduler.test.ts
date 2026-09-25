@@ -239,7 +239,7 @@ function makeWorkflowHarness(
       return run;
     },
     startRun: async () => {},
-    cancelRun: async () => {},
+    command: async () => ({ ok: true }),
   } as unknown as WorkflowRunService;
 
   const workflowRunRepo = {

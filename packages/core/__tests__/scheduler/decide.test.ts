@@ -469,6 +469,35 @@ describe('commands (desired state first)', () => {
     });
   });
 
+  it('frame_lost: an in-turn gate lost to a restart pauses the instance (interrupted); a completion review stays parked', () => {
+    const s = new Sim(graphOf(['a', 'b']));
+    s.boot();
+    for (const path of ['a', 'b']) {
+      s.exec(path, 'starting');
+      s.exec(path, 'running');
+      s.exec(path, 'awaiting_input', null);
+    }
+    const withKind = (path: string, kind: string) =>
+      (s.state = { ...s.state, instances: s.state.instances.map((i) => (i.instancePath === path ? { ...i, interruptData: { kind } } : i)) });
+    withKind('a', 'tool_permission');
+    withKind('b', 'stage_completion_review');
+    const lost = s.send({ type: 'frame_lost', stageRunId: s.inst('a').id, attemptNo: 1 });
+    expect(s.inst('a')).toMatchObject({ status: 'paused', statusReason: 'interrupted', attemptStatus: 'aborted' });
+    expect(events(lost)).toContain('stage_run.paused');
+    s.send({ type: 'frame_lost', stageRunId: s.inst('b').id, attemptNo: 1 });
+    expect(s.inst('b')).toMatchObject({ status: 'awaiting_input', attemptStatus: 'aborted' });
+    // A resume re-sends the interrupted turn in a new attempt.
+    s.send({ type: 'command', command: { command: 'resume', instanceId: 'a' } });
+    expect(s.status('a')).toBe('ready');
+    expect(only(s.log.at(-1)!.decisions, 'create_attempt')[0]).toMatchObject({ attemptNo: 2, mode: 'resume' });
+  });
+
+  it('an operator skip override skips the stage instead of launching it', () => {
+    const s = new Sim(graphOf(['a', 'b'], [['a', 'b']]), { skipKeys: ['a'] });
+    s.boot();
+    expect(s.inst('a')).toMatchObject({ status: 'skipped', skipReason: 'operator' });
+  });
+
   it('approve rejected fails the stage (routing applies) and stops the frame', () => {
     const s = new Sim(graphOf(['a', 'fix'], [{ from: 'a', to: 'fix', on: 'failure' }]));
     s.boot();

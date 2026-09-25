@@ -1,10 +1,8 @@
 // WP-2.6 — GatePort, TurnContextRegistry, the tool-policy wrapper, StageGatePort.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { DrizzleStageRunRepository } from '@generatorai/db';
 import { DEFAULT_AGENT_TOOL_POLICY, type AgentToolPolicy } from '@generatorai/shared';
 import type { PermissionRequest } from '../../src/domain/ports/IAgentHarness.js';
-import type { HitlService } from '../../src/services/HitlService.js';
 import { TurnContextRegistry, type GatePort } from '../../src/services/session/gates.js';
 import { applyModeConfig } from '../../src/services/session/modeConfig.js';
 import { StageGatePort } from '../../src/services/session/StageGatePort.js';
@@ -72,16 +70,14 @@ describe('mode config and the tool-policy wrapper', () => {
   it('a gate on a shared conversation is filed against the stage whose turn is in flight', async () => {
     const turns = new TurnContextRegistry();
     const parked: string[] = [];
-    const hitl = {
-      interrupt: async (stageRunId: string) => {
-        parked.push(stageRunId);
-        return { outcome: 'approved' as const };
-      },
-    } as unknown as HitlService;
+    const park = async (t: TurnContext) => {
+      parked.push(t.owner.kind === 'stage' ? t.owner.stageRunId : '');
+      return { outcome: 'approved' as const };
+    };
     const env = bootCore();
     envs.push(env);
     const port = new StageGatePort({
-      hitl,
+      park,
       eventBus: env.services.eventBus,
       harnessTypeOf: () => 'claude-agent',
       readPermissionMode: async () => 'default',
@@ -96,83 +92,48 @@ describe('mode config and the tool-policy wrapper', () => {
   });
 });
 
-describe('StageGatePort on the durable HITL wait', () => {
-  async function stageRun(env: TestEnv): Promise<{ runId: string; stageRunId: string }> {
-    const def = await env.services.workflowDefinitionService.createFromSpec(
-      {
-        formatVersion: 2,
-        workflow: { name: 'gates' },
-        stages: [{ kind: 'agent', key: 's', name: 's', prompts: [{ label: 'p', text: 'x' }] }],
-        edges: [],
-      },
-      { canEditCommands: true, status: 'published' },
-    );
-    const run = await env.services.workflowRunService.createRun({ workflowDefinitionId: def.id });
-    const [sr] = await new DrizzleStageRunRepository(env.db).getByRunId(run.id);
-    return { runId: run.id, stageRunId: sr!.id };
-  }
+describe('StageGatePort on the engine park', () => {
+  const ids = { runId: 'run-1', stageRunId: 'stage-1' };
 
-  const portFor = (env: TestEnv) =>
+  const portFor = (env: TestEnv, park = async () => ({ outcome: 'approved' as const, value: undefined as unknown })) =>
     new StageGatePort({
-      hitl: env.services.hitlService,
+      park,
       eventBus: env.services.eventBus,
       ...(env.services.planService ? { planService: env.services.planService } : {}),
       harnessTypeOf: () => 'claude-agent',
       readPermissionMode: async () => 'default',
     });
 
-  it('a question answered after a restart reaches the relaunched stage without asking again', async () => {
-    const first = bootCore();
-    envs.push(first);
-    const { runId, stageRunId } = await stageRun(first);
-    const owner = stageOwner(stageRunId, runId);
+  it('a question parks with its questions and returns the answers the approve command delivered', async () => {
+    const env = bootCore();
+    envs.push(env);
     const questions = [{ question: 'Which DB?', options: [{ label: 'sqlite' }, { label: 'pg' }] }];
-
-    // The first process parks the stage on the question, then dies.
-    void portFor(first).question({ questions } as never, turn(owner));
-    await new Promise((r) => setTimeout(r, 50));
-    expect((await new DrizzleStageRunRepository(first.db).getById(stageRunId)).status).toBe('awaiting_input');
-
-    // A new process on the same DB: the approver answers it there.
-    const second = bootCore({ db: first.db, workDir: first.workDir });
-    const resumed = await second.services.hitlService.resume(stageRunId, runId, {
-      outcome: 'approved',
-      value: { answers: { 'Which DB?': ['sqlite'] } },
+    const parked: Array<Record<string, unknown>> = [];
+    const port = portFor(env, async (_t: TurnContext, data: Record<string, unknown>) => {
+      parked.push(data);
+      return { outcome: 'approved' as const, value: { answers: { 'Which DB?': ['sqlite'] } } };
     });
-    expect(resumed.ok).toBe(true);
-
-    // The relaunched stage hits the same gate and gets the verdict, not a new wait.
-    await expect(portFor(second).question({ questions } as never, turn(owner))).resolves.toEqual({
+    await expect(port.question({ questions } as never, turn(stageOwner(ids.stageRunId, ids.runId)))).resolves.toEqual({
       answers: { 'Which DB?': ['sqlite'] },
     });
-    second.services.automationService.shutdown();
-    second.services.workflowRunService.shutdown();
-    second.services.agentInteractionService?.dispose();
+    expect(parked[0]).toMatchObject({ kind: 'question', questions });
   });
 
-  it('a plan review decided after a restart returns the decision to the relaunched stage', async () => {
-    const first = bootCore();
-    envs.push(first);
-    const { runId, stageRunId } = await stageRun(first);
-    const owner = stageOwner(stageRunId, runId);
+  it('a plan review returns the reviewer decision', async () => {
+    const env = bootCore();
+    envs.push(env);
     const request = { summary: 'Add a cache', planContent: '# Add a cache', actions: ['implement_interactive' as const] };
-    void portFor(first).planReview(request, turn(owner, { agentMode: 'plan' }));
-    await new Promise((r) => setTimeout(r, 50));
-    const second = bootCore({ db: first.db, workDir: first.workDir });
-    await second.services.hitlService.resume(stageRunId, runId, { outcome: 'changes_requested', value: { feedback: 'use redis' } });
-    await expect(portFor(second).planReview(request, turn(owner, { agentMode: 'plan' }))).resolves.toEqual({
+    const port = portFor(env, async () => ({ outcome: 'changes_requested' as const, value: { feedback: 'use redis' }, reason: 'use redis' }));
+    await expect(port.planReview(request, turn(stageOwner(ids.stageRunId, ids.runId), { agentMode: 'plan' }))).resolves.toEqual({
       approved: false,
       feedback: 'use redis',
     });
-    second.services.automationService.shutdown();
-    second.services.workflowRunService.shutdown();
-    second.services.agentInteractionService?.dispose();
   });
 
   it('record_plan files a plan for a stage (T7)', async () => {
     const env = bootCore();
     envs.push(env);
-    const { runId, stageRunId } = await stageRun(env);
+    const { runId, stageRunId } = ids;
     const events: string[] = [];
     env.services.eventBus.subscribeAll((e) => events.push(e.kind), 'test');
     const result = await portFor(env).recordPlan({ title: 'Refactor', content: '# Refactor\n\nSteps.' }, turn(stageOwner(stageRunId, runId)));

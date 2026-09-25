@@ -7,7 +7,6 @@ import { describe, expect, it } from 'vitest';
 
 import { AdmissionTimeoutError } from '../../src/services/AdmissionController.js';
 import { ComposeError } from '../../src/services/session/types.js';
-import { StageRejectedError } from '../../src/services/StageExecutionService.js';
 import { StageError, classifyStageError, classified, errorClassOf } from '../../src/domain/errors/StageError.js';
 
 const harness = (code: string, extra: Record<string, unknown> = {}) =>
@@ -25,7 +24,7 @@ describe('classifyStageError', () => {
     ['ComposeError agent_disabled', new ComposeError('agent_disabled', 'off'), 'agent_disabled', 'deterministic'],
     ['ComposeError secret_unresolved', new ComposeError('secret_unresolved', 'no secret'), 'config_invalid', 'deterministic'],
     ['admission timeout', new AdmissionTimeoutError('ordinary', 1_800_000), 'queue_timeout', 'deterministic'],
-    ['human rejection', new StageRejectedError('rejected'), 'rejected_by_human', 'deterministic'],
+    ['human rejection', Object.assign(new Error('rejected'), { rejected: true }), 'rejected_by_human', 'deterministic'],
     // providers (HarnessError, duck-typed)
     ['HarnessError overloaded', harness('overloaded'), 'overloaded', 'transient'],
     ['HarnessError quota', harness('quota_exhausted'), 'quota_exhausted', 'deterministic'],

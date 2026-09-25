@@ -55,7 +55,7 @@ export interface HookContext {
   stageRunId?: string;
   /**
    * ORC-01/02 — external cancellation signal plumbed from the caller
-   * (StageExecutionService / WorkflowRunService). When this fires BEFORE
+   * (the engine's StageExecutor). When this fires BEFORE
    * the hook's own timeout we cancel the hook's work immediately and
    * re-throw, propagating cancellation up the stage.
    */

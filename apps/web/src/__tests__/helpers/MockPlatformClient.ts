@@ -15,6 +15,8 @@ import type {
   CreateWorkflowRunParams,
 } from '@generatorai/shared';
 import type {
+  ForkRunRequest,
+  RunCommand,
   WorkflowDefinitionRecord,
   WorkflowDefinitionSummary,
   WorkflowGraph,
@@ -201,15 +203,11 @@ export class MockPlatformClient implements IPlatformClient {
   });
 
   startRun = vi.fn(async (_id: string): Promise<void> => {});
-  pauseRun = vi.fn(async (_id: string): Promise<void> => {});
-  resumeRun = vi.fn(async (_id: string): Promise<void> => {});
-  cancelRun = vi.fn(async (_id: string): Promise<void> => {});
-  retryRun = vi.fn(async (id: string): Promise<{ runId: string }> => ({ runId: id }));
+  runCommand = vi.fn(async (_runId: string, _command: RunCommand): Promise<void> => {});
+  forkRun = vi.fn(async (_runId: string, _request?: ForkRunRequest): Promise<WorkflowRun> => {
+    throw new Error('Not implemented in mock');
+  });
   deleteRun = vi.fn(async (_id: string): Promise<void> => {});
-  pauseStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
-  resumeStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
-  retryStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
-  cancelStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
 
   // ── HITL Operations ──
   getPermissionMode = vi.fn(async (_runId: string) => ({
@@ -217,6 +215,4 @@ export class MockPlatformClient implements IPlatformClient {
     mode: 'default' as const,
   }));
   setPermissionMode = vi.fn(async (_runId: string, _mode: string): Promise<void> => {});
-  listPendingInterrupts = vi.fn(async (_runId: string) => []);
-  resumeStage = vi.fn(async (_runId: string, _stageId: string, _resolution: { outcome: 'approved' | 'changes_requested' | 'rejected'; value?: unknown; reason?: string }) => ({ ok: true }));
 }

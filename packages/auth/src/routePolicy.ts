@@ -97,11 +97,14 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // whose default grant includes `exec:agent` but deliberately excludes
   // `write:workflows` (see DEFAULT_MOBILE_SCOPES).
   //
-  // Longest-prefix matching means these two entries win over `/workflow-runs`
-  // for their own paths only; everything else about a run (start, pause,
-  // cancel, retry, delete) still needs the full write grant.
+  // Every run command (pause, resume, cancel, retry, skip, fail, approve)
+  // goes through one route, so this entry admits the route on `exec:agent`
+  // and the route itself demands `write:workflows` for every command other
+  // than `approve`. Longest-prefix matching means this entry wins over
+  // `/workflow-runs` for its own path only; everything else about a run
+  // (create, start, fork, delete) still needs the full write grant.
   {
-    prefix: '/workflow-runs/:id/stages/:stageId/approve',
+    prefix: '/workflow-runs/:id/commands',
     read: ['read:workflows'],
     write: ['exec:agent'],
   },

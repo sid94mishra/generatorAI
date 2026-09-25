@@ -55,22 +55,43 @@ async function findRun(ctx: CliContext, ref: string) {
       status: r.status,
       createdAt: r.createdAt,
     })),
-    activeStatuses: ['running', 'awaiting_input', 'paused', 'starting'],
+    activeStatuses: ['running', 'starting', 'waiting', 'paused', 'finalizing'],
   });
 }
 
-/** A stage run by its stage key, its name, or its own id. */
+/** A stage run by its instance path, its stage key, its name, or its own id. */
 async function findStage(ctx: CliContext, runId: string, ref: string) {
   const stages = await ctx.api.runs.stages(runId);
-  const byKey = stages.filter((s) => s.stageKey === ref.trim());
-  // A retried stage has several runs under one key; the latest is the one
+  const view = (s: (typeof stages)[number]) => ({
+    id: s.id,
+    name: s.name,
+    status: s.status,
+    stageKey: s.stageKey,
+    instancePath: s.instancePath,
+  });
+  const byKey = stages.filter((s) => s.instancePath === ref.trim() || s.stageKey === ref.trim());
+  // A loop body has several instances under one key; the latest is the one
   // an operator means.
   const latest = byKey[byKey.length - 1];
-  if (latest) return { id: latest.id, name: latest.name, status: latest.status };
-  return resolveRef(ref, {
+  if (latest) return view(latest);
+  const hit = await resolveRef(ref, {
     kind: 'stage',
     candidates: stages.map((s) => ({ id: s.id, name: s.name, status: s.status })),
   });
+  const stage = stages.find((s) => s.id === hit.id);
+  return stage ? view(stage) : { ...hit, stageKey: undefined, instancePath: undefined };
+}
+
+/** The question an `awaiting_input` stage asks, from its interrupt payload. */
+function gatePrompt(data: unknown): string | undefined {
+  if (typeof data === 'string') return data;
+  if (!data || typeof data !== 'object') return undefined;
+  const r = data as Record<string, unknown>;
+  for (const key of ['prompt', 'reason', 'message', 'question']) {
+    const v = r[key];
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return typeof r['kind'] === 'string' ? r['kind'] : undefined;
 }
 
 /**
@@ -537,7 +558,7 @@ export function runCommands(): CommandSpec[] {
       },
     }),
 
-    ...(['pause', 'resume', 'cancel', 'retry'] as const).map((verb) =>
+    ...(['pause', 'resume', 'cancel'] as const).map((verb) =>
       defineCommand({
         id: `run.${verb}`,
         group: 'run',
@@ -547,26 +568,60 @@ export function runCommands(): CommandSpec[] {
         destructive: verb === 'cancel',
         sinceVersion: '0.2.0',
         args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
-        flags: verb === 'retry' ? [watchFlag, verbosityFlag] : [],
-        schema: inputSchema(
-          { run: z.string() },
-          {
-            watch: z.boolean().optional(),
-            verbosity: z.enum(['minimal', 'normal', 'verbose']).default('normal'),
-          },
-        ),
+        flags: [],
+        schema: inputSchema({ run: z.string() }, {}),
         output: { kind: 'record', successMessage: `Run {id} ${verb}d.` },
-        async handler(ctx, { args, flags }) {
+        async handler(ctx, { args }) {
           const target = await findRun(ctx, args.run);
-          const result = await ctx.api.runs[verb](target.id);
-          if (verb === 'retry' && flags.watch) {
-            await watchRun(ctx, target.id, flags.verbosity);
-            return record(await ctx.api.runs.get(target.id));
-          }
-          return record(result);
+          // A run command; pause interrupts in-flight stages as well.
+          await ctx.api.runs.command(
+            target.id,
+            verb === 'pause' ? { command: 'pause', mode: 'interrupt' } : { command: verb },
+          );
+          return record(await ctx.api.runs.get(target.id));
         },
       }),
     ),
+
+    // A finished run is never mutated: retry forks a NEW run that re-runs
+    // every stage that did not complete (completed ones are memoized).
+    defineCommand({
+      id: 'run.retry',
+      group: 'run',
+      verb: 'retry',
+      summary: 'Re-run the failed stages of a finished run as a new run',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
+      flags: [
+        { name: 'from', description: 'Re-run from this stage (and everything after it)', type: 'string' },
+        watchFlag,
+        verbosityFlag,
+      ],
+      schema: inputSchema(
+        { run: z.string() },
+        {
+          from: z.string().optional(),
+          watch: z.boolean().optional(),
+          verbosity: z.enum(['minimal', 'normal', 'verbose']).default('normal'),
+        },
+      ),
+      output: { kind: 'record' },
+      async handler(ctx, { args, flags }) {
+        const target = await findRun(ctx, args.run);
+        const from = flags.from ? await findStage(ctx, target.id, flags.from) : undefined;
+        const fromPath = from ? (from.instancePath ?? from.stageKey) : undefined;
+        if (from && !fromPath) {
+          throw new CliError('VALIDATION', `Stage "${flags.from}" has no instance path to re-run from.`);
+        }
+        const fork = await ctx.api.runs.fork(target.id, fromPath ? { rerunFrom: [fromPath] } : {});
+        if (flags.watch) {
+          await watchRun(ctx, fork.id, flags.verbosity);
+          return record(await ctx.api.runs.get(fork.id), `Retried as run ${fork.id}.`);
+        }
+        return record(fork, `Retried as run ${fork.id}.`);
+      },
+    }),
 
     defineCommand({
       id: 'run.delete',
@@ -615,6 +670,8 @@ export function runCommands(): CommandSpec[] {
       },
     }),
 
+    // Instance commands. Retry starts a new attempt of a PAUSED stage in a
+    // live run; to re-run a stage of a finished run, use `run retry --from`.
     ...(['pause', 'resume', 'retry', 'cancel'] as const).map((verb) =>
       defineCommand({
         id: `run.stage.${verb}`,
@@ -634,7 +691,14 @@ export function runCommands(): CommandSpec[] {
         async handler(ctx, { args }) {
           const run = await findRun(ctx, args.run);
           const stage = await findStage(ctx, run.id, args.stage);
-          await ctx.api.runs.stage[verb](run.id, stage.id);
+          await ctx.api.runs.command(
+            run.id,
+            verb === 'pause'
+              ? { command: 'pause', instanceId: stage.id, mode: 'interrupt' }
+              : verb === 'retry'
+                ? { command: 'retry', instanceId: stage.id, mode: 'resume' }
+                : { command: verb, instanceId: stage.id },
+          );
           return ok(`Stage ${stage.name ?? stage.id} ${verb}d.`);
         },
       }),
@@ -685,7 +749,18 @@ export function runCommands(): CommandSpec[] {
       },
       async handler(ctx, { args }) {
         const target = await findRun(ctx, args.run);
-        return list(await ctx.api.runs.pendingInterrupts(target.id));
+        // The pending gates are the run's `awaiting_input` stage runs.
+        const run = await ctx.api.runs.get(target.id);
+        return list(
+          run.stageRuns
+            .filter((s) => s.status === 'awaiting_input')
+            .map((s) => ({
+              stageId: s.id,
+              stageName: s.name ?? s.stageKey,
+              prompt: gatePrompt(s.interruptData),
+              createdAt: s.startedAt ?? null,
+            })),
+        );
       },
     }),
 
@@ -716,20 +791,14 @@ export function runCommands(): CommandSpec[] {
           { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
         ],
         flags: [
-          { name: 'value', description: 'JSON value to hand back to the stage', type: 'string' },
-          { name: 'reason', description: 'Why', type: 'string' },
-          {
-            name: 'followUp',
-            description: 'Follow-up prompt sent to the agent',
-            type: 'string',
-          },
+          { name: 'value', description: 'JSON object to hand back to the stage', type: 'string' },
+          { name: 'feedback', description: 'Reviewer feedback, sent to the agent', type: 'string' },
         ],
         schema: inputSchema(
           { run: z.string(), stage: z.string() },
           {
             value: z.string().optional(),
-            reason: z.string().optional(),
-            followUp: z.string().optional(),
+            feedback: z.string().optional(),
           },
         ),
         output: { kind: 'record', successMessage: `Stage ${past}.` },
@@ -737,22 +806,29 @@ export function runCommands(): CommandSpec[] {
           const run = await findRun(ctx, args.run);
           const stage = await findStage(ctx, run.id, args.stage);
 
-          let value: unknown;
+          // `data` is an object; a bare (non-object) value is a free-form answer.
+          let data: Record<string, unknown> | undefined;
           if (flags.value !== undefined) {
+            let parsed: unknown;
             try {
-              value = JSON.parse(flags.value);
+              parsed = JSON.parse(flags.value);
             } catch {
-              value = flags.value;
+              parsed = flags.value;
             }
+            data =
+              parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? (parsed as Record<string, unknown>)
+                : { freeformResponse: typeof parsed === 'string' ? parsed : JSON.stringify(parsed) };
           }
 
-          return record(
-            await ctx.api.runs.stage.approve(
-              run.id,
-              stage.id,
-              compact({ outcome, value, reason: flags.reason, followUpPrompt: flags.followUp }),
-            ),
-          );
+          await ctx.api.runs.command(run.id, {
+            command: 'approve',
+            instanceId: stage.id,
+            outcome,
+            ...(flags.feedback ? { feedback: flags.feedback } : {}),
+            ...(data ? { data } : {}),
+          });
+          return record({ runId: run.id, stageId: stage.id, outcome });
         },
       }),
     ),
