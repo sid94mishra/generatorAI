@@ -28,6 +28,7 @@ import type { StreamEventRow, StreamScope } from '@generatorai/core';
 import { canMintDerivedCredentials, type Principal, type Scope } from '@generatorai/auth';
 import { acquireSseSlot } from '../composition/sseConnectionCap.js';
 import { LIFECYCLE_EVENT_KINDS } from '../composition/streamScopes.js';
+import { redactAttentionEventPayload } from '@generatorai/core';
 import { SseConnection, parseCursor } from '../streaming/sseConnection.js';
 import { MuxSseConnection } from '../streaming/muxConnection.js';
 import {
@@ -212,6 +213,30 @@ function lifecycleOnly<R>(deliver: (row: StreamEventRow) => R): (row: StreamEven
  */
 function lifecycleKindPrefixes(clientFilter: readonly string[] | undefined): readonly string[] {
   return clientFilter && clientFilter.length > 0 ? clientFilter : LIFECYCLE_KIND_FAMILIES;
+}
+
+/**
+ * G-01 scope rule for the attention feed on `global`.
+ *
+ * `attention.upsert` rows carry `ask.detail` and `progress.label`, which can
+ * contain commands and file names. A principal that lacks `read:chats` (chat
+ * items) or `read:workflows` (run and automation items) gets them stripped —
+ * the same rule `GET /api/attention` applies to its snapshot. Returns null
+ * when nothing needs stripping for this principal, so the common case costs
+ * nothing per row. The stored row is never mutated: the broker hands the same
+ * object to every subscriber and memoises its encoding.
+ */
+function attentionRedactor(
+  principal: Principal | undefined,
+): ((row: StreamEventRow) => StreamEventRow) | null {
+  if (!principal) return null;
+  const scopes = principal.scopes;
+  if (scopes.includes('read:chats') && scopes.includes('read:workflows')) return null;
+  return (row) => {
+    if (row.kind !== 'attention.upsert') return row;
+    const payload = redactAttentionEventPayload(row.kind, row.payload, scopes);
+    return payload === row.payload ? row : ({ ...row, payload } as StreamEventRow);
+  };
 }
 
 /** The 403 body for a subscription the principal may not read. */
@@ -714,7 +739,9 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     // when an item had to be queued; the broker awaits it, which is how a
     // congested connection actually slows its session's producer rather than
     // only bounding memory.
-    const deliverRaw = (row: StreamEventRow): void | Promise<void> => conn.deliver(row);
+    const redact = scope === 'global' ? attentionRedactor(req.principal) : null;
+    const deliverRaw = (row: StreamEventRow): void | Promise<void> =>
+      conn.deliver(redact ? redact(row) : row);
     const deliver = lifecycleRestricted ? lifecycleOnly(deliverRaw) : deliverRaw;
 
     try {
@@ -960,7 +987,11 @@ export function createUnifiedStreamRoutes(container: Container): Router {
       // re-checked here so a flag lost anywhere between the two requests
       // fails CLOSED. Either says restrict → restricted.
       const restricted = sub.lifecycleOnly === true || restrictsGlobalToLifecycle(principal, sub.scope);
-      const deliverRaw = deliverTo(scopeKey);
+      const redact = sub.scope === 'global' ? attentionRedactor(principal) : null;
+      const deliverScope = deliverTo(scopeKey);
+      const deliverRaw = redact
+        ? (row: StreamEventRow, cls?: 'delta' | 'item') => deliverScope(redact(row), cls)
+        : deliverScope;
       const deliver = restricted
         ? lifecycleOnly((row: StreamEventRow) => deliverRaw(row))
         : deliverRaw;
@@ -1101,7 +1132,11 @@ export function createUnifiedStreamRoutes(container: Container): Router {
         Math.min(parseInt(String(req.query['limit'] ?? '100'), 10) || 100, MAX_REPLAY_LIMIT),
       );
       const rows = await streamBroker.replay(scope, scopeId, afterSeq, limit);
-      res.json({ rows, nextAfterSeq: rows.length > 0 ? rows[rows.length - 1]!.seq : afterSeq });
+      const redact = scope === 'global' ? attentionRedactor(req.principal) : null;
+      res.json({
+        rows: redact ? rows.map(redact) : rows,
+        nextAfterSeq: rows.length > 0 ? rows[rows.length - 1]!.seq : afterSeq,
+      });
     } catch (err) {
       next(err);
     }

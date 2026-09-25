@@ -77,6 +77,15 @@ export class DrizzleAgentInteractionRepository implements IAgentInteractionRepos
     return rows.map((r) => this.mapRow(r));
   }
 
+  async listPendingAll(): Promise<AgentInteraction[]> {
+    const rows = await this.db
+      .select()
+      .from(agentInteractions)
+      .where(eq(agentInteractions.status, 'pending'))
+      .orderBy(asc(agentInteractions.createdAt));
+    return rows.map((r) => this.mapRow(r));
+  }
+
   async listPendingByScope(
     scopeKind: 'chat' | 'stage_run',
     scopeId: string,

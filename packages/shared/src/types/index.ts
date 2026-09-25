@@ -459,3 +459,30 @@ export type {
   OpenInEditorRequest,
   OpenInEditorResult,
 } from './SourceControl.js';
+
+// ── Attention feed (G-01) ──
+export type {
+  AttentionEntity,
+  AttentionItemState,
+  AttentionAskKind,
+  AttentionAction,
+  AttentionAsk,
+  AttentionProgress,
+  AttentionItem,
+  AttentionEntityCounts,
+  AttentionCounts,
+  AttentionSnapshot,
+  AttentionFilter,
+  AttentionUpsertEventData,
+  AttentionRemoveEventData,
+  AttentionCountsEventData,
+  AttentionEventKind,
+} from './Attention.js';
+export {
+  ATTENTION_ENTITIES,
+  ATTENTION_EVENT_KINDS,
+  isAttentionAsk,
+  emptyAttentionCounts,
+  countAttention,
+  compareAttentionItems,
+} from './Attention.js';

@@ -64,6 +64,14 @@ export const LIFECYCLE_EVENT_KINDS: ReadonlySet<string> = new Set([
   // "Pending since …" row is wrong until it hears the answer.
   'device.scope_requested',
   'device.scope_request_resolved',
+  // Attention feed (G-01). The sidebar's Needs you / Running lists and every
+  // badge counting them are wrong until they hear these. `ask.detail` and
+  // `progress.label` are stripped per principal on delivery
+  // (`routes/stream.ts`), so a `read:activity` device sees the row, not the
+  // command inside it.
+  'attention.upsert',
+  'attention.remove',
+  'attention.counts',
 ]);
 
 function readString(obj: unknown, key: string): string | undefined {

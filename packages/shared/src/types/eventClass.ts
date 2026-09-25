@@ -80,6 +80,10 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'chat.created': 'item',
   'device.scope_requested': 'item',
   'device.scope_request_resolved': 'item',
+  // Attention deltas carry a sequence the client checks for gaps, so none may be dropped.
+  'attention.upsert': 'item',
+  'attention.remove': 'item',
+  'attention.counts': 'item',
   'chat.prompt_sent': 'item',
   'chat.prompt_failed': 'item',
   'chat.archived': 'item',

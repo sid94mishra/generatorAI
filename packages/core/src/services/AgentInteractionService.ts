@@ -185,6 +185,11 @@ export class AgentInteractionService {
     return this.repo.listPendingByChat(chatId);
   }
 
+  /** Every pending gate, oldest first. Read by `AttentionService` at boot. */
+  async listPendingAll(): Promise<AgentInteraction[]> {
+    return this.repo.listPendingAll();
+  }
+
   async findById(interactionId: string): Promise<AgentInteraction | null> {
     return this.repo.findById(interactionId);
   }

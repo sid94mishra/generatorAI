@@ -14,6 +14,7 @@ import type {
 import type { TerminalHostKind } from './Terminal.js';
 import type { ScmFlowResult } from './SourceControl.js';
 import type { SttEngineKind } from './Voice.js';
+import type { AttentionCountsEventData, AttentionRemoveEventData, AttentionUpsertEventData } from './Attention.js';
 
 /**
  * Per-operation file-change stats, derived from the provider's structured
@@ -176,6 +177,11 @@ export type AgentEvent =
   // Lifecycle kinds: they fan out to the global scope so admin devices' lists refresh.
   | { kind: 'device.scope_requested'; data: { requestId: string; deviceId: string; deviceName: string | null; platform: string | null; scopes: string[] } }
   | { kind: 'device.scope_request_resolved'; data: { requestId: string; deviceId: string; deviceName: string | null; status: 'approved' | 'denied' | 'cancelled'; scopes: string[] } }
+  // Attention feed deltas (G-01). Emitted on the global scope by `AttentionService`;
+  // lifecycle kinds, so `read:activity` devices receive them (detail/label redacted per scope).
+  | { kind: 'attention.upsert'; data: AttentionUpsertEventData }
+  | { kind: 'attention.remove'; data: AttentionRemoveEventData }
+  | { kind: 'attention.counts'; data: AttentionCountsEventData }
   | { kind: 'chat.prompt_sent'; data: { chatId: string; prompt: string } }
   | { kind: 'chat.prompt_failed'; data: { chatId: string; error: string } }
   | { kind: 'chat.archived'; data: { chatId: string } }

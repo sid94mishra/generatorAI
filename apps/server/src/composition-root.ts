@@ -153,6 +153,8 @@ import {
   CuaDriverBridge,
   NullComputerBridge,
   PendingConsentStore,
+  // G-01 — attention feed
+  AttentionService,
   // Integrated Terminal
   TerminalService,
   NodePtyHost,
@@ -1853,6 +1855,24 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const computerConsentStore = new PendingConsentStore(computerUseRepo, eventBus, logger, {
     autoApproveForDevelopment: process.env['GENERATORAI_COMPUTER_USE_AUTO_APPROVE'] === '1',
   });
+
+  // G-01 — the attention feed: Needs you + Running across chats, workflow
+  // runs and automation executions. Started in `initialize()` after boot
+  // recovery, so its rebuild reads settled rows.
+  const attentionService = new AttentionService({
+    eventBus,
+    chats: chatEntityRepo,
+    projects: projectRepo,
+    ...(agentInteractionService ? { interactions: agentInteractionService } : {}),
+    streaming: chatManagementService,
+    runs: workflowRunRepo,
+    stageRuns: stageRunRepo,
+    definitions: workflowDefinitionRepo,
+    automations: automationRepo,
+    executions: automationExecutionRepo,
+    consent: computerConsentStore,
+    logger,
+  });
   const cuaDriverBridge = new CuaDriverBridge({
     logger,
     maxSnapshotElements: computerUseConfig.maxSnapshotElements,
@@ -2379,6 +2399,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     cuaDriverBridge,
     computerConsentStore,
     screenCast,
+    // G-01 — attention feed
+    attentionService,
     // Expose the execution-workspace + artifact repos so routes can read
     // browser artifacts + workspace rows without a full service round-trip.
     executionWorkspaceRepo,
@@ -2654,11 +2676,20 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         logger.warn(`[Container] Extension load failed — continuing without extensions: ${String(err)}`);
       }
 
+      // G-01 — after every boot recovery above, so the rebuilt snapshot
+      // reads settled rows (expired chat gates, recovered runs/executions).
+      try {
+        await attentionService.start();
+      } catch (err) {
+        logger.warn(`[Container] attention feed failed to start: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
       logger.info('[Container] All services initialized');
     },
 
     /** Graceful shutdown. */
     async shutdown(): Promise<void> {
+      attentionService.stop();
       scriptRunner.shutdown();
       automationService.shutdown();
       // Track A1 — stop the idempotency-key sweeper.
@@ -2847,6 +2878,8 @@ export interface Container {
   cuaDriverBridge: CuaDriverBridge;
   /** Exposed so routes/internal-computer.ts can deliver the user's answer. */
   computerConsentStore: PendingConsentStore;
+  /** G-01 — Needs you + Running snapshot for `GET /api/attention`. */
+  attentionService: AttentionService;
   screenCast: ScreenCast;
   /** Execution workspace repo — exposed for the browser route (read workspace row). */
   executionWorkspaceRepo: InstanceType<typeof DrizzleExecutionWorkspaceRepository>;

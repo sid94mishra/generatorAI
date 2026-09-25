@@ -281,3 +281,21 @@ export type {
   EffectSpec,
   DurableContext,
 } from './DurableExecutionEngine.js';
+
+// G-01 — attention feed (Needs you + Running across chats, runs, automations)
+export {
+  AttentionService,
+  describeToolStep,
+  describeInteraction,
+  redactAttentionItem,
+  redactAttentionSnapshot,
+  redactAttentionEventPayload,
+} from './AttentionService.js';
+export type {
+  AttentionServiceDeps,
+  AttentionEventBus,
+  AttentionStreamingSource,
+  AttentionConsentEntry,
+} from './AttentionService.js';
+export { StreamingChatRegistry } from './StreamingChatRegistry.js';
+export type { StreamingChangeListener } from './StreamingChatRegistry.js';

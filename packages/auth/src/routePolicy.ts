@@ -79,6 +79,12 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: '/relay', read: ['admin:relay'], write: ['admin:relay'], riskLevel: 'high' },
 
   { prefix: '/stream', read: ['stream:events'], write: ['stream:events'] },
+  // Attention feed (G-01): the Needs you + Running snapshot. `read:activity`
+  // is the scope that opens the lifecycle-only `global` stream carrying its
+  // deltas; commands and file names inside it are stripped per principal by
+  // the route (`read:chats` / `read:workflows`). Read-only: quick actions use
+  // the existing chat, run and consent endpoints.
+  { prefix: '/attention', read: ['read:activity'], write: ['admin:settings'] },
 
   { prefix: '/chats', read: ['read:chats'], write: ['write:chats'] },
   // Authoring an agent GRANTS capability (skills, MCP servers, tool policy), so

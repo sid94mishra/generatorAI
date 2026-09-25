@@ -90,6 +90,8 @@ export interface IAgentInteractionRepository {
   create(params: CreateInteractionParams): Promise<AgentInteraction>;
   findById(id: string): Promise<AgentInteraction | null>;
   listPendingByChat(chatId: string): Promise<AgentInteraction[]>;
+  /** Every pending gate across all chats and stage runs, oldest first (attention feed boot). */
+  listPendingAll(): Promise<AgentInteraction[]>;
   listPendingByScope(scopeKind: 'chat' | 'stage_run', scopeId: string): Promise<AgentInteraction[]>;
   /**
    * Conditional transition `pending → <status>`.

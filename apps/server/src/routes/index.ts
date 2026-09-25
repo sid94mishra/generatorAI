@@ -37,6 +37,7 @@ import { createWorkflowScriptRoutes } from './workflowScripts.js';
 import { createBrowserRoutes } from './browser.js';
 import { createComputerRoutes } from './computer.js';
 import { createTerminalRoutes } from './terminals.js';
+import { createAttentionRoutes } from './attention.js';
 
 // Widgets & Extensions
 import { createExtensionRoutes } from './extensions.js';
@@ -126,6 +127,10 @@ export function createApiRouter(container: Container): Router {
 
   // Hooks — phases, session hooks, test (3 endpoints)
   router.use('/hooks', createHooksRoutes(container));
+
+  // Attention feed (G-01) — Needs you + Running across chats, runs and
+  // automation executions. Live deltas ride the `global` stream scope.
+  router.use('/attention', createAttentionRoutes(container));
 
   // Harness — runtime AI provider switching (PRV-02)
   router.use('/harness', createHarnessRoutes(container));

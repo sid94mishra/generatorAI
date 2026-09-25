@@ -770,6 +770,104 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
         required: ['driving', 'team', 'skills', 'mcpServers', 'toolPolicy', 'runtime', 'warnings'],
       },
+      // ── Attention feed (G-01; mirrors packages/shared/src/types/Attention.ts) ──
+      AttentionItem: {
+        type: 'object',
+        description:
+          'One Needs you or Running row. `ask` is present exactly when the item is in `needsYou`. ' +
+          '`ask.detail` and `progress.label` are omitted for principals without `read:chats` ' +
+          '(chat items) or `read:workflows` (run and automation items).',
+        properties: {
+          key: { type: 'string', description: '`${entity}:${entityId}`, plus `:${ask.id}` for asks' },
+          entity: { type: 'string', enum: ['chat', 'workflow_run', 'automation_execution'] },
+          entityId: { type: 'string' },
+          title: { type: 'string' },
+          href: { type: 'string', description: 'In-app route, e.g. `/chats/abc?dock=plan`' },
+          project: {
+            type: 'object',
+            properties: { id: { type: 'string' }, name: { type: 'string' } },
+            required: ['id', 'name'],
+          },
+          parent: {
+            type: 'object',
+            description: 'Set on worker chats: the orchestrator chat they roll up to.',
+            properties: {
+              entity: { type: 'string', enum: ['chat'] },
+              id: { type: 'string' },
+              title: { type: 'string' },
+            },
+            required: ['entity', 'id', 'title'],
+          },
+          state: { type: 'string', enum: ['needs_you', 'running', 'waiting', 'paused', 'queued'] },
+          since: { type: 'string', format: 'date-time' },
+          ask: {
+            type: 'object',
+            properties: {
+              kind: {
+                type: 'string',
+                enum: [
+                  'tool_permission',
+                  'question',
+                  'plan_review',
+                  'stage_approval',
+                  'stage_input',
+                  'computer_consent',
+                  'run_paused',
+                ],
+              },
+              id: { type: 'string' },
+              summary: { type: 'string' },
+              detail: { type: 'string' },
+              actions: {
+                type: 'array',
+                items: { type: 'string', enum: ['allow_once', 'deny', 'approve', 'reject', 'answer', 'open'] },
+              },
+            },
+            required: ['kind', 'id', 'summary', 'actions'],
+          },
+          progress: {
+            type: 'object',
+            properties: {
+              label: { type: 'string' },
+              step: { type: 'integer' },
+              of: { type: 'integer' },
+            },
+          },
+          stoppable: { type: 'boolean' },
+        },
+        required: ['key', 'entity', 'entityId', 'title', 'href', 'state', 'since', 'stoppable'],
+      },
+      AttentionCounts: {
+        type: 'object',
+        properties: {
+          needsYou: { type: 'integer' },
+          running: { type: 'integer' },
+          byEntity: {
+            type: 'object',
+            additionalProperties: {
+              type: 'object',
+              properties: { needsYou: { type: 'integer' }, running: { type: 'integer' } },
+              required: ['needsYou', 'running'],
+            },
+          },
+        },
+        required: ['needsYou', 'running', 'byEntity'],
+      },
+      AttentionSnapshot: {
+        type: 'object',
+        description:
+          'Deltas follow on the `global` stream scope as `attention.upsert` `{seq, item}`, ' +
+          '`attention.remove` `{seq, key}` and `attention.counts` `{seq, counts}`. Apply a delta ' +
+          'whose seq is exactly `seq + 1`; on any larger jump, refetch this snapshot.',
+        properties: {
+          seq: { type: 'integer' },
+          generatedAt: { type: 'string', format: 'date-time' },
+          needsYou: { type: 'array', items: { $ref: '#/components/schemas/AttentionItem' } },
+          running: { type: 'array', items: { $ref: '#/components/schemas/AttentionItem' } },
+          counts: { $ref: '#/components/schemas/AttentionCounts' },
+        },
+        required: ['seq', 'generatedAt', 'needsYou', 'running', 'counts'],
+      },
     },
     securitySchemes: {
       bearerAuth: {
@@ -2136,6 +2234,37 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         tags: ['Webhooks'],
         summary: 'GitHub webhook endpoint (HMAC-verified)',
         responses: { '200': { description: 'Accepted' }, '401': { description: 'Signature mismatch' } },
+      },
+    },
+
+    '/api/attention': {
+      get: {
+        tags: ['Attention'],
+        summary: 'Needs you + Running across chats, workflow runs and automation executions (G-01)',
+        description:
+          'Requires `read:activity`. Needs you is oldest ask first; Running is longest-running first. ' +
+          'An entity with a pending ask appears only under Needs you.',
+        parameters: [
+          {
+            in: 'query',
+            name: 'projectId',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Only items belonging to this project (counts follow the filter).',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Attention snapshot',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AttentionSnapshot' } },
+            },
+          },
+          '400': {
+            description: 'Invalid projectId',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
       },
     },
   },

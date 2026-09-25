@@ -53,6 +53,12 @@ export interface PendingConsentSummary {
   expiresAt: number;
 }
 
+/** A pending prompt with the workspace and chat it belongs to (attention feed). */
+export interface PendingConsentEntry extends PendingConsentSummary {
+  workspaceId: string;
+  chatId?: string;
+}
+
 export interface PendingConsentStoreOptions {
   eventBusScopeSessionId?: string;
   /**
@@ -195,6 +201,29 @@ export class PendingConsentStore implements IComputerConsentStore {
       if (entry.workspaceId !== workspaceId) continue;
       out.push({
         requestId,
+        appIdentity: entry.prompt.app.appId,
+        appLabel: entry.prompt.app.name,
+        action: entry.prompt.action,
+        summary: entry.prompt.summary,
+        path: entry.synthetic ? 'synthetic' : 'accessibility',
+        expiresAt: entry.expiresAt,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Every prompt still awaiting an answer, across workspaces. The attention
+   * feed reads it to list consent asks next to the chat that raised them.
+   */
+  listAllPending(): PendingConsentEntry[] {
+    this.sweepExpired();
+    const out: PendingConsentEntry[] = [];
+    for (const [requestId, entry] of this.pending) {
+      out.push({
+        requestId,
+        workspaceId: entry.workspaceId,
+        ...(entry.prompt.chatId ? { chatId: entry.prompt.chatId } : {}),
         appIdentity: entry.prompt.app.appId,
         appLabel: entry.prompt.app.name,
         action: entry.prompt.action,

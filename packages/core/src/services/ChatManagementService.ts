@@ -51,6 +51,7 @@ import {
 } from './agentModePolicy.js';
 import type { HookBridge } from '../domain/ports/IHookBridge.js';
 import type { EventBus } from '../events/EventBus.js';
+import { StreamingChatRegistry, type StreamingChangeListener } from './StreamingChatRegistry.js';
 import type { CustomToolRegistry } from '../tools/CustomToolRegistry.js';
 import {
   createRecordPlanTool,
@@ -266,8 +267,13 @@ export interface ChatManagementServiceExtensions {
 }
 
 export class ChatManagementService {
-  /** Track active event subscriptions per chat to prevent leaks */
-  private activeSubscriptions = new Map<string, () => void>();
+  /**
+   * Track active event subscriptions per chat to prevent leaks. An entry
+   * exists exactly while a turn is in flight, so this is also the "streaming
+   * now" set — with start times and change notifications for the attention
+   * feed (`getStreamingSince`, `onStreamingChange`).
+   */
+  private activeSubscriptions = new StreamingChatRegistry();
 
   /**
    * P1-45: Tracks in-flight worktree-creation promises keyed by chatId.
@@ -1326,6 +1332,20 @@ export class ChatManagementService {
    */
   getStreamingChatIds(): string[] {
     return [...this.activeSubscriptions.keys()];
+  }
+
+  /** chatId → when its in-flight turn started. Same set as `getStreamingChatIds`. */
+  getStreamingSince(): Map<string, Date> {
+    return this.activeSubscriptions.since();
+  }
+
+  /**
+   * Observe the streaming set. Fires synchronously when a turn starts
+   * (`streaming: true`) and when it settles, is cancelled or its chat is
+   * archived (`false`). Returns an unsubscribe.
+   */
+  onStreamingChange(listener: StreamingChangeListener): () => void {
+    return this.activeSubscriptions.onChange(listener);
   }
 
   /**

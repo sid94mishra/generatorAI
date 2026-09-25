@@ -53,6 +53,10 @@ class FakeRepo implements IAgentInteractionRepository {
     return [...this.rows.values()].filter((r) => r.chatId === chatId && r.status === 'pending');
   }
 
+  async listPendingAll() {
+    return [...this.rows.values()].filter((r) => r.status === 'pending');
+  }
+
   async listPendingByScope(scopeKind: 'chat' | 'stage_run', scopeId: string) {
     return [...this.rows.values()].filter(
       (r) => r.scopeKind === scopeKind && r.scopeId === scopeId && r.status === 'pending',
