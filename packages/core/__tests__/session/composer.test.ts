@@ -4,7 +4,7 @@
 // mode reaches Claude and Codex stages turn by turn and their gates park;
 // a provider that never asks is refused.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AgentResolver } from '../../src/services/AgentResolver.js';
 import type { HitlService } from '../../src/services/HitlService.js';
 import { SessionComposer, type ComposeInput } from '../../src/services/session/SessionComposer.js';
@@ -134,6 +134,20 @@ describe('composer platform gating', () => {
     expect(bypass.warnings.map((w) => w.code)).toContain('computer_use_blocked_bypass');
   });
 
+  it('R6 — computer use is decided per call: a switch to bypass, or an owner that never opted in, is refused', async () => {
+    const c = composer({ computerService, workspaceManager });
+    const r = await c.compose(stageInput({ workspace, spec: { computerUse: true }, mode: 'acceptEdits' }));
+    type Tool = { name: string; handler: (a: Record<string, unknown>) => Promise<unknown> };
+    const tool = (r.params as unknown as { tools: Tool[] }).tools.find((t) => t.name.startsWith('computer'))!;
+    expect(r.turnPolicy.computerUse).toBe('opted_in');
+    // The run was PATCHed to bypass after the session was bound.
+    c.beginTurn(stage, 'conv-1', { agentMode: 'auto', permissionMode: 'bypassPermissions' }, { policy: r.turnPolicy });
+    await expect(tool.handler({})).rejects.toThrow(/bypassPermissions/);
+    // A later stage on the shared conversation that never opted in.
+    c.beginTurn(stage, 'conv-1', { agentMode: 'auto', permissionMode: 'acceptEdits' }, { policy: { computerUse: 'off' } });
+    await expect(tool.handler({})).rejects.toThrow(/not enabled/);
+  });
+
   it('custom tools reach a stage without the extension-authoring pair; widgets obey the spec switch', async () => {
     const registry = new CustomToolRegistry();
     for (const name of ['lookup', 'write_extension', 'reload_extension']) {
@@ -155,12 +169,19 @@ describe('composer platform gating', () => {
   });
 
   it('a BYOK provider key is resolved from the secret store, and an unresolved one fails the compose', async () => {
-    const provider = { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'secretref:byok/openai' };
+    const provider = { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'secretref:provider/openai' };
     const ok = await composer({ resolveSecretRef: async () => 'sk-real' }).compose(stageInput({ spec: { provider }, mode: 'acceptEdits' }));
     expect((ok.params as unknown as { provider: { apiKey: string } }).provider.apiKey).toBe('sk-real');
     await expect(
       composer({ resolveSecretRef: async () => null }).compose(stageInput({ spec: { provider }, mode: 'acceptEdits' })),
     ).rejects.toMatchObject({ code: 'secret_unresolved' });
+    // R1 — any other namespace (an MCP credential, say) is never read out.
+    const resolveSecretRef = vi.fn(async () => 'mcp-token');
+    const stolen = { ...provider, apiKey: 'secretref:mcp-github/token' };
+    await expect(
+      composer({ resolveSecretRef }).compose(stageInput({ spec: { provider: stolen }, mode: 'acceptEdits' })),
+    ).rejects.toMatchObject({ code: 'secret_unresolved' });
+    expect(resolveSecretRef).not.toHaveBeenCalled();
   });
 
   it('a stage whose agent is missing fails with agent_not_found (C-12)', async () => {

@@ -20,6 +20,12 @@
 // W-51 / W-52 (WP-2.8) regenerated the stage snapshots (f, g).
 // ────────────────────────────────────────────────────────────────
 
+import { MemorySecretStore, setSecretString } from '@generatorai/secrets';
+import { InMemoryMcpHub } from '../../src/mcp/IMcpHub.js';
+import { McpCredentialVault } from '../../src/mcp/McpCredentialVault.js';
+import { SessionComposer } from '../../src/services/session/SessionComposer.js';
+import { TurnContextRegistry } from '../../src/services/session/gates.js';
+import { redactProjection } from '../../src/services/AgentResolver.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -473,6 +479,48 @@ describe('session composition golden snapshots', () => {
     // the chat has no workspace here, the stage does).
     const names = (p: unknown) => ((p as { tools?: Array<{ name: string }> }).tools ?? []).map((t) => t.name);
     expect(names(stageParams)).toEqual(names(chatParams));
+  });
+
+  it('(h) stage resumed from its frozen agent snapshot keeps a credentialed MCP server (review R2)', async () => {
+    const env = fresh();
+    const secrets = new MemorySecretStore();
+    await setSecretString(secrets, 'mcp-golden', 'token', 'ghp-golden-real');
+    const credentialed = (): ResolvedAgentProjection => ({
+      ...goldenProjection(),
+      mcpServers: {
+        github: { type: 'http', url: 'https://mcp.example.com', headers: { Authorization: 'secretref:mcp-golden/token', 'X-Env': 'literal' } },
+        linear: { type: 'http', url: 'https://linear.example.com', headers: { Authorization: 'secretref:mcp-golden/token' } },
+      },
+    });
+    const composer = new SessionComposer(
+      {
+        agentResolver: {
+          resolve: async (i: { snapshot?: ResolvedAgentProjection }) => i.snapshot ?? credentialed(),
+        } as unknown as AgentResolver,
+        mcpHub: new InMemoryMcpHub({ vault: new McpCredentialVault(secrets) }),
+      },
+      spyHarness(env.calls),
+      new TurnContextRegistry(),
+    );
+    const input = (agentSnapshot?: ResolvedAgentProjection) => ({
+      owner: { kind: 'stage' as const, stageRunId: 'sr-h', workflowRunId: 'run-h', workflowDefinitionId: 'def-h', sessionId: 'sess-h' },
+      conversationId: 'conv-h',
+      mode: agentSnapshot ? ('resume' as const) : ('create' as const),
+      spec: { harnessType: 'claude-agent' as const, agentRef: AGENT_REF },
+      agentSnapshot,
+      attended: true,
+      permission: { source: { kind: 'run' as const, read: async () => 'acceptEdits' as const } },
+      platform: { browser: { autoStart: false }, computerUse: 'opt_in' as const, orchestrator: false },
+    });
+    const live = await composer.compose(input());
+    const resumed = await composer.compose(input(redactProjection(live.projection)));
+    const mcp = (p: unknown) => (p as { mcpServers?: Record<string, { headers?: Record<string, string> }> }).mcpServers;
+    // The pointer survives the snapshot and is injected again; the masked
+    // literal is taken back from the live agent by server id.
+    expect(mcp(live.params)?.['github']?.headers).toEqual({ Authorization: 'ghp-golden-real', 'X-Env': 'literal' });
+    expect(mcp(resumed.params)).toEqual(mcp(live.params));
+    expect(mcp(resumed.params)?.['linear']?.headers).toEqual({ Authorization: 'ghp-golden-real' });
+    await expect(golden(resumed.params, env.workDir)).toMatchFileSnapshot('__snapshots__/h-stage-snapshot-mcp.json');
   });
 
   it('(g) stage with the browser enabled', async () => {

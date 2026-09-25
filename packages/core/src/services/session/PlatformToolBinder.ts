@@ -95,7 +95,11 @@ export class PlatformToolBinder {
    * switch is on and the owner allows it (`enabled`): chats follow the
    * switch, stages must opt in and are refused on bypass runs (PD-5).
    */
-  async computer(cfg: ConversationConfig, t: BindTarget, opts: { enabled: boolean }): Promise<void> {
+  async computer(
+    cfg: ConversationConfig,
+    t: BindTarget,
+    opts: { enabled: boolean; refusal?: () => string | null },
+  ): Promise<void> {
     const { computerService, workspaceManager } = this.deps;
     if (!opts.enabled || !computerService?.isEnabled() || !t.workspaceId) return;
     try {
@@ -104,13 +108,26 @@ export class PlatformToolBinder {
       // root, never the directory the agent edits.
       const workspaceRoot = workspace?.rootPath;
       if (!workspaceRoot) return;
-      const tools = buildComputerToolSet({
+      const built = buildComputerToolSet({
         computerService,
         workspaceId: t.workspaceId,
         workspaceRoot,
         ...(t.owner.kind === 'chat' ? { chatId: t.owner.chatId } : {}),
         owner: ownerTag(t.owner),
       });
+      // R6 — decided per call: a run switched to bypass after binding, or a
+      // later owner of a shared conversation that never opted in, is refused.
+      const refusal = opts.refusal;
+      const tools = refusal
+        ? built.map((tool) => ({
+            ...tool,
+            handler: async (args: Record<string, unknown>) => {
+              const reason = refusal();
+              if (reason) throw new Error(reason);
+              return tool.handler(args);
+            },
+          }))
+        : built;
       appendTools(cfg, tools);
       appendSystemBlock(cfg, COMPUTER_USE_SYSTEM_HINT);
       await this.registerComputerUseSkill(cfg, workspaceRoot);

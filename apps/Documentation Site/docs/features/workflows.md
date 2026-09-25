@@ -32,7 +32,7 @@ The workflow's **General** settings and each stage's panel use one session edito
 
 ### Permission mode
 
-A run's permission mode comes from, in order: the run itself (set at start or changed while it runs), the stage's session, the workflow's session, the automation that started it, then the server's default. There is no silent bypass default. The mode is read again at every turn, so a change applies to the next tool call. A stage that asks for approval, a question or a plan review waits in the run's approval queue, and the answer survives a server restart.
+A run's permission mode comes from, in order: the run itself (set at start or changed while it runs), the stage's session, the workflow's session, the automation that started it, then the server's default. There is no silent bypass default. For a run an automation started, the automation's mode is a ceiling: a stage or workflow session cannot widen it. Saving a definition whose workflow or stage session uses `bypassPermissions`, or sets a bring-your-own-key `provider`, requires the `admin:settings` scope; a provider key must be a `secretref:provider/<name>` reference. The mode is read again at every turn, so a change applies to the next tool call. A stage that asks for approval, a question or a plan review waits in the run's approval queue, and the answer survives a server restart.
 
 | Provider | Approval gating | Platform tools | Skills |
 | --- | --- | --- | --- |

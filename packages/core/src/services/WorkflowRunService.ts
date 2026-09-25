@@ -93,6 +93,12 @@ export function stripExecutionContext(
 
 const UNREACHABLE_STAGE_MESSAGE = 'Skipped — no incoming edge or run condition was satisfied';
 
+/**
+ * Which provider a stage session would run on: its bound agent's runtime
+ * folded in, then MultiHarness routing by model (PD-17 checks).
+ */
+export type StageProviderResolver = (params: { session: SessionSpec; projectId?: string }) => Promise<string | undefined>;
+
 export class WorkflowRunService {
   /** Track stage run IDs already processed to prevent duplicate handling */
   private processedStageRuns = new Set<string>();
@@ -1113,6 +1119,10 @@ export class WorkflowRunService {
     const previous = await this.getPermissionMode(runId);
     const run = await this.runRepo.getById(runId);
     if (run.permissionMode === mode) return; // no-op
+    // PD-17 — a live run cannot be switched to a mode a stage's provider
+    // cannot hold, any more than it could be started in one (review R8).
+    const graph = await this.definitions.get(run.definitionVersionId);
+    await this.assertPermissionGating({ ...run, permissionMode: mode }, graph);
     await this.runRepo.update(runId, { permissionMode: mode });
     await this.eventBus.emitGlobal({
       kind: 'workflow_run.permission_mode_changed',
@@ -1139,9 +1149,9 @@ export class WorkflowRunService {
    * Resolves which provider a session would run on (MultiHarness routing),
    * for the PD-17 check at run start. Late-bound by `createCoreServices`.
    */
-  private providerResolver?: (params: { harnessType?: string; model?: string }) => Promise<string | undefined>;
+  private providerResolver?: StageProviderResolver;
 
-  setProviderResolver(fn: (params: { harnessType?: string; model?: string }) => Promise<string | undefined>): void {
+  setProviderResolver(fn: StageProviderResolver): void {
     this.providerResolver = fn;
   }
 
@@ -1154,9 +1164,12 @@ export class WorkflowRunService {
   private async assertPermissionGating(run: WorkflowRun, graph: WorkflowGraph): Promise<void> {
     for (const stage of graph.stages) {
       const session = resolveSessionSpec(graph.workflow.session, stage.session);
-      const provider =
-        session.harnessType ??
-        (this.providerResolver ? await this.providerResolver({ ...(session.model ? { model: session.model } : {}) }) : undefined);
+      // The bound agent's runtime harness counts too (review R8): the
+      // resolver folds it in exactly as the composer will.
+      const projectId = (run.variables?.['__projectId'] as string | undefined) ?? graph.workflow.projectId ?? undefined;
+      const provider = this.providerResolver
+        ? await this.providerResolver({ session, ...(projectId ? { projectId } : {}) })
+        : session.harnessType;
       try {
         checkPermissionGating(provider, runPermissionMode(run, stage.session, graph.workflow.session));
       } catch (err) {

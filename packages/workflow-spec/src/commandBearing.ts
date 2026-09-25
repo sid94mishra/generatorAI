@@ -1,6 +1,9 @@
 // ────────────────────────────────────────────────────────────────
-// Command-bearing fields: every place a workflow can make the server run
-// a program. Adding or changing one needs an elevated scope
+// Command-bearing (privileged) fields: every place a workflow can make the
+// server run a program, spend a stored provider key at an endpoint of its
+// choosing (`session.provider`, P02 review R1) or run without approvals
+// (`session.permissionMode: bypassPermissions`, R5). Adding or changing one
+// needs an elevated scope
 // (`admin:settings`); the server decides by comparing fingerprints of the
 // old and the new graph (P01 WP-1.7, W-34). The security layer of the
 // validator walks the same registry, so a new command-bearing field is
@@ -14,7 +17,16 @@ import type { PreprocessingStep } from './schemas/workflow.js';
 import { canonicalJson } from './expr/values.js';
 import { pointerToken } from './validate/issues.js';
 
-export type CommandFieldKind = 'hook' | 'compensation' | 'action' | 'rule' | 'preprocessing' | 'postprocessing' | 'mcp';
+export type CommandFieldKind =
+  | 'hook'
+  | 'compensation'
+  | 'action'
+  | 'rule'
+  | 'preprocessing'
+  | 'postprocessing'
+  | 'mcp'
+  | 'provider'
+  | 'bypass';
 
 export interface CommandField {
   kind: CommandFieldKind;
@@ -78,6 +90,26 @@ function mcpFields(session: SessionSpec | undefined, pointer: string, stableId: 
   }
 }
 
+/**
+ * A session's privileged non-command fields: a BYOK provider (its key is a
+ * stored secret sent to `baseUrl`) and a bypass permission mode.
+ */
+function sessionPrivilegeFields(
+  session: SessionSpec | undefined,
+  pointer: string,
+  stableId: string,
+  out: CommandField[],
+  stageKey?: string,
+): void {
+  const key = stageKey ? { stageKey } : {};
+  if (session?.provider) {
+    out.push({ kind: 'provider', pointer: `${pointer}/provider`, stableId: `${stableId}/provider`, ...key, value: session.provider });
+  }
+  if (session?.permissionMode === 'bypassPermissions') {
+    out.push({ kind: 'bypass', pointer: `${pointer}/permissionMode`, stableId: `${stableId}/bypass`, ...key, value: 'bypassPermissions' });
+  }
+}
+
 function preprocessingFields(steps: readonly PreprocessingStep[], pointer: string, stableId: string, out: CommandField[]): void {
   steps.forEach((s, i) => {
     const p = `${pointer}/${i}/config`;
@@ -96,6 +128,7 @@ export const COMMAND_COLLECTORS: CommandCollector[] = [
   (g, out) => hookFields(g.workflow.onExit, 'action', '/workflow/onExit', 'workflow/onExit', out),
   (g, out) => hookFields(g.workflow.onFailure, 'action', '/workflow/onFailure', 'workflow/onFailure', out),
   (g, out) => mcpFields(g.workflow.session, '/workflow/session', 'workflow/session', out),
+  (g, out) => sessionPrivilegeFields(g.workflow.session, '/workflow/session', 'workflow/session', out),
   (g, out) =>
     preprocessingFields(g.workflow.lifecycle.preprocessingSteps, '/workflow/lifecycle/preprocessingSteps', 'workflow/pre', out),
   (g, out) =>
@@ -118,6 +151,7 @@ export const COMMAND_COLLECTORS: CommandCollector[] = [
       // restore_checkpoint entries are skipped by hookFields (neither script nor function).
       hookFields(s.compensate as HookLike[] | undefined, 'compensation', `${p}/compensate`, `${id}/compensate`, out, s.key);
       mcpFields(s.session, `${p}/session`, `${id}/session`, out, s.key);
+      sessionPrivilegeFields(s.session, `${p}/session`, `${id}/session`, out, s.key);
       s.output.rules.forEach((r, j) => {
         if (r.type !== 'custom_script') return;
         out.push({

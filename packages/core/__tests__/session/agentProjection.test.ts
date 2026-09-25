@@ -142,12 +142,17 @@ describe('deliverSkills (RV-7, RV-8)', () => {
     return d;
   }
 
-  it("claude-agent ('plugin'): a local plugin root, plugin-qualified names, no directory list", async () => {
+  it("claude-agent ('plugin'): a local plugin root per conversation, plugin-qualified names, no directory list", async () => {
     const root = scratch();
+    const staging = new AgentStagingService(quietLogger);
     const cfg: Record<string, unknown> = { skills: ['review'], skillDirectories: [stagedSkills(root)] };
-    const warnings = await deliverSkills(cfg, 'claude-agent', root, new AgentStagingService(quietLogger));
+    const warnings = await deliverSkills(cfg, 'claude-agent', root, staging, 'conv-a');
     expect(warnings).toEqual([]);
-    const pluginRoot = join(root, '.generatorai', 'plugin');
+    const pluginRoot = join(root, '.generatorai', 'plugin', 'conv-a');
+    // R3 — a second conversation on the same workspace with no skills does
+    // not delete the first one's.
+    await deliverSkills({ skills: ['x'], skillDirectories: [] }, 'claude-agent', root, staging, 'conv-b');
+    expect(existsSync(join(pluginRoot, 'skills', 'review', 'SKILL.md'))).toBe(true);
     expect(cfg['plugins']).toEqual([{ type: 'local', path: pluginRoot }]);
     expect(cfg['skills']).toEqual(['generatorai:review']);
     expect(cfg['skillDirectories']).toBeUndefined();
@@ -160,12 +165,12 @@ describe('deliverSkills (RV-7, RV-8)', () => {
     const root = scratch();
     const src = stagedSkills(root);
     const copilot: Record<string, unknown> = { skillDirectories: [src] };
-    expect(await deliverSkills(copilot, 'copilot', root, undefined)).toEqual([]);
+    expect(await deliverSkills(copilot, 'copilot', root, undefined, 'c')).toEqual([]);
     expect(copilot['skillDirectories']).toEqual([src]);
-    expect((await deliverSkills({ skillDirectories: [src] }, 'codex', root, undefined)).map((w) => w.code)).toEqual([
+    expect((await deliverSkills({ skillDirectories: [src] }, 'codex', root, undefined, 'c')).map((w) => w.code)).toEqual([
       'skills_process_global',
     ]);
-    expect((await deliverSkills({ skills: ['review'] }, 'opencode', root, undefined)).map((w) => w.code)).toEqual([
+    expect((await deliverSkills({ skills: ['review'] }, 'opencode', root, undefined, 'c')).map((w) => w.code)).toEqual([
       'skills_unsupported',
     ]);
   });

@@ -5,7 +5,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
-import { createTestApp } from '../helpers/testApp.js';
+import { createMockContainer, createTestApp } from '../helpers/testApp.js';
+import { createApp } from '../../src/app.js';
 import type { Express } from 'express';
 import type { Container } from '../../src/composition-root.js';
 
@@ -102,6 +103,27 @@ describe('E2E: Workflow Run API Flow', () => {
         .send({ approved: true });
       expect(res.status).toBe(400);
       expect(res.body.error.message).toMatch(/outcome is required/);
+    });
+
+    it('R7 — a question gate is answered by its value alone; the text is not re-injected as a follow-up', async () => {
+      const c = createMockContainer();
+      const resume = vi.fn().mockResolvedValue({ ok: true });
+      (c as unknown as { hitlService: unknown }).hitlService = {
+        listPending: vi.fn().mockResolvedValue([{ id: 'sr-1', interruptData: { kind: 'question' } }]),
+        resume,
+      };
+      const ses = c.stageExecutionService as unknown as Record<string, unknown>;
+      ses['sendStageFollowUp'] = vi.fn().mockResolvedValue(undefined);
+      ses['markFollowUpPending'] = vi.fn();
+      const res = await request(createApp(c))
+        .post('/api/workflow-runs/run-1/stages/sr-1/approve')
+        .send({ outcome: 'approved', value: { answers: { q1: ['yes'] } }, followUpPrompt: 'and hurry' });
+      expect(res.status).toBe(202);
+      expect(resume).toHaveBeenCalledWith('sr-1', 'run-1', expect.objectContaining({
+        value: { answers: { q1: ['yes'] }, followUpPrompt: 'and hurry', feedback: 'and hurry' },
+      }));
+      expect(ses['sendStageFollowUp']).not.toHaveBeenCalled();
+      expect(ses['markFollowUpPending']).not.toHaveBeenCalled();
     });
   });
 

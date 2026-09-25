@@ -9,6 +9,8 @@ import type {
   ChatMessageMetadata,
   Session,
   ResolvedAgentProjection,
+  ExecutionWorkspace,
+  WorkspaceExposure,
 } from '@generatorai/shared';
 import {
   generateId,
@@ -55,7 +57,7 @@ import { templateScope } from './definitions/runScope.js';
 import type { IChatMessageRepository } from '../domain/ports/IRepositories.js';
 import type { IAgentHarness, AttachmentRef, SendPromptOptions } from '../domain/ports/IAgentHarness.js';
 import type { EventBus } from '../events/EventBus.js';
-import type { SessionAllocator } from './SessionAllocator.js';
+import type { SessionAllocator, SessionIdentity } from './SessionAllocator.js';
 import type { HookExecutor, HookContext } from './HookExecutor.js';
 import type { WorkspaceManager } from './WorkspaceManager.js';
 import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
@@ -68,9 +70,9 @@ import { redactProjection } from './AgentResolver.js';
 import type { SessionComposer, ComposeResult } from './session/SessionComposer.js';
 import { StageGatePort } from './session/StageGatePort.js';
 import { resolverLayer } from './session/agentProjection.js';
-import { runPermissionSource, turnOptionsFrom } from './session/permissionSource.js';
+import { runPermissionSource, turnOptionsFrom, type PermissionModeSource } from './session/permissionSource.js';
 import { runWorkspace, workspaceExposure } from './session/workspaceExposure.js';
-import { ComposeError, type SessionOwner } from './session/types.js';
+import { ComposeError, type SessionOwner, type TurnPolicy } from './session/types.js';
 import { TurnRecorder, type RecordedToolCall, type RecordedTurn } from './session/TurnRecorder.js';
 import { StageRunStateMachine } from '../domain/state-machines/StageRunStateMachine.js';
 import type { DurableContext, DurableExecutionEngine } from './DurableExecutionEngine.js';
@@ -361,6 +363,70 @@ export class StageExecutionService {
     });
   }
 
+  /** R6 — each stage run's tool policy, stamped on every turn it sends. */
+  private readonly turnPolicies = new Map<string, TurnPolicy>();
+
+  /**
+   * Compose a stage's session (P02 WP-2.8): the one place a stage config is
+   * built, for its first allocation, its resume after a restart, a shared
+   * attach, and an operator turn on a conversation lost to a restart.
+   */
+  private composeStage(p: {
+    stageRun: StageRun;
+    workflowDefinitionId: string;
+    stage: AgentStage;
+    spec: SessionSpec;
+    workflowSession: SessionSpec | undefined;
+    workspace: ExecutionWorkspace;
+    exposure: WorkspaceExposure;
+    variables: Record<string, unknown> | undefined;
+    identity: SessionIdentity;
+    agentSnapshot: ResolvedAgentProjection | undefined;
+    permissionSource: PermissionModeSource;
+  }): Promise<ComposeResult> {
+    const { stageRun, stage, spec, workflowSession, workspace, variables, identity, permissionSource } = p;
+    return this.composer.compose({
+      owner: {
+        kind: 'stage',
+        stageRunId: stageRun.id,
+        workflowRunId: stageRun.workflowRunId,
+        workflowDefinitionId: p.workflowDefinitionId,
+        sessionId: identity.sessionId,
+      },
+      conversationId: identity.conversationId,
+      mode: identity.op === 'create' ? 'create' : 'resume',
+      spec,
+      bindingSpec: stage.session ?? {},
+      agent: { baseLayer: resolverLayer(workflowSession), bindingLayer: resolverLayer(stage.session) },
+      agentSnapshot: p.agentSnapshot,
+      workspace,
+      exposure: p.exposure,
+      projectId: typeof variables?.['__projectId'] === 'string' ? (variables['__projectId'] as string) : undefined,
+      ...(identity.providerSessionId ? { resumeProviderSessionId: identity.providerSessionId } : {}),
+      // A stage can always park on a human: its gates are durable.
+      attended: true,
+      gates: new StageGatePort({
+        hitl: this.hitlService,
+        eventBus: this.eventBus,
+        planService: this.planService,
+        workspaceRoot: workspace.rootPath,
+        harnessTypeOf: () => this.resolvedHarnessType(identity.conversationId, spec.harnessType),
+        readPermissionMode: () => permissionSource.read(),
+      }),
+      permission: { source: permissionSource },
+      platform: {
+        browser: { autoStart: true, reattach: true, ...(spec.browser ? { config: spec.browser as Record<string, unknown> } : {}) },
+        computerUse: 'opt_in',
+        orchestrator: false,
+        uploads: {
+          skillDirectories: stringArray(variables?.['__skillDirectories']),
+          customAgents: Array.isArray(variables?.['__customAgents']) ? (variables['__customAgents'] as unknown[]) : undefined,
+          promptDirectories: stringArray(variables?.['__promptDirectories']),
+        },
+      },
+    });
+  }
+
   /**
    * The owner, turn options and prompt preparation for a stage turn sent
    * outside `executeStage` (an in-session validation retry, an operator
@@ -369,7 +435,7 @@ export class StageExecutionService {
    */
   private async stageTurn(
     stageRun: StageRun,
-    session: { id: string; conversationId?: string },
+    session: { id: string; conversationId?: string; providerSessionId?: string },
   ): Promise<{ options: SendPromptOptions; prepare: (text: string) => string; turnId: string; workspaceId?: string }> {
     const run = await this.workflowRunRepo.getById(stageRun.workflowRunId);
     const graph = await this.definitions.get(run.definitionVersionId);
@@ -383,12 +449,46 @@ export class StageExecutionService {
       workflowDefinitionId: run.workflowDefinitionId,
       sessionId: session.id,
     };
-    const options = await turnOptionsFrom(
-      agentMode,
-      runPermissionSource(() => this.workflowRunRepo.getById(stageRun.workflowRunId), stage?.session, graph.workflow.session),
+    const permissionSource = runPermissionSource(
+      () => this.workflowRunRepo.getById(stageRun.workflowRunId),
+      stage?.session,
+      graph.workflow.session,
     );
-    const turnId = this.composer.beginTurn(owner, session.conversationId ?? '', options);
-    const workspaceId = await runWorkspace(this.workspaceManager, run).then((ws) => ws.id, () => undefined);
+    const workspace = await runWorkspace(this.workspaceManager, run).catch(() => undefined);
+    // R4 — a conversation lost to a restart comes back composed (tools, gates,
+    // MCP), never bare: the provider would otherwise re-create it tool-less.
+    if (session.conversationId && stage && workspace && !this.harness.hasLiveConversation(session.conversationId)) {
+      const variables = run.variables as Record<string, unknown> | undefined;
+      const pinned = typeof variables?.['__workingDirectory'] === 'string' ? (variables['__workingDirectory'] as string) : undefined;
+      const exposure = await workspaceExposure(this.workspaceManager, workspace, { workingDirectory: pinned });
+      const composed = await this.composeStage({
+        stageRun,
+        workflowDefinitionId: run.workflowDefinitionId,
+        stage,
+        spec,
+        workflowSession: graph.workflow.session,
+        workspace,
+        exposure,
+        variables,
+        identity: {
+          sessionId: session.id,
+          conversationId: session.conversationId,
+          op: 'resume',
+          ...(session.providerSessionId ? { providerSessionId: session.providerSessionId } : {}),
+        },
+        agentSnapshot: this.readAgentSnapshot(stageRun.id),
+        permissionSource,
+      });
+      await this.harness.resumeConversation(session.conversationId, composed.params);
+      this.turnPolicies.set(stageRun.id, composed.turnPolicy);
+    }
+    const options = await turnOptionsFrom(agentMode, permissionSource);
+    // R6 — the stage's own tool policy; one not composed in this process
+    // gets no computer use rather than the conversation creator's.
+    const turnId = this.composer.beginTurn(owner, session.conversationId ?? '', options, {
+      policy: this.turnPolicies.get(stageRun.id) ?? { computerUse: 'off' },
+    });
+    const workspaceId = workspace?.id;
     return {
       options,
       turnId,
@@ -1031,39 +1131,18 @@ export class StageExecutionService {
     let composed: ComposeResult | undefined;
     const session = await this.sessionAllocator
       .allocateSession(workflowRunId, stageRun.id, sessionMode, async (identity) => {
-        composed = await this.composer.compose({
-          owner: stageOwner(identity.sessionId),
-          conversationId: identity.conversationId,
-          mode: identity.op === 'create' ? 'create' : 'resume',
+        composed = await this.composeStage({
+          stageRun,
+          workflowDefinitionId: run.workflowDefinitionId,
+          stage,
           spec,
-          bindingSpec: stage.session ?? {},
-          agent: { baseLayer: resolverLayer(workflowSession), bindingLayer: resolverLayer(stage.session) },
-          agentSnapshot,
+          workflowSession,
           workspace,
           exposure: stageExposure,
-          projectId: typeof variables?.['__projectId'] === 'string' ? (variables['__projectId'] as string) : undefined,
-          ...(identity.providerSessionId ? { resumeProviderSessionId: identity.providerSessionId } : {}),
-          // A stage can always park on a human: its gates are durable.
-          attended: true,
-          gates: new StageGatePort({
-            hitl: this.hitlService,
-            eventBus: this.eventBus,
-            planService: this.planService,
-            workspaceRoot: workspace.rootPath,
-            harnessTypeOf: () => this.resolvedHarnessType(identity.conversationId, spec.harnessType),
-            readPermissionMode: () => permissionSource.read(),
-          }),
-          permission: { source: permissionSource },
-          platform: {
-            browser: { autoStart: true, reattach: true, ...(spec.browser ? { config: spec.browser as Record<string, unknown> } : {}) },
-            computerUse: 'opt_in',
-            orchestrator: false,
-            uploads: {
-              skillDirectories: stringArray(variables?.['__skillDirectories']),
-              customAgents: Array.isArray(variables?.['__customAgents']) ? (variables['__customAgents'] as unknown[]) : undefined,
-              promptDirectories: stringArray(variables?.['__promptDirectories']),
-            },
-          },
+          variables,
+          identity,
+          agentSnapshot,
+          permissionSource,
         });
         return composed.params;
       })
@@ -1073,6 +1152,7 @@ export class StageExecutionService {
       });
     if (!session || !composed) return;
     const stageSession: ComposeResult = composed;
+    this.turnPolicies.set(stageRun.id, stageSession.turnPolicy);
     this.writeAgentSnapshot(stageRun.id, stageSession.projection);
     for (const w of stageSession.warnings) {
       await this.eventBus.emit(session.id, {
@@ -1104,6 +1184,7 @@ export class StageExecutionService {
       const options = await stageSession.turnOptions(stageAgentMode);
       const turnId = this.composer.beginTurn(stageOwner(session.id), session.conversationId!, options, {
         ...(semaphoreCallbacks ? { semaphore: semaphoreCallbacks } : {}),
+        policy: stageSession.turnPolicy,
       });
       // A new turn on the same listener: the recorder starts over.
       recorder.begin({ turnId, agentMode: options.agentMode ?? stageAgentMode });
@@ -2640,17 +2721,10 @@ export class StageExecutionService {
     const stageRun = await this.stageRunRepo.getById(stageRunId);
     if (stageRun.status !== 'paused') return;
 
-    // Re-hydrate SDK handle using the real conversationId from DB
-    if (stageRun.sessionId) {
-      const session = await this.sessionAllocator.getSessionById(stageRun.sessionId);
-      if (session?.conversationId) {
-        try {
-          await this.harness.resumeConversation(session.conversationId);
-        } catch {
-          // May need fresh session — allocateSession will handle
-        }
-      }
-    }
+    // No bare re-hydration here: `executeStage` → `allocateSession` brings
+    // the conversation back with the COMPOSED config (tools, gates, MCP). A
+    // bare resume first would put a tool-less conversation in memory and the
+    // composed resume would then be skipped as "already live" (review R4).
 
     // Determine if the interrupted step needs a continuation prompt.
     // When paused mid-turn, the catch block persists a partial assistant message
@@ -3011,6 +3085,7 @@ export class StageExecutionService {
    * Uses a 10s timeout to prevent hanging if destroyConversation() never settles.
    */
   private releaseSessionSafe(stageRunId: string): void {
+    this.turnPolicies.delete(stageRunId);
     const RELEASE_TIMEOUT = 10_000;
     Promise.race([
       this.sessionAllocator.releaseSession(stageRunId),

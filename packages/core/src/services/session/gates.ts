@@ -81,7 +81,9 @@ function deniedByAgent(request: PermissionRequest, groups: AgentToolPolicy): str
 export function withAgentToolPolicy(gate: GatePort, groups: AgentToolPolicy): GatePort {
   return {
     permission: async (req, turn) => {
-      const denied = deniedByAgent(req, groups);
+      // The owner in flight decides, not the one the conversation was built
+      // for (a shared stage session; review R6).
+      const denied = deniedByAgent(req, turn.policy?.groups ?? groups);
       if (denied) return { granted: false, reason: `The bound agent is not allowed to ${denied}.` };
       return gate.permission(req, turn);
     },

@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Router } from 'express';
-import { canBypassPermissions } from './permissionScope.js';
+import { canBypassPermissions, canSetSessionProvider } from './permissionScope.js';
 import multer from 'multer';
 import { z } from 'zod';
 import type { Container } from '../composition-root.js';
@@ -281,6 +281,14 @@ export function createChatApiRoutes(container: Container): Router {
         params.sourceControl = sc.value;
       }
 
+      // R1 — a BYOK provider sends a stored key to a caller-chosen endpoint.
+      if (params.harnessConfig?.provider && !canSetSessionProvider(req)) {
+        res.status(403).json({
+          error: { code: 'FORBIDDEN', message: 'Setting a chat provider requires the admin:settings scope.' },
+        });
+        return;
+      }
+
       // Creation is the front door, and it takes `permissionMode` directly.
       // Gating only the two update routes left a caller free to ask for
       // approvals-off on the way in, which is the same escalation by another
@@ -483,7 +491,21 @@ export function createChatApiRoutes(container: Container): Router {
       if (model !== undefined) updates.model = model;
       if (tags !== undefined) updates.tags = tags;
       if (projectId !== undefined) updates.projectId = projectId;
-      if (harnessConfig !== undefined) updates.harnessConfig = harnessConfig;
+      if (harnessConfig !== undefined) {
+        // R1 — setting or changing the BYOK provider needs admin:settings;
+        // keeping or removing it does not.
+        const nextProvider = (harnessConfig as { provider?: unknown } | null)?.provider;
+        if (nextProvider !== undefined && !canSetSessionProvider(req)) {
+          const current = await container.chatEntityRepo.getById(chatId);
+          if (JSON.stringify(current.harnessConfig?.provider ?? null) !== JSON.stringify(nextProvider)) {
+            res.status(403).json({
+              error: { code: 'FORBIDDEN', message: 'Changing a chat provider requires the admin:settings scope.' },
+            });
+            return;
+          }
+        }
+        updates.harnessConfig = harnessConfig;
+      }
       if (status !== undefined && status !== 'archived') updates.status = status;
       // PLN-01 — sticky per-chat composer defaults.
       if (isAgentMode(defaultAgentMode)) {

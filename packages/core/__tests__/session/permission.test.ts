@@ -11,6 +11,7 @@ import {
   TRIGGER_PERMISSION_MODE_KEY,
 } from '../../src/services/session/permissionSource.js';
 import { bootCore, type TestEnv } from './boot.js';
+import { AgentResolver } from '../../src/services/AgentResolver.js';
 
 const envs: TestEnv[] = [];
 const posture = getDefaultChatPermissionMode();
@@ -20,11 +21,13 @@ afterEach(() => {
 });
 
 describe('run permission layers (W-07, PD-18)', () => {
-  it('run row → stage → workflow → trigger → deployment posture; never a bypass default', () => {
+  it('run row → stage → workflow (under the trigger ceiling) → trigger → posture; never a bypass default', () => {
     const trigger = { [TRIGGER_PERMISSION_MODE_KEY]: 'acceptEdits' };
     expect(runPermissionMode({ permissionMode: 'plan', variables: trigger }, { permissionMode: 'default' }, { permissionMode: 'bypassPermissions' })).toBe('plan');
     expect(runPermissionMode({ variables: trigger }, { permissionMode: 'default' }, { permissionMode: 'bypassPermissions' })).toBe('default');
-    expect(runPermissionMode({ variables: trigger }, undefined, { permissionMode: 'bypassPermissions' })).toBe('bypassPermissions');
+    // R5 — the automation's mode is a ceiling: a bypass definition cannot widen it.
+    expect(runPermissionMode({ variables: trigger }, undefined, { permissionMode: 'bypassPermissions' })).toBe('acceptEdits');
+    expect(runPermissionMode({ variables: {} }, undefined, { permissionMode: 'bypassPermissions' })).toBe('bypassPermissions');
     expect(runPermissionMode({ variables: trigger }, undefined, undefined)).toBe('acceptEdits');
     // Nothing declared: undefined, which the turn resolves to the posture.
     expect(runPermissionMode({ variables: {} }, undefined, undefined)).toBeUndefined();
@@ -80,5 +83,32 @@ describe('PD-17 — gating level vs run mode', () => {
     // The same run on accept-edits (the run row) is allowed through the check.
     const ok = await env.services.workflowRunService.createRun({ workflowDefinitionId: def.id, permissionMode: 'acceptEdits' });
     expect(await env.services.workflowRunService.getPermissionMode(ok.id)).toBe('acceptEdits');
+    // R8 — and cannot be switched to a mode the provider cannot hold mid-run.
+    await expect(env.services.workflowRunService.setPermissionMode(ok.id, 'default')).rejects.toMatchObject({
+      code: 'PERMISSION_GATING_UNSUPPORTED',
+    });
+  });
+
+  it("R8 — the bound agent's runtime harness is what the start check judges", async () => {
+    const env = bootCore({
+      agentResolver: {
+        resolve: async () => ({ ...AgentResolver.empty(), runtime: { harnessType: 'opencode' } }),
+      } as unknown as AgentResolver,
+    });
+    envs.push(env);
+    const def = await env.services.workflowDefinitionService.createFromSpec(
+      {
+        formatVersion: 2,
+        workflow: { name: 'agent-bound', session: { agentRef: 'global:oc', permissionMode: 'default' } },
+        stages: [{ kind: 'agent', key: 's', name: 'Build', prompts: [{ label: 'p', text: 'x' }] }],
+        edges: [],
+      },
+      { canEditCommands: true, status: 'published' },
+    );
+    const run = await env.services.workflowRunService.createRun({ workflowDefinitionId: def.id });
+    await expect(env.services.workflowRunService.startRun(run.id)).rejects.toMatchObject({
+      code: 'PERMISSION_GATING_UNSUPPORTED',
+    });
   });
 });
+

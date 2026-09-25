@@ -266,7 +266,7 @@ describe('security layer', () => {
   it('requires secretref for provider keys and rejects literal secrets', () => {
     const provider = { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'sk-live-abcdefghijklmnopqrstuvwxyz' };
     expect(codes(validateWorkflow(graph([agent('a', { session: { provider } })])))).toContain('secret-not-secretref');
-    expect(codes(validateWorkflow(graph([agent('a')], [], { session: { provider: { ...provider, apiKey: 'secretref:openai' } } }), { engine: 'v2' }))).toEqual([]);
+    expect(codes(validateWorkflow(graph([agent('a')], [], { session: { provider: { ...provider, apiKey: 'secretref:provider/openai' } } }), { engine: 'v2' }))).toEqual([]);
     const env = (e: Record<string, string>) => codes(validateWorkflow(graph([agent('a', { hooks: [scriptHook({ command: 'x', env: e })] })])));
     expect(env({ GITHUB_TOKEN: 'abc123' })).toContain('secret-literal');
     expect(env({ ANYTHING: 'ghp_abcdefghijklmnopqrstuvwxyz0123456789' })).toContain('secret-literal');
@@ -326,7 +326,7 @@ describe('engine capability gate', () => {
   });
 
   it('accepts provider credentials and MCP secret references on v1: the session composer resolves them (P02)', () => {
-    const provider = { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'secretref:k' };
+    const provider = { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'secretref:provider/k' };
     expect(v1(graph([agent('a', { session: { provider } })])).issues).toEqual([]);
     const mcp = { servers: { gh: { type: 'http' as const, url: 'https://mcp.test', headers: { Authorization: 'secretref:gh' } } } };
     expect(v1(graph([agent('a')], [], { session: { mcp } })).issues).toEqual([]);

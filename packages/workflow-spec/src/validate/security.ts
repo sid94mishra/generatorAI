@@ -65,14 +65,16 @@ function checkPairs(
 function checkSession(session: SessionSpec | undefined, pointer: string, stageKey: string | undefined, out: ValidationIssue[]): void {
   if (!session) return;
   const key = session.provider?.apiKey;
-  if (key !== undefined && !isSecretRef(key)) {
+  // Only the BYOK namespace: the key is sent to `baseUrl`, so it must not be
+  // able to name any other stored secret (P02 review R1).
+  if (key !== undefined && !(isSecretRef(key) && key.startsWith('secretref:provider/'))) {
     out.push({
       code: 'secret-not-secretref',
       severity: 'error',
       path: `${pointer}/provider/apiKey`,
       ...(stageKey ? { stageKey } : {}),
-      message: 'provider.apiKey must be a secretref: reference',
-      hint: 'Store the key in the secret store and reference it as secretref:<name>',
+      message: 'provider.apiKey must be a secretref:provider/<name> reference',
+      hint: 'Store the key in the secret store under the provider namespace and reference it as secretref:provider/<name>',
     });
   }
   for (const [id, cfg] of Object.entries(session.mcp?.servers ?? {})) {

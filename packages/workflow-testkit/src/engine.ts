@@ -31,6 +31,7 @@ import {
   type RestartOptions,
   type RunCommand,
   type RunSnapshot,
+  type RunStartPermissionMode,
   type TestEngineOptions,
 } from './types.js';
 
@@ -98,7 +99,7 @@ export interface TestEngine {
   runWorkflow(
     definition: WorkflowSpecJson | { definitionId: string },
     variables?: Record<string, unknown>,
-    opts?: { start?: boolean; testRun?: boolean },
+    opts?: { start?: boolean; testRun?: boolean; permissionMode?: RunStartPermissionMode },
   ): Promise<RunHandle>;
   handle(runId: string): Promise<RunHandle>;
   snapshotRun(runId: string): Promise<RunSnapshot>;
@@ -143,6 +144,7 @@ export async function createTestEngine(opts: TestEngineOptions = {}): Promise<Te
     timing,
     ...(opts.maxConcurrentStages !== undefined ? { maxConcurrentStages: opts.maxConcurrentStages } : {}),
     resultValidation: opts.resultValidation !== false,
+    ...(opts.secrets ? { secrets: opts.secrets } : {}),
   });
 
   const poll = async (runId: string, predicate: (s: RunSnapshot) => boolean, timeoutMs: number, label: string) => {

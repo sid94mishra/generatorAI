@@ -30,6 +30,13 @@ import { ContextUsageGauge } from '@/components/shared/ContextUsageGauge.js';
 import { InlineHitlControls } from './InlineHitlControls.js';
 import type { StageStatus, StageView } from './types.js';
 
+/** What `/stages/:id/approve` takes for an in-turn gate. */
+export interface StageGateResolution {
+  outcome: 'approved' | 'changes_requested';
+  value: Record<string, unknown>;
+  reason?: string;
+}
+
 interface StageTimelineItemProps {
   stage: StageView;
   focused: boolean;
@@ -48,6 +55,12 @@ interface StageTimelineItemProps {
   onRejectHitl?: (id: string, feedback?: string) => void;
   /** Terminal rejection — fails the stage and blocks the rest of the run. */
   onTerminalRejectHitl?: (id: string, reason?: string) => void;
+  /**
+   * Answer one of the stage's in-turn gates (tool permission, question, plan
+   * review) through `/stages/:id/approve`: the parked turn continues with the
+   * value, nothing is re-sent as a follow-up (P02 review R7).
+   */
+  onResolveGate?: (id: string, resolution: StageGateResolution) => void;
   onRetry?: (id: string) => void;
   onSelectFiles?: (id: string) => void;
   onSelectOutput?: (id: string) => void;
@@ -76,7 +89,7 @@ function formatDuration(ms?: number): string | null {
 }
 
 export const StageTimelineItem = React.memo(function StageTimelineItem({
-  stage, focused, defaultOpen, autoCollapse = true, openWhenFinished = false, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onRetry, onSelectFiles, onSelectOutput, onOpenInspector,
+  stage, focused, defaultOpen, autoCollapse = true, openWhenFinished = false, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onResolveGate, onRetry, onSelectFiles, onSelectOutput, onOpenInspector,
 }: StageTimelineItemProps) {
   const v = statusVisual(stage.status);
   const isActive = stage.status === 'running' || stage.status === 'awaiting_input';
@@ -265,6 +278,26 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
             answerStreaming={isActive && !isAwaiting}
             loading={isActive && !isAwaiting && stage.steps.length === 0}
             error={isFailed ? stage.error : undefined}
+            {...(onResolveGate
+              ? {
+                  onAnswerPermission: (interactionId: string, behavior: 'allow' | 'deny', message?: string) =>
+                    onResolveGate(stage.id, {
+                      // A denied call is not a verdict on the run: `rejected` would end it.
+                      outcome: behavior === 'allow' ? 'approved' : 'changes_requested',
+                      value: { interactionId, ...(message ? { message } : {}) },
+                      ...(message ? { reason: message } : {}),
+                    }),
+                  onAnswerQuestion: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) =>
+                    onResolveGate(stage.id, {
+                      outcome: 'approved',
+                      value: { interactionId, answers, ...(freeformResponse ? { freeformResponse } : {}) },
+                    }),
+                  onApprovePlan: (planId: string, action: 'implement_interactive' | 'implement_autopilot') =>
+                    onResolveGate(stage.id, { outcome: 'approved', value: { planId, action } }),
+                  onRequestPlanChanges: (planId: string, feedback: string) =>
+                    onResolveGate(stage.id, { outcome: 'changes_requested', value: { planId, feedback }, reason: feedback }),
+                }
+              : {})}
           />
 
 

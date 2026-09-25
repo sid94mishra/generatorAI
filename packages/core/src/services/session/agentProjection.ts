@@ -9,7 +9,8 @@
 // load them (RV-7, RV-8).
 // ────────────────────────────────────────────────────────────────
 
-import { ValidationError } from '@generatorai/shared';
+import { MCP_REDACTED_VALUE, ValidationError } from '@generatorai/shared';
+import type { McpServerConfig } from '@generatorai/shared';
 import type { AgentOverrides, HarnessConfig, ResolvedAgentProjection } from '@generatorai/shared';
 import type { SessionSpec } from '@generatorai/workflow-spec';
 import { AgentResolver } from '../AgentResolver.js';
@@ -65,7 +66,7 @@ export async function applyAgentProjection(
     );
   }
 
-  const projection = await deps.agentResolver.resolve({
+  const resolveInput = {
     ...(ref ? { agentRef: ref } : {}),
     ...(input.overrides ? { overrides: input.overrides } : {}),
     ...(input.baseLayer ? { baseHarnessConfig: input.baseLayer } : {}),
@@ -73,8 +74,28 @@ export async function applyAgentProjection(
     ...(input.projectId ? { projectId: input.projectId } : {}),
     harnessType: (cfg['harnessType'] as HarnessConfig['harnessType'] | undefined) ?? 'copilot',
     scope: input.scope,
+  };
+  let projection = await deps.agentResolver.resolve({
+    ...resolveInput,
     ...(input.snapshot ? { snapshot: input.snapshot } : {}),
   });
+
+  // R2 — a snapshot keeps `secretref:` pointers but masks literal MCP
+  // values. The frozen server SET stands; a masked server's config is taken
+  // from the live agent by id, and one the agent no longer has stays masked
+  // (dropped with a warning at injection, never started with the mask).
+  if (input.snapshot) {
+    const masked = Object.entries(projection.mcpServers).filter(([, c]) => hasMaskedValue(c as McpServerConfig));
+    if (masked.length > 0) {
+      const live = await deps.agentResolver.resolve(resolveInput).catch(() => undefined);
+      const mcpServers = { ...projection.mcpServers };
+      for (const [name] of masked) {
+        const fresh = live?.mcpServers[name];
+        if (fresh) mcpServers[name] = fresh;
+      }
+      projection = { ...projection, mcpServers };
+    }
+  }
 
   if (input.scope === 'stage' && ref && !projection.driving) {
     const disabled = projection.warnings.some((w) => w.code === 'AGENT_DISABLED');
@@ -242,6 +263,7 @@ export async function deliverSkills(
   provider: string | undefined,
   workspaceRoot: string | undefined,
   staging: AgentStagingService | undefined,
+  conversationId: string,
 ): Promise<ComposeWarning[]> {
   const dirs = Array.isArray(cfg['skillDirectories']) ? (cfg['skillDirectories'] as string[]) : [];
   const names = Array.isArray(cfg['skills']) ? (cfg['skills'] as string[]) : [];
@@ -272,7 +294,7 @@ export async function deliverSkills(
   if (!workspaceRoot || !staging) {
     return [{ code: 'skills_unsupported', message: 'Skills need a workspace to be staged as a plugin', params: { provider } }];
   }
-  const plugin = await staging.ensurePlugin(workspaceRoot, dirs);
+  const plugin = await staging.ensurePlugin(workspaceRoot, conversationId, dirs);
   delete cfg['skillDirectories'];
   if (plugin.skills.length === 0) {
     delete cfg['skills'];
@@ -314,4 +336,8 @@ export function resolverLayer(s: SessionSpec | undefined): Partial<HarnessConfig
   if (s.skills?.disabled) h.disabledSkills = [...s.skills.disabled];
   if (s.customAgents) h.customAgents = s.customAgents.map((c) => ({ ...c }));
   return h;
+}
+
+function hasMaskedValue(cfg: McpServerConfig): boolean {
+  return [cfg.env, cfg.headers].some((m) => !!m && Object.values(m).includes(MCP_REDACTED_VALUE));
 }

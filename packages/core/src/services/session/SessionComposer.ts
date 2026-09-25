@@ -19,7 +19,7 @@
 // `warnings`, which the owner emits as `harness.session_info` (C-11).
 // ────────────────────────────────────────────────────────────────
 
-import { DEFAULT_AGENT_MODE, generateId, isMcpSecretRef } from '@generatorai/shared';
+import { DEFAULT_AGENT_MODE, generateId, isMcpSecretRef, parseMcpSecretRef } from '@generatorai/shared';
 import type {
   AgentMode,
   AgentOverrides,
@@ -46,7 +46,7 @@ import { applyModeConfig, planPromptPrefix } from './modeConfig.js';
 import { checkPermissionGating, turnOptionsFrom, type PermissionModeSource } from './permissionSource.js';
 import { PlatformToolBinder, type BindTarget } from './PlatformToolBinder.js';
 import { resolveMcp } from './resolveMcp.js';
-import { ComposeError, type ComposeWarning, type SessionComposerDeps, type SessionOwner } from './types.js';
+import { ComposeError, type ComposeWarning, type SessionComposerDeps, type SessionOwner, type TurnPolicy } from './types.js';
 import { applyWorkspaceExposure } from './workspaceExposure.js';
 
 export interface ComposeInput {
@@ -117,6 +117,8 @@ export interface ComposeResult {
   preparePrompt(prompt: string, agentMode: AgentMode): string;
   /** Drop the owner's registrations. */
   dispose(): void;
+  /** Stamp on every turn this owner sends (`beginTurn` extra `policy`). */
+  turnPolicy: TurnPolicy;
 }
 
 export class SessionComposer {
@@ -205,7 +207,10 @@ export class SessionComposer {
       ...(i.platform.browser.reattach ? { reattach: true } : {}),
       ...(i.platform.browser.config ? { browserConfig: i.platform.browser.config } : {}),
     });
-    await this.binder.computer(cfg, target, { enabled: this.computerUseAllowed(i, mode, warnings) });
+    await this.binder.computer(cfg, target, {
+      enabled: this.computerUseAllowed(i, mode, warnings),
+      refusal: () => this.computerRefusal(i.conversationId),
+    });
     this.binder.widgets(cfg, target, { enabled: i.spec.widgets !== false });
     this.binder.sourceControlHint(cfg, i.platform.sourceControl);
     const mcpWarnings = await resolveMcp(
@@ -263,7 +268,7 @@ export class SessionComposer {
         });
       }
     }
-    warnings.push(...(await deliverSkills(cfg, provider, i.workspace?.rootPath, this.deps.agentStaging)));
+    warnings.push(...(await deliverSkills(cfg, provider, i.workspace?.rootPath, this.deps.agentStaging, i.conversationId)));
 
     // 8. mode config: gates, plan-mode blocks, record_plan
     applyModeConfig(cfg, {
@@ -295,6 +300,10 @@ export class SessionComposer {
       provider,
       bindingKey,
       warnings,
+      turnPolicy: {
+        computerUse: i.platform.computerUse === 'switch' ? 'switch' : i.spec.computerUse === true ? 'opted_in' : 'off',
+        groups: projection.toolPolicy.groups,
+      },
       turnOptions: (agentMode) => turnOptionsFrom(agentMode ?? defaultMode, i.permission.source),
       preparePrompt: (prompt, agentMode) =>
         this.preparePrompt(i.owner, i.conversationId, cfg['harnessType'] as string | undefined, prompt, agentMode),
@@ -325,7 +334,7 @@ export class SessionComposer {
     owner: SessionOwner,
     conversationId: string,
     options: SendPromptOptions,
-    extra: { turnId?: string; semaphore?: { pause(): void; resume(): Promise<void> } } = {},
+    extra: { turnId?: string; semaphore?: { pause(): void; resume(): Promise<void> }; policy?: TurnPolicy } = {},
   ): string {
     const turnId = extra.turnId ?? generateId();
     this.turns.set(conversationId, {
@@ -340,8 +349,21 @@ export class SessionComposer {
       nextSequence: 0,
       cardSequence: new Map(),
       ...(extra.semaphore ? { semaphore: extra.semaphore } : {}),
+      ...(extra.policy ? { policy: extra.policy } : {}),
     });
     return turnId;
+  }
+
+  /** R6 — why a `computer_*` call is refused for the turn in flight, or null. */
+  private computerRefusal(conversationId: string): string | null {
+    const turn = this.turns.get(conversationId);
+    const policy = turn?.policy;
+    if (!turn || !policy || policy.computerUse === 'switch') return null;
+    if (policy.computerUse === 'off') return 'Computer use is not enabled for this session.';
+    if (turn.permissionMode === 'bypassPermissions') {
+      return 'Computer use is not available with tool approvals off (bypassPermissions).';
+    }
+    return null;
   }
 
   /** Chats follow the deployment switch; a stage must opt in, and never on a bypass run (PD-5). */
@@ -377,6 +399,14 @@ export class SessionComposer {
     const provider = cfg['provider'] as { apiKey?: string } | undefined;
     const key = provider?.apiKey;
     if (!key || !isMcpSecretRef(key)) return;
+    // R1 — only the BYOK namespace: the key goes to the session's `baseUrl`,
+    // so it must never name an MCP credential or any other stored secret.
+    if (parseMcpSecretRef(key)?.namespace !== 'provider') {
+      throw new ComposeError(
+        'secret_unresolved',
+        `The provider API key ${key} is not a provider key; use secretref:provider/<name>`,
+      );
+    }
     const value = await this.deps.resolveSecretRef?.(key);
     if (value == null) {
       throw new ComposeError('secret_unresolved', `The provider API key ${key} has no value in the secret store`);

@@ -152,6 +152,8 @@ export interface AdapterContext {
   timing: Required<TestEngineTiming>;
   maxConcurrentStages?: number;
   resultValidation: boolean;
+  /** Secret store contents (`namespace/name` → value); wires the MCP hub + vault when set. */
+  secrets?: Record<string, string>;
 }
 
 /** Everything engine-specific the testkit needs. One per engine version. */
@@ -168,7 +170,11 @@ export interface EngineAdapter {
   classifyTurn(conversationId: string, prompt: string): TurnKind;
   importDefinition(spec: WorkflowSpecJson): Promise<{ definitionId: string; stageIds: Record<string, string> }>;
   /** Create a run; start it unless `start: false`. Returns the run id. */
-  startRun(definitionId: string, variables: Record<string, unknown>, opts?: { start?: boolean; testRun?: boolean }): Promise<string>;
+  startRun(
+    definitionId: string,
+    variables: Record<string, unknown>,
+    opts?: { start?: boolean; testRun?: boolean; permissionMode?: RunStartPermissionMode },
+  ): Promise<string>;
   command(runId: string, cmd: RunCommand): Promise<CommandResult>;
   snapshot(runId: string): Promise<RunSnapshot>;
   isTerminal(snap: RunSnapshot): boolean;
@@ -196,4 +202,13 @@ export interface TestEngineOptions {
   resultValidation?: boolean;
   /** The engine under test. Default: today's engine (`createV1Adapter`). */
   adapter?: AdapterFactory;
+  /**
+   * Secret store contents (`namespace/name` → value). When set, the MCP hub
+   * and credential vault are wired as the server wires them, so `secretref:`
+   * values resolve (P02 `P02-mcp-secret`).
+   */
+  secrets?: Record<string, string>;
 }
+
+/** A run's own permission mode at creation (the run row). */
+export type RunStartPermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';

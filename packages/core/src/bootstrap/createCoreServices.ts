@@ -16,7 +16,7 @@
 // own composition-root.
 // ────────────────────────────────────────────────────────────────
 
-import type { ILogger, AgentEvent } from '@generatorai/shared';
+import type { ILogger, AgentEvent, AgentOverrides, HarnessConfig } from '@generatorai/shared';
 import type {
   ISessionRepository,
   IEventRepository,
@@ -51,6 +51,7 @@ import { ChatManagementService } from '../services/ChatManagementService.js';
 import type { ChatManagementServiceExtensions } from '../services/ChatManagementService.js';
 import { SessionComposer } from '../services/session/SessionComposer.js';
 import { TurnContextRegistry } from '../services/session/gates.js';
+import { resolverLayer } from '../services/session/agentProjection.js';
 import { OrchestratorService, DEFAULT_ORCHESTRATOR_CONFIG } from '../services/orchestrator/OrchestratorService.js';
 import type { OrchestratorConfig } from '../services/orchestrator/OrchestratorService.js';
 import { DAGScheduler } from '../services/DAGScheduler.js';
@@ -464,11 +465,30 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     stageSemaphore,
   );
 
-  // PD-17 — which provider a stage would run on, for the run-start check.
-  if (harness.resolveProvider) {
-    const resolveProvider = harness.resolveProvider.bind(harness);
-    workflowRunService.setProviderResolver((p) => resolveProvider(p));
-  }
+  // PD-17 — which provider a stage would run on, for the run-start and
+  // mode-change checks: the bound agent's runtime (read through the same
+  // resolver the composer uses), then routing by model (review R8).
+  workflowRunService.setProviderResolver(async ({ session, projectId }) => {
+    let harnessType: string | undefined = session.harnessType;
+    let model = session.model;
+    const agentResolver = sessionExtensions.agentResolver;
+    if (session.agentRef && agentResolver) {
+      const projection = await agentResolver
+        .resolve({
+          agentRef: session.agentRef,
+          ...(session.agentOverrides ? { overrides: session.agentOverrides as AgentOverrides } : {}),
+          ...(resolverLayer(session) ? { runtimeOverrides: resolverLayer(session)! } : {}),
+          ...(projectId ? { projectId } : {}),
+          harnessType: (harnessType ?? 'copilot') as HarnessConfig['harnessType'],
+          scope: 'stage',
+        })
+        .catch(() => undefined);
+      harnessType = projection?.runtime.harnessType ?? harnessType;
+      model = projection?.runtime.model ?? model;
+    }
+    if (harnessType) return harnessType;
+    return harness.resolveProvider?.({ ...(model ? { model } : {}) });
+  });
 
   // X-25 — read side of the durable artifact channel, so a successor's
   // context comes from the predecessor's durable result rather than a column

@@ -18,3 +18,14 @@ export function canBypassPermissions(req: { principal?: { scopes?: readonly stri
   if (!scopes) return true;
   return scopes.includes('admin:settings');
 }
+
+/**
+ * May this caller set or change a BYOK `provider` (a chat's
+ * `harnessConfig.provider`)? The provider's key is a stored secret the server
+ * sends to the provider's `baseUrl`, so choosing the endpoint is as
+ * privileged as reading the secret (P02 review R1). Workflows get the same
+ * rule through the command-bearing fingerprint.
+ */
+export function canSetSessionProvider(req: { principal?: { scopes?: readonly string[] } }): boolean {
+  return canBypassPermissions(req);
+}

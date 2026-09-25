@@ -114,6 +114,8 @@ export interface HarnessCall {
   stageRunId: string;
   kind: TurnKind;
   prompt: string;
+  /** The per-turn options the engine sent (agent mode, permission mode). */
+  options?: SendPromptOptions;
   /** The scripted turn that answered, or undefined for a default reply. */
   scripted?: Turn;
   outcome: 'replied' | 'error' | 'aborted' | 'pending';
@@ -300,6 +302,7 @@ export class ScriptedFauxHarness extends FauxProvider {
       stageRunId: key.stageRunId,
       kind,
       prompt,
+      ...(options ? { options } : {}),
       ...(turn ? { scripted: turn } : {}),
       outcome: 'pending',
       startedAt: Date.now(),

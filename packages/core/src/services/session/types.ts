@@ -7,7 +7,7 @@
 // to the model and when (the chat turn loop, the stage script).
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentMode } from '@generatorai/shared';
+import type { AgentMode, AgentToolPolicy } from '@generatorai/shared';
 import type { HookBridge } from '../../domain/ports/IHookBridge.js';
 import type { HarnessPermissionMode } from '../../domain/ports/IAgentHarness.js';
 import type { CustomToolRegistry } from '../../tools/CustomToolRegistry.js';
@@ -129,6 +129,21 @@ export class ComposeError extends Error {
  * filed against the owner of the turn in flight, not the owner the
  * conversation was created for.
  */
+/**
+ * The owner's tool policy, stamped on every turn it sends (P02 review R6). A
+ * shared conversation keeps the tools of the owner that created it, so what
+ * a turn may use is decided per call from the owner actually in flight.
+ */
+export interface TurnPolicy {
+  /**
+   * `switch`: the deployment switch decides (chats); `opted_in`: allowed
+   * unless the turn runs on bypass (PD-5, re-read every turn); `off`: never.
+   */
+  computerUse: 'switch' | 'opted_in' | 'off';
+  /** The owner's own agent tool groups. */
+  groups?: AgentToolPolicy | undefined;
+}
+
 export interface TurnContext {
   owner: SessionOwner;
   sessionId: string;
@@ -149,4 +164,6 @@ export interface TurnContext {
    * is parked on a human.
    */
   semaphore?: { pause(): void; resume(): Promise<void> };
+  /** The owner's tool policy; absent means the compose-time binding decides. */
+  policy?: TurnPolicy | undefined;
 }

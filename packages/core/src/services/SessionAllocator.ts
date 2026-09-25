@@ -306,19 +306,21 @@ export class SessionAllocator {
       }
 
       // The stage still composes (its turn options and gate context come from
-      // it), but the shared conversation keeps the config it was created with
-      // — no interim rebind (RV-20; P03 owns session groups).
-      await build({
+      // it). A live shared conversation keeps the config it was created with
+      // — no interim rebind (RV-20; P03 owns session groups) — but one lost to
+      // a restart comes back WITH the composed config, never bare (review R4).
+      const params = await build({
         sessionId: session.id,
         conversationId: session.conversationId!,
         op: 'attach',
         ...(session.providerSessionId ? { providerSessionId: session.providerSessionId } : {}),
       });
-      // Ensure the conversation is in-memory (may have been lost after restart)
-      try {
-        await this.harness.resumeConversation(session.conversationId!);
-      } catch {
-        // Already in-memory — ignore
+      if (!this.harness.hasLiveConversation(session.conversationId!)) {
+        try {
+          await this.harness.resumeConversation(session.conversationId!, params);
+        } catch {
+          // Raced another resume — ignore
+        }
       }
 
       return session;

@@ -1,4 +1,5 @@
 import type { HarnessProviderId } from '@generatorai/shared';
+import { isMcpSecretRef, MCP_REDACTED_VALUE } from '@generatorai/shared';
 // ────────────────────────────────────────────────────────────────
 // AgentResolver — the ONE place capability sets are combined.
 //
@@ -433,12 +434,19 @@ export class AgentResolver {
  * returned from the preview endpoint, or serialised to `.agent.md`.
  */
 export function redactProjection(p: ResolvedAgentProjection): ResolvedAgentProjection {
+  // Keep the maps' shape and their `secretref:` pointers (they name a
+  // secret, they are not one), so a session resumed from the snapshot still
+  // gets its credentials injected; only literal values are masked (P02
+  // review R2). A server whose map still holds the mask is dropped with a
+  // warning at injection rather than started with a bogus value.
+  const mask = (map: Record<string, string>): Record<string, string> =>
+    Object.fromEntries(Object.entries(map).map(([k, v]) => [k, isMcpSecretRef(v) ? v : MCP_REDACTED_VALUE]));
   const mcpServers: Record<string, unknown> = {};
   for (const [name, raw] of Object.entries(p.mcpServers)) {
     const cfg = raw as McpServerConfig;
     const clone: Record<string, unknown> = { ...cfg };
-    if (cfg.env && Object.keys(cfg.env).length > 0) clone['env'] = '<redacted>';
-    if (cfg.headers && Object.keys(cfg.headers).length > 0) clone['headers'] = '<redacted>';
+    if (cfg.env && Object.keys(cfg.env).length > 0) clone['env'] = mask(cfg.env);
+    if (cfg.headers && Object.keys(cfg.headers).length > 0) clone['headers'] = mask(cfg.headers);
     mcpServers[name] = clone;
   }
   return { ...p, mcpServers };

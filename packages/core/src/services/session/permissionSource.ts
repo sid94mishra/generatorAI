@@ -7,7 +7,12 @@
 //   run   — the run row → the stage's `session.permissionMode` → the
 //           workflow's → the trigger's (an automation's declared mode) →
 //           undefined, which `resolveTurnPermissionMode` resolves to the
-//           deployment posture. A NULL run mode is never bypass.
+//           deployment posture. A NULL run mode is never bypass. For a
+//           trigger-started run the automation's mode is a CEILING over the
+//           definition layers: the more restrictive of the two wins, so a
+//           definition cannot widen what the automation's owner declared
+//           (P02 review R5). An explicit run-row mode (admin-gated for
+//           bypass) still decides.
 // ────────────────────────────────────────────────────────────────
 
 import type { AgentMode, ChatPermissionMode, WorkflowRun } from '@generatorai/shared';
@@ -32,12 +37,17 @@ export function runPermissionMode(
   stage: SessionSpec | undefined,
   workflow: SessionSpec | undefined,
 ): ChatPermissionMode | undefined {
-  const trigger = run.variables?.[TRIGGER_PERMISSION_MODE_KEY];
-  return (run.permissionMode ??
-    stage?.permissionMode ??
-    workflow?.permissionMode ??
-    (typeof trigger === 'string' ? trigger : undefined)) as ChatPermissionMode | undefined;
+  if (run.permissionMode) return run.permissionMode as ChatPermissionMode;
+  const raw = run.variables?.[TRIGGER_PERMISSION_MODE_KEY];
+  const trigger = typeof raw === 'string' ? (raw as ChatPermissionMode) : undefined;
+  const definition = (stage?.permissionMode ?? workflow?.permissionMode) as ChatPermissionMode | undefined;
+  if (!trigger) return definition;
+  if (!definition) return trigger;
+  return (PERMISSIVENESS[definition] ?? 3) <= (PERMISSIVENESS[trigger] ?? 3) ? definition : trigger;
 }
+
+/** How much a mode lets through without asking (higher = more). */
+const PERMISSIVENESS: Record<string, number> = { plan: 0, default: 1, acceptEdits: 2, dontAsk: 2, bypassPermissions: 3 };
 
 /** The run source: every read goes back to the run row. */
 export function runPermissionSource(

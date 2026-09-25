@@ -33,6 +33,9 @@ const CreateWorkflowRunSchema = z.object({
   stageOverrides: z.array(StageOverrideSchema).max(100).optional(),
 });
 
+/** HITL kinds a parked turn waits on: answered by the resolution value only. */
+const IN_TURN_GATE_KINDS = new Set(['stage_completion_review', 'tool_permission', 'question', 'plan_review']);
+
 export function createWorkflowRunRoutes(container: Container): Router {
   const router = Router();
   const {
@@ -456,13 +459,18 @@ export function createWorkflowRunRoutes(container: Container): Router {
       // Calling sendStageFollowUp here would race with that loop, so we
       // short-circuit and route the feedback through the resolution value
       // only.
-      let isCompletionReview = false;
+      //
+      // The same holds for every in-turn gate (P02 review R7): a tool
+      // permission, a question or a plan review is answered through the
+      // resolution value alone — the parked turn continues with it. Injecting
+      // the text again as a follow-up turn would deliver it twice.
+      let isGate = false;
       try {
         const stageRow = await hitlService
           .listPending(runId)
           .then((rows) => rows.find((r) => r.id === stageId));
         const kind = (stageRow?.interruptData as { kind?: unknown } | undefined)?.kind;
-        if (kind === 'stage_completion_review') isCompletionReview = true;
+        if (typeof kind === 'string' && IN_TURN_GATE_KINDS.has(kind)) isGate = true;
       } catch {
         // Non-fatal — falls through to the legacy behaviour.
       }
@@ -470,12 +478,20 @@ export function createWorkflowRunRoutes(container: Container): Router {
       // BEFORE resuming HITL so the natural per-stage session release is
       // skipped and the follow-up can be injected on the still-live
       // conversation.
-      if (!isCompletionReview && approved && followUpPrompt) {
+      if (!isGate && approved && followUpPrompt) {
         stageExecutionService.markFollowUpPending(stageId);
       }
+      // A gate's own answer (`{answers}` / `{action, feedback}`) wins; a free
+      // text follow-up rides along as the freeform answer or feedback.
+      const value =
+        isGate && body.value && typeof body.value === 'object'
+          ? { ...(body.value as Record<string, unknown>), ...(followUpPrompt ? { followUpPrompt, feedback: followUpPrompt } : {}) }
+          : followUpPrompt
+            ? { followUpPrompt }
+            : body.value;
       const result = await hitlService.resume(stageId, runId, {
         outcome,
-        value: followUpPrompt ? { followUpPrompt } : body.value,
+        value,
         reason: typeof body.reason === 'string' ? body.reason : undefined,
       });
       if (!result.ok) {
@@ -491,7 +507,7 @@ export function createWorkflowRunRoutes(container: Container): Router {
       // the stage's session and stream the agent's response. The
       // stage-completion review flow handles this itself inside
       // StageExecutionService.executeStage, so we skip it here.
-      if (!isCompletionReview && approved && followUpPrompt) {
+      if (!isGate && approved && followUpPrompt) {
         void stageExecutionService
           .sendStageFollowUp(stageId, runId, followUpPrompt)
           .catch((err: unknown) => {

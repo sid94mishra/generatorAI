@@ -33,6 +33,8 @@
 import { join } from 'node:path';
 import {
   AdmissionController,
+  InMemoryMcpHub,
+  McpCredentialVault,
   createCoreServices,
   FetchHttpClient,
   GitManager,
@@ -200,7 +202,7 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
         artifactsDir: join(workDir, 'art'),
         ...(ctx.maxConcurrentStages !== undefined ? { maxConcurrentStages: ctx.maxConcurrentStages } : {}),
       },
-      chatExtensions: {},
+      chatExtensions: ctx.secrets ? { mcpHub: secretsHub(ctx.secrets) } : {},
       planRepo: new DrizzlePlanRepository(db),
       agentInteractionRepo: new DrizzleAgentInteractionRepository(db),
     });
@@ -435,6 +437,7 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
         workflowDefinitionId: definitionId,
         variables,
         ...(opts.testRun ? { testRun: true } : {}),
+        ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
       });
       if (opts.start !== false) startFireAndForget(run.id);
       return run.id;
@@ -466,4 +469,19 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
       await current.services.eventBus.flush().catch(() => undefined);
     },
   };
+}
+
+/**
+ * The server's MCP hub + credential vault over an in-memory secret store
+ * (`namespace/name` → value). Structural: the testkit does not depend on
+ * the secrets package, and the vault only reads.
+ */
+function secretsHub(secrets: Record<string, string>): InMemoryMcpHub {
+  const store = {
+    get: async (namespace: string, name: string) => {
+      const v = secrets[`${namespace}/${name}`];
+      return v === undefined ? null : new TextEncoder().encode(v);
+    },
+  } as unknown as ConstructorParameters<typeof McpCredentialVault>[0];
+  return new InMemoryMcpHub({ vault: new McpCredentialVault(store) });
 }

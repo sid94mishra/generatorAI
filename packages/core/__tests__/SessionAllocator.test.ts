@@ -33,20 +33,26 @@ function makeMocks() {
   } as unknown as ISessionRepository;
 
   const counters = { destroy: 0, create: 0, resume: 0 };
+  const live = new Set<string>();
+  const resumedWith: unknown[] = [];
   const harness = {
-    createConversation: async () => {
+    createConversation: async (p: { conversationId: string }) => {
       counters.create++;
+      live.add(p.conversationId);
     },
     destroyConversation: async () => {
       counters.destroy++;
     },
-    resumeConversation: async () => {
+    resumeConversation: async (id: string, params?: unknown) => {
       counters.resume++;
+      live.add(id);
+      resumedWith.push(params);
     },
+    hasLiveConversation: (id: string) => live.has(id),
   } as unknown as IAgentHarness;
 
   const allocator = new SessionAllocator(sessionRepo, harness, new EventBus());
-  return { allocator, counters, sessions };
+  return { allocator, counters, sessions, live, resumedWith };
 }
 
 /** The composer's stand-in: an empty config for every identity. */
@@ -97,5 +103,17 @@ describe('SessionAllocator — single mode ref-counting (EXEC-8)', () => {
 
     await allocator.releaseSession('stage-1');
     expect(counters.destroy).toBe(1);
+  });
+
+  it('R4 — a shared conversation lost to a restart is attached WITH the composed config', async () => {
+    const m = makeMocks();
+    await m.allocator.allocateSession(RUN, 'stage-1', 'single', build);
+    m.live.clear(); // the process restarted: nothing is in memory
+    const composed = { model: 'composed', tools: [] } as unknown as CreateConversationParams;
+    await m.allocator.allocateSession(RUN, 'stage-2', 'single', async () => composed);
+    expect(m.resumedWith).toEqual([composed]);
+    // A live one keeps its config: no rebind.
+    await m.allocator.allocateSession(RUN, 'stage-3', 'single', async () => composed);
+    expect(m.resumedWith).toHaveLength(1);
   });
 });

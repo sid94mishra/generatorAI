@@ -33,7 +33,7 @@ import type { WorkflowRunPermissionMode } from '@generatorai/shared';
 
 import { RunHeaderBar } from '@/components/workflow/redesign/RunHeaderBar.js';
 import { PipelineFlow } from '@/components/workflow/redesign/PipelineFlow.js';
-import { StageTimelineItem } from '@/components/workflow/redesign/StageTimelineItem.js';
+import { StageTimelineItem, type StageGateResolution } from '@/components/workflow/redesign/StageTimelineItem.js';
 import { RightInspector } from '@/components/workflow/redesign/RightInspector.js';
 import { deriveRunView, pickStageStreams } from '@/components/workflow/redesign/deriveRunView.js';
 import type { FileChange } from '@/components/workflow/redesign/types.js';
@@ -367,6 +367,16 @@ export function WorkflowRunPage() {
     }
   }, [runId, platform]);
 
+  // R7 — a stage's permission / question / plan-review card answers its gate.
+  const handleResolveGate = useCallback(async (stageId: string, resolution: StageGateResolution) => {
+    if (!runId) return;
+    try {
+      await platform.resumeStage(runId, stageId, resolution);
+    } catch (e) {
+      console.error('Stage gate answer failed:', e);
+    }
+  }, [runId, platform]);
+
   const handleRejectHitl = useCallback(async (stageId: string, feedback?: string) => {
     if (!runId) return;
     try {
@@ -540,6 +550,7 @@ export function WorkflowRunPage() {
                 onApproveHitl={handleApproveHitl}
                 onRejectHitl={handleRejectHitl}
                 onTerminalRejectHitl={handleTerminalRejectHitl}
+                onResolveGate={handleResolveGate}
                 onRetry={handleRetryStage}
                 onSelectFiles={selectStage}
                 onSelectOutput={selectStage}

@@ -26,6 +26,9 @@ export interface McpSecretInjectionResult {
   missing: Array<{ server: string; ref: string }>;
 }
 
+/** The only secret namespace a BYOK provider key may be read from (`secretref:provider/<name>`). */
+export const BYOK_PROVIDER_SECRET_NAMESPACE = 'provider';
+
 export class McpCredentialVault {
   constructor(private readonly secrets: SecretStore) {}
 
@@ -67,12 +70,15 @@ export class McpCredentialVault {
   }
 
   /**
-   * The value behind one `secretref:<namespace>/<name>` pointer (a BYOK
-   * provider key), or null when the store has none.
+   * The value behind one BYOK provider-key pointer
+   * (`secretref:provider/<name>`), or null when the store has none. Every
+   * other namespace is refused: a session's provider sends this value to a
+   * caller-chosen `baseUrl`, so it must never be able to name an MCP server
+   * credential or any other stored secret (P02 review R1).
    */
   async resolveRef(ref: string): Promise<string | null> {
     const parsed = parseMcpSecretRef(ref);
-    if (!parsed) return null;
+    if (!parsed || parsed.namespace !== BYOK_PROVIDER_SECRET_NAMESPACE) return null;
     return (await getSecretString(this.secrets, parsed.namespace, parsed.name)) ?? null;
   }
 
@@ -117,6 +123,8 @@ export class McpCredentialVault {
         if (!map) continue;
         const resolved: Record<string, string> = {};
         for (const [k, v] of Object.entries(map)) {
+          // A masked literal (a redacted snapshot) has no value to send.
+          if (v === MCP_REDACTED_VALUE) { missing.push({ server: name, ref: `${field}.${k}` }); ok = false; break; }
           if (!isMcpSecretRef(v)) { resolved[k] = v; continue; }
           const ref = parseMcpSecretRef(v);
           const value = ref ? await getSecretString(this.secrets, ref.namespace, ref.name) : null;

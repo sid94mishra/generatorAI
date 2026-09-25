@@ -150,21 +150,27 @@ export class AgentStagingService {
   }
 
   /**
-   * RV-7 — stage skills as ONE local plugin root for providers whose skills
-   * load from plugins (claude-agent `Options.plugins`):
-   * `<root>/.generatorai/plugin/{.claude-plugin/plugin.json, skills/<name>/…}`.
+   * RV-7 — stage skills as a local plugin root for providers whose skills
+   * load from plugins (claude-agent `Options.plugins`), one per conversation:
+   * `<root>/.generatorai/plugin/<conversationId>/{.claude-plugin/plugin.json, skills/<name>/…}`.
+   * Parallel stages and orchestrator workers share a workspace, so each
+   * conversation owns its own root and never touches another's skills
+   * (P02 review R3).
    *
    * `dirs` are skill directories (each holding `<name>/SKILL.md` folders):
    * the agent's staged skills, platform skills, explicit ones. Every skill
-   * folder is copied in whole; a skill no longer in `dirs` is removed. Returns
+   * folder is copied in whole; a skill no longer in `dirs` is removed from
+   * this conversation's root. Returns
    * the plugin root and the plugin-qualified skill names (`generatorai:<name>`)
    * the provider's skill filter expects. Idempotent.
    */
   async ensurePlugin(
     workspaceRoot: string,
+    conversationId: string,
     dirs: readonly string[],
   ): Promise<{ path: string; skills: string[] }> {
-    const pluginRoot = path.join(this.stagingRoot(workspaceRoot), 'plugin');
+    const owner = conversationId.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120) || 'session';
+    const pluginRoot = path.join(this.stagingRoot(workspaceRoot), 'plugin', owner);
     const skillsDir = path.join(pluginRoot, 'skills');
     await mkdir(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
     await mkdir(skillsDir, { recursive: true });
