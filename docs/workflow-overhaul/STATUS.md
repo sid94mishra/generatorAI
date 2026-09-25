@@ -6,7 +6,7 @@ The coding agent updates this file in every phase PR.
 |---|---|---|---|---|---|
 | 00 Baseline | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | Baseline section below | gate pass with the recorded baseline exceptions |
 | 01 Spec, legacy, definitions | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | part A gate 2026-09-25: typecheck 50/50; tests = the 12 baseline failures only (cli 5, core 3, git 2, server 2); lint green; no-legacy 69 bans, 0 hits, 12 comments (baseline 12); db-baseline + migrations-lock + BaselineFreshDb pass ; part B gate 2026-09-25: typecheck 52/52; workflow-spec 359/359; lint green; no-legacy 72 bans, 0 hits; generate:workflow-spec --check clean; **phase gate 2026-09-25 (part C): see "Phase 01 gate" below** | WP-1.6–1.9 done (1d67d0f, 28f9c5e, 9c61ec6, ebb4e82); v55 applied to the dev-DB copy |
-| 02 SessionComposer | wf/phase-02-session-composer | not started | | | |
+| 02 SessionComposer | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-25: see "Phase 02 gate" below** | WP-2.0–2.11 (0c02b1c..a220bb3), bans/docs c35f905, gate fixes f14cf5a; v56 applied to the dev-DB copy |
 | 03 Engine v2 | wf/phase-03-engine-v2 | not started | | | |
 | 03b Stage conversation | wf/phase-03b-stage-conversation | not started | | | |
 | 04 Lifecycle and invocation | wf/phase-04-invocation | not started | | | |
@@ -199,6 +199,24 @@ Run at `wf/overhaul` @ ebb4e82 plus the tracker update (Windows 11, Node 26.8.2,
 - **Fresh DB:** `BaselineFreshDb.test.ts` passes. An empty DB reaches v55 through `baseline.sql`; the P00 install-drift allowlist is **empty** (v55 reconciled all 8 entries); the real v52 developer schema plus synthetic chats reaches v55 with chat rows intact and stage-run history purged.
 - **`pnpm workflow:dbcopy-upgrade`** (`C:/gaiwf/dbcopy/generatorai.db`, a copy of the developer DB; the real DB was not opened): v52 → v55 via the legacy route in 3.9 s. Chat rows **UNCHANGED** (hashes match): chats 362, chat sessions 392, chat messages 841. All rows before/after: sessions 2323 → 392 (the 1931 stage-run sessions go with the run history), messages 8178 → 841. Schema drift against a fresh DB: **0**. An earlier conversion run on the same copy: 343 definitions converted (47 with `needs_attention` notes), 1113 runs and 1931 stage-run sessions purged, loop/batch automations converted, 3 script-mode automations disabled, 1 plaintext webhook token hashed.
 - **Live E2E** (advisory, RV-35): not run in this part.
+
+## Phase 02 gate (2026-09-25)
+
+Run at `wf/overhaul` @ f14cf5a (Windows 11, Node 26.8.2, pnpm 10.29.2).
+
+- **`pnpm install --frozen-lockfile`:** pass.
+- **`pnpm turbo typecheck`:** pass, 52/52.
+- **`pnpm turbo test --concurrency=2 --continue`:** 9 min 16 s. Failures: cli 5 (TUI on Windows), core 1 (symlink EPERM), git 2 (CRLF), server 3. Two server failures are baseline (symlink EPERM, CSP hash); the third, `automations.test` "mints a one-time signing secret", was new: the test predates PD-18 and created an automation without the now-required permission mode (400). Fixed in f14cf5a; server re-run 540 pass / the 2 baseline failures. Core re-run after the gate fixes: 1757 pass / the baseline failure. The web task's `check-bundle-size` "FAIL" lines are the script's own unit-test fixtures, not the real bundle.
+- **Counts that moved:** core 1757 (1721 at P01; composer/session tests added), db 137 (134), web 640 (636), shared 326, workflow-spec 364 (355), agent-harness-providers 704, agent-host 50, client-core 294 (295), server 542 (539), workflow-testkit 43.
+- **`pnpm lint`:** pass (turbo lint 28/28; security, durability, docs, syncio, tokens; workflow-invariants 24 = baseline). Three security knownDebt entries (the run bypass defaults P02 deleted) were stale and are removed; the R9 bind-failure status write and the `sendTurn` dispatch carry inline waivers with reasons.
+- **`check-no-legacy`:** 90 banned patterns (12 added for P02), 0 hits; 11 legacy comments (baseline 11).
+- **`check:migrations-lock`:** 56 locked and unchanged. **`check:db-baseline`:** baseline v56 up to date. **`check:workflow-spec`:** generated files up to date.
+- **Testkit (hard gate):** 43/43. T8's W-32 characterisation now pins that the relaunched stage completes: the race is masked by timing in the testkit (the stage composes before allocating), not fixed (DEVIATIONS).
+- **Golden snapshots (R-10):** chat snapshots a–e byte-identical apart from the deliberate W-50 fields (systemPromptAppend and maxTurns on create; b gains `mcpServers: {}`); stage snapshots f/g flipped for W-51/W-52 and regenerated.
+- **Fresh DB:** `BaselineFreshDb.test.ts` 10/10: an empty DB reaches v56 through `baseline.sql`; the v52 developer schema reaches head with chats intact.
+- **`pnpm workflow:dbcopy-upgrade`** (`C:/gaiwf/dbcopy/generatorai.db`; the real DB was not opened): v52 → v56 via the legacy route in 2.7 s. Chat rows **UNCHANGED** (362 chats, 392 chat sessions, 841 messages); drift 0. Found and fixed on the way: with the baseline at 56 a v55 database took the legacy route and failed (`VERSIONED_ONLY_FROM = 55`, DEVIATIONS).
+- **W-19 / C7:** covered at composer level (session/composer.test.ts). **Live E2E** (advisory, `P02-perm` and the other P02 scenarios): not run.
+- **Acceptance:** no session-config builders outside `services/session/` (the SES and CMS blocks are deleted and banned); chat and stage bound to one agent get the same tools, blocks and MCP servers apart from the documented owner differences (golden + composer tests); a stage widget now carries its stage run id so the run page Widget tab routes it to that stage (unit-tested; not checked in a browser); an automation cannot be saved without a permission mode (schema + route + web form).
 
 ## Migration versions (authoritative, RV-17)
 
