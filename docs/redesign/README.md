@@ -34,7 +34,7 @@ Both PNG folders are gitignored; `shots/**/DIFF.md` is tracked.
 | File | What it holds | Use it when |
 |---|---|---|
 | `00-context-and-analysis.md` | How the web and desktop clients work today, the diagnosis with numbers, the design summary, what the independent review changed, the relationship to the Workflow Overhaul Plan, non-negotiable constraints | Understanding *why* |
-| `01-decisions.md` | D-01…D-50: every decision with options, evidence and consequences; sources | Always |
+| `01-decisions.md` | D-01…D-51: every decision with options, evidence and consequences; sources | Always |
 | `02-design-system-spec.md` | Token architecture; every colour token (derivation, Instrument values); collisions and codemods; Instrument theme and ink accent; type, radius, heights and density, z-index, focus, motion; the status map with the full server→state mapping; `CHROME`; icon concepts; emitters file by file; pre-paint; WCAG suite; the P1 token checklist | Tokens and foundations (P1), any styling question |
 | `03-component-inventory-kit.md` | The presentational kit: 48 primitives, 35 patterns, 13 shell parts, 5 templates, 5 layouts — anatomy, exact sizes, props, Base UI part, board usage counts, what each replaces, phase. **Rosetta table** (board markup → component). Usage matrix, delete list, build order | Building or using any `ui/` component; translating a board |
 | `03-component-inventory-domain.md` | Query-aware parts: 27 blocks, ~90 feature composites, 20 workflow kit pieces, 4 extension registries; the composer state map; decomposition plans and characterization behaviours for the giant files | Building blocks and features; splitting giant files (P4) |
@@ -140,7 +140,7 @@ Update in every PR (task ID, PR link, date).
 | Phase | Status | Notes |
 |---|---|---|
 | P0 Documentation & rails | done 2026-09-25 (review: reviews/P0-review.md, 3 rounds, 0 open) | P0-01 ✓ · P0-02 ✓ · P0-03 ✓ CI triggers + e2e env fix + spec repairs + BASELINE · P0-04 ✓ guardrails · P0-05 ✓ dead code · P0-06 owner action |
-| P1 Platform, tokens, registries | in progress | U1 ✓ Tailwind 4.3.3 · U2 ✓ TS 6.0.3 · U3 ✓ Vite 7.3.6 + Vitest 4.1.11 · U4 ✓ React Router 8.4 + React 19.3 · S3 ✓ router split · T10 ✓ status map · T11 ✓ icon concepts · S1 ✓ CHROME/SHELL · S2 ✓ command registry + shortcuts sheet · T1–T6 ✓ tokens (Instrument/ink defaults, --gai-* layer, 252-combo WCAG suite, scales) · S5 ✓ overlay contract · U5 ✓ lucide 1.48 + ui/icons |
+| P1 Platform, tokens, registries | in progress | U1 ✓ Tailwind 4.3.3 · U2 ✓ TS 6.0.3 · U3 ✓ Vite 7.3.6 + Vitest 4.1.11 · U4 ✓ React Router 8.4 + React 19.3 · S3 ✓ router split · T10 ✓ status map · T11 ✓ icon concepts · S1 ✓ CHROME/SHELL · S2 ✓ command registry + shortcuts sheet · T1–T6 ✓ tokens (Instrument/ink defaults, --gai-* layer, 252-combo WCAG suite, scales) · S5 ✓ overlay contract · U5 ✓ lucide 1.48 + ui/icons · T7 ✓ bundled fonts · T8 ✓ pre-paint + single writer + desktop appearance IPC · T9 ✓ cn/tailwind-merge 3 · SB in progress |
 | P2 Backend track | in progress | P2-00 ✓ Faux test harness (ready provider, scripted replies) + sandbox :3197/:5197 + seed · P2-01 ✓ G-01 attention feed (GET /attention, attention.* SSE, client-core store, web hooks) · P2-02 G-02/G-14 in progress |
 | P3 Slice A — shell + Chats list | not started | |
 | P4 Slice B — chat workspace | not started | |
