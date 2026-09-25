@@ -139,7 +139,7 @@ Update in every PR (task ID, PR link, date).
 
 | Phase | Status | Notes |
 |---|---|---|
-| P0 Documentation & rails | in progress | P0-01 ✓ plan + boards + render scripts · P0-02 ✓ CLAUDE.md, launch.json, make-dummy-repo |
+| P0 Documentation & rails | in progress | P0-01 ✓ · P0-02 ✓ · P0-03 ✓ CI triggers + e2e env fix + spec repairs + BASELINE · P0-04 ✓ guardrails · P0-05 ✓ dead code · P0-06 owner action |
 | P1 Platform, tokens, registries | not started | |
 | P2 Backend track | not started | G-01 is on the critical path for P3 |
 | P3 Slice A — shell + Chats list | not started | |

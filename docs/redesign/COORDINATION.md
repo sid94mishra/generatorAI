@@ -6,3 +6,6 @@ Workflow-owned areas: `apps/web/src/pages/{Workflow*,Automation*,CreateAutomatio
 
 | Date | Task | Commit | Files touched in workflow-owned areas | Note for the other session |
 |---|---|---|---|---|
+| 2026-09-25 | P0-05 | `24e435b` | deleted `apps/web/src/components/workflow/WorkflowDefinitionList.tsx` (zero importers) | `workflow/ToggleSwitch.tsx` and `workflow/StyledSelect.tsx` are still imported by `StagePropertiesPanel` and `settings/HooksTab` — kept |
+| 2026-09-25 | P0-03 | `004e1c5` | spec-only: `agent-tests/e2e/{automations,workflow-builder,workflow-run}.spec.ts` selector repairs against the current workflow/automation UI | no app files touched |
+| 2026-09-25 | P0-04 | `b2afabc` | none edited; ESLint layer rules and the design ratchet now **read** workflow-owned files (warnings only in legacy code) | new code in `apps/web/src/{ui,blocks,features,app}` is hard-zero on the design rules |
