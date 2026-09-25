@@ -19,10 +19,8 @@ variables            JSON VariableDefinition[]
 hooks                JSON HookDefinition[]    (workflow-scope phases)
 hooksFile?           JSON                     (separate .hooks.json reference)
 orchestratorConfig?  JSON                     (system templates + preprocessing config)
-selectedArtifacts?   JSON                     (preselected skills/agents/prompts)
 tags                 JSON string[]
-scope                enum 'global' | 'project'
-projectId?           FK → projects.id
+projectId?           FK → projects.id   (null = global)
 useWorktree          boolean (default true when projectId set)
 createdAt, updatedAt
 ```
@@ -218,11 +216,6 @@ type OrchestratorConfig = {
   autoCreatePR?: boolean;
   preprocessing?: { ... };                      // pre-prompt enrichment passes
   postprocessing?: { ... };                     // post-stage transformations
-  selectedArtifacts?: {
-    skills?: string[];
-    agents?: string[];
-    prompts?: string[];
-  };
 };
 ```
 

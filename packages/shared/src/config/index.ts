@@ -55,7 +55,6 @@ export {
   StageConditionSchema,
   VariableDefinitionSchema,
   SkillDefinitionSchema,
-  AgentDefinitionSchema,
 } from './WorkflowDefinitionSchemas.js';
 export type { ImportWorkflowJson, RunProfileInput } from './WorkflowDefinitionSchemas.js';
 export { RunProfileSchema, StageRunOverrideSchema } from './WorkflowDefinitionSchemas.js';

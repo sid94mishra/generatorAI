@@ -514,11 +514,11 @@ Source: `apps/server/src/routes/workflowScripts.ts`.
 | `GET` | `/api/workflow-scripts/:id` | 65 |
 | `GET` | `/api/workflow-scripts/:id/profiles` | 85 |
 | `POST` | `/api/workflow-scripts/:id/materialize` | 100 |
-| `POST` | `/api/workflow-scripts/:id/run` | 189 |
-| `POST` | `/api/workflow-scripts/reload` | 342 |
-| `POST` | `/api/workflow-scripts/:id/reload` | 354 |
-| `POST` | `/api/workflow-scripts/upload` | 381 |
-| `POST` | `/api/workflow-scripts/validate` | 430 |
+| `POST` | `/api/workflow-scripts/:id/run` | 187 |
+| `POST` | `/api/workflow-scripts/reload` | 338 |
+| `POST` | `/api/workflow-scripts/:id/reload` | 350 |
+| `POST` | `/api/workflow-scripts/upload` | 377 |
+| `POST` | `/api/workflow-scripts/validate` | 426 |
 
 ## workspaces
 

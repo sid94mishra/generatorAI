@@ -418,6 +418,32 @@
         "apps/server/src/routes/workflowRunOrder.ts"
       ],
       "reason": "WP-1.4: stage-run iteration index / parent link deleted (never set)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(selectedArtifacts|defaultAgentRef|SkillReference|AgentReference|AgentDefinitionSchema|SkillReferenceOutputSchema|AgentReferenceOutputSchema)\\b|customAgent\\(agent",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/sdk/",
+        "packages/db/src/repositories/",
+        "packages/cli-core/",
+        "packages/client-core/",
+        "apps/server/",
+        "apps/web/src/stores/workflowBuilderStore.ts",
+        "apps/web/src/components/workflow/",
+        "apps/web/src/pages/Workflow",
+        "apps/mobile/"
+      ],
+      "reason": "WP-1.4: selectedArtifacts, defaultAgentRef and definition-level skills/agents deleted (PD-11); agent binds via harnessConfig.agentRef / stage agentRef"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bsetScope\\b|EntityScope",
+      "paths": [
+        "apps/web/src/stores/workflowBuilderStore.ts"
+      ],
+      "reason": "WP-1.4: workflow-definition scope deleted; projectId IS NULL means global"
     }
   ],
   "comments": {

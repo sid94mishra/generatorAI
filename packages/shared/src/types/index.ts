@@ -155,8 +155,6 @@ export type {
   WorkflowDefinitionWithStages,
   WorkflowSessionMode,
   VariableDefinition,
-  SkillReference,
-  AgentReference,
   CreateWorkflowDefinitionParams,
   UpdateWorkflowDefinitionParams,
 } from './WorkflowDefinition.js';

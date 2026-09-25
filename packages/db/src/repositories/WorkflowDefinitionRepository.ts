@@ -11,8 +11,6 @@ import type {
   OrchestratorConfig,
   WorkflowHookDefinition,
   HooksFileConfig,
-  SkillReference,
-  AgentReference,
 } from '@generatorai/shared';
 import { StorageError, NotFoundError, ValidationError } from '@generatorai/shared';
 import { workflowDefinitions } from '../schema.js';
@@ -31,13 +29,8 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
       validateJsonColumn(definition.variables, jsonArray, { column: 'variables', table: 'workflow_definitions' });
       validateJsonColumn(definition.tags, stringArray, { column: 'tags', table: 'workflow_definitions' });
       validateJsonColumn(definition.orchestratorConfig, jsonRecord, { column: 'orchestratorConfig', table: 'workflow_definitions' });
-      validateJsonColumn(definition.selectedArtifacts, jsonRecord, { column: 'selectedArtifacts', table: 'workflow_definitions' });
       validateJsonColumn(definition.hooks, jsonArray, { column: 'hooks', table: 'workflow_definitions' });
       validateJsonColumn(definition.hooksFile, jsonRecord, { column: 'hooksFile', table: 'workflow_definitions' });
-      // G8 fix — these had no column at all before; validated the same way
-      // as every other JSON column now that one exists.
-      validateJsonColumn(definition.skills, jsonArray, { column: 'skills', table: 'workflow_definitions' });
-      validateJsonColumn(definition.agents, jsonArray, { column: 'agents', table: 'workflow_definitions' });
 
       await this.db.insert(workflowDefinitions).values({
         id: definition.id,
@@ -50,12 +43,8 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
         tags: definition.tags,
         orchestratorConfig: definition.orchestratorConfig ?? null,
         projectId: definition.projectId ?? null,
-        selectedArtifacts: definition.selectedArtifacts ?? {},
         hooks: definition.hooks ?? [],
         hooksFile: definition.hooksFile ?? null,
-        defaultAgentRef: definition.defaultAgentRef ?? null,
-        skills: definition.skills ?? null,
-        agents: definition.agents ?? null,
         createdAt: definition.createdAt,
         updatedAt: definition.updatedAt,
       });
@@ -110,20 +99,11 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
     if (updates.orchestratorConfig !== undefined) {
       validateJsonColumn(updates.orchestratorConfig, jsonRecord, { column: 'orchestratorConfig', table: 'workflow_definitions' });
     }
-    if (updates.selectedArtifacts !== undefined) {
-      validateJsonColumn(updates.selectedArtifacts, jsonRecord, { column: 'selectedArtifacts', table: 'workflow_definitions' });
-    }
     if (updates.hooks !== undefined) {
       validateJsonColumn(updates.hooks, jsonArray, { column: 'hooks', table: 'workflow_definitions' });
     }
     if (updates.hooksFile !== undefined) {
       validateJsonColumn(updates.hooksFile, jsonRecord, { column: 'hooksFile', table: 'workflow_definitions' });
-    }
-    if (updates.skills !== undefined) {
-      validateJsonColumn(updates.skills, jsonArray, { column: 'skills', table: 'workflow_definitions' });
-    }
-    if (updates.agents !== undefined) {
-      validateJsonColumn(updates.agents, jsonArray, { column: 'agents', table: 'workflow_definitions' });
     }
 
     const values: Record<string, unknown> = {};
@@ -136,12 +116,8 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
     if (updates.tags !== undefined) values['tags'] = updates.tags;
     if (updates.orchestratorConfig !== undefined) values['orchestratorConfig'] = updates.orchestratorConfig;
     if (updates.projectId !== undefined) values['projectId'] = updates.projectId;
-    if (updates.selectedArtifacts !== undefined) values['selectedArtifacts'] = updates.selectedArtifacts;
     if (updates.hooks !== undefined) values['hooks'] = updates.hooks;
     if (updates.hooksFile !== undefined) values['hooksFile'] = updates.hooksFile;
-    if (updates.defaultAgentRef !== undefined) values['defaultAgentRef'] = updates.defaultAgentRef ?? null;
-    if (updates.skills !== undefined) values['skills'] = updates.skills;
-    if (updates.agents !== undefined) values['agents'] = updates.agents;
     values['updatedAt'] = new Date();
 
     await this.db
@@ -181,13 +157,9 @@ export class DrizzleWorkflowDefinitionRepository implements IWorkflowDefinitionR
       tags: safeJsonColumn(row.tags, stringArray, { fallback: [] }) ?? [],
       orchestratorConfig: safeJsonColumn(row.orchestratorConfig, jsonRecord, { fallback: undefined }) as OrchestratorConfig | undefined,
       projectId: row.projectId ?? undefined,
-      selectedArtifacts: safeJsonColumn(row.selectedArtifacts, jsonRecord, { fallback: undefined }) as Record<string, string[]> | undefined,
       useWorktree: row.useWorktree ?? true,
       hooks: (safeJsonColumn(row.hooks, jsonArray, { fallback: [] }) ?? []) as WorkflowHookDefinition[],
       hooksFile: safeJsonColumn(row.hooksFile, jsonRecord, { fallback: undefined }) as HooksFileConfig | undefined,
-      defaultAgentRef: row.defaultAgentRef ?? undefined,
-      skills: safeJsonColumn(row.skills, jsonArray, { fallback: undefined }) as SkillReference[] | undefined,
-      agents: safeJsonColumn(row.agents, jsonArray, { fallback: undefined }) as AgentReference[] | undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

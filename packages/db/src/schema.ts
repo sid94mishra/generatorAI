@@ -18,8 +18,6 @@ import type {
   AgentOrchestrationPolicy,
   AgentOverrides,
   ResolvedAgentProjection,
-  SkillReference,
-  AgentReference,
   ChatSourceControlOptions,
 } from '@generatorai/shared';
 
@@ -393,10 +391,10 @@ export const workflowDefinitions = sqliteTable(
     useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
     hooks: text('hooks', { mode: 'json' }).$type<unknown[]>().default([]),
     hooksFile: text('hooks_file', { mode: 'json' }),
-    /** G8 fix — was typed on the domain object but never had a column at all. */
-    skills: text('skills', { mode: 'json' }).$type<SkillReference[]>(),
-    /** G8 fix — was typed on the domain object but never had a column at all. */
-    agents: text('agents', { mode: 'json' }).$type<AgentReference[]>(),
+    /** No reader since P01 WP-1.4; dropped in migration v55. */
+    skills: text('skills', { mode: 'json' }).$type<unknown[]>(),
+    /** No reader since P01 WP-1.4; dropped in migration v55. */
+    agents: text('agents', { mode: 'json' }).$type<unknown[]>(),
     /** Portable `scope:slug` ref of the default agent for stages without their own. */
     defaultAgentRef: text('default_agent_ref'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),

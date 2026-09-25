@@ -27,21 +27,6 @@ export interface VariableDefinition {
   options?: string[];
 }
 
-/** Skill reference for workflow-level skill configuration */
-export interface SkillReference {
-  name: string;
-  directory?: string;
-  description?: string;
-}
-
-/** Agent reference for workflow-level agent configuration */
-export interface AgentReference {
-  name: string;
-  description?: string;
-  instructions?: string;
-  tools?: string[];
-}
-
 /** WorkflowDefinition domain entity */
 export interface WorkflowDefinition {
   id: string;
@@ -57,12 +42,6 @@ export interface WorkflowDefinition {
   orchestratorConfig?: OrchestratorConfig;
   /** Project ID — scopes this workflow to a project (null = global) */
   projectId?: string;
-  /** Skills for this workflow */
-  skills?: SkillReference[];
-  /** Agents for this workflow */
-  agents?: AgentReference[];
-  /** Selected artifact IDs for skills/agents/prompts */
-  selectedArtifacts?: { skillIds?: string[]; agentIds?: string[]; promptIds?: string[] };
   /** Whether to create worktrees for project codebases during execution */
   useWorktree?: boolean;
   /** Workflow-level lifecycle hooks */
@@ -71,8 +50,6 @@ export interface WorkflowDefinition {
   hooksFile?: HooksFileConfig;
   /** Integrated Browser configuration (workflow-level default). */
   browserConfig?: BrowserConfig;
-  /** Portable `scope:slug` ref of the default agent for stages that do not bind their own. */
-  defaultAgentRef?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -94,18 +71,12 @@ export interface CreateWorkflowDefinitionParams {
   orchestratorConfig?: OrchestratorConfig;
   /** Project ID — scopes this workflow to a project */
   projectId?: string;
-  skills?: SkillReference[];
-  agents?: AgentReference[];
-  /** Selected artifact IDs for skills/agents/prompts */
-  selectedArtifacts?: { skillIds?: string[]; agentIds?: string[]; promptIds?: string[] };
   /** Workflow-level lifecycle hooks */
   hooks?: WorkflowHookDefinition[];
   /** Imported hooks file configuration */
   hooksFile?: HooksFileConfig;
   /** Integrated Browser configuration (workflow-level default). */
   browserConfig?: BrowserConfig;
-  /** Portable `scope:slug` ref of the default agent for stages that do not bind their own. */
-  defaultAgentRef?: string;
 }
 
 /** Parameters for updating a WorkflowDefinition */
@@ -117,14 +88,10 @@ export interface UpdateWorkflowDefinitionParams {
   variables?: VariableDefinition[];
   tags?: string[];
   orchestratorConfig?: OrchestratorConfig;
-  skills?: SkillReference[];
-  agents?: AgentReference[];
   /** Workflow-level lifecycle hooks */
   hooks?: WorkflowHookDefinition[];
   /** Imported hooks file configuration */
   hooksFile?: HooksFileConfig;
   /** Integrated Browser configuration (workflow-level default). */
   browserConfig?: BrowserConfig;
-  /** Portable `scope:slug` ref of the default agent. `null` clears the binding. */
-  defaultAgentRef?: string | null;
 }

@@ -84,7 +84,7 @@ SYSTEM     templates/system/artifacts/* + templates/system/mcp-servers.json
    ↓ merged with
 PROJECT    projects/<id>/config/*
    ↓ merged with
-WORKFLOW   workflow_definitions.selectedArtifacts + orchestratorConfig
+WORKFLOW   workflow_definitions.harnessConfig (incl. agentRef)
    ↓ merged with
 STAGE      stage_definitions.harnessConfigOverrides.{customAgents,skillDirectories,disabledSkills,mcpServers}
 ```
@@ -158,8 +158,7 @@ Any hot-loaded extension can register skills, prompts, custom agents, tools, and
   on/off + inputs + credentials — see §6).
 
 ### Workflow
-- `workflow_definitions.selectedArtifacts: { skills?, agents?, prompts? }` — a list of artifact IDs that *must* be available (a "lockfile").
-- `orchestratorConfig.selectedArtifacts` — same idea but for orchestrator-driven flows.
+- `workflow_definitions.harnessConfig` — the workflow-level harness defaults; `harnessConfig.agentRef` is the default agent for stages that bind none.
 - Stage-scope overrides take precedence.
 
 ### Stage

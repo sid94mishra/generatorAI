@@ -10,8 +10,6 @@ import { MAX_STAGES_PER_WORKFLOW } from '../constants/index.js';
 import type { HarnessConfig } from '../types/Workflow.js';
 import type {
   VariableDefinition,
-  SkillReference,
-  AgentReference,
   WorkflowSessionMode,
 } from '../types/WorkflowDefinition.js';
 import type { StageEdgeType } from '../types/StageDefinition.js';
@@ -49,8 +47,6 @@ export class WorkflowBuilder {
   private _excludedTools?: string[];
   private _stages: Array<{ localId: string; builder: StageBuilder }> = [];
   private _edges: EdgeOutput[] = [];
-  private _skills: SkillReference[] = [];
-  private _agents: AgentReference[] = [];
   private _preprocessingSteps: PreprocessingStep[] = [];
   private _resultValidations: StageResultValidation[] = [];
   private _useWorktree?: boolean;
@@ -254,18 +250,6 @@ export class WorkflowBuilder {
     return this;
   }
 
-  // ═══ Skills & Agents ═══
-
-  skill(ref: SkillReference): this {
-    this._skills.push(ref);
-    return this;
-  }
-
-  customAgent(agent: AgentReference): this {
-    this._agents.push(agent);
-    return this;
-  }
-
   // ═══ Build ═══
 
   build(): WorkflowScriptOutput {
@@ -332,8 +316,6 @@ export class WorkflowBuilder {
         orchestratorConfig: Object.keys(orchestratorConfig).length > 0 ? orchestratorConfig : undefined,
         hooks: this._hooks.length > 0 ? this._hooks : undefined,
         useWorktree: this._useWorktree,
-        skills: this._skills.length > 0 ? this._skills : undefined,
-        agents: this._agents.length > 0 ? this._agents : undefined,
       },
       stages,
       edges: this._edges,

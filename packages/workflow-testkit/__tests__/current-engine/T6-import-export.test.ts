@@ -46,13 +46,10 @@ const FULL_DEF = {
     resultValidations: [{ stageIndex: 0, rules: [{ type: 'contains', value: 'WF-LEVEL', message: 'wf-level rule' }] }],
     postProcessingSteps: [],
   },
-  skills: [{ name: 'skillA', description: 'dA' }],
-  agents: [{ name: 'agentA', description: 'aa', instructions: 'ii', tools: ['Read'] }],
   hooks: [hook('wh1', 'on_run_start')],
   hooksFile: { version: 1, workflow: [hook('hf1', 'on_run_complete')], stages: { S0: [hook('hfs1', 'pre_run')] } },
   useWorktree: false,
   browserConfig: { enabled: true, visibility: 'headless', allowedHosts: ['example.com'] },
-  defaultAgentRef: 'user:default-agent',
 };
 
 const stageBody = (name: string, order: number) => ({
@@ -91,9 +88,8 @@ describe('T6 definitions: create and export → import (current engine)', () => 
     const orig = await svc.getDefinitionWithStages(created.id);
 
     // Create silently drops accepted fields (F-12).
-    expect(orig.skills ?? null).toBeNull(); // KNOWN-BUG W-20 (definition skills dropped)
-    expect(orig.agents ?? null).toBeNull(); // KNOWN-BUG W-20 (definition agents dropped)
-    expect(orig.defaultAgentRef ?? null).toBeNull(); // KNOWN-BUG W-20 (defaultAgentRef dropped)
+    // Definition-level skills/agents and defaultAgentRef were deleted in P01
+    // WP-1.4 (PD-11); the agent binds through harnessConfig.agentRef.
     expect(orig.useWorktree).toBe(true); // KNOWN-BUG W-20 (useWorktree:false stored as true)
     expect((orig as { browserConfig?: unknown }).browserConfig).toBeUndefined(); // KNOWN-BUG W-20 (no column)
     expect((orig.stages[0] as { skills?: unknown }).skills).toBeUndefined(); // KNOWN-BUG W-20 (stage skills dropped)

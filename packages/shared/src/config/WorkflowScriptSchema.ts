@@ -104,19 +104,6 @@ const VariableDefinitionOutputSchema = z.object({
   options: z.array(z.string()).optional(),
 });
 
-const SkillReferenceOutputSchema = z.object({
-  name: z.string(),
-  directory: z.string().optional(),
-  description: z.string().optional(),
-});
-
-const AgentReferenceOutputSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  instructions: z.string().optional(),
-  tools: z.array(z.string()).optional(),
-});
-
 const WorkflowHookPhaseSchema = z.enum([
   'on_run_start',
   'on_run_complete',
@@ -165,8 +152,6 @@ export const WorkflowScriptOutputSchema = z.object({
     orchestratorConfig: z.record(z.unknown()).optional(),
     hooks: z.array(WorkflowHookDefinitionOutputSchema).optional(),
     useWorktree: z.boolean().optional(),
-    skills: z.array(SkillReferenceOutputSchema).optional(),
-    agents: z.array(AgentReferenceOutputSchema).optional(),
   }),
   stages: z.array(StageOutputSchema).min(1).max(MAX_STAGES_PER_WORKFLOW),
   edges: z.array(EdgeOutputSchema),

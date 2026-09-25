@@ -146,7 +146,6 @@ export class WorkflowDefinitionService {
       tags: params.tags ?? [],
       orchestratorConfig: params.orchestratorConfig,
       projectId: params.projectId,
-      selectedArtifacts: params.selectedArtifacts,
       hooks: params.hooks ?? [],
       hooksFile: params.hooksFile,
       createdAt: now,
@@ -184,15 +183,8 @@ export class WorkflowDefinitionService {
     params: UpdateWorkflowDefinitionParams,
   ): Promise<WorkflowDefinition> {
     const existing = await this.definitionRepo.getById(id);
-    // `null` is the wire form for "clear the binding"; the entity uses undefined.
-    const { defaultAgentRef, ...rest } = params;
     const updated = await this.definitionRepo.update(id, {
-      ...rest,
-      ...(defaultAgentRef === null
-        ? { defaultAgentRef: undefined }
-        : defaultAgentRef !== undefined
-          ? { defaultAgentRef }
-          : {}),
+      ...params,
       version: existing.version + 1,
     });
     this.dagScheduler?.clearCache(id);
@@ -576,8 +568,6 @@ export class WorkflowDefinitionService {
         hooks: data.hooks,
         hooksFile: data.hooksFile,
         projectId: data.projectId,
-        skills: data.skills,
-        agents: data.agents,
       });
 
       try {

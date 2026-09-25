@@ -8,7 +8,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createDB, migrateDB, DrizzleAgentRepository } from '../src/index.js';
+import { createDB, migrateDB, DrizzleAgentRepository, DrizzleWorkflowDefinitionRepository } from '../src/index.js';
 import type { Agent } from '@generatorai/shared';
 
 function makeAgent(over: Partial<Agent> = {}): Agent {
@@ -149,5 +149,24 @@ describe('DrizzleAgentRepository', () => {
     await repo.create(makeAgent());
     const usage = await repo.countUsage('global:reviewer');
     expect(usage).toEqual({ chats: [], stages: [], workflows: [] });
+  });
+
+  it("counts a workflow whose harnessConfig binds the agent (the workflow's default agent)", async () => {
+    await repo.create(makeAgent());
+    const now = new Date();
+    await new DrizzleWorkflowDefinitionRepository(db).create({
+      id: 'wf-1',
+      name: 'Bound',
+      version: 1,
+      sessionMode: 'auto',
+      harnessConfig: { agentRef: 'global:reviewer' },
+      variables: [],
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    const usage = await repo.countUsage('global:reviewer');
+    expect(usage.workflows).toEqual([{ id: 'wf-1', name: 'Bound' }]);
+    expect((await repo.countUsage('global:other')).workflows).toEqual([]);
   });
 });

@@ -87,8 +87,6 @@ export class ScriptFacade {
       variables: out.definition.variables,
       tags: [...(out.definition.tags ?? []), `script:${scriptId}`],
       projectId: options?.projectId,
-      skills: out.definition.skills,
-      agents: out.definition.agents,
       hooks: out.definition.hooks,
     });
 

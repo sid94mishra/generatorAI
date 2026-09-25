@@ -121,8 +121,6 @@ export function createWorkflowScriptRoutes(container: Container): Router {
         variables: script.output.definition.variables,
         tags: [...script.output.definition.tags, `script:${id}`],
         projectId,
-        skills: script.output.definition.skills,
-        agents: script.output.definition.agents,
         hooks: script.output.definition.hooks,
       };
 
@@ -249,8 +247,6 @@ export function createWorkflowScriptRoutes(container: Container): Router {
         variables: script.output.definition.variables,
         tags: [...script.output.definition.tags, `script:${id}`],
         projectId,
-        skills: script.output.definition.skills,
-        agents: script.output.definition.agents,
         hooks: script.output.definition.hooks,
       };
 

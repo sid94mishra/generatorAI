@@ -5,8 +5,6 @@
 import type { HarnessConfig } from '../types/Workflow.js';
 import type {
   VariableDefinition,
-  SkillReference,
-  AgentReference,
   WorkflowSessionMode,
 } from '../types/WorkflowDefinition.js';
 import type { WorkflowRunPermissionMode } from '../types/WorkflowRun.js';
@@ -185,8 +183,6 @@ export interface WorkflowScriptOutput {
       config: HookConfig;
     }>;
     useWorktree?: boolean;
-    skills?: SkillReference[];
-    agents?: AgentReference[];
   };
 
   /** Stage definitions with local IDs for edge resolution */

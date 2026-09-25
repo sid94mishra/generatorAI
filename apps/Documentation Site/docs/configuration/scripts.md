@@ -61,17 +61,6 @@ since functions can't be serialized — it's validated separately at runtime.
 | definition.hooks[].config&lt;variant 3&gt;.handlerName | string | `optional` | — |
 | definition.hooks[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
 | definition.useWorktree | boolean | `optional` | — |
-| definition.skills | array of object | `optional` | — |
-| definition.skills[] | object | `required` | unknown keys: strip |
-| definition.skills[].name | string | `required` | — |
-| definition.skills[].directory | string | `optional` | — |
-| definition.skills[].description | string | `optional` | — |
-| definition.agents | array of object | `optional` | — |
-| definition.agents[] | object | `required` | unknown keys: strip |
-| definition.agents[].name | string | `required` | — |
-| definition.agents[].description | string | `optional` | — |
-| definition.agents[].instructions | string | `optional` | — |
-| definition.agents[].tools | array of string | `optional` | — |
 | stages | array of object | `required` | minLength 1; maxLength 50 |
 | stages[] | object | `required` | unknown keys: strip |
 | stages[].localId | string | `required` | min 1; regex /^[a-zA-Z][a-zA-Z0-9_-]*$/ |
@@ -274,19 +263,6 @@ const VariableDefinitionOutputSchema = z.object({
   options: z.array(z.string()).optional(),
 });
 
-const SkillReferenceOutputSchema = z.object({
-  name: z.string(),
-  directory: z.string().optional(),
-  description: z.string().optional(),
-});
-
-const AgentReferenceOutputSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  instructions: z.string().optional(),
-  tools: z.array(z.string()).optional(),
-});
-
 const WorkflowHookPhaseSchema = z.enum([
   'on_run_start',
   'on_run_complete',
@@ -335,8 +311,6 @@ export const WorkflowScriptOutputSchema = z.object({
     orchestratorConfig: z.record(z.unknown()).optional(),
     hooks: z.array(WorkflowHookDefinitionOutputSchema).optional(),
     useWorktree: z.boolean().optional(),
-    skills: z.array(SkillReferenceOutputSchema).optional(),
-    agents: z.array(AgentReferenceOutputSchema).optional(),
   }),
   stages: z.array(StageOutputSchema).min(1).max(MAX_STAGES_PER_WORKFLOW),
   edges: z.array(EdgeOutputSchema),

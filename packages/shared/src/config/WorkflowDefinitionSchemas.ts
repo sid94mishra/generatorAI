@@ -23,14 +23,6 @@ export const SkillDefinitionSchema = z.object({
   description: z.string().optional(),
 });
 
-/** Zod schema for Agent reference (independent of prompts) */
-export const AgentDefinitionSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().optional(),
-  instructions: z.string().optional(),
-  tools: z.array(z.string()).optional(),
-});
-
 /** Zod schema for RetryPolicy */
 export const RetryPolicySchema = z.object({
   maxRetries: z.number().int().min(0).max(10).default(0),
@@ -156,26 +148,14 @@ export const CreateWorkflowDefinitionSchema = z.object({
   orchestratorConfig: OrchestratorConfigSchema.optional(),
   /** Project ID — scopes this workflow to a project and its codebases */
   projectId: z.string().uuid().optional(),
-  /** Skills to use in this workflow (independent of stage prompts) */
-  skills: z.array(SkillDefinitionSchema).max(20).default([]),
-  /** Agents to use in this workflow (independent of stage prompts) */
-  agents: z.array(AgentDefinitionSchema).max(10).default([]),
   /** Workflow-level lifecycle hooks */
   hooks: z.array(WorkflowHookDefinitionSchema).max(50).optional(),
   /** Imported hooks file config (.hooks.json) */
   hooksFile: HooksFileConfigSchema.optional(),
-  /** Selected artifact IDs for skills/agents/prompts */
-  selectedArtifacts: z.object({
-    skillIds: z.array(z.string()).optional(),
-    agentIds: z.array(z.string()).optional(),
-    promptIds: z.array(z.string()).optional(),
-  }).optional(),
   /** Whether to create worktrees for project codebases during execution */
   useWorktree: z.boolean().optional(),
   /** Integrated Browser configuration (workflow-level default). */
   browserConfig: BrowserConfigSchema.optional(),
-  /** Portable `scope:slug` ref of the default agent for stages that do not bind their own. */
-  defaultAgentRef: z.string().max(128).optional(),
 });
 
 /** Zod schema for updating a WorkflowDefinition */
@@ -188,24 +168,14 @@ export const UpdateWorkflowDefinitionSchema = z.object({
   tags: z.array(z.string().max(50)).max(20).optional(),
   orchestratorConfig: OrchestratorConfigSchema.optional(),
   projectId: z.string().uuid().optional().nullable(),
-  skills: z.array(SkillDefinitionSchema).max(20).optional(),
-  agents: z.array(AgentDefinitionSchema).max(10).optional(),
   /** Workflow-level lifecycle hooks */
   hooks: z.array(WorkflowHookDefinitionSchema).max(50).optional(),
   /** Imported hooks file config (.hooks.json) */
   hooksFile: HooksFileConfigSchema.optional(),
-  /** Selected artifact IDs for skills/agents/prompts */
-  selectedArtifacts: z.object({
-    skillIds: z.array(z.string()).optional(),
-    agentIds: z.array(z.string()).optional(),
-    promptIds: z.array(z.string()).optional(),
-  }).optional(),
   /** Whether to create worktrees for project codebases during execution */
   useWorktree: z.boolean().optional(),
   /** Integrated Browser configuration (workflow-level default). */
   browserConfig: BrowserConfigSchema.optional(),
-  /** Portable `scope:slug` ref of the default agent for stages that do not bind their own. */
-  defaultAgentRef: z.string().max(128).optional().nullable(),
 });
 
 /** Zod schema for creating a StageDefinition */
@@ -269,8 +239,6 @@ export const WorkflowDefinitionSchema = z.object({
   harnessConfig: HarnessConfigSchema.optional(),
   variables: z.array(VariableDefinitionSchema),
   tags: z.array(z.string()),
-  skills: z.array(SkillDefinitionSchema).optional(),
-  agents: z.array(AgentDefinitionSchema).optional(),
   createdAt: z.coerce.date(),
   updatedAt: z.coerce.date(),
 });
@@ -325,10 +293,6 @@ export const ImportWorkflowJsonSchema = z.object({
   tags: z.array(z.string().max(50)).max(20).default([]),
   stages: z.array(ImportStageSchema).min(1, 'At least one stage is required').max(100),
   edges: z.array(ImportEdgeSchema).max(500).default([]),
-  /** Skills for the entire workflow */
-  skills: z.array(SkillDefinitionSchema).max(20).default([]),
-  /** Agents for the entire workflow */
-  agents: z.array(AgentDefinitionSchema).max(10).default([]),
   /** Orchestrator configuration */
   orchestratorConfig: OrchestratorConfigSchema.optional(),
   /** Project ID to link to */
@@ -339,8 +303,6 @@ export const ImportWorkflowJsonSchema = z.object({
   hooksFile: HooksFileConfigSchema.optional(),
   /** Integrated Browser configuration */
   browserConfig: BrowserConfigSchema.optional(),
-  /** Portable `scope:slug` ref of the default agent for stages that do not bind their own. */
-  defaultAgentRef: z.string().max(128).optional(),
 });
 
 export type ImportWorkflowJson = z.infer<typeof ImportWorkflowJsonSchema>;

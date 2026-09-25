@@ -20,7 +20,6 @@ import type {
   WorkflowSessionMode,
   HarnessConfig,
   OrchestratorConfig,
-  EntityScope,
   WorkflowHookDefinition,
 } from '@generatorai/shared';
 import { globalSingleton } from '../lib/globalSingleton.js';
@@ -71,8 +70,6 @@ interface WorkflowBuilderState {
   autoPush: boolean;
   /** Whether to auto-create PR after workflow completes */
   autoCreatePR: boolean;
-  /** Scope: 'global' or array of project IDs */
-  scope: EntityScope;
   /** Selected project ID for project-scoped workflows */
   projectId: string | null;
   /** Selected codebase aliases from the project (max 3) */
@@ -133,7 +130,6 @@ interface WorkflowBuilderState {
   setAutoCommit: (autoCommit: boolean) => void;
   setAutoPush: (autoPush: boolean) => void;
   setAutoCreatePR: (autoCreatePR: boolean) => void;
-  setScope: (scope: EntityScope) => void;
   setProjectId: (projectId: string | null) => void;
   setSelectedCodebases: (codebases: string[]) => void;
   setHooks: (hooks: WorkflowHookDefinition[]) => void;
@@ -245,7 +241,6 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   autoCommit: true,
   autoPush: false,
   autoCreatePR: false,
-  scope: 'global',
   projectId: null,
   selectedCodebases: [],
   hooks: [],
@@ -285,7 +280,6 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       autoPush:
         (definition.orchestratorConfig as { autoPush?: boolean } | undefined)?.autoPush ?? false,
       autoCreatePR: definition.orchestratorConfig?.autoCreatePR ?? false,
-      scope: (definition as unknown as { scope?: EntityScope }).scope ?? 'global',
       projectId: definition.projectId ?? null,
       selectedCodebases: definition.orchestratorConfig?.codebaseAliases ?? [],
       hooks: (definition as unknown as { hooks?: WorkflowHookDefinition[] }).hooks ?? [],
@@ -315,8 +309,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
           autoCommit: true,
       autoPush: false,
       autoCreatePR: false,
-      scope: 'global',
-      projectId: null,
+          projectId: null,
       selectedCodebases: [],
       hooks: [],
       nodes: [],
@@ -532,7 +525,6 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     set(autoPush ? { autoPush, autoCommit: true, isDirty: true } : { autoPush, autoCreatePR: false, isDirty: true }),
   setAutoCreatePR: (autoCreatePR) =>
     set(autoCreatePR ? { autoCreatePR, autoPush: true, autoCommit: true, isDirty: true } : { autoCreatePR, isDirty: true }),
-  setScope: (scope) => set({ scope, isDirty: true }),
   setProjectId: (projectId) => set({ projectId, isDirty: true, selectedCodebases: [] }),
   setSelectedCodebases: (selectedCodebases) => set({ selectedCodebases, isDirty: true }),
   setHooks: (hooks) => set({ hooks, isDirty: true }),

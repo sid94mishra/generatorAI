@@ -3974,37 +3974,6 @@
   },
   {
     "file": "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
-    "schema": "AgentDefinitionSchema",
-    "page": "configuration/workflows",
-    "fields": [
-      {
-        "field": "name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "min 1"
-      },
-      {
-        "field": "description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "instructions",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "tools",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      }
-    ]
-  },
-  {
-    "file": "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
     "schema": "RetryPolicySchema",
     "page": "configuration/workflows",
     "fields": [
@@ -4774,72 +4743,6 @@
         "constraints": "uuid"
       },
       {
-        "field": "skills",
-        "type": "array of object",
-        "presence": "default []",
-        "constraints": "maxLength 20"
-      },
-      {
-        "field": "skills[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "skills[].name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "min 1"
-      },
-      {
-        "field": "skills[].directory",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "skills[].description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents",
-        "type": "array of object",
-        "presence": "default []",
-        "constraints": "maxLength 10"
-      },
-      {
-        "field": "agents[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "agents[].name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "min 1"
-      },
-      {
-        "field": "agents[].description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents[].instructions",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents[].tools",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "hooks",
         "type": "array of object",
         "presence": "optional",
@@ -5206,30 +5109,6 @@
         "constraints": "—"
       },
       {
-        "field": "selectedArtifacts",
-        "type": "object",
-        "presence": "optional",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "selectedArtifacts.skillIds",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "selectedArtifacts.agentIds",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "selectedArtifacts.promptIds",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "useWorktree",
         "type": "boolean",
         "presence": "optional",
@@ -5354,12 +5233,6 @@
         "type": "boolean",
         "presence": "optional",
         "constraints": "—"
-      },
-      {
-        "field": "defaultAgentRef",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "max 128"
       }
     ]
   },
@@ -6041,72 +5914,6 @@
         "constraints": "uuid"
       },
       {
-        "field": "skills",
-        "type": "array of object",
-        "presence": "optional",
-        "constraints": "maxLength 20"
-      },
-      {
-        "field": "skills[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "skills[].name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "min 1"
-      },
-      {
-        "field": "skills[].directory",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "skills[].description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents",
-        "type": "array of object",
-        "presence": "optional",
-        "constraints": "maxLength 10"
-      },
-      {
-        "field": "agents[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "agents[].name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "min 1"
-      },
-      {
-        "field": "agents[].description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents[].instructions",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents[].tools",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "hooks",
         "type": "array of object",
         "presence": "optional",
@@ -6473,30 +6280,6 @@
         "constraints": "—"
       },
       {
-        "field": "selectedArtifacts",
-        "type": "object",
-        "presence": "optional",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "selectedArtifacts.skillIds",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "selectedArtifacts.agentIds",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "selectedArtifacts.promptIds",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "useWorktree",
         "type": "boolean",
         "presence": "optional",
@@ -6621,12 +6404,6 @@
         "type": "boolean",
         "presence": "optional",
         "constraints": "—"
-      },
-      {
-        "field": "defaultAgentRef",
-        "type": "string",
-        "presence": "optional; null accepted",
-        "constraints": "max 128"
       }
     ]
   },
@@ -8109,72 +7886,6 @@
         "constraints": "—"
       },
       {
-        "field": "skills",
-        "type": "array of object",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "skills[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "skills[].name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "min 1"
-      },
-      {
-        "field": "skills[].directory",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "skills[].description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents",
-        "type": "array of object",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "agents[].name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "min 1"
-      },
-      {
-        "field": "agents[].description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents[].instructions",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents[].tools",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "createdAt",
         "type": "date (coerced)",
         "presence": "required",
@@ -9628,72 +9339,6 @@
         "constraints": "—"
       },
       {
-        "field": "skills",
-        "type": "array of object",
-        "presence": "default []",
-        "constraints": "maxLength 20"
-      },
-      {
-        "field": "skills[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "skills[].name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "min 1"
-      },
-      {
-        "field": "skills[].directory",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "skills[].description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents",
-        "type": "array of object",
-        "presence": "default []",
-        "constraints": "maxLength 10"
-      },
-      {
-        "field": "agents[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "agents[].name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "min 1"
-      },
-      {
-        "field": "agents[].description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents[].instructions",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "agents[].tools",
-        "type": "array of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "orchestratorConfig",
         "type": "object",
         "presence": "optional",
@@ -10364,12 +10009,6 @@
         "type": "boolean",
         "presence": "optional",
         "constraints": "—"
-      },
-      {
-        "field": "defaultAgentRef",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "max 128"
       }
     ]
   },
@@ -13415,72 +13054,6 @@
       {
         "field": "definition.useWorktree",
         "type": "boolean",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "definition.skills",
-        "type": "array of object",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "definition.skills[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "definition.skills[].name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "—"
-      },
-      {
-        "field": "definition.skills[].directory",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "definition.skills[].description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "definition.agents",
-        "type": "array of object",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "definition.agents[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "definition.agents[].name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "—"
-      },
-      {
-        "field": "definition.agents[].description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "definition.agents[].instructions",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "definition.agents[].tools",
-        "type": "array of string",
         "presence": "optional",
         "constraints": "—"
       },

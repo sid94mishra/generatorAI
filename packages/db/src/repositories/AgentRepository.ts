@@ -180,7 +180,8 @@ export class DrizzleAgentRepository implements IAgentRepository {
       this.db
         .select({ id: workflowDefinitions.id, name: workflowDefinitions.name })
         .from(workflowDefinitions)
-        .where(eq(workflowDefinitions.defaultAgentRef, ref)),
+        // A workflow binds its default agent through `harnessConfig.agentRef`.
+        .where(sql`json_extract(${workflowDefinitions.harnessConfig}, '$.agentRef') = ${ref}`),
     ]);
     return { chats: chatRows, stages: stageRows, workflows: workflowRows };
   }
