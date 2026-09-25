@@ -1,10 +1,11 @@
 // ────────────────────────────────────────────────────────────────
-// AgentBindingSection — bind a first-class Agent to a workflow stage.
+// AgentBindingSection — bind a first-class Agent to a session (chat,
+// workflow or stage).
 //
 // Replaces the old AgentSelector, which built a throwaway `customAgents`
 // entry with an EMPTY instructions string: the harness then received an
 // agent that had a name and a description but no instructions at all. Here the
-// stage session stores the portable `scope:slug` ref (`session.agentRef`)
+// session stores the portable `scope:slug` ref (`session.agentRef`)
 // and an additive override delta (`session.agentOverrides`); `AgentResolver`
 // performs the union server-side at execution time.
 // ────────────────────────────────────────────────────────────────
@@ -12,39 +13,49 @@
 import React, { useEffect, useState } from 'react';
 import { Bot } from 'lucide-react';
 import { Button } from '@/components/ui/index.js';
-import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useResolveAgentPreview, useSelectableAgents } from '@/hooks/agentQueries.js';
 import { AgentPicker } from '@/components/agents/AgentPicker.js';
 import { AgentOverridesEditor } from '@/components/agents/AgentOverridesEditor.js';
 import { EffectiveCapabilitiesPanel } from '@/components/agents/EffectiveCapabilitiesPanel.js';
-import type { AgentOverrides, ResolvedAgentProjection } from '@generatorai/shared';
-import type { AgentStage, SessionSpec } from '@generatorai/workflow-spec';
-import { patchSession } from './sessionPatch.js';
+import type { Agent, AgentOverrides, ResolvedAgentProjection } from '@generatorai/shared';
+import type { SessionSpec } from '@generatorai/workflow-spec';
 
 interface AgentBindingSectionProps {
-  stage: AgentStage;
-  onUpdate: (updates: Partial<AgentStage>) => void;
+  /** The (partial) session being edited. */
+  session: SessionSpec | undefined;
+  /** Patch semantics: a key set to undefined is removed. */
+  onChange: (updates: Partial<SessionSpec>) => void;
+  projectId?: string | undefined;
+  /** The binding site the preview resolves for. */
+  scope: 'chat' | 'stage';
+  /** The picked agent itself (a host may react to its role). */
+  onAgentChange?: (agent: Agent | undefined) => void;
+  testIdPrefix?: string;
 }
 
-export function AgentBindingSection({ stage, onUpdate }: AgentBindingSectionProps) {
-  const projectId = useWorkflowBuilderStore((s) => s.workflow.projectId ?? null) ?? undefined;
+export function AgentBindingSection({
+  session,
+  onChange,
+  projectId,
+  scope,
+  onAgentChange,
+  testIdPrefix = 'stage',
+}: AgentBindingSectionProps) {
   const { data: agents } = useSelectableAgents(projectId);
   const resolvePreview = useResolveAgentPreview();
 
-  const overridesFromStage = (stage.session?.agentOverrides ?? {}) as AgentOverrides;
+  const overridesFromStage = (session?.agentOverrides ?? {}) as AgentOverrides;
 
   const [showCapabilities, setShowCapabilities] = useState(false);
   const [projection, setProjection] = useState<ResolvedAgentProjection | undefined>(undefined);
 
-  const agentRef = stage.session?.agentRef;
+  const agentRef = session?.agentRef;
   const selectedAgent = (agents ?? []).find((a) => a.ref === agentRef);
 
   const setOverrides = (next: AgentOverrides) => {
-    onUpdate(
-      patchSession(stage, {
-        agentOverrides: Object.keys(next).length > 0 ? (next as SessionSpec['agentOverrides']) : undefined,
-      }),
-    );
+    onChange({
+      agentOverrides: Object.keys(next).length > 0 ? (next as SessionSpec['agentOverrides']) : undefined,
+    });
   };
 
   const overridesKey = JSON.stringify(overridesFromStage);
@@ -56,7 +67,7 @@ export function AgentBindingSection({ stage, onUpdate }: AgentBindingSectionProp
     }
     const timer = setTimeout(() => {
       void resolveMutate({
-        scope: 'stage',
+        scope,
         ...(agentRef ? { agentRef } : {}),
         ...(projectId ? { projectId } : {}),
         overrides: JSON.parse(overridesKey) as AgentOverrides,
@@ -65,10 +76,10 @@ export function AgentBindingSection({ stage, onUpdate }: AgentBindingSectionProp
         .catch(() => setProjection(undefined));
     }, 300);
     return () => clearTimeout(timer);
-  }, [agentRef, overridesKey, projectId, resolveMutate]);
+  }, [agentRef, overridesKey, projectId, resolveMutate, scope]);
 
   return (
-    <div className="space-y-3" data-testid="stage-agent-binding">
+    <div className="space-y-3" data-testid={`${testIdPrefix}-agent-binding`}>
       <div>
         <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-foreground">
           <Bot className="h-3.5 w-3.5 text-primary" />
@@ -77,8 +88,11 @@ export function AgentBindingSection({ stage, onUpdate }: AgentBindingSectionProp
         <AgentPicker
           value={agentRef}
           {...(projectId ? { projectId } : {})}
-          data-testid="stage-agent-picker"
-          onChange={(ref) => onUpdate(patchSession(stage, { agentRef: ref }))}
+          data-testid={`${testIdPrefix}-agent-picker`}
+          onChange={(ref, agent) => {
+            onChange({ agentRef: ref });
+            onAgentChange?.(agent);
+          }}
         />
         <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">
           Skills and MCP servers chosen below are ADDED to the agent&apos;s own — an agent with 5
@@ -89,7 +103,7 @@ export function AgentBindingSection({ stage, onUpdate }: AgentBindingSectionProp
       <Button
         type="button"
         onClick={() => setShowCapabilities((v) => !v)}
-        data-testid="stage-customize-capabilities"
+        data-testid={`${testIdPrefix}-customize-capabilities`}
         variant="ghost"
         size="sm"
         className="h-auto bg-transparent p-0 text-xs font-medium text-primary hover:bg-transparent hover:underline"

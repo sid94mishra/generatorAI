@@ -1,26 +1,26 @@
 // ────────────────────────────────────────────────────────────────
-// McpServerSelector — Toggle MCP servers per stage
+// McpServerSelector — toggle MCP servers for a session (chat, workflow or stage)
 // By default all system MCP servers are enabled
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo } from 'react';
 import { Server } from 'lucide-react';
-import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useSystemMcpServers, useProjectMcpServers } from '@/hooks/projectQueries.js';
 import { useCatalogPrefsStore } from '@/stores/catalogPrefsStore.js';
 import { cn } from '@/lib/utils.js';
 import { Badge, Button } from '@/components/ui/index.js';
-import type { AgentStage } from '@generatorai/workflow-spec';
-import { patchSession } from './sessionPatch.js';
+import type { SessionSpec } from '@generatorai/workflow-spec';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 interface McpServerSelectorProps {
-  stage: AgentStage;
-  onUpdate: (updates: Partial<AgentStage>) => void;
+  /** The (partial) session being edited. */
+  session: SessionSpec | undefined;
+  /** Patch semantics: a key set to undefined is removed. */
+  onChange: (updates: Partial<SessionSpec>) => void;
+  projectId?: string | undefined;
 }
 
-export function McpServerSelector({ stage, onUpdate }: McpServerSelectorProps) {
-  const projectId = useWorkflowBuilderStore((s) => s.workflow.projectId ?? null);
+export function McpServerSelector({ session, onChange, projectId }: McpServerSelectorProps) {
   const { data: systemServers, isLoading: systemLoading } = useSystemMcpServers();
   const { data: projectServers, isLoading: projectLoading } = useProjectMcpServers(projectId ?? undefined);
 
@@ -40,14 +40,14 @@ export function McpServerSelector({ stage, onUpdate }: McpServerSelectorProps) {
   // nothing (no tool is called `github`) while silently corrupting the tool
   // deny-list. Keyed by ID, not name, because two registries can each define
   // a server called "github".
-  const mcp = stage.session?.mcp;
+  const mcp = session?.mcp;
   const excludedServers = useMemo(() => new Set(mcp?.excludedIds ?? []), [mcp]);
 
   const writeExcluded = (ids: string[]) => {
     const next = { ...mcp };
     if (ids.length > 0) next.excludedIds = ids;
     else delete next.excludedIds;
-    onUpdate(patchSession(stage, { mcp: Object.keys(next).length > 0 ? next : undefined }));
+    onChange({ mcp: Object.keys(next).length > 0 ? next : undefined });
   };
 
   const toggleServer = (serverId: string) => {

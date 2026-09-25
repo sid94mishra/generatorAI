@@ -1,15 +1,14 @@
 // ────────────────────────────────────────────────────────────────
 // GeneralTab — Workflow name, description and the workflow session
-// (`graph.workflow.session`: the model, reasoning effort, agent and agent
-// mode every stage inherits unless its own session overrides them).
+// (`graph.workflow.session`: everything every stage inherits unless its own
+// session overrides it), edited with the shared SessionSpecEditor.
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { AGENT_MODES, REASONING_EFFORTS, type SessionSpec } from '@generatorai/workflow-spec';
+import type { SessionSpec } from '@generatorai/workflow-spec';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
-import { Input, Select, Textarea } from '@/components/ui/index.js';
-import { ModelPicker } from '@/components/shared/ModelPicker.js';
-import { AgentPicker } from '@/components/agents/AgentPicker.js';
+import { Input, Textarea } from '@/components/ui/index.js';
+import { SessionSpecEditor, applySessionPatch } from '@/components/session/SessionSpecEditor.js';
 import { FieldIssues } from '../engineGate.js';
 
 export function GeneralTab() {
@@ -21,9 +20,7 @@ export function GeneralTab() {
   const updateWorkflow = useWorkflowBuilderStore((s) => s.updateWorkflow);
 
   const setSession = (updates: Partial<SessionSpec>) => {
-    const next: Record<string, unknown> = { ...session, ...updates };
-    for (const [k, v] of Object.entries(updates)) if (v === undefined) delete next[k];
-    updateWorkflow({ session: next as SessionSpec });
+    updateWorkflow({ session: applySessionPatch(session, updates) });
   };
 
   return (
@@ -65,52 +62,7 @@ export function GeneralTab() {
           <h4 className="text-sm font-medium text-foreground">Session</h4>
           <p className="text-xs text-muted-foreground">Defaults every stage inherits; a stage can override each one.</p>
         </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-foreground">Model</label>
-          <ModelPicker
-            value={session.model ?? ''}
-            onChange={(v) => setSession({ model: v || undefined })}
-            allowEmpty
-            emptyLabel="Provider default"
-            emptyDescription="Use the provider or agent default"
-            placeholder="Select a model…"
-            ariaLabel="Workflow model"
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-foreground">Reasoning Effort</label>
-            <Select
-              aria-label="Workflow reasoning effort"
-              value={session.reasoningEffort ?? ''}
-              onChange={(v) => setSession({ reasoningEffort: (v || undefined) as SessionSpec['reasoningEffort'] })}
-              options={[
-                { value: '', label: 'Default' },
-                ...REASONING_EFFORTS.map((e) => ({ value: e, label: e[0]!.toUpperCase() + e.slice(1) })),
-              ]}
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-foreground">Agent Mode</label>
-            <Select
-              aria-label="Workflow agent mode"
-              value={session.defaultAgentMode ?? ''}
-              onChange={(v) => setSession({ defaultAgentMode: (v || undefined) as SessionSpec['defaultAgentMode'] })}
-              options={[
-                { value: '', label: 'Default' },
-                ...AGENT_MODES.map((m) => ({ value: m, label: m === 'plan' ? 'Plan' : 'Auto' })),
-              ]}
-            />
-          </div>
-        </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-foreground">Agent</label>
-          <AgentPicker
-            value={session.agentRef}
-            {...(projectId ? { projectId } : {})}
-            onChange={(ref) => setSession({ agentRef: ref })}
-          />
-        </div>
+        <SessionSpecEditor value={session} onChange={setSession} scope="workflow" projectId={projectId} />
         <FieldIssues issues={issues.filter((i) => i.path.startsWith('/workflow/session'))} />
       </div>
     </div>

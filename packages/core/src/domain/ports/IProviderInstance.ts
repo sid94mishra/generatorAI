@@ -37,10 +37,9 @@ export type ProviderWireProtocol =
   | 'opencode-http'  // W38 — future
   | 'acp';           // W39 — future
 
-export type ApprovalGatingLevel = 'per_call' | 'exec_and_patch' | 'none';
-export type HostToolsLevel = 'full' | 'start_only' | 'none';
-export type StructuredOutputLevel = 'native' | 'tool' | 'none';
-export type SkillsLevel = 'plugin' | 'directories' | 'none';
+// The level vocabulary lives in @generatorai/shared with the provider table.
+export type { ApprovalGatingLevel, HostToolsLevel, StructuredOutputLevel, SkillsLevel } from '@generatorai/shared';
+import type { ApprovalGatingLevel, HostToolsLevel, StructuredOutputLevel, SkillsLevel } from '@generatorai/shared';
 
 /**
  * Declared capabilities for a provider instance.

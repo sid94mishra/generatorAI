@@ -12,10 +12,8 @@ import {
   CheckCircle2, Clock, Braces, UserCheck, GitMerge, AlertCircle,
 } from 'lucide-react';
 import {
-  AGENT_MODES,
   ApprovalSpecSchema,
   EDGE_ON_VALUES,
-  REASONING_EFFORTS,
   RepairPolicySchema,
   RetryPolicySchema,
   STAGE_HOOK_PHASES,
@@ -26,13 +24,10 @@ import {
   type HookDefinition,
   type PromptDefinition,
   type ResultValidationRule,
-  type SessionSpec,
 } from '@generatorai/workflow-spec';
 import { useWorkflowBuilderStore, type BuilderIssue } from '@/stores/workflowBuilderStore.js';
 import { PromptEditor } from './PromptEditor.js';
-import { McpServerSelector } from './McpServerSelector.js';
-import { SkillSelector } from './SkillSelector.js';
-import { AgentBindingSection } from './AgentBindingSection.js';
+import { SessionSpecEditor, type SessionSpecSection } from '@/components/session/SessionSpecEditor.js';
 import { NumberStepper } from './NumberStepper.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
 import { patchSession } from './sessionPatch.js';
@@ -40,7 +35,6 @@ import { EDGE_TYPE_LABELS, EDGE_TYPE_HINTS } from './edgeTypeStyles.js';
 import { EngineGated, ENGINE_SUPPORTS_V2, ENGINE_UPGRADE_HINT, ExpressionField, FieldIssues, issuesAt } from './engineGate.js';
 import { Button, Input, Select, Textarea, ToggleSwitch } from '@/components/ui/index.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
-import { ModelPicker } from '@/components/shared/ModelPicker.js';
 import { cn } from '@/lib/utils.js';
 
 interface StagePropertiesPanelProps {
@@ -184,6 +178,19 @@ type PromptSubTab = 'inline' | 'agent';
 
 function PropertiesTab({ stage, onUpdate, issues }: SectionProps) {
   const [promptSubTab, setPromptSubTab] = useState<PromptSubTab>('inline');
+  const projectId = useWorkflowBuilderStore((s) => s.workflow.projectId ?? undefined);
+  const workflowSession = useWorkflowBuilderStore((s) => s.workflow.session);
+  // One session editor (P02 WP-2.11), spread over the panel's sections.
+  const sessionEditor = (sections: readonly SessionSpecSection[]) => (
+    <SessionSpecEditor
+      value={stage.session}
+      onChange={(updates) => onUpdate(patchSession(stage, updates))}
+      scope="stage"
+      projectId={projectId}
+      inherited={workflowSession}
+      sections={sections}
+    />
+  );
 
   return (
     <div>
@@ -213,49 +220,9 @@ function PropertiesTab({ stage, onUpdate, issues }: SectionProps) {
         </div>
       </CollapsibleSection>
 
-      {/* Model: the stage session over the workflow session */}
+      {/* Session: the stage session over the workflow session */}
       <CollapsibleSection title="Model" icon={<Cpu className="h-3.5 w-3.5" />} defaultOpen>
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-foreground">Model Override</label>
-          <ModelPicker
-            value={stage.session?.model ?? ''}
-            onChange={(v) => onUpdate(patchSession(stage, { model: v || undefined }))}
-            allowEmpty
-            emptyLabel="Workflow default"
-            emptyDescription="Inherit from workflow settings"
-            placeholder="Select a model…"
-            ariaLabel="Stage model override"
-          />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-foreground">Reasoning Effort</label>
-          <Select
-            aria-label="Reasoning Effort"
-            value={stage.session?.reasoningEffort ?? ''}
-            onChange={(v) =>
-              onUpdate(patchSession(stage, { reasoningEffort: (v || undefined) as SessionSpec['reasoningEffort'] }))
-            }
-            options={[
-              { value: '', label: 'Default' },
-              ...REASONING_EFFORTS.map((e) => ({ value: e, label: e[0]!.toUpperCase() + e.slice(1) })),
-            ]}
-            placeholder="Default"
-          />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-foreground">Agent Mode</label>
-          <Select
-            aria-label="Agent Mode"
-            value={stage.session?.defaultAgentMode ?? ''}
-            onChange={(v) =>
-              onUpdate(patchSession(stage, { defaultAgentMode: (v || undefined) as SessionSpec['defaultAgentMode'] }))
-            }
-            options={[
-              { value: '', label: 'Workflow default' },
-              ...AGENT_MODES.map((m) => ({ value: m, label: m === 'plan' ? 'Plan' : 'Auto' })),
-            ]}
-          />
-        </div>
+        {sessionEditor(['runtime', 'mode', 'warnings'])}
         <FieldIssues issues={issuesAt(issues, '/session')} />
       </CollapsibleSection>
 
@@ -304,18 +271,23 @@ function PropertiesTab({ stage, onUpdate, issues }: SectionProps) {
           </>
         )}
         {promptSubTab === 'agent' && (
-          <AgentBindingSection stage={stage} onUpdate={onUpdate} />
+          sessionEditor(['agent'])
         )}
       </CollapsibleSection>
 
       {/* Skills */}
       <CollapsibleSection title="Skills" icon={<Wand2 className="h-3.5 w-3.5" />} defaultOpen={false}>
-        <SkillSelector stage={stage} onUpdate={onUpdate} />
+        {sessionEditor(['skills'])}
       </CollapsibleSection>
 
       {/* MCP Servers */}
       <CollapsibleSection title="MCP Servers" icon={<Server className="h-3.5 w-3.5" />} defaultOpen={false}>
-        <McpServerSelector stage={stage} onUpdate={onUpdate} />
+        {sessionEditor(['mcp'])}
+      </CollapsibleSection>
+
+      {/* Platform tools */}
+      <CollapsibleSection title="Platform Tools" icon={<Settings2 className="h-3.5 w-3.5" />} defaultOpen={false}>
+        {sessionEditor(['platform'])}
       </CollapsibleSection>
     </div>
   );

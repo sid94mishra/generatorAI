@@ -1,27 +1,27 @@
 // ────────────────────────────────────────────────────────────────
-// SkillSelector — Enable/disable skills per stage
-// Explicit stage additions (`session.agentOverrides.addSkillIds`), resolved
-// and staged through AgentResolver.
+// SkillSelector — skills added to a session (chat, workflow or stage).
+// Explicit additions (`session.agentOverrides.addSkillIds`), resolved and
+// staged through AgentResolver.
 // Includes Select All / Deselect All controls
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo } from 'react';
 import { Wand2 } from 'lucide-react';
-import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useAvailableArtifacts } from '@/hooks/projectQueries.js';
 import { cn } from '@/lib/utils.js';
 import { Badge, Button } from '@/components/ui/index.js';
-import type { AgentStage, SessionSpec } from '@generatorai/workflow-spec';
-import { patchSession } from './sessionPatch.js';
+import type { SessionSpec } from '@generatorai/workflow-spec';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 interface SkillSelectorProps {
-  stage: AgentStage;
-  onUpdate: (updates: Partial<AgentStage>) => void;
+  /** The (partial) session being edited. */
+  session: SessionSpec | undefined;
+  /** Patch semantics: a key set to undefined is removed. */
+  onChange: (updates: Partial<SessionSpec>) => void;
+  projectId?: string | undefined;
 }
 
-export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
-  const projectId = useWorkflowBuilderStore((s) => s.workflow.projectId ?? null);
+export function SkillSelector({ session, onChange, projectId }: SkillSelectorProps) {
   const { data: systemSkills, isLoading: systemLoading } = useAvailableArtifacts(undefined, 'skill');
   const { data: projectSkills, isLoading: projectLoading } = useAvailableArtifacts(
     projectId ?? undefined,
@@ -45,8 +45,6 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
     return [...byName.values()];
   }, [systemSkills, projectSkills]);
 
-  const session = stage.session;
-
   // Stage additions are explicit. Merely listing a catalog entry must not
   // claim that its files have been staged into the provider's workspace.
   const selectedIds = useMemo(
@@ -65,12 +63,10 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
     const disabled = session?.skills?.disabled?.filter((name) => !selectedNames.has(name));
     const skills = session?.skills ? { ...session.skills, disabled: disabled?.length ? disabled : undefined } : undefined;
     if (skills && skills.disabled === undefined) delete skills.disabled;
-    onUpdate(
-      patchSession(stage, {
-        agentOverrides: Object.keys(overrides).length > 0 ? overrides : undefined,
-        skills: skills && Object.keys(skills).length > 0 ? skills : undefined,
-      }),
-    );
+    onChange({
+      agentOverrides: Object.keys(overrides).length > 0 ? overrides : undefined,
+      skills: skills && Object.keys(skills).length > 0 ? skills : undefined,
+    });
   };
 
   const toggleSkill = (id: string) => {
@@ -108,7 +104,7 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">Add skills to this stage. Skills selected by a bound agent are inherited separately.</p>
+      <p className="text-xs text-muted-foreground">Add skills to this session. Skills selected by a bound agent are inherited separately.</p>
       {/* Count + Select/Deselect All */}
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
