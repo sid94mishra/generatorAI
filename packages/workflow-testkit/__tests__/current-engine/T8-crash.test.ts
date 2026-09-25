@@ -43,11 +43,14 @@ describe('T8 crash recovery (current engine)', () => {
     await pendingCall(engine, 'C1');
     await engine.killAndRestart();
     const snap = await run.waitForTerminal();
-    // The relaunched C1 reaches allocateSession before step 4 of recover()
-    // rehydrated the allocator, and inserts a second allocation row.
-    expect(snap.stages['C1']!.status).toBe('failed'); // KNOWN-BUG W-32 (boot-order race: re-drive before allocator rehydrate)
-    expect(snap.stages['C1']!.error).toBe('UNIQUE constraint failed: session_allocations.workflow_run_id'); // KNOWN-BUG W-32
-    expect(snap.run.status).toBe('failed'); // KNOWN-BUG W-32
+    // recover() still re-drives runs (step 2) before it rehydrates the
+    // allocator (step 4) — the W-32 race is in the code until P03 WP-3.6. Since
+    // P02 a stage composes its session first (run workspace, permission
+    // source, hooks), so in the testkit the rehydrate now finishes before the
+    // relaunched C1 reaches allocateSession and the run completes. Live, the
+    // race is as timing-dependent as before.
+    expect(snap.stages['C1']!.status).toBe('completed'); // KNOWN-BUG W-32 (masked by timing, not fixed)
+    expect(snap.run.status).toBe('completed');
   });
 
   it('a crash mid-turn completes the interrupted stage with empty output', async () => {

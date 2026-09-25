@@ -214,15 +214,32 @@ interface Env {
   workDir: string;
   calls: Recorded[];
   services: CoreServices;
+  /** The session composer's deps (shared by chats and stages). */
+  extensions: Record<string, unknown>;
 }
 
 function boot(db: AppDatabase, workDir: string): Env {
   const calls: Recorded[] = [];
-  // Only case (g) passes a `__workspaceId`; every other case never asks.
+  // Chats get no workspace here (the chat extensions carry no manager); a run
+  // has one, as every run does, with a single generated mount at its root.
+  const runWs = { id: 'ws-golden', rootPath: join(workDir, 'ws'), browserConfig: {} };
   const workspaces = {
-    getExecutionWorkspace: async (id: string) => ({ id, rootPath: join(workDir, 'ws'), browserConfig: {} }),
-    findWorkspaceByOwner: async () => null,
+    getExecutionWorkspace: async (id: string) => ({ ...runWs, id }),
+    findWorkspaceByOwner: async () => runWs,
+    getWorkingDirectory: () => runWs.rootPath,
+    getExposure: async () => ({
+      rootPath: runWs.rootPath,
+      scratchDir: join(runWs.rootPath, 'scratch'),
+      workingDirectory: runWs.rootPath,
+      additionalDirectories: [],
+      mounts: [],
+      env: { GENERATORAI_WORKSPACE_ROOT: runWs.rootPath },
+      hint: `
+
+[Workspace] ${runWs.rootPath}`,
+    }),
   } as unknown as WorkspaceManager;
+  const extensions: Record<string, unknown> = {};
   const services = createCoreServices({
     logger: quiet,
     harness: spyHarness(calls),
@@ -249,12 +266,12 @@ function boot(db: AppDatabase, workDir: string): Env {
     admissionController: new AdmissionController(),
     scmFlow: { run: async () => { throw new Error('golden: no source control'); } },
     config: { artifactsDir: join(workDir, 'art') },
-    chatExtensions: {},
+    chatExtensions: extensions,
     planRepo: new DrizzlePlanRepository(db),
     agentInteractionRepo: new DrizzleAgentInteractionRepository(db),
     agentResolver: fakeResolver,
   });
-  return { db, workDir, calls, services };
+  return { db, workDir, calls, services, extensions };
 }
 
 const envs: Env[] = [];
@@ -428,19 +445,34 @@ describe('session composition golden snapshots', () => {
     });
     const chatParams = lastCreate(env);
 
-    // W-51 — `projection: replace` on a stage wipes the workflow author's
-    // whole system message; the chat keeps the user's message and drops only
-    // the provider base prompt.
-    expect(sys(stageParams)?.mode).toBe('replace');
-    expect(sys(stageParams)?.content).not.toContain('WORKFLOW-AUTHOR-SYSTEM-MESSAGE'); // KNOWN-DRIFT W-51 (replace wipes the author's system message)
-    expect(sys(chatParams)?.content).toContain('GOLDEN-AGENT-INSTRUCTIONS');
+    // W-51 (fixed in P02) — `projection: replace` drops only the replaceable
+    // base (the author's own message, exactly as a chat drops the user's),
+    // never a platform block; the agent instructions come last, as a chat's.
+    const stageSys = sys(stageParams)!;
+    const chatSys = sys(chatParams)!;
+    expect(stageSys.mode).toBe('replace');
+    expect(stageSys.content).not.toContain('WORKFLOW-AUTHOR-SYSTEM-MESSAGE');
+    expect(chatSys.content).not.toContain('USER-SYSTEM-MESSAGE');
+    expect(stageSys.content).toContain('[Workspace]');
+    expect(stageSys.content).toContain('PLAN RECORDING');
+    for (const c of [stageSys.content!, chatSys.content!]) {
+      expect(c.trimEnd().endsWith('</generatorai:agent>')).toBe(true);
+    }
 
-    // W-52 — the stage's team mapping drops every restriction on a sub-agent.
+    // W-52 (fixed in P02) — the team member keeps every restriction in a stage.
     const stageTeam = (stageParams as unknown as { customAgents?: Array<Record<string, unknown>> }).customAgents!;
     expect(stageTeam).toHaveLength(1);
-    for (const field of ['tools', 'disallowedTools', 'maxTurns', 'permissionMode', 'reasoningEffort']) {
-      expect(stageTeam[0]![field]).toBeUndefined(); // KNOWN-DRIFT W-52 (restricted team member unrestricted in a stage)
-    }
+    expect(stageTeam[0]).toMatchObject({
+      disallowedTools: ['Bash', 'Write'],
+      maxTurns: 4,
+      permissionMode: 'plan',
+      reasoningEffort: 'low',
+    });
+    expect(stageTeam[0]!['tools']).toBeDefined();
+    // Same agent, same tools as the chat (the documented owner differences:
+    // the chat has no workspace here, the stage does).
+    const names = (p: unknown) => ((p as { tools?: Array<{ name: string }> }).tools ?? []).map((t) => t.name);
+    expect(names(stageParams)).toEqual(names(chatParams));
   });
 
   it('(g) stage with the browser enabled', async () => {
@@ -450,15 +482,16 @@ describe('session composition golden snapshots', () => {
       resolveConfig: () => ({ enabled: false, visibility: 'off' }),
       ensureStarted: async () => undefined,
     } as unknown as BrowserService;
-    env.services.stageExecutionService.setBrowserService(browser);
-    const p = await runStage(env, { name: 'golden-browser-stage', session: { agentRef: AGENT_REF } }, { __workspaceId: 'ws-golden' });
+    env.extensions['browserService'] = browser;
+    const p = await runStage(env, { name: 'golden-browser-stage', session: { agentRef: AGENT_REF } });
     const toolNames = ((p as unknown as { tools?: Array<{ name: string }> }).tools ?? []).map((t) => t.name);
     expect(toolNames).toContain('open_browser_page');
     await expect(golden(p, env.workDir)).toMatchFileSnapshot('__snapshots__/g-stage-browser.json');
 
-    // W-51 — on a stage the agent instructions land BEFORE the platform
-    // (browser) block; a chat appends them after every platform block.
+    // W-51 (fixed in P02) — the agent instructions come AFTER every platform
+    // block, the shared browser hint included.
     const content = sys(p)?.content ?? '';
-    expect(content.indexOf('GOLDEN-AGENT-INSTRUCTIONS')).toBeLessThan(content.indexOf('[Integrated Browser]')); // KNOWN-DRIFT W-51 (instructions before platform blocks)
+    expect(content.indexOf('GOLDEN-AGENT-INSTRUCTIONS')).toBeGreaterThan(content.indexOf('[Integrated Browser]'));
+    expect(content).toContain('when beneficial for front-end tasks'); // BROWSER_SYSTEM_HINT, not a stage copy
   });
 });

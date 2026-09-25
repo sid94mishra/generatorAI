@@ -49,6 +49,8 @@ import { ErrorHandler } from '../services/ErrorHandler.js';
 import { SessionAllocator } from '../services/SessionAllocator.js';
 import { ChatManagementService } from '../services/ChatManagementService.js';
 import type { ChatManagementServiceExtensions } from '../services/ChatManagementService.js';
+import { SessionComposer } from '../services/session/SessionComposer.js';
+import { TurnContextRegistry } from '../services/session/gates.js';
 import { OrchestratorService, DEFAULT_ORCHESTRATOR_CONFIG } from '../services/orchestrator/OrchestratorService.js';
 import type { OrchestratorConfig } from '../services/orchestrator/OrchestratorService.js';
 import { DAGScheduler } from '../services/DAGScheduler.js';
@@ -144,10 +146,9 @@ export interface CoreServicesInputs {
   entryRepo: EntryRepository;
 
   /**
-   * Section 8 — optional harness-agnostic extensions for ChatManagementService.
-   * When omitted, behaviour is identical to pre-Phase-6. Supply a populated
-   * `customToolRegistry` / `mcpHub` / `buildHookBridge` once a workflow or
-   * plug-in wants to exercise the custom tool / plan-mode / MCP layer.
+   * The platform services every agent session is built with — chats AND
+   * workflow stages share this object (the session composer's deps), by
+   * reference, so services wired into it after the graph is built reach both.
    */
   chatExtensions?: ChatManagementServiceExtensions;
   /**
@@ -192,6 +193,8 @@ export interface CoreServices {
   // Workflow execution services
   sessionAllocator: SessionAllocator;
   chatManagementService: ChatManagementService;
+  /** Builds every agent session (chats and stages). */
+  sessionComposer: SessionComposer;
   orchestratorService: OrchestratorService;
   dagScheduler: DAGScheduler;
   workflowDefinitionService: WorkflowDefinitionService;
@@ -278,13 +281,19 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     sessionAllocationRepo,
   );
 
+  // ONE session composer for chats and stages (P02). The extensions object is
+  // shared by reference: composition roots wire several services into it
+  // after the graph is built, and both owners see them.
+  const sessionExtensions: ChatManagementServiceExtensions = inputs.chatExtensions ?? {};
+  const sessionComposer = new SessionComposer(sessionExtensions, harness, new TurnContextRegistry());
   const chatManagementService = new ChatManagementService(
     chatEntityRepo,
     sessionRepo,
     chatMessageRepo,
     harness,
     eventBus,
-    inputs.chatExtensions,
+    sessionExtensions,
+    sessionComposer,
   );
 
   // PLN-01 — plan mode. Late-bound into the (by-reference) chat extensions so
@@ -342,10 +351,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
       },
       logger,
     );
-    if (inputs.chatExtensions) {
-      inputs.chatExtensions.planService = planService;
-      inputs.chatExtensions.agentInteractionService = agentInteractionService;
-    }
+    sessionExtensions.planService = planService;
+    sessionExtensions.agentInteractionService = agentInteractionService;
     // A pending chat gate blocks an in-memory SDK callback that did not
     // survive the restart, so it can never be honestly resumed.
     void agentInteractionService.expireOrphans().catch(() => undefined);
@@ -386,9 +393,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   orchestratorService.setChatManagementService(chatManagementService);
   // Late-bind into the chat extensions object (passed by reference) so
   // createChat can inject the orchestrator tool set for orchestrator chats.
-  if (inputs.chatExtensions) {
-    inputs.chatExtensions.orchestratorService = orchestratorService;
-  }
+  sessionExtensions.orchestratorService = orchestratorService;
 
   // Runs read their pinned definition version through one reader (W-13).
   const runDefinitionReader = new RunDefinitionReader(workflowDefinitionStore);
@@ -414,8 +419,9 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     sessionAllocator,
     hookExecutor,
     workspaceManager,
-    workflowRunRepo,        // HITL-06: read run's permissionMode per request
-    hitlService,            // HITL-06: bridge harness prompts to HITL waiter
+    workflowRunRepo,        // the run row: the permission source's first layer
+    hitlService,            // stage gates park on the durable HITL wait
+    sessionComposer,        // the same composer chats use
   );
 
   // W22 — put the effect sandwich on the real turn path. Without this line
@@ -438,11 +444,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   // composition-root does, so an SDK embedder that supplies the services gets
   // identical behaviour instead of a half-enabled feature.
   if (inputs.agentResolver) {
-    stageExecutionService.setAgentServices(inputs.agentResolver, inputs.agentStaging);
-    if (inputs.chatExtensions) {
-      inputs.chatExtensions.agentResolver = inputs.agentResolver;
-      if (inputs.agentStaging) inputs.chatExtensions.agentStaging = inputs.agentStaging;
-    }
+    sessionExtensions.agentResolver = inputs.agentResolver;
+    if (inputs.agentStaging) sessionExtensions.agentStaging = inputs.agentStaging;
   }
   if (inputs.agentService) orchestratorService.setAgentService(inputs.agentService);
 
@@ -546,6 +549,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     errorHandler,
     sessionAllocator,
     chatManagementService,
+    sessionComposer,
     orchestratorService,
     dagScheduler,
     workflowDefinitionService,

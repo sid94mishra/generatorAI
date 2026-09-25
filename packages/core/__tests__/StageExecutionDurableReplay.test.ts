@@ -33,6 +33,7 @@ import {
   MockWorkflowDefinitionStore,
   MockWorkflowRunRepository,
   createFakeWorkspaceManager,
+  createTestComposer,
   seedDefinition,
   testGraph,
 } from './MockRepositories.js';
@@ -117,16 +118,26 @@ function createMessageRepo(): IChatMessageRepository & { rows: ChatMessage[] } {
  */
 function createSessionAllocator(boot: { n: number }): SessionAllocator {
   return {
-    allocateSession: vi.fn(async (): Promise<Session> => ({
-      id: `ses-${boot.n}`,
-      name: 'session',
-      status: 'running',
-      conversationId: `conv-${boot.n}`,
-      tags: [],
-      requiresCodebase: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })),
+    allocateSession: vi.fn(
+      async (
+        _run: string,
+        _stage: string,
+        _mode: string,
+        build: (id: { sessionId: string; conversationId: string; op: 'create' }) => Promise<unknown>,
+      ): Promise<Session> => {
+        await build({ sessionId: `ses-${boot.n}`, conversationId: `conv-${boot.n}`, op: 'create' });
+        return {
+          id: `ses-${boot.n}`,
+          name: 'session',
+          status: 'running',
+          conversationId: `conv-${boot.n}`,
+          tags: [],
+          requiresCodebase: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as Session;
+      },
+    ),
     releaseSession: vi.fn(async () => {}),
     releaseAll: vi.fn(async () => {}),
     getSessionById: vi.fn(async () => null),
@@ -221,7 +232,8 @@ describe('W22 — effect sandwich on the stage turn path', () => {
     const runRepo = new MockWorkflowRunRepository(stageRunRepo);
     const messageRepo = createMessageRepo();
     const seed = async (prompts: string[], extra?: Record<string, unknown>): Promise<void> => {
-      const { definitionId, versionId } = await seedDefinition(definitionStore, stageGraph(prompts, extra));
+      const bound = opts.toolGroups ? { session: { agentRef: 'global:ro' } } : {};
+      const { definitionId, versionId } = await seedDefinition(definitionStore, stageGraph(prompts, { ...bound, ...extra }));
       const now = new Date();
       await runRepo.create({
         id: 'run-1', workflowDefinitionId: definitionId, definitionVersionId: versionId, name: 'Run',
@@ -240,21 +252,28 @@ describe('W22 — effect sandwich on the stage turn path', () => {
       createFakeWorkspaceManager(),
       runRepo,
       {} as HitlService,
+      createTestComposer(harnessPort(harness), {
+        ...(opts.toolGroups
+          ? {
+              // A stage with no agent gets the permissive platform defaults; a
+              // resolver answering with narrower groups is how a test says
+              // "this stage is read-only" (the stage binds an agent for it).
+              agentResolver: {
+                resolve: async () => {
+                  const empty = AgentResolver.empty();
+                  return {
+                    ...empty,
+                    agentRef: 'global:ro',
+                    driving: { ref: 'global:ro', name: 'RO', description: 'd', instructions: 'i', projection: 'append', role: 'agent' },
+                    toolPolicy: { ...empty.toolPolicy, groups: opts.toolGroups },
+                  };
+                },
+              } as unknown as AgentResolver,
+            }
+          : {}),
+      }),
     );
     if (opts.durable) service.setDurableEngine(engine);
-    if (opts.toolGroups) {
-      // `resolveStageAgent` returns `AgentResolver.empty()` when no agent is
-      // bound, whose groups are the permissive platform defaults. Overriding
-      // the projection is how a test says "this stage is read-only".
-      const empty = AgentResolver.empty();
-      vi.spyOn(
-        service as unknown as { resolveStageAgent: () => Promise<unknown> },
-        'resolveStageAgent',
-      ).mockResolvedValue({
-        ...empty,
-        toolPolicy: { ...empty.toolPolicy, groups: opts.toolGroups },
-      });
-    }
     return { service, harness, stageRunRepo, seed, messageRepo, entryRepo, boot };
   }
 

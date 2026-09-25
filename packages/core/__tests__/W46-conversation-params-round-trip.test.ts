@@ -2,7 +2,7 @@
 // W46 — CreateConversationParams round-trip acceptance test.
 //
 // Every field on CreateConversationParams must survive the path:
-//   SessionAllocator.allocateSession(config)
+//   SessionAllocator.allocateSession(build → config)
 //     → harness.createConversation(params)
 //
 // The previous 16-key hand-enumeration in SessionAllocator.createSession
@@ -141,7 +141,7 @@ describe('W46 — CreateConversationParams round-trip (G1/G2)', () => {
 
   it('per-stage: every non-function field in the config reaches harness.createConversation', async () => {
     const config = fullParams();
-    await allocator.allocateSession('run-1', 'stage-1', 'per-stage', config);
+    await allocator.allocateSession('run-1', 'stage-1', 'per-stage', async () => config as CreateConversationParams);
 
     expect(spy.createCalls).toHaveLength(1);
     const received = spy.createCalls[0]!;
@@ -174,7 +174,7 @@ describe('W46 — CreateConversationParams round-trip (G1/G2)', () => {
 
   it('single mode: shared session receives the same config', async () => {
     const config = fullParams();
-    await allocator.allocateSession('run-2', 'stage-1', 'single', config);
+    await allocator.allocateSession('run-2', 'stage-1', 'single', async () => config as CreateConversationParams);
 
     expect(spy.createCalls).toHaveLength(1);
     const received = spy.createCalls[0]!;
@@ -185,30 +185,20 @@ describe('W46 — CreateConversationParams round-trip (G1/G2)', () => {
 
   it('a second stage in single mode reuses the existing session (no second createConversation)', async () => {
     const config = fullParams();
-    await allocator.allocateSession('run-3', 'stage-1', 'single', config);
-    await allocator.allocateSession('run-3', 'stage-2', 'single', config);
+    await allocator.allocateSession('run-3', 'stage-1', 'single', async () => config as CreateConversationParams);
+    await allocator.allocateSession('run-3', 'stage-2', 'single', async () => config as CreateConversationParams);
 
     // The second stage reuses the shared session — createConversation is called only once
     expect(spy.createCalls).toHaveLength(1);
   });
 
-  it('null config: falls back gracefully — does not throw', async () => {
-    // No config passed — must not crash
-    await expect(
-      allocator.allocateSession('run-4', 'stage-1', 'per-stage'),
-    ).resolves.toBeDefined();
-    expect(spy.createCalls).toHaveLength(1);
-    // streaming default is injected
-    expect(spy.createCalls[0]!.streaming).toBe(true);
-  });
-
   it('onPermissionRequest from config reaches harness.createConversation', async () => {
     const onPermission = async () => ({ granted: true as const });
     const config: Partial<CreateConversationParams> = { onPermissionRequest: onPermission };
-    await allocator.allocateSession('run-5', 'stage-1', 'per-stage', config);
+    await allocator.allocateSession('run-5', 'stage-1', 'per-stage', async () => config as CreateConversationParams);
 
     const received = spy.createCalls[0]!;
-    // The caller's handler must win; the allocator default is only for the null case
+    // The composed handler reaches the provider; the allocator adds none of its own
     expect(received.onPermissionRequest).toBe(onPermission);
   });
 });

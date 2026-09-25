@@ -14,6 +14,7 @@ import {
   MockWorkflowDefinitionStore,
   MockWorkflowRunRepository,
   createFakeWorkspaceManager,
+  createTestComposer,
   seedDefinition,
   testGraph,
 } from './MockRepositories.js';
@@ -49,7 +50,10 @@ function createMockSessionAllocator(): SessionAllocator {
     updatedAt: new Date(),
   };
   return {
-    allocateSession: vi.fn(async () => fakeSession),
+    allocateSession: vi.fn(async (_run: string, _stage: string, _mode: string, build: (id: { sessionId: string; conversationId: string; op: 'create' }) => Promise<unknown>) => {
+      await build({ sessionId: fakeSession.id, conversationId: fakeSession.conversationId!, op: 'create' });
+      return fakeSession;
+    }),
     releaseSession: vi.fn(async () => {}),
     releaseAll: vi.fn(async () => {}),
   } as unknown as SessionAllocator;
@@ -128,6 +132,7 @@ describe('StageExecutionService', () => {
       createFakeWorkspaceManager(),
       runRepo,
       {} as HitlService,
+      createTestComposer(copilot),
     );
   });
 
@@ -144,7 +149,19 @@ describe('StageExecutionService', () => {
     const run = makeStageRun('skill-run', 'skill_stage');
     await stageRunRepo.create(run);
     const resolve = vi.fn(async () => AgentResolver.empty());
-    service.setAgentServices({ resolve } as unknown as AgentResolver);
+    service = new StageExecutionService(
+      stageRunRepo,
+      new RunDefinitionReader(definitionStore),
+      messageRepo,
+      copilot,
+      eventBus,
+      sessionAllocator,
+      hookExecutor,
+      createFakeWorkspaceManager(),
+      runRepo,
+      {} as HitlService,
+      createTestComposer(copilot, { agentResolver: { resolve } as unknown as AgentResolver }),
+    );
     await service.executeStage(run, 'run-1', 'per-stage');
     expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
       runtimeOverrides: expect.objectContaining({ agentOverrides: { addSkillIds: ['skill-a'] } }),

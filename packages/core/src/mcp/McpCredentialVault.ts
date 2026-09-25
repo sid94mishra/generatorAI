@@ -66,6 +66,16 @@ export class McpCredentialVault {
     return out;
   }
 
+  /**
+   * The value behind one `secretref:<namespace>/<name>` pointer (a BYOK
+   * provider key), or null when the store has none.
+   */
+  async resolveRef(ref: string): Promise<string | null> {
+    const parsed = parseMcpSecretRef(ref);
+    if (!parsed) return null;
+    return (await getSecretString(this.secrets, parsed.namespace, parsed.name)) ?? null;
+  }
+
   /** Delete every credential of one server. */
   async remove(namespace: string): Promise<void> {
     await this.secrets.removeNamespace(namespace);

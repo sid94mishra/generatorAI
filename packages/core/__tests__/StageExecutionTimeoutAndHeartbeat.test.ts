@@ -11,6 +11,7 @@ import {
   MockWorkflowDefinitionStore,
   MockWorkflowRunRepository,
   createFakeWorkspaceManager,
+  createTestComposer,
   seedDefinition,
   testGraph,
 } from './MockRepositories.js';
@@ -47,7 +48,10 @@ function createMockSessionAllocator(): SessionAllocator {
     updatedAt: new Date(),
   };
   return {
-    allocateSession: vi.fn(async () => fakeSession),
+    allocateSession: vi.fn(async (_run: string, _stage: string, _mode: string, build: (id: { sessionId: string; conversationId: string; op: 'create' }) => Promise<unknown>) => {
+      await build({ sessionId: fakeSession.id, conversationId: fakeSession.conversationId!, op: 'create' });
+      return fakeSession;
+    }),
     releaseSession: vi.fn(async () => {}),
     releaseAll: vi.fn(async () => {}),
     getSessionById: vi.fn(async () => fakeSession),
@@ -114,6 +118,7 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
       createFakeWorkspaceManager(),
       runRepo,
       {} as HitlService,
+      createTestComposer(copilot),
     );
   });
 

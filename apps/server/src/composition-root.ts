@@ -783,6 +783,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const chatExtensions: ChatManagementServiceExtensions = {
     customToolRegistry,
     mcpHub,
+    // BYOK provider API keys are `secretref:` pointers; the session composer
+    // reads the value here, at the last moment (never the pointer string).
+    resolveSecretRef: (ref) => mcpCredentialVault.resolveRef(ref),
     // Agent-native source control (doc §5) — the post-turn commit → push → PR
     // hook for chats created with `sourceControl.autoCommit`.
     sourceControlFlowService,
@@ -1561,7 +1564,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   chatExtensions.agentResolver = agentResolver;
   chatExtensions.agentStaging = agentStaging;
   chatExtensions.systemArtifacts = systemArtifactService;
-  stageExecutionService.setAgentServices(agentResolver, agentStaging);
   orchestratorService.setAgentService(agentService);
   // Staged skill files live under `<workspace>/.generatorai`, outside every
   // worktree; drop them with the workspace (invariant §5.14).
@@ -1649,13 +1651,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     }
   }, 'native');
 
-  // Late-wire browserService into ChatManagementService so chats with
-  // `browserConfig.enabled: true` auto-boot a shared Chromium and inject
-  // the CDP endpoint into the harness system prompt.
-  chatExtensions.browserService = browserService;  // Same story for stage sessions — the workflow path builds sessions
-  // via StageExecutionService which needs BrowserService to register
-  // the built-in browser tool set per stage.
-  stageExecutionService.setBrowserService(browserService);
+  // Late-wire browserService into the session composer's deps: every chat
+  // and every stage session gets the built-in browser tool set, and sessions
+  // with `browserConfig.enabled` auto-boot a shared Chromium.
+  chatExtensions.browserService = browserService;
 
   // Computer Use. The bridge chain ends in NullComputerBridge so that with no
   // desktop attached every call resolves to a typed refusal rather than

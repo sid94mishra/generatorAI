@@ -17,11 +17,10 @@ import type {
   PlanCardSummary,
   PlanDecision,
   QuestionCardSummary,
-  AgentToolPolicy,
 } from '@generatorai/shared';
 import { generateId, DEFAULT_AGENT_MODE, ValidationError } from '@generatorai/shared';
 import * as path from 'node:path';
-import type { ChatSourceSpec, ExecutionWorkspace } from '@generatorai/shared';
+import type { ChatSourceSpec, ExecutionWorkspace, WorkspaceExposure } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
 import type { IChatRepository } from '../domain/ports/IChatRepository.js';
 import type { ISessionRepository, IChatMessageRepository } from '../domain/ports/IRepositories.js';
@@ -57,16 +56,13 @@ import {
 import { scmMountTargets } from './scm/workspaceMounts.js';
 import { buildTurnHint } from './scm/turnHint.js';
 import { withDeadline } from '../utils/withDeadline.js';
-import { appendSystemBlock } from './session/cfg.js';
-import { PlatformToolBinder, type BindTarget } from './session/PlatformToolBinder.js';
+import type { PlatformToolBinder } from './session/PlatformToolBinder.js';
+import { formatConversationBindingKey } from './session/bindingKey.js';
+import { workspaceExposure } from './session/workspaceExposure.js';
 import type { ComposeWarning, SessionComposerDeps, TurnContext } from './session/types.js';
 import { stampCardSequence, TurnContextRegistry, type GatePort } from './session/gates.js';
-import { applyModeConfig } from './session/modeConfig.js';
-import { resolveMcp } from './session/resolveMcp.js';
-import { applyAgentProjection, applyExplicitSpec, appendAgentInstructions, deliverSkills } from './session/agentProjection.js';
+import { SessionComposer, type ComposeInput } from './session/SessionComposer.js';
 import { chatSessionSpec } from './session/chatSpec.js';
-import { applyWorkspaceExposure, workspaceExposure } from './session/workspaceExposure.js';
-import { systemContent } from './session/cfg.js';
 import {
   groupTurns,
   lastAnchor,
@@ -245,11 +241,15 @@ export class ChatManagementService {
     private harness: IAgentHarness,
     private eventBus: EventBus,
     private extensions: ChatManagementServiceExtensions = {},
-    /** The turn in flight on each conversation; shared with the stage executor. */
-    private readonly turns: TurnContextRegistry = new TurnContextRegistry(),
+    /** Builds every agent session; shared with the stage executor (one turn registry). */
+    private readonly composer: SessionComposer = new SessionComposer(extensions, harness, new TurnContextRegistry()),
   ) {
-    this.binder = new PlatformToolBinder(extensions);
+    this.binder = composer.binder;
+    this.turns = composer.turns;
   }
+
+  /** The turn in flight on each conversation (the composer's registry). */
+  private readonly turns: TurnContextRegistry;
 
   // ══════════════════════════════════════════════════════════════
   // Files the user moved back in time since the agent last looked
@@ -694,30 +694,23 @@ export class ChatManagementService {
     recordPlan: (args, turn) => this.recordPlan(chatOf(turn), args, turn),
   };
 
+  /** The chat's view of its workspace (persisted mounts), for the composer. */
+  private async exposureOf(workspace: ExecutionWorkspace): Promise<WorkspaceExposure | undefined> {
+    const manager = this.extensions.workspaceManager;
+    return manager ? workspaceExposure(manager, workspace) : undefined;
+  }
+
   /**
-   * Gates, plan-mode instructions and `record_plan` for a chat conversation.
-   * Workers get none (`attended: false`); a chat attaches its permission mode
-   * only when it asks for gated permissions (see
-   * `shouldAttachPermissionHandler`).
+   * A chat's permission policy for the composer: its row is the source; it
+   * attaches its construction-time mode only when it asks for gated
+   * permissions (`shouldAttachPermissionHandler`, part of the binding key).
    */
-  private chatModeConfig(
-    conversationConfig: Record<string, unknown>,
-    conversationId: string,
-    chat: { parentChatId?: string | undefined; permissionMode?: Chat['permissionMode'] },
-    groups: AgentToolPolicy,
-    planModeInstructions: string | undefined,
-  ): void {
-    applyModeConfig(conversationConfig, {
-      conversationId,
-      turns: this.turns,
-      gates: this.planModeEnabled ? this.chatGatePort : undefined,
-      attended: !chat.parentChatId,
-      groups,
-      planModeInstructions,
-      ...(shouldAttachPermissionHandler(chat.permissionMode)
-        ? { attachPermissionMode: { mode: chat.permissionMode } }
-        : {}),
-    });
+  private chatPermissionPolicy(chat: { permissionMode?: Chat['permissionMode'] }): ComposeInput['permission'] {
+    return {
+      source: { kind: 'chat', read: async () => chat.permissionMode },
+      ...(shouldAttachPermissionHandler(chat.permissionMode) ? { attach: { mode: chat.permissionMode } } : {}),
+      bindingMode: chat.permissionMode ?? 'bypassPermissions',
+    };
   }
 
   /**
@@ -1093,34 +1086,15 @@ export class ChatManagementService {
   private readonly conversationBindings = new Map<string, string>();
 
   /**
-   * The model + provider + agent a chat currently asks for.
-   *
-   * ONE formatter, used by both the site that RECORDS a binding at creation
-   * and the site that COMPARES it on the next turn. They used to build the
-   * string separately — four parts written, five computed — so the comparison
-   * could never match and every chat's first message paid a full rebuild:
-   * a database read, complete agent resolution, writing skill files to disk,
-   * MCP resolution, tool definitions, and a provider round-trip, all before
-   * the first word (review 3.6). The comment at the write site said the
-   * opposite of what the code did.
+   * The model + provider + agent a chat currently asks for, in the SAME
+   * format the composer recorded at creation (`formatConversationBindingKey`),
+   * so the first turn does not pay a needless rebind (review 3.6).
    */
-  private formatConversationBindingKey(parts: {
-    harnessType: string;
-    model: string;
-    agentRef: string;
-    agentVersion: number;
-    permissionMode?: string;
-  }): string {
-    // Computer Use is a Settings toggle that applies live. Without it here, a
-    // chat that was open when the user turned the feature on would keep the
-    // tool-less conversation until the server restarted — and one that was open
-    // when they turned it OFF would keep driving their desktop.
-    const computerUse = this.extensions.computerService?.isEnabled() ? '1' : '0';
-    return `${parts.harnessType}::${parts.model}::${parts.agentRef}::${parts.agentVersion}::cu${computerUse}::pm${parts.permissionMode ?? '-'}`;
-  }
-
   private conversationBindingKey(chat: Chat): string {
-    return this.formatConversationBindingKey({
+    return formatConversationBindingKey({
+      // Computer Use is a live Settings toggle: a chat open when it flipped
+      // must rebind, or it keeps (or lacks) desktop control.
+      computerUseEnabled: this.extensions.computerService?.isEnabled() ?? false,
       harnessType: chat.harnessConfig?.harnessType ?? '',
       model: chat.harnessConfig?.model ?? chat.model ?? '',
       // Agent ref + version only. Per-turn options must NOT participate, or
@@ -1154,13 +1128,6 @@ export class ChatManagementService {
     return [...this.activeSubscriptions.keys()];
   }
 
-  /** The provider a conversation config will run on, for capability-level decisions. */
-  private async providerOf(cfg: Record<string, unknown>, conversationId: string): Promise<string | undefined> {
-    const explicit = cfg['harnessType'] as string | undefined;
-    if (explicit) return explicit;
-    return this.harness.resolveProvider?.({ conversationId, ...(typeof cfg['model'] === 'string' ? { model: cfg['model'] as string } : {}) });
-  }
-
   /**
    * P1-45: Await any in-flight git worktree creation for a chat.
    *
@@ -1181,21 +1148,6 @@ export class ChatManagementService {
     if (!this.extensions.mountService) return;
     const chat = await this.chatRepo.getById(chatId);
     if (chat.workspaceId) await this.extensions.mountService.ready(chat.workspaceId);
-  }
-
-  /**
-   * Put the workspace's exposure on a conversation config (cwd, the other
-   * mounts + managed root as additional directories, env). The `[Workspace]`
-   * hint is appended separately because it must land AFTER the caller's own
-   * system message.
-   */
-  private async exposeWorkspace(
-    conversationConfig: Record<string, unknown>,
-    workspace: ExecutionWorkspace,
-  ): Promise<string | undefined> {
-    const manager = this.extensions.workspaceManager;
-    if (!manager) return undefined;
-    return applyWorkspaceExposure(conversationConfig, await workspaceExposure(manager, workspace));
   }
 
   /**
@@ -1364,26 +1316,14 @@ export class ChatManagementService {
     };
     await this.sessionRepo.create(session);
 
-    // 2. Create the harness conversation with full config. `harnessType`
-    // pins the agent provider; when unset the router picks the provider whose
-    // live catalog owns `model`, so chats can span providers.
-    const conversationConfig: Record<string, unknown> = {
-      conversationId,
-      model: params.harnessConfig?.model ?? params.model,
-      harnessType: params.harnessConfig?.harnessType,
-      streaming: params.harnessConfig?.streaming ?? true,
-    };
-
     // 2.1: Execution workspace (ALWAYS — even without a project). The
     // managed root holds plans, scratch, screenshots and staged skills; the
     // code the agent edits lives in MOUNTS (see MountService).
     let workspaceId: string | undefined;
-    let workspaceRootPath: string | undefined;
-    let workspaceHint: string | undefined;
+    let chatWorkspace: ExecutionWorkspace | undefined;
     if (sharedWorkspace) {
       workspaceId = sharedWorkspace.id;
-      workspaceRootPath = sharedWorkspace.rootPath;
-      workspaceHint = await this.exposeWorkspace(conversationConfig, sharedWorkspace);
+      chatWorkspace = sharedWorkspace;
     } else if (this.extensions.workspaceManager) {
       // Not swallowed any more: a chat whose workspace could not be created
       // would run the agent in the shared artifacts directory.
@@ -1408,102 +1348,41 @@ export class ChatManagementService {
           : {}),
       });
       workspaceId = workspace.id;
-      workspaceRootPath = workspace.rootPath;
+      chatWorkspace = workspace;
       if (planned && this.extensions.mountService) {
         await this.extensions.mountService.stage(workspace.id, planned);
       }
-      workspaceHint = await this.exposeWorkspace(conversationConfig, workspace);
     }
 
-    // Skills are staged into the MANAGED root, never the user's repository.
-    const workspaceRootForStaging = workspaceRootPath;
-
-    // Agent binding — resolved BEFORE the explicit harnessConfig pass-through
-    // so a caller-supplied field still wins per-field. The instructions themselves are
-    // appended at the very end, after every platform instruction block.
-    const { projection: agentProjection, warnings: agentWarnings } = await applyAgentProjection(
-      conversationConfig,
-      {
-        scope: 'chat',
-        agentRef: params.agentRef,
-        overrides: params.agentOverrides,
-        baseLayer: params.harnessConfig,
-        projectId: params.projectId,
-        workspaceRoot: workspaceRootForStaging,
+    // 2. The harness conversation, composed like every agent session
+    // (canonical order, instructions last). `harnessType` pins the provider;
+    // when unset the router picks the provider whose catalog owns `model`.
+    const chatSpec = chatSessionSpec(params);
+    const composed = await this.composer.compose({
+      owner: { kind: 'chat', chatId, sessionId, ...(params.parentChatId ? { parentChatId: params.parentChatId } : {}) },
+      conversationId,
+      mode: 'create',
+      spec: chatSpec,
+      agent: { overrides: params.agentOverrides, baseLayer: params.harnessConfig },
+      extras: { streaming: params.harnessConfig?.streaming, configDir: params.harnessConfig?.configDir },
+      workspace: chatWorkspace,
+      exposure: chatWorkspace ? await this.exposureOf(chatWorkspace) : undefined,
+      projectId: params.projectId,
+      attended: !params.parentChatId,
+      gates: this.planModeEnabled ? this.chatGatePort : undefined,
+      permission: this.chatPermissionPolicy(params),
+      platform: {
+        browser: { autoStart: true, config: params.browserConfig as Record<string, unknown> | undefined },
+        computerUse: 'switch',
+        orchestrator: params.orchestratorMode ?? false,
+        sourceControl: params.sourceControl,
       },
-      this.extensions,
-    );
-
-    // An orchestrator-role agent IS the orchestrator, so binding one enables
-    // orchestrate mode here rather than relying on each client to tick a box —
-    // the web dialog did, the CLI/SDK/mobile did not, and those chats silently
-    // lost the background-agent tool set.
+    });
+    const agentProjection = composed.projection;
+    // An orchestrator-role agent IS the orchestrator (the composer gave it the
+    // tool set); the chat record says so for every client.
     const orchestratorMode =
       (params.orchestratorMode ?? false) || agentProjection.driving?.role === 'orchestrator';
-
-    // The explicit spec, after the projection: one precedence rule for create
-    // and resume (W-50).
-    const chatSpec = chatSessionSpec(params);
-    applyExplicitSpec(conversationConfig, chatSpec, chatSpec, { configDir: params.harnessConfig?.configDir });
-
-    // Everything appended to `systemMessage` below this line is a PLATFORM block.
-    const baseSystemMessage =
-      (conversationConfig['systemMessage'] as { content?: string } | undefined)?.content ?? '';
-    appendSystemBlock(conversationConfig, workspaceHint);
-
-    // Platform tool surface, in the canonical order (R-10): browser →
-    // computer → widgets → SCM hint → MCP → custom → orchestrator → hooks.
-    const bindTarget: BindTarget = {
-      owner: { kind: 'chat', chatId, sessionId, ...(params.parentChatId ? { parentChatId: params.parentChatId } : {}) },
-      sessionId,
-      conversationId,
-      ...(workspaceId ? { workspaceId } : {}),
-      groups: agentProjection.toolPolicy.groups,
-    };
-    await this.binder.browser(conversationConfig, bindTarget, {
-      autoStart: true,
-      ...(params.browserConfig ? { browserConfig: params.browserConfig as Record<string, unknown> } : {}),
-    });
-    await this.binder.computer(conversationConfig, bindTarget, { enabled: true });
-    this.binder.widgets(conversationConfig, bindTarget, { enabled: true });
-    this.binder.sourceControlHint(conversationConfig, params.sourceControl);
-
-    // TOL-06 / W-18 — one merge (agent ∪ explicit, explicit last) and the
-    // hub (disable flags, secretref resolution), shared with the resume path
-    // and with stages.
-    const mcpWarnings = await resolveMcp(
-      conversationConfig,
-      params.harnessConfig?.mcpServers,
-      bindTarget.owner,
-      conversationId,
-      this.extensions.mcpHub,
-    );
-
-    this.binder.custom(conversationConfig, bindTarget);
-    // Workers never get the orchestrator tool set (no recursive spawning).
-    this.binder.orchestrator(conversationConfig, bindTarget, {
-      enabled: orchestratorMode && !params.parentChatId,
-      includeAgentDiscovery: !!agentProjection.driving,
-    });
-    this.binder.hooks(conversationConfig, bindTarget);
-    const skillWarnings = await deliverSkills(
-      conversationConfig,
-      await this.providerOf(conversationConfig, conversationId),
-      workspaceRootForStaging,
-      this.extensions.agentStaging,
-    );
-
-    // PLN-01 — plan/question gates + plan-mode instructions.
-    this.chatModeConfig(
-      conversationConfig,
-      conversationId,
-      { parentChatId: params.parentChatId, permissionMode: params.permissionMode },
-      agentProjection.toolPolicy.groups,
-      chatSpec.planModeInstructions,
-    );
-
-    // The agent instructions go LAST — after every platform instruction block.
-    appendAgentInstructions(conversationConfig, agentProjection, baseSystemMessage);
 
     // `conversationConfig` is assembled dynamically as a Record; every key set
     // above is a valid CreateConversationParams field, so assert the final shape
@@ -1512,9 +1391,9 @@ export class ChatManagementService {
       if (params.createConversation) {
         // A fork: the provider branches the source conversation into this id
         // instead of starting cold. Same config, same tool handlers.
-        await params.createConversation(conversationConfig as unknown as CreateConversationParams);
+        await params.createConversation(composed.params);
       } else {
-        await this.harness.createConversation(conversationConfig as unknown as CreateConversationParams);
+        await this.harness.createConversation(composed.params);
       }
     } finally {
       // Materialise the mounts (worktrees, branch checkouts, shadow stores) in
@@ -1539,20 +1418,9 @@ export class ChatManagementService {
       permissionMode: resolveTurnPermissionMode(firstAgentMode, params.permissionMode),
     });
     // Remember what this conversation was bound to so the first turn doesn't
-    // rebind it needlessly.
-    this.conversationBindings.set(
-      conversationId,
-      this.formatConversationBindingKey({
-        harnessType: (conversationConfig['harnessType'] as string | undefined) ?? '',
-        model: (conversationConfig['model'] as string | undefined) ?? '',
-        agentRef: agentProjection.agentRef ?? '-',
-        agentVersion: agentProjection.agentVersion ?? 0,
-        // Must match what `conversationBindingKey` will compute for the chat
-        // record built below, or the very first turn would see a changed key
-        // and rebind the conversation this call just created.
-        permissionMode: params.permissionMode ?? 'bypassPermissions',
-      }),
-    );
+    // rebind it needlessly (the key uses the chat row's permission mode, as
+    // `conversationBindingKey` does for the record built below).
+    this.conversationBindings.set(conversationId, composed.bindingKey);
 
     // 3. Transition session to active
     await this.sessionRepo.updateStatus(sessionId, 'active');
@@ -1604,7 +1472,7 @@ export class ChatManagementService {
       kind: 'chat.created',
       data: { chatId, name: chat.name },
     });
-    await this.emitComposeWarnings(sessionId, chatId, [...agentWarnings, ...mcpWarnings, ...skillWarnings]);
+    await this.emitComposeWarnings(sessionId, chatId, composed.warnings);
 
     return chat;
   }
@@ -1688,8 +1556,7 @@ export class ChatManagementService {
    * with a freshly-created chat.
    */
   private async ensureConversation(chat: Chat, conversationId: string): Promise<void> {
-    const conversationConfig = await this.buildConversationConfig(chat, conversationId);
-    await this.harness.createConversation(conversationConfig as unknown as CreateConversationParams);
+    await this.harness.createConversation(await this.buildConversationConfig(chat, conversationId));
   }
 
   /**
@@ -1700,126 +1567,45 @@ export class ChatManagementService {
    * in-memory functions that cannot be persisted, so they must be rebuilt from
    * this config every time a conversation re-enters memory.
    */
-  private async buildConversationConfig(chat: Chat, conversationId: string): Promise<Record<string, unknown>> {
-    const conversationConfig: Record<string, unknown> = {
-      conversationId,
-      model: chat.harnessConfig?.model ?? chat.model,
-      harnessType: chat.harnessConfig?.harnessType,
-      streaming: chat.harnessConfig?.streaming ?? true,
-    };
-
+  private async buildConversationConfig(chat: Chat, conversationId: string): Promise<CreateConversationParams> {
     // The provider's own handle for this conversation (Claude session id,
     // Codex thread id), persisted after every turn. Without it a conversation
     // re-created after a server restart started the model over with no memory
-    // of the chat — measured live: a Codex chat resumed onto a brand-new
-    // thread, so a later rewind could not find the turn it was asked to drop.
-    // A live adapter's own record still wins (see `resumeProviderSessionId`).
-    try {
-      const session = await this.sessionRepo.getById(chat.sessionId);
-      if (session.providerSessionId) {
-        conversationConfig['resumeProviderSessionId'] = session.providerSessionId;
-      }
-    } catch {
-      // No session row — a cold start is the only option.
-    }
-
-    // Working directory + additional directories + env, from the persisted
-    // mounts — the SAME exposure the create path used, so a restart, an
-    // eviction or a model switch never moves the agent out of its mount.
-    let workspaceHint: string | undefined;
-    let workspaceRootPath: string | undefined;
-    if (chat.workspaceId && this.extensions.workspaceManager) {
-      try {
-        const workspace = await this.extensions.workspaceManager.getExecutionWorkspace(chat.workspaceId);
-        if (workspace) {
-          workspaceRootPath = workspace.rootPath;
-          workspaceHint = await this.exposeWorkspace(conversationConfig, workspace);
-        }
-      } catch {
-        // Non-fatal — fall back to no explicit working directory.
-      }
-    }
-
-    // Agent binding. Resolution uses the FROZEN snapshot: resolving live would
-    // let an agent edit change a resumed conversation's tool set and break the
-    // deliberately byte-identical prompt-cache prefix. Same order as the
-    // create path: projection, then the explicit spec (one precedence rule).
-    const { projection: agentProjection, warnings: agentWarnings } = await applyAgentProjection(
-      conversationConfig,
-      {
-        scope: 'chat',
-        agentRef: chat.agentRef,
-        overrides: chat.agentOverrides,
-        baseLayer: chat.harnessConfig,
-        projectId: chat.projectId,
-        // Skills are staged into the MANAGED root — same as the create path.
-        workspaceRoot: workspaceRootPath,
-        snapshot: chat.agentSnapshot,
-      },
-      this.extensions,
-    );
-    const spec = chatSessionSpec(chat);
-    applyExplicitSpec(conversationConfig, spec, spec, { configDir: chat.harnessConfig?.configDir });
-
-    // Everything appended to `systemMessage` below this line is a PLATFORM block.
-    const baseSystemMessage = systemContent(conversationConfig);
-    appendSystemBlock(conversationConfig, workspaceHint);
-
-    // The same platform tool surface as the create path (tool handlers are
-    // in-memory and must be rebound on every resume). No auto-start here: a
-    // resumed conversation re-boots Chromium lazily on its first browser call.
-    const bindTarget: BindTarget = {
+    // of the chat. A live adapter's own record still wins.
+    const session = await this.sessionRepo.getById(chat.sessionId).catch(() => null);
+    // The SAME exposure as the create path (persisted mounts), so a restart,
+    // an eviction or a model switch never moves the agent out of its mount.
+    const workspace =
+      chat.workspaceId && this.extensions.workspaceManager
+        ? ((await this.extensions.workspaceManager.getExecutionWorkspace(chat.workspaceId).catch(() => null)) ?? undefined)
+        : undefined;
+    // Resolution uses the FROZEN agent snapshot: resolving live would let an
+    // agent edit change a resumed conversation's tools and prompt prefix.
+    const composed = await this.composer.compose({
       owner: { kind: 'chat', chatId: chat.id, sessionId: chat.sessionId, ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}) },
-      sessionId: chat.sessionId,
       conversationId,
-      ...(chat.workspaceId ? { workspaceId: chat.workspaceId } : {}),
-      groups: agentProjection.toolPolicy.groups,
-    };
-    await this.binder.browser(conversationConfig, bindTarget, { autoStart: false });
-    await this.binder.computer(conversationConfig, bindTarget, { enabled: true });
-    this.binder.widgets(conversationConfig, bindTarget, { enabled: true });
-    this.binder.sourceControlHint(conversationConfig, chat.sourceControl);
-
-    // MCP servers: the SAME merge and hub resolution as the create path.
-    const mcpWarnings = await resolveMcp(
-      conversationConfig,
-      chat.harnessConfig?.mcpServers,
-      { kind: 'chat', chatId: chat.id, sessionId: chat.sessionId },
-      conversationId,
-      this.extensions.mcpHub,
-    );
-
-    this.binder.custom(conversationConfig, bindTarget);
-    this.binder.orchestrator(conversationConfig, bindTarget, {
-      enabled: !!chat.orchestratorMode && !chat.parentChatId,
-      includeAgentDiscovery: !!agentProjection.driving,
+      mode: 'resume',
+      spec: chatSessionSpec(chat),
+      agent: { overrides: chat.agentOverrides, baseLayer: chat.harnessConfig },
+      agentSnapshot: chat.agentSnapshot,
+      extras: { streaming: chat.harnessConfig?.streaming, configDir: chat.harnessConfig?.configDir },
+      workspace,
+      exposure: workspace ? await this.exposureOf(workspace) : undefined,
+      projectId: chat.projectId,
+      ...(session?.providerSessionId ? { resumeProviderSessionId: session.providerSessionId } : {}),
+      attended: !chat.parentChatId,
+      gates: this.planModeEnabled ? this.chatGatePort : undefined,
+      permission: this.chatPermissionPolicy(chat),
+      platform: {
+        // A resumed conversation re-boots Chromium lazily on its first browser call.
+        browser: { autoStart: false },
+        computerUse: 'switch',
+        orchestrator: !!chat.orchestratorMode,
+        sourceControl: chat.sourceControl,
+      },
     });
-    // HKS-01 — the hook bridge is a set of in-memory closures the SDK cannot
-    // persist, so a resumed conversation without this silently loses hooks.
-    this.binder.hooks(conversationConfig, bindTarget);
-    const skillWarnings = await deliverSkills(
-      conversationConfig,
-      await this.providerOf(conversationConfig, conversationId),
-      workspaceRootPath,
-      this.extensions.agentStaging,
-    );
-
-    // PLN-01 — the resume path MUST reinstall the gates. The SDK cannot
-    // persist in-memory callbacks, so a resumed conversation without these
-    // silently loses plan mode and clarifying questions after a restart.
-    this.chatModeConfig(
-      conversationConfig,
-      conversationId,
-      chat,
-      agentProjection.toolPolicy.groups,
-      spec.planModeInstructions,
-    );
-
-    // Instructions last, after every platform block.
-    appendAgentInstructions(conversationConfig, agentProjection, baseSystemMessage);
-    await this.emitComposeWarnings(chat.sessionId, chat.id, [...agentWarnings, ...mcpWarnings, ...skillWarnings]);
-
-    return conversationConfig;
+    await this.emitComposeWarnings(chat.sessionId, chat.id, composed.warnings);
+    return composed.params;
   }
 
   /**
@@ -2679,11 +2465,11 @@ export class ChatManagementService {
   }
 
   /** Bring a conversation back into the harness's memory (best effort). */
-  private async ensureLiveConversation(conversationId: string, cfg: Record<string, unknown>): Promise<void> {
+  private async ensureLiveConversation(conversationId: string, cfg: CreateConversationParams): Promise<void> {
     if (this.harness.hasLiveConversation(conversationId)) return;
     try {
       await withDeadline(
-        this.harness.resumeConversation(conversationId, cfg as unknown as CreateConversationParams),
+        this.harness.resumeConversation(conversationId, cfg),
         CONVERSATION_BIND_TIMEOUT_MS,
         'resume the conversation',
       );

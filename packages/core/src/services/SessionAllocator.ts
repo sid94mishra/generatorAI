@@ -13,6 +13,24 @@ import type {
 } from '../domain/ports/ISessionAllocationRepository.js';
 import type { EventBus } from '../events/EventBus.js';
 
+/**
+ * The session a stage speaks through, as the allocator decided it. `op` says
+ * what happens to its conversation: `create` (a new one), `resume` (this
+ * stage's own, back into memory after a restart — rebuilt with the composed
+ * config so its tool handlers and gates exist again), or `attach` (a shared
+ * conversation another stage created; its config is not rebound, RV-20).
+ */
+export interface SessionIdentity {
+  sessionId: string;
+  conversationId: string;
+  op: 'create' | 'resume' | 'attach';
+  /** The provider's own handle for the conversation, when it has one. */
+  providerSessionId?: string;
+}
+
+/** Composes the conversation config for an identity (the session composer). */
+export type SessionConfigBuilder = (identity: SessionIdentity) => Promise<CreateConversationParams>;
+
 /** Tracks allocated sessions for a workflow run */
 interface RunAllocation {
   /** DB row id for the persisted allocation (so we can update/delete). */
@@ -98,10 +116,10 @@ export class SessionAllocator {
     workflowRunId: string,
     stageRunId: string,
     mode: WorkflowSessionMode,
-    config?: Partial<CreateConversationParams>,
+    build: SessionConfigBuilder,
   ): Promise<Session> {
     return this.serializePerRun(workflowRunId, () =>
-      this.allocateSessionLocked(workflowRunId, stageRunId, mode, config),
+      this.allocateSessionLocked(workflowRunId, stageRunId, mode, build),
     );
   }
 
@@ -109,7 +127,7 @@ export class SessionAllocator {
     workflowRunId: string,
     stageRunId: string,
     mode: WorkflowSessionMode,
-    config?: Partial<CreateConversationParams>,
+    build: SessionConfigBuilder,
   ): Promise<Session> {
     let allocation = this.allocations.get(workflowRunId);
     if (!allocation) {
@@ -131,13 +149,13 @@ export class SessionAllocator {
 
     switch (mode) {
       case 'single':
-        return this.allocateSingleMode(allocation, workflowRunId, stageRunId, config);
+        return this.allocateSingleMode(allocation, workflowRunId, stageRunId, build);
       case 'per-stage':
-        return this.allocatePerStageMode(allocation, workflowRunId, stageRunId, config);
+        return this.allocatePerStageMode(allocation, workflowRunId, stageRunId, build);
       case 'auto':
         // Auto mode creates a new session per stage for simplicity
         // (DAGScheduler handles parallelism, each parallel stage gets its own)
-        return this.allocatePerStageMode(allocation, workflowRunId, stageRunId, config);
+        return this.allocatePerStageMode(allocation, workflowRunId, stageRunId, build);
       default:
         throw new SessionAllocationError(`Unknown session mode: ${mode as string}`);
     }
@@ -248,7 +266,7 @@ export class SessionAllocator {
     allocation: RunAllocation,
     workflowRunId: string,
     stageRunId: string,
-    config?: Partial<CreateConversationParams>,
+    build: SessionConfigBuilder,
   ): Promise<Session> {
     if (allocation.sharedSessionId) {
       // Reuse existing shared session
@@ -276,6 +294,15 @@ export class SessionAllocator {
         }
       }
 
+      // The stage still composes (its turn options and gate context come from
+      // it), but the shared conversation keeps the config it was created with
+      // — no interim rebind (RV-20; P03 owns session groups).
+      await build({
+        sessionId: session.id,
+        conversationId: session.conversationId!,
+        op: 'attach',
+        ...(session.providerSessionId ? { providerSessionId: session.providerSessionId } : {}),
+      });
       // Ensure the conversation is in-memory (may have been lost after restart)
       try {
         await this.harness.resumeConversation(session.conversationId!);
@@ -287,7 +314,7 @@ export class SessionAllocator {
     }
 
     // Create new shared session
-    const session = await this.createSession(workflowRunId, stageRunId, config);
+    const session = await this.createSession(workflowRunId, stageRunId, build);
     allocation.sharedSessionId = session.id;
     allocation.stageSessionMap.set(stageRunId, session.id);
     allocation.sharedRefCount = 1;
@@ -310,17 +337,25 @@ export class SessionAllocator {
     allocation: RunAllocation,
     workflowRunId: string,
     stageRunId: string,
-    config?: Partial<CreateConversationParams>,
+    build: SessionConfigBuilder,
   ): Promise<Session> {
     // Reuse existing session if already allocated (e.g. after crash recovery + resume)
     const existingSessionId = allocation.stageSessionMap.get(stageRunId);
     if (existingSessionId) {
       const existing = await this.sessionRepo.getById(existingSessionId);
       if (existing) {
-        // Ensure SDK conversation handle is in-memory (may have been lost after restart)
+        // Back into memory WITH the composed config: tool handlers and gates
+        // are in-memory functions a bare resume would lose, and the provider
+        // session handle resumes the model's own history (L7).
         if (existing.conversationId) {
+          const params = await build({
+            sessionId: existing.id,
+            conversationId: existing.conversationId,
+            op: 'resume',
+            ...(existing.providerSessionId ? { providerSessionId: existing.providerSessionId } : {}),
+          });
           try {
-            await this.harness.resumeConversation(existing.conversationId);
+            await this.harness.resumeConversation(existing.conversationId, params);
           } catch {
             // Already in-memory — ignore
           }
@@ -329,7 +364,7 @@ export class SessionAllocator {
       }
     }
 
-    const session = await this.createSession(workflowRunId, stageRunId, config);
+    const session = await this.createSession(workflowRunId, stageRunId, build);
     allocation.stageSessionMap.set(stageRunId, session.id);
     if (this.allocationRepo) {
       try {
@@ -355,7 +390,7 @@ export class SessionAllocator {
   private async createSession(
     workflowRunId: string,
     stageRunId: string,
-    config?: Partial<CreateConversationParams>,
+    build: SessionConfigBuilder,
   ): Promise<Session> {
     const sessionId = generateId();
     const conversationId = `stage-${stageRunId}-${Date.now()}`;
@@ -375,22 +410,12 @@ export class SessionAllocator {
 
     await this.sessionRepo.create(session);
 
-    // Create the harness conversation. `harnessType` picks the agent provider
-    // for this stage; when unset the router falls back to the provider that
-    // owns `model`, so a workflow can mix providers across stages.
-    //
-    // Spread the caller's config wholesale rather than re-enumerating fields:
-    // the old allow-list silently dropped reasoningEffort, hooks, plan gates
-    // and the agent binding. `conversationId` is overridden last because it is
-    // already persisted on the session row above and must win.
-    await this.harness.createConversation({
-      ...(config ?? {}),
-      conversationId,
-      streaming: config?.streaming ?? true,
-      // Auto-approve all permission requests for workflow stage execution
-      // so the Copilot agent can create files, directories, and run commands
-      onPermissionRequest: config?.onPermissionRequest ?? (async () => ({ granted: true })),
-    });
+    // Create the harness conversation with the composed config (the session
+    // composer decides tools, gates and permission policy — there is no
+    // auto-approve fallback here). `conversationId` is persisted on the
+    // session row above and must win.
+    const config = await build({ sessionId, conversationId, op: 'create' });
+    await this.harness.createConversation({ ...config, conversationId });
 
     // Transition session to active
     await this.sessionRepo.updateStatus(sessionId, 'active');

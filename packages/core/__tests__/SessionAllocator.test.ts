@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { SessionAllocator } from '../src/services/SessionAllocator.js';
 import { EventBus } from '../src/events/EventBus.js';
 import type { ISessionRepository } from '../src/domain/ports/IRepositories.js';
-import type { IAgentHarness } from '../src/domain/ports/IAgentHarness.js';
+import type { CreateConversationParams, IAgentHarness } from '../src/domain/ports/IAgentHarness.js';
 import type { Session } from '@generatorai/shared';
 
 const RUN = 'run-1';
@@ -49,6 +49,9 @@ function makeMocks() {
   return { allocator, counters, sessions };
 }
 
+/** The composer's stand-in: an empty config for every identity. */
+const build = async () => ({}) as CreateConversationParams;
+
 describe('SessionAllocator — single mode ref-counting (EXEC-8)', () => {
   let allocator: SessionAllocator;
   let counters: { destroy: number; create: number; resume: number };
@@ -60,10 +63,10 @@ describe('SessionAllocator — single mode ref-counting (EXEC-8)', () => {
 
   it('re-allocating the SAME stage (retry) does not double-count the shared ref', async () => {
     // First allocation creates the shared session (refcount → 1).
-    await allocator.allocateSession(RUN, 'stage-1', 'single');
+    await allocator.allocateSession(RUN, 'stage-1', 'single', build);
     // A retry re-allocates for the same stageRunId WITHOUT an intervening
     // release. This must NOT bump the refcount again.
-    await allocator.allocateSession(RUN, 'stage-1', 'single');
+    await allocator.allocateSession(RUN, 'stage-1', 'single', build);
 
     expect(counters.create).toBe(1); // only one shared session ever created
     expect(sessions.size).toBe(1);
@@ -74,8 +77,8 @@ describe('SessionAllocator — single mode ref-counting (EXEC-8)', () => {
   });
 
   it('shares one session across distinct stages and destroys it only on the last release', async () => {
-    await allocator.allocateSession(RUN, 'stage-1', 'single');
-    await allocator.allocateSession(RUN, 'stage-2', 'single');
+    await allocator.allocateSession(RUN, 'stage-1', 'single', build);
+    await allocator.allocateSession(RUN, 'stage-2', 'single', build);
 
     expect(counters.create).toBe(1); // shared
     expect(sessions.size).toBe(1);
@@ -88,8 +91,8 @@ describe('SessionAllocator — single mode ref-counting (EXEC-8)', () => {
   });
 
   it('per-stage mode creates and destroys an independent session per stage', async () => {
-    await allocator.allocateSession(RUN, 'stage-1', 'per-stage');
-    await allocator.allocateSession(RUN, 'stage-2', 'per-stage');
+    await allocator.allocateSession(RUN, 'stage-1', 'per-stage', build);
+    await allocator.allocateSession(RUN, 'stage-2', 'per-stage', build);
     expect(counters.create).toBe(2);
 
     await allocator.releaseSession('stage-1');

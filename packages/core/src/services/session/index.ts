@@ -11,3 +11,5 @@ export { TurnContextRegistry, withAgentToolPolicy, stampCardSequence, type GateP
 export { applyModeConfig, planPromptPrefix, type ModeConfigInput } from './modeConfig.js';
 export { StageGatePort, type StageGatePortDeps } from './StageGatePort.js';
 export { runPermissionSource, runPermissionMode, turnOptionsFrom, checkPermissionGating, TRIGGER_PERMISSION_MODE_KEY, type PermissionModeSource } from './permissionSource.js';
+export { SessionComposer, type ComposeInput, type ComposeResult } from './SessionComposer.js';
+export { formatConversationBindingKey, type BindingKeyParts } from './bindingKey.js';

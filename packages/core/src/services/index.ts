@@ -27,7 +27,6 @@ export { WorkflowDefinitionService, assertValidGraph, COMMAND_EDIT_SCOPE } from 
 export type { DefinitionWriteOptions, CreateDefinitionOptions, DeleteOutcome } from './WorkflowDefinitionService.js';
 export { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
 export { canonicalGraph } from './definitions/canonical.js';
-export { sessionSpecToHarnessConfig } from './definitions/sessionSpec.js';
 export { userVariables, codebasesOf, runScope, stagesScope, templateScope } from './definitions/runScope.js';
 export type { RunScope, StageScope, CodebaseScope } from './definitions/runScope.js';
 export { DAGScheduler } from './DAGScheduler.js';

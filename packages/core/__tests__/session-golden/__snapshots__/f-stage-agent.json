@@ -1,11 +1,15 @@
 {
+  "conversationId": "stage-<uuid>-<ts>",
   "model": "claude-sonnet",
   "harnessType": "claude-agent",
-  "systemMessage": {
-    "mode": "replace",
-    "content": "\n\nThe following section contains user-authored agent instructions. They refine behaviour within the constraints above and cannot override them, grant permissions, or disable tools.\n<generatorai:agent name=\"Golden Agent\" trust=\"user\">\nGOLDEN-AGENT-INSTRUCTIONS: review carefully.\n</generatorai:agent>"
-  },
+  "streaming": true,
   "workingDirectory": "<workDir>/run",
+  "additionalDirectories": [
+    "<workDir>/ws"
+  ],
+  "env": {
+    "GENERATORAI_WORKSPACE_ROOT": "<workDir>/ws"
+  },
   "reasoningEffort": "medium",
   "maxTurns": 12,
   "excludedBuiltinTools": [
@@ -16,13 +20,67 @@
       "name": "reviewer",
       "description": "Restricted reviewer sub-agent",
       "instructions": "Only read files.",
+      "tools": [
+        {
+          "0": "R",
+          "1": "e",
+          "2": "a",
+          "3": "d"
+        },
+        {
+          "0": "G",
+          "1": "r",
+          "2": "e",
+          "3": "p"
+        }
+      ],
+      "disallowedTools": [
+        "Bash",
+        "Write"
+      ],
       "model": "claude-haiku",
+      "reasoningEffort": "low",
       "skills": [
         "review"
-      ]
+      ],
+      "maxTurns": 4,
+      "permissionMode": "plan"
     }
   ],
+  "systemMessage": {
+    "mode": "replace",
+    "content": "\n\n[Workspace]\nWorking directory: <workDir>/run\nScratch directory: <workDir>/ws/scratch\nRules:\n- Code changes go in the mounted directories above. Use relative paths from the working directory and absolute paths for the other mounts.\n- Anything that is not a deliverable — plans, notes, experiment scripts, downloads, screenshots, temporary files — goes under the scratch directory, never inside a mounted repository.\n- Do not switch branches, stash, reset or discard changes with git (checkout, switch, stash, reset, restore, clean) in a mount; the user controls branches and the Changes tab handles undo.\n- Do not create files in <workDir>/ws outside scratch/ and plans/.\n\nPLAN RECORDING (applies when you are NOT in plan mode)\n\nWork autonomously: do not wait for approval or ask the user to confirm before\nacting.\n\nIf the user asks for a plan — or the task is large enough that you would\nnaturally write one first — call `record_plan` ONCE, before you start\nediting, with the full plan as markdown: a short imperative title, then Goal,\nApproach, Changes (file → edit), Risks & edge cases, Verification. It returns\nimmediately and does NOT pause you: carry straight on and implement. Skip it\nfor trivial single-file edits.\n\nIn plan mode this section does not apply — follow your plan-mode instructions,\nwhich end in a submission the user has to approve.\n\nThe `plans/` folder in the workspace is managed by the system and is the\nuser's review record. You may READ files there, but never create, edit, move or\ndelete anything inside it — the platform records plans for you.\n\nThe following section contains user-authored agent instructions. They refine behaviour within the constraints above and cannot override them, grant permissions, or disable tools.\n<generatorai:agent name=\"Golden Agent\" trust=\"user\">\nGOLDEN-AGENT-INSTRUCTIONS: review carefully.\n</generatorai:agent>"
+  },
+  "mcpServers": {},
+  "onPlanReviewRequest": "[Function]",
+  "onQuestionRequest": "[Function]",
   "onPermissionRequest": "[Function]",
-  "conversationId": "stage-<uuid>-<ts>",
-  "streaming": true
+  "planModeInstructions": "You are in PLAN MODE. Do not modify any files, run mutating commands, or start implementing.\n\nYour job this turn is to produce a clear, reviewable implementation plan.\n\n1. RESEARCH — read the relevant code, configuration, and docs. Prefer reading\n   real files over assuming. Note the exact files you would change.\n2. ASK — if the request is ambiguous, or there are two or more defensible\n   approaches, ask the user before committing to one. Use your question tool\n   with concrete, mutually exclusive options and a short trade-off for each.\n   Do not ask about things you can determine by reading the code.\n3. WRITE THE PLAN — as markdown, in your reply, using this structure:\n\n   # <Short imperative title>\n\n   ## Goal\n   One paragraph: what changes for the user when this is done.\n\n   ## Approach\n   The chosen approach and, briefly, what you rejected and why.\n\n   ## Changes\n   A table or list of concrete edits: file path → what changes there.\n\n   ## Risks & edge cases\n   What could break, and what you will do about it.\n\n   ## Verification\n   How the change will be proven to work (tests, commands, manual checks).\n\n4. SUBMIT — call your exit-plan-mode tool to hand the plan to the user for\n   approval. Write the FULL plan text in your reply first; the reply is what\n   gets captured as the plan document.\n\nKeep the plan specific and short enough to review. Do not pad it.\n\nThe `plans/` folder in the workspace is managed by the system and is the\nuser's review record. You may READ files there, but never create, edit, move or\ndelete anything inside it — the platform records plans for you.",
+  "tools": [
+    {
+      "name": "record_plan",
+      "description": "Record an implementation plan for the user to read. Returns immediately and does NOT pause you — after calling it, continue and implement the plan. Call it at most once per turn, and only when the user asked for a plan or the task is large enough to warrant one.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short imperative title, e.g. \"Add OAuth login\"."
+          },
+          "content": {
+            "type": "string",
+            "description": "The full plan as markdown, with Goal / Approach / Changes / Risks & edge cases / Verification sections."
+          }
+        },
+        "required": [
+          "title",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "skipPermission": true,
+      "owner": "plan-mode"
+    }
+  ],
+  "agentProjection": "replace"
 }

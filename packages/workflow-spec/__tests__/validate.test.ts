@@ -318,13 +318,18 @@ describe('engine capability gate', () => {
     ['approval.allowChanges', graph([agent('a', { approval: { allowChanges: false } })])],
     ['approval.maxRounds', graph([agent('a', { approval: { maxRounds: 1 } })])],
     ['workflow outputs', graph([agent('a')], [], { outputs: { done: "stages.a.status == 'completed'" } })],
-    ['session.provider', graph([agent('a', { session: { provider: { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'secretref:k' } } })])],
-    ['MCP secretref', graph([agent('a')], [], { session: { mcp: { servers: { gh: { type: 'http', url: 'https://mcp.test', headers: { Authorization: 'secretref:gh' } } } } } })],
   ])('%s is rejected on v1 and accepted on v2', (_what, g) => {
     const r1 = v1(g);
     expect(codes(r1, 'error')).toEqual(['engine-unsupported']);
     expect(find(r1.issues, 'engine-unsupported')!.hint).toMatch(/engine upgrade/);
     expect(codes(v2(g), 'error')).toEqual([]);
+  });
+
+  it('accepts provider credentials and MCP secret references on v1: the session composer resolves them (P02)', () => {
+    const provider = { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'secretref:k' };
+    expect(v1(graph([agent('a', { session: { provider } })])).issues).toEqual([]);
+    const mcp = { servers: { gh: { type: 'http' as const, url: 'https://mcp.test', headers: { Authorization: 'secretref:gh' } } } };
+    expect(v1(graph([agent('a')], [], { session: { mcp } })).issues).toEqual([]);
   });
 
   it('accepts what v1 executes: attempt timeouts, retries, approval, fail on exhaustion', () => {

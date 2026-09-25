@@ -7,9 +7,7 @@ import type {
   StageRun,
   AgentEvent,
   ChatMessage,
-  HarnessConfig,
   ResolvedAgentProjection,
-  AgentToolPolicy,
 } from '@generatorai/shared';
 import {
   generateId,
@@ -52,7 +50,6 @@ function digest(text: string): string {
 import { resolveWithinBase, isSymlink } from '../utils/safePath.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import type { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
-import { sessionSpecToHarnessConfig } from './definitions/sessionSpec.js';
 import { templateScope } from './definitions/runScope.js';
 import type { IChatMessageRepository } from '../domain/ports/IRepositories.js';
 import type { IAgentHarness, AttachmentRef, SendPromptOptions } from '../domain/ports/IAgentHarness.js';
@@ -63,19 +60,16 @@ import type { WorkspaceManager } from './WorkspaceManager.js';
 import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import type { HitlService } from './HitlService.js';
-import {
-  instructionsForMode,
-  resolveModeDescriptor,
-  resolveTurnPermissionMode,
-} from './agentModePolicy.js';
+import { resolveModeDescriptor } from './agentModePolicy.js';
 import type { PlanService } from './PlanService.js';
 import { DEFAULT_AGENT_MODE } from '@generatorai/shared';
-import type { BrowserService } from './BrowserService.js';
-import { AgentResolver } from './AgentResolver.js';
-import type { AgentStagingService } from './AgentStagingService.js';
-import type { PermissionRequest, PermissionResponse } from '../domain/ports/IAgentHarness.js';
-import { buildBrowserToolSet } from '../tools/browser/index.js';
-import { appendSystemBlock, appendTools, unionList } from './session/cfg.js';
+import { redactProjection } from './AgentResolver.js';
+import type { SessionComposer, ComposeResult } from './session/SessionComposer.js';
+import { StageGatePort } from './session/StageGatePort.js';
+import { resolverLayer } from './session/agentProjection.js';
+import { runPermissionSource, turnOptionsFrom } from './session/permissionSource.js';
+import { runWorkspace, workspaceExposure } from './session/workspaceExposure.js';
+import { ComposeError, type SessionOwner } from './session/types.js';
 import { StageRunStateMachine } from '../domain/state-machines/StageRunStateMachine.js';
 import type { DurableContext, DurableExecutionEngine } from './DurableExecutionEngine.js';
 import { isSyntheticEffectResult, replayPolicyForToolGroups } from './DurableExecutionEngine.js';
@@ -231,8 +225,16 @@ function stageRetryPolicy(stage: AgentStage): { maxRetries: number; backoffMs: n
   };
 }
 
-/** Session fields that bind the agent or pick the turn mode rather than configure the conversation. */
-const NON_CONVERSATION_SESSION_FIELDS = new Set(['agentRef', 'defaultAgentMode']);
+/**
+ * The artifact (on the stage run's durable channel) holding the stage's frozen
+ * agent projection, so retries and restarts do not re-resolve a mid-run edit.
+ */
+export const STAGE_AGENT_SNAPSHOT_ARTIFACT = 'agent-snapshot';
+
+/** A string-list engine-state value (run uploads), or undefined. */
+function stringArray(v: unknown): string[] | undefined {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined;
+}
 
 /**
  * Thrown when a reviewer rejects a stage at its completion gate.
@@ -298,27 +300,97 @@ export class StageExecutionService {
     private sessionAllocator: SessionAllocator,
     private hookExecutor: HookExecutor,
     private workspaceManager: WorkspaceManager,
-    /**
-     * HITL-06: read with `hitlService` on every tool-permission request — the
-     * run's current `permissionMode` decides whether the request is routed
-     * through the HITL waiter.
-     */
+    /** The run row: the permission source's first layer, re-read every turn. */
     private workflowRunRepo: IWorkflowRunRepository,
-    /**
-     * HITL-06: bridges the harness's `onPermissionRequest` callback into
-     * `HitlService.interrupt()` so a running stage parks in `awaiting_input`
-     * until an approver responds.
-     */
+    /** The durable wait a stage's gates park on (StageGatePort). */
     private hitlService: HitlService,
     /**
-     * Optional BrowserService. When present, every stage that has a
-     * workspace gets the built-in browser tool set (open_browser_page,
-     * read_page, click_element, run_playwright_code, …) registered on
-     * its session config — mirroring what ChatManagementService does
-     * for chat sessions. Zero effect if omitted (tools/tests etc.).
+     * Builds the stage's session exactly as a chat's is built: tools, MCP,
+     * skills, the agent, gates and the permission policy (P02 WP-2.8).
      */
-    private browserService?: BrowserService,
+    private composer: SessionComposer,
   ) {}
+
+  /**
+   * R9 — the session could not be bound (no workspace, a missing or disabled
+   * agent, an unresolved secret, a mode its provider cannot hold, the
+   * provider refusing the conversation). The stage stream gets `error` +
+   * `idle` so every client leaves its "working" state, and the stage fails
+   * with the reason. Deterministic configuration errors are not retried.
+   */
+  private async failBind(stageRun: StageRun, workflowRunId: string, err: unknown): Promise<void> {
+    const message =
+      err instanceof ComposeError ? `${err.code}: ${err.message}` : `Could not start the stage session: ${err instanceof Error ? err.message : String(err)}`;
+    const data = { stageRunId: stageRun.id, workflowRunId, message };
+    const emit = (event: AgentEvent) =>
+      stageRun.sessionId ? this.eventBus.emit(stageRun.sessionId, event) : this.eventBus.emitGlobal(event);
+    await emit({ kind: 'harness.error', data } as AgentEvent);
+    await emit({ kind: 'harness.idle', data: { stageRunId: stageRun.id, workflowRunId } } as unknown as AgentEvent);
+    await this.stageRunRepo.update(stageRun.id, { status: 'failed', error: message, completedAt: new Date() });
+    await this.eventBus.emitGlobal({
+      kind: 'stage_run.failed',
+      data: { stageRunId: stageRun.id, workflowRunId, error: message, name: stageRun.name },
+    });
+  }
+
+  /**
+   * The stage's frozen agent projection: resolved once for the stage run and
+   * reused by its retries and restarts, so a mid-run agent edit cannot change
+   * a stage in flight (P03 moves it onto the attempt). Kept on the stage run's
+   * durable artifact channel, which outlives the journal.
+   */
+  private readAgentSnapshot(stageRunId: string): ResolvedAgentProjection | undefined {
+    const record = this.durableEngine?.getArtifact({ scope: 'stage_run', scopeId: stageRunId }, STAGE_AGENT_SNAPSHOT_ARTIFACT);
+    if (!record?.text) return undefined;
+    try {
+      return JSON.parse(record.text) as ResolvedAgentProjection;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private writeAgentSnapshot(stageRunId: string, projection: ResolvedAgentProjection): void {
+    if (!projection.driving || !this.durableEngine) return;
+    const ctx = { scope: 'stage_run' as const, scopeId: stageRunId };
+    if (this.durableEngine.getArtifact(ctx, STAGE_AGENT_SNAPSHOT_ARTIFACT)) return;
+    this.durableEngine.appendArtifact(ctx, STAGE_AGENT_SNAPSHOT_ARTIFACT, JSON.stringify(redactProjection(projection)), {
+      last: true,
+      meta: { stageRunId },
+    });
+  }
+
+  /**
+   * The owner, turn options and prompt preparation for a stage turn sent
+   * outside `executeStage` (an in-session validation retry, an operator
+   * follow-up): the same permission source and turn registration a composed
+   * stage uses, without rebuilding its session.
+   */
+  private async stageTurn(
+    stageRun: StageRun,
+    session: { id: string; conversationId?: string },
+  ): Promise<{ options: SendPromptOptions; prepare: (text: string) => string }> {
+    const run = await this.workflowRunRepo.getById(stageRun.workflowRunId);
+    const graph = await this.definitions.get(run.definitionVersionId);
+    const stage = graph.stages.find((st) => st.key === stageRun.stageKey) as AgentStage | undefined;
+    const spec = resolveSessionSpec(graph.workflow.session, stage?.session);
+    const agentMode: AgentMode = spec.defaultAgentMode ?? DEFAULT_AGENT_MODE;
+    const owner: SessionOwner = {
+      kind: 'stage',
+      stageRunId: stageRun.id,
+      workflowRunId: stageRun.workflowRunId,
+      workflowDefinitionId: run.workflowDefinitionId,
+      sessionId: session.id,
+    };
+    const options = await turnOptionsFrom(
+      agentMode,
+      runPermissionSource(() => this.workflowRunRepo.getById(stageRun.workflowRunId), stage?.session, graph.workflow.session),
+    );
+    this.composer.beginTurn(owner, session.conversationId ?? '', options);
+    return {
+      options,
+      prepare: (text) => this.composer.preparePrompt(owner, session.conversationId ?? '', spec.harnessType, text, agentMode),
+    };
+  }
 
   /**
    * Checkpoints — snapshots the run's workspace at each stage boundary so
@@ -330,18 +402,6 @@ export class StageExecutionService {
   /** Late-wire the checkpoint service (set after construction). */
   setWorkspaceCheckpointService(svc: WorkspaceCheckpointService): void {
     this.workspaceCheckpointService = svc;
-  }
-
-  /**
-   * Agents — resolves the stage's bound agent into a capability projection.
-   * Late-wired like the other cross-cutting services.
-   */
-  private agentResolver?: AgentResolver;
-  private agentStaging?: AgentStagingService;
-
-  setAgentServices(resolver: AgentResolver, staging?: AgentStagingService): void {
-    this.agentResolver = resolver;
-    if (staging) this.agentStaging = staging;
   }
 
   /**
@@ -357,117 +417,6 @@ export class StageExecutionService {
 
   setDurableEngine(engine: DurableExecutionEngine): void {
     this.durableEngine = engine;
-  }
-
-  /**
-   * Fold the stage's agent into `sessionConfig`.
-   *
-   * The stage `session` has already been applied, so it acts as the
-   * binding-site delta: capability lists UNION with the agent's, scalars are
-   * most-specific-wins, and the instructions are appended after the platform blocks.
-   */
-  private async resolveStageAgent(
-    sessionConfig: Record<string, unknown>,
-    stage: AgentStage,
-    workflowharnessConfig: Partial<HarnessConfig> | undefined,
-    variables: Record<string, unknown> | undefined,
-  ): Promise<ResolvedAgentProjection> {
-    const ref = stage.session?.agentRef ?? workflowharnessConfig?.agentRef;
-    if (!this.agentResolver) {
-      if (!ref) return AgentResolver.empty();
-      // Fail loudly: silently running a stage without its agent's skills and
-      // tool policy is worse than not running it.
-      throw new StageExecutionError(
-        'Stage is bound to an agent but no AgentResolver is wired into StageExecutionService',
-        stage.key,
-      );
-    }
-
-    const stageHarness = stage.session ? sessionSpecToHarnessConfig(stage.session) : undefined;
-    const projectId = typeof variables?.['__projectId'] === 'string'
-      ? (variables['__projectId'] as string)
-      : undefined;
-
-    const projection = await this.agentResolver.resolve({
-      ...(ref ? { agentRef: ref } : {}),
-      ...(workflowharnessConfig ? { baseHarnessConfig: workflowharnessConfig } : {}),
-      // The stage's session is the MOST specific level, so it goes
-      // in as `runtimeOverrides` — that single slot carries both the stage's
-      // `agentOverrides` delta and its `excludedMcpServerIds`. Passing the
-      // delta a second time as `overrides` would duplicate
-      // `appendInstructions` in the concatenated instructions.
-      ...(stageHarness ? { runtimeOverrides: stageHarness } : {}),
-      ...(projectId ? { projectId } : {}),
-      harnessType: (sessionConfig['harnessType'] as HarnessConfig['harnessType']) ?? 'copilot',
-      scope: 'stage',
-    });
-
-    if (projection.runtime.model) sessionConfig['model'] = projection.runtime.model;
-    if (projection.runtime.harnessType) sessionConfig['harnessType'] = projection.runtime.harnessType;
-    if (projection.runtime.reasoningEffort) sessionConfig['reasoningEffort'] = projection.runtime.reasoningEffort;
-    if (projection.runtime.contextTier) sessionConfig['contextTier'] = projection.runtime.contextTier;
-    if (projection.runtime.maxTurns) sessionConfig['maxTurns'] = projection.runtime.maxTurns;
-    if (projection.runtime.permissionMode) sessionConfig['permissionMode'] = projection.runtime.permissionMode;
-
-    if (projection.skills.refs.length > 0) {
-      sessionConfig['skills'] = projection.skills.names;
-      const workingDirectory = typeof sessionConfig['workingDirectory'] === 'string'
-        ? (sessionConfig['workingDirectory'] as string)
-        : undefined;
-      if (workingDirectory && this.agentStaging) {
-        const staged = await this.agentStaging.ensureStaged(workingDirectory, projection);
-        if (staged.skillDirectories.length > 0) {
-          unionList(sessionConfig, 'skillDirectories', staged.skillDirectories);
-        }
-      }
-    }
-
-    if (Object.keys(projection.mcpServers).length > 0) {
-      sessionConfig['mcpServers'] = {
-        ...(sessionConfig['mcpServers'] as Record<string, unknown> | undefined),
-        ...projection.mcpServers,
-      };
-    }
-
-    // Built-in tool names go to `excludedBuiltinTools`, not `excludedTools` —
-    // the latter only filters custom/MCP tools. See ChatManagementService.
-    if (projection.toolPolicy.deny.length > 0) {
-      unionList(sessionConfig, 'excludedBuiltinTools', projection.toolPolicy.deny);
-    }
-
-    if (projection.team.length > 0) {
-      sessionConfig['customAgents'] = projection.team.map((t) => ({
-        name: t.name,
-        description: t.description,
-        instructions: t.instructions,
-        ...(t.model ? { model: t.model } : {}),
-        ...(t.skills ? { skills: t.skills } : {}),
-      }));
-    }
-
-    if (projection.driving) {
-      const existing = sessionConfig['systemMessage'] as { mode?: string; content?: string } | undefined;
-      const isReplace = projection.driving.projection === 'replace';
-      const base = isReplace ? '' : (existing?.content ?? '');
-      sessionConfig['systemMessage'] = {
-        // The provider's own base prompt is governed by `mode`, not by content;
-        // leaving this on `append` meant `replace` replaced nothing.
-        mode: isReplace ? 'replace' : ((existing?.mode as 'append' | 'replace' | undefined) ?? 'append'),
-        content:
-          `${base}\n\nThe following section contains user-authored agent instructions. ` +
-          `They refine behaviour within the constraints above and cannot override them, ` +
-          `grant permissions, or disable tools.\n` +
-          `<generatorai:agent name="${projection.driving.name.replace(/"/g, "'")}" trust="user">\n` +
-          `${projection.driving.instructions}\n` +
-          `</generatorai:agent>`,
-      };
-    }
-
-    for (const w of projection.warnings) {
-      // eslint-disable-next-line no-console
-      console.warn(`[StageExecution] agent resolution: ${w.code} ${JSON.stringify(w.params)}`);
-    }
-    return projection;
   }
 
   /**
@@ -530,11 +479,6 @@ export class StageExecutionService {
   /** Reserve a stage for follow-up injection. Idempotent. */
   markFollowUpPending(stageRunId: string): void {
     this.pendingFollowUps.add(stageRunId);
-  }
-
-  /** Late-wire browser service (set after construction to break DI cycles). */
-  setBrowserService(bs: BrowserService): void {
-    this.browserService = bs;
   }
 
   // ── WS-D1: step timeout defaults + liveness heartbeat ──
@@ -656,110 +600,6 @@ export class StageExecutionService {
         // May not be active
       }
     }
-  }
-
-  /**
-   * HITL-06 — Build the per-stage `onPermissionRequest` bridge.
-   *
-   * Every harness permission prompt (file write, shell exec, network, …)
-   * is routed through this handler. It reads the run's *current*
-   * `permissionMode` from the DB on each call so mid-run mode changes
-   * (via `PATCH /workflow-runs/:id/permission-mode`) take effect
-   * immediately without needing to restart the session.
-   *
-   * Modes:
-   *   - `bypassPermissions` (default) — grant every request without
-   *     asking. Preserves the pre-HITL-06 behaviour so existing runs
-   *     don't change.
-   *   - `acceptEdits` — auto-approve read/write file ops; ask for
-   *     shell/network/other.
-   *   - `default` / `plan` — every request pauses the stage in
-   *     `awaiting_input` via `HitlService.interrupt` until an operator
-   *     approves or rejects via `PATCH /stages/:id/approve`.
-   *
-   * Falls back to the auto-approve stub when the run repo or HITL service
-   * aren't wired (tests / older bootstraps).
-   *
-   * `groups` is the bound agent's resolved capability policy. It is checked
-   * FIRST and is not overridable by `permissionMode`: telling the provider
-   * about the deny list is advisory (a live run showed Copilot happily calling
-   * `create` and `powershell` with both `excludedTools` and
-   * `defaultAgent.excludedTools` set), so this handler — the one funnel every
-   * tool call passes through — is where the policy is actually enforced.
-   */
-  private buildPermissionHandler(
-    workflowRunId: string,
-    stageRunId: string,
-    groups?: AgentToolPolicy,
-    semaphoreCallbacks?: { pause: () => void; resume: () => Promise<void> },
-  ): (request: PermissionRequest) => Promise<PermissionResponse> {
-    const runRepo = this.workflowRunRepo;
-    const hitl = this.hitlService;
-
-    const deniedByAgent = (request: PermissionRequest): string | null => {
-      if (!groups) return null;
-      if (request.type === 'file_write' && !groups.fileWrite) return 'write files';
-      if (request.type === 'file_read' && !groups.fileRead) return 'read files';
-      if (request.type === 'shell_exec' && !groups.shell) return 'run shell commands';
-      if (request.type === 'network' && !groups.web) return 'access the network';
-      return null;
-    };
-
-    return async (request) => {
-      const denied = deniedByAgent(request);
-      if (denied) {
-        return { granted: false, reason: `The bound agent is not allowed to ${denied}.` };
-      }
-
-      let mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan' =
-        'bypassPermissions';
-      try {
-        const run = await runRepo.getById(workflowRunId);
-        mode = (run.permissionMode ?? 'bypassPermissions') as typeof mode;
-      } catch {
-        // Run row missing — safest to allow so we don't wedge the stage.
-        return { granted: true };
-      }
-
-      // Fast path — auto-approve modes.
-      if (mode === 'bypassPermissions') return { granted: true };
-      if (mode === 'acceptEdits' && (request.type === 'file_read' || request.type === 'file_write')) {
-        return { granted: true };
-      }
-
-      // Slow path — ask a human. Park the stage in `awaiting_input` and
-      // wait for `HitlService.resume` to fire (via the approver hitting
-      // `PATCH /stages/:id/approve`). The interrupt data is a structured
-      // record so the UI can render "wants to run <shell command>" etc.
-      //
-      // M9-fix: release the stage-semaphore permit while parked waiting for
-      // human review — the wait can last hours and holding the permit would
-      // starve other concurrent stages. Re-acquire once the reviewer decides.
-      const prompt = `Approve ${request.type}: ${request.description}`;
-      semaphoreCallbacks?.pause();
-      let resolution: Awaited<ReturnType<typeof hitl.interrupt>>;
-      try {
-        resolution = await hitl.interrupt(
-          stageRunId,
-          workflowRunId,
-          {
-            kind: 'tool_permission',
-            request: {
-              type: request.type,
-              description: request.description,
-              details: request.details ?? null,
-            },
-          },
-          { prompt },
-        );
-      } finally {
-        await semaphoreCallbacks?.resume();
-      }
-      return {
-        granted: resolution.outcome === 'approved',
-        reason: resolution.reason,
-      };
-    };
   }
 
   /**
@@ -1042,9 +882,11 @@ export class StageExecutionService {
     const sm = new StageRunStateMachine(stageRun.status);
     // The stage as the run's pinned definition version declares it.
     const stage = await this.stageOf(stageRun);
-    const workflowharnessConfig = workflowSession ? sessionSpecToHarnessConfig(workflowSession) : undefined;
+    const run = await this.workflowRunRepo.getById(workflowRunId);
+    // ONE session spec: the workflow's session under the stage's own.
+    const spec = resolveSessionSpec(workflowSession, stage.session);
     // The effective agent mode: the stage session over the workflow session.
-    const stageAgentMode = resolveSessionSpec(workflowSession, stage.session).defaultAgentMode;
+    const stageAgentMode: AgentMode = spec.defaultAgentMode ?? DEFAULT_AGENT_MODE;
 
     // Transition: pending → queued → running
     if (stageRun.status === 'pending') {
@@ -1096,135 +938,17 @@ export class StageExecutionService {
       }
     }
 
-    // Build session config from the workflow session + the stage session
-    const stageOverrides = stage.session
-      ? Object.fromEntries(
-          Object.entries(sessionSpecToHarnessConfig(stage.session)).filter(([k]) => !NON_CONVERSATION_SESSION_FIELDS.has(k)),
-        )
-      : undefined;
-    const sessionConfig: Record<string, unknown> = {};
-
-    // Apply workflow-level config first
-    if (workflowharnessConfig) {
-      if (workflowharnessConfig.model) sessionConfig['model'] = workflowharnessConfig.model;
-      // Agent provider for the whole workflow; a stage can still override it
-      // below, which is what allows stage 1 on Claude and stage 2 on Copilot.
-      if (workflowharnessConfig.harnessType) sessionConfig['harnessType'] = workflowharnessConfig.harnessType;
-      if (workflowharnessConfig.systemMessage) sessionConfig['systemMessage'] = workflowharnessConfig.systemMessage;
-      if (workflowharnessConfig.mcpServers) sessionConfig['mcpServers'] = workflowharnessConfig.mcpServers;
-      if (workflowharnessConfig.availableTools) sessionConfig['availableTools'] = workflowharnessConfig.availableTools;
-      if (workflowharnessConfig.excludedTools) sessionConfig['excludedTools'] = workflowharnessConfig.excludedTools;
-      if (workflowharnessConfig.skillDirectories) sessionConfig['skillDirectories'] = workflowharnessConfig.skillDirectories;
-      if (workflowharnessConfig.disabledSkills) sessionConfig['disabledSkills'] = workflowharnessConfig.disabledSkills;
-      if (workflowharnessConfig.customAgents) sessionConfig['customAgents'] = workflowharnessConfig.customAgents;
-      if (workflowharnessConfig.provider) sessionConfig['provider'] = workflowharnessConfig.provider;
-      if (workflowharnessConfig.configDir) sessionConfig['configDir'] = workflowharnessConfig.configDir;
-      if (workflowharnessConfig.reasoningEffort) sessionConfig['reasoningEffort'] = workflowharnessConfig.reasoningEffort;
-      if (workflowharnessConfig.maxTurns) sessionConfig['maxTurns'] = workflowharnessConfig.maxTurns;
-    }
-
-    // Stage-level overrides take precedence (deep merge for object fields)
-    if (stageOverrides) {
-      for (const [key, value] of Object.entries(stageOverrides)) {
-        if (value === undefined) continue;
-        // Deep merge object-type config fields to avoid overwriting workflow-level entries
-        if (key === 'mcpServers' && typeof value === 'object' && value !== null) {
-          sessionConfig[key] = { ...(sessionConfig[key] as Record<string, unknown> ?? {}), ...value as Record<string, unknown> };
-        } else {
-          sessionConfig[key] = value;
-        }
-      }
-    }
-
-    // Set workingDirectory from variables (per-run workspace) or workflow config
-    if (variables?.['__workingDirectory'] && typeof variables['__workingDirectory'] === 'string') {
-      sessionConfig['workingDirectory'] = variables['__workingDirectory'];
-    } else if (workflowharnessConfig?.configDir) {
-      // configDir is already handled above; workingDirectory needs explicit handling
-    }
-
-    // Pass skillDirectories from variables if uploaded
-    if (variables?.['__skillDirectories'] && Array.isArray(variables['__skillDirectories'])) {
-      const existingSkills = (sessionConfig['skillDirectories'] as string[] | undefined) ?? [];
-      sessionConfig['skillDirectories'] = [...existingSkills, ...(variables['__skillDirectories'] as string[])];
-    }
-
-    // Pass customAgents from variables if uploaded
-    if (variables?.['__customAgents'] && Array.isArray(variables['__customAgents'])) {
-      const existingAgents = (sessionConfig['customAgents'] as unknown[] | undefined) ?? [];
-      sessionConfig['customAgents'] = [...existingAgents, ...(variables['__customAgents'] as unknown[])];
-    }
-
-    // Pass promptDirectories from variables if uploaded
-    if (variables?.['__promptDirectories'] && Array.isArray(variables['__promptDirectories'])) {
-      const existingPrompts = (sessionConfig['promptDirectories'] as string[] | undefined) ?? [];
-      sessionConfig['promptDirectories'] = [...existingPrompts, ...(variables['__promptDirectories'] as string[])];
-    }
-
-    // ── Agent binding ──────────────────────────────────────────────
-    //
-    // Replaces the historical `sessionConfig['defaultAgent'] = agentName`,
-    // which never reached the harness. Resolution happens AFTER the stage
-    // overrides are folded in so the stage `session` acts as the
-    // binding-site delta (capability lists UNION, scalars most-specific-wins).
-    const agentProjection = await this.resolveStageAgent(
-      sessionConfig,
-      stage,
-      workflowharnessConfig,
-      variables,
-    );
-
-    // ── Integrated Browser — VSCode-parity built-in tool set ──────
-    //
-    // Mirror what ChatManagementService does: whenever the stage has a
-    // workspace and BrowserService is wired, expose the ten browser
-    // tools + a one-sentence system prompt hint. Auto-boot Chromium
-    // when the run's browserConfig has `enabled: true` AND
-    // `visibility !== 'off'`; otherwise the first `open_browser_page`
-    // tool call boots it lazily. The stage's own
-    // `session.tools.available` can filter these off if
-    // the workflow author wants to constrain — same mechanism as any
-    // other tool.
-    const stageWorkspaceId = typeof variables?.['__workspaceId'] === 'string'
-      ? (variables['__workspaceId'] as string)
-      : undefined;
-    if (this.browserService && stageWorkspaceId && agentProjection.toolPolicy.groups.browser) {
-      try {
-        // Re-attach on new stage/turn — matches the chat semantics: a
-        // fresh workflow run is a fresh user intent to hand the browser
-        // to the agent, even if a previous turn detached it.
-        this.browserService.reattachOnPrompt(stageWorkspaceId);
-        const workspace = await this.workspaceManager.getExecutionWorkspace(stageWorkspaceId);
-        if (workspace) {
-          const cfg = this.browserService.resolveConfig(workspace.browserConfig);
-          if (cfg.enabled && cfg.visibility !== 'off') {
-            await this.browserService.ensureStarted(workspace).catch((err) => {
-              // Never fail the stage on browser boot failure — the tools
-              // themselves surface errors when the LLM calls them.
-              // eslint-disable-next-line no-console
-              console.warn(`[StageExecution] Browser auto-start failed for stage ${stageRun.id}:`, err);
-            });
-          }
-        }
-        const browserTools = buildBrowserToolSet({
-          browserService: this.browserService,
-          workspaceId: stageWorkspaceId,
-          owner: `stage:${stageRun.id}`,
-        });
-        appendTools(sessionConfig, browserTools, 'start');
-        appendSystemBlock(
-          sessionConfig,
-          `\n\n[Integrated Browser]\nUse the browser tools (open_browser_page, ` +
-            `read_page, click_element, type_in_page, screenshot_page, ` +
-            `run_playwright_code, etc.) when the stage needs to test or interact ` +
-            `with web pages. Prefer these tools over shell commands or spawning ` +
-            `your own browser.`,
-        );
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn(`[StageExecution] Browser tool registration failed for stage ${stageRun.id}:`, err);
-      }
-    }
+    // The run's execution workspace. Every run has one; a stage without it
+    // cannot be composed and fails (no server-cwd fallback, B-5).
+    const workspace = await runWorkspace(this.workspaceManager, run).catch(async (err: unknown) => {
+      await this.failBind(stageRun, workflowRunId, err);
+      return null;
+    });
+    if (!workspace) return;
+    // The directory the v1 engine placed the run in (its primary worktree).
+    const pinnedWorkDir =
+      typeof variables?.['__workingDirectory'] === 'string' ? (variables['__workingDirectory'] as string) : undefined;
+    const stageWorkDir = pinnedWorkDir ?? this.workspaceManager.getWorkingDirectory(workspace);
 
     // ── PRE_RUN hooks — execute before session allocation / prompt dispatch ──
     // If a hook with failurePolicy='abort' fails, the stage is aborted.
@@ -1234,9 +958,7 @@ export class StageExecutionService {
       const preRunHookContext: HookContext = {
         sessionId: stageRun.sessionId ?? '__pre_session__',
         workflowId: workflowRunId,
-        workspacePath: typeof variables?.['__workingDirectory'] === 'string'
-          ? variables['__workingDirectory'] as string
-          : process.cwd(),
+        workspacePath: stageWorkDir,
         variables: Object.fromEntries(
           Object.entries(variables ?? {}).map(([k, v]) => [k, String(v)]),
         ),
@@ -1263,11 +985,8 @@ export class StageExecutionService {
       }
       // Write attachments to workspace
       if (preResult.mergedResult.attachments && preResult.mergedResult.attachments.length > 0) {
-        const wsDir = typeof variables?.['__workingDirectory'] === 'string'
-          ? variables['__workingDirectory'] as string
-          : process.cwd();
         for (const att of preResult.mergedResult.attachments) {
-          const attDir = path.join(wsDir, 'hook-attachments');
+          const attDir = path.join(stageWorkDir, 'hook-attachments');
           await fs.mkdir(attDir, { recursive: true });
           const attPath = path.join(attDir, path.basename(att.filename));
           await fs.writeFile(attPath, att.content, 'utf-8');
@@ -1275,27 +994,111 @@ export class StageExecutionService {
       }
     }
 
-    // Allocate session
-    const session = await this.sessionAllocator.allocateSession(
-      workflowRunId,
-      stageRun.id,
-      sessionMode,
-      {
-        ...sessionConfig,
-        // HITL-06 — bridge harness permission prompts into HitlService so the
-        // run's `permissionMode` field actually gates tool calls. When both
-        // deps are absent (older wiring / tests), sessionAllocator falls back
-        // to auto-approve, preserving previous behaviour.
-        // M9-fix: pass semaphoreCallbacks so the permission handler can release
-        // the stage-semaphore permit while awaiting a human decision on tool use.
-        onPermissionRequest: this.buildPermissionHandler(
-          workflowRunId,
-          stageRun.id,
-          agentProjection.toolPolicy.groups,
-          semaphoreCallbacks,
-        ),
+    // What the stage sees of the run workspace: every mount and the managed
+    // root, with the cwd pinned where the engine put the run (WP-2.5).
+    const stageExposure = await workspaceExposure(this.workspaceManager, workspace, { workingDirectory: pinnedWorkDir }).catch(
+      async (err: unknown) => {
+        await this.failBind(stageRun, workflowRunId, err);
+        return null;
       },
     );
+    if (!stageExposure) return;
+
+    // ── The session, composed like every agent session (P02 WP-2.8) ──
+    //
+    // Tools, MCP, skills, the agent, gates and the permission policy come from
+    // the session composer, exactly as a chat's do. The allocator decides the
+    // session's identity (new, this stage's own resumed after a restart, or a
+    // shared one), then asks for the composed config.
+    const permissionSource = runPermissionSource(
+      () => this.workflowRunRepo.getById(workflowRunId),
+      stage.session,
+      workflowSession,
+    );
+    const stageOwner = (sessionId: string): SessionOwner => ({
+      kind: 'stage',
+      stageRunId: stageRun.id,
+      workflowRunId,
+      workflowDefinitionId: run.workflowDefinitionId,
+      sessionId,
+    });
+    const agentSnapshot = this.readAgentSnapshot(stageRun.id);
+    let composed: ComposeResult | undefined;
+    const session = await this.sessionAllocator
+      .allocateSession(workflowRunId, stageRun.id, sessionMode, async (identity) => {
+        composed = await this.composer.compose({
+          owner: stageOwner(identity.sessionId),
+          conversationId: identity.conversationId,
+          mode: identity.op === 'create' ? 'create' : 'resume',
+          spec,
+          bindingSpec: stage.session ?? {},
+          agent: { baseLayer: resolverLayer(workflowSession), bindingLayer: resolverLayer(stage.session) },
+          agentSnapshot,
+          workspace,
+          exposure: stageExposure,
+          projectId: typeof variables?.['__projectId'] === 'string' ? (variables['__projectId'] as string) : undefined,
+          ...(identity.providerSessionId ? { resumeProviderSessionId: identity.providerSessionId } : {}),
+          // A stage can always park on a human: its gates are durable.
+          attended: true,
+          gates: new StageGatePort({
+            hitl: this.hitlService,
+            eventBus: this.eventBus,
+            planService: this.planService,
+            workspaceRoot: workspace.rootPath,
+            harnessTypeOf: () => this.resolvedHarnessType(identity.conversationId, spec.harnessType),
+            readPermissionMode: () => permissionSource.read(),
+          }),
+          permission: { source: permissionSource },
+          platform: {
+            browser: { autoStart: true, reattach: true, ...(spec.browser ? { config: spec.browser as Record<string, unknown> } : {}) },
+            computerUse: 'opt_in',
+            orchestrator: false,
+            uploads: {
+              skillDirectories: stringArray(variables?.['__skillDirectories']),
+              customAgents: Array.isArray(variables?.['__customAgents']) ? (variables['__customAgents'] as unknown[]) : undefined,
+              promptDirectories: stringArray(variables?.['__promptDirectories']),
+            },
+          },
+        });
+        return composed.params;
+      })
+      .catch(async (err: unknown) => {
+        await this.failBind(stageRun, workflowRunId, err);
+        return null;
+      });
+    if (!session || !composed) return;
+    const stageSession: ComposeResult = composed;
+    this.writeAgentSnapshot(stageRun.id, stageSession.projection);
+    for (const w of stageSession.warnings) {
+      await this.eventBus.emit(session.id, {
+        kind: 'harness.session_info',
+        data: {
+          infoType: w.code,
+          message: w.message,
+          stageRunId: stageRun.id,
+          workflowRunId,
+          ...(w.params ? { params: w.params } : {}),
+        },
+      });
+    }
+
+    /**
+     * One stage turn: the options re-read from the run's permission source,
+     * the turn registered for the gates (so a gate on a shared conversation is
+     * filed against THIS stage), and — for the stage's own prompts — the
+     * widget digest and plan prefix.
+     */
+    const sendTurn = async (
+      text: string,
+      opts: { attachments?: AttachmentRef[]; signal?: AbortSignal; prepare?: boolean } = {},
+    ): Promise<{ content: string }> => {
+      const options = await stageSession.turnOptions(stageAgentMode);
+      this.composer.beginTurn(stageOwner(session.id), session.conversationId!, options, {
+        ...(semaphoreCallbacks ? { semaphore: semaphoreCallbacks } : {}),
+      });
+      const prompt = opts.prepare ? stageSession.preparePrompt(text, stageAgentMode) : text;
+      return this.harness.sendPromptAndWait(session.conversationId!, prompt, opts.attachments, opts.signal, options);
+    };
 
     // X-13 — record which session this stage is now speaking through. The
     // chain's head makes the "lost" links `StartupRecoveryService` writes
@@ -1477,7 +1280,7 @@ export class StageExecutionService {
     // Derived from the stage's own tool surface — see `replayPolicyForToolGroups`.
     // A read-only stage's interrupted turn simply re-runs; a stage that could
     // have written a file or run a command does not silently redo that work.
-    const turnReplayPolicy = replayPolicyForToolGroups(agentProjection.toolPolicy.groups);
+    const turnReplayPolicy = replayPolicyForToolGroups(stageSession.projection.toolPolicy.groups);
 
     // X-25 — this attempt is running, so the stage's durable result is not
     // final. A previous attempt on the SAME stage run (the scope is the stage
@@ -1536,7 +1339,7 @@ export class StageExecutionService {
       // Journalling it would memoise a message whose whole purpose is to
       // describe one particular restart; and it already runs inside the next
       // turn's `perform`, so it is covered by that turn's settlement.
-      await this.harness.sendPromptAndWait(session.conversationId, recapMessage); // durability-ok: see above
+      await sendTurn(recapMessage); // durability-ok: see above
       isInternalTurn = false;
       replayedTurns.length = 0;
     };
@@ -1678,7 +1481,6 @@ export class StageExecutionService {
         // W22 — journalled turn. On a post-restart re-entry the predecessor
         // context has already been delivered once; re-sending it costs a full
         // model turn and tells the agent things it was told before.
-        const contextConversationId = session.conversationId;
         await runTurn('context', contextMessage, async () => {
           // Send as a user message so the agent receives the context
           await this.messageRepo.create({
@@ -1699,7 +1501,7 @@ export class StageExecutionService {
 
           // Mark as internal turn so the client doesn't reset stream blocks
           isInternalTurn = true;
-          await this.harness.sendPromptAndWait(contextConversationId, contextMessage);
+          await sendTurn(contextMessage);
           isInternalTurn = false;
           return turnContent;
         });
@@ -1717,8 +1519,6 @@ export class StageExecutionService {
           `Your previous output for this stage did not pass validation:\n\n` +
           `${validationFeedback}\n\n` +
           `Please address these issues in your response this time.`;
-
-        const feedbackConversationId = session.conversationId;
         await runTurn('validation-feedback', feedbackMessage, async () => {
           await this.messageRepo.create({
             id: generateId(),
@@ -1736,7 +1536,7 @@ export class StageExecutionService {
           turnContent = '';
 
           isInternalTurn = true;
-          await this.harness.sendPromptAndWait(feedbackConversationId, feedbackMessage);
+          await sendTurn(feedbackMessage);
           isInternalTurn = false;
           return turnContent;
         });
@@ -1745,7 +1545,6 @@ export class StageExecutionService {
       // ── Hook context messages — inject messages returned by pre_run hooks ──
       // Skip on resume — the reused conversation already has hook context from the first attempt.
       if (!isResuming && hookContextMessages.length > 0 && session.conversationId) {
-        const hookConversationId = session.conversationId;
         for (const [hookIdx, msg] of hookContextMessages.entries()) {
           await runTurn(`hook-context/${hookIdx}`, msg.content, async () => {
             await this.messageRepo.create({
@@ -1764,7 +1563,7 @@ export class StageExecutionService {
             turnContent = '';
 
             isInternalTurn = true;
-            await this.harness.sendPromptAndWait(hookConversationId, msg.content);
+            await sendTurn(msg.content);
             isInternalTurn = false;
             return turnContent;
           });
@@ -1896,17 +1695,10 @@ export class StageExecutionService {
           }
         }
 
-        // PLN-01 — a plan-mode stage needs the plan workflow spelled out.
-        //
-        // A chat gets this via the conversation's `planModeInstructions` /
-        // system message, but stage conversations are built by SessionAllocator
-        // and have no per-turn mode. Prepending to the prompt is the one channel
-        // that reaches both providers without rebuilding the session, and it is
-        // scoped to exactly the turns that need it.
-        const stageInstructions = instructionsForMode(stageAgentMode);
-        if (stageInstructions && resolveModeDescriptor(stageAgentMode).planGate === 'blocking') {
-          promptText = `${stageInstructions}\n\n---\n\n${promptText}`;
-        }
+        // PLN-01 — plan mode reaches the model the way a chat's does: the
+        // turn's `permissionMode: 'plan'` and the composed `planModeInstructions`
+        // for providers with a native plan gate, the plan-mode prefix
+        // (`preparePrompt`) for the rest (P7).
 
         // W22 — a RESUMED step is a retraction, not a replay.
         //
@@ -1957,11 +1749,6 @@ export class StageExecutionService {
           // value here ensures the message is always persisted reliably.
           let promptResponse: { content: string } | undefined;
           if (session.conversationId) {
-            // PLN-01 — a stage's agent mode drives tool availability and the
-            // permission policy exactly as a chat's per-turn mode does. Resolved
-            // through the shared registry so a new mode needs no change here.
-            const stageTurnOptions = this.resolveStageTurnOptions(stageAgentMode);
-            const conversationId = session.conversationId;
             // Every prompt turn is awaited under a real deadline: an explicit
             // `timeouts.attemptMs` is honoured (floored at MIN_TIMEOUT_MS), and a
             // stage with none gets the default. `withStageTimeout` clears its
@@ -1974,13 +1761,11 @@ export class StageExecutionService {
               effectiveTimeout,
               stageRun.id,
               (signal) =>
-                this.harness.sendPromptAndWait(
-                  conversationId,
-                  promptText,
-                  promptAttachments.length ? promptAttachments : undefined,
+                sendTurn(promptText, {
+                  ...(promptAttachments.length ? { attachments: promptAttachments } : {}),
                   signal,
-                  stageTurnOptions,
-                ),
+                  prepare: true,
+                }),
             );
           }
 
@@ -2011,11 +1796,10 @@ export class StageExecutionService {
 
         // ── POST_PROMPT hook — fire after each prompt turn completes ──
         if (stage.hooks && stage.hooks.length > 0) {
-          const wkDir = variables?.['__workingDirectory'];
           await this.hookExecutor.executePhase('post_prompt', stage.hooks, {
             sessionId: session.id,
             workflowId: workflowRunId,
-            workspacePath: typeof wkDir === 'string' ? wkDir : process.cwd(),
+            workspacePath: stageWorkDir,
             variables: Object.fromEntries(
               Object.entries(variables ?? {}).map(([k, v]) => [k, String(v)]),
             ),
@@ -2073,8 +1857,6 @@ export class StageExecutionService {
               '```\n' +
               'Please produce ONLY the output.json block now.'
             : `Your response did not include a clear summary of your work. Please provide a concise summary of the actions taken, decisions made, and outputs produced.`;
-
-          const outputRetryConversationId = session.conversationId;
           await runTurn(`output-retry/${retryAttempt}`, retryPrompt, async () => {
             await this.messageRepo.create({
               id: generateId(),
@@ -2093,7 +1875,7 @@ export class StageExecutionService {
             turnContent = '';
 
             isInternalTurn = true;
-            await this.harness.sendPromptAndWait(outputRetryConversationId, retryPrompt);
+            await sendTurn(retryPrompt);
             isInternalTurn = false;
             return turnContent;
           }, { contributesOutput: true });
@@ -2129,8 +1911,6 @@ export class StageExecutionService {
             `Provide a concise summary (max 500 words) of all the work you just completed in this stage named "${stageRun.name}". ` +
             `Include: key actions taken, files created or modified, important decisions made, and any outputs produced. ` +
             `This summary will be provided to subsequent workflow stages as context. Be specific and factual.`;
-
-          const summaryConversationId = session.conversationId;
           stageSummary = await runTurn('summary', summaryPrompt, async () => {
             // Persist the summary prompt as a user message so
             // the chat history matches what the user sees during streaming
@@ -2152,10 +1932,7 @@ export class StageExecutionService {
 
             // Mark as internal turn so the client doesn't reset stream blocks
             isInternalTurn = true;
-            const summaryResponse = await this.harness.sendPromptAndWait(
-              summaryConversationId,
-              summaryPrompt,
-            );
+            const summaryResponse = await sendTurn(summaryPrompt);
             isInternalTurn = false;
             return summaryResponse.content;
           });
@@ -2243,7 +2020,7 @@ export class StageExecutionService {
         const postRunHookContext: HookContext = {
           sessionId: session.id,
           workflowId: workflowRunId,
-          workspacePath: typeof workspaceDirectory === 'string' ? workspaceDirectory : process.cwd(),
+          workspacePath: stageWorkDir,
           variables: Object.fromEntries(
             Object.entries(variables ?? {}).map(([k, v]) => [k, String(v)]),
           ),
@@ -2299,9 +2076,9 @@ export class StageExecutionService {
                 stageRun,
                 workflowRunId,
                 sessionId: session.id,
-                harnessType: this.resolvedHarnessType(session.conversationId, sessionConfig['harnessType']),
+                harnessType: this.resolvedHarnessType(session.conversationId, spec.harnessType),
+                workspaceRoot: workspace.rootPath,
                 content: stageOutputContent,
-                variables,
               });
             }
 
@@ -2432,7 +2209,6 @@ export class StageExecutionService {
             // since asked for something different. Same round + same feedback
             // is the only case that is genuinely the same operation.
             const feedbackText = feedback;
-            const reviewConversationId = session.conversationId;
             await runTurn(
               `review/${reviewRound}/${digest(feedbackText)}`,
               feedbackText,
@@ -2466,13 +2242,7 @@ export class StageExecutionService {
                 turnSystemMessages.length = 0;
                 turnContent = '';
 
-                await this.harness.sendPromptAndWait(
-                  reviewConversationId,
-                  feedbackText,
-                  undefined,
-                  undefined,
-                  this.resolveStageTurnOptions(stageAgentMode),
-                );
+                await sendTurn(feedbackText, { prepare: true });
                 return turnContent;
               },
               { contributesOutput: true },
@@ -2620,9 +2390,7 @@ export class StageExecutionService {
         await this.hookExecutor.executePhase('on_error', stage.hooks, {
           sessionId: stageRun.sessionId ?? '__error_session__',
           workflowId: workflowRunId,
-          workspacePath: typeof variables?.['__workingDirectory'] === 'string'
-            ? variables['__workingDirectory'] as string
-            : process.cwd(),
+          workspacePath: stageWorkDir,
           variables: Object.fromEntries(
             Object.entries(variables ?? {}).map(([k, v]) => [k, String(v)]),
           ),
@@ -2827,7 +2595,8 @@ export class StageExecutionService {
       // operator decision on an already-completed stage. It has no journalled
       // sequence to be part of, and a restart mid-way must NOT silently replay
       // it — the operator re-issues the retry.
-      await this.harness.sendPromptAndWait(session.conversationId, feedbackMessage); // durability-ok: see above
+      const turn = await this.stageTurn(stageRun, session);
+      await this.harness.sendPromptAndWait(session.conversationId, turn.prepare(feedbackMessage), undefined, undefined, turn.options); // durability-ok: see above
 
       unsubscribe?.();
 
@@ -2842,9 +2611,13 @@ export class StageExecutionService {
         // durability-ok: `retryInSession`'s own summary turn — same separate
         // entry point as the follow-up above, with no journalled sequence to
         // belong to.
+        const summaryTurn = await this.stageTurn(stageRun, session);
         const summaryResponse = await this.harness.sendPromptAndWait( // durability-ok: see above
           session.conversationId,
           summaryPrompt,
+          undefined,
+          undefined,
+          summaryTurn.options,
         );
         stageSummary = summaryResponse.content;
       } catch {
@@ -2868,7 +2641,7 @@ export class StageExecutionService {
         const postRunHookContext: HookContext = {
           sessionId: session.id,
           workflowId: workflowRunId,
-          workspacePath: typeof workspaceDirectory === 'string' ? workspaceDirectory : process.cwd(),
+          workspacePath: await this.stageWorkDir(workflowRunId, variables),
           variables: Object.fromEntries(
             Object.entries(variables ?? {}).map(([k, v]) => [k, String(v)]),
           ),
@@ -3053,7 +2826,9 @@ export class StageExecutionService {
       // stage that has already left `executeStage`. Same reasoning as
       // `retryInSession` — there is no epoch to key it on, and replaying an
       // operator's follow-up without them asking is worse than not replaying.
-      await this.harness.sendPromptAndWait(session.conversationId, prompt); // durability-ok: see above
+      // Follow-ups get the stage's turn options too (they used to send none).
+      const turn = await this.stageTurn(stageRun, session);
+      await this.harness.sendPromptAndWait(session.conversationId, turn.prepare(prompt), undefined, undefined, turn.options); // durability-ok: see above
       unsubscribe?.();
       await this.stageRunRepo.update(stageRunId, { status: 'completed', completedAt: new Date() });
       await this.eventBus.emit(session.id, {
@@ -3234,7 +3009,7 @@ export class StageExecutionService {
       await this.hookExecutor.executePhase('on_cancel', cancelStage.hooks, {
         sessionId: stageRun.sessionId ?? '__cancel_session__',
         workflowId: stageRun.workflowRunId,
-        workspacePath: process.cwd(),
+        workspacePath: await this.stageWorkDir(stageRun.workflowRunId, undefined),
         variables: {},
         eventBus: this.eventBus,
         workflowRunId: stageRun.workflowRunId,
@@ -3286,6 +3061,18 @@ export class StageExecutionService {
       variables,
       predecessorSummaries,
     );
+  }
+
+  /**
+   * The directory a stage's hooks run in: the engine's pinned working
+   * directory, else the run workspace's. Never the server's cwd (B-5); a run
+   * without a workspace has no directory to offer.
+   */
+  private async stageWorkDir(workflowRunId: string, variables: Record<string, unknown> | undefined): Promise<string> {
+    if (typeof variables?.['__workingDirectory'] === 'string') return variables['__workingDirectory'] as string;
+    const run = await this.workflowRunRepo.getById(workflowRunId);
+    const ws = await runWorkspace(this.workspaceManager, run);
+    return this.workspaceManager.getWorkingDirectory(ws);
   }
 
   /** The stage a stage run executes, from the run's pinned definition version. */
@@ -3364,15 +3151,12 @@ export class StageExecutionService {
     sessionId: string;
     harnessType: string;
     content: string;
-    variables?: Record<string, unknown>;
+    /** The run workspace's managed root: plans are platform artifacts, never in a worktree. */
+    workspaceRoot: string;
   }): Promise<string | undefined> {
     const planService = this.planService;
     if (!planService) return params.planId;
-
-    const workspaceRoot =
-      typeof params.variables?.['__workingDirectory'] === 'string'
-        ? (params.variables['__workingDirectory'] as string)
-        : undefined;
+    const workspaceRoot = params.workspaceRoot;
 
     try {
       if (params.planId) {
@@ -3411,22 +3195,6 @@ export class StageExecutionService {
       );
       return params.planId;
     }
-  }
-
-  /**
-   * Per-turn harness options for a stage.
-   *
-   * A stage with no explicit `agentMode` inherits the autonomous default, so
-   * every pre-existing workflow keeps behaving exactly as before. When a stage
-   * opts into `plan`, the permission policy is forced read-only by the mode
-   * descriptor — the same mechanism the chat composer uses.
-   */
-  private resolveStageTurnOptions(stageAgentMode: AgentMode | undefined): SendPromptOptions {
-    const agentMode = stageAgentMode ?? DEFAULT_AGENT_MODE;
-    return {
-      agentMode,
-      permissionMode: resolveTurnPermissionMode(agentMode, undefined),
-    };
   }
 
   /**

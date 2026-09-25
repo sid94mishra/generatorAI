@@ -10,9 +10,8 @@
 
 import type { EngineLevel } from '../constants.js';
 import type { WorkflowGraph } from '../schemas/graph.js';
-import type { SessionSpec } from '../schemas/session.js';
 import { ApprovalSpecSchema, RetryPolicySchema } from '../schemas/stage.js';
-import { pointerToken, type ValidationIssue } from './issues.js';
+import type { ValidationIssue } from './issues.js';
 
 const RETRY_DEFAULTS = RetryPolicySchema.parse({});
 const APPROVAL_DEFAULTS = ApprovalSpecSchema.parse({});
@@ -33,7 +32,6 @@ export function engineIssues(graph: WorkflowGraph, engine: EngineLevel): Validat
     });
 
   const wf = graph.workflow;
-  const stageSessions: Array<[string, SessionSpec | undefined, string | undefined]> = [];
   if (wf.onExit !== undefined) add('/workflow/onExit', 'onExit');
   if (wf.onFailure !== undefined) add('/workflow/onFailure', 'onFailure');
   if (wf.maxParallel !== undefined) add('/workflow/maxParallel', 'maxParallel');
@@ -69,23 +67,8 @@ export function engineIssues(graph: WorkflowGraph, engine: EngineLevel): Validat
       if (a.allowChanges !== APPROVAL_DEFAULTS.allowChanges) add(`${p}/approval/allowChanges`, 'approval.allowChanges', s.key);
       if (a.maxRounds !== APPROVAL_DEFAULTS.maxRounds) add(`${p}/approval/maxRounds`, 'approval.maxRounds', s.key);
     }
-    // Provider credentials and MCP secret references are resolved by the
-    // session composer (P02); the v1 engine would hand them to the harness
-    // verbatim (P01 review R6).
-    stageSessions.push([`${p}/session`, s.session, s.key]);
   });
 
-  stageSessions.push(['/workflow/session', wf.session, undefined]);
-  for (const [path, session, key] of stageSessions) {
-    if (!session) continue;
-    if (session.provider !== undefined) add(`${path}/provider`, 'session.provider', key);
-    for (const [id, server] of Object.entries(session.mcp?.servers ?? {})) {
-      const values = [...Object.values(server.env ?? {}), ...Object.values(server.headers ?? {})];
-      if (values.some((v) => typeof v === 'string' && v.startsWith('secretref:'))) {
-        add(`${path}/mcp/servers/${pointerToken(id)}`, `A secretref: value in MCP server '${id}'`, key);
-      }
-    }
-  }
   if (wf.outputs !== undefined) add('/workflow/outputs', 'workflow outputs');
 
   graph.edges.forEach((e, i) => {

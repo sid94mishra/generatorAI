@@ -51,7 +51,12 @@ export async function applyAgentProjection(
   deps: { agentResolver?: AgentResolver | undefined; agentStaging?: AgentStagingService | undefined },
 ): Promise<{ projection: ResolvedAgentProjection; warnings: ComposeWarning[] }> {
   const ref = input.agentRef ?? input.bindingLayer?.agentRef ?? input.baseLayer?.agentRef;
-  if (!ref && !input.snapshot && (!input.projectId || !deps.agentResolver)) {
+  // Capability additions without a reusable agent (a stage's addSkillIds, an
+  // MCP exclusion) still need the resolver.
+  const hasAdditions = [input.overrides, input.baseLayer?.agentOverrides, input.bindingLayer?.agentOverrides].some(
+    (o) => !!o && Object.keys(o).length > 0,
+  ) || !!input.bindingLayer?.excludedMcpServerIds?.length || !!input.baseLayer?.excludedMcpServerIds?.length;
+  if (!ref && !input.snapshot && (!(input.projectId || hasAdditions) || !deps.agentResolver)) {
     return { projection: AgentResolver.empty(), warnings: [] };
   }
   if (!deps.agentResolver) {
@@ -276,4 +281,37 @@ export async function deliverSkills(
   cfg['plugins'] = [{ type: 'local', path: plugin.path }];
   cfg['skills'] = plugin.skills;
   return [];
+}
+
+/**
+ * A session layer as the agent resolver's input: the resolver folds its
+ * runtime scalars and override lists by `HarnessConfig` field names. The
+ * stage passes the workflow's session as the base layer and its own session
+ * as the binding layer, so the stage beats the agent and the agent beats the
+ * workflow.
+ */
+export function resolverLayer(s: SessionSpec | undefined): Partial<HarnessConfig> | undefined {
+  if (!s) return undefined;
+  const h: Partial<HarnessConfig> = {};
+  if (s.model) h.model = s.model;
+  if (s.harnessType) h.harnessType = s.harnessType;
+  if (s.reasoningEffort) h.reasoningEffort = s.reasoningEffort as HarnessConfig['reasoningEffort'];
+  if (s.contextTier) h.contextTier = s.contextTier;
+  if (s.maxTurns !== undefined) h.maxTurns = s.maxTurns;
+  if (s.provider) h.provider = s.provider;
+  if (s.agentRef) h.agentRef = s.agentRef;
+  if (s.agentOverrides) h.agentOverrides = s.agentOverrides as HarnessConfig['agentOverrides'];
+  if (s.systemMessage) h.systemMessage = { mode: s.systemMessage.mode, content: s.systemMessage.content };
+  if (s.systemPromptAppend) h.systemPromptAppend = s.systemPromptAppend;
+  if (s.planModeInstructions) h.planModeInstructions = s.planModeInstructions;
+  if (s.permissionMode) h.permissionMode = s.permissionMode as HarnessConfig['permissionMode'];
+  if (s.defaultAgentMode) h.defaultAgentMode = s.defaultAgentMode;
+  if (s.tools?.available) h.availableTools = [...s.tools.available];
+  if (s.tools?.excluded) h.excludedTools = [...s.tools.excluded];
+  if (s.mcp?.servers) h.mcpServers = { ...s.mcp.servers } as HarnessConfig['mcpServers'];
+  if (s.mcp?.excludedIds) h.excludedMcpServerIds = [...s.mcp.excludedIds];
+  if (s.skills?.directories) h.skillDirectories = [...s.skills.directories];
+  if (s.skills?.disabled) h.disabledSkills = [...s.skills.disabled];
+  if (s.customAgents) h.customAgents = s.customAgents.map((c) => ({ ...c }));
+  return h;
 }

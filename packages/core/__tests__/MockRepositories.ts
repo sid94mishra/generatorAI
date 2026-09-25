@@ -481,15 +481,37 @@ export class MockStageRunRepository implements IStageRunRepository {
 // is a required dependency). Service-level tests only need the four calls the
 // run and stage services make; nothing is written to disk.
 
+import { SessionComposer } from '../src/services/session/SessionComposer.js';
+import { TurnContextRegistry } from '../src/services/session/gates.js';
+import type { SessionComposerDeps } from '../src/services/session/types.js';
+import type { IAgentHarness } from '../src/domain/ports/IAgentHarness.js';
 import type { WorkspaceManager } from '../src/services/WorkspaceManager.js';
 
 export function createFakeWorkspaceManager(root = '/tmp/gai-fake-ws'): WorkspaceManager {
+  // Every run has a workspace (created at start); the fake answers for any owner.
+  const workspaceOf = (ownerId: string) => ({ id: `ws-${ownerId}`, ownerId, rootPath: `${root}/${ownerId}` });
   return {
-    createWorkspace: async (opts: { ownerId: string }) => ({ id: `ws-${opts.ownerId}`, rootPath: `${root}/${opts.ownerId}` }),
+    createWorkspace: async (opts: { ownerId: string }) => workspaceOf(opts.ownerId),
     getWorkingDirectory: (ws: { rootPath: string }) => `${ws.rootPath}/source`,
     completeWorkspace: async () => undefined,
-    findWorkspaceByOwner: async () => null,
-    getExecutionWorkspace: async () => null,
+    findWorkspaceByOwner: async (ownerId: string) => workspaceOf(ownerId),
+    getExecutionWorkspace: async (id: string) => workspaceOf(id.replace(/^ws-/, '')),
+    getExposure: async (ws: { rootPath: string }) => ({
+      rootPath: ws.rootPath,
+      scratchDir: `${ws.rootPath}/scratch`,
+      workingDirectory: `${ws.rootPath}/source`,
+      additionalDirectories: [ws.rootPath],
+      mounts: [],
+      env: { GENERATORAI_WORKSPACE_ROOT: ws.rootPath },
+      hint: `
+
+[Workspace] ${ws.rootPath}/source`,
+    }),
     trackArtifact: async () => undefined,
   } as unknown as WorkspaceManager;
+}
+
+/** A session composer over `harness` with the given platform services (test helper). */
+export function createTestComposer(harness: IAgentHarness, deps: SessionComposerDeps = {}): SessionComposer {
+  return new SessionComposer(deps, harness, new TurnContextRegistry());
 }
