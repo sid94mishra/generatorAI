@@ -103,14 +103,15 @@ jobs:
       # despite being written specifically to be CI guards.
       - run: pnpm lint
 
-      # Web design-system ratchet. Counts raw <button>/<select>/Loader2 uses
-      # against a committed baseline and fails when the count goes UP. The
-      # baseline file and its shrink-only rules are owned by the web UI
-      # overhaul (WS-F2) in apps/web/scripts/check-design-system.mjs — this
-      # step only wires it into CI. Ubuntu-only: it reads source, not builds.
+      # Web design-system ratchet + stories-present check
+      # (docs/redesign/09-verification.md §2.1–2.2, §3.6). `--strict` fails when
+      # any count rises AND when a count fell without the PR lowering the
+      # baseline (`check:design --update`), so every improvement is locked in.
+      # The redesign folders src/{ui,blocks,features,app} are hard-zero.
+      # Ubuntu-only: it reads source, not builds.
       - name: Check web design-system ratchet
         if: matrix.os == 'ubuntu-latest'
-        run: pnpm --filter @generatorai/web check:design
+        run: pnpm --filter @generatorai/web check:design --strict
 
       - run: pnpm turbo typecheck
 
@@ -122,6 +123,14 @@ jobs:
       - name: Check web bundle size
         if: matrix.os == 'ubuntu-latest'
         run: pnpm --filter @generatorai/web check:bundle
+
+      # Tailwind emits nothing (and reports nothing) for a broken `@theme` /
+      # `@source` — this reads the same dist/ and checks that the CSS parses
+      # and that the design utilities were emitted (09-verification.md §2.4;
+      # P0 skeleton, fully active from P1).
+      - name: Check web CSS emission
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm --filter @generatorai/web check:css
 
       # CLI_TUI_POST_OVERHAUL_PARITY_AUDIT_2026.md §5.6 — the CLI's declared
       # `bin` was never actually produced or exercised by CI: `pnpm turbo

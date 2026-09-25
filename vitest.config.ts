@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
+import { unitProject as webUnitProject } from './apps/web/vitest.config.ts';
 
 /**
  * Two projects, because the web tests need two things nothing else does: the
@@ -52,22 +53,12 @@ const GLOBAL_SETUP = [resolve(import.meta.dirname, 'scripts/vitest-temp-teardown
 export default defineConfig({
   test: {
     projects: [
-      {
-        test: {
-          name: 'web',
-          globals: true,
-          globalSetup: GLOBAL_SETUP,
-          passWithNoTests: true,
-          environment: 'jsdom',
-          setupFiles: [resolve(import.meta.dirname, 'apps/web/vitest.setup.ts')],
-          include: ['apps/web/**/*.{test,spec}.{ts,tsx}'],
-          exclude: EXCLUDE,
-        },
-        // `@` is `apps/web/src` and nothing else — see `apps/web/vite.config.ts`.
-        resolve: {
-          alias: { '@': resolve(import.meta.dirname, 'apps/web/src') },
-        },
-      },
+      // The web app's own config is the single source for its tests
+      // (docs/redesign/09-verification.md §1.1): happy-dom, the `@` alias and
+      // apps/web/vitest.setup.ts all live there. Listing the file itself does
+      // not work — Vitest ignores the `projects` inside it — so this extends it
+      // for the alias and reuses its `unit` project.
+      { extends: './apps/web/vitest.config.ts', test: webUnitProject },
       {
         test: {
           name: 'node',

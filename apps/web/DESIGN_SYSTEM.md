@@ -1,6 +1,6 @@
 # GeneratorAI Web — Design System
 
-Single source of truth for the web UI's visual language, for both the web app and the Electron desktop app (same SPA). **All UI must use these tokens and primitives** — do not hand-roll buttons, cards, badges, selects, modals, tabs, or inputs with ad-hoc classes. Enforced by ESLint (design-system rules in the root `eslint.config.mjs`) and the ratchet check (`pnpm check:design` → [`scripts/check-design-system.mjs`](./scripts/check-design-system.mjs) vs [`design-system-baseline.json`](./design-system-baseline.json) — CI fails if any violation count rises).
+Single source of truth for the web UI's visual language, for both the web app and the Electron desktop app (same SPA). **All UI must use these tokens and primitives** — do not hand-roll buttons, cards, badges, selects, modals, tabs, or inputs with ad-hoc classes. Enforced by ESLint (design-system rules in the root `eslint.config.mjs`) and the ratchet check (`pnpm check:design` → [`scripts/check-design-system.mjs`](./scripts/check-design-system.mjs) vs [`design-system-baseline.json`](./design-system-baseline.json) — CI runs it with `--strict`: it fails if any violation count rises, if a count fell without `--update` lowering the baseline, or if anything appears in the redesign folders `src/{ui,blocks,features,app}`; see `docs/redesign/09-verification.md` §2).
 
 ## 1. Tokens & theming
 

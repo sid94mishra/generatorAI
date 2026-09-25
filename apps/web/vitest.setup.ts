@@ -1,5 +1,7 @@
 // ────────────────────────────────────────────────────────────────
-// Web test environment shims.
+// Web test environment shims — the only setup file of the `unit` project in
+// apps/web/vitest.config.ts (happy-dom). The shims were written against jsdom
+// and are all guarded, so each one only fills an API the DOM environment lacks.
 //
 // The jest-dom matchers are registered here and nowhere else. Without this
 // import every `toBeInTheDocument` / `toHaveTextContent` / `toBeDisabled`

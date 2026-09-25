@@ -3,6 +3,74 @@ import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
 import reactHooks from 'eslint-plugin-react-hooks';
 import prettierConfig from 'eslint-config-prettier';
+import betterTailwind from 'eslint-plugin-better-tailwindcss';
+import boundaries from 'eslint-plugin-boundaries';
+import { fileURLToPath } from 'node:url';
+
+// Absolute paths: turbo runs `eslint src/` from apps/web while `pnpm lint`'s
+// check:syncio runs `eslint .` from the repo root, and both must resolve the
+// same files.
+const REPO_ROOT = fileURLToPath(new URL('.', import.meta.url));
+const WEB_DIR = fileURLToPath(new URL('./apps/web', import.meta.url));
+const WEB_CSS = fileURLToPath(new URL('./apps/web/src/styles/globals.css', import.meta.url));
+const WEB_TSCONFIG = fileURLToPath(new URL('./apps/web/tsconfig.eslint.json', import.meta.url));
+
+// ── Web design-system restrictions shared by every block that re-declares ──
+// `no-restricted-imports` / `no-restricted-syntax` for apps/web/src (see the
+// flat-config trap at the bottom of this file: a later block REPLACES a rule
+// for the files it matches, it does not merge with it).
+const WEB_RESTRICTED_IMPORT_PATHS = [
+  {
+    name: 'lucide-react',
+    importNames: ['Loader2'],
+    message: 'Use <Spinner> from @/components/ui instead of raw Loader2.',
+  },
+];
+const WEB_RESTRICTED_SYNTAX = [
+  {
+    selector: "JSXOpeningElement[name.name='button']",
+    message: 'Use <Button> from @/components/ui instead of a raw <button>.',
+  },
+  {
+    selector: "JSXOpeningElement[name.name='select']",
+    message: 'Use <Select> from @/components/ui instead of a raw <select>.',
+  },
+];
+
+// ── Redesign layers (docs/redesign/09-verification.md §2.3, D-04) ──────────
+const WEB_NEW_CODE = 'apps/web/src/{ui,blocks,features,app}/**/*.{ts,tsx}';
+const WEB_TEST_FILES = ['apps/web/src/**/__tests__/**', 'apps/web/src/**/*.test.{ts,tsx}'];
+
+const LUCIDE = { name: 'lucide-react', message: 'Import icons from @/ui/icons by concept (D-17).' };
+const HEADLESS = {
+  group: ['@radix-ui/*', 'radix-ui', '@base-ui/*', '@base-ui-components/*', 'cmdk'],
+  message: 'Headless primitives are wrapped in @/ui/primitives (D-05).',
+};
+const UI_LAYER = [
+  {
+    group: ['@tanstack/react-query', 'react-router', 'react-router-dom', 'zustand', 'zustand/*', '@generatorai/client-core', '@generatorai/client-runtime'],
+    message: 'ui/ is presentational: pass data and callbacks in as props.',
+  },
+  {
+    group: ['@/stores/*', '@/platform/*', '@/hooks/*', '@/features/*', '@/blocks/*', '@/components/*', '@/pages/*'],
+    message: 'ui/ may import only ui/ (D-04).',
+  },
+];
+
+const ARBITRARY_VALUE_RESTRICTION = { pattern: '\\[.+\\]', message: 'No arbitrary values. Add a token or a kit variant.' };
+const NEW_CODE_RESTRICTED_CLASSES = [
+  { pattern: '^(.*:)?text-(xs|sm|base|lg|xl|\\d?xl)$', message: 'Use the D-13 scale: text-micro|small|ui|body|title|heading|display.' },
+  { pattern: '^(.*:)?(bg|text|border|ring|fill|stroke|outline|divide|from|to|via)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d+(/\\d+)?$', message: 'Palette classes are off-system. Use design tokens (D-08).' },
+  { pattern: '^(.*:)?(bg|text|border|ring|fill|stroke)-(white|black)(/\\d+)?$', message: 'Use fg/surface/on-accent tokens.' },
+  { pattern: '^(.*:)?rounded(-[trblxyse]{1,2})?(-(xs|sm|md|lg|xl|\\dxl))?$', message: 'Use rounded-badge|control-sm|control|seg|card|panel|dialog (D-14).' },
+  { pattern: '^(.*:)?shadow(-(2xs|xs|sm|md|lg|xl|2xl|inner))?$', message: 'Only shadow-pop / shadow-none exist.' },
+  ARBITRARY_VALUE_RESTRICTION,
+  { pattern: '^(.*:)?h-(\\d+(\\.\\d+)?|px)$', message: 'Heights come from density variables: h-control-sm|h-control|h-control-lg|h-row|h-bar|h-tab|h-nav (D-15).' },
+  // P1 appends one entry built from LEGACY_UTILITY_NAMES: legacy semantic utilities are banned in new code.
+];
+
+/** Allow imports into the given element types (eslint-plugin-boundaries v7 policy selector). */
+const toTypes = (...types) => ({ to: { element: { type: types } } });
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [
@@ -82,32 +150,152 @@ export default [
       'apps/web/src/**/*.test.tsx',
     ],
     rules: {
-      'no-restricted-syntax': [
-        'warn',
-        {
-          selector: "JSXOpeningElement[name.name='button']",
-          message: 'Use <Button> from @/components/ui instead of a raw <button>.',
-        },
-        {
-          selector: "JSXOpeningElement[name.name='select']",
-          message: 'Use <Select> from @/components/ui instead of a raw <select>.',
-        },
-      ],
-      'no-restricted-imports': [
-        'warn',
-        {
-          paths: [
-            {
-              name: 'lucide-react',
-              importNames: ['Loader2'],
-              message: 'Use <Spinner> from @/components/ui instead of raw Loader2.',
-            },
-          ],
-        },
-      ],
+      'no-restricted-syntax': ['warn', ...WEB_RESTRICTED_SYNTAX],
+      'no-restricted-imports': ['warn', { paths: WEB_RESTRICTED_IMPORT_PATHS }],
       'no-restricted-globals': [
         'warn',
         { name: 'confirm', message: 'Use <ConfirmDialog> from @/components/ui.' },
+      ],
+    },
+  },
+  // ── Redesign guardrails (D-03; docs/redesign/09-verification.md §2.3) ──────
+  //
+  // (a) Tailwind vocabulary, new code only. `error` from P0: the folders start
+  // empty. Legacy code is held by the check-design-system.mjs ratchet instead.
+  //
+  // `cwd` is not optional: from the repo root `tailwindcss` resolves to the
+  // hoisted 3.x (docs site), and the plugin would then lint v4 code against v3.
+  // `callees` is left at the plugin default on purpose: it already covers cn,
+  // cva, clsx and twMerge (including cva `variants` values), and setting the
+  // option replaces those matchers instead of extending them.
+  {
+    files: [WEB_NEW_CODE],
+    ignores: ['**/*.stories.tsx', ...WEB_TEST_FILES],
+    plugins: { 'better-tailwindcss': betterTailwind },
+    settings: { 'better-tailwindcss': { entryPoint: WEB_CSS, cwd: WEB_DIR } },
+    rules: {
+      'better-tailwindcss/no-unknown-classes': ['error', { ignore: ['^app-drag-region$', '^no-drag$', '^group(/.+)?$', '^peer(/.+)?$'] }],
+      'better-tailwindcss/no-conflicting-classes': 'error',
+      'better-tailwindcss/no-duplicate-classes': 'error',
+      'better-tailwindcss/no-deprecated-classes': 'error',
+      'better-tailwindcss/no-unnecessary-whitespace': 'warn',
+      'better-tailwindcss/no-restricted-classes': ['error', { restrict: NEW_CODE_RESTRICTED_CLASSES }],
+    },
+  },
+  {
+    // ui/lib is the one sanctioned home of arbitrary values (Base UI CSS-variable
+    // passthroughs, each with a comment) — the same exemption the ratchet's
+    // `arbitraryValue` rule gives it. Everything else in (a) still applies.
+    files: ['apps/web/src/ui/lib/**/*.{ts,tsx}'],
+    ignores: ['**/*.stories.tsx', ...WEB_TEST_FILES],
+    rules: {
+      'better-tailwindcss/no-restricted-classes': [
+        'error',
+        { restrict: NEW_CODE_RESTRICTED_CLASSES.filter((r) => r !== ARBITRARY_VALUE_RESTRICTION) },
+      ],
+    },
+  },
+  // (b) Layer boundaries (D-04), over all of apps/web/src.
+  {
+    files: ['apps/web/src/**/*.{ts,tsx}'],
+    plugins: { boundaries },
+    settings: {
+      'import/resolver': { typescript: { project: WEB_TSCONFIG } },
+      'boundaries/root-path': REPO_ROOT,
+      'boundaries/include': ['apps/web/src/**/*'],
+      // Lazy route modules and barrel re-exports cross layers too.
+      'boundaries/dependency-nodes': ['import', 'dynamic-import', 'export'],
+      'boundaries/elements': [
+        { type: 'ui', pattern: 'apps/web/src/ui', partialMatch: false },
+        { type: 'blocks', pattern: 'apps/web/src/blocks', partialMatch: false },
+        { type: 'features', pattern: 'apps/web/src/features/*', partialMatch: false, capture: ['domain'] },
+        { type: 'app', pattern: 'apps/web/src/app', partialMatch: false },
+        { type: 'platform', pattern: 'apps/web/src/platform', partialMatch: false },
+        { type: 'data', pattern: 'apps/web/src/{stores,hooks,lib,utils,providers,types,audio}', partialMatch: false },
+        { type: 'legacy', pattern: 'apps/web/src/{components,pages}', partialMatch: false },
+        // The loose files at the top of src (App, main, router). v7 has no
+        // non-deprecated way to make a single file an element; `mode: 'file'`
+        // is it.
+        { type: 'root', pattern: 'apps/web/src/*.{ts,tsx}', mode: 'file' },
+      ],
+    },
+    rules: {
+      'boundaries/dependencies': [
+        'error',
+        {
+          default: 'disallow',
+          policies: [
+            { from: { element: { type: 'ui' } }, allow: toTypes('ui') },
+            { from: { element: { type: 'blocks' } }, allow: toTypes('ui', 'blocks', 'data', 'platform') },
+            { from: { element: { type: 'features' } }, allow: toTypes('ui', 'blocks', 'data') },
+            {
+              from: { element: { type: 'features' } },
+              allow: { to: { element: { type: 'features', captured: { domain: '{{ from.element.captured.domain }}' } } } },
+            },
+            { from: { element: { type: 'app' } }, allow: toTypes('ui', 'blocks', 'features', 'data', 'platform', 'legacy') },
+            { from: { element: { type: 'data' } }, allow: toTypes('data', 'platform') },
+            // Migration scaffolding; removed in P7. The only data → legacy edges
+            // at P0 (4 imports in hooks/queries.ts, hooks/composerQueries.ts,
+            // providers/QueryProvider.tsx), allowed to these target files only so
+            // no new edge can appear. They go when Toast and the composer
+            // builtins move to ui/ and packages/client-core.
+            {
+              from: { element: { type: 'data' } },
+              allow: {
+                to: {
+                  element: { type: 'legacy' },
+                  file: { path: ['apps/web/src/components/Toast.tsx', 'apps/web/src/components/chat/composer/{builtins,types}.ts'] },
+                },
+              },
+            },
+            { from: { element: { type: 'platform' } }, allow: toTypes('platform', 'data') },
+            // Migration scaffolding; deleted in P7.
+            { from: { element: { type: 'legacy' } }, allow: toTypes('legacy', 'ui', 'blocks', 'data', 'platform') },
+            // `root` too: each loose file is its own element, and main.tsx imports App.tsx.
+            { from: { element: { type: 'root' } }, allow: toTypes('root', 'app', 'ui', 'data', 'platform', 'legacy') },
+          ],
+        },
+      ],
+    },
+  },
+  // (c) no-restricted-imports per layer. The three file sets are DISJOINT, so
+  // no block replaces another's rule; each repeats WEB_RESTRICTED_IMPORT_PATHS
+  // because it replaces the design-system block's rule above.
+  {
+    // Everything outside ui/ (legacy included): `warn` until P7, ratcheted by
+    // check-design-system.mjs (lucideDirectImport, rawHeadlessImport).
+    files: ['apps/web/src/**/*.{ts,tsx}'],
+    ignores: ['apps/web/src/ui/**', 'apps/web/src/components/ui/**', ...WEB_TEST_FILES],
+    rules: {
+      'no-restricted-imports': ['warn', { paths: [...WEB_RESTRICTED_IMPORT_PATHS, LUCIDE], patterns: [HEADLESS] }],
+    },
+  },
+  {
+    // The legacy components/ui primitives wrap Radix by design and own the
+    // Spinner, so they were never under the Loader2 path or a headless ban;
+    // they are held to the D-17 lucide rule only (deleted in P7).
+    files: ['apps/web/src/components/ui/**/*.{ts,tsx}'],
+    ignores: WEB_TEST_FILES,
+    rules: {
+      'no-restricted-imports': ['warn', { paths: [LUCIDE] }],
+    },
+  },
+  {
+    // ui/ except the icon registry: headless allowed, lucide and data layers not.
+    files: ['apps/web/src/ui/**/*.{ts,tsx}'],
+    ignores: ['apps/web/src/ui/icons/**'],
+    rules: {
+      'no-restricted-imports': ['error', { paths: [...WEB_RESTRICTED_IMPORT_PATHS, LUCIDE], patterns: UI_LAYER }],
+    },
+  },
+  {
+    // The icon registry: the only lucide importer (it maps the loader concept,
+    // so the Loader2 path is deliberately not repeated here).
+    files: ['apps/web/src/ui/icons/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { paths: WEB_RESTRICTED_IMPORT_PATHS.filter((p) => p.name !== 'lucide-react'), patterns: UI_LAYER },
       ],
     },
   },

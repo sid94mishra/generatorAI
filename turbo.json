@@ -32,6 +32,10 @@
     },
     "typecheck": {
       "dependsOn": ["^build"]
+    },
+    "check:css": {
+      "dependsOn": ["build"],
+      "cache": false
     }
   }
 }

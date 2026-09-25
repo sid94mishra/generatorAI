@@ -1,0 +1,10 @@
+{
+  // Import resolution for eslint-plugin-boundaries (root eslint.config.mjs) only.
+  //
+  // eslint-import-resolver-typescript v4 always resolves with project references
+  // set to 'auto', and unrs-resolver then ignores the `paths` of a tsconfig that
+  // has `references` — so every `@/…` import in apps/web went unresolved and
+  // escaped the D-04 layer rules. `references` is not inherited through
+  // `extends`, so this file is the web tsconfig minus its references.
+  "extends": "./tsconfig.json"
+}
