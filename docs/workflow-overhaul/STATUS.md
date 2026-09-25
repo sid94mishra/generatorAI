@@ -5,7 +5,7 @@ The coding agent updates this file in every phase PR.
 | Phase | Branch | Status | PR | Gate report | Notes |
 |---|---|---|---|---|---|
 | 00 Baseline | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | Baseline section below | gate pass with the recorded baseline exceptions |
-| 01 Spec, legacy, definitions | wf/phase-01-spec-definitions | not started | | | |
+| 01 Spec, legacy, definitions | wf/overhaul (see DEVIATIONS) | in progress: part A (WP-1.1–1.4) done | local only | part A gate 2026-09-25: typecheck 50/50; tests = the 12 baseline failures only (cli 5, core 3, git 2, server 2); lint green; no-legacy 69 bans, 0 hits, 12 comments (baseline 12); db-baseline + migrations-lock + BaselineFreshDb pass | WP-1.5–1.9 todo; v55 drop list in TRACKER 1.4 |
 | 02 SessionComposer | wf/phase-02-session-composer | not started | | | |
 | 03 Engine v2 | wf/phase-03-engine-v2 | not started | | | |
 | 03b Stage conversation | wf/phase-03b-stage-conversation | not started | | | |
