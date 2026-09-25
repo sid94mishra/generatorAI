@@ -15,7 +15,7 @@
 //   - no dropped items (every created resource reaches a terminal state)
 //
 // Chats/workflows/automations run against `FauxProvider` (see
-// `GENERATORAI_LOAD_TEST_FAUX_HARNESS` in composition-root.ts) so this test
+// `GENERATORAI_TEST_FAUX_HARNESS` in composition-root.ts) so this test
 // needs no real LLM credentials and is safe/deterministic in CI — every
 // turn still goes through the REAL ChatManagementService, EventBus, DAG
 // scheduler and DB writes end to end; only the model backend is fake.
@@ -184,7 +184,7 @@ function bootServerPortable(dbDir) {
       // refused to start with bindHost=0.0.0.0 on a developer machine and the
       // test timed out waiting for health). Pin it — this test owns its server.
       GENERATORAI_BIND_HOST: '127.0.0.1',
-      GENERATORAI_LOAD_TEST_FAUX_HARNESS: process.env.LOAD_TEST_REAL_HARNESS === '1' ? 'false' : 'true',
+      GENERATORAI_TEST_FAUX_HARNESS: process.env.LOAD_TEST_REAL_HARNESS === '1' ? 'false' : 'true',
     },
     // The 4th ('ipc') stdio slot matters beyond messaging: on Windows,
     // `ChildProcess.kill('SIGTERM')` without an IPC channel present does a

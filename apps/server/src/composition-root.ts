@@ -496,7 +496,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // §1.Q — see the FauxProvider branch just below. Named so every place that
   // must also avoid touching a real provider CLI (the model-catalog warm-up,
   // in particular) can check the same flag rather than re-reading env.
-  const loadTestFauxHarness = process.env['GENERATORAI_LOAD_TEST_FAUX_HARNESS'] === 'true';
+  const testFauxHarness = process.env['GENERATORAI_TEST_FAUX_HARNESS'] === 'true';
   let harness: IAgentHarness;
   let hostSupervisor: HostSupervisor | undefined;
 
@@ -511,11 +511,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // ChatManagementService, EventBus, and DB writes end to end. Explicit,
   // scary env var name so this is unmistakably a test-only escape hatch —
   // off by default, never reachable in a normal deployment.
-  if (loadTestFauxHarness) {
+  if (testFauxHarness) {
     harness = new FauxProvider();
     logger.warn(
-      '[Container] GENERATORAI_LOAD_TEST_FAUX_HARNESS=true — using FauxProvider for ALL conversations. ' +
-      'This must never be set outside a load test.',
+      '[Container] GENERATORAI_TEST_FAUX_HARNESS=true — using FauxProvider for ALL conversations. ' +
+      'This must never be set outside a test.',
     );
   } else if (agentHostEnabled) {
     // Resolve the agent-host entry point. In the monorepo the package lives
@@ -2447,8 +2447,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // test's own `killOwnDescendants()` shutdown assertion caught exactly
       // that: a leftover `copilot.exe`/`conhost.exe` pair reaped at shutdown
       // even though FauxProvider had handled every actual conversation.
-      if (loadTestFauxHarness) {
-        logger.warn('[Container] GENERATORAI_LOAD_TEST_FAUX_HARNESS=true — skipping real-provider model-catalog warm-up.');
+      if (testFauxHarness) {
+        logger.warn('[Container] GENERATORAI_TEST_FAUX_HARNESS=true — skipping real-provider model-catalog warm-up.');
       } else {
         void harnessRegistry.refresh(true)
           .then((statuses) => {
