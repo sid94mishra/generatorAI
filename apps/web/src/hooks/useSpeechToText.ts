@@ -195,7 +195,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
    */
   const pausedRef = useRef(false);
   /** The last ~1s of capture frames while paused — see the file header. */
-  const preRollRef = useRef<Float32Array[]>([]);
+  const preRollRef = useRef<Float32Array<ArrayBuffer>[]>([]);
   /** Recent frame loudness while paused, for the onset detector. */
   const onsetRef = useRef<number[]>([]);
 
@@ -344,7 +344,9 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     wsRef.current = ws;
 
     worklet.port.onmessage = (e: MessageEvent) => {
-      const buf = e.data as Float32Array;
+      // Posted by the worklet, so it arrives backed by a plain (never shared)
+      // ArrayBuffer — which is what `WebSocket.send` accepts.
+      const buf = e.data as Float32Array<ArrayBuffer>;
       if (!buf?.length || ws.readyState !== ws.OPEN) return;
 
       if (!pausedRef.current) {
