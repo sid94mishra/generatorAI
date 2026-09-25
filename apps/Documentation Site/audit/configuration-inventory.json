@@ -4704,37 +4704,157 @@
         "field": "orchestratorConfig.postProcessingSteps[]",
         "type": "object",
         "presence": "required",
-        "constraints": "unknown keys: strip"
+        "constraints": "unknown keys: strip; refinement"
       },
       {
         "field": "orchestratorConfig.postProcessingSteps[].type",
-        "type": "string",
+        "type": "\"commit_and_push\" / \"create_pr\" / \"run_script\"",
         "presence": "required",
         "constraints": "—"
       },
       {
         "field": "orchestratorConfig.postProcessingSteps[].name",
         "type": "string",
-        "presence": "optional",
-        "constraints": "—"
+        "presence": "required",
+        "constraints": "min 1"
       },
       {
         "field": "orchestratorConfig.postProcessingSteps[].config",
-        "type": "map of unknown",
+        "type": "variants by type (object / object / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strip"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.type",
+        "type": "\"commit_and_push\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.repoAlias",
+        "type": "string",
         "presence": "optional",
         "constraints": "—"
       },
       {
-        "field": "orchestratorConfig.postProcessingSteps[].failOnError",
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.commitMessage",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.push",
         "type": "boolean",
         "presence": "optional",
         "constraints": "—"
       },
       {
-        "field": "orchestratorConfig.postProcessingSteps[].order",
-        "type": "number",
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.generateMessage",
+        "type": "boolean",
         "presence": "optional",
         "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.baseBranch",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strip"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.type",
+        "type": "\"create_pr\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.repoAlias",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.title",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.body",
+        "type": "string",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.baseBranch",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.generateText",
+        "type": "boolean",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.draft",
+        "type": "boolean",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strip"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.type",
+        "type": "\"run_script\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.script",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.cwd",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.timeoutMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 0 (exclusive)"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].failOnError",
+        "type": "boolean",
+        "presence": "default true",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].order",
+        "type": "number",
+        "presence": "default 0",
+        "constraints": "int; min 0"
       },
       {
         "field": "projectId",
@@ -5875,37 +5995,157 @@
         "field": "orchestratorConfig.postProcessingSteps[]",
         "type": "object",
         "presence": "required",
-        "constraints": "unknown keys: strip"
+        "constraints": "unknown keys: strip; refinement"
       },
       {
         "field": "orchestratorConfig.postProcessingSteps[].type",
-        "type": "string",
+        "type": "\"commit_and_push\" / \"create_pr\" / \"run_script\"",
         "presence": "required",
         "constraints": "—"
       },
       {
         "field": "orchestratorConfig.postProcessingSteps[].name",
         "type": "string",
-        "presence": "optional",
-        "constraints": "—"
+        "presence": "required",
+        "constraints": "min 1"
       },
       {
         "field": "orchestratorConfig.postProcessingSteps[].config",
-        "type": "map of unknown",
+        "type": "variants by type (object / object / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strip"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.type",
+        "type": "\"commit_and_push\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.repoAlias",
+        "type": "string",
         "presence": "optional",
         "constraints": "—"
       },
       {
-        "field": "orchestratorConfig.postProcessingSteps[].failOnError",
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.commitMessage",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.push",
         "type": "boolean",
         "presence": "optional",
         "constraints": "—"
       },
       {
-        "field": "orchestratorConfig.postProcessingSteps[].order",
-        "type": "number",
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.generateMessage",
+        "type": "boolean",
         "presence": "optional",
         "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.baseBranch",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strip"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.type",
+        "type": "\"create_pr\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.repoAlias",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.title",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.body",
+        "type": "string",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.baseBranch",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.generateText",
+        "type": "boolean",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.draft",
+        "type": "boolean",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strip"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.type",
+        "type": "\"run_script\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.script",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.cwd",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.timeoutMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 0 (exclusive)"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].failOnError",
+        "type": "boolean",
+        "presence": "default true",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].order",
+        "type": "number",
+        "presence": "default 0",
+        "constraints": "int; min 0"
       },
       {
         "field": "projectId",
@@ -9486,37 +9726,157 @@
         "field": "orchestratorConfig.postProcessingSteps[]",
         "type": "object",
         "presence": "required",
-        "constraints": "unknown keys: strip"
+        "constraints": "unknown keys: strip; refinement"
       },
       {
         "field": "orchestratorConfig.postProcessingSteps[].type",
-        "type": "string",
+        "type": "\"commit_and_push\" / \"create_pr\" / \"run_script\"",
         "presence": "required",
         "constraints": "—"
       },
       {
         "field": "orchestratorConfig.postProcessingSteps[].name",
         "type": "string",
-        "presence": "optional",
-        "constraints": "—"
+        "presence": "required",
+        "constraints": "min 1"
       },
       {
         "field": "orchestratorConfig.postProcessingSteps[].config",
-        "type": "map of unknown",
+        "type": "variants by type (object / object / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strip"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.type",
+        "type": "\"commit_and_push\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.repoAlias",
+        "type": "string",
         "presence": "optional",
         "constraints": "—"
       },
       {
-        "field": "orchestratorConfig.postProcessingSteps[].failOnError",
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.commitMessage",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.push",
         "type": "boolean",
         "presence": "optional",
         "constraints": "—"
       },
       {
-        "field": "orchestratorConfig.postProcessingSteps[].order",
-        "type": "number",
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.generateMessage",
+        "type": "boolean",
         "presence": "optional",
         "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 1>.baseBranch",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strip"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.type",
+        "type": "\"create_pr\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.repoAlias",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.title",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.body",
+        "type": "string",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.baseBranch",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.generateText",
+        "type": "boolean",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 2>.draft",
+        "type": "boolean",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strip"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.type",
+        "type": "\"run_script\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.script",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.cwd",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].config<variant 3>.timeoutMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 0 (exclusive)"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].failOnError",
+        "type": "boolean",
+        "presence": "default true",
+        "constraints": "—"
+      },
+      {
+        "field": "orchestratorConfig.postProcessingSteps[].order",
+        "type": "number",
+        "presence": "default 0",
+        "constraints": "int; min 0"
       },
       {
         "field": "projectId",

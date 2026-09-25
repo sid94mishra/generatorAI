@@ -170,12 +170,32 @@ Zod schema for creating a WorkflowDefinition
 | orchestratorConfig.autoPush | boolean | `optional` | — |
 | orchestratorConfig.autoCreatePR | boolean | `optional` | — |
 | orchestratorConfig.postProcessingSteps | array of object | `default []` | — |
-| orchestratorConfig.postProcessingSteps[] | object | `required` | unknown keys: strip |
-| orchestratorConfig.postProcessingSteps[].type | string | `required` | — |
-| orchestratorConfig.postProcessingSteps[].name | string | `optional` | — |
-| orchestratorConfig.postProcessingSteps[].config | map of unknown | `optional` | — |
-| orchestratorConfig.postProcessingSteps[].failOnError | boolean | `optional` | — |
-| orchestratorConfig.postProcessingSteps[].order | number | `optional` | — |
+| orchestratorConfig.postProcessingSteps[] | object | `required` | unknown keys: strip; refinement |
+| orchestratorConfig.postProcessingSteps[].type | "commit_and_push" / "create_pr" / "run_script" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].name | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config | variants by type (object / object / object) | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt; | object | `required` | unknown keys: strip |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.type | "commit_and_push" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.repoAlias | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.commitMessage | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.push | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.generateMessage | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.baseBranch | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt; | object | `required` | unknown keys: strip |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.type | "create_pr" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.repoAlias | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.title | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.body | string | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.baseBranch | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.generateText | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.draft | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt; | object | `required` | unknown keys: strip |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.type | "run_script" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.script | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.cwd | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.timeoutMs | number | `optional` | int; min 0 (exclusive) |
+| orchestratorConfig.postProcessingSteps[].failOnError | boolean | `default true` | — |
+| orchestratorConfig.postProcessingSteps[].order | number | `default 0` | int; min 0 |
 | projectId | string | `optional` | uuid |
 | hooks | array of object | `optional` | maxLength 50 |
 | hooks[] | object | `required` | unknown keys: strip |
@@ -371,12 +391,32 @@ Zod schema for updating a WorkflowDefinition
 | orchestratorConfig.autoPush | boolean | `optional` | — |
 | orchestratorConfig.autoCreatePR | boolean | `optional` | — |
 | orchestratorConfig.postProcessingSteps | array of object | `default []` | — |
-| orchestratorConfig.postProcessingSteps[] | object | `required` | unknown keys: strip |
-| orchestratorConfig.postProcessingSteps[].type | string | `required` | — |
-| orchestratorConfig.postProcessingSteps[].name | string | `optional` | — |
-| orchestratorConfig.postProcessingSteps[].config | map of unknown | `optional` | — |
-| orchestratorConfig.postProcessingSteps[].failOnError | boolean | `optional` | — |
-| orchestratorConfig.postProcessingSteps[].order | number | `optional` | — |
+| orchestratorConfig.postProcessingSteps[] | object | `required` | unknown keys: strip; refinement |
+| orchestratorConfig.postProcessingSteps[].type | "commit_and_push" / "create_pr" / "run_script" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].name | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config | variants by type (object / object / object) | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt; | object | `required` | unknown keys: strip |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.type | "commit_and_push" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.repoAlias | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.commitMessage | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.push | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.generateMessage | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.baseBranch | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt; | object | `required` | unknown keys: strip |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.type | "create_pr" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.repoAlias | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.title | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.body | string | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.baseBranch | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.generateText | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.draft | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt; | object | `required` | unknown keys: strip |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.type | "run_script" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.script | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.cwd | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.timeoutMs | number | `optional` | int; min 0 (exclusive) |
+| orchestratorConfig.postProcessingSteps[].failOnError | boolean | `default true` | — |
+| orchestratorConfig.postProcessingSteps[].order | number | `default 0` | int; min 0 |
 | projectId | string | `optional; null accepted` | uuid |
 | hooks | array of object | `optional` | maxLength 50 |
 | hooks[] | object | `required` | unknown keys: strip |
@@ -1002,12 +1042,32 @@ Zod schema for importing a full workflow from a JSON file upload
 | orchestratorConfig.autoPush | boolean | `optional` | — |
 | orchestratorConfig.autoCreatePR | boolean | `optional` | — |
 | orchestratorConfig.postProcessingSteps | array of object | `default []` | — |
-| orchestratorConfig.postProcessingSteps[] | object | `required` | unknown keys: strip |
-| orchestratorConfig.postProcessingSteps[].type | string | `required` | — |
-| orchestratorConfig.postProcessingSteps[].name | string | `optional` | — |
-| orchestratorConfig.postProcessingSteps[].config | map of unknown | `optional` | — |
-| orchestratorConfig.postProcessingSteps[].failOnError | boolean | `optional` | — |
-| orchestratorConfig.postProcessingSteps[].order | number | `optional` | — |
+| orchestratorConfig.postProcessingSteps[] | object | `required` | unknown keys: strip; refinement |
+| orchestratorConfig.postProcessingSteps[].type | "commit_and_push" / "create_pr" / "run_script" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].name | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config | variants by type (object / object / object) | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt; | object | `required` | unknown keys: strip |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.type | "commit_and_push" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.repoAlias | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.commitMessage | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.push | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.generateMessage | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 1&gt;.baseBranch | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt; | object | `required` | unknown keys: strip |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.type | "create_pr" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.repoAlias | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.title | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.body | string | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.baseBranch | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.generateText | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 2&gt;.draft | boolean | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt; | object | `required` | unknown keys: strip |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.type | "run_script" | `required` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.script | string | `required` | min 1 |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.cwd | string | `optional` | — |
+| orchestratorConfig.postProcessingSteps[].config&lt;variant 3&gt;.timeoutMs | number | `optional` | int; min 0 (exclusive) |
+| orchestratorConfig.postProcessingSteps[].failOnError | boolean | `default true` | — |
+| orchestratorConfig.postProcessingSteps[].order | number | `default 0` | int; min 0 |
 | projectId | string | `optional` | uuid |
 | hooks | array of object | `optional` | maxLength 50 |
 | hooks[] | object | `required` | unknown keys: strip |
@@ -1266,6 +1326,47 @@ const PreprocessingStepSchema = z.object({
   order: z.number().int().min(0).default(0),
 });
 
+/** Zod schema for a post-processing step's config — discriminated on `type` */
+const PostProcessingStepConfigSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('commit_and_push'),
+    repoAlias: z.string().optional(),
+    commitMessage: z.string().min(1),
+    push: z.boolean().optional(),
+    generateMessage: z.boolean().optional(),
+    baseBranch: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('create_pr'),
+    repoAlias: z.string().optional(),
+    title: z.string().min(1),
+    body: z.string(),
+    baseBranch: z.string().optional(),
+    generateText: z.boolean().optional(),
+    draft: z.boolean().optional(),
+  }),
+  z.object({
+    type: z.literal('run_script'),
+    script: z.string().min(1),
+    cwd: z.string().optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  }),
+]);
+
+/** Zod schema for a post-processing step. `type` must match `config.type`. */
+const PostProcessingStepSchema = z
+  .object({
+    type: z.enum(['commit_and_push', 'create_pr', 'run_script']),
+    name: z.string().min(1),
+    config: PostProcessingStepConfigSchema,
+    failOnError: z.boolean().default(true),
+    order: z.number().int().min(0).default(0),
+  })
+  .refine((step) => step.type === step.config.type, {
+    message: 'type must match config.type',
+    path: ['config', 'type'],
+  });
+
 /** Zod schema for a single ResultValidationRule */
 const ResultValidationRuleSchema = z.object({
   type: z.enum(['contains', 'not_contains', 'min_length', 'max_length', 'regex', 'custom_script', 'json_schema', 'llm_validation']),
@@ -1292,13 +1393,8 @@ const OrchestratorConfigSchema = z.object({
   /** Push the run's work branch after committing (implied by autoCreatePR). */
   autoPush: z.boolean().optional(),
   autoCreatePR: z.boolean().optional(),
-  postProcessingSteps: z.array(z.object({
-    type: z.string(),
-    name: z.string().optional(),
-    config: z.record(z.unknown()).optional(),
-    failOnError: z.boolean().optional(),
-    order: z.number().optional(),
-  })).default([]),
+  /** Every declared step runs; `config.type` names what it does. */
+  postProcessingSteps: z.array(PostProcessingStepSchema).default([]),
 });
 
 /** Zod schema for creating a WorkflowDefinition */

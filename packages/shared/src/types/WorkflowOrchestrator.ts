@@ -105,8 +105,6 @@ export interface PostProcessingStep {
   failOnError: boolean;
   /** Order of execution (lower = earlier) */
   order: number;
-  /** Whether this step is enabled */
-  enabled: boolean;
 }
 
 /** Union of post-processing step configs */

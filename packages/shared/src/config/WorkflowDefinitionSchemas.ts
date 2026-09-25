@@ -102,6 +102,47 @@ const PreprocessingStepSchema = z.object({
   order: z.number().int().min(0).default(0),
 });
 
+/** Zod schema for a post-processing step's config — discriminated on `type` */
+const PostProcessingStepConfigSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('commit_and_push'),
+    repoAlias: z.string().optional(),
+    commitMessage: z.string().min(1),
+    push: z.boolean().optional(),
+    generateMessage: z.boolean().optional(),
+    baseBranch: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('create_pr'),
+    repoAlias: z.string().optional(),
+    title: z.string().min(1),
+    body: z.string(),
+    baseBranch: z.string().optional(),
+    generateText: z.boolean().optional(),
+    draft: z.boolean().optional(),
+  }),
+  z.object({
+    type: z.literal('run_script'),
+    script: z.string().min(1),
+    cwd: z.string().optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  }),
+]);
+
+/** Zod schema for a post-processing step. `type` must match `config.type`. */
+const PostProcessingStepSchema = z
+  .object({
+    type: z.enum(['commit_and_push', 'create_pr', 'run_script']),
+    name: z.string().min(1),
+    config: PostProcessingStepConfigSchema,
+    failOnError: z.boolean().default(true),
+    order: z.number().int().min(0).default(0),
+  })
+  .refine((step) => step.type === step.config.type, {
+    message: 'type must match config.type',
+    path: ['config', 'type'],
+  });
+
 /** Zod schema for a single ResultValidationRule */
 const ResultValidationRuleSchema = z.object({
   type: z.enum(['contains', 'not_contains', 'min_length', 'max_length', 'regex', 'custom_script', 'json_schema', 'llm_validation']),
@@ -128,13 +169,8 @@ const OrchestratorConfigSchema = z.object({
   /** Push the run's work branch after committing (implied by autoCreatePR). */
   autoPush: z.boolean().optional(),
   autoCreatePR: z.boolean().optional(),
-  postProcessingSteps: z.array(z.object({
-    type: z.string(),
-    name: z.string().optional(),
-    config: z.record(z.unknown()).optional(),
-    failOnError: z.boolean().optional(),
-    order: z.number().optional(),
-  })).default([]),
+  /** Every declared step runs; `config.type` names what it does. */
+  postProcessingSteps: z.array(PostProcessingStepSchema).default([]),
 });
 
 /** Zod schema for creating a WorkflowDefinition */

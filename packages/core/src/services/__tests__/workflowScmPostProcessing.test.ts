@@ -80,7 +80,6 @@ function commitStep(config: Record<string, unknown> = {}): PostProcessingStep {
     },
     failOnError: true,
     order: 100,
-    enabled: true,
   } as PostProcessingStep;
 }
 
@@ -97,7 +96,6 @@ function prStep(config: Record<string, unknown> = {}): PostProcessingStep {
     },
     failOnError: true,
     order: 200,
-    enabled: true,
   } as PostProcessingStep;
 }
 

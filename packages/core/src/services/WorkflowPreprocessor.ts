@@ -224,7 +224,7 @@ export class WorkflowPreprocessor {
     context: PreprocessorContext,
   ): Promise<PreprocessingResult[]> {
     const results: PreprocessingResult[] = [];
-    const sorted = [...steps].filter((s) => s.enabled).sort((a, b) => a.order - b.order);
+    const sorted = [...steps].sort((a, b) => a.order - b.order);
 
     for (const step of sorted) {
       const start = Date.now();

@@ -975,7 +975,6 @@ export class WorkflowOrchestrator {
         // Either way the steps after this one must not run.
         failOnError: true,
         order: 100,
-        enabled: true,
       });
     }
 
@@ -993,7 +992,6 @@ export class WorkflowOrchestrator {
         },
         failOnError: true,
         order: 200,
-        enabled: true,
       });
     }
 

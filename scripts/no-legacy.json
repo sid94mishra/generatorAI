@@ -444,6 +444,27 @@
         "apps/web/src/stores/workflowBuilderStore.ts"
       ],
       "reason": "WP-1.4: workflow-definition scope deleted; projectId IS NULL means global"
+    },
+    {
+      "phase": "01",
+      "pattern": "masterSessionId|master_\\$\\{",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/sdk/",
+        "packages/db/src/repositories/",
+        "apps/"
+      ],
+      "reason": "WP-1.4: masterSessionId deleted (no event was ever emitted to it)"
+    },
+    {
+      "phase": "01",
+      "pattern": "filter\\(\\(s\\) => s\\.enabled\\)|enabled: true,\\s*$",
+      "paths": [
+        "packages/core/src/services/WorkflowPreprocessor.ts",
+        "packages/core/src/services/WorkflowOrchestrator.ts"
+      ],
+      "reason": "WP-1.4: PostProcessingStep.enabled deleted; every declared step runs"
     }
   ],
   "comments": {
