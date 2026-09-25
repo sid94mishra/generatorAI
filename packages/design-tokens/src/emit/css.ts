@@ -5,8 +5,10 @@
 // The generator splices this between marker comments so the hand-written base
 // styles below the markers stay hand-written.
 //
-//   Layer 1  raw semantic values, per theme × appearance × accent
-//   Layer 2  `@theme inline` — makes them Tailwind utilities
+//   Layer 1  raw semantic values, per theme × appearance × accent (legacy)
+//   Layer 1b `--gai-*` design values, same ladder (02 §10.1)
+//   Layer 2  `@theme inline` — makes the legacy values Tailwind utilities
+//            (the design utilities live in css/vocabulary.css)
 //   Layer 3  `--color-*` compat aliases for legacy arbitrary values
 //   Layer 4  highlight.js rules, driven by the theme's syntax tokens
 //
@@ -16,14 +18,14 @@
 // beyond setting two attributes and a class. That is done purely with CSS
 // specificity, and the order below is load-bearing:
 //
-//   :root                                          (0,0,0)  default theme, dark
+//   :root                                          (0,1,0)  default theme, dark
 //   .light                                         (0,1,0)  default theme, light
 //   [data-theme="x"]                               (0,1,0)  theme x, dark
 //   .light[data-theme="x"]                         (0,2,0)  theme x, light
 //   [data-theme="x"][data-accent="a"]              (0,2,0)  theme x, dark, accent a
 //   .light[data-theme="x"][data-accent="a"]        (0,3,0)  theme x, light, accent a
 //
-// Rows 3/4 and 4/5 tie on specificity, so they are broken by source order —
+// Rows 1/2/3 and 4/5 tie on specificity, so they are broken by source order —
 // which is why the emission order in `emitCss()` is not cosmetic. Reordering
 // those sections silently gives light-mode users dark-mode accents.
 //
@@ -42,6 +44,13 @@
 //    `color-scheme` — which is exactly where these tokens are consumed.
 // ────────────────────────────────────────────────────────────────
 
+import { DESIGN_ACCENT_KEYS, DESIGN_COLOR_VARS, resolveDesignTokens } from '../design.js';
+import {
+  LEGACY_BRIDGE_SOURCE,
+  LEGACY_COLOR_NAMES,
+  REQUIRED_UTILITIES,
+  SHARED_COLOR_NAMES,
+} from '../vocabulary.js';
 import {
   ACCENT_IDS,
   DEFAULT_THEME,
@@ -126,57 +135,9 @@ const SYNTAX_ROLES = [
   'inserted',
 ] as const;
 
-const CHART_SLOTS = 6;
-
-/**
- * Every token that ends up as a Tailwind colour utility in Layer 2.
- *
- * Names that collide with the design vocabulary (02 §3) are not bridged:
- * `accent` is bridged as `accent-tint` (the raw `--accent` keeps its name,
- * mobile reads it), and `surface`, `surface-hover`, `raised`, `overlay` and
- * `accent-foreground` are dropped — their raw variables still emit until P7.
- */
-export const THEME_COLOR_VARS = [
-  'background',
-  'foreground',
-  'card',
-  'card-foreground',
-  'popover',
-  'popover-foreground',
-  'subtle',
-  'emphasis',
-  'primary',
-  'primary-emphasis',
-  'primary-foreground',
-  'secondary',
-  'secondary-foreground',
-  'muted',
-  'muted-foreground',
-  'accent-tint',
-  'destructive',
-  'destructive-foreground',
-  'border',
-  'border-muted',
-  'input',
-  'ring',
-  'success',
-  'success-muted',
-  'warning',
-  'warning-muted',
-  'info',
-  'info-muted',
-  'danger',
-  'danger-muted',
-  'done',
-  'sidebar',
-  'sidebar-foreground',
-  'sidebar-border',
-  'sidebar-accent',
-  'sidebar-accent-foreground',
-  'canvas-bg',
-  'canvas-dot',
-  ...Array.from({ length: CHART_SLOTS }, (_, i) => `chart-${i + 1}`),
-] as const;
+/** Raw variable behind a legacy bridge name. */
+const bridgeSource = (name: (typeof LEGACY_COLOR_NAMES)[number]): string =>
+  LEGACY_BRIDGE_SOURCE[name] ?? name;
 
 /**
  * The colour half of a theme × appearance: everything except fonts and radii,
@@ -279,16 +240,9 @@ function accentBlock(theme: ThemeDef, accentId: AccentId, appearance: Appearance
   ].join('\n');
 }
 
-/** Raw variable behind a legacy bridge name (only `accent-tint` is renamed). */
-const LEGACY_BRIDGE_SOURCE: Partial<Record<(typeof THEME_COLOR_VARS)[number], string>> = {
-  'accent-tint': 'accent',
-};
-const bridgeSource = (name: (typeof THEME_COLOR_VARS)[number]): string =>
-  LEGACY_BRIDGE_SOURCE[name] ?? name;
-
 function themeInlineBlock(): string {
   const lines = ['@theme inline {'];
-  for (const name of THEME_COLOR_VARS) {
+  for (const name of LEGACY_COLOR_NAMES) {
     lines.push(`  --color-${name}: var(--${bridgeSource(name)});`);
   }
   lines.push('  --font-sans: var(--font-sans);');
@@ -299,8 +253,13 @@ function themeInlineBlock(): string {
 
 function compatAliasBlock(): string {
   const lines = [':root {'];
-  for (const name of THEME_COLOR_VARS) {
+  for (const name of LEGACY_COLOR_NAMES) {
     lines.push(`  --color-${name}: var(--${bridgeSource(name)});`);
+  }
+  // The shared tokens' utilities live in vocabulary.css; these aliases keep the
+  // hand-written `var(--color-canvas-bg)` rules (React Flow) resolving.
+  for (const name of SHARED_COLOR_NAMES) {
+    lines.push(`  --color-${name}: var(--${name});`);
   }
   lines.push('}');
   return lines.join('\n');
@@ -341,6 +300,71 @@ function syntaxRulesBlock(): string {
     '.hljs-emphasis { font-style: italic; }',
     '.hljs-strong { font-weight: 600; }',
   ].join('\n');
+}
+
+const designVar = (key: keyof ReturnType<typeof resolveDesignTokens>): string =>
+  DESIGN_COLOR_VARS.find(([k]) => k === key)?.[1] as string;
+
+/** Every `--gai-*` colour for one theme × appearance (its default accent). */
+function designAppearanceBlock(theme: ThemeDef, appearance: Appearance, selector: string): string {
+  const d = resolveDesignTokens(theme, appearance, theme.defaultAccent);
+  const lines = [`${selector} {`, `  color-scheme: ${appearance};`];
+  for (const [key, name] of DESIGN_COLOR_VARS) lines.push(`  ${name}: ${d[key]};`);
+  lines.push('}');
+  return lines.join('\n');
+}
+
+/** The accent-dependent `--gai-*` colours for one theme × accent × appearance. */
+function designAccentBlock(theme: ThemeDef, accentId: AccentId, appearance: Appearance): string {
+  const base = `[data-theme="${theme.id}"][data-accent="${accentId}"]`;
+  const d = resolveDesignTokens(theme, appearance, accentId);
+  return [
+    `${appearance === 'dark' ? base : `.light${base}`} {`,
+    ...DESIGN_ACCENT_KEYS.map((key) => `  ${designVar(key)}: ${d[key]};`),
+    '}',
+  ].join('\n');
+}
+
+export const DESIGN_LAYER_HEADER = '/* ── Layer 1b — design values (--gai-*) ── */';
+
+/**
+ * Layer 1b: the design layer, with the same specificity ladder as Layer 1 in a
+ * section of its own so P7 can delete Layer 1 wholesale. Unlike Layer 1, the
+ * default theme also gets explicit `[data-theme]` blocks, so an attribute on
+ * any element (a Storybook decorator) fully describes its theme.
+ */
+function designLayer(base: ThemeDef): string[] {
+  const sections: string[] = [
+    [
+      DESIGN_LAYER_HEADER,
+      '/* Design-named colours (02 §2). Legacy pages never read these; ported',
+      '   pages reach them through the utilities in css/vocabulary.css. */',
+    ].join('\n'),
+    designAppearanceBlock(base, 'dark', ':root'),
+    designAppearanceBlock(base, 'light', '.light'),
+  ];
+  for (const theme of THEMES) {
+    sections.push(designAppearanceBlock(theme, 'dark', `[data-theme="${theme.id}"]`));
+    sections.push(designAppearanceBlock(theme, 'light', `.light[data-theme="${theme.id}"]`));
+  }
+  for (const theme of THEMES) {
+    for (const accentId of ACCENT_IDS) {
+      if (accentId === theme.defaultAccent) continue;
+      sections.push(designAccentBlock(theme, accentId, 'dark'));
+      sections.push(designAccentBlock(theme, accentId, 'light'));
+    }
+  }
+  return sections;
+}
+
+/**
+ * Tailwind emits a utility only when it finds the class in a source file. The
+ * CSS-emission check (09 §2.4) asserts the required design utilities are built
+ * and token-backed before any page uses them, so they are safelisted here.
+ * Emitting unused rules changes no rendered pixel.
+ */
+function requiredUtilitiesSafelist(): string {
+  return `@source inline("${REQUIRED_UTILITIES.join(' ')}");`;
 }
 
 /** The full generated CSS body (without the surrounding markers). */
@@ -405,6 +429,8 @@ export function emitCss(): string {
     }
   }
 
+  sections.push(...designLayer(base));
+
   sections.push(
     [
       '/* ══════════════════════════════════════════════════════════════',
@@ -415,6 +441,13 @@ export function emitCss(): string {
     ].join('\n'),
   );
   sections.push(themeInlineBlock());
+  sections.push(
+    [
+      '/* Design utilities are mapped in css/vocabulary.css (imported at the top of',
+      '   globals.css). The required ones are always built (09 §2.4). */',
+      requiredUtilitiesSafelist(),
+    ].join('\n'),
+  );
 
   sections.push(
     [

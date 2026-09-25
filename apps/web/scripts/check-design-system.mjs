@@ -41,7 +41,6 @@ const webDir = webDirArg ? resolve(webDirArg) : fileURLToPath(new URL('..', impo
 const srcDir = join(webDir, 'src');
 const baselinePath = join(webDir, 'design-system-baseline.json');
 const filesBaselinePath = join(webDir, 'design-system-baseline.files.json');
-const globalsCssPath = join(srcDir, 'styles', 'globals.css');
 
 const args = new Set(argv);
 const update = args.has('--update');
@@ -72,31 +71,21 @@ const TS_ONLY = /\.tsx?$/;
 const TS_AND_CSS = /\.(?:tsx?|css)$/;
 
 // ── Legacy token utility names (09 §2.1 `legacyTokenUtility`) ──
-// Until P1 exports LEGACY_UTILITY_NAMES from packages/design-tokens: the
-// `--color-*` keys of the legacy `@theme inline` block in globals.css, minus the
-// D-08 design names, minus the shared tokens that survive P7 (02 §2.3 "Kept
-// tokens": chart-N and canvas-*). Counting those would keep the rule above 0
-// forever, and P7 requires it locked at 0.
-const DESIGN_COLOR_NAMES = new Set([
-  'ground', 'surface', 'raised', 'overlay', 'sunken', 'hover', 'selected',
-  'line', 'line-soft', 'line-strong', 'fg', 'fg-2', 'fg-3', 'accent', 'on-accent', 'focus',
-  'run', 'run-text', 'run-bg', 'ok', 'ok-text', 'ok-bg', 'warn', 'warn-text', 'warn-bg',
-  'err', 'err-text', 'err-bg', 'add-bg', 'del-bg', 'scrim', 'pop',
-]);
-const SHARED_COLOR_NAME = /^(?:chart-\d+|canvas-[\w-]+)$/;
+// LEGACY_UTILITY_NAMES from packages/design-tokens (src/vocabulary.ts), read
+// from its generated JSON because this script cannot import TypeScript. It
+// holds only the legacy bridge names: the D-08 design names and the shared
+// tokens that survive P7 (chart-N, canvas-*) are not in it, so the rule can
+// reach 0 and lock, as P7 requires.
+const legacyVocabularyPath = fileURLToPath(
+  new URL('../../../packages/design-tokens/generated/vocabulary.json', import.meta.url),
+);
 
 function legacyUtilityNames() {
-  const css = readFileSync(globalsCssPath, 'utf8');
-  const names = new Set();
-  // Only the `@theme inline` blocks: the Layer 3 `:root` compat aliases repeat
-  // the same keys but are not utilities.
-  for (const block of css.matchAll(/@theme\s+inline\s*\{([^}]*)\}/g)) {
-    for (const [, name] of block[1].matchAll(/--color-([\w-]+)\s*:/g)) names.add(name);
+  const names = JSON.parse(readFileSync(legacyVocabularyPath, 'utf8')).legacyUtilityNames;
+  if (!Array.isArray(names) || names.length === 0) {
+    throw new Error(`no legacyUtilityNames in ${legacyVocabularyPath} — run \`pnpm tokens:write\``);
   }
-  if (names.size === 0) {
-    throw new Error(`no --color-* keys found in the @theme inline block of ${globalsCssPath}`);
-  }
-  return [...names].filter((n) => !DESIGN_COLOR_NAMES.has(n) && !SHARED_COLOR_NAME.test(n)).sort();
+  return [...names].sort();
 }
 
 function legacyTokenUtilityPattern() {

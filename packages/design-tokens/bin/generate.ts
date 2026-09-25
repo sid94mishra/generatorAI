@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import { emitCss, spliceCss } from '../src/emit/css.js';
 import { emitNative } from '../src/emit/native.js';
+import { emitVocabularyCss, emitVocabularyJson } from '../src/emit/vocabulary.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../..');
@@ -38,6 +39,16 @@ const targets: Target[] = [
       }
       return spliceCss(existing, emitCss());
     },
+  },
+  {
+    label: 'shared class vocabulary',
+    path: resolve(repoRoot, 'packages/design-tokens/css/vocabulary.css'),
+    render: () => emitVocabularyCss(),
+  },
+  {
+    label: 'vocabulary lists for Node tools',
+    path: resolve(repoRoot, 'packages/design-tokens/generated/vocabulary.json'),
+    render: () => emitVocabularyJson(),
   },
   {
     label: 'mobile token module',

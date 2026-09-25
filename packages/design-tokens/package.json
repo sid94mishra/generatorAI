@@ -17,9 +17,15 @@
     "./emit": {
       "import": "./src/emit/index.ts",
       "types": "./src/emit/index.ts"
-    }
+    },
+    "./css/vocabulary.css": "./css/vocabulary.css",
+    "./vocabulary.json": "./generated/vocabulary.json"
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "css",
+    "generated"
+  ],
   "publishConfig": {
     "access": "public",
     "main": "./dist/index.js",
@@ -36,7 +42,9 @@
       "./emit": {
         "types": "./dist/emit/index.d.ts",
         "import": "./dist/emit/index.js"
-      }
+      },
+      "./css/vocabulary.css": "./css/vocabulary.css",
+      "./vocabulary.json": "./generated/vocabulary.json"
     }
   },
   "scripts": {

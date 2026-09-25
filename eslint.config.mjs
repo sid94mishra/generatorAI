@@ -5,6 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import prettierConfig from 'eslint-config-prettier';
 import betterTailwind from 'eslint-plugin-better-tailwindcss';
 import boundaries from 'eslint-plugin-boundaries';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // Absolute paths: turbo runs `eslint src/` from apps/web while `pnpm lint`'s
@@ -101,6 +102,15 @@ const FEATURES_DATA = [
   },
 ];
 
+// LEGACY_UTILITY_NAMES from packages/design-tokens (src/vocabulary.ts), via the
+// JSON `pnpm tokens:write` generates next to it (a config cannot import TS).
+const LEGACY_UTILITY_NAMES = JSON.parse(
+  readFileSync(new URL('./packages/design-tokens/generated/vocabulary.json', import.meta.url), 'utf8'),
+).legacyUtilityNames;
+const LEGACY_UTILITY_RESTRICTION = {
+  pattern: `^(.*:)?!?(bg|text|border|ring|fill|stroke|outline|divide|from|to|via|shadow|accent|caret|decoration|placeholder)-(${LEGACY_UTILITY_NAMES.join('|')})(/\\d+)?$`,
+  message: 'Legacy token utility (D-06). Use the design vocabulary: bg-surface, text-fg-2, border-line … (02 §2.3).',
+};
 const ARBITRARY_VALUE_RESTRICTION = { pattern: '\\[.+\\]', message: 'No arbitrary values. Add a token or a kit variant.' };
 const NEW_CODE_RESTRICTED_CLASSES = [
   { pattern: '^(.*:)?text-(xs|sm|base|lg|xl|\\d?xl)$', message: 'Use the D-13 scale: text-micro|small|ui|body|title|heading|display.' },
@@ -110,7 +120,8 @@ const NEW_CODE_RESTRICTED_CLASSES = [
   { pattern: '^(.*:)?shadow(-(2xs|xs|sm|md|lg|xl|2xl|inner))?$', message: 'Only shadow-pop / shadow-none exist.' },
   ARBITRARY_VALUE_RESTRICTION,
   { pattern: '^(.*:)?h-(\\d+(\\.\\d+)?|px)$', message: 'Heights come from density variables: h-control-sm|h-control|h-control-lg|h-row|h-bar|h-tab|h-nav (D-15).' },
-  // P1 appends one entry built from LEGACY_UTILITY_NAMES: legacy semantic utilities are banned in new code.
+  // Legacy semantic utilities are banned in new code (09 §2.3).
+  LEGACY_UTILITY_RESTRICTION,
 ];
 
 /** Allow imports into the given element types (eslint-plugin-boundaries v7 policy selector). */

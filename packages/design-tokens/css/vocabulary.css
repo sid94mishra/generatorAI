@@ -1,0 +1,50 @@
+/* GENERATED from packages/design-tokens (src/vocabulary.ts) — do not edit. Regenerate with `pnpm tokens:write`. */
+@theme inline {
+  /* Colour (02 §2.3). */
+  --color-ground: var(--gai-ground);
+  --color-surface: var(--gai-surface);
+  --color-raised: var(--gai-raised);
+  --color-overlay: var(--gai-overlay);
+  --color-sunken: var(--gai-sunken);
+  --color-hover: var(--gai-hover);
+  --color-selected: var(--gai-selected);
+  --color-line-soft: var(--gai-line-soft);
+  --color-line: var(--gai-line);
+  --color-line-strong: var(--gai-line-strong);
+  --color-fg: var(--gai-fg);
+  --color-fg-2: var(--gai-fg-2);
+  --color-fg-3: var(--gai-fg-3);
+  --color-accent: var(--gai-accent);
+  --color-on-accent: var(--gai-on-accent);
+  --color-focus: var(--gai-focus);
+  --color-run: var(--gai-run);
+  --color-run-bg: var(--gai-run-bg);
+  --color-ok: var(--gai-ok);
+  --color-ok-bg: var(--gai-ok-bg);
+  --color-warn: var(--gai-warn);
+  --color-warn-bg: var(--gai-warn-bg);
+  --color-err: var(--gai-err);
+  --color-err-bg: var(--gai-err-bg);
+  --color-add-bg: var(--gai-add-bg);
+  --color-del-bg: var(--gai-del-bg);
+  --color-scrim: var(--gai-scrim);
+
+  /* text-<status> is the AA-safe text value; bg-/border-/fill-<status> stay the hue. */
+  --text-color-run: var(--gai-run-text);
+  --text-color-ok: var(--gai-ok-text);
+  --text-color-warn: var(--gai-warn-text);
+  --text-color-err: var(--gai-err-text);
+
+  /* Elevation (02 §6.4). */
+  --shadow-pop: var(--gai-shadow-pop);
+
+  /* Shared layer: kept through P7 (02 §2.3 "Kept tokens"). */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-canvas-bg: var(--canvas-bg);
+  --color-canvas-dot: var(--canvas-dot);
+}

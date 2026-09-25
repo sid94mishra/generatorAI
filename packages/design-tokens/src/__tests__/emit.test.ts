@@ -17,9 +17,19 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { emitCss, spliceCss, TOKENS_END_MARKER, TOKENS_START_MARKER } from '../emit/css.js';
+import { DESIGN_ACCENT_KEYS, DESIGN_COLOR_VARS } from '../design.js';
+import { DESIGN_LAYER_HEADER, emitCss, spliceCss, TOKENS_END_MARKER, TOKENS_START_MARKER } from '../emit/css.js';
 import { emitNative } from '../emit/native.js';
+import { emitVocabularyCss, emitVocabularyJson, vocabularyJson } from '../emit/vocabulary.js';
 import { ACCENT_IDS, DEFAULT_THEME, THEMES } from '../themes/index.js';
+import {
+  COLOR_NAMES,
+  LEGACY_COLOR_NAMES,
+  LEGACY_UTILITY_NAMES,
+  REQUIRED_UTILITIES,
+  SHARED_COLOR_NAMES,
+  TEXT_COLOR_OVERRIDES,
+} from '../vocabulary.js';
 
 const css = emitCss();
 
@@ -99,6 +109,8 @@ describe('web CSS emitter', () => {
       '--font-sans',
       '--font-mono',
       '--radius',
+      '--gai-ground',
+      '--gai-fg-3',
     ]) {
       expect(css, `${name} missing`).toContain(`${name}:`);
     }
@@ -139,6 +151,108 @@ describe('web CSS emitter', () => {
   });
 });
 
+describe('design layer (L1b)', () => {
+  const start = css.indexOf(DESIGN_LAYER_HEADER);
+  const end = css.indexOf('Layer 2 — Tailwind utility bridge');
+  const l1b = css.slice(start, end);
+  const inL1b = (selector: string): number => l1b.indexOf(`\n${selector} {`);
+  const block = (selector: string): string => {
+    const i = inL1b(selector);
+    return i === -1 ? '' : l1b.slice(i, l1b.indexOf('}', i));
+  };
+
+  it('is its own section after Layer 1 and before the bridge', () => {
+    expect(start).toBeGreaterThan(css.indexOf('/* ── Accent axis'));
+    expect(end).toBeGreaterThan(start);
+  });
+
+  it('defines every design colour in :root, .light and every theme block', () => {
+    const selectors = [':root', '.light', ...THEMES.flatMap((t) => [`[data-theme="${t.id}"]`, `.light[data-theme="${t.id}"]`])];
+    for (const selector of selectors) {
+      const body = block(selector);
+      expect(body, `${selector} missing from L1b`).not.toBe('');
+      for (const [, name] of DESIGN_COLOR_VARS) expect(body, `${selector} ${name}`).toContain(`  ${name}: `);
+    }
+  });
+
+  it('orders the ladder per theme: dark < light < accent dark < accent light', () => {
+    for (const theme of THEMES) {
+      const accentId = ACCENT_IDS.find((a) => a !== theme.defaultAccent)!;
+      const base = `[data-theme="${theme.id}"][data-accent="${accentId}"]`;
+      const order = [`[data-theme="${theme.id}"]`, `.light[data-theme="${theme.id}"]`, base, `.light${base}`].map(inL1b);
+      for (const i of order) expect(i, theme.id).toBeGreaterThan(-1);
+      expect([...order].sort((a, b) => a - b), `${theme.id}: ${order.join(' < ')}`).toEqual(order);
+      // The light theme block must also precede every theme's accent blocks
+      // (same (0,2,0) specificity as an accent block, resolved by source order).
+      expect(inL1b(`.light[data-theme="${theme.id}"]`)).toBeLessThan(inL1b(`[data-theme="${THEMES[0]!.id}"][data-accent="${ACCENT_IDS.find((a) => a !== THEMES[0]!.defaultAccent)}"]`));
+    }
+  });
+
+  it('accent blocks set only accent, on-accent and focus, and are always theme-scoped', () => {
+    const names = DESIGN_ACCENT_KEYS.map((k) => DESIGN_COLOR_VARS.find(([key]) => key === k)![1]);
+    for (const theme of THEMES) {
+      for (const accentId of ACCENT_IDS) {
+        if (accentId === theme.defaultAccent) continue;
+        const body = block(`[data-theme="${theme.id}"][data-accent="${accentId}"]`);
+        const declared = [...body.matchAll(/(--gai-[\w-]+):/g)].map((m) => m[1]);
+        expect(declared, `${theme.id}/${accentId}`).toEqual(names);
+      }
+    }
+    expect(l1b.match(/^(?:\.light)?\[data-accent=/gm)).toBeNull();
+  });
+
+  it('emits legacy ink accent blocks for all 17 themes whose default is not ink', () => {
+    const others = THEMES.filter((t) => t.defaultAccent !== 'ink');
+    expect(others).toHaveLength(17);
+    for (const theme of others) expect(at(`[data-theme="${theme.id}"][data-accent="ink"]`), theme.id).toBeGreaterThan(-1);
+  });
+
+  it('bridges only legacy names in Layer 2; the shared tokens move to vocabulary.css', () => {
+    const bridge = css.slice(css.indexOf('@theme inline {'), css.indexOf('}', css.indexOf('@theme inline {')));
+    for (const name of LEGACY_COLOR_NAMES) expect(bridge).toContain(`--color-${name}: var(--`);
+    for (const name of [...SHARED_COLOR_NAMES, ...COLOR_NAMES]) expect(bridge).not.toContain(`--color-${name}:`);
+  });
+
+  it('safelists the required design utilities for the CSS-emission check', () => {
+    expect(css).toContain(`@source inline("${REQUIRED_UTILITIES.join(' ')}");`);
+  });
+});
+
+describe('shared class vocabulary', () => {
+  const vocab = emitVocabularyCss();
+
+  it('maps every design colour name to its --gai-* variable', () => {
+    for (const name of COLOR_NAMES) expect(vocab).toContain(`  --color-${name}: var(--gai-${name});`);
+    for (const [name, variable] of Object.entries(TEXT_COLOR_OVERRIDES)) {
+      expect(vocab).toContain(`  --text-color-${name}: var(--gai-${variable});`);
+    }
+    expect(vocab).toContain('  --shadow-pop: var(--gai-shadow-pop);');
+    for (const name of SHARED_COLOR_NAMES) expect(vocab).toContain(`  --color-${name}: var(--${name});`);
+  });
+
+  it('holds names only, no values, so each platform supplies its own (D-40)', () => {
+    expect(vocab).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(vocab).toContain('GENERATED');
+  });
+
+  it('has a design variable behind every colour name', () => {
+    const vars = new Set(DESIGN_COLOR_VARS.map(([, n]) => n));
+    for (const [, v] of vocab.matchAll(/var\((--gai-[\w-]+)\)/g)) expect(vars.has(v!), v).toBe(true);
+  });
+
+  it('exports the lists Node tools read, identical to the TS source', () => {
+    const json = JSON.parse(emitVocabularyJson());
+    expect(json).toEqual(JSON.parse(JSON.stringify(vocabularyJson())));
+    expect(json.requiredUtilities).toEqual([...REQUIRED_UTILITIES]);
+    expect(json.legacyUtilityNames).toEqual([...LEGACY_UTILITY_NAMES]);
+  });
+
+  it('keeps legacy and design names disjoint', () => {
+    const design = new Set<string>([...COLOR_NAMES, ...SHARED_COLOR_NAMES]);
+    for (const name of LEGACY_UTILITY_NAMES) expect(design.has(name), name).toBe(false);
+  });
+});
+
 describe('splice', () => {
   it('replaces only the region between the markers', () => {
     const file = `HEAD\n${TOKENS_START_MARKER}\nold\n${TOKENS_END_MARKER}\nTAIL`;
@@ -166,6 +280,13 @@ describe('native emitter', () => {
     // the status bar, so the values must be concrete.
     expect(native).toContain('"--background"');
     expect(native).toContain('"--chart-1"');
+    // The design layer ships as literals too (M-01), but gets no NativeWind
+    // utilities in P1.
+    expect(native).toContain('"--gai-ground"');
+    const tailwind = native.slice(native.indexOf('export const tailwindColors'), native.indexOf('/** Design-layer colour names'));
+    expect(tailwind).not.toContain('gai-');
+    expect(native).toContain('export const gaiColors');
+    expect(native).toContain('export const accentIds');
   });
 
   it('ships terminal palettes and picker metadata', () => {

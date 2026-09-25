@@ -1,0 +1,141 @@
+{
+  "requiredUtilities": [
+    "bg-ground",
+    "bg-surface",
+    "bg-raised",
+    "bg-overlay",
+    "bg-sunken",
+    "bg-hover",
+    "bg-selected",
+    "border-line",
+    "border-line-soft",
+    "border-line-strong",
+    "text-fg",
+    "text-fg-2",
+    "text-fg-3",
+    "bg-accent",
+    "text-on-accent",
+    "outline-focus",
+    "bg-run",
+    "text-run",
+    "bg-run-bg",
+    "text-ok",
+    "text-warn",
+    "text-err",
+    "bg-add-bg",
+    "bg-del-bg",
+    "shadow-pop",
+    "bg-scrim"
+  ],
+  "legacyUtilityNames": [
+    "background",
+    "foreground",
+    "card",
+    "card-foreground",
+    "popover",
+    "popover-foreground",
+    "subtle",
+    "emphasis",
+    "primary",
+    "primary-emphasis",
+    "primary-foreground",
+    "secondary",
+    "secondary-foreground",
+    "muted",
+    "muted-foreground",
+    "accent-tint",
+    "destructive",
+    "destructive-foreground",
+    "border",
+    "border-muted",
+    "input",
+    "ring",
+    "success",
+    "success-muted",
+    "warning",
+    "warning-muted",
+    "info",
+    "info-muted",
+    "danger",
+    "danger-muted",
+    "done",
+    "sidebar",
+    "sidebar-foreground",
+    "sidebar-border",
+    "sidebar-accent",
+    "sidebar-accent-foreground"
+  ],
+  "namespaces": [
+    {
+      "id": "color",
+      "prefixes": [
+        "bg",
+        "text",
+        "border",
+        "ring",
+        "outline",
+        "fill",
+        "stroke",
+        "divide",
+        "from",
+        "via",
+        "to",
+        "shadow",
+        "accent",
+        "caret",
+        "decoration",
+        "placeholder"
+      ],
+      "names": [
+        "ground",
+        "surface",
+        "raised",
+        "overlay",
+        "sunken",
+        "hover",
+        "selected",
+        "line-soft",
+        "line",
+        "line-strong",
+        "fg",
+        "fg-2",
+        "fg-3",
+        "accent",
+        "on-accent",
+        "focus",
+        "run",
+        "run-bg",
+        "ok",
+        "ok-bg",
+        "warn",
+        "warn-bg",
+        "err",
+        "err-bg",
+        "add-bg",
+        "del-bg",
+        "scrim"
+      ]
+    },
+    {
+      "id": "text-color",
+      "prefixes": [
+        "text"
+      ],
+      "names": [
+        "run",
+        "ok",
+        "warn",
+        "err"
+      ]
+    },
+    {
+      "id": "shadow",
+      "prefixes": [
+        "shadow"
+      ],
+      "names": [
+        "pop"
+      ]
+    }
+  ]
+}

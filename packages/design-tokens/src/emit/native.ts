@@ -18,6 +18,8 @@
 // and the iOS status-bar API all take a literal string.
 // ────────────────────────────────────────────────────────────────
 
+import { DESIGN_COLOR_VARS, resolveDesignTokens } from '../design.js';
+import { COLOR_NAMES, TEXT_COLOR_OVERRIDES } from '../vocabulary.js';
 import {
   ACCENT_IDS,
   DEFAULT_ACCENT,
@@ -59,13 +61,10 @@ export function resolveTokenSet(
   if (!theme) throw new Error(`Unknown theme: ${themeId}`);
 
   const t = resolveAppearanceTokens(theme, appearance);
-  const a = resolveAccentTokens(
-    theme,
-    (ACCENT_IDS as readonly string[]).includes(accentId)
-      ? (accentId as (typeof ACCENT_IDS)[number])
-      : theme.defaultAccent,
-    appearance,
-  );
+  const resolvedAccent = (ACCENT_IDS as readonly string[]).includes(accentId)
+    ? (accentId as (typeof ACCENT_IDS)[number])
+    : theme.defaultAccent;
+  const a = resolveAccentTokens(theme, resolvedAccent, appearance);
   const out: ResolvedTokenSet = {};
 
   for (const [key, value] of Object.entries(t)) {
@@ -89,13 +88,24 @@ export function resolveTokenSet(
     out[`--file-icon-${name}`] = pair[appearance];
   }
 
+  // Design layer (M-01), additive: literal values, translucent ones as
+  // #rrggbbaa (React Native accepts both).
+  const d = resolveDesignTokens(theme, appearance, resolvedAccent);
+  for (const [key, name] of DESIGN_COLOR_VARS) {
+    out[name] = d[key];
+  }
+
   return out;
 }
 
 /** Colour names exposed as Tailwind utilities on mobile. */
 export function tailwindColorNames(): string[] {
   const sample = resolveTokenSet(DEFAULT_THEME, 'dark', DEFAULT_ACCENT);
-  return Object.keys(sample).map((v) => v.slice(2));
+  // The design layer gets no NativeWind utilities in P1; the mobile pass reads
+  // css/vocabulary.css through Uniwind instead (D-40).
+  return Object.keys(sample)
+    .filter((v) => !v.startsWith('--gai-'))
+    .map((v) => v.slice(2));
 }
 
 const stringify = (value: unknown, indent: number): string =>
@@ -143,6 +153,12 @@ export function emitNative(): string {
     tailwindColors[name] = `var(--${name})`;
   }
 
+  // Design name → variable, as vocabulary.css maps it (text-<status> reads
+  // the text value there; here each name maps to its own variable).
+  const gaiColors: Record<string, string> = {};
+  for (const name of COLOR_NAMES) gaiColors[name] = `var(--gai-${name})`;
+  for (const variable of Object.values(TEXT_COLOR_OVERRIDES)) gaiColors[variable] = `var(--gai-${variable})`;
+
   return `// ────────────────────────────────────────────────────────────────
 // GENERATED FILE — do not edit.
 //
@@ -173,6 +189,12 @@ export const themeMeta = ${stringify(themeMeta, 0)} as const;
 
 /** For tailwind.config.js \`theme.extend.colors\`. */
 export const tailwindColors = ${stringify(tailwindColors, 0)} as const;
+
+/** Design-layer colour names → \`var(--gai-*)\` (for the mobile pass, D-40). */
+export const gaiColors = ${stringify(gaiColors, 0)} as const;
+
+/** Accent ids, in picker order. */
+export const accentIds = ${stringify(ACCENT_IDS, 0)} as const;
 
 export const radius = ${stringify(RADIUS, 0)} as const;
 export const fontFamily = ${stringify(NATIVE_FONT_FAMILY, 0)} as const;

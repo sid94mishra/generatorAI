@@ -49,8 +49,8 @@ describe('design-system ratchet', () => {
 
   beforeAll(() => {
     web = tempDir('rails-ratchet-');
-    // legacyTokenUtility reads the @theme inline block; one legacy key is enough.
-    put(web, 'src/styles/globals.css', '@theme inline {\n  --color-background: var(--background);\n  --color-surface: var(--gai-surface);\n}\n');
+    // legacyTokenUtility reads LEGACY_UTILITY_NAMES from the repo's
+    // packages/design-tokens/generated/vocabulary.json, not from the fixture.
     legacy(2);
   });
 
@@ -123,6 +123,21 @@ describe('design-system ratchet', () => {
     expect(bad.status).toBe(1);
     expect(bad.out).toContain('Button.stories.tsx:1');
     fs.rmSync(path.join(web, 'src', 'ui'), { recursive: true });
+  });
+
+  it('legacyTokenUtility counts LEGACY_UTILITY_NAMES, not design or shared names (P1-T5)', () => {
+    put(
+      web,
+      'src/components/Tint.tsx',
+      'export const Tint = () => <div className="hover:bg-accent-tint bg-background bg-surface text-fg-2 bg-chart-1" />;\n',
+    );
+    const r = run();
+    expect(r.status).toBe(1);
+    expect(r.out).toMatch(/legacyTokenUtility: (?:locked at )?0 → 2/);
+    expect(r.out).toMatch(/Tint\.tsx:1 {2}bg-accent-tint/);
+    expect(r.out).toMatch(/Tint\.tsx:1 {2}bg-background/);
+    expect(r.out).not.toMatch(/Tint\.tsx:1 {2}(?:bg-surface|text-fg-2|bg-chart-1)/);
+    fs.rmSync(path.join(web, 'src', 'components', 'Tint.tsx'));
   });
 
   it('a kit component without a story fails storiesPresent', () => {
@@ -262,6 +277,16 @@ describe('ESLint layer rules', () => {
 
   it('an off-system Tailwind class in ui/ fails', async () => {
     expect(await errors('ui/X.tsx', 'export const X = () => <div className="text-sm" />;\n')).toContain('better-tailwindcss/no-restricted-classes');
+  }, 60_000);
+
+  it('a legacy token utility in ui/ fails; the design vocabulary passes (P1-T5)', async () => {
+    expect(await errors('ui/X.tsx', 'export const X = () => <div className="hover:bg-accent-tint" />;\n')).toContain(
+      'better-tailwindcss/no-restricted-classes',
+    );
+    expect(await errors('ui/X.tsx', 'export const X = () => <div className="text-muted-foreground" />;\n')).toContain(
+      'better-tailwindcss/no-restricted-classes',
+    );
+    expect(await errors('ui/X.tsx', 'export const X = () => <div className="bg-surface text-fg-2 border-line hover:bg-hover" />;\n')).toEqual([]);
   }, 60_000);
 
   it('raw elements fail in ui/ but not in ui/primitives or stories (D-43, D-45)', async () => {
