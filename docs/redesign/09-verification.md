@@ -87,7 +87,7 @@ New rules. Regexes are JavaScript. Today's counts were measured with these exact
 | `defaultShadow` | `/(?<![\w-])shadow(?:-(?:2xs\|xs\|sm\|md\|lg\|xl\|2xl\|inner))?(?![\w-])/g` | — | 82 |
 | `hardcodedPaletteClass` | existing | — | 299 |
 | `arbitraryValue` | `/(?<=^\|[\s"'\x60{])(?:[\w-]+:)*!?-?[a-z][\w-]*-\[[^\]\s]+\]/gm`. Utility-shaped only, so `arr[0]` is not matched. Also add `/(?<=^\|[\s"'\x60{])\[[a-z-]+:[^\]\s]+\]/gm` (arbitrary properties). | `ui/lib/**` (the one sanctioned place, for Radix/Base UI CSS-variable passthroughs; each one needs a comment) | 2,246 |
-| `varInClassString` | `/\[(?:[\w-]+:)?var\(--\|-\(--[\w-]+\)/g` (v3 `-[var(--x)]` and v4 `-(--x)` forms) | — | 1,419 |
+| `varInClassString` | `/\[(?:[\w-]+:)?var\(--\|-\(--[\w-]+\)/g` (v3 `-[var(--x)]` and v4 `-(--x)` forms) | `ui/lib/**` (D-43) | 1,419 |
 | `legacyColorVar` | `/var\(--color-[\w-]+\)/g` (in `.ts/.tsx`; the `.css` layer is exempt) | — | 1,487 |
 | `legacyTokenUtility` | built at runtime: `(?<![\w-])(?:bg\|text\|border\|ring\|fill\|stroke\|outline\|divide\|from\|to\|via\|shadow\|accent\|caret\|decoration\|placeholder)-(?:<legacy names>)(?:\/\d+)?(?![\w-])`. `<legacy names>` is read from `packages/design-tokens` (P1 exports `LEGACY_UTILITY_NAMES`; until then, parse the `--color-*` keys of the legacy `@theme inline` block in `globals.css` and subtract the D-08 design names). | — | measure in P1 |
 | `hexOrRgbInTs` | `/(?<![&\w])#(?:[0-9a-fA-F]{8}\|[0-9a-fA-F]{6}\|[0-9a-fA-F]{3,4})(?![\w-])/g` plus `/\b(?:rgba?\|hsla?\|oklch\|oklab)\(/g`, `.ts/.tsx` only | `components/shared/VendorIcons.tsx` (brand colours) | 30 |

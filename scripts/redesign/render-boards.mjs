@@ -167,7 +167,7 @@ async function main() {
 // differs from import.meta.url and the script would silently do nothing.
 function isMain() {
   try {
-    return Boolean(process.argv[1]) && fs.realpathSync.native(process.argv[1]) === fileURLToPath(import.meta.url);
+    return Boolean(process.argv[1]) && fs.realpathSync.native(process.argv[1]) === fs.realpathSync.native(fileURLToPath(import.meta.url));
   } catch {
     return false; // argv[1] is not a file (node -e, a test runner's flags)
   }

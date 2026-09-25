@@ -203,7 +203,7 @@ describe('ESLint layer rules', () => {
   beforeAll(() => {
     root = tempDir('rails-eslint-');
     put(root, 'apps/web/tsconfig.eslint.json', JSON.stringify({ compilerOptions: { baseUrl: '.', paths: { '@/*': ['./src/*'] }, jsx: 'react-jsx' } }));
-    for (const f of ['ui/Y.tsx', 'blocks/Y.tsx', 'features/alpha/Y.tsx', 'features/beta/Y.tsx', 'app/Y.tsx', 'platform/Y.ts', 'stores/Y.ts', 'zzunknown/Y.ts']) {
+    for (const f of ['ui/Y.tsx', 'blocks/Y.tsx', 'features/alpha/Y.tsx', 'features/beta/Y.tsx', 'app/Y.tsx', 'platform/Y.ts', 'stores/Y.ts', 'providers/QueryProvider.tsx', 'zzunknown/Y.ts']) {
       put(root, `apps/web/src/${f}`, 'export const a = 1;\n');
     }
     eslint = new ESLint({
@@ -234,6 +234,9 @@ describe('ESLint layer rules', () => {
     ['blocks/X.tsx', '@/features/alpha/Y', 'boundaries/dependencies'],
     ['features/alpha/X.tsx', '@tanstack/react-query', 'no-restricted-imports'],
     ['features/alpha/X.tsx', '../../providers/PlatformProvider', 'no-restricted-imports'],
+    ['features/alpha/X.tsx', '@generatorai/client-runtime', 'no-restricted-imports'],
+    ['features/alpha/X.tsx', '@/providers/QueryProvider', 'no-restricted-imports'],
+    ['features/alpha/X.tsx', '@/providers/QueryProvider.js', 'no-restricted-imports'],
   ])('%s → %s fails (%s)', async (from, to, rule) => {
     expect(await errors(from, importing(to))).toContain(rule);
   }, 60_000);
@@ -242,6 +245,9 @@ describe('ESLint layer rules', () => {
     ['app/X.tsx', '@/features/alpha/Y'],
     ['features/alpha/X.tsx', '@/features/alpha/Y'],
     ['ui/X.tsx', '@/ui/Y'],
+    ['features/alpha/X.tsx', '@generatorai/client-core'],
+    ['ui/__tests__/X.test.tsx', '@/stores/Y'],
+    ['ui/icons/__tests__/X.test.tsx', '@/stores/Y'],
   ])('%s → %s passes', async (from, to) => {
     expect(await errors(from, importing(to))).toEqual([]);
   }, 60_000);
@@ -263,5 +269,19 @@ describe('ESLint layer rules', () => {
     expect(await errors('ui/X.tsx', raw)).toContain('no-restricted-syntax');
     expect(await errors('ui/primitives/Button/Button.tsx', 'export const X = () => <button type="button" />;\n')).toEqual([]);
     expect(await errors('ui/primitives/Button/Button.stories.tsx', raw)).toEqual([]);
+  }, 60_000);
+});
+
+// ── 5. The real config's own settings (root-path, resolver project) ───────────
+// The probes above point the resolver at a temp tree; this one lints a virtual
+// file against the repo itself, so a wrong `boundaries/root-path` or resolver
+// `project` in eslint.config.mjs (which silences every layer rule) fails here.
+describe('ESLint layer rules with the real config settings', () => {
+  it('ui/ → a real store import fails in the actual repo', async () => {
+    const eslint = new ESLint({ cwd: REPO });
+    const [result] = await eslint.lintText("import { useStreamStore } from '@/stores/streamStore';\nexport const X = useStreamStore;\n", {
+      filePath: path.join(REPO, 'apps', 'web', 'src', 'ui', '__rails_probe__.tsx'),
+    });
+    expect(result.messages.filter((m) => m.severity === 2).map((m) => m.ruleId)).toContain('boundaries/dependencies');
   }, 60_000);
 });

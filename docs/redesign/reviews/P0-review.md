@@ -244,3 +244,78 @@ Critical: 0, Major: 1, Minor: 6
 | P0-R20 | Deferred, reason: the rails tests must point the resolver at a temp tree to lint virtual files against real targets; the real config values are exercised on every `pnpm lint` (26 tasks, `--force` in review), and any drift in `root-path`/resolver would fail every web import there. Revisit if a config value regresses unnoticed |
 | P0-R21 | Fixed: `fs.realpathSync.native` in the two main-module guards and the rails test temp dir (expands Windows 8.3 short names) |
 | P0-R22 | Fixed: 09 §1.3/§2.7 list the rails step and `check:css`; D-44, CLAUDE.md and the CI e2e server set `EXTENSIONS_DIR` |
+
+## Round 3 review
+
+- **Range:** `5386d18..HEAD` (fix commit `05f52a1`) on `desktop_redesign`.
+- **Date:** 2026-09-25 · macOS arm64 · reviewer: fresh independent adversarial pass (read-only apart from this section). Probes ran through `ESLint#lintText` on virtual paths against the real config, and the probe scripts lived in the session scratchpad. `git status` is clean apart from this file.
+
+### Commands
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @generatorai/web typecheck` | green |
+| `pnpm turbo lint --force --filter=@generatorai/web` | 1/1 task, 0 cached, 0 errors (311 warnings, unchanged) |
+| `pnpm --filter @generatorai/web check:design --strict` | OK (`literalInlineStyle` info 39, `radixOverlaySelector` info 3, storiesPresent ok) |
+| `pnpm exec vitest run --project node scripts/__tests__` | 2 files / 33 tests passed; the sweep removed 0 dirs |
+
+### Round-2 fixes verified
+
+- **R16:** a `features/x/A.tsx` value import of `runTitle` or `ApiError` from `@generatorai/client-core` **passes**. Value imports from `@generatorai/client-runtime` and `@generatorai/client-transport` **fail** (`no-restricted-imports`), and `import type … from '@generatorai/client-runtime'` passes. **Fixed.**
+- **R17:** a `queryClient` value import from `@/providers/QueryProvider`, `@/providers/QueryProvider.js`, `../../providers/QueryProvider` and `../../../providers/QueryProvider.js` **fails**, and so does `@/providers/PlatformProvider.js`. `import type { QueryProvider }` and `import { type ErrorReportingMeta }` **pass**. **Fixed.** (Not a finding: `await import('@/providers/QueryProvider')` is caught by neither rule. The same was already true for react-query, and the pattern is contrived.)
+- **R18:** the `varInClassString` exemption is `^src/ui/lib/`, matched against `toPosix(relative(webDir, …))`, so it holds on Windows too. **Fixed in code.** See R26 for the docs.
+- **R19:** `ui/__tests__/x.test.tsx` importing `@/stores/streamStore` + `lucide-react` **passes**, and so does `ui/foo/x.test.tsx`. A non-test `ui/X.tsx` still fails. **Only partly fixed:** see R23.
+- **R20 (deferred):** **the deferral is not accepted.** See R24.
+- **R21:** the temp dir in the rails test is fine. The two `isMain` guards introduce a new risk, described in R25.
+- **R22:** 09 §1.3 and §2.7 list the rails step and `check:css`. D-44, CLAUDE.md and the CI e2e server set `EXTENSIONS_DIR`, and the server reads it (`apps/server/src/index.ts:241`). No local isolated-server script exists yet that would also need it. **Fixed.**
+
+### Critical
+
+None.
+
+### Major
+
+None.
+
+### Minor
+
+#### P0-R23 — R19 is half-applied: tests under `ui/icons/` are still not exempt
+- **Where:** `eslint.config.mjs:381-386` (the `ui/icons/**` `no-restricted-imports` block has no `ignores`).
+- **Evidence:** the probe `apps/web/src/ui/icons/__tests__/x.test.tsx` importing `@/stores/streamStore` fails with `no-restricted-imports` ("ui/ may import only ui/"). The same import in `ui/__tests__/` passes. Round 2's fix text asked for the ignore on "the icons block" too. D-45 says "Tests stay exempt from everything".
+- **Fix:** add `ignores: WEB_TEST_FILES` to the icons block.
+
+#### P0-R24 — R20's deferral reason is false: a resolver or root-path regression fails open, and `pnpm lint` stays green
+- **Where:** `eslint.config.mjs:261-262`; `scripts/__tests__/redesign-rails.test.mjs:209-218`.
+- **Evidence:** I ran `new ESLint({ cwd: REPO, overrideConfig: [{ files: ['apps/web/**'], settings }] })` on the real tree:
+  - with `settings['import/resolver'].typescript.project` set to `apps/web/tsconfig.json` (the D-43 references bug), `ui/X.tsx` importing `@/stores/streamStore` + `@/lib/utils` gives **0** `boundaries/*` errors, and the real `App.tsx` gives 0;
+  - with `boundaries/root-path` set to `<repo>/apps`, both again give **0**;
+  - the control (the same override object, empty) gives 2 `boundaries/dependencies` errors.
+
+  The layer rules therefore go silent, not red. Only the specifier-based `no-restricted-imports` ban for `ui/` would still fire. Cross-feature and `blocks → features` checks depend on `boundaries` alone. The deferral says the probe must use a temp tree, but it does not: one `lintText` of a virtual `apps/web/src/ui/X.tsx` against the real `@/stores/…` target, with no overrides, catches both regressions and took under a second here.
+- **Fix:** add that probe as in R20. Expect `boundaries/dependencies` on `ui/X.tsx`, and for good measure a `features/a/X.tsx` → `@/features/b/…` failure.
+
+#### P0-R25 — Windows risk (unverified): the `isMain` guards now compare `realpathSync.native(argv[1])` with a URL that Node built through the JS `realpathSync`
+- **Where:** `apps/web/scripts/check-stories.mjs:68`, `scripts/redesign/render-boards.mjs:170`.
+- **Evidence:** Node resolves the main entry through `toRealPath` → `fs.realpathSync` (JS) in `internal/modules/run_main.js`, so `import.meta.url` carries whatever casing and 8.3 short names were in `argv[1]`. On Windows, `realpathSync.native` (GetFinalPathNameByHandle) returns on-disk casing and long names. A developer whose shell cwd has a different case (`cd c:\projects\generatorai`) or a short-name component (`C:\Users\RUNNER~1\…`) therefore gets `isMain() === false`. `check-stories` then exits 0 **without checking anything**, which is the silent no-op the comment warns about. Before `05f52a1`, both sides used the JS realpath and matched. On macOS, both variants return canonical case (checked with a wrong-case cwd: check-stories printed OK), so the problem does not show up here. The rails temp dir using `.native` is correct and not affected.
+- **Fix:** undo `.native` in the two guards (the JS `realpathSync` mirrors how Node builds the main URL). Or compare both sides through the same function: `realpathSync.native(argv[1]) === realpathSync.native(fileURLToPath(import.meta.url))`. The second form is the safer choice for all three OSes.
+
+#### P0-R26 — The round-2 fixes have no rails cases, and the ratchet exemption is not recorded in the docs
+- **Where:** `scripts/__tests__/redesign-rails.test.mjs` has no case for client-core allowed or runtime/transport/QueryProvider banned (R16/R17), for `ui/lib` exempt from `varInClassString` (R18), or for `ui/**` tests exempt (R19). All four were asked for in round 2. `docs/redesign/09-verification.md:90` (§2.1 `varInClassString` exempt column) still says "—". D-43 does not mention the `ui/lib` exemption.
+- **Fix:** add the four probe cases above to the rails suite. Set 09 §2.1 line 90's exempt column to `ui/lib/**` (as on `arbitraryValue`), and add one clause to D-43.
+
+Critical: 0, Major: 0, Minor: 4
+
+## Round 3 fixes
+
+| Finding | Status |
+|---|---|
+| P0-R23 | Fixed: the `ui/icons/**` import block ignores test files |
+| P0-R24 | Fixed (supersedes the R20 deferral): a rails test lints a virtual `apps/web/src/ui/__rails_probe__.tsx` against the repo with the **real** config (no overrides) and expects `boundaries/dependencies` — a wrong `root-path` or resolver `project` now fails the suite |
+| P0-R25 | Fixed: both sides of the main-module comparison go through `realpathSync.native` |
+| P0-R26 | Fixed: rails probes for client-core (passes), client-runtime / QueryProvider / QueryProvider.js (fail), ui and ui/icons test files (pass); 09 §2.1 and D-43 document the `ui/lib` exemption of `varInClassString` |
+
+Verification after round 3: rails tests 40/40, web lint 0 errors (`--force`), `check:design --strict` OK, `check-stories` OK.
+
+## Final status
+
+**P0 closed 2026-09-25.** Rounds: 1 (0 C · 4 M · 11 m) → 2 (0 C · 1 M · 6 m) → 3 (0 C · 0 M · 4 m); every finding fixed, none outstanding. End-of-phase e2e: 80 passed · 0 failed · 3 skipped (BASELINE.md). Open items outside the redesign session: P0-06 (owner applies the PD-19 amendment to the Workflow Overhaul Plan artifact); CI has not run on `desktop_redesign` yet because nothing is pushed (owner decides when to push).

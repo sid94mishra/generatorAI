@@ -222,6 +222,7 @@ Decided while building P0-04 where `09-verification.md` was silent or wrong:
 - `check:design` is **one** script: `check-design-system.mjs` runs `check-stories.mjs` itself, because with `a.mjs && b.mjs` pnpm forwards `--strict` only to the last command.
 - `legacyTokenUtility` leaves out the `chart-N` and `canvas-*` tokens (they survive P7 per `02` §2.3), so the rule can reach 0.
 - `lucideDirectImport` counts every file outside `ui/icons` (148 at P0), not only files outside `components/ui` (135): D-17 bans direct imports everywhere else.
+- `arbitraryValue` and `varInClassString` exempt `src/ui/lib/**` (the one sanctioned home of CSS-variable passthroughs, each with a comment), matching the ESLint `ui/lib` block.
 - Raw-element rules (`rawButtonElement`, `rawInputElement` …) exempt `src/ui/primitives/**`, where the kit's own Button/Input/Dialog must render the raw element.
 - `eslint-plugin-boundaries` v7 (`boundaries/dependencies` policies); loose `src/*.tsx` files are `root` elements and may import each other. The only legacy edges from the `data` layer at P0 (`hooks/queries.ts`, `providers/QueryProvider.tsx` → `components/Toast.tsx`; `hooks/composerQueries.ts` → `components/chat/composer/{builtins,types}.ts`) are allowed **for those target files only**, as migration scaffolding removed by P7.
 - ESLint import resolution uses `apps/web/tsconfig.eslint.json` (the web tsconfig without `references`): eslint-import-resolver-typescript v4 ignores `paths` in a tsconfig that has references, so every `@/` import escaped the layer rules.

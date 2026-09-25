@@ -380,6 +380,7 @@ export default [
     // The icon registry: the only lucide importer (it maps the loader concept
     // too, so Loader2 is allowed here).
     files: ['apps/web/src/ui/icons/**/*.{ts,tsx}'],
+    ignores: WEB_TEST_FILES,
     rules: {
       'no-restricted-imports': ['error', { patterns: UI_LAYER }],
     },
