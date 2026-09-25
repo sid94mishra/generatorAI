@@ -35,7 +35,7 @@ import type {
   IAgentHarness,
   SendPromptOptions,
 } from '../../domain/ports/IAgentHarness.js';
-import { getDefaultChatPermissionMode, providerHasNativePlanGate } from '../agentModePolicy.js';
+import { getDefaultChatPermissionMode, providerHasNativePlanGate, resolveTurnPermissionMode } from '../agentModePolicy.js';
 import { inheritWorkerCapabilitiesFrom } from '../orchestrator/OrchestratorService.js';
 import { appendAgentInstructions, applyAgentProjection, applyExplicitSpec, deliverSkills } from './agentProjection.js';
 import { formatConversationBindingKey } from './bindingKey.js';
@@ -333,7 +333,8 @@ export class SessionComposer {
       sessionId: owner.sessionId,
       turnId,
       agentMode: options.agentMode ?? DEFAULT_AGENT_MODE,
-      permissionMode: options.permissionMode ?? 'bypassPermissions',
+      // A turn sent without a mode is judged by the deployment posture, never bypass.
+      permissionMode: options.permissionMode ?? resolveTurnPermissionMode(options.agentMode ?? DEFAULT_AGENT_MODE, undefined),
       planIds: [],
       interactionIds: [],
       nextSequence: 0,

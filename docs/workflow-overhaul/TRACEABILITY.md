@@ -9,11 +9,11 @@ Status values: `open` → `in progress` → `closed (PR #)` / `accepted (rationa
 | ID | Requirement | Phase / WP | Status |
 |---|---|---|---|
 | R1 | One invocation path across clients | P04 WP-4.1–4.5 | open |
-| R2 | Streamlined creation, stages and config | P01 WP-1.5–1.8; P02 SessionSpec; P03 WP-3.1, 3.11 | in progress (P01 part done: 1d67d0f, 28f9c5e) |
-| R3 | A stage is a compact chat with every chat capability | P02 (all); P03b; P04 design 7 (mounts) | open |
+| R2 | Streamlined creation, stages and config | P01 WP-1.5–1.8; P02 SessionSpec; P03 WP-3.1, 3.11 | in progress (P01 part done: 1d67d0f, 28f9c5e; P02 SessionSpecEditor a220bb3) |
+| R3 | A stage is a compact chat with every chat capability | P02 (all); P03b; P04 design 7 (mounts) | in progress (P02 done: one SessionComposer, binder, gates, TurnRecorder, permission source — see Phase 02 closure) |
 | R4 | DAG evaluation; retries; a **generic** loop (fix ↔ review is one example) with a budget | README §5.1; P03 WP-3.3–3.6; P05 §2–§3, WP-5A.1–5A.5 (tests: loop matrix, examples L1–L6, v59 migration, Windows `check`) | open |
 | R5 | Codex goals and Claude Code dynamic workflows research and support (as DAG constructs, no slash commands) | README §5.3; P05 examples L1–L6, M1–M3; P08 (judge panel + expansion; script runtime gated by PD-21) | open |
-| R6 | Remove legacy and back-compat code | P01 WP-1.1–1.4; P03 WP-3.7; P04 WP-4.1 (orchestrator, worktrees), 4.4 (MCP embedded), 4.6; `check-no-legacy` | in progress (P01 part done; 78 bans) |
+| R6 | Remove legacy and back-compat code | P01 WP-1.1–1.4; P03 WP-3.7; P04 WP-4.1 (orchestrator, worktrees), 4.4 (MCP embedded), 4.6; `check-no-legacy` | in progress (P01 and P02 parts done; 90 bans) |
 | R7 | Chat and the orchestrator invoke workflows | P06 WP-6.1–6.4 | open |
 | R8 | An authoring skill for any agent | P06 WP-6.5–6.8 | open |
 | R9 | Review the earlier document | README §4 | closed (this plan) |
@@ -128,6 +128,33 @@ The P01 plan's **Closes** list, with the commits and the tests that pin each ite
 | W-64 (import side) | Strict import of v2 documents only; `/validate` endpoint | 1d67d0f | T6; server validate test |
 | RV-13..RV-16, RV-22, RV-32, RV-42 | Spec/validator/scope items (part B) wired into the store, engine and clients | 1d67d0f | — |
 | RV-1, RV-33 | v55: FKs off with explicit child deletes; frozen schema copies | 1d67d0f | migration55 test |
+
+## Phase 02 closure (2026-09-25, review pending)
+
+The P02 plan's **Closes** list, with the commits and the tests that pin each item. Commits: 0c02b1c (2.1), a8324be (2.2), 2ea6ce0 (2.3), 7666200 (capability levels), 52df8ae (2.4), 1fb1574 (2.5), 47806a2 (2.6), 8cfe62a (2.7), 1cb1991 (2.10), 8f3dbe3 (2.8), ad35d22 (2.9), a220bb3 (2.11), c35f905 (bans, docs).
+
+| ID | What P02 closed | Commits | Evidence |
+|---|---|---|---|
+| W-07 | No bypass default: run → stage → workflow → trigger → posture; automations must declare a mode (PD-18); `DEFAULT_WORKFLOW_RUN_PERMISSION_MODE` deleted and banned | 8cfe62a, 1cb1991 | session/permission.test.ts; migration56.test.ts |
+| W-18 | MCP `secretref:` values resolved per owner through the hub; unresolved servers dropped with a warning, no pointer reaches a provider; v1 engine gate lifted | 2ea6ce0, 8f3dbe3 | session/resolveMcp.test.ts; workflow-spec validate test |
+| W-19 | The run's permission mode reaches Claude and Codex stages per turn; their gates park in HITL; a provider that never asks is refused (PD-17) | 8cfe62a, 8f3dbe3 | session/composer.test.ts (composer level; live E2E not run) |
+| W-36 (skills) | Skills delivered per provider level: Claude local plugin root (settingSources stays []), Copilot/Codex directories (Codex warns process-global), others warn; a stage with a missing/disabled agent fails (C-12) | 52df8ae, 8f3dbe3 | session/agentProjection.test.ts; providers workspace-mounts test; composer.test.ts |
+| W-40 (binder) | Stages get the chat's tools: browser, computer use (opt-in, never on bypass), widgets, custom tools, orchestrator, session hooks | a8324be, 8f3dbe3 | composer.test.ts; golden g; agent-host binderContract test |
+| W-50 | Chat create and resume share one precedence rule and order | 52df8ae, 8f3dbe3 | golden a–e (W-50 fields flipped, the rest byte-identical) |
+| W-51 | Agent instructions last; `replace` drops only the replaceable base | 52df8ae, 8f3dbe3 | golden f; agentProjection.test.ts |
+| W-52 | Stage team mapping keeps tools/disallowedTools/effort/maxTurns/permissionMode | 52df8ae, 8f3dbe3 | golden f; agentProjection.test.ts |
+| W-53 | Chats enforce the agent's tool groups before any gate | 47806a2 | session/gates.test.ts |
+| W-54 | Session hook bridge wired for chats and stages (`SessionHookRegistry`) | a8324be | session/sessionHooks.test.ts |
+| RV-6, RV-9 (levels) | `approvalGating` / `hostTools` / `structuredOutput` / `skills` levels replace the booleans; one table (shared) checked against every provider | 7666200, a220bb3 | agent-harness-providers capabilityLevels.test.ts |
+| RV-7, RV-8 | Claude skills as a local plugin; skills staged only where the provider loads them | 52df8ae | agentProjection.test.ts; workspace-mounts test |
+| RV-10 (P02 half) | `chat_messages.complete`; written false for a stopped turn by the TurnRecorder | 1cb1991, ad35d22 | migration56.test.ts; session/turnRecorder.test.ts |
+| RV-18 / PD-20 | Chats keep their columns; `chatSessionSpec` maps them to the composer's SessionSpec | 52df8ae | golden a–e |
+| RV-20 | Interim single-mode rebind cut (the shared session keeps its config; rebind is P03) | 8f3dbe3 | DEVIATIONS (binding key) |
+| RV-26 | Tools, gates and hooks cross the agent-host IPC as callbacks; turn options on `send_turn` | a8324be | agent-host binderContract.test.ts (host on/off) |
+| RV-30 / PD-18 | Automations require a permission mode; webhook + bypass needs admin:settings | 8cfe62a, 1cb1991 | permission.test.ts; server automation routes |
+| RV-41 | T4 (tool policy), T7 (record_plan), P6 (question/plan-review gates), P7 (plan prefix only without a native gate), R9 (bind failure → error + idle, stage failed) | 47806a2, 8f3dbe3 | gates.test.ts; composer.test.ts; SES tests |
+| F-3b | Stage sessions record and resume the provider session handle | 8f3dbe3, ad35d22 | turnRecorder.test.ts |
+| PD-5, PD-17, PD-19 | Computer use opt-in for stages and never on bypass; gating refusals/warnings at compose and run start; SessionSpecEditor with inline warnings | 8f3dbe3, 8cfe62a, a220bb3 | composer.test.ts; SessionSpecEditor.test.tsx |
 
 ## Independent review findings
 

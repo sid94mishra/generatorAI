@@ -328,7 +328,7 @@ export class StageExecutionService {
       stageRun.sessionId ? this.eventBus.emit(stageRun.sessionId, event) : this.eventBus.emitGlobal(event);
     await emit({ kind: 'harness.error', data } as AgentEvent);
     await emit({ kind: 'harness.idle', data: { stageRunId: stageRun.id, workflowRunId } } as unknown as AgentEvent);
-    await this.stageRunRepo.update(stageRun.id, { status: 'failed', error: message, completedAt: new Date() });
+    await this.stageRunRepo.update(stageRun.id, { status: 'failed', error: message, completedAt: new Date() }); // workflow-invariant-ok: R9 bind failure (the stage never started); P03 transition() replaces every direct write
     await this.eventBus.emitGlobal({
       kind: 'stage_run.failed',
       data: { stageRunId: stageRun.id, workflowRunId, error: message, name: stageRun.name },
@@ -1108,7 +1108,7 @@ export class StageExecutionService {
       // A new turn on the same listener: the recorder starts over.
       recorder.begin({ turnId, agentMode: options.agentMode ?? stageAgentMode });
       const prompt = opts.prepare ? stageSession.preparePrompt(text, stageAgentMode) : text;
-      return this.harness.sendPromptAndWait(session.conversationId!, prompt, opts.attachments, opts.signal, options);
+      return this.harness.sendPromptAndWait(session.conversationId!, prompt, opts.attachments, opts.signal, options); // durability-ok: sendTurn is only called inside runTurn's perform (and the restart recap, see injectReplayedTurns)
     };
 
     // X-13 — record which session this stage is now speaking through. The

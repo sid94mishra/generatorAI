@@ -133,7 +133,8 @@ describe('Automation routes — webhook signature verification', () => {
       name: 'x',
       triggerType: 'webhook',
       workflowIds: ['00000000-0000-0000-0000-000000000001'],
-      });
+      permissionMode: 'acceptEdits', // PD-18: required
+    });
     expect(createRes.status).toBe(201);
     expect(createRes.body.webhookToken).toBe(rawToken);
     const signingSecret: string = createRes.body.webhookSigningSecret;

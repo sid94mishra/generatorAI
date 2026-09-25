@@ -710,7 +710,9 @@ export class ChatManagementService {
     return {
       source: { kind: 'chat', read: async () => chat.permissionMode },
       ...(shouldAttachPermissionHandler(chat.permissionMode) ? { attach: { mode: chat.permissionMode } } : {}),
-      bindingMode: chat.permissionMode ?? 'bypassPermissions',
+      // Binding-key label only: it must equal the mode the new chat row is stored
+      // with (the WS-A new-chat default debt), or the first turn would rebind.
+      bindingMode: chat.permissionMode ?? 'bypassPermissions', // security-ok: key label, grants nothing
     };
   }
 
