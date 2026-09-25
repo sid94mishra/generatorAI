@@ -69,6 +69,7 @@ const DELETE_PATHS: Record<string, (id: string) => string> = {
   chat: (id) => `/chats/${id}`,
   project: (id) => `/projects/${id}`,
   automation: (id) => `/automations/${id}`,
+  agent: (id) => `/agents/${id}`,
 };
 
 // ── High-level seeders ──────────────────────────────────────────
@@ -172,12 +173,24 @@ export async function seedWorkflowDefinition(
 
 export async function seedChat(
   tracker: ResourceTracker,
-  opts: { name: string; model?: string; tags?: string[] },
+  opts: {
+    name: string;
+    model?: string;
+    tags?: string[];
+    /**
+     * P2-00 — the sandbox's needs-you fixture chat needs a mode other than
+     * the default 'bypassPermissions', or `decideToolPermission` auto-grants
+     * every `permission_request` script entry instead of opening a pending
+     * gate (see `packages/core/src/services/agentModePolicy.ts`).
+     */
+    permissionMode?: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan';
+  },
 ): Promise<string> {
   const res = await apiRequest<{ id: string }>('POST', '/chats', {
     name: opts.name,
     model: opts.model,
     tags: opts.tags ?? ['e2e-seed'],
+    ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
   });
   if (!res.ok || !res.data?.id) {
     throw new Error(`seedChat failed (${res.status}): ${JSON.stringify(res.data)}`);
@@ -231,6 +244,92 @@ export async function findAutomationIdByName(name: string): Promise<string | und
   const res = await apiRequest<Array<{ id: string; name: string }>>('GET', '/automations');
   if (!res.ok || !Array.isArray(res.data)) return undefined;
   return res.data.find((a) => a.name === name)?.id;
+}
+
+/**
+ * P2-00 — generic "find by exact name in a list endpoint's array response"
+ * helper, used by the sandbox seed (`agent-tests/vrt/seed.ts`) to make
+ * seeding idempotent: look up a fixed-name entity before creating it, so
+ * re-running the seed against an already-seeded DB does not create
+ * duplicates.
+ */
+export async function findIdByName(path: string, name: string): Promise<string | undefined> {
+  const res = await apiRequest<Array<{ id: string; name: string }>>('GET', path);
+  if (!res.ok || !Array.isArray(res.data)) return undefined;
+  return res.data.find((item) => item.name === name)?.id;
+}
+
+export async function findChatIdByName(name: string): Promise<string | undefined> {
+  return findIdByName('/chats', name);
+}
+
+export async function findProjectIdByName(name: string): Promise<string | undefined> {
+  return findIdByName('/projects', name);
+}
+
+export async function findWorkflowDefinitionIdByName(name: string): Promise<string | undefined> {
+  return findIdByName('/workflow-definitions', name);
+}
+
+export async function findAgentIdByName(name: string): Promise<string | undefined> {
+  return findIdByName('/agents', name);
+}
+
+/** P2-00 — seed a reusable agent (`agent-tests/vrt/seed.ts`). */
+export async function seedAgent(
+  tracker: ResourceTracker,
+  opts: { name: string; description: string; instructions: string; tags?: string[] },
+): Promise<string> {
+  const res = await apiRequest<{ id: string }>('POST', '/agents', {
+    scope: 'global',
+    name: opts.name,
+    description: opts.description,
+    instructions: opts.instructions,
+    tags: opts.tags ?? ['e2e-seed'],
+  });
+  if (!res.ok || !res.data?.id) {
+    throw new Error(`seedAgent failed (${res.status}): ${JSON.stringify(res.data)}`);
+  }
+  tracker.track('agent', res.data.id);
+  return res.data.id;
+}
+
+/** P2-00 — send a chat prompt (POST /chats/:id/prompt, fire-and-forget on the server; events stream via SSE). */
+export async function sendChatPrompt(chatId: string, prompt: string): Promise<void> {
+  const res = await apiRequest('POST', `/chats/${chatId}/prompt`, { prompt });
+  if (!res.ok) throw new Error(`sendChatPrompt failed (${res.status}): ${JSON.stringify(res.data)}`);
+}
+
+/** P2-00 — archive a chat (PATCH /chats/:id { status: 'archived' }). */
+export async function archiveChat(chatId: string): Promise<void> {
+  const res = await apiRequest('PATCH', `/chats/${chatId}`, { status: 'archived' });
+  if (!res.ok) throw new Error(`archiveChat failed (${res.status}): ${JSON.stringify(res.data)}`);
+}
+
+/** P2-00 — list a chat's pending interactions (GET /chats/:id/interactions). */
+export async function listPendingInteractions(
+  chatId: string,
+): Promise<Array<{ interactionId: string; kind: string; status: string }>> {
+  const res = await apiRequest<Array<{ interactionId: string; kind: string; status: string }>>(
+    'GET',
+    `/chats/${chatId}/interactions?status=pending`,
+  );
+  return res.ok && Array.isArray(res.data) ? res.data : [];
+}
+
+/** P2-00 — poll until a chat has at least one pending interaction (or time out). */
+export async function waitForPendingInteraction(
+  chatId: string,
+  timeoutMs = 10_000,
+): Promise<Array<{ interactionId: string; kind: string; status: string }>> {
+  const start = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const pending = await listPendingInteractions(chatId);
+    if (pending.length > 0) return pending;
+    if (Date.now() - start > timeoutMs) return [];
+    await new Promise((r) => setTimeout(r, 250));
+  }
 }
 
 /** Create a workflow run (status 'created', not started). */

@@ -431,12 +431,23 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     } : undefined,
   });
 
+  // P2-00 — read once, up here, so both HarnessRegistry's synthetic 'faux'
+  // status (below) and the FauxProvider-as-`harness` wiring further down
+  // (originally `loadTestFauxHarness`, renamed with the flag itself — see
+  // the note there) agree on the same value. Was
+  // `GENERATORAI_LOAD_TEST_FAUX_HARNESS`; renamed because VRT, the sandbox
+  // and e2e all reuse it too, not just the load test (D-02: clean rename,
+  // no alias).
+  const testFauxHarness = process.env['GENERATORAI_TEST_FAUX_HARNESS'] === 'true';
   const harnessRegistry = new HarnessRegistry({
     buildConfig: buildHarnessConfig,
     primary: primaryHarnessType,
     logger: { info: (m) => logger.info(m), warn: (m) => logger.warn(m) },
     // W41 — disk cache so boot never blocks on a provider probe.
     diskCacheFile: `${config.artifactsDir}/.generatorai-provider-status-cache.json`,
+    // P2-00 — report a synthetic, always-ready 'faux' provider so
+    // /harness/providers and /harness/models see it too (P0 review R15).
+    testFauxHarness,
   });
   // W41-N2 — disk cache is awaited in initialize() so the seed is guaranteed
   // to complete before any getAllModels() call. Do NOT call it here (construction
@@ -493,12 +504,23 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // If the build is absent, we fall back to MultiHarness with a warning so the
   // server still starts.
   const agentHostEnabled = process.env['GENERATORAI_AGENT_HOST'] === 'true';
-  // §1.Q — see the FauxProvider branch just below. Named so every place that
-  // must also avoid touching a real provider CLI (the model-catalog warm-up,
-  // in particular) can check the same flag rather than re-reading env.
-  const testFauxHarness = process.env['GENERATORAI_TEST_FAUX_HARNESS'] === 'true';
+  // §1.Q / P2-00 — `testFauxHarness` was read above (before HarnessRegistry
+  // construction) so both this branch and the registry's synthetic 'faux'
+  // status agree. Named so every place that must also avoid touching a real
+  // provider CLI (the model-catalog warm-up, in particular) can check the
+  // same flag rather than re-reading env.
   let harness: IAgentHarness;
   let hostSupervisor: HostSupervisor | undefined;
+
+  // P2-00 — GENERATORAI_TEST_FAUX_SCRIPT=<path.json>: a fixture of
+  // FauxScriptEntry[][] turn-scripts keyed by conversation NAME (chats don't
+  // have a stable id until they're created, so fixtures key by the name the
+  // caller gives them). `resolveChatNameForFaux` is a forward reference —
+  // `chatEntityRepo` (assigned it below, once the v2 repositories are
+  // constructed) is only ever CALLED once a real conversation is created,
+  // long after that assignment has run, so the closure sees it correctly.
+  let resolveChatNameForFaux: ((conversationId: string) => Promise<string | undefined>) | undefined;
+  const fauxScriptFilePath = process.env['GENERATORAI_TEST_FAUX_SCRIPT'];
 
   // §1.Q — the concurrent-load test (agent-tests/concurrent-load-1q.mjs)
   // needs to drive real chat/workflow/automation traffic through the FULL
@@ -512,10 +534,21 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // scary env var name so this is unmistakably a test-only escape hatch —
   // off by default, never reachable in a normal deployment.
   if (testFauxHarness) {
-    harness = new FauxProvider();
+    harness = new FauxProvider(
+      fauxScriptFilePath
+        ? {
+            scriptSource: {
+              filePath: fauxScriptFilePath,
+              resolveConversationName: async (id) => resolveChatNameForFaux?.(id),
+              logger: { warn: (m) => logger.warn(m) },
+            },
+          }
+        : undefined,
+    );
     logger.warn(
       '[Container] GENERATORAI_TEST_FAUX_HARNESS=true — using FauxProvider for ALL conversations. ' +
-      'This must never be set outside a test.',
+      'This must never be set outside a test.' +
+      (fauxScriptFilePath ? ` Scripted from ${fauxScriptFilePath}.` : ''),
     );
   } else if (agentHostEnabled) {
     // Resolve the agent-host entry point. In the monorepo the package lives
@@ -734,6 +767,25 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
   // ── Repositories (v2) ──
   const chatEntityRepo = new DrizzleChatRepository(db);
+  // P2-00 — now that the v2 chat repository exists, complete the forward
+  // reference the FauxProvider's scriptSource closure was given above.
+  //
+  // `conversationId` (what FauxProvider.createConversation actually receives)
+  // is NOT the chat id — ChatManagementService.createChat mints it as
+  // `chat-${chatId}-${Date.now()}` (a chat's *session* carries this as
+  // `conversationId`, separate from both the chat's own id and its
+  // sessionId). Anchored on both ends so it still finds the id even though a
+  // chat id (a UUID) can itself contain hyphens and all-digit segments.
+  const CHAT_CONVERSATION_ID_RE = /^chat-(.+)-\d+$/;
+  resolveChatNameForFaux = async (conversationId) => {
+    const chatId = CHAT_CONVERSATION_ID_RE.exec(conversationId)?.[1];
+    if (!chatId) return undefined; // not a chat conversation (e.g. a workflow stage run)
+    try {
+      return (await chatEntityRepo.getById(chatId)).name;
+    } catch {
+      return undefined; // no such chat
+    }
+  };
   const workflowDefinitionRepo = new DrizzleWorkflowDefinitionRepository(db);
   const stageDefinitionRepo = new DrizzleStageDefinitionRepository(db);
   const stageEdgeRepo = new DrizzleStageEdgeRepository(db);

@@ -13,8 +13,17 @@ import type { AgentHostSupervisor } from './AgentHostSupervisor.js';
  * W37: 'codex'    — Codex app-server (JSON-RPC over stdio).
  * W38: 'opencode' — OpenCode serve (HTTP + SSE).
  * W39: 'acp'      — ACP breadth client (long-tail agents, @agentclientprotocol/sdk).
+ *
+ * P2-00: 'faux' — registry-only synthetic type for `HarnessRegistry`'s
+ * `GENERATORAI_TEST_FAUX_HARNESS` status entry. Deliberately NOT part of
+ * `HarnessProviderId` (`@generatorai/shared`) — that union is persisted in
+ * chat/workflow/agent configs in production and must stay real-provider-only.
+ * `createHarnessProvider` never constructs a 'faux' adapter (see
+ * `HarnessFactory.ts`); the actual FauxProvider instance conversations run
+ * on is wired directly in `apps/server/src/composition-root.ts`, entirely
+ * outside `HarnessRegistry`.
  */
-export type HarnessType = HarnessProviderId;
+export type HarnessType = HarnessProviderId | 'faux';
 
 /**
  * Union of all provider-specific configuration options.

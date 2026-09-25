@@ -49,8 +49,17 @@ import { createLogger, type ILogger } from '@generatorai/shared';
 
 import { type GeneratorAIConfig, type ResolvedConfig, resolveConfig } from './config.js';
 
+/**
+ * P2-00 — `HarnessType` also includes 'faux' (`HarnessRegistry`'s
+ * registry-only synthetic test status; see that type's doc comment). This
+ * SDK never constructs a 'faux' adapter — `createHarnessProvider` has no
+ * factory case for it (see HarnessFactory.ts) — so this map, and the guard
+ * around its one lookup below, stay real-provider-only.
+ */
+type KnownHarnessType = Exclude<HarnessType, 'faux'>;
+
 /** `HarnessProviderConfig` option-bag key per harness type. */
-const PROVIDER_OPTIONS_KEY: Record<HarnessType, string> = {
+const PROVIDER_OPTIONS_KEY: Record<KnownHarnessType, string> = {
   copilot: 'copilot',
   'claude-agent': 'claudeAgent',
   codex: 'codex',
@@ -350,7 +359,15 @@ export class GeneratorAI {
     // ── Harness ──
     let harness: HarnessProxy;
     if (typeof resolved.harness === 'string') {
-      const harnessType: HarnessType = resolved.harness;
+      // P2-00 — 'faux' is a registry-only synthetic status (see
+      // KnownHarnessType above); this SDK has no adapter for it.
+      if (resolved.harness === 'faux') {
+        throw new Error(
+          `Harness type "faux" is a test-only registry status (GENERATORAI_TEST_FAUX_HARNESS), not a` +
+          ' selectable provider — the SDK has no adapter for it.',
+        );
+      }
+      const harnessType: KnownHarnessType = resolved.harness;
       // `HarnessProviderConfig` keys its per-provider options by a camelCased
       // form of the type; this is the same mapping the server's config layer
       // applies, so `providerOptions` lands where the provider reads it.

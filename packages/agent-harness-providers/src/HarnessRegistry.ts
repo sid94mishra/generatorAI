@@ -32,6 +32,7 @@ import type { IAgentHarness, HarnessModel, ProviderCapabilities, ProviderInstanc
 import { createHarnessProvider } from './HarnessFactory.js';
 import type { HarnessType, HarnessProviderConfig } from './types.js';
 import { readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { FAUX_MODELS } from './providers/faux/FauxProvider.js';
 
 /**
  * Optional credential probe. Providers that can distinguish "installed" from
@@ -165,6 +166,8 @@ export function harnessTypeLabel(type: HarnessType): string {
     case 'codex': return 'Codex';
     case 'opencode': return 'OpenCode';
     case 'acp': return 'ACP Agent';
+    // P2-00 — the synthetic test-harness status; see HarnessType.
+    case 'faux': return 'Faux (test)';
     default: return type;
   }
 }
@@ -247,6 +250,22 @@ export interface HarnessRegistryOptions {
    * File format: JSON array of `HarnessProviderStatus`, version-tagged.
    */
   diskCacheFile?: string;
+  /**
+   * P2-00 — when true, the registry reports a synthetic, always-ready 'faux'
+   * provider status (with `FAUX_MODELS`) from construction, so
+   * `/harness/providers` and `/harness/models` include it exactly like a
+   * real ready provider — restoring CI coverage of the "every ready provider
+   * publishes a non-empty model catalog" test (P0 review R15). It is never
+   * probed, never expires, and is NOT added to `ALL_HARNESS_TYPES` (so
+   * `/harness/switch` and provider login/logout still reject it — it is a
+   * status, not a selectable provider through this registry).
+   *
+   * Separate from whichever `IAgentHarness` composition-root wires up for
+   * actual conversation routing (also a `FauxProvider` instance when this
+   * flag is set, via `GENERATORAI_TEST_FAUX_HARNESS` — see
+   * composition-root.ts). This flag only affects what the registry REPORTS.
+   */
+  testFauxHarness?: boolean;
 }
 
 /** Shape stored in the disk cache file (version-tagged for safe loading). */
@@ -288,6 +307,8 @@ export class HarnessRegistry {
   private readonly instanceEntries = new Map<ProviderInstanceId, Entry & { driverType: HarnessType; config: HarnessProviderConfig; enabled: boolean }>();
   private readonly opts: HarnessRegistryOptions;
   private readonly statusTtlMs: number;
+  /** P2-00 — the synthetic 'faux' status, set once at construction when `opts.testFauxHarness`. */
+  private readonly fauxStatus: HarnessProviderStatus | undefined;
   private _primary: HarnessType;
   private refreshInFlight: Promise<HarnessProviderStatus[]> | null = null;
   /** W41 — semaphore flag for fire-and-forget background refresh. */
@@ -355,6 +376,22 @@ export class HarnessRegistry {
         },
       });
     }
+
+    // P2-00 — synthetic, always-ready 'faux' status. Set once here rather
+    // than probed: there is nothing to probe (no CLI, no credentials), and
+    // the catalog never changes.
+    this.fauxStatus = opts.testFauxHarness
+      ? {
+          type: 'faux',
+          label: harnessTypeLabel('faux'),
+          installed: true,
+          connected: true,
+          authenticated: true,
+          ready: true,
+          models: [...FAUX_MODELS],
+          checkedAt: Date.now(),
+        }
+      : undefined;
   }
 
   // ── W41 — Disk cache helpers ─────────────────────────────────────────────
@@ -611,7 +648,8 @@ export class HarnessRegistry {
 
   /** Types that currently pass the full readiness check. */
   get readyTypes(): HarnessType[] {
-    return [...this.entries.values()].filter((e) => e.status.ready).map((e) => e.status.type);
+    const base = [...this.entries.values()].filter((e) => e.status.ready).map((e) => e.status.type);
+    return this.fauxStatus ? [...base, this.fauxStatus.type] : base; // P2-00
   }
 
   /**
@@ -836,7 +874,11 @@ export class HarnessRegistry {
 
   /** Last known status for every provider (may be stale — see `refresh`). */
   getStatuses(): HarnessProviderStatus[] {
-    return ALL_HARNESS_TYPES.map((t) => ({ ...this.entries.get(t)!.status }));
+    const base = ALL_HARNESS_TYPES.map((t) => ({ ...this.entries.get(t)!.status }));
+    // P2-00 — every reader of getStatuses() (the `/`, `/providers`,
+    // `/models` routes, getAllModels(), resolveProviderForModel()) picks up
+    // the synthetic 'faux' entry from this single spot.
+    return this.fauxStatus ? [...base, { ...this.fauxStatus }] : base;
   }
 
   /**

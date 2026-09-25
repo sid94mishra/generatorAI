@@ -58,6 +58,10 @@ bootstrap-pairing.json
 # Transient debugging artifacts (per-run a11y dumps), not fixtures — keep out of commits.
 agent-tests/snapshots/
 
+# P2-00 — ids written by agent-tests/vrt/seed.ts (a run's actual DB ids);
+# fixtures under agent-tests/vrt/fixtures/ stay tracked.
+agent-tests/vrt/.seed.json
+
 # ── Test output / E2E artifacts (regenerable, never source) ──
 # Playwright per-test failure artifacts (test-failed-*.png, video.webm,
 # trace.zip), HTML reports + bundled trace-viewer assets, the .last-run.json

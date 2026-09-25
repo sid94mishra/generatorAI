@@ -33,14 +33,24 @@ import {
   type ProviderInstanceStore,
 } from '@generatorai/agent-harness-providers';
 
-const KNOWN_DRIVER_TYPES: readonly HarnessType[] = ['copilot', 'claude-agent', 'codex', 'opencode', 'acp'];
+/**
+ * P2-00 — `HarnessType` now also includes 'faux' (`HarnessRegistry`'s
+ * registry-only synthetic test status; see that type's doc comment). This
+ * module registers persisted `harness_instances` ROWS as live, routable
+ * adapters — 'faux' is never one of those, has no persisted-instance config
+ * shape, and never reaches this file — so everything here keeps working
+ * against the narrower, real-driver-only union.
+ */
+type KnownDriverType = Exclude<HarnessType, 'faux'>;
 
-function isKnownDriverType(v: string): v is HarnessType {
+const KNOWN_DRIVER_TYPES: readonly KnownDriverType[] = ['copilot', 'claude-agent', 'codex', 'opencode', 'acp'];
+
+function isKnownDriverType(v: string): v is KnownDriverType {
   return (KNOWN_DRIVER_TYPES as readonly string[]).includes(v);
 }
 
 /** Wire protocol for a driver type — every instance of a driver uses that driver's one protocol today (N-4 leaves room for more later). */
-function protocolFor(driverType: HarnessType): ProviderWireProtocol {
+function protocolFor(driverType: KnownDriverType): ProviderWireProtocol {
   switch (driverType) {
     case 'copilot': return 'copilot-sdk';
     case 'claude-agent': return 'claude-agent-sdk';
@@ -234,7 +244,7 @@ export async function registerHarnessInstances(
         continue;
       }
       const instanceId = makeProviderInstanceId(record.instanceId);
-      const driverType = record.driverType as HarnessType;
+      const driverType = record.driverType as KnownDriverType;
       harnessRegistry.registerInstance(instanceId, driverType, config);
       instanceRegistry.register({
         id: instanceId,

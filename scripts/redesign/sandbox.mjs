@@ -1,0 +1,277 @@
+#!/usr/bin/env node
+// ────────────────────────────────────────────────────────────────
+// P2-00 — the redesign sandbox (09-verification.md §6.2): a deterministic,
+// seeded, isolated stack for walkthroughs and destructive testing that never
+// touches :3100/:5173 or the developer's real database.
+//
+//   node scripts/redesign/sandbox.mjs                 → Faux harness (default)
+//   node scripts/redesign/sandbox.mjs --real-harness   → real provider CLIs
+//   node scripts/redesign/sandbox.mjs --clean          → remove old sandbox temp dirs, then exit
+//
+// What it does, in order:
+//   1. Bundles the server if apps/server/dist-bundle is missing.
+//   2. Starts the server on :3197 with a temp DB under
+//      os.tmpdir()/generatorai-sandbox-* (bare env names — D-44), loopback
+//      dev-auth, and (by default) the Faux harness scripted from
+//      agent-tests/vrt/fixtures/sandbox.faux.json.
+//   3. Asserts the startup log's dbPath is the temp one before continuing.
+//   4. Runs agent-tests/vrt/seed.ts against it.
+//   5. Starts Vite on :5197, proxying /api to :3197 (GENERATORAI_DEV_API_TARGET
+//      — see apps/web/vite.config.ts).
+//   6. Prints the sandbox URL.
+//
+// Ctrl-C / SIGTERM stops both children cleanly on every OS: the server gets
+// the same `{ type: 'shutdown' }` IPC message the desktop app's production
+// shutdown path uses (apps/server/src/index.ts — Windows maps a raw
+// kill('SIGTERM') to TerminateProcess, which no handler can observe), and
+// both children are spawned with an 'ipc' stdio slot even where a signal IS
+// used (Vite), because — per agent-tests/concurrent-load-1q.mjs — an IPC
+// channel being PRESENT is what makes Node relay a signal to the child's own
+// handler on Windows in the first place, instead of hard-killing it. A
+// SIGKILL fallback covers a child that doesn't exit within the budget.
+// ────────────────────────────────────────────────────────────────
+
+import { spawn, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '..', '..');
+const SERVER_DIR = path.join(ROOT, 'apps', 'server');
+const WEB_DIR = path.join(ROOT, 'apps', 'web');
+const BUNDLE_ENTRY = path.join(SERVER_DIR, 'dist-bundle', 'server.mjs');
+const FAUX_SCRIPT_FIXTURE = path.join(ROOT, 'agent-tests', 'vrt', 'fixtures', 'sandbox.faux.json');
+const SEED_SCRIPT = path.join(ROOT, 'agent-tests', 'vrt', 'seed.ts');
+
+// Not `gai-`/`genai-` — those prefixes are what scripts/sweep-temp-workspaces.mjs deletes.
+const PREFIX = 'generatorai-sandbox-';
+const SERVER_PORT = 3197;
+const WEB_PORT = 5197;
+const SHUTDOWN_BUDGET_MS = 5_000;
+const START_TIMEOUT_MS = 60_000;
+
+function bin(name) {
+  const exe = process.platform === 'win32' ? `${name}.cmd` : name;
+  return path.join(ROOT, 'node_modules', '.bin', exe);
+}
+
+function log(msg) {
+  console.log(`[sandbox] ${msg}`);
+}
+
+// ── --clean ──────────────────────────────────────────────────────
+
+function clean() {
+  const tmp = os.tmpdir();
+  let removed = 0;
+  for (const name of fs.readdirSync(tmp)) {
+    if (!name.startsWith(PREFIX)) continue;
+    fs.rmSync(path.join(tmp, name), { recursive: true, force: true });
+    removed += 1;
+  }
+  log(`removed ${removed} sandbox temp dir(s) from ${tmp}`);
+}
+
+if (process.argv.includes('--clean')) {
+  clean();
+  process.exit(0);
+}
+
+const realHarness = process.argv.includes('--real-harness');
+
+// Declared up front (not near the shutdown handlers below) so every exit
+// listener registered on a child — including the ones from an early failure
+// path (dbPath assertion, seed failure) that stops a child before reaching
+// the bottom of this file — can read it safely.
+let shuttingDown = false;
+
+// ── 1. Bundle the server if missing ─────────────────────────────
+
+if (!fs.existsSync(BUNDLE_ENTRY)) {
+  log('dist-bundle missing — bundling the server (pnpm --filter @generatorai/server bundle)...');
+  // `pnpm` itself is not a project dependency (no node_modules/.bin/pnpm) —
+  // resolve it from PATH, same as any other globally installed tool.
+  execFileSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['--filter', '@generatorai/server', 'bundle'], {
+    cwd: ROOT,
+    stdio: 'inherit',
+  });
+}
+
+// ── 2. Temp DB / artifacts / workspaces / extensions dirs ──────
+
+const sandboxDir = fs.mkdtempSync(path.join(os.tmpdir(), PREFIX));
+const dbPath = path.join(sandboxDir, 'sandbox.db');
+const artifactsDir = path.join(sandboxDir, 'artifacts');
+const workspacesDir = path.join(sandboxDir, 'workspaces');
+const extensionsDir = path.join(sandboxDir, 'extensions');
+for (const dir of [artifactsDir, workspacesDir, extensionsDir]) fs.mkdirSync(dir, { recursive: true });
+log(`temp dir: ${sandboxDir}`);
+
+// ── 3. Start the server ─────────────────────────────────────────
+
+const serverEnv = {
+  ...process.env,
+  PORT: String(SERVER_PORT),
+  WIDGET_PORT: String(SERVER_PORT + 1),
+  // D-44 — bare names; GENERATORAI_-prefixed equivalents are silently ignored
+  // and would open the developer's real database.
+  DB_PATH: dbPath,
+  ARTIFACTS_DIR: artifactsDir,
+  WORKSPACES_DIR: workspacesDir,
+  EXTENSIONS_DIR: extensionsDir,
+  GENERATORAI_BIND_HOST: '127.0.0.1',
+  GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK: '1',
+  NODE_ENV: 'test',
+  CORS_ORIGINS: `http://localhost:${WEB_PORT}`,
+  ...(realHarness
+    ? {}
+    : {
+        GENERATORAI_TEST_FAUX_HARNESS: 'true',
+        GENERATORAI_TEST_FAUX_SCRIPT: FAUX_SCRIPT_FIXTURE,
+      }),
+};
+
+log(`starting server on :${SERVER_PORT} (${realHarness ? 'real harness' : 'Faux harness'})...`);
+const serverChild = spawn(process.execPath, [BUNDLE_ENTRY], {
+  cwd: SERVER_DIR,
+  env: serverEnv,
+  // The 4th ('ipc') slot: lets us `send({type:'shutdown'})` for graceful
+  // stop, AND (Windows) is what makes a later kill('SIGTERM') reach the
+  // child's own signal handler instead of a hard TerminateProcess. See the
+  // file header and agent-tests/concurrent-load-1q.mjs.
+  stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+});
+let serverLog = '';
+serverChild.stdout.on('data', (c) => { serverLog += c.toString(); process.stdout.write(`[server] ${c}`); });
+serverChild.stderr.on('data', (c) => { serverLog += c.toString(); process.stderr.write(`[server] ${c}`); });
+serverChild.on('exit', (code, signal) => {
+  if (!shuttingDown) {
+    console.error(`[sandbox] server exited unexpectedly (code=${code} signal=${signal})`);
+    console.error(serverLog.slice(-4000));
+    process.exit(1);
+  }
+});
+
+async function waitForHttp(url, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return;
+    } catch { /* not up yet */ }
+    await delay(300);
+  }
+  throw new Error(`${url} did not become healthy within ${timeoutMs}ms`);
+}
+
+await waitForHttp(`http://127.0.0.1:${SERVER_PORT}/api/health`, START_TIMEOUT_MS);
+
+// D-44 — assert the startup log really is on the temp DB before doing
+// anything else. The pino line is JSON: {"…","dbPath":"<path>",…}.
+const expectedDbPathJson = `"dbPath":${JSON.stringify(dbPath)}`;
+{
+  const deadline = Date.now() + 15_000;
+  let onTempDb = serverLog.includes(expectedDbPathJson);
+  while (!onTempDb && Date.now() < deadline) {
+    await delay(300);
+    onTempDb = serverLog.includes(expectedDbPathJson);
+  }
+  if (!onTempDb) {
+    console.error(`[sandbox] server did not report the temp dbPath (expected ${expectedDbPathJson})`);
+    console.error(serverLog.slice(-4000));
+    await stopChild(serverChild, { ipcShutdown: true });
+    process.exit(1);
+  }
+}
+log(`server is on the temp DB: ${dbPath}`);
+
+// ── 4. Seed ──────────────────────────────────────────────────────
+
+log('seeding...');
+try {
+  execFileSync(bin('tsx'), [SEED_SCRIPT], {
+    cwd: ROOT,
+    env: { ...process.env, API_URL: `http://127.0.0.1:${SERVER_PORT}/api` },
+    stdio: 'inherit',
+  });
+} catch (err) {
+  console.error('[sandbox] seed failed:', err.message);
+  await stopChild(serverChild, { ipcShutdown: true });
+  process.exit(1);
+}
+
+// ── 5. Start Vite ────────────────────────────────────────────────
+
+log(`starting Vite on :${WEB_PORT}, proxying /api to :${SERVER_PORT}...`);
+const viteEnv = {
+  ...process.env,
+  // apps/web/vite.config.ts — where /api is proxied in dev.
+  GENERATORAI_DEV_API_TARGET: `http://localhost:${SERVER_PORT}`,
+};
+const viteChild = spawn(bin('vite'), ['--port', String(WEB_PORT), '--host', '127.0.0.1', '--strictPort'], {
+  cwd: WEB_DIR,
+  env: viteEnv,
+  stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+});
+let viteLog = '';
+viteChild.stdout.on('data', (c) => { viteLog += c.toString(); process.stdout.write(`[web] ${c}`); });
+viteChild.stderr.on('data', (c) => { viteLog += c.toString(); process.stderr.write(`[web] ${c}`); });
+viteChild.on('exit', (code, signal) => {
+  if (!shuttingDown) {
+    console.error(`[sandbox] vite exited unexpectedly (code=${code} signal=${signal})`);
+    console.error(viteLog.slice(-4000));
+    process.exit(1);
+  }
+});
+
+await waitForHttp(`http://127.0.0.1:${WEB_PORT}/`, START_TIMEOUT_MS);
+
+console.log('');
+console.log(`  Sandbox ready:  http://localhost:${WEB_PORT}`);
+console.log(`  API:            http://localhost:${SERVER_PORT}/api`);
+console.log(`  DB:             ${dbPath}`);
+console.log('  Ctrl-C to stop both processes cleanly.');
+console.log('');
+
+// ── 6. Clean shutdown on every OS ───────────────────────────────
+
+async function stopChild(child, { ipcShutdown = false } = {}) {
+  if (!child || child.exitCode !== null || child.killed) return;
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+
+  if (ipcShutdown && typeof child.send === 'function') {
+    try { child.send({ type: 'shutdown' }); } catch { /* channel already gone — fall through to signal */ }
+  } else {
+    try { child.kill('SIGTERM'); } catch { /* already gone */ }
+  }
+
+  const timedOut = await Promise.race([
+    exited.then(() => false),
+    delay(SHUTDOWN_BUDGET_MS).then(() => true),
+  ]);
+  if (timedOut && child.exitCode === null && !child.killed) {
+    try { child.kill('SIGKILL'); } catch { /* already gone */ }
+    await Promise.race([exited, delay(2_000)]);
+  }
+}
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n[sandbox] ${signal} received — stopping server and web...`);
+  await Promise.all([
+    stopChild(serverChild, { ipcShutdown: true }),
+    stopChild(viteChild, {}),
+  ]);
+  log('stopped.');
+  process.exit(0);
+}
+
+process.on('SIGINT', () => { void shutdown('SIGINT'); });
+process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+
+// Keep the process alive until a signal arrives.
+await new Promise(() => {});

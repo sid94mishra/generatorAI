@@ -40,8 +40,27 @@ import type {
   AttachmentRef,
   SendPromptOptions,
   ProviderCapabilities,
+  PermissionRequest,
 } from '@generatorai/core';
-import type { AgentEvent } from '@generatorai/shared';
+import type { AgentEvent, AgentQuestion } from '@generatorai/shared';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join } from 'node:path';
+
+// ── Model catalog ────────────────────────────────────────────────
+//
+// P2-00 — extracted to a standalone constant so `HarnessRegistry` can report
+// the same catalog synchronously (it needs a model list before any
+// conversation exists to call `getModels()` on) without duplicating it.
+export const FAUX_MODELS: HarnessModel[] = [
+  {
+    id: 'faux-model',
+    name: 'Faux Model',
+    provider: 'faux',
+    description: 'Deterministic faux model for testing',
+    promptTokenLimit: 200_000,
+    totalContextWindow: 200_000,
+  },
+];
 
 // ── Script entry types ──────────────────────────────────────────
 
@@ -100,6 +119,61 @@ export interface FauxExhaustedEntry {
   maxTurns: number;
 }
 
+/**
+ * P2-00 — write, overwrite or delete a real file under the conversation's
+ * `workingDirectory`, so a scripted turn produces a REAL diff for the
+ * Changes dock / git status to find (09-verification.md §4.2: "file edits
+ * happen in a seeded dummy repo so the Changes dock has real diffs").
+ *
+ * Emits a `harness.tool_start` / `harness.tool_complete` pair around the
+ * write, with a best-effort `fileOp` line-count stat, so the transcript shows
+ * a tool card exactly like a real Write/Edit tool call would.
+ */
+export interface FauxFileEditEntry {
+  type: 'file_edit';
+  /** Relative to `CreateConversationParams.workingDirectory` (or absolute). */
+  path: string;
+  /** New full file content. Ignored when `op` is 'delete'. */
+  content?: string;
+  /**
+   * Defaults to 'delete' when `content` is omitted, otherwise 'update' when
+   * the file already exists on disk and 'create' when it does not.
+   */
+  op?: 'create' | 'update' | 'delete';
+  /** Tool name shown in the transcript. Defaults to 'Write' (or 'Delete'). */
+  toolName?: string;
+  callId?: string;
+}
+
+/**
+ * P2-00 — drive `CreateConversationParams.onQuestionRequest`, the same
+ * blocking gate a real provider's clarifying-question tool uses
+ * (`ChatManagementService.buildQuestionHandler`). Requires plan mode to be
+ * enabled and the handler to have been installed on this conversation;
+ * otherwise the entry is skipped with a `harness.warning` event rather than
+ * throwing, since not every conversation configures the gate.
+ */
+export interface FauxAskQuestionEntry {
+  type: 'ask_question';
+  questions: AgentQuestion[];
+}
+
+/**
+ * P2-00 — drive `CreateConversationParams.onPermissionRequest`, the same
+ * blocking gate a real provider's tool-permission callback uses
+ * (`ChatManagementService.buildPermissionHandler`). Same "skip with a
+ * warning, don't throw" behaviour as {@link FauxAskQuestionEntry} when no
+ * handler is installed.
+ *
+ * TODO(P2-00): `onPlanReviewRequest` (the plan-mode "review and approve the
+ * plan" gate) and the HKS-01 hook bridge are NOT emulated yet — FauxProvider
+ * never calls either, so a script cannot drive those interaction kinds today.
+ */
+export interface FauxPermissionRequestEntry {
+  type: 'permission_request';
+  request: PermissionRequest;
+}
+
 export type FauxScriptEntry =
   | FauxTextEntry
   | FauxToolCallEntry
@@ -108,7 +182,32 @@ export type FauxScriptEntry =
   | FauxCancelledEntry
   | FauxTruncatedEntry
   | FauxErrorEntry
-  | FauxExhaustedEntry;
+  | FauxExhaustedEntry
+  | FauxFileEditEntry
+  | FauxAskQuestionEntry
+  | FauxPermissionRequestEntry;
+
+/**
+ * P2-00 — `GENERATORAI_TEST_FAUX_SCRIPT=<path.json>` file shape: turn-scripts
+ * keyed by conversation NAME (the chat's human-readable name, not its id —
+ * ids don't exist yet when the fixture is authored). Each array is consumed
+ * in order, exactly like repeated calls to {@link FauxProvider.script}.
+ */
+export type FauxScriptFile = Record<string, FauxScriptEntry[][]>;
+
+/** P2-00 — wires `GENERATORAI_TEST_FAUX_SCRIPT` into a `FauxProvider` instance. */
+export interface FauxScriptSource {
+  /** Path to the JSON `FauxScriptFile`. */
+  filePath: string;
+  /**
+   * Resolves a conversation id to the human-readable name
+   * `FauxScriptFile` is keyed by (typically the chat's `name`). Returning
+   * `undefined` means "no script for this conversation" — never throws past
+   * this boundary; a failing resolver is treated the same way.
+   */
+  resolveConversationName: (conversationId: string) => Promise<string | undefined>;
+  logger?: { warn: (message: string) => void };
+}
 
 // ── Internal session state ────────────────────────────────────────
 
@@ -124,6 +223,12 @@ interface FauxConversationState {
   pendingTools: Map<string, (result: unknown) => void>;
   /** Set while a sendPromptAndWait is in flight. */
   inFlight: boolean;
+  /**
+   * P2-00 — whether GENERATORAI_TEST_FAUX_SCRIPT has already been consulted
+   * for this conversation. Applied lazily on the FIRST `sendPromptAndWait`
+   * rather than at `createConversation` — see that method's comment for why.
+   */
+  scriptFileApplied: boolean;
 }
 
 // ── FauxProvider ─────────────────────────────────────────────────
@@ -144,10 +249,20 @@ export class FauxProvider implements IAgentHarness {
   private readonly clientHandlers: Array<(e: HarnessClientEvent) => void> = [];
   private readonly conversations = new Map<string, FauxConversationState>();
   private readonly capabilitiesOverride: Partial<ProviderCapabilities>;
+  private readonly scriptSource: FauxScriptSource | undefined;
+  private scriptFileCache: Promise<FauxScriptFile> | undefined;
 
-  /** W44 — configurable capabilities so conformance tests can exercise edge cases. */
-  constructor(opts: { capabilities?: Partial<ProviderCapabilities> } = {}) {
+  /**
+   * W44 — configurable capabilities so conformance tests can exercise edge
+   * cases.
+   * P2-00 — `scriptSource` wires `GENERATORAI_TEST_FAUX_SCRIPT`: a fixture
+   * file of turn-scripts keyed by conversation name, applied automatically
+   * (once, lazily, on the conversation's first `sendPromptAndWait`) once the
+   * conversation's name can be resolved.
+   */
+  constructor(opts: { capabilities?: Partial<ProviderCapabilities>; scriptSource?: FauxScriptSource } = {}) {
     this.capabilitiesOverride = opts.capabilities ?? {};
+    this.scriptSource = opts.scriptSource;
   }
 
   // ── IHarnessClientLifecycle ─────────────────────────────────────
@@ -210,16 +325,7 @@ export class FauxProvider implements IAgentHarness {
   // ── IHarnessModelDiscovery ──────────────────────────────────────
 
   async getModels(): Promise<HarnessModel[]> {
-    return [
-      {
-        id: 'faux-model',
-        name: 'Faux Model',
-        provider: 'faux',
-        description: 'Deterministic faux model for testing',
-        promptTokenLimit: 200_000,
-        totalContextWindow: 200_000,
-      },
-    ];
+    return [...FAUX_MODELS];
   }
 
   // ── IHarnessConversationLifecycle ───────────────────────────────
@@ -234,9 +340,61 @@ export class FauxProvider implements IAgentHarness {
       pendingScript: [],
       pendingTools: new Map(),
       inFlight: false,
+      scriptFileApplied: false,
     };
     this.conversations.set(params.conversationId, conv);
+    // Pre-registered via script(entries) with no conversationId, queued
+    // before this conversation existed. This was previously dead code — the
+    // "apply to the next created conversation" fallback documented on
+    // `script()` never actually ran.
+    this._transferScripts(conv);
+    // P2-00 — GENERATORAI_TEST_FAUX_SCRIPT is applied lazily, on the first
+    // `sendPromptAndWait` (see there), NOT here. Callers that build their
+    // conversation config from a name that only becomes durable (e.g. a
+    // caller-side DB row) AFTER `createConversation` returns — GeneratorAI's
+    // own ChatManagementService.createChat does exactly this, persisting the
+    // chat row only after the harness conversation is created — would
+    // otherwise race a name lookup against a row that does not exist yet.
     return params.conversationId;
+  }
+
+  /** P2-00 — load (and cache) the GENERATORAI_TEST_FAUX_SCRIPT fixture file. */
+  private async loadScriptFile(): Promise<FauxScriptFile> {
+    const source = this.scriptSource;
+    if (!source) return {};
+    this.scriptFileCache ??= (async () => {
+      try {
+        const raw = await readFile(source.filePath, 'utf8');
+        const parsed = JSON.parse(raw) as unknown;
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          throw new Error('expected a JSON object keyed by conversation name');
+        }
+        return parsed as FauxScriptFile;
+      } catch (err) {
+        source.logger?.warn(
+          `[FauxProvider] failed to load GENERATORAI_TEST_FAUX_SCRIPT file "${source.filePath}": ${String(err)}`,
+        );
+        return {};
+      }
+    })();
+    return this.scriptFileCache;
+  }
+
+  /** P2-00 — resolve this conversation's name and queue its scripted turns, if any. */
+  private async applyScriptFile(conv: FauxConversationState): Promise<void> {
+    const source = this.scriptSource;
+    if (!source) return;
+    let name: string | undefined;
+    try {
+      name = await source.resolveConversationName(conv.id);
+    } catch {
+      name = undefined; // resolution is best-effort — never block conversation creation on it
+    }
+    if (!name) return;
+    const file = await this.loadScriptFile();
+    const turns = file[name];
+    if (!turns) return;
+    for (const turn of turns) conv.pendingScript.push(turn);
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
@@ -300,6 +458,13 @@ export class FauxProvider implements IAgentHarness {
     const conv = this.conversations.get(conversationId);
     if (!conv) throw new Error(`FauxProvider: unknown conversation ${conversationId}`);
     if (conv.inFlight) throw new Error(`FauxProvider: turn already in flight for ${conversationId}`);
+
+    // P2-00 — GENERATORAI_TEST_FAUX_SCRIPT, applied once, lazily, on the
+    // first turn (see createConversation's comment for why not there).
+    if (this.scriptSource && !conv.scriptFileApplied) {
+      conv.scriptFileApplied = true;
+      await this.applyScriptFile(conv);
+    }
 
     conv.inFlight = true;
     conv.messages.push({ role: 'user', content: prompt, timestamp: new Date() });
@@ -397,6 +562,82 @@ export class FauxProvider implements IAgentHarness {
               kind: 'harness.tool_complete',
               data: { tool: entry.name, result: entry.error, callId, success: false },
             });
+            break;
+          }
+
+          case 'file_edit': {
+            const callId = entry.callId ?? nextCallId();
+            const isDelete = entry.op === 'delete' || (entry.op === undefined && entry.content === undefined);
+            const toolName = entry.toolName ?? (isDelete ? 'Delete' : 'Write');
+            const absPath = isAbsolute(entry.path)
+              ? entry.path
+              : join(conv.params.workingDirectory ?? process.cwd(), entry.path);
+
+            this.broadcast(conversationId, {
+              kind: 'harness.tool_start',
+              data: { tool: toolName, args: { file_path: entry.path }, callId },
+            });
+
+            let previousContent: string | undefined;
+            try {
+              previousContent = await readFile(absPath, 'utf8');
+            } catch {
+              previousContent = undefined; // file does not exist yet — that's fine
+            }
+            const resolvedOp = entry.op ?? (isDelete ? 'delete' : previousContent === undefined ? 'create' : 'update');
+
+            if (resolvedOp === 'delete') {
+              await rm(absPath, { force: true });
+            } else {
+              await mkdir(dirname(absPath), { recursive: true });
+              await writeFile(absPath, entry.content ?? '', 'utf8');
+            }
+
+            const oldLines = previousContent ? previousContent.split('\n').length : 0;
+            const newLines = resolvedOp === 'delete' ? 0 : (entry.content ?? '').split('\n').length;
+            const fileOp = {
+              kind: resolvedOp,
+              filePath: entry.path,
+              additions: resolvedOp === 'delete' ? 0 : newLines,
+              deletions: resolvedOp === 'delete' ? oldLines : previousContent === undefined ? 0 : oldLines,
+            };
+
+            this.broadcast(conversationId, {
+              kind: 'harness.tool_complete',
+              data: { tool: toolName, result: `${resolvedOp} ${entry.path}`, callId, success: true, fileOp },
+            });
+            break;
+          }
+
+          case 'ask_question': {
+            const handler = conv.params.onQuestionRequest;
+            if (!handler) {
+              this.broadcast(conversationId, {
+                kind: 'harness.warning',
+                data: {
+                  message: 'FauxProvider: "ask_question" script entry ignored — this conversation has no onQuestionRequest handler (plan mode may be disabled).',
+                  provider: 'faux',
+                },
+              });
+              break;
+            }
+            await handler({ questions: entry.questions });
+            break;
+          }
+
+          case 'permission_request': {
+            const handler = conv.params.onPermissionRequest;
+            if (!handler) {
+              this.broadcast(conversationId, {
+                kind: 'harness.warning',
+                data: {
+                  message: 'FauxProvider: "permission_request" script entry ignored — this conversation has no onPermissionRequest handler.',
+                  provider: 'faux',
+                },
+              });
+              break;
+            }
+            await handler(entry.request);
             break;
           }
 

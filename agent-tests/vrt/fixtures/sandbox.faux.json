@@ -1,0 +1,32 @@
+{
+  "Sandbox — Active Chat": [
+    [
+      {
+        "type": "text",
+        "content": "Hello! I'm the deterministic Faux test harness (GENERATORAI_TEST_FAUX_HARNESS). I can stream text, run tool calls, edit real files under this chat's workspace, and drive question/permission gates — ask me anything, or just say hi back."
+      },
+      { "type": "complete" }
+    ]
+  ],
+  "Sandbox — Needs Your Review": [
+    [
+      {
+        "type": "text",
+        "content": "I'd like to confirm before making this change."
+      },
+      {
+        "type": "permission_request",
+        "request": {
+          "type": "file_write",
+          "description": "Overwrite src/config.ts with the new settings.",
+          "details": { "path": "src/config.ts" }
+        }
+      },
+      {
+        "type": "text",
+        "content": "Thanks — applying the change now."
+      },
+      { "type": "complete" }
+    ]
+  ]
+}

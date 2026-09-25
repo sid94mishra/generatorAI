@@ -385,6 +385,7 @@ jobs:
             GENERATORAI_BIND_HOST=127.0.0.1 \
             GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK=1 \
             NODE_ENV=test \
+            GENERATORAI_TEST_FAUX_HARNESS=true \
             nohup node dist-bundle/server.mjs > "$state/logs/server.log" 2>&1 &
             echo $! > "$state/server.pid"
           )

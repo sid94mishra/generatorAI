@@ -430,7 +430,7 @@ One tool and one container cover both surfaces: **Playwright Test `toHaveScreens
 **Decision: seeded test server.** The app renders against the real bundled server (`apps/server/dist-bundle/server.mjs`), configured as follows:
 - a fresh temp DB (`DB_PATH`), artifacts dir (`ARTIFACTS_DIR`) and workspaces dir (`WORKSPACES_DIR`) under `os.tmpdir()/generatorai-vrt-*` — the server reads these **bare** names (`apps/server/src/index.ts`); `GENERATORAI_DB_PATH` is ignored and silently opens the developer's default DB;
 - `GENERATORAI_BIND_HOST=127.0.0.1`, `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK=1`, `NODE_ENV=test`, `PORT=3197`;
-- `GENERATORAI_LOAD_TEST_FAUX_HARNESS=true`, so every conversation runs on the deterministic `FauxProvider`.
+- `GENERATORAI_TEST_FAUX_HARNESS=true` (P2-00; renamed from the load-test-only `GENERATORAI_LOAD_TEST_FAUX_HARNESS`, no alias per D-02), so every conversation runs on the deterministic `FauxProvider`, which also reports itself as a ready provider with a non-empty model catalog in `/harness/providers` and `/harness/models`. `GENERATORAI_TEST_FAUX_SCRIPT=<path.json>` (P2-00) additionally scripts specific conversations by name — see `FauxScriptEntry`/`FauxScriptFile` in `packages/agent-harness-providers/src/providers/faux/FauxProvider.ts` and the sandbox's `agent-tests/vrt/fixtures/sandbox.faux.json`.
 
 This is already proven by `concurrent-load-1q.mjs` and the CI `e2e` job.
 
@@ -720,7 +720,7 @@ P4's dock swaps `useResizablePane` for react-resizable-panels 4 (D-27/D-38). The
 12. If SCM/Changes/diff features changed: repeat step 7 against a dummy repo (§6.6).
 ```
 
-**When each step becomes available.** Steps 1–4, 6 (minus `check:css`), 7, 9 and 11–12 work from P0. `check:css` and `--project unit` come from P0-04; the step 8 scripts from P0-01; `make-dummy-repo.mjs` (step 12) from P0-02; steps 0, 5 and 10 (Storybook, `test:stories`, `pnpm vrt`) from P1-SB; the sandbox on :5197 from P2-00 — until it lands, walk through against `pnpm dev` (:5173) and do destructive actions only on data you created. A step whose tooling has not landed yet is skipped and the PR says so.
+**When each step becomes available.** Steps 1–4, 6 (minus `check:css`), 7, 9 and 11–12 work from P0. `check:css` and `--project unit` come from P0-04; the step 8 scripts from P0-01; `make-dummy-repo.mjs` (step 12) from P0-02; steps 0, 5 and 10 (Storybook, `test:stories`, `pnpm vrt`) from P1-SB; the sandbox on :5197 from P2-00 (`node scripts/redesign/sandbox.mjs`, landed). A step whose tooling has not landed yet is skipped and the PR says so.
 
 `DIFF.md` has three headings:
 - **Matches**;
@@ -931,5 +931,5 @@ Contrast is owned by the token suite (§2.6, 252 combinations). axe's `color-con
 3. **Compact density vs WCAG 2.5.8.** D-15 compact makes `control-sm` 20 px, which is below the 24 px minimum target size. The kit needs an invisible hit-slop (a `::before` inset of −2 px) on sub-24 controls, or compact `control-sm` stays at 24. Record this in D-15.
 4. **D-33 virtualization vs native find.** The desktop FindBar uses Electron `findInPage`, which cannot find text in turns that are not rendered. The spike's acceptance must include find, or the FindBar must search the transcript model and scroll the virtualizer. Add this to D-33.
 5. **CI branch triggers.** `ci.yml` runs only for `main`/`dev`. The redesign branches get no CI until P0 fixes the triggers. This is not a decision conflict, but every D-03 gate depends on it.
-6. **`GENERATORAI_LOAD_TEST_FAUX_HARNESS`.** The name and its log say "load test only", but VRT, the sandbox and e2e reuse it. Per `no-backward-compatibility`, P2 should rename it to `GENERATORAI_TEST_FAUX_HARNESS` and add the `GENERATORAI_TEST_FAUX_SCRIPT` hook, or adopt the Workflow Overhaul Plan's WP-0.3 test server if it has landed.
+6. **`GENERATORAI_LOAD_TEST_FAUX_HARNESS`.** ~~The name and its log say "load test only", but VRT, the sandbox and e2e reuse it.~~ **Done (P2-00).** No WP-0.3 test server had landed, so P2-00 renamed the flag to `GENERATORAI_TEST_FAUX_HARNESS` (clean rename, no alias — D-02; `grep -rn GENERATORAI_LOAD_TEST_FAUX_HARNESS` returns nothing outside historical review/plan docs), added `GENERATORAI_TEST_FAUX_SCRIPT`, and made `HarnessRegistry` report the Faux harness as a ready provider with a non-empty catalog when the flag is set — `agent-tests/e2e/subsystems-live.spec.ts`'s "every ready provider publishes a non-empty model catalog" now runs (not skips) against the sandbox and the CI `e2e` job.
 7. **D-26 changes a tested contract.** `navigation.spec.ts` asserts that opening Settings does not change the URL. D-26 makes the URL `/settings/:section`. The P6 PR changes this assertion on purpose.
