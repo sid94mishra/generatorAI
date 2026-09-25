@@ -115,18 +115,6 @@ export function windowChrome(): WindowChrome {
 }
 
 /**
- * Accelerator for switching to the Nth main section.
- *
- * macOS reserves `Cmd+1..9` for tab switching almost universally, so binding
- * navigation there fights muscle memory — a user pressing `Cmd+2` expecting a
- * tab would be teleported to another page. Windows and Linux have no such
- * convention, so `Ctrl+N` is both free and expected there.
- */
-export function sectionAccelerator(index: number, macKey: string): string {
-  return isMac ? `Cmd+Shift+${macKey}` : `Ctrl+${index}`;
-}
-
-/**
  * Adds an `&` mnemonic to a Windows/Linux menu label.
  *
  * The `&` makes the following letter underlined and generates the `Alt+<key>`

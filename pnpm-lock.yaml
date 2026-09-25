@@ -281,6 +281,9 @@ importers:
       '@generatorai/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
+      '@generatorai/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@types/better-sqlite3':
         specifier: ^7.6.11
         version: 7.6.13
@@ -20000,9 +20003,9 @@ snapshots:
       obug: 2.2.1
       std-env: 4.2.0
       tinyrainbow: 3.1.1
-      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@22.20.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(happy-dom@20.13.2)(jsdom@25.0.1)(vite@7.3.6(@types/node@22.20.0)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))
+      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@22.20.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(happy-dom@20.13.2)(jsdom@25.0.1)(vite@7.3.6(@types/node@22.20.0)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))
     optionalDependencies:
-      '@vitest/browser': 4.1.11(vite@7.3.6(@types/node@22.20.0)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))(vitest@4.1.11)
+      '@vitest/browser': 4.1.11(vite@7.3.6(@types/node@22.20.0)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))(vitest@4.1.11)
 
   '@vitest/expect@4.1.11':
     dependencies:

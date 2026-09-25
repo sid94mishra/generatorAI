@@ -9,9 +9,12 @@
 //
 //   1. Navigation lives under `View`, not a bespoke `Go` menu. That is where
 //      Safari, Finder and VS Code put it, so it is where users look.
-//   2. Accelerators are chosen PER PLATFORM. `Cmd+1..9` means "switch tab"
-//      on macOS, so binding navigation there fights muscle memory; Windows
-//      and Linux have no such convention and get `Ctrl+1..8`.
+//   2. Accelerators come from the shared command registry
+//      (`@generatorai/shared/ui-contract`, D-24), per platform: `Cmd+1..9`
+//      means "switch tab" on macOS, so sections are `Cmd+Shift+<letter>`
+//      there; Windows and Linux get `Ctrl+1..7` in sidebar order. The same
+//      table drives the web key handler and the shortcuts sheet, so the menu,
+//      the palette hints and Help ▸ Keyboard Shortcuts cannot disagree.
 //
 // The menu is REBUILT whenever renderer state changes, so checkmarks, radio
 // groups and enabled/disabled items reflect the app rather than decorating it.
@@ -23,7 +26,8 @@ import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
 import { resolvePaths } from './paths';
 import { loadSettings, saveSettings } from './config';
-import { isMac, mnemonic, sectionAccelerator } from './platform';
+import { COMMANDS, NAV_DESTINATIONS, toElectronAccelerator, type CommandId } from '@generatorai/shared/ui-contract';
+import { isMac, mnemonic } from './platform';
 import { log } from './logger';
 import {
   connectionState,
@@ -73,15 +77,11 @@ function nav(route: string): void {
   getWindowManager().navigateTo(route);
 }
 
-/** The main sections, in sidebar order. */
-const SECTIONS: { label: string; route: string; index: number; macKey: string }[] = [
-  { label: 'Dashboard', route: '/', index: 1, macKey: 'D' },
-  { label: 'Projects', route: '/projects', index: 2, macKey: 'P' },
-  { label: 'Chats', route: '/chats', index: 3, macKey: 'C' },
-  { label: 'Workflows', route: '/workflows', index: 4, macKey: 'W' },
-  { label: 'Scripts', route: '/scripts', index: 5, macKey: 'S' },
-  { label: 'Automations', route: '/automations', index: 6, macKey: 'A' },
-];
+/** This platform's accelerator for a registry command (undefined = unbound here). */
+export function accel(id: CommandId): string | undefined {
+  const binding = COMMANDS[id][isMac ? 'desktopMac' : 'desktopWinLinux'];
+  return binding === null ? undefined : toElectronAccelerator(binding);
+}
 
 /**
  * Updates the menu to reflect renderer state.
@@ -110,7 +110,7 @@ export function buildMenu(actions: MenuActions): void {
             { label: `About ${app.name}`, click: actions.showAbout },
             { label: 'Check for Updates…', click: actions.checkForUpdates },
             { type: 'separator' },
-            { label: 'Settings…', accelerator: 'Cmd+,', click: () => nav('/settings') },
+            { label: 'Settings…', accelerator: accel('app.settings'), click: () => wm.sendCommand('app.settings') },
             { type: 'separator' },
             { role: 'services' },
             { type: 'separator' },
@@ -176,26 +176,23 @@ export function buildMenu(actions: MenuActions): void {
   const fileMenu: MenuItemConstructorOptions = {
     label: mnemonic('File', 'F'),
     submenu: [
-      // Routing for these lives in the renderer (useDesktopIntegration), so
+      // Routing for these lives in the renderer (useCommandHost), so
       // the menu only announces intent — one source of truth for where
       // "new X" actually goes.
-      {
-        label: 'New Chat',
-        accelerator: 'CmdOrCtrl+N',
-        click: () => wm.sendCommand('new-chat'),
-      },
-      { label: 'New Workflow', accelerator: 'CmdOrCtrl+Shift+N', click: () => wm.sendCommand('new-workflow') },
-      { label: 'New Project', click: () => wm.sendCommand('new-project') },
-      { label: 'New Automation', click: () => wm.sendCommand('new-automation') },
+      { label: 'New Chat', accelerator: accel('chat.new'), click: () => wm.sendCommand('chat.new') },
+      { label: 'New Workflow', accelerator: accel('workflow.new'), click: () => wm.sendCommand('workflow.new') },
+      { label: 'New Project', accelerator: accel('project.new'), click: () => wm.sendCommand('project.new') },
+      { label: 'New Automation', accelerator: accel('automation.new'), click: () => wm.sendCommand('automation.new') },
       { type: 'separator' },
       { label: 'Open Recent', submenu: recentSubmenu },
       { type: 'separator' },
-      { label: 'Reload Scripts', click: () => { nav('/scripts'); wm.sendCommand('reload-scripts'); } },
+      // Refreshes the scripts list wherever it is shown; no navigation.
+      { label: 'Reload Scripts', accelerator: accel('scripts.reload'), click: () => wm.sendCommand('scripts.reload') },
       // macOS puts Settings in the app menu; everywhere else it belongs here.
       ...(!isMac
         ? ([
             { type: 'separator' },
-            { label: 'Settings', accelerator: 'Ctrl+,', click: () => nav('/settings') },
+            { label: 'Settings', accelerator: accel('app.settings'), click: () => wm.sendCommand('app.settings') },
           ] as MenuItemConstructorOptions[])
         : []),
       { type: 'separator' },
@@ -221,13 +218,9 @@ export function buildMenu(actions: MenuActions): void {
       // Find means find IN THIS PAGE, as it does in every other desktop app.
       // It used to open the command palette — which already has its own
       // shortcut — and `Find Next` dispatched an event nothing listened to.
-      { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => wm.sendCommand('find-in-page') },
-      { label: 'Find Next', accelerator: 'CmdOrCtrl+G', click: () => wm.sendCommand('find-next') },
-      {
-        label: 'Find Previous',
-        accelerator: 'Shift+CmdOrCtrl+G',
-        click: () => wm.sendCommand('find-previous'),
-      },
+      { label: 'Find…', accelerator: accel('find.open'), click: () => wm.sendCommand('find.open') },
+      { label: 'Find Next', accelerator: accel('find.next'), click: () => wm.sendCommand('find.next') },
+      { label: 'Find Previous', accelerator: accel('find.previous'), click: () => wm.sendCommand('find.previous') },
       // Speech is a macOS system service, not something we provide.
       ...(isMac
         ? ([
@@ -244,19 +237,21 @@ export function buildMenu(actions: MenuActions): void {
     submenu: [
       {
         label: 'Command Palette…',
-        accelerator: 'CmdOrCtrl+K',
-        click: () => wm.sendCommand('command-palette'),
+        accelerator: accel('palette.toggle'),
+        click: () => wm.sendCommand('palette.toggle'),
       },
       { type: 'separator' },
-      ...SECTIONS.map<MenuItemConstructorOptions>((s) => ({
-        label: s.label,
-        accelerator: sectionAccelerator(s.index, s.macKey),
-        click: () => nav(s.route),
+      // Sections in sidebar order (D-22). `navigateTo` (not the nav command)
+      // because it also surfaces a window that was hidden to the tray.
+      ...NAV_DESTINATIONS.map<MenuItemConstructorOptions>((d) => ({
+        label: d.label,
+        accelerator: accel(d.command),
+        click: () => nav(d.path),
       })),
       { type: 'separator' },
       {
         label: 'Back',
-        accelerator: isMac ? 'Cmd+[' : 'Alt+Left',
+        accelerator: accel('nav.back'),
         enabled: navHistory().back,
         click: () => {
           const wc = wm.getMainWindow()?.webContents;
@@ -265,7 +260,7 @@ export function buildMenu(actions: MenuActions): void {
       },
       {
         label: 'Forward',
-        accelerator: isMac ? 'Cmd+]' : 'Alt+Right',
+        accelerator: accel('nav.forward'),
         enabled: navHistory().forward,
         click: () => {
           const wc = wm.getMainWindow()?.webContents;
@@ -275,17 +270,17 @@ export function buildMenu(actions: MenuActions): void {
       { type: 'separator' },
       {
         label: 'Toggle Sidebar',
-        accelerator: 'CmdOrCtrl+B',
+        accelerator: accel('sidebar.toggle'),
         type: 'checkbox',
         checked: menuState.sidebarOpen,
-        click: () => wm.sendCommand('toggle-sidebar'),
+        click: () => wm.sendCommand('sidebar.toggle'),
       },
       {
-        label: 'Toggle Right Panel',
-        accelerator: 'CmdOrCtrl+Alt+B',
+        label: 'Toggle Side Dock',
+        accelerator: accel('dock.toggle'),
         type: 'checkbox',
         checked: menuState.rightPaneOpen,
-        click: () => wm.sendCommand('toggle-right-pane'),
+        click: () => wm.sendCommand('dock.toggle'),
       },
       { type: 'separator' },
       {
@@ -304,11 +299,11 @@ export function buildMenu(actions: MenuActions): void {
       { type: 'separator' },
       { role: 'togglefullscreen' },
       { type: 'separator' },
-      { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => wm.reload() },
+      { label: 'Reload', accelerator: accel('window.reload'), click: () => wm.reload() },
       { role: 'forceReload' },
       {
         label: 'Toggle Developer Tools',
-        accelerator: isMac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I',
+        accelerator: accel('devtools.toggle'),
         click: () => wm.toggleDevtools(),
       },
     ],
@@ -337,8 +332,8 @@ export function buildMenu(actions: MenuActions): void {
       { label: 'Documentation', click: () => wm.openExternalSafely('https://github.com/') },
       {
         label: 'Keyboard Shortcuts',
-        accelerator: 'CmdOrCtrl+/',
-        click: () => wm.sendCommand('show-shortcuts'),
+        accelerator: accel('shortcuts.show'),
+        click: () => wm.sendCommand('shortcuts.show'),
       },
       { type: 'separator' },
       {

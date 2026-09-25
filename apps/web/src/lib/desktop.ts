@@ -15,6 +15,18 @@ export type DesktopCommand = GeneratorAIDesktopCommand;
 export const isDesktop: boolean =
   typeof window !== 'undefined' && window.generatoraiDesktop?.isDesktop === true;
 
+/** True on macOS (browser tab or desktop shell): `Mod` means Cmd there. */
+export const isMacOS: boolean =
+  typeof navigator !== 'undefined' &&
+  (/mac/i.test(navigator.platform ?? '') || /mac/i.test(navigator.userAgent ?? ''));
+
+/** Which binding column of the command registry applies here (D-24). */
+export const commandHost: 'web' | 'desktopMac' | 'desktopWinLinux' = !isDesktop
+  ? 'web'
+  : isMacOS
+    ? 'desktopMac'
+    : 'desktopWinLinux';
+
 /**
  * What a plain browser looks like: the OS (or nothing) owns the title bar and
  * the SPA reserves no space. Also the fallback when the shell is too old to

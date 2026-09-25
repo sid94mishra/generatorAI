@@ -2,11 +2,13 @@
 // System tray — quick access to navigation, server status and quit.
 // ────────────────────────────────────────────────────────────────
 
-import { app, Tray, Menu, nativeImage, type NativeImage } from 'electron';
+import { app, Tray, Menu, nativeImage, type MenuItemConstructorOptions, type NativeImage } from 'electron';
+import { NAV_DESTINATIONS } from '@generatorai/shared/ui-contract';
 import * as path from 'node:path';
 import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
 import { log } from './logger';
+import { accel } from './menu';
 
 const RESOURCES = path.join(__dirname, '..', '..', 'resources');
 
@@ -61,10 +63,23 @@ export function refreshTrayMenu(): void {
     { label: `Server: ${status.state}${status.port ? ` (:${status.port})` : ''}`, enabled: false },
     { type: 'separator' },
     { label: 'Open GeneratorAI', click: () => wm.restoreFromTray() },
-    { label: 'Dashboard', click: () => wm.navigateTo('/') },
-    { label: 'Chats', click: () => wm.navigateTo('/chats') },
-    { label: 'Workflows', click: () => wm.navigateTo('/workflows') },
-    { label: 'Automations', click: () => wm.navigateTo('/automations') },
+    {
+      label: 'New Chat',
+      // Shown for discoverability; tray menus do not register accelerators.
+      accelerator: accel('chat.new'),
+      registerAccelerator: false,
+      click: () => {
+        wm.restoreFromTray();
+        wm.sendCommand('chat.new');
+      },
+    },
+    { type: 'separator' },
+    { label: 'Go to', enabled: false },
+    // Same destinations and order as the sidebar (D-22), minus Scripts.
+    ...NAV_DESTINATIONS.filter((d) => d.tray).map<MenuItemConstructorOptions>((d) => ({
+      label: d.label,
+      click: () => wm.navigateTo(d.path),
+    })),
     { type: 'separator' },
     { label: 'Restart Server', click: () => void sm.restart().catch(() => undefined) },
     { type: 'separator' },

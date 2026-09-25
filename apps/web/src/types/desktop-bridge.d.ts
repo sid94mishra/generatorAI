@@ -154,20 +154,11 @@ interface GeneratorAIDesktopWindowStateChange {
   focused: boolean;
 }
 
-type GeneratorAIDesktopCommand =
-  | 'new-chat'
-  | 'new-workflow'
-  | 'new-project'
-  | 'new-automation'
-  | 'command-palette'
-  | 'focus-search'
-  | 'find-in-page'
-  | 'find-next'
-  | 'find-previous'
-  | 'toggle-sidebar'
-  | 'toggle-right-pane'
-  | 'show-shortcuts'
-  | 'reload-scripts';
+/** The registry's global renderer commands (D-24) — the same union main sends. */
+// This file is ambient (no top-level import/export); an `import type` would make
+// it a module and drop every global it declares, so the inline import() stays.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+type GeneratorAIDesktopCommand = import('@generatorai/shared/ui-contract').RendererCommandId;
 
 interface GeneratorAIDesktopWindowApi {
   toggleMaximize: () => Promise<void>;

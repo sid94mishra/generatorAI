@@ -17,6 +17,10 @@
     "./client": {
       "import": "./src/client.ts",
       "types": "./src/client.ts"
+    },
+    "./ui-contract": {
+      "import": "./src/ui-contract/index.ts",
+      "types": "./src/ui-contract/index.ts"
     }
   },
   "files": [

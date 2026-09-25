@@ -181,19 +181,9 @@ export interface FindInPageResult {
   matches: number;
 }
 
-/** High-level commands dispatched from native menus / shortcuts to the renderer. */
-export type DesktopCommand =
-  | 'new-chat'
-  | 'new-workflow'
-  | 'new-project'
-  | 'new-automation'
-  | 'command-palette'
-  | 'focus-search'
-  /** Open the find bar (Edit ▸ Find). */
-  | 'find-in-page'
-  | 'find-next'
-  | 'find-previous'
-  | 'toggle-sidebar'
-  | 'toggle-right-pane'
-  | 'show-shortcuts'
-  | 'reload-scripts';
+/**
+ * Commands main sends to the renderer (menu items, accelerators, tray): the
+ * registry's global renderer commands (`@generatorai/shared/ui-contract`, D-24).
+ * The renderer handles every one of them exhaustively (useCommandHost).
+ */
+export type { RendererCommandId as DesktopCommand } from '@generatorai/shared/ui-contract';

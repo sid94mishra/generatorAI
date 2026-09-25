@@ -16,7 +16,9 @@ import {
   Settings,
   Plus,
   Bot,
+  Keyboard,
 } from 'lucide-react';
+import { COMMANDS } from '@generatorai/shared/ui-contract';
 import {
   CommandDialog,
   CommandInput,
@@ -52,6 +54,7 @@ export function CommandPalette() {
   const open = useUiStore((s) => s.commandPaletteOpen);
   const setOpen = useUiStore((s) => s.setCommandPaletteOpen);
   const openSettings = useSettingsUiStore((s) => s.openSettings);
+  const setShortcutsOpen = useUiStore((s) => s.setShortcutsOpen);
 
   /** Close the palette, then run the command. */
   const run = (fn: () => void) => {
@@ -85,6 +88,14 @@ export function CommandPalette() {
               {label}
             </CommandItem>
           ))}
+          <CommandItem
+            value="action-Keyboard shortcuts"
+            keywords={['Keyboard shortcuts', 'keys', 'help', 'hotkeys']}
+            onSelect={() => run(() => setShortcutsOpen(true))}
+          >
+            <Keyboard className="size-4 text-fg-3" />
+            {COMMANDS['shortcuts.show'].label}
+          </CommandItem>
         </CommandGroup>
       </CommandList>
 

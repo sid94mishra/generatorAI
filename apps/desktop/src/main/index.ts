@@ -18,6 +18,7 @@ import { nativeBrowserEnabled } from './browser-host';
 import { disposeComputerHost, initComputerHost } from './computer-host-registry';
 import { setIpcToken } from './cdp/ipc-token';
 import { registerIpc } from './ipc';
+import { NAV_DESTINATIONS } from '@generatorai/shared/ui-contract';
 import { buildMenu, syncMenuThemeFromSettings } from './menu';
 import { createTray, destroyTray, refreshTrayMenu } from './tray';
 import { registerDownloadHandler } from './downloads';
@@ -400,7 +401,7 @@ function registerNativeShortcuts(): void {
         { label: 'New Chat', click: () => go('/chats') },
         { label: 'New Workflow', click: () => go('/workflows/new') },
         { type: 'separator' },
-        { label: 'Dashboard', click: () => go('/') },
+        { label: NAV_DESTINATIONS[0].label, click: () => go(NAV_DESTINATIONS[0].path) },
       ]),
     );
   }

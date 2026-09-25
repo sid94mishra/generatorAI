@@ -70,20 +70,20 @@ export function FindBar(): React.ReactElement | null {
   useEffect(() => {
     if (!isDesktop) return undefined;
     return onDesktopCommand((command) => {
-      if (command === 'find-in-page') {
+      if (command === 'find.open') {
         setOpen(true);
         // Already open with a query → treat it as "find again", the way a
         // second Cmd+F behaves elsewhere.
         window.setTimeout(() => inputRef.current?.select(), 0);
         return;
       }
-      if (command === 'find-next' || command === 'find-previous') {
+      if (command === 'find.next' || command === 'find.previous') {
         setQuery((current) => {
           if (!current) {
             setOpen(true);
             return current;
           }
-          search(current, command === 'find-next', true);
+          search(current, command === 'find.next', true);
           return current;
         });
       }

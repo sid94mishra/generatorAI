@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // AppLayout — Top-level shell: sidebar + header + main content
-// Sidebar state lives in uiStore (persisted); registers the global
-// ⌘K / Ctrl+K keybinding for the command palette.
+// Sidebar state lives in uiStore (persisted). Global commands and their
+// keys (⌘K, `G C`, `?` …) run through useCommandHost (D-24).
 //
 // Below the `md` breakpoint the sidebar is a real modal Drawer (Radix
 // Dialog): the page behind it is inert, focus is trapped, Escape and the
@@ -16,26 +16,19 @@ import { Header } from './Header.js';
 import { TitleBar } from './TitleBar.js';
 import { CommandPalette } from './CommandPalette.js';
 import { FindBar } from './FindBar.js';
+import { ShortcutsSheet } from './ShortcutsSheet.js';
 import { Drawer } from '@/components/ui/Drawer.js';
 import { useUiStore } from '@/stores/uiStore.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { useDesktopIntegration } from '@/hooks/useDesktopIntegration.js';
+import { useCommandHost } from '@/hooks/useCommandHost.js';
 import { useIsNarrowViewport } from '@/hooks/useMediaQuery.js';
-import { isDesktop } from '@/lib/desktop.js';
 import { cn } from '@/lib/utils.js';
-
-/** True when the keydown originates from a text-editing context. */
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
-}
 
 export function AppLayout() {
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
-  const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
   const isMobile = useIsNarrowViewport();
   const location = useLocation();
   const navigate = useNavigate();
@@ -54,23 +47,8 @@ export function AppLayout() {
   // state back into the menu. No-op outside the Electron shell.
   const chrome = useDesktopIntegration();
 
-  // Global ⌘K / Ctrl+K — toggle the command palette.
-  //
-  // In the desktop shell the native `View ▸ Command Palette` accelerator
-  // already fires this, and Electron delivers menu accelerators *and* the
-  // keydown, so listening here too would toggle twice and cancel out.
-  useEffect(() => {
-    if (isDesktop) return undefined;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        if (isEditableTarget(e.target)) return;
-        e.preventDefault();
-        setCommandPaletteOpen(!useUiStore.getState().commandPaletteOpen);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [setCommandPaletteOpen]);
+  // Menu commands (desktop) and the registry's web key bindings (browser).
+  useCommandHost();
 
   // On a phone the drawer covers the page, so following a nav link must
   // also dismiss it — otherwise the user lands on the new page and still
@@ -138,6 +116,7 @@ export function AppLayout() {
       {/* Global ⌘K command palette */}
       <CommandPalette />
       <FindBar />
+      <ShortcutsSheet />
 
     </div>
   );

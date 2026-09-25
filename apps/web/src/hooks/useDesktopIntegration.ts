@@ -1,12 +1,14 @@
 // ────────────────────────────────────────────────────────────────
 // useDesktopIntegration — binds the SPA to the Electron shell.
 //
-// Three jobs, all no-ops in a plain browser tab:
+// Jobs, all no-ops in a plain browser tab:
 //   1. Read the window chrome once and publish it to <html> so CSS can
 //      reserve space for the OS window controls.
-//   2. Handle menu/accelerator commands pushed from the main process.
+//   2. Follow route pushes from the menu, tray, dock menu and deep links.
 //   3. Mirror renderer state back into the native menu, so checkmarks and
 //      enablement stay truthful.
+// Menu/accelerator COMMANDS are executed by useCommandHost (one handler table
+// for desktop IPC and the web key handler, D-24).
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from 'react';
@@ -16,7 +18,6 @@ import {
   applyChromeToDocument,
   applyFullscreenInsets,
   isDesktop,
-  onDesktopCommand,
   onDesktopNavigate,
   onDesktopThemePreference,
   onWindowStateChanged,
@@ -25,26 +26,17 @@ import {
   trackWindowControlsOverlay,
   type DesktopWindowChrome,
 } from '@/lib/desktop.js';
+import { navDestinationFor } from '@generatorai/shared/ui-contract';
 import { useUiStore } from '@/stores/uiStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import { usePageTitleStore } from '@/stores/pageTitleStore.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
 
-const ROUTE_LABELS: Array<[prefix: string, label: string]> = [
-  ['/chats', 'Chats'],
-  ['/workflows', 'Workflows'],
-  ['/projects', 'Projects'],
-  ['/agents', 'Agents'],
-  ['/scripts', 'Scripts'],
-  ['/automations', 'Automations'],
-  ['/settings', 'Settings'],
-];
-
+/** `File ▸ Open Recent` label for a route without a page title: its section (D-22). */
 function routeLabel(pathname: string): string {
-  if (pathname === '/') return 'Dashboard';
-  const hit = ROUTE_LABELS.find(([prefix]) => pathname.startsWith(prefix));
-  return hit ? hit[1] : pathname;
+  if (pathname === '/settings' || pathname.startsWith('/settings/')) return 'Settings';
+  return navDestinationFor(pathname)?.label ?? pathname;
 }
 
 export function useDesktopIntegration(): DesktopWindowChrome {
@@ -95,50 +87,7 @@ export function useDesktopIntegration(): DesktopWindowChrome {
     });
   }, [chrome]);
 
-  // ── 2. Menu / accelerator commands ──
-  useEffect(() => {
-    if (!isDesktop) return undefined;
-    return onDesktopCommand((command) => {
-      const ui = useUiStore.getState();
-      switch (command) {
-        case 'command-palette':
-          ui.setCommandPaletteOpen(!ui.commandPaletteOpen);
-          break;
-        case 'toggle-sidebar':
-          ui.toggleSidebar();
-          break;
-        case 'toggle-right-pane':
-          useRightPaneStore.getState().controller?.toggle();
-          break;
-        case 'focus-search':
-          // The palette doubles as the app's search surface.
-          ui.setCommandPaletteOpen(true);
-          break;
-        case 'show-shortcuts':
-          window.dispatchEvent(new CustomEvent('generatorai:show-shortcuts'));
-          break;
-        case 'new-chat':
-          navigate('/chats');
-          break;
-        case 'new-workflow':
-          navigate('/workflows/new');
-          break;
-        case 'new-project':
-          navigate('/projects/new');
-          break;
-        case 'new-automation':
-          navigate('/automations/new');
-          break;
-        case 'reload-scripts':
-          window.dispatchEvent(new CustomEvent('generatorai:reload-scripts'));
-          break;
-        default:
-          break;
-      }
-    });
-  }, [navigate]);
-
-  // Route pushes from the menu, tray, dock menu, JumpList and deep links.
+  // ── 2. Route pushes from the menu, tray, dock menu, JumpList and deep links ──
   useEffect(() => {
     if (!isDesktop) return undefined;
     return onDesktopNavigate((path) => {

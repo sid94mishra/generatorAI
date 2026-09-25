@@ -133,6 +133,22 @@ async function main() {
     find(view?.submenu, 'Command Palette…')?.accelerator,
   );
   check('View owns navigation (Chats)', Boolean(find(view?.submenu, 'Chats')));
+  // Sections come from NAV_DESTINATIONS (D-22): Home (not Dashboard) … Scripts, Agents included.
+  const sectionLabels = (view?.submenu ?? []).map((i) => i.label);
+  const homeAt = sectionLabels.indexOf('Home');
+  check(
+    'View sections follow the sidebar order',
+    homeAt >= 0 &&
+      ['Home', 'Chats', 'Projects', 'Agents', 'Workflows', 'Automations', 'Scripts'].every(
+        (l, i) => sectionLabels[homeAt + i] === l,
+      ),
+    JSON.stringify(sectionLabels),
+  );
+  check(
+    'Help ▸ Keyboard Shortcuts is bound',
+    /(?:Cmd|Ctrl)\+\//.test(find(help?.submenu, 'Keyboard Shortcuts')?.accelerator ?? ''),
+    find(help?.submenu, 'Keyboard Shortcuts')?.accelerator,
+  );
 
   const chatsAccel = find(view?.submenu, 'Chats')?.accelerator ?? '';
   check(
@@ -145,7 +161,7 @@ async function main() {
 
   const toggleSidebar = find(view?.submenu, 'Toggle Sidebar');
   check('Toggle Sidebar is a checkbox', toggleSidebar?.type === 'checkbox', toggleSidebar?.type);
-  check('Toggle Right Panel exists', Boolean(find(view?.submenu, 'Toggle Right Panel')));
+  check('Toggle Side Dock exists', Boolean(find(view?.submenu, 'Toggle Side Dock')));
   check('Appearance radio group exists', Boolean(find(view?.submenu, 'Appearance')?.submenu?.length));
 
   check('File has Open Recent', Boolean(find(file?.submenu, 'Open Recent')));

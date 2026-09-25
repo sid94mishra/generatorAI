@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
-// uiStore — global UI chrome state (sidebar, command palette).
-// `sidebarOpen` persists to localStorage; `commandPaletteOpen` is
+// uiStore — global UI chrome state (sidebar, command palette, shortcuts
+// sheet). `sidebarOpen` persists to localStorage; the overlays are
 // session-only (excluded via partialize).
 // ────────────────────────────────────────────────────────────────
 
@@ -16,6 +16,9 @@ interface UiState {
   /** Whether the ⌘K command palette is open. NOT persisted. */
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
+  /** Whether the keyboard shortcuts sheet is open. NOT persisted. */
+  shortcutsOpen: boolean;
+  setShortcutsOpen: (open: boolean) => void;
 }
 
 const useUiStoreImpl = create<UiState>()(
@@ -26,6 +29,8 @@ const useUiStoreImpl = create<UiState>()(
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       commandPaletteOpen: false,
       setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+      shortcutsOpen: false,
+      setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
     }),
     {
       name: 'generatorai:ui',
